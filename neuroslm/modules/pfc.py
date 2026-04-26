@@ -12,8 +12,9 @@ import torch.nn.functional as F
 
 
 class PrefrontalCortex(nn.Module):
-    def __init__(self, d_sem: int, n_layers: int, n_heads: int):
+    def __init__(self, d_sem: int, n_layers: int, n_heads: int, learning_rule: str = 'backprop'):
         super().__init__()
+        self.learning_rule = learning_rule
         enc_layer = nn.TransformerEncoderLayer(
             d_model=d_sem, nhead=n_heads, dim_feedforward=d_sem * 4,
             batch_first=True, activation="gelu", norm_first=True,

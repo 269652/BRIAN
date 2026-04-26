@@ -75,14 +75,14 @@ def main():
         optim.load_state_dict(ckpt["optim"])
         start_step = ckpt["step"]
         if "gene_pool" in ckpt:
-            from .dna import GenePool
+            from .genome import GenePool
             brain.gene_pool = GenePool.from_state(ckpt["gene_pool"])
         print(f"[train] resumed from {args.resume} @ step {start_step}", flush=True)
     elif args.transfer and Path(args.transfer).exists():
         ckpt = torch.load(args.transfer, map_location=device)
         brain.load_partial(ckpt["model"])
         if "gene_pool" in ckpt:
-            from .dna import GenePool
+            from .genome import GenePool
             brain.gene_pool = GenePool.from_state(ckpt["gene_pool"])
         print(f"[train] transferred matching tensors from {args.transfer}", flush=True)
 
@@ -115,12 +115,34 @@ def main():
         for pg in optim.param_groups:
             pg["lr"] = cosine_lr(step, cfg.warmup_steps, args.steps, cfg.lr)
 
+
+        # --- Memory system integration ---
+        # 1. Record episodic memory for this batch (use first sample for simplicity)
+        content = tok.decode(ids[0].tolist())
+        content_vec = ids[0].float().cpu().numpy()  # Placeholder: use embedding for real system
+        nt_state = brain.transmitters.vector()[0].cpu().numpy()
+        emotion = None  # Placeholder: can be inferred from NT or model output
+        tags = []
+        context = {'self': True}  # Placeholder: can be set based on batch/task
+        brain.record_episode(content, content_vec, nt_state, emotion, tags, context)
+
+        # 2. Forward pass and optimization
         out = brain.forward_lm(ids, targets)
         loss = out["loss"]
         optim.zero_grad(set_to_none=True)
         loss.backward()
         gnorm = torch.nn.utils.clip_grad_norm_(brain.parameters(), cfg.grad_clip)
         optim.step()
+
+        # 3. Tag memory with reward/insight (mesolimbic)
+        reward = float(out["learning_gain"][0].item()) if "learning_gain" in out else 0.0
+        insight = None  # Placeholder: can be set if new pattern detected
+        brain.tag_memory(len(brain.episodic.buffer)-1, reward, insight)
+
+        # 4. Consolidate and update narratives every 500 steps
+        if (step + 1) % 500 == 0:
+            brain.consolidate_memory()
+            brain.update_narratives()
 
         # Slow homeostatic regulation of NT baselines & gains.
         brain.homeostasis.observe(brain.transmitters,

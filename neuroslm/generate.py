@@ -13,7 +13,7 @@ import torch
 from .config import BrainConfig
 from .tokenizer import Tokenizer
 from .brain import Brain
-from .dna import GenePool
+from .genome import GenePool
 
 
 def make_logger(verbose: bool):

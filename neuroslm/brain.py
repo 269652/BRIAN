@@ -1,18 +1,4 @@
-"""Brain: top-level wiring of all neuro-inspired modules + neurochemistry.
-
-Adds, vs. v0.1:
-  - Full transmitter system (DA, NE, 5HT, ACh, eCB, Glu, GABA) with
-    vesicle dynamics.
-  - Nuclei (VTA, NAcc, LC, Raphe, BasalForebrain) producing NTs from
-    novelty / reward / surprise.
-  - Receptor banks per region modulating activations multiplicatively.
-  - Projection graph carrying both signals and NT release between regions.
-  - Thalamic content router between association cortex and PFC.
-  - Homeostasis controller adjusting NT baselines + gains.
-  - NAcc 'learning gain' that scales the loss (mesolimbic reinforcement
-    of pretraining steps that have high novelty / improvement).
-"""
-from __future__ import annotations
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -43,34 +29,201 @@ from .neurochem import (
 )
 from .neurochem.growth import TrophicSystem
 from .neurochem.receptors import Receptor
-from .dna import GenePool, Genome
+from .genome import GenePool, Genome
+from .genomes import select_build_genome, apply_build_genome, BUILTIN_BUILDS
+
+
+class Ribosome:
+    def __init__(self, dna_vm, base_cfg):
+        """Ribosome constructs region modules from DNA. It also detects
+        hardware and selects/apply a BuildGenome to scale the base config
+        before building regions."""
+        from .genomes import select_build_genome, apply_build_genome, BUILTIN_BUILDS
+        self.dna_vm = dna_vm
+        self.base_cfg = base_cfg
+        # select build genome: DNA 'build' profile overrides auto-detection
+        build = None
+        if 'build' in self.dna_vm and 'profile' in self.dna_vm['build'].env:
+            prof = self.dna_vm['build'].env.get('profile')
+            if isinstance(prof, str) and prof.startswith("'"):
+                prof = prof[1:]
+            if isinstance(prof, str) and prof in BUILTIN_BUILDS:
+                build = BUILTIN_BUILDS[prof]
+        if build is None:
+            build = select_build_genome()
+        self.build_genome = build
+        # apply scaling to produce an operational cfg for module construction
+        self.cfg = apply_build_genome(self.base_cfg, build)
+
+        self.region_modules = {}
+        self.projections = []
+        self.nt_production = {}
+        self._build_regions()
+        self._build_projections()
+        self._build_nt_production()
+
+    def _build_regions(self):
+        # Example for PFC, DMN, Hippo, BG; extend as needed
+        from .modules.pfc import PrefrontalCortex
+        from .modules.dmn import DefaultModeNetwork
+        from .modules.hippocampus import Hippocampus
+        from .modules.basal_ganglia import BasalGanglia
+        cfg = self.cfg
+        # PFC
+        if 'pfc' in self.dna_vm:
+            env = self.dna_vm['pfc'].env
+            layers = int(env.get('layers', cfg.pfc_layers))
+            learning_rule = str(env.get('learning_rule', 'backprop'))
+            self.region_modules['pfc'] = PrefrontalCortex(cfg.d_sem, layers, cfg.pfc_heads, learning_rule=learning_rule)
+        # DMN
+        if 'dmn' in self.dna_vm:
+            env = self.dna_vm['dmn'].env
+            layers = int(env.get('layers', cfg.dmn_layers))
+            connections = str(env.get('connections', 'skip'))
+            learning_rule = str(env.get('learning_rule', 'backprop'))
+            self.region_modules['dmn'] = DefaultModeNetwork(cfg.d_sem, cfg.gws_slots, layers)
+        # Hippocampus
+        if 'hippocampus' in self.dna_vm:
+            env = self.dna_vm['hippocampus'].env
+            layers = int(env.get('layers', cfg.hippo_layers if hasattr(cfg, 'hippo_layers') else 2))
+            learning_rule = str(env.get('learning_rule', 'hebbian'))
+            self.region_modules['hippocampus'] = Hippocampus(cfg.d_sem, cfg.hippo_capacity, cfg.hippo_topk, cfg.hippo_sparse_k)
+        # Basal Ganglia
+        if 'basal_ganglia' in self.dna_vm:
+            env = self.dna_vm['basal_ganglia'].env
+            layers = int(env.get('layers', cfg.bg_layers if hasattr(cfg, 'bg_layers') else 2))
+            learning_rule = str(env.get('learning_rule', 'reinforce'))
+            self.region_modules['basal_ganglia'] = BasalGanglia(cfg.d_sem, cfg.bg_action_dim, cfg.bg_n_candidates)
+
+    def _build_projections(self):
+        # Collect projections from all region DNA
+        for region, vm in self.dna_vm.items():
+            env = vm.env
+            if 'projections' in env:
+                for proj in env['projections']:
+                    # Each proj: (projection src tgt type nt condition)
+                    self.projections.append(proj)
+
+    def _build_nt_production(self):
+        # Collect NT production rules from all region DNA
+        for region, vm in self.dna_vm.items():
+            env = vm.env
+            if 'nt_production' in env:
+                self.nt_production[region] = env['nt_production']
+
+    def get_module(self, region):
+        return self.region_modules.get(region)
+
+    def get_projections(self):
+        return self.projections
+
+    def get_nt_production(self, region):
+        return self.nt_production.get(region, [])
+        
+import os
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from .config import BrainConfig
+from .modules.language import LanguageCortex
+from .modules.sensory import TextSensoryCortex
+from .modules.association import AssociationCortex
+from .modules.world_model import WorldModel
+from .modules.self_model import SelfModel
+from .modules.workspace import GlobalWorkspace
+from .modules.hippocampus import Hippocampus
+from .modules.dmn import DefaultModeNetwork
+from .modules.pfc import PrefrontalCortex
+from .modules.basal_ganglia import BasalGanglia
+from .modules.forward_model import ForwardModel
+from .modules.evaluator import Evaluator
+from .modules.motor import MotorCortex, ACTION_NAMES, ACTION_INDEX
+from .modules.thalamus import Thalamus
+from .modules.critic import SubconsciousCritic
+
+from .neurochem import (
+    TransmitterSystem, NT_NAMES,
+    ReceptorBank,
+    Projection, ProjectionGraph,
+    VTA, NucleusAccumbens, LocusCoeruleus, RapheNuclei, BasalForebrain,
+    Homeostasis,
+)
+from .neurochem.growth import TrophicSystem
+from .neurochem.receptors import Receptor
+from .genome import GenePool, Genome
 
 
 class Brain(nn.Module):
     def __init__(self, cfg: BrainConfig):
         super().__init__()
-        self.cfg = cfg
+        # keep original config and allow a scaled build cfg to be applied via Ribosome
+        self.base_cfg = cfg
 
-        # ---- cortices / classical modules ----
-        self.language = LanguageCortex(
-            cfg.vocab_size, cfg.d_hidden, cfg.d_sem,
-            cfg.lang_layers, cfg.lang_heads, cfg.lang_ctx,
-        )
-        self.sensory = TextSensoryCortex(cfg.d_sem)
-        self.association = AssociationCortex(cfg.d_sem)
-        self.world = WorldModel(cfg.d_sem, cfg.d_hidden, cfg.world_layers)
-        self.self_m = SelfModel(cfg.d_sem, cfg.bg_action_dim, cfg.n_neuromods,
-                                cfg.d_hidden, cfg.self_layers)
-        self.gws = GlobalWorkspace(cfg.d_sem, cfg.gws_slots, cfg.gws_heads)
-        self.hippo = Hippocampus(cfg.d_sem, cfg.hippo_capacity,
-                                 cfg.hippo_topk, cfg.hippo_sparse_k)
-        self.thalamus = Thalamus(cfg.d_sem)
-        self.dmn = DefaultModeNetwork(cfg.d_sem, cfg.gws_slots, cfg.dmn_layers)
-        self.pfc = PrefrontalCortex(cfg.d_sem, cfg.pfc_layers, cfg.pfc_heads)
-        self.bg = BasalGanglia(cfg.d_sem, cfg.bg_action_dim, cfg.bg_n_candidates)
-        self.forward_m = ForwardModel(cfg.d_sem, cfg.bg_action_dim, cfg.forward_layers)
-        self.evaluator = Evaluator(cfg.d_sem, len(NT_NAMES))
-        self.motor = MotorCortex(cfg.bg_action_dim, cfg.d_sem, cfg.d_hidden)
+        # ---- DNA-driven construction (load templates) ----
+        from .dna.dsl import LispVM
+        self.dna_vm = {}
+        dna_dir = os.path.join(os.path.dirname(__file__), 'dna', 'templates')
+        for fname in os.listdir(dna_dir):
+            if not fname.endswith('.lisp'):
+                continue
+            region = fname[:-5]
+            path = os.path.join(dna_dir, fname)
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    code = f.read()
+                vm = LispVM()
+                vm.run(code)
+                self.dna_vm[region] = vm
+            except Exception:
+                # skip malformed or unreadable templates; they will be logged elsewhere
+                continue
+
+        # --- DNA-driven ribosome construction ---
+        # Ribosome will choose/apply build genome and expose self.ribosome.cfg
+        self.ribosome = Ribosome(self.dna_vm, self.base_cfg)
+        self.build_genome = self.ribosome.build_genome
+        # Use ribosome's scaled cfg for module construction
+        self.cfg = self.ribosome.cfg
+
+        # ---- core cortex & models (built using scaled cfg) ----
+        self.language = LanguageCortex(self.cfg.vocab_size, self.cfg.d_hidden, self.cfg.d_sem,
+                                      self.cfg.lang_layers, self.cfg.lang_heads, self.cfg.lang_ctx)
+        self.sensory = TextSensoryCortex(self.cfg.d_sem)
+        self.association = AssociationCortex(self.cfg.d_sem)
+        self.gws = GlobalWorkspace(self.cfg.d_sem, self.cfg.gws_slots, self.cfg.gws_heads)
+        self.thalamus = Thalamus(self.cfg.d_sem, self.cfg.d_hidden)
+        self.world = WorldModel(self.cfg.d_sem, self.cfg.d_hidden, self.cfg.world_layers)
+        self.self_m = SelfModel(self.cfg.d_sem, self.cfg.bg_action_dim, self.cfg.n_neuromods,
+                                self.cfg.d_hidden, self.cfg.self_layers)
+
+        # Retrieve DNA-built region modules (if available)
+        self.pfc = self.ribosome.get_module('pfc')
+        self.dmn = self.ribosome.get_module('dmn')
+        self.hippo = self.ribosome.get_module('hippocampus')
+        self.bg = self.ribosome.get_module('basal_ganglia')
+
+        # Projections and NT production rules from DNA
+        self.dna_projections = self.ribosome.get_projections()
+        self.dna_nt_production = self.ribosome.nt_production
+
+        # Forward / evaluator / motor built on scaled dims
+        self.forward_m = ForwardModel(self.cfg.d_sem, self.cfg.bg_action_dim, self.cfg.forward_layers)
+        self.evaluator = Evaluator(self.cfg.d_sem, len(NT_NAMES))
+        self.motor = MotorCortex(self.cfg.bg_action_dim, self.cfg.d_sem, self.cfg.d_hidden)
+
+        # ---- memory systems ----
+        from .memory.episodic import EpisodicMemory
+        from .memory.consolidated import ConsolidatedMemory
+        from .memory.narrative import NarrativeBuffer
+        from .memory.mesolimbic import MesolimbicTagger
+        from .memory.hippocampal import HippocampalEnrichment
+        self.episodic = EpisodicMemory(maxlen=2048)
+        self.consolidated = ConsolidatedMemory()
+        self.narrative_self = NarrativeBuffer(maxlen=2048)
+        self.narrative_world = NarrativeBuffer(maxlen=2048)
+        self.mesolimbic = MesolimbicTagger()
+        self.hippocampal = HippocampalEnrichment(self.consolidated)
 
         # ---- neurochemistry ----
         self.transmitters = TransmitterSystem()
@@ -82,7 +235,7 @@ class Brain(nn.Module):
         self.homeostasis = Homeostasis()
 
         # Subconscious threat critic — fast survival circuit
-        self.critic = SubconsciousCritic(cfg.d_sem)
+        self.critic = SubconsciousCritic(self.cfg.d_sem)
 
         # Gene pool — the DMN's algorithmic CFG, evolved over training
         self.gene_pool = GenePool(pool_size=4, tournament_period=200)
@@ -117,10 +270,10 @@ class Brain(nn.Module):
 
         # Projections graph — moves NT (and optionally signals) between regions
         region_dims = {
-            "VTA":   cfg.d_sem, "NAcc": cfg.d_sem, "LC": cfg.d_sem,
-            "Raphe": cfg.d_sem, "NBM":  cfg.d_sem,
-            "PFC":   cfg.d_sem, "Hippo": cfg.d_sem, "BG": cfg.d_sem,
-            "Thalamus": cfg.d_sem, "Language": cfg.d_sem, "DMN": cfg.d_sem,
+            "VTA":   self.cfg.d_sem, "NAcc": self.cfg.d_sem, "LC": self.cfg.d_sem,
+            "Raphe": self.cfg.d_sem, "NBM":  self.cfg.d_sem,
+            "PFC":   self.cfg.d_sem, "Hippo": self.cfg.d_sem, "BG": self.cfg.d_sem,
+            "Thalamus": self.cfg.d_sem, "Language": self.cfg.d_sem, "DMN": self.cfg.d_sem,
         }
         self.projections = ProjectionGraph([
             Projection("VTA",   "NAcc",     "DA",  release_scale=1.0, carries_signal=False),
@@ -166,11 +319,9 @@ class Brain(nn.Module):
 
     @staticmethod
     def _act_scalar(x: torch.Tensor) -> torch.Tensor:
-        """Scalar 'firing rate' summary of a region (B,) ∈ [0,1]."""
         return torch.sigmoid(x.detach().abs().mean(dim=-1) - 1.0)
 
     def _release_via_nuclei(self, signals: dict[str, torch.Tensor]):
-        """Compute & execute NT releases from each nucleus this tick."""
         nacc_drive, learning_gain = self.nacc(
             signals["novelty"], signals["reward"],
             signals["curiosity"], signals["ecb"]
@@ -521,10 +672,6 @@ class Brain(nn.Module):
     def generate(self, ids: torch.Tensor, max_new: int = 64,
                  temperature: float = 1.0, top_k: int = 50,
                  on_tick=None, max_silent_streak: int = 3):
-        """Generate tokens. Per-tick logs of motor action, NT levels, threat,
-        routing are passed to `on_tick(step, info)` if provided. If the motor
-        cortex picks REMAIN_SILENT the model thinks again instead of emitting;
-        after `max_silent_streak` consecutive silences SPEAK is forced."""
         cfg = self.cfg
         device = ids.device
         state = self.init_latents(ids.size(0), device)
@@ -569,10 +716,47 @@ class Brain(nn.Module):
                 loaded += 1
             else:
                 skipped += 1
-        self.load_state_dict(new_sd, strict=False)
         if verbose:
-            print(f"[brain] loaded {loaded} tensors, skipped {skipped}")
+            print(f"Loaded {loaded} keys, skipped {skipped}.")
+        self.load_state_dict(new_sd, strict=False)
         return loaded, skipped
 
-    def num_parameters(self) -> int:
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+    def save(self, path: str):
+        torch.save(self.state_dict(), path)
+
+    def load(self, path: str):
+        self.load_state_dict(torch.load(path, map_location="cpu"))
+
+    def to_device(self, device):
+        for m in self.modules():
+            m.to(device)
+        self.transmitters.to_device(device)
+        self.critic.to_device(device)
+        self.gene_pool.to_device(device)
+        self.trophic.to_device(device)
+        self.forward_m.to_device(device)
+        self.evaluator.to_device(device)
+        self.motor.to_device(device)
+        self.language.to_device(device)
+        self.sensory.to_device(device)
+        self.association.to_device(device)
+        self.world.to_device(device)
+        self.self_m.to_device(device)
+        self.gws.to_device(device)
+        self.hippo.to_device(device)
+        self.dmn.to_device(device)
+        self.bg.to_device(device)
+        self.thalamus.to_device(device)
+        self.vta.to_device(device)
+        self.nacc.to_device(device)
+        self.lc.to_device(device)
+        self.raphe.to_device(device)
+        self.nbm.to_device(device)
+        self.homeostasis.to_device(device)
+        self.rcpt_pfc.to_device(device)
+        self.rcpt_hippo.to_device(device)
+        self.rcpt_bg.to_device(device)
+        self.rcpt_thal.to_device(device)
+        self.rcpt_lang.to_device(device)
+        self.rcpt_dmn.to_device(device)
+        self.projections.to_device(device)
