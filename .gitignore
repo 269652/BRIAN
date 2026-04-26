@@ -1,1 +1,53 @@
-checkpoints
+# Checkpoints / model weights
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.Python
+
+# Data files / downloads
+data/
+datasets/
+*.csv
+*.tar.gz
+*.zip
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Editor/project files
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and runtime
+*.log
+training.err
+training.log
+
+# Testing and packaging
+pip-wheel-metadata/
+.pytest_cache/
+
+# Temp
+tmp/
+temp/
+.cache/
+
