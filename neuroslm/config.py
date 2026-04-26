@@ -1,0 +1,103 @@
+"""Central configuration for NeuroSLM.
+
+All dimensions, layer counts, and training hyperparameters live here so
+scaling up is a one-file change.
+"""
+from dataclasses import dataclass, field
+
+
+@dataclass
+class BrainConfig:
+    # ---- Shared semantic embedding space (the "GWS bus" dim) ----
+    d_sem: int = 256          # shared semantic embedding dimension
+    d_hidden: int = 384       # internal hidden dim for most modules
+    vocab_size: int = 50257   # GPT-2 BPE vocab (via tiktoken)
+
+    # ---- Sensory / language cortex ----
+    lang_layers: int = 4
+    lang_heads: int = 6
+    lang_ctx: int = 512       # max context tokens
+
+    # ---- World / self / forward models (SSM-style, but we use GRU for simplicity) ----
+    world_layers: int = 2
+    self_layers: int = 1
+    forward_layers: int = 2
+
+    # ---- Global workspace ----
+    gws_slots: int = 8        # number of broadcast slots
+    gws_heads: int = 4
+
+    # ---- DMN / PFC ----
+    dmn_layers: int = 2
+    pfc_layers: int = 2
+    pfc_heads: int = 4
+
+    # ---- Hippocampus ----
+    hippo_capacity: int = 4096    # max stored episodes
+    hippo_topk: int = 4           # recalls per query
+    hippo_sparse_k: int = 32      # DG sparse code active units (out of d_sem)
+    novelty_threshold: float = 0.6
+
+    # ---- Basal ganglia ----
+    bg_action_dim: int = 256
+    bg_n_candidates: int = 4
+
+    # ---- Neuromodulators ----
+    n_neuromods: int = 4          # DA, NE, 5HT, ACh
+
+    # ---- Loop control ----
+    dmn_period: int = 4           # sensory ticks per DMN tick
+    max_thinking_steps: int = 6   # max planning iterations before forced output
+
+    # ---- Floating thought ----
+    thought_alpha: float = 0.3    # base ACh-modulated update rate
+
+    # ---- Training ----
+    lr: float = 3e-4
+    weight_decay: float = 0.01
+    warmup_steps: int = 200
+    grad_clip: float = 1.0
+
+    # ---- Loss weights for multi-objective training ----
+    w_lm: float = 1.0          # language modeling
+    w_world: float = 0.3       # world model next-state prediction
+    w_self: float = 0.1        # self model consistency
+    w_forward: float = 0.2     # forward model
+    w_value: float = 0.1       # evaluator (placeholder; needs RL signal)
+    w_motor: float = 0.05      # SPEAK gate auxiliary loss
+    speak_conf_threshold: float = 0.25  # min next-token confidence to want to SPEAK
+
+
+# ----- Preset sizes -----
+def tiny() -> BrainConfig:
+    """~5M params. Sanity test."""
+    c = BrainConfig()
+    c.d_sem = 128
+    c.d_hidden = 192
+    c.lang_layers = 2
+    c.lang_heads = 4
+    c.lang_ctx = 256
+    c.dmn_layers = 1
+    c.pfc_layers = 1
+    return c
+
+
+def small() -> BrainConfig:
+    """~15M params. CPU-trainable in hours."""
+    return BrainConfig()
+
+
+def medium() -> BrainConfig:
+    """~80M params. GPU recommended."""
+    c = BrainConfig()
+    c.d_sem = 512
+    c.d_hidden = 768
+    c.lang_layers = 8
+    c.lang_heads = 8
+    c.lang_ctx = 1024
+    c.dmn_layers = 4
+    c.pfc_layers = 4
+    return c
+
+
+PRESETS = {"tiny": tiny, "small": small, "medium": medium}
