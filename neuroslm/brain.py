@@ -553,6 +553,39 @@ class Brain(nn.Module):
         self.transmitters.detach_()
         return out
 
+    def lm_logprob(self, ids: torch.Tensor, lengths: torch.Tensor | None = None) -> torch.Tensor:
+        """Compute per-sample log-probability of sequences `ids` under the LM.
+
+        ids: (B, T) token ids (padded with 0). lengths: optional (B,) true lengths
+        Returns: (B,) summed log-probabilities (natural log)
+        """
+        device = ids.device
+        B, T = ids.shape
+        # Compute logits from language cortex (no conditioning thought)
+        # We run the language forward to get logits for all positions.
+        logits, _, _ = self.language(ids)
+        # Compute log softmax across vocab
+        logp = F.log_softmax(logits, dim=-1)  # (B, T, V)
+        # Gather token log-probs for each position
+        token_logp = logp.gather(-1, ids.unsqueeze(-1)).squeeze(-1)  # (B, T)
+        if lengths is None:
+            # Assume all tokens are valid
+            seq_logp = token_logp.sum(dim=1)
+        else:
+            # lengths is tensor of true lengths per sample
+            mask = (torch.arange(T, device=device).unsqueeze(0) < lengths.unsqueeze(1)).to(token_logp.dtype)
+            seq_logp = (token_logp * mask).sum(dim=1)
+        return seq_logp
+
+    def num_parameters(self, trainable_only: bool = False) -> int:
+        """Return the number of parameters in the Brain.
+
+        If trainable_only is True, only count parameters with requires_grad==True.
+        """
+        if trainable_only:
+            return sum(p.numel() for p in self.parameters() if p.requires_grad)
+        return sum(p.numel() for p in self.parameters())
+
     # ====================================================================
     # Inference-time cognitive loop
     # ====================================================================
@@ -760,3 +793,57 @@ class Brain(nn.Module):
         self.rcpt_lang.to_device(device)
         self.rcpt_dmn.to_device(device)
         self.projections.to_device(device)
+
+    # ------------------ Memory helpers ------------------
+    def record_episode(self, content, content_vec=None, nt_state=None, emotion=None, tags=None, context=None):
+        """Record an episodic memory. If content_vec is None, compute a semantic
+        embedding using the model's LanguageCortex (in eval mode). This is a
+        best-effort operation — failures are swallowed so training isn't
+        interrupted by memory logging issues."""
+        try:
+            vec = content_vec
+            if vec is None:
+                # Lazily import tokenizer to avoid circular imports at module load
+                from .tokenizer import Tokenizer
+                tok = Tokenizer()
+                ids = tok.encode(content)
+                # Truncate/pad to context length
+                ids = ids[-self.cfg.lang_ctx:]
+                import torch
+                device = next(self.language.parameters()).device if any(True for _ in self.language.parameters()) else torch.device('cpu')
+                ids_t = torch.tensor([ids], dtype=torch.long, device=device)
+                # Run LM in eval mode to get semantic vector
+                self.language.eval()
+                with torch.no_grad():
+                    _, sem, _ = self.language(ids_t)
+                vec = sem.squeeze(0).cpu().numpy()
+            self.episodic.add(content, content_vec=vec, nt_state=nt_state, emotion=emotion, tags=tags, context=context)
+        except Exception:
+            return
+
+    def tag_memory(self, memory_id: int, reward: float, insight=None):
+        try:
+            self.mesolimbic.tag(memory_id, reward, insight=insight)
+        except Exception:
+            return
+
+    def consolidate_memory(self, threshold: float = 0.85):
+        try:
+            episodes = self.episodic.recent(256)
+            # Each episode should have a content_vec field; fall back to zero vectors
+            for ep in episodes:
+                if 'content_vec' not in ep:
+                    ep['content_vec'] = getattr(ep, 'content_vec', None) or (0.0,)
+            self.consolidated.consolidate(episodes, threshold=threshold)
+        except Exception:
+            return
+
+    def update_narratives(self):
+        try:
+            # Simple heuristic: collect recent episodes and append to narrative buffers
+            recent = self.episodic.recent(32)
+            for ep in recent:
+                self.narrative_self.update(ep.get('content', ''))
+                self.narrative_world.update(ep.get('content', ''))
+        except Exception:
+            return

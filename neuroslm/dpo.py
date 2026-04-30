@@ -24,15 +24,18 @@ class PreferencePairDataset(Dataset):
 
 
 def collate_fn(batch):
-    # Very small collate: pad to max length in batch
+    # Pad sequences and return lengths for each side
     as_, bs, labs = zip(*batch)
     la = max(len(x) for x in as_)
     lb = max(len(x) for x in bs)
-    import torch.nn.utils.rnn as rnn
-    def pad(xs, L):
+    import torch
+    def pad_and_lens(xs, L):
         out = [x + [0] * (L - len(x)) for x in xs]
-        return torch.tensor(out, dtype=torch.long)
-    return pad(as_, la), pad(bs, lb), torch.tensor(labs, dtype=torch.float)
+        lens = [len(x) for x in xs]
+        return torch.tensor(out, dtype=torch.long), torch.tensor(lens, dtype=torch.long)
+    a_p, a_lens = pad_and_lens(as_, la)
+    b_p, b_lens = pad_and_lens(bs, lb)
+    return a_p, a_lens, b_p, b_lens, torch.tensor(labs, dtype=torch.float)
 
 
 def dpo_loss(logp_a, logp_b, epsilon=1.0):
@@ -44,16 +47,27 @@ def dpo_loss(logp_a, logp_b, epsilon=1.0):
 def train_dpo(model, tokenizer, pairs, device='cuda', epochs=1, batch_size=8):
     ds = PreferencePairDataset(pairs)
     dl = DataLoader(ds, batch_size=batch_size, collate_fn=collate_fn)
-    optim = AdamW(model.parameters(), lr=1e-5)
+    # Only train adapter (LoRA) params if present; otherwise train all params
+    params = [p for p in model.parameters() if p.requires_grad]
+    optim = AdamW(params, lr=1e-5)
     model.to(device)
     model.train()
     for epoch in range(epochs):
-        for a_ids, b_ids, labs in dl:
-            a_ids = a_ids.to(device)
-            b_ids = b_ids.to(device)
-            # Compute log-prob of sequence under model (sum log probs per token)
-            with torch.no_grad():
-                pass
-            # Placeholder: you must provide a logp computation using your LM's forward
-            # e.g. compute token logits, shift, cross-entropy, sum negative loss -> logp
-            raise NotImplementedError("Integrate with model log-prob computation")
+        for a_p, a_lens, b_p, b_lens, labs in dl:
+            a_p = a_p.to(device)
+            b_p = b_p.to(device)
+            a_lens = a_lens.to(device)
+            b_lens = b_lens.to(device)
+            labs = labs.to(device)
+
+            # Compute log-prob of sequences under the model
+            # Expect model to implement `lm_logprob(ids, lengths)` returning (B,) log-probs
+            logp_a = model.lm_logprob(a_p, lengths=a_lens)
+            logp_b = model.lm_logprob(b_p, lengths=b_lens)
+
+            loss = dpo_loss(logp_a, logp_b)
+            optim.zero_grad()
+            loss.backward()
+            optim.step()
+
+    return model

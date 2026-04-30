@@ -15,6 +15,12 @@ from pathlib import Path
 import torch
 from torch.optim import AdamW
 
+import sys
+
+# Extra safety: assert Python version early with a helpful message.
+if getattr(sys, 'version_info', (0,)) < (3, 8):
+    raise RuntimeError("neuroslm training requires Python 3.8+. Please run using your venv python or 'py -3'.")
+
 from .config import PRESETS
 from .tokenizer import Tokenizer
 from .brain import Brain

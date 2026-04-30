@@ -8,10 +8,12 @@ class EpisodicMemory:
         self.buffer = deque(maxlen=maxlen)
         self.lock = threading.Lock()
 
-    def add(self, content, nt_state=None, emotion=None, tags=None, context=None):
+    def add(self, content, content_vec=None, nt_state=None, emotion=None, tags=None, context=None):
+        """Append an episode. content_vec can be a numeric vector (optional)."""
         episode = {
             'content': content,
             'timestamp': time.time(),
+            'content_vec': content_vec,
             'nt_state': nt_state,
             'emotion': emotion,
             'tags': tags or [],
