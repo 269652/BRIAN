@@ -221,10 +221,10 @@ class Brain(nn.Module):
 
         # ---- Thought Transformer (meta-learnable reasoning amplifier) ----
         self.thought_transformer = ThoughtTransformer(
-            d_model=self.cfg.d_sem, n_thought_tokens=4, n_layers=2, n_heads=4)
+            d_sem=self.cfg.d_sem, n_thought_tokens=4, n_layers=2, n_heads=4)
 
         # ---- Consciousness metrics (oscillations, Φ, binding, ignition) ----
-        self.consciousness = ConsciousnessMetrics(d_model=self.cfg.d_sem)
+        self.consciousness = ConsciousnessMetrics(d_sem=self.cfg.d_sem)
 
         # ---- Neuroanatomical structures ----
         # Cortical columns: predictive processing (apical/basal dendrites)
