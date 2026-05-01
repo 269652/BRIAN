@@ -11,6 +11,7 @@ import argparse
 import math
 import os
 import time
+from contextlib import nullcontext
 from pathlib import Path
 import torch
 from torch.optim import AdamW
@@ -165,53 +166,56 @@ def main():
         brain.record_episode(content, content_vec, nt_state, emotion, tags, context)
 
         # 2. Forward pass
-        out = brain.forward_lm(ids, targets)
-        loss = out["loss"]
+        # When meta-training, we need math SDP backend for the entire
+        # forward+backward chain (create_graph=True requires higher-order
+        # derivatives that flash/efficient attention doesn't support).
+        _sdp_ctx = torch.nn.attention.sdpa_kernel(
+            torch.nn.attention.SDPBackend.MATH) if args.meta else nullcontext()
+        with _sdp_ctx:
+            out = brain.forward_lm(ids, targets)
+            loss = out["loss"]
 
-        # If meta-training is enabled, perform a one-step differentiable unroll
-        if args.meta:
-            # Compute comprehension delta: how much LM loss improved vs last step
-            current_lm = float(out["lm_loss"].item())
-            if not hasattr(main, '_prev_lm'):
+            # If meta-training is enabled, perform a one-step differentiable unroll
+            if args.meta:
+                # Compute comprehension delta: how much LM loss improved vs last step
+                current_lm = float(out["lm_loss"].item())
+                if not hasattr(main, '_prev_lm'):
+                    main._prev_lm = current_lm
+                comp_delta = main._prev_lm - current_lm  # positive = improvement
                 main._prev_lm = current_lm
-            comp_delta = main._prev_lm - current_lm  # positive = improvement
-            main._prev_lm = current_lm
 
-            # get a meta batch
-            try:
-                meta_batch = next(it)
-            except StopIteration:
-                it = batch_iterator(tok, ctx_len, args.batch_size,
-                                    seed=args.seed + step,
-                                    mode=args.mode, chat_ratio=args.chat_ratio)
-                meta_batch = next(it)
-            meta_batch = meta_batch.to(device)
-            meta_ids, meta_targets = meta_batch[:, :-1], meta_batch[:, 1:].contiguous()
+                # get a meta batch
+                try:
+                    meta_batch = next(it)
+                except StopIteration:
+                    it = batch_iterator(tok, ctx_len, args.batch_size,
+                                        seed=args.seed + step,
+                                        mode=args.mode, chat_ratio=args.chat_ratio)
+                    meta_batch = next(it)
+                meta_batch = meta_batch.to(device)
+                meta_ids, meta_targets = meta_batch[:, :-1], meta_batch[:, 1:].contiguous()
 
-            # Meta-learn language module parameters (including geometry adapters)
-            model_named = list(brain.language.named_parameters())
-            model_params = [p for _, p in model_named]
-            grads = torch.autograd.grad(loss, model_params, create_graph=True, allow_unused=True)
+                # Meta-learn language module parameters (including geometry adapters)
+                model_named = list(brain.language.named_parameters())
+                model_params = [p for _, p in model_named]
+                grads = torch.autograd.grad(loss, model_params, create_graph=True, allow_unused=True)
 
-            # neuromodulatory vector (DA, NE, 5HT, ACh)
-            nm = brain.transmitters.vector().mean(dim=0)[:4].to(device)
+                # neuromodulatory vector (DA, NE, 5HT, ACh)
+                nm = brain.transmitters.vector().mean(dim=0)[:4].to(device)
 
-            # form virtual updated parameters for the language module
-            virtual_map = {}
-            for (name, p), g in zip(model_named, grads):
-                if g is None:
-                    g = torch.zeros_like(p)
-                mult = brain.learned_opt(g, p, nm,
-                                         comprehension_delta=comp_delta,
-                                         param_name=name)
-                transformed = g * mult
-                virtual = p - cfg.lr * transformed
-                virtual_map[name] = virtual
+                # form virtual updated parameters for the language module
+                virtual_map = {}
+                for (name, p), g in zip(model_named, grads):
+                    if g is None:
+                        g = torch.zeros_like(p)
+                    mult = brain.learned_opt(g, p, nm,
+                                             comprehension_delta=comp_delta,
+                                             param_name=name)
+                    transformed = g * mult
+                    virtual = p - cfg.lr * transformed
+                    virtual_map[name] = virtual
 
-            # Evaluate meta-loss under virtual language params
-            # Force math SDP backend — efficient/flash attention lacks
-            # higher-order derivative support needed for meta-backward.
-            with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.MATH):
+                # Evaluate meta-loss under virtual language params
                 meta_out = functional_call(brain.language, virtual_map, (meta_ids,))
                 logits_meta, _, _ = meta_out
                 meta_loss = torch.nn.functional.cross_entropy(
@@ -221,10 +225,10 @@ def main():
                 # Update meta-parameters (learned optimizer + geometry adapters)
                 meta_opt.zero_grad(set_to_none=True)
                 meta_loss.backward()
-            meta_opt.step()
+                meta_opt.step()
 
-            # Reset learned optimizer hidden states after meta step
-            brain.learned_opt.reset_state()
+                # Reset learned optimizer hidden states after meta step
+                brain.learned_opt.reset_state()
 
             # Apply transformed gradients for real model update
             optim.zero_grad(set_to_none=True)
@@ -239,7 +243,9 @@ def main():
             # gradient clip and step (only on language params we modified)
             gnorm = torch.nn.utils.clip_grad_norm_(model_params, cfg.grad_clip)
             optim.step()
-        else:
+        # end of _sdp_ctx
+
+        if not args.meta:
             optim.zero_grad(set_to_none=True)
             loss.backward()
             gnorm = torch.nn.utils.clip_grad_norm_(brain.parameters(), cfg.grad_clip)
