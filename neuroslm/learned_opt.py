@@ -104,7 +104,10 @@ class LearnedBackprop(nn.Module):
 
         h_prev, c_prev = self._get_state(param_name, device)
         h_new, c_new = self.lstm(features, (h_prev, c_prev))
-        self._hidden_states[param_name] = (h_new, c_new)
+        # Store detached states — backward path goes through current call only.
+        # This prevents in-place modification errors when learned_opt is called
+        # multiple times per training step.
+        self._hidden_states[param_name] = (h_new.detach(), c_new.detach())
 
         # Scale: exp(tanh(raw)) → ~[0.37, 2.72]
         raw_scale = self.scale_head(h_new)
