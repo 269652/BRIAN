@@ -25,7 +25,7 @@ from .config import PRESETS
 from .tokenizer import Tokenizer
 from .brain import Brain
 from .data import batch_iterator
-from torch.nn.utils import stateless
+from torch.func import functional_call
 
 
 def cosine_lr(step: int, warmup: int, total: int, peak: float) -> float:
@@ -212,15 +212,15 @@ def main():
             # Force math SDP backend — efficient/flash attention lacks
             # higher-order derivative support needed for meta-backward.
             with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.MATH):
-                meta_out = stateless.functional_call(brain.language, virtual_map, (meta_ids,))
+                meta_out = functional_call(brain.language, virtual_map, (meta_ids,))
                 logits_meta, _, _ = meta_out
                 meta_loss = torch.nn.functional.cross_entropy(
                     logits_meta.reshape(-1, logits_meta.size(-1)),
                     meta_targets.reshape(-1), ignore_index=-100)
 
-            # Update meta-parameters (learned optimizer + geometry adapters)
-            meta_opt.zero_grad(set_to_none=True)
-            meta_loss.backward()
+                # Update meta-parameters (learned optimizer + geometry adapters)
+                meta_opt.zero_grad(set_to_none=True)
+                meta_loss.backward()
             meta_opt.step()
 
             # Reset learned optimizer hidden states after meta step
