@@ -33,7 +33,6 @@ from .genome import GenePool, Genome
 from .genomes import select_build_genome, apply_build_genome, BUILTIN_BUILDS
 from .learning import LearningLayer
 from .learned_opt import LearnedBackprop
-from .learned_opt import LearnedBackprop
 
 
 class Ribosome:
@@ -247,7 +246,7 @@ class Brain(nn.Module):
         # Learned backprop module (meta-optimizer). Transforms per-parameter
         # gradients conditioned on neuromodulatory state. This module is
         # intended to be meta-trained by unrolling inner updates.
-        self.learned_opt = LearnedBackprop(n_neuromods=self.cfg.n_neuromods, hidden=64)
+        self.learned_opt = LearnedBackprop(n_neuromods=self.cfg.n_neuromods, hidden=32)
 
         # Gene pool — the DMN's algorithmic CFG, evolved over training
         self.gene_pool = GenePool(pool_size=4, tournament_period=200)

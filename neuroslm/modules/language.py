@@ -3,21 +3,99 @@
 Contains the token embeddings, transformer stack, and LM head.
 The hidden state at the last position is exposed as the "comprehension embedding"
 projected into d_sem space for downstream modules.
+
+Includes a **NeuralGeometryAdapter** — a meta-trainable layer that dynamically
+reshapes the hidden-state manifold between transformer blocks.  The adapter
+projects activations into a higher-dimensional "hyperbolic-like" space where
+neurons can form richer inter-connections, then projects back.  The up/down
+projections and a learned *connectivity kernel* are meta-trained so the network
+discovers neural topologies that pack more linguistic understanding into fewer
+parameters than a vanilla transformer.
 """
 from __future__ import annotations
+import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from .common import TransformerBlock, RMSNorm
+
+
+# ---------------------------------------------------------------------------
+# Neural Geometry Adapter — meta-trainable higher-dimensional wiring
+# ---------------------------------------------------------------------------
+
+class NeuralGeometryAdapter(nn.Module):
+    """Learns to reshape the hidden-state geometry between transformer blocks.
+
+    Core idea: project d_hidden → d_hyper (larger), apply a learned
+    *connectivity kernel* (low-rank + sparse gating), then project back.
+    The connectivity kernel acts as a dynamic adjacency matrix in the
+    higher-dimensional space, enabling neurons to form connections that
+    do not exist in the original d_hidden topology.
+
+    The adapter is deliberately lightweight:
+      up:     (d_hidden → d_hyper) via linear
+      kernel: low-rank (d_hyper, rank) @ (rank, d_hyper) + sigmoid gate
+      down:   (d_hyper → d_hidden) via linear
+
+    A residual connection and layer-norm ensure stability.
+    The adapter parameters are included in the meta-training parameter set
+    so the geometry itself is meta-learned.
+    """
+
+    def __init__(self, d_hidden: int, expansion: float = 2.0,
+                 rank: int = 0):
+        super().__init__()
+        self.d_hyper = int(d_hidden * expansion)
+        if rank <= 0:
+            rank = max(8, self.d_hyper // 8)
+        self.rank = rank
+
+        self.norm = RMSNorm(d_hidden)
+        self.up = nn.Linear(d_hidden, self.d_hyper, bias=False)
+        # Low-rank connectivity kernel
+        self.kern_a = nn.Parameter(torch.randn(self.d_hyper, rank) * 0.01)
+        self.kern_b = nn.Parameter(torch.randn(rank, self.d_hyper) * 0.01)
+        # Per-dimension gate (sigmoid) — controls which hyper-dimensions
+        # are "active connections" for this input
+        self.gate = nn.Linear(self.d_hyper, self.d_hyper, bias=True)
+        self.down = nn.Linear(self.d_hyper, d_hidden, bias=False)
+
+        # Init down projection to zero so the adapter starts as identity
+        nn.init.zeros_(self.down.weight)
+        nn.init.constant_(self.gate.bias, -2.0)  # gates start mostly closed
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """x: (B, T, d_hidden) → (B, T, d_hidden) with geometry-adapted residual."""
+        h = self.norm(x)
+        z = self.up(h)                                    # (B, T, d_hyper)
+        # Connectivity kernel: low-rank transform in hyper-space
+        # This is the "virtual wiring" — neurons interact through a
+        # learned adjacency that doesn't exist in the base transformer
+        k = z @ self.kern_a @ self.kern_b                 # (B, T, d_hyper)
+        # Gating: sigmoid gate decides which hyper-connections are active
+        g = torch.sigmoid(self.gate(z))                   # (B, T, d_hyper)
+        z_new = F.silu(k) * g                             # gated activation
+        out = self.down(z_new)                             # (B, T, d_hidden)
+        return x + out                                     # residual
 
 
 class LanguageCortex(nn.Module):
     def __init__(self, vocab_size: int, d_hidden: int, d_sem: int,
-                 n_layers: int, n_heads: int, max_ctx: int):
+                 n_layers: int, n_heads: int, max_ctx: int,
+                 geometry_expansion: float = 2.0):
         super().__init__()
         self.tok_emb = nn.Embedding(vocab_size, d_hidden)
-        self.blocks = nn.ModuleList([
-            TransformerBlock(d_hidden, n_heads, max_ctx) for _ in range(n_layers)
-        ])
+
+        # Interleaved: [TransformerBlock, GeometryAdapter] × n_layers
+        self.blocks = nn.ModuleList()
+        self.adapters = nn.ModuleList()
+        for _ in range(n_layers):
+            self.blocks.append(TransformerBlock(d_hidden, n_heads, max_ctx))
+            self.adapters.append(
+                NeuralGeometryAdapter(d_hidden, expansion=geometry_expansion)
+            )
+
         self.norm_f = RMSNorm(d_hidden)
         # Tied output head
         self.lm_head = nn.Linear(d_hidden, vocab_size, bias=False)
@@ -42,14 +120,14 @@ class LanguageCortex(nn.Module):
                 motor_bias: torch.Tensor | None = None):
         """ids: (B, T). thought: optional (B, d_sem) injected as a prefix bias.
         motor_bias: optional (B, d_hidden) added to the LAST position's hidden
-        state before the LM head — this is how the motor cortex shapes
-        emission without requiring a second forward pass."""
+        state before the LM head."""
         h = self.tok_emb(ids)
         if thought is not None:
             bias = self.from_sem(thought).unsqueeze(1)  # (B, 1, d_hidden)
             h = h + bias
-        for blk in self.blocks:
+        for blk, adapter in zip(self.blocks, self.adapters):
             h = blk(h)
+            h = adapter(h)     # geometry-adapted residual after each block
         h = self.norm_f(h)
         if motor_bias is not None:
             # Add bias only to the last position (the one that will be sampled).

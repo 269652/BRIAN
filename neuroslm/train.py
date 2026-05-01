@@ -98,8 +98,13 @@ def main():
 
     meta_opt = None
     if args.meta:
-        # meta optimizer updates only the parameters of the learned optimizer
-        meta_opt = AdamW(brain.learned_opt.parameters(), lr=args.meta_lr)
+        # meta optimizer updates the learned optimizer + geometry adapters
+        meta_params = list(brain.learned_opt.parameters())
+        # Include geometry adapter parameters so the neural topology is meta-learned
+        for name, p in brain.language.named_parameters():
+            if 'adapter' in name:
+                meta_params.append(p)
+        meta_opt = AdamW(meta_params, lr=args.meta_lr)
 
     start_step = 0
     if args.resume and Path(args.resume).exists():
@@ -165,6 +170,13 @@ def main():
 
         # If meta-training is enabled, perform a one-step differentiable unroll
         if args.meta:
+            # Compute comprehension delta: how much LM loss improved vs last step
+            current_lm = float(out["lm_loss"].item())
+            if not hasattr(main, '_prev_lm'):
+                main._prev_lm = current_lm
+            comp_delta = main._prev_lm - current_lm  # positive = improvement
+            main._prev_lm = current_lm
+
             # get a meta batch
             try:
                 meta_batch = next(it)
@@ -176,10 +188,9 @@ def main():
             meta_batch = meta_batch.to(device)
             meta_ids, meta_targets = meta_batch[:, :-1], meta_batch[:, 1:].contiguous()
 
-            # For tractability, meta-learn only the language module parameters.
+            # Meta-learn language module parameters (including geometry adapters)
             model_named = list(brain.language.named_parameters())
             model_params = [p for _, p in model_named]
-            # allow_unused=True because some params might not contribute to loss
             grads = torch.autograd.grad(loss, model_params, create_graph=True, allow_unused=True)
 
             # neuromodulatory vector (DA, NE, 5HT, ACh)
@@ -190,32 +201,36 @@ def main():
             for (name, p), g in zip(model_named, grads):
                 if g is None:
                     g = torch.zeros_like(p)
-                mult = brain.learned_opt(g, p, nm)  # scalar tensor
+                mult = brain.learned_opt(g, p, nm,
+                                         comprehension_delta=comp_delta,
+                                         param_name=name)
                 transformed = g * mult
                 virtual = p - cfg.lr * transformed
-                # stateless.functional_call expects a mapping from parameter name -> tensor
                 virtual_map[name] = virtual
 
-            # Evaluate meta-loss under virtual language parameters using stateless.functional_call
-            # Build a parameter mapping with the same qualified names used by brain.language
-            # The names from model_named are already the qualified names for brain.language
-            # We can call functional_call with that mapping to evaluate on meta batch.
+            # Evaluate meta-loss under virtual language params
             meta_out = stateless.functional_call(brain.language, virtual_map, (meta_ids,))
-            # functional_call returns (logits, sem, h); compute LM loss on meta batch
             logits_meta, _, _ = meta_out
-            meta_loss = torch.nn.functional.cross_entropy(logits_meta.reshape(-1, logits_meta.size(-1)), meta_targets.reshape(-1), ignore_index=-100)
+            meta_loss = torch.nn.functional.cross_entropy(
+                logits_meta.reshape(-1, logits_meta.size(-1)),
+                meta_targets.reshape(-1), ignore_index=-100)
 
-            # Update meta-parameters (learned optimizer)
+            # Update meta-parameters (learned optimizer + geometry adapters)
             meta_opt.zero_grad(set_to_none=True)
             meta_loss.backward()
             meta_opt.step()
 
-            # Now apply transformed gradients as real gradients for model update
+            # Reset learned optimizer hidden states after meta step
+            brain.learned_opt.reset_state()
+
+            # Apply transformed gradients for real model update
             optim.zero_grad(set_to_none=True)
             for (name, p), g in zip(model_named, grads):
                 if g is None:
                     g = torch.zeros_like(p)
-                mult = brain.learned_opt(g, p, nm)
+                mult = brain.learned_opt(g, p, nm,
+                                         comprehension_delta=comp_delta,
+                                         param_name=name)
                 transformed = (g * mult).detach()
                 p.grad = transformed
             # gradient clip and step (only on language params we modified)
