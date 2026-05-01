@@ -25,6 +25,7 @@ from .config import PRESETS
 from .tokenizer import Tokenizer
 from .brain import Brain
 from .data import batch_iterator
+from torch.nn.utils import stateless
 
 
 def cosine_lr(step: int, warmup: int, total: int, peak: float) -> float:
@@ -50,6 +51,10 @@ def main():
                     help="Load only matching tensors from a previous checkpoint "
                          "(use when architecture changed).")
     ap.add_argument("--device", default=None)
+    ap.add_argument("--meta", action="store_true",
+                    help="Enable one-step meta-training of the learned optimizer")
+    ap.add_argument("--meta_lr", type=float, default=1e-4,
+                    help="Learning rate for the meta-optimizer (updates learned optimizer)")
     ap.add_argument("--mode", default="text", choices=["text", "chat", "mix"],
                     help="text=narrative, chat=multi-turn dialogue, "
                          "mix=interleave (recommended once base LM is decent)")
@@ -61,6 +66,18 @@ def main():
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[train] device={device}", flush=True)
 
+    # Meta-mode requires higher-order gradients through the inner update.
+    # Some CPU attention kernels (flash attention variants) do not implement
+    # higher-order derivatives on CPU. Detect this early and emit a helpful
+    # error to avoid confusing low-level runtime failures.
+    if args.meta and device != "cuda":
+        raise RuntimeError(
+            "Meta-training (--meta) requires a CUDA-capable device because some CPU\n"
+            "attention kernels lack support for higher-order gradients.\n"
+            "Please run with --device cuda on a machine with an NVIDIA GPU (or on Colab),\n"
+            "or disable --meta for CPU runs."
+        )
+
     cfg = PRESETS[args.preset]()
     tok = Tokenizer()
     cfg.vocab_size = tok.vocab_size
@@ -71,8 +88,18 @@ def main():
     n_params = brain.num_parameters()
     print(f"[train] model params: {n_params/1e6:.2f}M (preset={args.preset})", flush=True)
 
-    optim = AdamW(brain.parameters(), lr=cfg.lr,
+    # Separate optimizers: model optimizer updates model params; meta optimizer
+    # updates the learned optimizer (`brain.learned_opt`). This avoids double
+    # updating learned_opt with the main optimizer.
+    named = list(brain.named_parameters())
+    model_params = [p for n, p in named if not n.startswith('learned_opt.')]
+    optim = AdamW(model_params, lr=cfg.lr,
                   weight_decay=cfg.weight_decay, betas=(0.9, 0.95))
+
+    meta_opt = None
+    if args.meta:
+        # meta optimizer updates only the parameters of the learned optimizer
+        meta_opt = AdamW(brain.learned_opt.parameters(), lr=args.meta_lr)
 
     start_step = 0
     if args.resume and Path(args.resume).exists():
@@ -122,7 +149,7 @@ def main():
             pg["lr"] = cosine_lr(step, cfg.warmup_steps, args.steps, cfg.lr)
 
 
-        # --- Memory system integration ---
+    # --- Memory system integration ---
         # 1. Record episodic memory for this batch (use first sample for simplicity)
         content = tok.decode(ids[0].tolist())
         content_vec = ids[0].float().cpu().numpy()  # Placeholder: use embedding for real system
@@ -132,13 +159,73 @@ def main():
         context = {'self': True}  # Placeholder: can be set based on batch/task
         brain.record_episode(content, content_vec, nt_state, emotion, tags, context)
 
-        # 2. Forward pass and optimization
+        # 2. Forward pass
         out = brain.forward_lm(ids, targets)
         loss = out["loss"]
-        optim.zero_grad(set_to_none=True)
-        loss.backward()
-        gnorm = torch.nn.utils.clip_grad_norm_(brain.parameters(), cfg.grad_clip)
-        optim.step()
+
+        # If meta-training is enabled, perform a one-step differentiable unroll
+        if args.meta:
+            # get a meta batch
+            try:
+                meta_batch = next(it)
+            except StopIteration:
+                it = batch_iterator(tok, ctx_len, args.batch_size,
+                                    seed=args.seed + step,
+                                    mode=args.mode, chat_ratio=args.chat_ratio)
+                meta_batch = next(it)
+            meta_batch = meta_batch.to(device)
+            meta_ids, meta_targets = meta_batch[:, :-1], meta_batch[:, 1:].contiguous()
+
+            # For tractability, meta-learn only the language module parameters.
+            model_named = list(brain.language.named_parameters())
+            model_params = [p for _, p in model_named]
+            # allow_unused=True because some params might not contribute to loss
+            grads = torch.autograd.grad(loss, model_params, create_graph=True, allow_unused=True)
+
+            # neuromodulatory vector (DA, NE, 5HT, ACh)
+            nm = brain.transmitters.vector().mean(dim=0)[:4].to(device)
+
+            # form virtual updated parameters for the language module
+            virtual_map = {}
+            for (name, p), g in zip(model_named, grads):
+                if g is None:
+                    g = torch.zeros_like(p)
+                mult = brain.learned_opt(g, p, nm)  # scalar tensor
+                transformed = g * mult
+                virtual = p - cfg.lr * transformed
+                # stateless.functional_call expects a mapping from parameter name -> tensor
+                virtual_map[name] = virtual
+
+            # Evaluate meta-loss under virtual language parameters using stateless.functional_call
+            # Build a parameter mapping with the same qualified names used by brain.language
+            # The names from model_named are already the qualified names for brain.language
+            # We can call functional_call with that mapping to evaluate on meta batch.
+            meta_out = stateless.functional_call(brain.language, virtual_map, (meta_ids,))
+            # functional_call returns (logits, sem, h); compute LM loss on meta batch
+            logits_meta, _, _ = meta_out
+            meta_loss = torch.nn.functional.cross_entropy(logits_meta.reshape(-1, logits_meta.size(-1)), meta_targets.reshape(-1), ignore_index=-100)
+
+            # Update meta-parameters (learned optimizer)
+            meta_opt.zero_grad(set_to_none=True)
+            meta_loss.backward()
+            meta_opt.step()
+
+            # Now apply transformed gradients as real gradients for model update
+            optim.zero_grad(set_to_none=True)
+            for (name, p), g in zip(model_named, grads):
+                if g is None:
+                    g = torch.zeros_like(p)
+                mult = brain.learned_opt(g, p, nm)
+                transformed = (g * mult).detach()
+                p.grad = transformed
+            # gradient clip and step (only on language params we modified)
+            gnorm = torch.nn.utils.clip_grad_norm_(model_params, cfg.grad_clip)
+            optim.step()
+        else:
+            optim.zero_grad(set_to_none=True)
+            loss.backward()
+            gnorm = torch.nn.utils.clip_grad_norm_(brain.parameters(), cfg.grad_clip)
+            optim.step()
 
         # 3. Tag memory with reward/insight (mesolimbic)
         reward = float(out["learning_gain"][0].item()) if "learning_gain" in out else 0.0

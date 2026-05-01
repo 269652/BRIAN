@@ -31,6 +31,9 @@ from .neurochem.growth import TrophicSystem
 from .neurochem.receptors import Receptor
 from .genome import GenePool, Genome
 from .genomes import select_build_genome, apply_build_genome, BUILTIN_BUILDS
+from .learning import LearningLayer
+from .learned_opt import LearnedBackprop
+from .learned_opt import LearnedBackprop
 
 
 class Ribosome:
@@ -236,6 +239,15 @@ class Brain(nn.Module):
 
         # Subconscious threat critic — fast survival circuit
         self.critic = SubconsciousCritic(self.cfg.d_sem)
+
+        # Learning layer: observes neuromodulators and suggests an LR multiplier
+        # (legacy scalar gating)
+        self.learning_layer = LearningLayer(n_inputs=8, hidden=32, init_scale=1.0)
+
+        # Learned backprop module (meta-optimizer). Transforms per-parameter
+        # gradients conditioned on neuromodulatory state. This module is
+        # intended to be meta-trained by unrolling inner updates.
+        self.learned_opt = LearnedBackprop(n_neuromods=self.cfg.n_neuromods, hidden=64)
 
         # Gene pool — the DMN's algorithmic CFG, evolved over training
         self.gene_pool = GenePool(pool_size=4, tournament_period=200)
@@ -793,6 +805,7 @@ class Brain(nn.Module):
         self.rcpt_lang.to_device(device)
         self.rcpt_dmn.to_device(device)
         self.projections.to_device(device)
+        self.learned_opt.to(device)
 
     # ------------------ Memory helpers ------------------
     def record_episode(self, content, content_vec=None, nt_state=None, emotion=None, tags=None, context=None):
