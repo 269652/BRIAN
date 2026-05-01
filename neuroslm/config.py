@@ -102,26 +102,25 @@ def medium() -> BrainConfig:
 
 def large() -> BrainConfig:
     """~100M params. Targets high reasoning / instruction following.
-    Optimized for intelligence density: deep language cortex with
-    geometry adapters, large GWS, deep DMN/PFC for extended reasoning."""
+    Sized to fit on a T4 (16GB VRAM) with batch_size=4."""
     c = BrainConfig()
-    c.d_sem = 576
-    c.d_hidden = 896
-    c.lang_layers = 12
+    c.d_sem = 384
+    c.d_hidden = 512
+    c.lang_layers = 8
     c.lang_heads = 8
-    c.lang_ctx = 2048
-    c.dmn_layers = 6
-    c.pfc_layers = 6
+    c.lang_ctx = 1024
+    c.dmn_layers = 4
+    c.pfc_layers = 4
     c.pfc_heads = 8
-    c.gws_slots = 12
-    c.gws_heads = 8
-    c.world_layers = 3
-    c.forward_layers = 3
-    c.hippo_capacity = 8192
-    c.hippo_topk = 6
-    c.max_thinking_steps = 10
-    c.warmup_steps = 500
-    c.lr = 2e-4
+    c.gws_slots = 10
+    c.gws_heads = 4
+    c.world_layers = 2
+    c.forward_layers = 2
+    c.hippo_capacity = 4096
+    c.hippo_topk = 4
+    c.max_thinking_steps = 8
+    c.warmup_steps = 300
+    c.lr = 3e-4
     return c
 
 
