@@ -102,13 +102,13 @@ def medium() -> BrainConfig:
 
 def large() -> BrainConfig:
     """~100M params. Targets high reasoning / instruction following.
-    Sized to fit on a T4 (16GB VRAM) with batch_size=4."""
+    Sized to fit on a T4 (16GB VRAM) with batch_size=2."""
     c = BrainConfig()
     c.d_sem = 256
     c.d_hidden = 384
     c.lang_layers = 6
     c.lang_heads = 6
-    c.lang_ctx = 1024
+    c.lang_ctx = 512
     c.dmn_layers = 3
     c.pfc_layers = 3
     c.pfc_heads = 4
