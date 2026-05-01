@@ -34,7 +34,7 @@ class GridCellModule(nn.Module):
         self.frequency = frequency
 
         # Preferred directions for each grid cell (learned, init hexagonal)
-        angles = torch.linspace(0, 2 * math.pi, n_cells, endpoint=False)
+        angles = torch.linspace(0, 2 * math.pi * (n_cells - 1) / n_cells, n_cells)
         # Project into d_sem space
         self.direction_proj = nn.Linear(d_sem, n_cells, bias=False)
 
