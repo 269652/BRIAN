@@ -26,6 +26,7 @@ datasets/
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
+!colab_run.ipynb
 
 # Editor/project files
 .vscode/
