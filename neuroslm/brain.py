@@ -369,7 +369,10 @@ class Brain(nn.Module):
         B, T = ids.shape
         device = ids.device
         latents = self.init_latents(B, device)
-        nt = self.transmitters.vector()                  # (B, N_NT)
+        # Detach NT vector: meta-training only needs gradients through
+        # language params, not transmitter state. Prevents in-place
+        # modification errors during create_graph=True backward.
+        nt = self.transmitters.vector().detach()          # (B, N_NT)
 
         # 1) Language cortex — modulated by ACh / eCB
         lang_in_thought = self.rcpt_lang.modulate(
@@ -397,8 +400,7 @@ class Brain(nn.Module):
         if survival.any():
             self.transmitters.release("NE", torch.where(
                 survival, torch.full_like(threat, 0.9), torch.zeros_like(threat)))
-            # Suppress 5HT (less patience under threat) by zeroing release demand.
-            nt = self.transmitters.vector()  # refresh after release
+            nt = self.transmitters.vector().detach()  # refresh after release
 
         # 5) Global workspace
         candidates = torch.stack(
