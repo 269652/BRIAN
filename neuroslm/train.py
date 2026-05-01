@@ -168,10 +168,11 @@ def main():
         # 2. Forward pass
         # When meta-training, we need math SDP backend for the entire
         # forward+backward chain (create_graph=True requires higher-order
-        # derivatives that flash/efficient attention doesn't support).
+        # derivatives that flash/efficient attention and CuDNN RNNs don't support).
         _sdp_ctx = torch.nn.attention.sdpa_kernel(
             torch.nn.attention.SDPBackend.MATH) if args.meta else nullcontext()
-        with _sdp_ctx:
+        _cudnn_ctx = torch.backends.cudnn.flags(enabled=False) if args.meta else nullcontext()
+        with _sdp_ctx, _cudnn_ctx:
             out = brain.forward_lm(ids, targets)
             loss = out["loss"]
 
