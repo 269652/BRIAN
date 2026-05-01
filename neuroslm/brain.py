@@ -20,6 +20,13 @@ from .modules.motor import MotorCortex, ACTION_NAMES, ACTION_INDEX
 from .modules.thalamus import Thalamus
 from .modules.critic import SubconsciousCritic
 from .modules.qualia import QualiaState
+from .modules.thought_transformer import ThoughtTransformer
+from .modules.consciousness import ConsciousnessMetrics
+from .modules.cortical_column import CorticalSheet
+from .modules.entorhinal import EntorhinalCortex
+from .modules.claustrum import Claustrum
+from .modules.cerebellum import Cerebellum
+from .modules.neural_geometry import NeuralGeometryEngine
 
 from .neurochem import (
     TransmitterSystem, NT_NAMES,
@@ -193,7 +200,7 @@ class Brain(nn.Module):
         # ---- memory systems ----
         from .memory.episodic import EpisodicMemory
         from .memory.consolidated import ConsolidatedMemory
-        from .memory.narrative import NarrativeBuffer
+        from .memory.narrative import NarrativeBuffer, NarrativeSystem
         from .memory.mesolimbic import MesolimbicTagger
         from .memory.hippocampal import HippocampalEnrichment
         from .memory.relational_graph import RelationalMemoryGraph
@@ -201,6 +208,7 @@ class Brain(nn.Module):
         self.consolidated = ConsolidatedMemory()
         self.narrative_self = NarrativeBuffer(maxlen=2048)
         self.narrative_world = NarrativeBuffer(maxlen=2048)
+        self.narrative_system = NarrativeSystem(self.cfg.d_sem)
         self.mesolimbic = MesolimbicTagger()
         self.hippocampal = HippocampalEnrichment(self.consolidated)
         # Relational memory graph — multidimensional associative memory
@@ -210,6 +218,35 @@ class Brain(nn.Module):
 
         # ---- Qualia state module ----
         self.qualia = QualiaState(self.cfg.d_sem, len(NT_NAMES))
+
+        # ---- Thought Transformer (meta-learnable reasoning amplifier) ----
+        self.thought_transformer = ThoughtTransformer(
+            d_model=self.cfg.d_sem, n_thought_tokens=4, n_layers=2, n_heads=4)
+
+        # ---- Consciousness metrics (oscillations, Φ, binding, ignition) ----
+        self.consciousness = ConsciousnessMetrics(d_model=self.cfg.d_sem)
+
+        # ---- Neuroanatomical structures ----
+        # Cortical columns: predictive processing (apical/basal dendrites)
+        self.cortical_sheet = CorticalSheet(
+            self.cfg.d_sem, n_columns=4, n_minicolumns=8)
+        # Entorhinal cortex: grid/place cells for conceptual navigation
+        self.entorhinal = EntorhinalCortex(
+            self.cfg.d_sem, n_modules=4, cells_per_module=32, n_places=64)
+        # Claustrum: cross-modal binding hub
+        self.claustrum = Claustrum(self.cfg.d_sem, n_modalities=8)
+        # Cerebellum: fast predictive error-driven forward model
+        self.cerebellum = Cerebellum(self.cfg.d_sem, expansion=4)
+
+        # ---- Novel intelligence geometry ----
+        # Hyperdimensional VSA + fractal attention + manifold geodesic flow
+        self.neural_geometry = NeuralGeometryEngine(
+            self.cfg.d_sem, n_fractal_levels=3)
+
+        # ---- Virtual environment (sensory grounding) ----
+        from .environments.virtual_world import environment_stream, SensoryFrame
+        self._env_stream = environment_stream(seed=42, switch_every=50)
+        self._last_sensory_frame: SensoryFrame | None = None
 
         # ---- neurochemistry ----
         self.transmitters = TransmitterSystem()
@@ -618,6 +655,15 @@ class Brain(nn.Module):
         sens, salience = self.sensory(sem)
         assoc = self.association([sens])
 
+        # 2b) Cortical column: predictive processing
+        cortical_out = self.cortical_sheet(assoc, state["floating_thought"])
+        salience = salience + 0.3 * cortical_out["burst"]
+        assoc = assoc + 0.5 * cortical_out["output"]
+
+        # 2c) Entorhinal cortex: conceptual navigation
+        entorh = self.entorhinal(state["floating_thought"])
+        grid_context = entorh["grid_code"]
+
         # 3) Thalamic router
         routed, routing = self.thalamus(assoc, nt, return_routing=True)
         routed = self.rcpt_thal.modulate(routed.unsqueeze(1), nt).squeeze(1)
@@ -647,11 +693,25 @@ class Brain(nn.Module):
                 self.transmitters.release(nt_name, thought_nt[:, i] * 0.3)
         nt = self.transmitters.vector()  # refresh after thought→NT
 
-        # 7) GWS — include qualia-modulated thought as a candidate
+        # 7) GWS — include qualia-modulated thought + grid context as candidates
         modulated_thought = q_out["modulated_thought"]
         candidates = torch.stack(
-            [routed, z_world, z_self, modulated_thought], dim=1)
+            [routed, z_world, z_self, modulated_thought, grid_context], dim=1)
         slots = self.gws(candidates, ne_temp=nt[:, NT_NAMES.index("NE")])
+
+        # 7b) Claustrum: cross-modal binding
+        claustrum_out = self.claustrum([
+            sens, routed, z_world, z_self,
+            modulated_thought, grid_context,
+            state["qualia"], cortical_out["output"],
+        ])
+        # Claustral gestalt enriches GWS slots
+        gestalt = claustrum_out["gestalt"]  # (B, D)
+
+        # 7c) Neural geometry engine: VSA + fractal + manifold
+        geo_out = self.neural_geometry(slots, state["floating_thought"])
+        # Geometry-enriched reasoning integrates with GWS
+        slots = slots + 0.3 * geo_out["output"].unsqueeze(1).expand_as(slots)
 
         # 8) DMN query
         dmn_query, stop_logit = self.dmn(slots, modulated_thought)
@@ -675,17 +735,23 @@ class Brain(nn.Module):
         except Exception:
             rel_nodes = []
 
-        # 10) PFC selection
-        slots_mod = self.rcpt_pfc.modulate(slots, nt)
-        selected, replace_gate = self.pfc(slots_mod, recalls, modulated_thought)
+        # 10) Thought Transformer — amplify reasoning on slots + thought
+        tt_out = self.thought_transformer(
+            state["floating_thought"], slots)
+        # tt_out["transformed_thought"] is (B, D), blend into floating thought before PFC
+        enhanced_thought = tt_out["transformed_thought"]
 
-        # 11) Update floating thought (genome-driven + qualia-modulated)
+        # 11) PFC selection
+        slots_mod = self.rcpt_pfc.modulate(slots, nt)
+        selected, replace_gate = self.pfc(slots_mod, recalls, enhanced_thought)
+
+        # 12) Update floating thought (genome-driven + qualia-modulated)
         genome = self.gene_pool.active()
         novelty_thresh = 0.2 + 0.6 * genome.get("novelty_threshold")
         thought_alpha = 0.05 + 0.6 * genome.get("thought_alpha")
         replace_mask = (replace_gate > 0.5) | (novelty > novelty_thresh)
         ach = nt[:, NT_NAMES.index("ACh")].unsqueeze(-1)
-        smooth = (1 - thought_alpha * ach) * modulated_thought \
+        smooth = (1 - thought_alpha * ach) * enhanced_thought \
                  + thought_alpha * ach * selected
         state["floating_thought"] = torch.where(
             replace_mask.unsqueeze(-1), selected, smooth)
@@ -697,6 +763,12 @@ class Brain(nn.Module):
         # 13) Forward model — predict outcome of action
         wp, sp = self.forward_m(z_world, z_self, action)
         value = self.evaluator(wp, sp, nt)
+
+        # 13b) Cerebellum: fast error-driven forward model
+        cereb_out = self.cerebellum(
+            state["floating_thought"], selected_bg, actual_next=wp)
+        # Cerebellar prediction error feeds back as additional learning signal
+        cereb_error = cereb_out["error"]  # (B,) scalar error magnitude
 
         # 14) Motor cortex
         _motor_thought, motor_lang_bias, action_idx, action_logits, action_probs = \
@@ -798,6 +870,29 @@ class Brain(nn.Module):
         state["last_action"] = action
         state["prev_action_idx"] = action_idx
 
+        # Consciousness metrics — oscillations, binding, ignition, Φ
+        c_metrics = self.consciousness.update(
+            module_outputs={
+                "pfc": selected, "dmn": dmn_query,
+                "world": z_world, "self": z_self,
+                "sensory": sens, "language": sem.mean(1),
+            },
+            gws_slots=slots,
+            floating_thought=state["floating_thought"],
+            novelty=novelty,
+            routing=routing,
+        )
+
+        # Narrative recording — autobiographical (thought + valence)
+        self.narrative_system.record_autobiographical(
+            state["floating_thought"][0].detach(),
+            valence=float(state["thought_valence"][0]),
+            salience=float(salience.mean()))
+        # World narrative from world model
+        self.narrative_system.record_world(
+            z_world[0].detach(),
+            valence=float(rpe.mean()))
+
         info = {
             "value": value, "confidence": conf, "novelty": novelty,
             "stop": torch.sigmoid(stop_logit), "routing": routing,
@@ -814,6 +909,20 @@ class Brain(nn.Module):
             "consolidation": meso_out["consolidation"].detach(),
             "learning_gain": meso_out["learning_gain"].detach(),
             "receptor_sensitivity": self.receptor_adaptation.info(),
+            "consciousness": c_metrics,
+            "thought_transformer": {
+                "consistency": float(tt_out["consistency"].mean()),
+                "depth": float(tt_out["reasoning_depth"].mean()),
+            },
+            "narrative": self.narrative_system.info(),
+            "cortical_burst": float(cortical_out["burst"].mean()),
+            "entorhinal_velocity": float(entorh["velocity"].norm(dim=-1).mean()),
+            "claustrum_salience": float(claustrum_out["salience"].mean()),
+            "cerebellar_error": float(cereb_error.mean()),
+            "geometry": {
+                "curvature": float(geo_out["curvature"].mean()),
+                "stream_gates": geo_out["stream_gates"].mean(0).tolist(),
+            },
         }
         return logits2, state, info
 
@@ -870,6 +979,43 @@ class Brain(nn.Module):
             # Also break if stop signal is high (DMN says enough thinking)
             if float(info["stop"].mean()) > 0.7:
                 break
+        return last_info
+
+    @torch.no_grad()
+    def dream(self, state: dict, max_steps: int = 20,
+              environment: str = "random", seed: int = 42,
+              on_step=None) -> dict:
+        """Embodied dreaming: the brain processes sensory input from a
+        simulated virtual environment. Grounds cognition in experience.
+
+        The virtual world feeds sensory frames to the cortex each tick,
+        driving mind wandering, narrative formation, and memory encoding.
+        """
+        from .environments.virtual_world import create_environment
+        from .tokenizer import Tokenizer
+        env = create_environment(environment, seed=seed)
+        tok = Tokenizer()
+        last_info = {}
+        for i in range(max_steps):
+            # Get sensory frame from virtual world
+            frame = env.step()
+            self._last_sensory_frame = frame
+            # Encode sensory text to tokens for the language cortex
+            text = frame.to_text()
+            ids = torch.tensor([tok.encode(text)], dtype=torch.long,
+                               device=state["floating_thought"].device)
+            ids = ids[:, :self.cfg.lang_ctx]  # truncate to context
+            # Run cognitive step with virtual sensory input
+            _logits, state, info = self.cognitive_step(ids, state, allow_emit=False)
+            info["sensory_frame"] = frame.to_dict()
+            last_info = info
+            if on_step:
+                on_step(i, info)
+            # Record to narrative system
+            self.narrative_system.record_world(
+                state["floating_thought"][0].detach(),
+                content=text[:200],
+                valence=frame.valence, salience=frame.arousal)
         return last_info
 
     @torch.no_grad()

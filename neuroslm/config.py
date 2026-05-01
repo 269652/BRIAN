@@ -100,4 +100,29 @@ def medium() -> BrainConfig:
     return c
 
 
-PRESETS = {"tiny": tiny, "small": small, "medium": medium}
+def large() -> BrainConfig:
+    """~100M params. Targets high reasoning / instruction following.
+    Optimized for intelligence density: deep language cortex with
+    geometry adapters, large GWS, deep DMN/PFC for extended reasoning."""
+    c = BrainConfig()
+    c.d_sem = 576
+    c.d_hidden = 896
+    c.lang_layers = 12
+    c.lang_heads = 8
+    c.lang_ctx = 2048
+    c.dmn_layers = 6
+    c.pfc_layers = 6
+    c.pfc_heads = 8
+    c.gws_slots = 12
+    c.gws_heads = 8
+    c.world_layers = 3
+    c.forward_layers = 3
+    c.hippo_capacity = 8192
+    c.hippo_topk = 6
+    c.max_thinking_steps = 10
+    c.warmup_steps = 500
+    c.lr = 2e-4
+    return c
+
+
+PRESETS = {"tiny": tiny, "small": small, "medium": medium, "large": large}

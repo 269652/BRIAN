@@ -69,6 +69,22 @@ def _fmt_slimorca(ex: dict) -> str:
     return "\n".join(out)
 
 
+def _fmt_openhermes(ex: dict) -> str:
+    # OpenHermes-2.5: "conversations" = list of {from: human|gpt|system, value: ...}
+    conv = ex.get("conversations") or []
+    out = []
+    for turn in conv:
+        src = turn.get("from", "")
+        val = (turn.get("value") or "").strip()
+        if src == "system":
+            out.append(f"System: {val}")
+        elif src == "human":
+            out.append(f"User: {val}")
+        elif src == "gpt":
+            out.append(f"Assistant: {val}")
+    return "\n".join(out)
+
+
 def _fmt_hh(ex: dict) -> str:
     # Anthropic/hh-rlhf: "chosen" already contains "\n\nHuman: ... \n\nAssistant: ..."
     # Convert to our convention.
@@ -88,10 +104,17 @@ TEXT_CHAIN = [
 ]
 
 CHAT_CHAIN = [
+    ("teknium/OpenHermes-2.5", None, "train", _fmt_openhermes,   "OpenHermes-2.5"),
     ("Open-Orca/SlimOrca",     None, "train", _fmt_slimorca,     "SlimOrca"),
     ("daily_dialog",           None, "train", _fmt_daily_dialog, "DailyDialog"),
     ("Anthropic/hh-rlhf",      None, "train", _fmt_hh,           "hh-rlhf"),
     ("OpenAssistant/oasst1",   None, "train", _fmt_oasst1,       "oasst1"),
+]
+
+# QA-focused chain: instruction-following datasets for factual quality
+QA_CHAIN = [
+    ("teknium/OpenHermes-2.5", None, "train", _fmt_openhermes,   "OpenHermes-2.5"),
+    ("Open-Orca/SlimOrca",     None, "train", _fmt_slimorca,     "SlimOrca"),
 ]
 
 
@@ -107,7 +130,7 @@ def open_stream(mode: str = "text"):
 
     Tries each dataset in the chain until one succeeds.
     """
-    chain = TEXT_CHAIN if mode == "text" else CHAT_CHAIN
+    chain = TEXT_CHAIN if mode == "text" else (QA_CHAIN if mode == "qa" else CHAT_CHAIN)
     last_err = None
     for path, cfg, split, formatter, label in chain:
         try:
@@ -171,7 +194,7 @@ def token_window_iterator(tokenizer: Tokenizer, ctx_len: int,
       "chat" - chat-only chain
       "mix"  - probabilistically interleave; `chat_ratio` of windows from chat.
     """
-    if mode in ("text", "chat"):
+    if mode in ("text", "chat", "qa"):
         yield from _stream_iterator(tokenizer, ctx_len, mode, buffer_size)
         return
     if mode != "mix":
