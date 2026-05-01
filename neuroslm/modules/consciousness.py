@@ -71,8 +71,10 @@ class ConsciousnessMetrics(nn.Module):
             slot_norms = F.normalize(gws_slots, dim=-1)
             sim_matrix = torch.bmm(slot_norms, slot_norms.transpose(1, 2))
             # Off-diagonal mean = binding strength
-            mask = ~torch.eye(sim_matrix.size(1), device=device, dtype=torch.bool)
-            gamma = sim_matrix[:, mask.unsqueeze(0).expand(B, -1, -1).reshape(B, -1)].view(B, -1).mean()
+            N = sim_matrix.size(1)
+            mask = ~torch.eye(N, device=device, dtype=torch.bool)  # (N, N)
+            # Extract off-diagonal elements per batch
+            gamma = sim_matrix[:, mask].view(B, -1).mean()
         else:
             gamma = torch.tensor(0.0, device=device)
         gamma = gamma.clamp(0.0, 1.0)
