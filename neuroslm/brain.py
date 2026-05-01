@@ -19,6 +19,7 @@ from .modules.evaluator import Evaluator
 from .modules.motor import MotorCortex, ACTION_NAMES, ACTION_INDEX
 from .modules.thalamus import Thalamus
 from .modules.critic import SubconsciousCritic
+from .modules.qualia import QualiaState
 
 from .neurochem import (
     TransmitterSystem, NT_NAMES,
@@ -121,39 +122,6 @@ class Ribosome:
 
     def get_nt_production(self, region):
         return self.nt_production.get(region, [])
-        
-import os
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-from .config import BrainConfig
-from .modules.language import LanguageCortex
-from .modules.sensory import TextSensoryCortex
-from .modules.association import AssociationCortex
-from .modules.world_model import WorldModel
-from .modules.self_model import SelfModel
-from .modules.workspace import GlobalWorkspace
-from .modules.hippocampus import Hippocampus
-from .modules.dmn import DefaultModeNetwork
-from .modules.pfc import PrefrontalCortex
-from .modules.basal_ganglia import BasalGanglia
-from .modules.forward_model import ForwardModel
-from .modules.evaluator import Evaluator
-from .modules.motor import MotorCortex, ACTION_NAMES, ACTION_INDEX
-from .modules.thalamus import Thalamus
-from .modules.critic import SubconsciousCritic
-
-from .neurochem import (
-    TransmitterSystem, NT_NAMES,
-    ReceptorBank,
-    Projection, ProjectionGraph,
-    VTA, NucleusAccumbens, LocusCoeruleus, RapheNuclei, BasalForebrain,
-    Homeostasis,
-)
-from .neurochem.growth import TrophicSystem
-from .neurochem.receptors import Receptor
-from .genome import GenePool, Genome
 
 
 class Brain(nn.Module):
@@ -220,12 +188,20 @@ class Brain(nn.Module):
         from .memory.narrative import NarrativeBuffer
         from .memory.mesolimbic import MesolimbicTagger
         from .memory.hippocampal import HippocampalEnrichment
+        from .memory.relational_graph import RelationalMemoryGraph
         self.episodic = EpisodicMemory(maxlen=2048)
         self.consolidated = ConsolidatedMemory()
         self.narrative_self = NarrativeBuffer(maxlen=2048)
         self.narrative_world = NarrativeBuffer(maxlen=2048)
         self.mesolimbic = MesolimbicTagger()
         self.hippocampal = HippocampalEnrichment(self.consolidated)
+        # Relational memory graph — multidimensional associative memory
+        # encoding associativity, causality, temporality, patterns, NT state
+        self.relational_memory = RelationalMemoryGraph(max_nodes=8192)
+        self._last_memory_id: int | None = None  # for causal chaining
+
+        # ---- Qualia state module ----
+        self.qualia = QualiaState(self.cfg.d_sem, len(NT_NAMES))
 
         # ---- neurochemistry ----
         self.transmitters = TransmitterSystem()
@@ -326,6 +302,9 @@ class Brain(nn.Module):
             "world_h": self.world.init_state(batch_size, device),
             "self_h": self.self_m.init_state(batch_size, device),
             "novelty": torch.zeros(batch_size, device=device),
+            "qualia": torch.zeros(batch_size, cfg.d_sem, device=device),
+            "prev_action_idx": torch.full((batch_size,), -1, device=device, dtype=torch.long),
+            "thought_valence": torch.zeros(batch_size, device=device),
         }
 
     @staticmethod
@@ -598,75 +577,123 @@ class Brain(nn.Module):
         return sum(p.numel() for p in self.parameters())
 
     # ====================================================================
-    # Inference-time cognitive loop
+    # Inference-time cognitive loop (single tick at ~10 Hz)
     # ====================================================================
     @torch.no_grad()
     def cognitive_step(self, ids: torch.Tensor, state: dict,
                        allow_emit: bool = True):
+        """One cognitive tick. Processes sensory input, updates world/self
+        models, computes qualia, runs DMN query + hippocampal recall,
+        PFC selection, BG action, forward-model simulation, and feeds
+        the predicted outcome back into the GWS for the next tick.
+        Also drives thought→NT feedback."""
         cfg = self.cfg
         B = ids.size(0)
         nt = self.transmitters.vector()
 
+        # 1) Language cortex — modulated by qualia + ACh/eCB
         lang_in_thought = self.rcpt_lang.modulate(
             state["floating_thought"].unsqueeze(1), nt).squeeze(1)
         logits, sem, h_lang = self.language(ids, thought=lang_in_thought)
+
+        # 2) Sensory + association
         sens, salience = self.sensory(sem)
         assoc = self.association([sens])
+
+        # 3) Thalamic router
         routed, routing = self.thalamus(assoc, nt, return_routing=True)
         routed = self.rcpt_thal.modulate(routed.unsqueeze(1), nt).squeeze(1)
+
+        # 4) World + self models
         z_world, state["world_h"], _wp = self.world(routed, state["world_h"])
         z_self, state["self_h"] = self.self_m(
             state["last_action"], nt[:, :cfg.n_neuromods],
             state["floating_thought"], state["self_h"])
 
-        # Subconscious threat critic
+        # 5) Subconscious threat critic
         threat, survival = self.critic(z_world, z_self)
         if survival.any():
             self.transmitters.release("NE", torch.where(
                 survival, torch.full_like(threat, 0.9), torch.zeros_like(threat)))
             nt = self.transmitters.vector()
 
+        # 6) Qualia state — produces qualia embedding, modulates thought,
+        #    and generates thought→NT feedback
+        q_out = self.qualia(state["floating_thought"], nt, threat, z_self)
+        state["qualia"] = q_out["qualia"]
+        state["thought_valence"] = q_out["thought_valence"]
+        # Apply thought→NT feedback: thought content drives NT release
+        thought_nt = q_out["thought_nt_demand"]  # (B, n_nt)
+        for i, nt_name in enumerate(NT_NAMES):
+            if i < thought_nt.size(-1):
+                self.transmitters.release(nt_name, thought_nt[:, i] * 0.3)
+        nt = self.transmitters.vector()  # refresh after thought→NT
+
+        # 7) GWS — include qualia-modulated thought as a candidate
+        modulated_thought = q_out["modulated_thought"]
         candidates = torch.stack(
-            [routed, z_world, z_self, state["floating_thought"]], dim=1)
+            [routed, z_world, z_self, modulated_thought], dim=1)
         slots = self.gws(candidates, ne_temp=nt[:, NT_NAMES.index("NE")])
-        dmn_query, stop_logit = self.dmn(slots, state["floating_thought"])
+
+        # 8) DMN query
+        dmn_query, stop_logit = self.dmn(slots, modulated_thought)
         dmn_query_mod = self.rcpt_dmn.modulate(dmn_query.unsqueeze(1), nt).squeeze(1)
+
+        # 9) Hippocampal recall — query relational memory graph
         recalls, novelty = self.hippo.recall(dmn_query_mod)
         recalls = self.rcpt_hippo.modulate(recalls, nt)
-        slots_mod = self.rcpt_pfc.modulate(slots, nt)
-        selected, replace_gate = self.pfc(slots_mod, recalls, state["floating_thought"])
 
-        # Genome-driven thought update
+        # Also query relational memory for associative enrichment
+        try:
+            query_np = dmn_query_mod[0].cpu().numpy()
+            nt_np = nt[0].cpu().numpy()
+            rel_nodes = self.relational_memory.query_associative(
+                query_np, topk=3, nt_filter=nt_np)
+            # If we have a recent memory, do spreading activation from it
+            if self._last_memory_id is not None:
+                spread_nodes = self.relational_memory.spreading_activation(
+                    self._last_memory_id, hops=2, topk=3)
+                rel_nodes = rel_nodes + spread_nodes
+        except Exception:
+            rel_nodes = []
+
+        # 10) PFC selection
+        slots_mod = self.rcpt_pfc.modulate(slots, nt)
+        selected, replace_gate = self.pfc(slots_mod, recalls, modulated_thought)
+
+        # 11) Update floating thought (genome-driven + qualia-modulated)
         genome = self.gene_pool.active()
         novelty_thresh = 0.2 + 0.6 * genome.get("novelty_threshold")
-        thought_alpha  = 0.05 + 0.6 * genome.get("thought_alpha")
+        thought_alpha = 0.05 + 0.6 * genome.get("thought_alpha")
         replace_mask = (replace_gate > 0.5) | (novelty > novelty_thresh)
         ach = nt[:, NT_NAMES.index("ACh")].unsqueeze(-1)
-        smooth = (1 - thought_alpha * ach) * state["floating_thought"] \
+        smooth = (1 - thought_alpha * ach) * modulated_thought \
                  + thought_alpha * ach * selected
         state["floating_thought"] = torch.where(
             replace_mask.unsqueeze(-1), selected, smooth)
 
+        # 12) BG action selection
         selected_bg = self.rcpt_bg.modulate(selected.unsqueeze(1), nt).squeeze(1)
         action, conf, _ = self.bg(selected_bg, nt[:, NT_NAMES.index("DA")])
+
+        # 13) Forward model — predict outcome of action
         wp, sp = self.forward_m(z_world, z_self, action)
         value = self.evaluator(wp, sp, nt)
 
-        # Motor: discrete action + a small bias added to the language
-        # cortex's hidden state. Single transformer pass — we reuse h_lang
-        # and just rerun the LM head with the bias added.
+        # 14) Motor cortex
         _motor_thought, motor_lang_bias, action_idx, action_logits, action_probs = \
             self.motor(action, survival=survival)
         h_biased = h_lang + motor_lang_bias.unsqueeze(1)
         logits2 = self.language.lm_head(h_biased)
 
+        # 15) NT release (standard nuclei pathway)
         zero = torch.zeros(B, device=ids.device)
         signals = dict(
             novelty=novelty, reward=zero, curiosity=zero,
             ecb=self.transmitters.get("eCB"),
-            rpe=zero, salience=salience, valence=zero, uncertainty=novelty,
-            arousal=salience, avg_reward=zero, time_since_reward=zero,
-            mood=self.transmitters.get("5HT"),
+            rpe=zero, salience=salience, valence=state["thought_valence"],
+            uncertainty=novelty, arousal=salience, avg_reward=zero,
+            time_since_reward=zero, mood=self.transmitters.get("5HT"),
             attention_demand=salience, surprise=novelty,
         )
         self._release_via_nuclei(signals)
@@ -681,7 +708,26 @@ class Brain(nn.Module):
         self.transmitters.step()
         self.hippo.store(dmn_query, selected)
 
+        # 16) Encode to relational memory if salient enough
+        try:
+            sal_val = float(salience.mean())
+            if sal_val > 0.3 or float(novelty.mean()) > 0.4:
+                from .tokenizer import Tokenizer
+                tok = Tokenizer()
+                content = tok.decode(ids[0].tolist())
+                mem_vec = sem[0].cpu().numpy()
+                nt_snap = nt[0].cpu().numpy()
+                valence = float(state["thought_valence"][0])
+                mid = self.relational_memory.encode(
+                    content, mem_vec, nt_snap, valence=valence,
+                    salience=sal_val,
+                    causal_parent=self._last_memory_id)
+                self._last_memory_id = mid
+        except Exception:
+            pass
+
         state["last_action"] = action
+        state["prev_action_idx"] = action_idx
 
         info = {
             "value": value, "confidence": conf, "novelty": novelty,
@@ -690,32 +736,74 @@ class Brain(nn.Module):
             "action_idx": action_idx, "action_probs": action_probs,
             "nt": {n: float(self.transmitters.get(n).mean()) for n in NT_NAMES},
             "genome_id": genome.id,
+            "qualia": q_out["qualia"].detach(),
+            "thought_valence": q_out["thought_valence"].detach(),
+            "rel_memory_size": self.relational_memory.size,
         }
         return logits2, state, info
 
     # ----------------------------------------------------------------
-    # Mind wandering — runs the cognitive loop *without* consuming new
-    # input or emitting tokens. Floating thought drifts, hippocampus may
-    # cue novel associations, and the loop terminates if a threat appears
-    # or after `max_steps`.
+    # Convergent DMN loop — iterates cognitive_step until BG action
+    # stabilizes (same action 2x in a row) AND critic does not block,
+    # or max_iters is reached.
+    # ----------------------------------------------------------------
+    @torch.no_grad()
+    def convergent_think(self, ids: torch.Tensor, state: dict,
+                         max_iters: int = 6, on_step=None) -> tuple:
+        """Run the DMN reasoning loop until action converges or max_iters."""
+        prev_action = state.get("prev_action_idx", None)
+        converged = False
+        logits = None
+        info = {}
+        for i in range(max_iters):
+            logits, state, info = self.cognitive_step(ids, state)
+            current_action = info["action_idx"]
+            critic_ok = not info["survival"].any()
+            if on_step:
+                on_step(i, info)
+            # Check convergence: same action as last iteration + critic OK
+            if prev_action is not None and critic_ok:
+                same = (current_action == prev_action).all()
+                if same:
+                    converged = True
+                    break
+            prev_action = current_action
+        info["converged"] = converged
+        info["think_iters"] = i + 1
+        return logits, state, info
+
+    # ----------------------------------------------------------------
+    # Mind wandering — runs when no sensory input is given. The DMN
+    # generates queries from floating thought + qualia, hippocampus
+    # recalls associated memories, and thought evolves. Produces
+    # coherent internal narrative driven by memory + qualia.
     # ----------------------------------------------------------------
     @torch.no_grad()
     def wander(self, ids: torch.Tensor, state: dict, max_steps: int = 8,
                on_step=None) -> dict:
+        """Mind wandering loop. Floating thought drifts through memory
+        associations, modulated by qualia. No tokens are emitted."""
         last_info = {}
         for i in range(max_steps):
             _logits, state, info = self.cognitive_step(ids, state, allow_emit=False)
             last_info = info
             if on_step is not None:
                 on_step(i, info)
+            # Break if a threat interrupts mind wandering (survival mode)
             if info["survival"].any():
+                break
+            # Also break if stop signal is high (DMN says enough thinking)
+            if float(info["stop"].mean()) > 0.7:
                 break
         return last_info
 
     @torch.no_grad()
     def generate(self, ids: torch.Tensor, max_new: int = 64,
                  temperature: float = 1.0, top_k: int = 50,
-                 on_tick=None, max_silent_streak: int = 3):
+                 on_tick=None, max_silent_streak: int = 3,
+                 use_convergent: bool = True):
+        """Generate tokens. Uses convergent DMN loop by default — the model
+        thinks until its action stabilises before emitting each token."""
         cfg = self.cfg
         device = ids.device
         state = self.init_latents(ids.size(0), device)
@@ -723,7 +811,10 @@ class Brain(nn.Module):
         step = 0
         while step < max_new:
             ctx = ids[:, -cfg.lang_ctx:]
-            logits, state, info = self.cognitive_step(ctx, state)
+            if use_convergent:
+                logits, state, info = self.convergent_think(ctx, state)
+            else:
+                logits, state, info = self.cognitive_step(ctx, state)
             from .modules.motor import ACTION_NAMES, ACTION_INDEX
             act = int(info["action_idx"][0].item())
             force_speak = silent_streak >= max_silent_streak
@@ -744,6 +835,9 @@ class Brain(nn.Module):
                 silent_streak = 0
                 step += 1
             else:
+                # Mind wander during silent streaks
+                if silent_streak > 0:
+                    self.wander(ctx, state, max_steps=2)
                 silent_streak += 1
         return ids
 
