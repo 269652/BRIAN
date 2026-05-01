@@ -220,11 +220,13 @@ def main():
             for (name, p), g in zip(model_named, grads):
                 if g is None:
                     g = torch.zeros_like(p)
-                mult = brain.learned_opt(g, p, nm,
+                mult = brain.learned_opt(g, p.detach(), nm,
                                          comprehension_delta=comp_delta,
                                          param_name=name)
                 transformed = g * mult
-                virtual = p - cfg.lr * transformed
+                # Detach p so backward only flows through learned_opt (mult),
+                # not back into the live language parameters.
+                virtual = p.detach() - cfg.lr * transformed
                 virtual_map[name] = virtual
 
             # Evaluate meta-loss under virtual language params
