@@ -134,6 +134,8 @@ class Brain(nn.Module):
         from .dna.dsl import LispVM
         self.dna_vm = {}
         dna_dir = os.path.join(os.path.dirname(__file__), 'dna', 'templates')
+        if not os.path.isdir(dna_dir):
+            os.makedirs(dna_dir, exist_ok=True)
         for fname in os.listdir(dna_dir):
             if not fname.endswith('.lisp'):
                 continue
