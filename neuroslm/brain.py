@@ -26,7 +26,13 @@ from .neurochem import (
     ReceptorBank,
     Projection, ProjectionGraph,
     VTA, NucleusAccumbens, LocusCoeruleus, RapheNuclei, BasalForebrain,
+    SubstantiaNigra, PeriaqueductalGray, HypothalamicCRH,
     Homeostasis,
+    ReuptakeSystem,
+    ReceptorAdaptation,
+    GatedProjectionGraph,
+    MesolimbicCircuit,
+    PlasticityGate,
 )
 from .neurochem.growth import TrophicSystem
 from .neurochem.receptors import Receptor
@@ -212,7 +218,15 @@ class Brain(nn.Module):
         self.lc    = LocusCoeruleus()
         self.raphe = RapheNuclei()
         self.nbm   = BasalForebrain()
+        self.substantia_nigra = SubstantiaNigra()
+        self.pag   = PeriaqueductalGray()
+        self.hypothalamic_crh = HypothalamicCRH()
         self.homeostasis = Homeostasis()
+        self.reuptake = ReuptakeSystem()
+        self.receptor_adaptation = ReceptorAdaptation()
+        self.gated_projections = GatedProjectionGraph()
+        self.mesolimbic = MesolimbicCircuit(d_state=self.cfg.d_sem)
+        self.plasticity_gate = PlasticityGate()
 
         # Subconscious threat critic — fast survival circuit
         self.critic = SubconsciousCritic(self.cfg.d_sem)
@@ -688,32 +702,83 @@ class Brain(nn.Module):
         h_biased = h_lang + motor_lang_bias.unsqueeze(1)
         logits2 = self.language.lm_head(h_biased)
 
-        # 15) NT release (standard nuclei pathway)
+        # 15) Mesolimbic reward circuit — RPE, wanting/liking, consolidation
         zero = torch.zeros(B, device=ids.device)
+        state_summary = slots.mean(1)  # (B, d_sem) compressed GWS state
+        meso_out = self.mesolimbic(
+            state_vec=state_summary,
+            reward=zero,  # explicit reward is zero during inference; intrinsic only
+            da_level=self.transmitters.get("DA"),
+            ecb_level=self.transmitters.get("eCB"),
+            gaba_level=self.transmitters.get("GABA"),
+            novelty=novelty, salience=salience,
+            valence=state["thought_valence"],
+            uncertainty=novelty,
+        )
+        rpe = meso_out["rpe"]
+
+        # 16) NT release (standard nuclei pathway)
         signals = dict(
             novelty=novelty, reward=zero, curiosity=zero,
             ecb=self.transmitters.get("eCB"),
-            rpe=zero, salience=salience, valence=state["thought_valence"],
+            rpe=rpe.detach(), salience=salience,
+            valence=state["thought_valence"],
             uncertainty=novelty, arousal=salience, avg_reward=zero,
             time_since_reward=zero, mood=self.transmitters.get("5HT"),
             attention_demand=salience, surprise=novelty,
         )
         self._release_via_nuclei(signals)
+
+        # 16b) Substantia Nigra: nigrostriatal DA + thalamic GABA gate
+        motor_intent = self._act_scalar(action)
+        bg_act = self._act_scalar(selected_bg)
+        d2_fb = self.mesolimbic.d2_feedback(
+            self.transmitters.get("DA"), motor_intent).detach()
+        sn_da, sn_gaba = self.substantia_nigra(
+            motor_intent, bg_act, d2_fb,
+            zero, zero, self.transmitters.get("GABA"))
+        self.transmitters.release("DA", sn_da * 0.5)
+        self.transmitters.release("GABA", sn_gaba * 0.3)
+
+        # 16c) Mesolimbic DA release (VTA→NAcc, gated by D2 + CB1)
+        self.transmitters.release("DA", meso_out["da_release_demand"])
+
+        # 16d) Receptor-gated projections — NT flow based on receptor activity
         activities = {
             "PFC": self._act_scalar(selected), "BG": self._act_scalar(action),
             "Hippo": novelty, "VTA": self.transmitters.get("DA"),
-            "NAcc": novelty, "LC": self._act_scalar(z_self),
-            "Raphe": self._act_scalar(slots.mean(1)), "NBM": salience,
+            "NAcc": meso_out["wanting"].detach(),
+            "LC": self._act_scalar(z_self),
+            "Raphe": self._act_scalar(state_summary), "NBM": salience,
+            "SNr": sn_gaba.detach(), "Thalamus": self._act_scalar(routed),
         }
+        nt_refreshed = self.transmitters.vector()
+        gated_releases = self.gated_projections.gated_release(nt_refreshed, activities)
+        for nt_name, amount in gated_releases.items():
+            self.transmitters.release(nt_name, amount.clamp(0.0, 0.5))
+
+        # 16e) Standard projections + trophic update
         self._release_via_projections(activities)
         self.trophic.update(activities, bdnf=0.0, ngf=float(novelty.mean()))
+
+        # 17) Reuptake: transporters clear excess NT from synaptic cleft
+        self.reuptake.clear(self.transmitters)
+        # Adapt transporter density over long timescales
+        self.reuptake.adapt_density(self.transmitters)
+
+        # 18) Receptor desensitization / sensitization
+        self.receptor_adaptation.update(self.transmitters)
+
+        # 19) Transmitter decay + vesicle replenishment
         self.transmitters.step()
         self.hippo.store(dmn_query, selected)
 
-        # 16) Encode to relational memory if salient enough
+        # 20) Encode to relational memory if salient enough
+        # Use mesolimbic consolidation strength to decide
+        consol = float(meso_out["consolidation"].mean())
         try:
             sal_val = float(salience.mean())
-            if sal_val > 0.3 or float(novelty.mean()) > 0.4:
+            if consol > 0.3 or sal_val > 0.3 or float(novelty.mean()) > 0.4:
                 from .tokenizer import Tokenizer
                 tok = Tokenizer()
                 content = tok.decode(ids[0].tolist())
@@ -722,7 +787,7 @@ class Brain(nn.Module):
                 valence = float(state["thought_valence"][0])
                 mid = self.relational_memory.encode(
                     content, mem_vec, nt_snap, valence=valence,
-                    salience=sal_val,
+                    salience=max(sal_val, consol),
                     causal_parent=self._last_memory_id)
                 self._last_memory_id = mid
         except Exception:
@@ -741,6 +806,12 @@ class Brain(nn.Module):
             "qualia": q_out["qualia"].detach(),
             "thought_valence": q_out["thought_valence"].detach(),
             "rel_memory_size": self.relational_memory.size,
+            "rpe": rpe.detach(),
+            "wanting": meso_out["wanting"].detach(),
+            "liking": meso_out["liking"].detach(),
+            "consolidation": meso_out["consolidation"].detach(),
+            "learning_gain": meso_out["learning_gain"].detach(),
+            "receptor_sensitivity": self.receptor_adaptation.info(),
         }
         return logits2, state, info
 

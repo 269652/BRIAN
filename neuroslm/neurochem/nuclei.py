@@ -82,3 +82,52 @@ class BasalForebrain(_NucleusBase):
     """Nucleus basalis of Meynert: ACh. Inputs: [attention_demand, novelty, surprise]."""
     def __init__(self):
         super().__init__(in_features=3)
+
+
+class SubstantiaNigra(nn.Module):
+    """Substantia Nigra pars compacta (SNc) + pars reticulata (SNr).
+
+    SNc: produces DA for the nigrostriatal pathway (motor planning / BG).
+    SNr: produces GABA for thalamic gating (suppresses unwanted actions).
+
+    Inputs to SNc: [motor_intent, bg_activity, d2_autoreceptor_feedback]
+    Inputs to SNr: [bg_indirect_path, cortical_inhibition, gaba_tone]
+    """
+    def __init__(self):
+        super().__init__()
+        # SNc: DA release for dorsal striatum / BG direct pathway
+        self.snc = nn.Sequential(
+            nn.Linear(3, 16), nn.GELU(),
+            nn.Linear(16, 1),
+        )
+        # SNr: GABA release to thalamus (inhibitory gate)
+        self.snr = nn.Sequential(
+            nn.Linear(3, 16), nn.GELU(),
+            nn.Linear(16, 1),
+        )
+
+    def forward(self, motor_intent: torch.Tensor, bg_activity: torch.Tensor,
+                d2_feedback: torch.Tensor, indirect_path: torch.Tensor,
+                cortical_inhib: torch.Tensor, gaba_tone: torch.Tensor):
+        """Returns (da_demand, gaba_demand) both (B,) in [0,1]."""
+        snc_in = torch.stack([motor_intent, bg_activity, d2_feedback], dim=-1)
+        snr_in = torch.stack([indirect_path, cortical_inhib, gaba_tone], dim=-1)
+        da_demand = torch.sigmoid(self.snc(snc_in)).squeeze(-1)
+        gaba_demand = torch.sigmoid(self.snr(snr_in)).squeeze(-1)
+        return da_demand, gaba_demand
+
+
+class PeriaqueductalGray(_NucleusBase):
+    """PAG: opioid/eCB release for pain suppression and stress analgesia.
+    Inputs: [threat_level, stress, arousal]."""
+    def __init__(self):
+        super().__init__(in_features=3)
+
+
+class HypothalamicCRH(_NucleusBase):
+    """Hypothalamic CRH neurons: stress axis (HPA).
+    Drives NE/cortisol response to sustained threats.
+    Inputs: [sustained_threat, uncertainty, metabolic_demand]."""
+    def __init__(self):
+        super().__init__(in_features=3)
+
