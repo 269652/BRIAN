@@ -165,19 +165,18 @@ def main():
         context = {'self': True}  # Placeholder: can be set based on batch/task
         brain.record_episode(content, content_vec, nt_state, emotion, tags, context)
 
-        # 2. Forward pass
-        # When meta-training, we need math SDP backend for the entire
-        # forward+backward chain (create_graph=True requires higher-order
-        # derivatives that flash/efficient attention and CuDNN RNNs don't support).
-        _sdp_ctx = torch.nn.attention.sdpa_kernel(
-            torch.nn.attention.SDPBackend.MATH) if args.meta else nullcontext()
-        _cudnn_ctx = torch.backends.cudnn.flags(enabled=False) if args.meta else nullcontext()
-        with _sdp_ctx, _cudnn_ctx:
-            out = brain.forward_lm(ids, targets)
-            loss = out["loss"]
+        # 2. Forward pass (full brain pipeline — no create_graph needed here)
+        out = brain.forward_lm(ids, targets)
+        loss = out["loss"]
 
-            # If meta-training is enabled, perform a one-step differentiable unroll
-            if args.meta:
+        # If meta-training is enabled, perform a one-step differentiable unroll.
+        # We do a SEPARATE language-only forward pass for the meta path to avoid
+        # in-place modification issues from the full brain pipeline.
+        if args.meta:
+            _sdp_ctx = torch.nn.attention.sdpa_kernel(
+                torch.nn.attention.SDPBackend.MATH)
+            _cudnn_ctx = torch.backends.cudnn.flags(enabled=False)
+            with _sdp_ctx, _cudnn_ctx:
                 # Compute comprehension delta: how much LM loss improved vs last step
                 current_lm = float(out["lm_loss"].item())
                 if not hasattr(main, '_prev_lm'):
@@ -196,13 +195,22 @@ def main():
                 meta_batch = meta_batch.to(device)
                 meta_ids, meta_targets = meta_batch[:, :-1], meta_batch[:, 1:].contiguous()
 
+                # Clean language-only forward for create_graph=True grads.
+                # This avoids in-place modification issues from the full brain
+                # pipeline (transmitters, receptors, etc.).
+                inner_logits, _, _ = brain.language(ids)
+                inner_loss = torch.nn.functional.cross_entropy(
+                    inner_logits.reshape(-1, inner_logits.size(-1)),
+                    targets.reshape(-1), ignore_index=-100)
+
                 # Meta-learn language module parameters (including geometry adapters)
                 model_named = list(brain.language.named_parameters())
                 model_params = [p for _, p in model_named]
-                grads = torch.autograd.grad(loss, model_params, create_graph=True, allow_unused=True)
+                grads = torch.autograd.grad(inner_loss, model_params,
+                                            create_graph=True, allow_unused=True)
 
                 # neuromodulatory vector (DA, NE, 5HT, ACh)
-                nm = brain.transmitters.vector().mean(dim=0)[:4].to(device)
+                nm = brain.transmitters.vector().detach().mean(dim=0)[:4].to(device)
 
                 # form virtual updated parameters for the language module
                 virtual_map = {}
