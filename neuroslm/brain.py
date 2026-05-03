@@ -465,6 +465,7 @@ class Brain(nn.Module):
             'claustrum':   getattr(self, 'claustrum', None),
             'cortical_sheet': getattr(self, 'cortical_sheet', None),
             'neural_geometry': getattr(self, 'neural_geometry', None),
+            'comprehension_gate': getattr(self, 'comprehension_gate', None),
         }
         for region, env in self._compiled_envs.items():
             mod = _module_map.get(region)

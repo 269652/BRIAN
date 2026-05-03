@@ -545,7 +545,79 @@ class GenomeCompiler(nn.Module):
                 # If same opcode appears multiple times, average
                 # (handles e.g. two MODULATE steps)
 
-        # Also expose raw operand summaries
+        # ── Algorithmic choice params derived from opcode patterns ──
+        # The COMBINATION of opcodes encodes algorithmic strategy.
+        # This is how the genome controls not just gate values but
+        # which algorithm variant the module uses.
+
+        active_ops = []
+        for step in range(self.max_steps):
+            logits, ops = genome.get_step(step)
+            gate = 1.0 / (1.0 + math.exp(-ops[3]))
+            if gate < 0.3:
+                continue
+            idx = max(range(len(logits)), key=lambda i: logits[i])
+            opcode = OPCODES[idx] if idx < len(OPCODES) else 'NOP'
+            active_ops.append((opcode, ops, gate))
+
+        # Hippocampus: derive recall strategy from opcode pattern
+        # ATTEND before RECALL → softmax attention recall (learned)
+        # RECALL alone → cosine top-k recall (standard)
+        # RECALL + ERROR → surprise-weighted recall
+        has_attend_before_recall = False
+        has_error_after_recall = False
+        for i, (op, _, _) in enumerate(active_ops):
+            if op == 'RECALL':
+                has_attend_before_recall = any(
+                    active_ops[j][0] == 'ATTEND' for j in range(i))
+                has_error_after_recall = any(
+                    active_ops[j][0] == 'ERROR' for j in range(i+1, len(active_ops)))
+
+        if has_attend_before_recall:
+            params['recall_method'] = 'attention'
+        elif has_error_after_recall:
+            params['recall_method'] = 'surprise_weighted'
+        else:
+            params['recall_method'] = 'cosine'
+
+        # PFC: derive selection strategy from opcode pattern
+        # CMP_GT → threshold selection
+        # SIGMOID + PROJECT → softmax selection
+        # GATE + CMP_GT → inhibition-gated selection
+        has_sigmoid = any(op == 'SIGMOID' for op, _, _ in active_ops)
+        has_cmp = any(op == 'CMP_GT' for op, _, _ in active_ops)
+        has_gate_before_cmp = False
+        for i, (op, _, _) in enumerate(active_ops):
+            if op == 'CMP_GT':
+                has_gate_before_cmp = any(
+                    active_ops[j][0] == 'GATE' for j in range(i))
+        if has_sigmoid and not has_cmp:
+            params['selection_strategy'] = 'softmax'
+        elif has_gate_before_cmp:
+            params['selection_strategy'] = 'inhibition_gated'
+        else:
+            params['selection_strategy'] = 'threshold'
+
+        # Derive sparsity ratio from GATE val operands (averaged)
+        gate_vals = [ops[2] for op, ops, g in active_ops if op == 'GATE']
+        if gate_vals:
+            avg = sum(gate_vals) / len(gate_vals)
+            params['sparsity_ratio'] = 1.0 / (1.0 + math.exp(-avg))  # sigmoid → [0,1]
+        else:
+            params['sparsity_ratio'] = 0.5
+
+        # Derive recall temperature from ATTEND operands
+        attend_vals = [ops[2] for op, ops, g in active_ops if op == 'ATTEND']
+        if attend_vals:
+            params['recall_temperature'] = max(0.1, 2.0 / (1.0 + math.exp(-sum(attend_vals)/len(attend_vals))))
+        else:
+            params['recall_temperature'] = 1.0
+
+        # Comprehension gate weights from PREDICT/ERROR/WRITE_MEM pattern
+        params['surprise_weight'] = params.get('predict_gate', 0.5)
+        params['novelty_weight'] = params.get('novelty_bias', 0.5) + 0.5
+        params['comprehension_weight'] = params.get('gate_threshold', 0.5)
+
         params['_n_active_steps'] = len(genome.active_steps())
         return params
 

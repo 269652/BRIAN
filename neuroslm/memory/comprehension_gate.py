@@ -34,20 +34,25 @@ from __future__ import annotations
 import math
 import numpy as np
 
+from ..modules.genome_configurable import GenomeConfigurable
+
 
 def _cos(a: np.ndarray, b: np.ndarray) -> float:
     return float((a / (np.linalg.norm(a) + 1e-9)) @
                  (b / (np.linalg.norm(b) + 1e-9)))
 
 
-class ComprehensionGate:
+class ComprehensionGate(GenomeConfigurable):
     """Decides whether to store an observation as an episode.
+
+    Genome-driven: the scoring formula weights (surprise, comprehension,
+    novelty) and adaptive threshold params are read from the compiled
+    genome env.  Evolution can shift what counts as "worth remembering."
 
     Args:
         threshold:    write_score above this triggers a write.
         novelty_topk: # of consolidated nodes used to compute novelty.
-        ema_alpha:    smoothing for adaptive threshold (auto-tunes to
-                      keep write rate near `target_write_rate`).
+        ema_alpha:    smoothing for adaptive threshold.
         target_write_rate: fraction of observations expected to be stored.
     """
 
@@ -55,6 +60,7 @@ class ComprehensionGate:
                  novelty_topk: int = 16,
                  target_write_rate: float = 0.10,
                  ema_alpha: float = 0.01):
+        self._genome_env = {}
         self.threshold = threshold
         self.novelty_topk = novelty_topk
         self.target_write_rate = target_write_rate
@@ -62,6 +68,26 @@ class ComprehensionGate:
         self._write_rate_ema = target_write_rate
         self._n_evaluated = 0
         self._n_written = 0
+        # Genome-driven scoring weights (defaults = equal weighting)
+        self._surprise_weight = 1.0
+        self._comprehension_weight = 1.0
+        self._novelty_weight = 1.0
+
+    def configure_from_genome(self, env: dict, structural=None):
+        """Apply genome-compiled scoring weights.
+
+        The genome's opcode pattern determines how much the gate
+        weighs surprise vs comprehension vs novelty:
+          - PREDICT/ERROR opcodes → higher surprise_weight
+          - GATE opcodes → higher comprehension_weight
+          - RECALL/WRITE_MEM → higher novelty_weight
+        """
+        super().configure_from_genome(env, structural=structural)
+        self._surprise_weight = max(0.1, self.genv_float('surprise_weight', 1.0))
+        self._comprehension_weight = max(0.1, self.genv_float('comprehension_weight', 1.0))
+        self._novelty_weight = max(0.1, self.genv_float('novelty_weight', 1.0))
+        self.target_write_rate = max(0.01, min(0.5,
+            self.genv_float('gate_threshold', self.target_write_rate)))
 
     def evaluate(self,
                  obs_vec: np.ndarray,
@@ -100,7 +126,10 @@ class ComprehensionGate:
         # Surprise: clamp and normalize a typical NLL range
         surp = max(0.0, min(1.0, surprise / 6.0))
 
-        score = surp * comprehension * novelty
+        # Genome-driven weighted scoring: evolution tunes what matters
+        score = (surp ** self._surprise_weight
+                 * comprehension ** self._comprehension_weight
+                 * novelty ** self._novelty_weight)
         write = score > self.threshold
 
         # Adaptive threshold to track target_write_rate
