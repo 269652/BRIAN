@@ -363,6 +363,41 @@ class Brain(nn.Module):
         # Neurotrophic system — grows / prunes projections
         self.trophic = TrophicSystem(self.projections)
 
+        # ---- Neural Orchestrator (flow routing with homeostatic gates) ----
+        from .intelligence.orchestrator import NeuralOrchestrator
+        orchestrator_modules = [
+            'world', 'self_m', 'pfc', 'dmn', 'hippo',
+            'cerebellum', 'entorhinal', 'claustrum',
+        ]
+        self.orchestrator = NeuralOrchestrator(
+            self.cfg.d_sem, orchestrator_modules,
+            n_heads=4, baseline=False)
+
+        # ---- Neural Oscillation Tracker (multi-band spectral analysis) ----
+        from .intelligence.oscillations import NeuralOscillationTracker
+        self.oscillation_tracker = NeuralOscillationTracker(
+            self.cfg.d_sem, n_regions=8, window_size=64)
+        self.oscillation_tracker.register_regions([
+            'language', 'pfc', 'dmn', 'hippo', 'world',
+            'cerebellum', 'gws', 'motor',
+        ])
+
+        # ---- Latent Program System (differentiable Lisp algorithms) ----
+        from .dna.latent_program import LatentProgramSystem
+        self.latent_programs = LatentProgramSystem(
+            self.cfg.d_sem, d_latent=128, max_tokens=256, max_steps=16)
+        # Initialize programs from DNA templates if available
+        for region, vm in self.dna_vm.items():
+            try:
+                path = os.path.join(
+                    os.path.dirname(__file__), 'dna', 'templates', f'{region}.lisp')
+                if os.path.exists(path):
+                    with open(path, 'r') as f:
+                        source = f.read()
+                    self.latent_programs.register_program(region, source)
+            except Exception:
+                pass
+
         # ---- exposure for inspectability ----
         self.last_nt: dict | None = None
         self.last_routing: torch.Tensor | None = None
@@ -566,6 +601,15 @@ class Brain(nn.Module):
         self._release_via_projections(activities)
         self.transmitters.step()
 
+        # ---- Oscillation tracking (record regional activations) ----
+        if hasattr(self, 'oscillation_tracker'):
+            with torch.no_grad():
+                self.oscillation_tracker.record("language", sem.detach().mean(1))
+                self.oscillation_tracker.record("pfc", selected.detach().mean(1) if selected.dim() == 3 else selected.detach())
+                self.oscillation_tracker.record("hippocampus", dmn_query.detach())
+                self.oscillation_tracker.record("thalamus", routed.detach())
+                self.oscillation_tracker.record("basal_ganglia", action.detach())
+
         # Trophic update: BDNF rises with reward, NGF rises with novelty.
         with torch.no_grad():
             bdnf = float(reward_proxy.mean())
@@ -585,6 +629,8 @@ class Brain(nn.Module):
             "threat": threat.detach(),
             "survival": survival.detach(),
         }
+        if hasattr(self, 'oscillation_tracker'):
+            out["oscillation_snapshot"] = self.oscillation_tracker.snapshot()
 
         if targets is not None:
             # Use motor-conditioned logits — gradient now flows into motor head.

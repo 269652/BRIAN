@@ -36,6 +36,32 @@ def cosine_lr(step: int, warmup: int, total: int, peak: float) -> float:
     return peak * 0.5 * (1.0 + math.cos(math.pi * min(progress, 1.0)))
 
 
+def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
+    """Copy a checkpoint to lfs_checkpoints/ and push via Git LFS."""
+    try:
+        import shutil, subprocess
+        if repo_root is None:
+            repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        lfs_dir = os.path.join(repo_root, "lfs_checkpoints")
+        os.makedirs(lfs_dir, exist_ok=True)
+        basename = os.path.basename(ckpt_path)
+        dest = os.path.join(lfs_dir, basename)
+        shutil.copy2(ckpt_path, dest)
+        # Also copy .mem file if it exists
+        mem_src = ckpt_path.replace('.pt', '.mem')
+        if os.path.exists(mem_src):
+            shutil.copy2(mem_src, os.path.join(lfs_dir, os.path.basename(mem_src)))
+        subprocess.run(["git", "add", "lfs_checkpoints/"], cwd=repo_root,
+                       capture_output=True, timeout=30)
+        subprocess.run(["git", "commit", "-m", f"chkpt: {basename}"],
+                       cwd=repo_root, capture_output=True, timeout=30)
+        subprocess.run(["git", "push"], cwd=repo_root,
+                       capture_output=True, timeout=120)
+        print(f"[train] ✓ pushed {basename} to Git LFS", flush=True)
+    except Exception as e:
+        print(f"[train] ⚠ LFS push failed: {e}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--preset", default="xl", choices=list(PRESETS.keys()))
@@ -390,6 +416,13 @@ def main():
                 print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
                       f"| ppl {ppl:.1f} | lr {optim.param_groups[0]['lr']:.2e} "
                       f"| {tok_per_s:.0f} tok/s | mesoLG {lg:.2f} | NT[{nt_str}]", flush=True)
+                # Log oscillation spectrum
+                try:
+                    brain.oscillation_tracker.tick()
+                    osc = brain.oscillation_tracker.compute_spectrum()
+                    print(f"         oscillations: {osc.format()}", flush=True)
+                except Exception:
+                    pass
             running_loss = running_lm = 0.0
             n_obs = 0
             t0 = time.time()
@@ -432,37 +465,10 @@ def main():
             else:
                 print(f"[train] saved {path} (baseline)", flush=True)
 
-    print("[train] done.", flush=True)
+            # ── Auto-push every checkpoint to Git LFS ──
+            push_checkpoint_to_lfs(str(path))
 
-    # ─── Auto-push final checkpoint to Git LFS ───
-    try:
-        import shutil, subprocess
-        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        lfs_dir = os.path.join(repo_root, "lfs_checkpoints")
-        os.makedirs(lfs_dir, exist_ok=True)
-        save_dir = args.ckpt_dir
-        ckpts = sorted(
-            [f for f in os.listdir(save_dir) if f.endswith(".pt")],
-            key=lambda f: os.path.getmtime(os.path.join(save_dir, f))
-        )
-        if ckpts:
-            latest = os.path.join(save_dir, ckpts[-1])
-            lfs_path = os.path.join(lfs_dir, ckpts[-1])
-            shutil.copy2(latest, lfs_path)
-            print(f"[train] persisting checkpoint via Git LFS: {ckpts[-1]}", flush=True)
-            subprocess.run(["git", "lfs", "install"], cwd=repo_root,
-                           capture_output=True, check=True)
-            subprocess.run(["git", "add", "lfs_checkpoints/"], cwd=repo_root,
-                           capture_output=True, check=True)
-            subprocess.run(["git", "commit", "-m",
-                            f"chkpt: {ckpts[-1]} (auto-push)"],
-                           cwd=repo_root, capture_output=True, check=True)
-            subprocess.run(["git", "push"], cwd=repo_root,
-                           capture_output=True, check=True)
-            print("[train] ✓ checkpoint + memory pushed to remote (Git LFS)", flush=True)
-    except Exception as e:
-        print(f"[train] ⚠ auto-push failed: {e}", flush=True)
-        print("[train] checkpoint saved locally; push manually if needed", flush=True)
+    print("[train] done.", flush=True)
 
 
 if __name__ == "__main__":
