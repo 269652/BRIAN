@@ -149,24 +149,29 @@ def large() -> BrainConfig:
 
 
 def xl() -> BrainConfig:
-    """~1.5B params — fits on A100 (40GB) with batch_size=2, grad checkpointing.
+    """~350M params — fits on A100 (40GB) with batch_size=4.
 
-    Scaled to actually fit in 40GB VRAM with all bio modules active.
-    MoE and adaptive compute disabled until wired into forward pass.
+    Scales up from `large` (100M on T4 15GB) to use 40GB A100.
+    The Brain has many bio modules beyond the language cortex
+    (PFC, DMN, cerebellum, cortical sheet, neural geometry, etc.)
+    so d_hidden must stay moderate.
 
-    Budget rationale:
-        embed/unembed:  50257 * 768 * 2          ≈ 77M
-        20 trans blocks: 20 * (4 * 768² + ff)     ≈ 470M
-        bio modules (pfc, dmn, hippo, etc.):       ≈ 400M
-        buffers + activations (batch=2, ctx=2048): ≈ 12GB
-        TOTAL params                               ≈ 1.5B (~3GB fp16)
-        TOTAL VRAM                                 ≈ 18GB (fits A100)
+    Budget (approximate):
+        embed/unembed:  50257 * 512 * 2          ≈ 51M
+        16 trans blocks: 16 * (4*512² + ff)       ≈ 100M
+        16 geometry adapters                       ≈ 50M
+        bio modules (pfc, dmn, hippo, cerebellum,
+          cortical sheet, entorhinal, claustrum,
+          neural geometry, neurochemistry, etc.)   ≈ 150M
+        TOTAL                                      ≈ 350M
+        FP32 weights: ~1.4GB  +  activations/grads: ~15GB
+        Fits A100 40GB at batch=4, ctx=2048
     """
     c = BrainConfig()
-    c.d_sem = 768
-    c.d_hidden = 2048
-    c.lang_layers = 20
-    c.lang_heads = 16
+    c.d_sem = 512
+    c.d_hidden = 512
+    c.lang_layers = 16
+    c.lang_heads = 8
     c.lang_ctx = 2048
     c.dmn_layers = 3
     c.pfc_layers = 3
@@ -179,12 +184,11 @@ def xl() -> BrainConfig:
     c.hippo_capacity = 8192
     c.hippo_topk = 8
     c.hippo_sparse_k = 128
-    c.max_thinking_steps = 12
+    c.max_thinking_steps = 16
     c.warmup_steps = 1000
     c.lr = 2e-4
     c.weight_decay = 0.1
     c.gradient_checkpointing = True
-    # MoE + adaptive compute disabled — not yet wired into forward pass
     c.use_moe = False
     c.moe_experts = 8
     c.moe_top_k = 2
