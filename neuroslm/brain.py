@@ -827,7 +827,7 @@ class Brain(nn.Module):
             # Module genome evolution: report fitness, advance clock,
             # recompile genomes when evolution produces new champions
             if hasattr(self, 'module_genomes'):
-                self.module_genomes.report_all(float(lm_loss_per.mean()))
+                self.module_genomes.report_all(float(lm_loss_per.mean().detach()))
                 old_step = self.module_genomes.steps
                 self.module_genomes.step()
                 # Recompile if a tournament just ran (new genome may have won)
