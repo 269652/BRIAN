@@ -511,7 +511,11 @@ class Brain(nn.Module):
 
     def init_latents(self, batch_size: int, device):
         cfg = self.cfg
-        self.transmitters.reset(batch_size, device)
+        # Only reset transmitters if batch size changed or first call.
+        # Preserving NT state across forward passes lets dynamics evolve.
+        if (self.transmitters.level.size(0) != batch_size or
+                self.transmitters.level.device != device):
+            self.transmitters.reset(batch_size, device)
         return {
             "floating_thought": torch.zeros(batch_size, cfg.d_sem, device=device),
             "last_action": torch.zeros(batch_size, cfg.bg_action_dim, device=device),
@@ -734,6 +738,11 @@ class Brain(nn.Module):
                 self.oscillation_tracker.record(_osc_map.get('hippocampus', 2), dmn_query.detach())
                 self.oscillation_tracker.record(_osc_map.get('thalamus', 3), routed.detach())
                 self.oscillation_tracker.record(_osc_map.get('basal_ganglia', 4), action.detach())
+                self.oscillation_tracker.record(_osc_map.get('dmn', 5), dmn_query_mod.detach())
+                self.oscillation_tracker.record(_osc_map.get('gws', 6), slots.detach().mean(1))
+                self.oscillation_tracker.record(_osc_map.get('motor', 7), motor_lang_bias.detach())
+                # MUST call tick() every forward pass to advance the write pointer
+                self.oscillation_tracker.tick()
 
         # Trophic update: BDNF rises with reward, NGF rises with novelty.
         with torch.no_grad():
@@ -763,9 +772,10 @@ class Brain(nn.Module):
                 logits_motor.reshape(-1, cfg.vocab_size), targets.reshape(-1),
                 ignore_index=-100, reduction="none",
             ).reshape(B, T).mean(dim=1)                     # (B,)
-            # Mesolimbic gain: scales each example's loss by 0.5 + DA·NAcc-gain.
-            meso_gain = 0.5 + 0.5 * learning_gain.detach() * \
-                              self.transmitters.get("DA").detach()
+            # Mesolimbic gain: modulates per-example loss.  Floor at 1.0 so
+            # total_loss >= raw lm_loss (bio gain can only *amplify*).
+            meso_gain = (1.0 + 0.5 * learning_gain.detach() *
+                         self.transmitters.get("DA").detach()).clamp(min=1.0)
             lm_loss = (lm_loss_per * meso_gain).mean()
             world_loss = F.mse_loss(world_pred, z_world.detach())
             fwd_reg = (wp.pow(2).mean() + sp.pow(2).mean()) * 0.5
@@ -812,7 +822,7 @@ class Brain(nn.Module):
             out["motor_loss"] = motor_loss.detach()
             out["motor_speak_target_rate"] = speak_target.float().mean().detach()
             # Gene pool fitness = the unweighted LM loss
-            self.gene_pool.report(float(lm_loss_per.mean()))
+            self.gene_pool.report(float(lm_loss_per.mean().detach()))
 
             # Module genome evolution: report fitness, advance clock,
             # recompile genomes when evolution produces new champions

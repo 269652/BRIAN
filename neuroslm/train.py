@@ -428,9 +428,8 @@ def main():
                 print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
                       f"| ppl {ppl:.1f} | lr {optim.param_groups[0]['lr']:.2e} "
                       f"| {tok_per_s:.0f} tok/s | mesoLG {lg:.2f} | NT[{nt_str}]", flush=True)
-                # Log oscillation spectrum
+                # Log oscillation spectrum (tick() now called in forward_lm)
                 try:
-                    brain.oscillation_tracker.tick()
                     osc = brain.oscillation_tracker.compute_spectrum()
                     print(f"         oscillations: {osc.format()}", flush=True)
                 except Exception:
