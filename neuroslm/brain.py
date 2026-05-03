@@ -148,7 +148,8 @@ class Brain(nn.Module):
             self.language = LanguageCortex(cfg.vocab_size, cfg.d_hidden, cfg.d_sem,
                                           cfg.lang_layers, cfg.lang_heads, cfg.lang_ctx,
                                           n_kv_heads=cfg.lang_kv_heads,
-                                          gradient_checkpointing=cfg.gradient_checkpointing)
+                                          gradient_checkpointing=cfg.gradient_checkpointing,
+                                          baseline=True)
             self._baseline = True
             return
         self._baseline = False
@@ -184,12 +185,13 @@ class Brain(nn.Module):
         # ---- core cortex & models (built using scaled cfg) ----
         from .neurochem.transmitters import N_NT
         self.language = LanguageCortex(self.cfg.vocab_size, self.cfg.d_hidden, self.cfg.d_sem,
-                                      self.cfg.lang_layers, self.cfg.lang_heads, self.cfg.lang_ctx,
-                                      n_kv_heads=self.cfg.lang_kv_heads,
-                                      n_nt=N_NT,
-                                      hebbian_rank=getattr(self.cfg, 'hebbian_rank', 8),
-                                      gradient_checkpointing=self.cfg.gradient_checkpointing,
-                                      mod_capacity=getattr(self.cfg, 'mod_capacity', 1.0))
+                                       self.cfg.lang_layers, self.cfg.lang_heads, self.cfg.lang_ctx,
+                                       n_kv_heads=self.cfg.lang_kv_heads,
+                                       n_nt=N_NT,
+                                       hebbian_rank=getattr(self.cfg, 'hebbian_rank', 8),
+                                       gradient_checkpointing=self.cfg.gradient_checkpointing,
+                                       mod_capacity=getattr(self.cfg, 'mod_capacity', 1.0),
+                                       baseline=False)
         self.sensory = TextSensoryCortex(self.cfg.d_sem)
         self.association = AssociationCortex(self.cfg.d_sem)
         self.gws = GlobalWorkspace(self.cfg.d_sem, self.cfg.gws_slots, self.cfg.gws_heads)

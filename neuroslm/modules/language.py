@@ -91,7 +91,8 @@ class LanguageCortex(nn.Module):
                  hebbian_rank: int = 0,
                  geometry_expansion: float = 2.0,
                  gradient_checkpointing: bool = False,
-                 mod_capacity: float = 0.5):
+                 mod_capacity: float = 0.5,
+                 baseline: bool = False):
         super().__init__()
         self.gradient_checkpointing = gradient_checkpointing
         self.n_nt = n_nt
@@ -105,26 +106,33 @@ class LanguageCortex(nn.Module):
         #   + NeuralGeometryAdapter after every block (meta-learnable wiring)
         self.blocks = nn.ModuleList()
         self.adapters = nn.ModuleList()
-        for i in range(n_layers):
-            pattern = i % 3
-            if pattern == 0:
-                # Standard attention + Hebbian traces
+        if baseline:
+            # Only standard TransformerBlocks, no adapters
+            for i in range(n_layers):
                 self.blocks.append(TransformerBlock(
                     d_hidden, n_heads, max_ctx, n_kv_heads,
                     n_nt=n_nt, hebbian_rank=hebbian_rank))
-            elif pattern == 1:
-                # Differential attention (noise cancellation)
-                self.blocks.append(DiffTransformerBlock(
-                    d_hidden, n_heads, max_ctx, n_kv_heads, n_nt=n_nt))
-            else:
-                # Mixture-of-Depths with differential attention
-                self.blocks.append(MoDBlock(
-                    d_hidden, n_heads, max_ctx, n_kv_heads,
-                    n_nt=n_nt, capacity_ratio=mod_capacity,
-                    use_diff_attn=True))
-            self.adapters.append(
-                NeuralGeometryAdapter(d_hidden, expansion=geometry_expansion)
-            )
+        else:
+            for i in range(n_layers):
+                pattern = i % 3
+                if pattern == 0:
+                    # Standard attention + Hebbian traces
+                    self.blocks.append(TransformerBlock(
+                        d_hidden, n_heads, max_ctx, n_kv_heads,
+                        n_nt=n_nt, hebbian_rank=hebbian_rank))
+                elif pattern == 1:
+                    # Differential attention (noise cancellation)
+                    self.blocks.append(DiffTransformerBlock(
+                        d_hidden, n_heads, max_ctx, n_kv_heads, n_nt=n_nt))
+                else:
+                    # Mixture-of-Depths with differential attention
+                    self.blocks.append(MoDBlock(
+                        d_hidden, n_heads, max_ctx, n_kv_heads,
+                        n_nt=n_nt, capacity_ratio=mod_capacity,
+                        use_diff_attn=True))
+                self.adapters.append(
+                    NeuralGeometryAdapter(d_hidden, expansion=geometry_expansion)
+                )
 
         # Novel: Predictive Coding — each layer predicts next layer's output
         # Deep supervision gives each layer its own gradient signal
@@ -172,20 +180,32 @@ class LanguageCortex(nn.Module):
         layer_states = []
         pred_coding_loss = torch.tensor(0.0, device=ids.device)
 
-        for i, (blk, adapter) in enumerate(zip(self.blocks, self.adapters)):
-            if self.gradient_checkpointing and self.training:
-                # checkpoint doesn't support kwargs well, so wrap in lambda
-                h = torch.utils.checkpoint.checkpoint(
-                    lambda x, _nt=nt: blk(x, nt=_nt), h, use_reentrant=False)
-                h = torch.utils.checkpoint.checkpoint(
-                    adapter, h, use_reentrant=False)
-            else:
-                h = blk(h, nt=nt)
-                h = adapter(h)     # geometry-adapted residual after each block
-
-            # Store for predictive coding
-            if len(self.pred_coding) > 0:
-                layer_states.append(h)
+        if hasattr(self, 'adapters') and len(self.adapters) > 0:
+            for i, (blk, adapter) in enumerate(zip(self.blocks, self.adapters)):
+                from .common import TransformerBlock
+                can_checkpoint = (self.gradient_checkpointing and self.training
+                                  and isinstance(blk, TransformerBlock))
+                if can_checkpoint:
+                    h = torch.utils.checkpoint.checkpoint(
+                        lambda x, _nt=nt: blk(x, nt=_nt), h, use_reentrant=False)
+                else:
+                    h = blk(h, nt=nt)
+                h = adapter(h)  # never checkpointed (lightweight + AMP-safe)
+                if len(self.pred_coding) > 0:
+                    layer_states.append(h)
+        else:
+            # Baseline: no adapters
+            for blk in self.blocks:
+                from .common import TransformerBlock
+                can_checkpoint = (self.gradient_checkpointing and self.training
+                                  and isinstance(blk, TransformerBlock))
+                if can_checkpoint:
+                    h = torch.utils.checkpoint.checkpoint(
+                        lambda x, _nt=nt: blk(x, nt=_nt), h, use_reentrant=False)
+                else:
+                    h = blk(h, nt=nt)
+                if len(self.pred_coding) > 0:
+                    layer_states.append(h)
 
         # Predictive coding loss: each layer predicts the next
         if len(self.pred_coding) > 0 and len(layer_states) > 1:
