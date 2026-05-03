@@ -13,14 +13,22 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .genome_configurable import GenomeConfigurable
 
-class Hippocampus(nn.Module):
+
+class Hippocampus(nn.Module, GenomeConfigurable):
     def __init__(self, d_sem: int, capacity: int, topk: int, sparse_k: int):
         super().__init__()
+        self._genome_env = {}
         self.d_sem = d_sem
         self.capacity = capacity
         self.topk = topk
         self.sparse_k = sparse_k
+        # Genome-tunable gates (defaults = standard behavior)
+        self._recall_gate = 1.0    # how strongly recall fires
+        self._store_gate = 1.0     # how strongly store fires
+        self._novelty_bias = 0.0   # shift novelty threshold
+        self._modulation_gain = 1.0  # NT modulation strength
 
         # DG: sparse projection
         self.dg = nn.Linear(d_sem, d_sem, bias=False)
@@ -40,6 +48,18 @@ class Hippocampus(nn.Module):
         mask = torch.zeros_like(x)
         mask.scatter_(-1, topi, 1.0)
         return x * mask
+
+    def configure_from_genome(self, env: dict, structural=None):
+        """Apply genome-compiled parameters to hippocampal behavior.
+        The genome encodes: RECALL gate, WRITE_MEM gate, MODULATE gain, ERROR bias.
+        """
+        super().configure_from_genome(env, structural=structural)
+        # Extract gate/operand values from the compiled env
+        # These come from the genome's opcode execution
+        self._recall_gate = max(0.01, self.genv_float('recall_gate', 1.0))
+        self._store_gate = max(0.01, self.genv_float('store_gate', 1.0))
+        self._novelty_bias = self.genv_float('novelty_bias', 0.0)
+        self._modulation_gain = max(0.01, self.genv_float('modulation_gain', 1.0))
 
     @torch.no_grad()
     def store(self, query: torch.Tensor, value: torch.Tensor) -> None:
@@ -72,6 +92,8 @@ class Hippocampus(nn.Module):
         topv, topi = sim.topk(k, dim=-1)                    # (B, k)
         recalled = vals[topi]                               # (B, k, d_sem)
         recalled = self.ca1(recalled)
+        # Genome gate: scale recall strength
+        recalled = recalled * self._recall_gate
         # Pad if N < topk
         if k < self.topk:
             pad = torch.zeros(B, self.topk - k, self.d_sem,
@@ -79,4 +101,6 @@ class Hippocampus(nn.Module):
             recalled = torch.cat([recalled, pad], dim=1)
 
         novelty = 1.0 - topv[:, 0].clamp(-1, 1)             # (B,)
+        # Genome bias: shift novelty threshold
+        novelty = (novelty + self._novelty_bias).clamp(0, 1)
         return recalled, novelty

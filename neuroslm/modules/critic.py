@@ -19,11 +19,17 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
+from .genome_configurable import GenomeConfigurable
 
-class SubconsciousCritic(nn.Module):
+
+class SubconsciousCritic(nn.Module, GenomeConfigurable):
     def __init__(self, d_sem: int, threat_threshold: float = 0.6):
         super().__init__()
+        self._genome_env = {}
         self.threat_threshold = threat_threshold
+        # Genome-tunable
+        self._predict_gate = 1.0   # prediction strength
+        self._nt_emission = 0.9    # NE surge intensity
         self.mlp = nn.Sequential(
             nn.Linear(d_sem * 2, d_sem),
             nn.GELU(),
@@ -47,5 +53,12 @@ class SubconsciousCritic(nn.Module):
         learned = torch.sigmoid(self.mlp(x)).squeeze(-1)              # (B,)
         # Combine learned + heuristic (learned starts ~0.5, heuristic gives signal)
         threat = 0.5 * learned + 0.5 * heuristic
-        survival = (threat > self.threat_threshold)
+        # Genome-tunable threshold
+        threshold = self.genv_float('select_gate', self.threat_threshold) if self.has_genome else self.threat_threshold
+        survival = (threat > threshold)
         return threat, survival
+
+    def configure_from_genome(self, env: dict, structural=None):
+        super().configure_from_genome(env, structural=structural)
+        self._predict_gate = max(0.01, self.genv_float('predict_gate', 1.0))
+        self._nt_emission = self.genv_float('nt_emission', 0.9)

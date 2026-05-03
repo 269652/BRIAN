@@ -337,27 +337,22 @@ class Brain(nn.Module):
             Receptor("ACh",  sign=-1, weight=0.2),
         ])
 
-        # Projections graph — moves NT (and optionally signals) between regions
-        region_dims = {
-            "VTA":   self.cfg.d_sem, "NAcc": self.cfg.d_sem, "LC": self.cfg.d_sem,
-            "Raphe": self.cfg.d_sem, "NBM":  self.cfg.d_sem,
-            "PFC":   self.cfg.d_sem, "Hippo": self.cfg.d_sem, "BG": self.cfg.d_sem,
-            "Thalamus": self.cfg.d_sem, "Language": self.cfg.d_sem, "DMN": self.cfg.d_sem,
-        }
+        # Projections graph — built FROM DNA projection genome
+        # The projection genome encodes the entire NT connectome:
+        # which nuclei project to which regions, carrying which NT.
+        # This was previously hardcoded; now it stems from evolvable DNA.
+        from .dna.structural_genome import default_projection_genome
+        _proj_genome = default_projection_genome()
+        _all_region_names = set()
+        for pg in _proj_genome.projections:
+            _all_region_names.add(pg.src)
+            _all_region_names.add(pg.dst)
+        region_dims = {r: self.cfg.d_sem for r in _all_region_names}
         self.projections = ProjectionGraph([
-            Projection("VTA",   "NAcc",     "DA",  release_scale=1.0, carries_signal=False),
-            Projection("VTA",   "PFC",      "DA",  release_scale=0.8, carries_signal=False),
-            Projection("VTA",   "BG",       "DA",  release_scale=1.0, carries_signal=False),
-            Projection("NAcc",  "VTA",      "Glu", release_scale=0.5, carries_signal=False),
-            Projection("LC",    "PFC",      "NE",  release_scale=0.7, carries_signal=False),
-            Projection("LC",    "Thalamus", "NE",  release_scale=0.7, carries_signal=False),
-            Projection("Raphe", "DMN",      "5HT", release_scale=0.6, carries_signal=False),
-            Projection("Raphe", "PFC",      "5HT", release_scale=0.5, carries_signal=False),
-            Projection("NBM",   "Language", "ACh", release_scale=0.6, carries_signal=False),
-            Projection("NBM",   "Hippo",    "ACh", release_scale=0.6, carries_signal=False),
-            Projection("PFC",   "VTA",      "Glu", release_scale=0.4, carries_signal=False),
-            Projection("Hippo", "NAcc",     "Glu", release_scale=0.5, carries_signal=False),
-            Projection("PFC",   "PFC",      "eCB", release_scale=0.3, carries_signal=False),
+            Projection(pg.src, pg.dst, pg.nt,
+                       release_scale=pg.release_scale,
+                       carries_signal=pg.carries_signal)
+            for pg in _proj_genome.projections
         ], region_dims)
 
         # Neurotrophic system — grows / prunes projections
@@ -402,18 +397,15 @@ class Brain(nn.Module):
         # This is the central pipeline: each module's behavior is defined by
         # its genome, compiled to a latent embedding, decompiled to readable
         # Lisp, then executed by the DSL interpreter.
-        from .dna.compiler import GenomeCompiler, ModuleGenomePool
-        _all_regions = [
-            'language', 'sensory', 'association', 'thalamus',
-            'world', 'self_model', 'pfc', 'dmn', 'hippocampus',
-            'basal_ganglia', 'critic', 'forward_model', 'evaluator',
-            'motor', 'cerebellum', 'entorhinal', 'claustrum',
-            'gws', 'cortical_sheet', 'neural_geometry',
-        ]
-        self.genome_compiler = GenomeCompiler(d_latent=128, max_steps=16)
+        from .dna.compiler import GenomeCompiler, ModuleGenomePool, ALL_REGIONS
+        from .dna.structural_genome import BrainDNA
+        self.genome_compiler = GenomeCompiler(max_steps=16)
         self.module_genomes = ModuleGenomePool(
-            _all_regions, pool_size=4, tournament_period=200)
-        # Initial compilation: compile all genomes → Lisp → execute
+            ALL_REGIONS, pool_size=4, tournament_period=200)
+        # BrainDNA: structural genomes (architecture/receptors/NT modifiers)
+        # + projection genome (NT wiring topology)
+        self.brain_dna = BrainDNA.default(ALL_REGIONS)
+        # Initial compilation: compile all genomes → extract params → push to modules
         self._recompile_all_genomes()
 
         # ---- exposure for inspectability ----
@@ -429,21 +421,64 @@ class Brain(nn.Module):
     # Helpers
     # ====================================================================
     def _recompile_all_genomes(self):
-        """Compile all module genomes through the full pipeline:
-            Genome → Latent Embedding → Lisp Source → DSL Execute
-        Each module's behavior is now derived from its genome.
+        """Compile all module genomes and push params into live modules.
+
+        Pipeline:
+          1. Algorithmic genome alleles → opcode params → Lisp → DSL Execute → env
+          2. Structural genome → receptors, NT modifiers, architecture params
+          3. Push combined env + structural into each module's configure_from_genome()
+
+        This is where the genome ACTUALLY controls behavior.
         """
         genomes = self.module_genomes.active_all()
         self._compiled_envs = self.genome_compiler.compile_batch(genomes)
-        # Also register the compiled latents as latent programs
-        # so the differentiable interpreter can still be used
+
+        # Push genome-compiled params + structural genome into live modules
+        _module_map = {
+            'hippocampus': getattr(self, 'hippo', None),
+            'pfc':         getattr(self, 'pfc', None),
+            'dmn':         getattr(self, 'dmn', None),
+            'basal_ganglia': getattr(self, 'bg', None),
+            'critic':      getattr(self, 'critic', None),
+            'thalamus':    getattr(self, 'thalamus', None),
+            'cerebellum':  getattr(self, 'cerebellum', None),
+            'entorhinal':  getattr(self, 'entorhinal', None),
+            'claustrum':   getattr(self, 'claustrum', None),
+            'cortical_sheet': getattr(self, 'cortical_sheet', None),
+            'neural_geometry': getattr(self, 'neural_geometry', None),
+        }
+        for region, env in self._compiled_envs.items():
+            mod = _module_map.get(region)
+            if mod is not None and hasattr(mod, 'configure_from_genome'):
+                structural = self.brain_dna.get_structural(region)
+                mod.configure_from_genome(env, structural=structural)
+
+        # Also sync latents if latent_programs exists (backward compat)
         for region, genome in genomes.items():
-            latent = self.genome_compiler.get_latent(region)
-            if latent is not None and hasattr(self, 'latent_programs'):
+            if hasattr(self, 'latent_programs'):
                 if region not in self.latent_programs._programs:
                     self.latent_programs.register_program(region)
-                with torch.no_grad():
-                    self.latent_programs._programs[region].copy_(latent)
+
+    def _apply_nt_modifiers_all(self, nt_levels_dict: dict[str, float]):
+        """Apply NT modifier rules to ALL genome-configured modules.
+
+        Called each forward tick. NT levels activate modifier rules defined
+        in each module's StructuralGenome, shifting their behavioral params.
+
+        Example: high 5HT → PFC select_gate *= 0.5 (safer selection)
+        """
+        _module_map = {
+            'hippocampus': getattr(self, 'hippo', None),
+            'pfc':         getattr(self, 'pfc', None),
+            'dmn':         getattr(self, 'dmn', None),
+            'basal_ganglia': getattr(self, 'bg', None),
+            'critic':      getattr(self, 'critic', None),
+            'thalamus':    getattr(self, 'thalamus', None),
+            'cerebellum':  getattr(self, 'cerebellum', None),
+        }
+        for region, mod in _module_map.items():
+            if mod is not None and hasattr(mod, 'apply_nt_modifiers'):
+                mod.apply_nt_modifiers(nt_levels_dict)
 
     def get_module_lisp(self, region: str) -> str:
         """Get the current compiled Lisp for any module — full inspectability."""
@@ -536,6 +571,14 @@ class Brain(nn.Module):
         # modification errors during create_graph=True backward.
         nt = self.transmitters.vector().detach()          # (B, N_NT)
 
+        # Apply NT modifier rules to all genome-configured modules.
+        # This is where neurochemistry ACTUALLY controls module behavior:
+        #   high 5HT → PFC safer selection, high NE → PFC urgent tasks, etc.
+        with torch.no_grad():
+            nt_mean = {n: float(nt[:, i].mean())
+                       for i, n in enumerate(NT_NAMES)}
+            self._apply_nt_modifiers_all(nt_mean)
+
         # 1) Language cortex — modulated by ACh / eCB
         lang_in_thought = self.rcpt_lang.modulate(
             latents["floating_thought"].unsqueeze(1), nt).squeeze(1)
@@ -549,6 +592,21 @@ class Brain(nn.Module):
         routed, routing_probs = self.thalamus(assoc, nt, return_routing=True)
         routed = self.rcpt_thal.modulate(routed.unsqueeze(1), nt).squeeze(1)
         self.last_routing = routing_probs.detach()
+
+        # 3b) Neural Orchestrator — homeostatic pre/post processing
+        # The orchestrator wraps each module connection with learnable
+        # transformer blocks that maintain stable signal flow. Its gates
+        # are meta-trainable: identity coherence + signal stability.
+        orch_modules = {
+            'world': self.world,
+            'cerebellum': self.cerebellum,
+            'entorhinal': self.entorhinal,
+            'claustrum': self.claustrum,
+        }
+        orch_out, orch_metrics = self.orchestrator.route(
+            routed, orch_modules)
+        # Blend orchestrator output with raw routed signal (residual)
+        routed = routed + 0.1 * (orch_out - routed)
 
         # 4) World + self models
         z_world, _wh, world_pred = self.world(routed, latents["world_h"])
@@ -651,11 +709,14 @@ class Brain(nn.Module):
         # ---- Oscillation tracking (record regional activations) ----
         if hasattr(self, 'oscillation_tracker'):
             with torch.no_grad():
-                self.oscillation_tracker.record("language", sem.detach().mean(1))
-                self.oscillation_tracker.record("pfc", selected.detach().mean(1) if selected.dim() == 3 else selected.detach())
-                self.oscillation_tracker.record("hippocampus", dmn_query.detach())
-                self.oscillation_tracker.record("thalamus", routed.detach())
-                self.oscillation_tracker.record("basal_ganglia", action.detach())
+                _osc_map = {'language': 0, 'pfc': 1, 'hippocampus': 2,
+                            'thalamus': 3, 'basal_ganglia': 4, 'dmn': 5,
+                            'gws': 6, 'motor': 7}
+                self.oscillation_tracker.record(_osc_map.get('language', 0), sem.detach().mean(1))
+                self.oscillation_tracker.record(_osc_map.get('pfc', 1), selected.detach().mean(1) if selected.dim() == 3 else selected.detach())
+                self.oscillation_tracker.record(_osc_map.get('hippocampus', 2), dmn_query.detach())
+                self.oscillation_tracker.record(_osc_map.get('thalamus', 3), routed.detach())
+                self.oscillation_tracker.record(_osc_map.get('basal_ganglia', 4), action.detach())
 
         # Trophic update: BDNF rises with reward, NGF rises with novelty.
         with torch.no_grad():
@@ -677,7 +738,7 @@ class Brain(nn.Module):
             "survival": survival.detach(),
         }
         if hasattr(self, 'oscillation_tracker'):
-            out["oscillation_snapshot"] = self.oscillation_tracker.snapshot()
+            out["oscillation_snapshot"] = self.oscillation_tracker.compute_spectrum().as_dict()
 
         if targets is not None:
             # Use motor-conditioned logits — gradient now flows into motor head.
@@ -717,6 +778,17 @@ class Brain(nn.Module):
                      + cfg.w_world * world_loss
                      + cfg.w_forward * fwd_reg * 0.01
                      + cfg.w_motor * motor_loss)
+
+            # ── Homeostatic stability loss (meta-training the orchestrator) ──
+            # Penalizes identity drift + signal instability so the
+            # pre/post processing gates learn to maintain coherent signalling.
+            if hasattr(self, 'orchestrator') and not self.orchestrator.baseline:
+                identity_drift = orch_metrics.get('identity_drift', 0.0)
+                neural_calm = orch_metrics.get('neural_calm', 1.0)
+                # We want low drift and high calm
+                stability_loss = 0.01 * identity_drift + 0.01 * (1.0 - neural_calm)
+                total = total + stability_loss
+                out["stability_loss"] = stability_loss
             out["loss"] = total
             out["lm_loss"] = lm_loss_per.mean().detach()
             out["world_loss"] = world_loss.detach()

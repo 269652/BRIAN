@@ -458,6 +458,8 @@ class GenomeCompiler(nn.Module):
     """Compiles ModuleGenomes: Genome alleles → Lisp → DSL Execute.
 
     No neural network needed — the genome alleles ARE the opcode logits.
+    Additionally extracts opcode-level gate/operand values as module-readable
+    parameters, so the genome ACTUALLY controls module behavior.
     """
 
     def __init__(self, max_steps: int = MAX_STEPS):
@@ -475,6 +477,77 @@ class GenomeCompiler(nn.Module):
         t = torch.tensor(alleles, dtype=torch.float32)
         t = t.view(self.max_steps, STEP_SIZE)
         return t[:, :N_OPCODES], t[:, N_OPCODES:]
+
+    def _extract_genome_params(self, genome: ModuleGenome) -> dict:
+        """Extract opcode-level parameters that modules can read.
+
+        For each active step, the dominant opcode's gate and operand values
+        become named parameters in the env dict. This is how the genome
+        ACTUALLY controls module behavior — not just pretty Lisp, but
+        real gate values that flow into forward().
+
+        Mapping:
+          RECALL  → recall_gate (from gate operand)
+          GATE    → gate_threshold (from val operand)
+          ATTEND  → attend_gate (from gate)
+          PROJECT → project_gain (from gate)
+          MODULATE → modulation_gain (from val)
+          ERROR   → novelty_bias (from val)
+          SIGMOID → sigmoid_gain (from gate)
+          CMP_GT  → threshold (from dst operand)
+          EMIT_NT → nt_emission (from val)
+          READ_NT → nt_sensitivity (from val)
+          OSCILLATE → oscillate_freq (from val)
+          WRITE_MEM → store_gate (from gate)
+        """
+        params = {}
+        # Map opcode names to parameter keys
+        OPCODE_TO_PARAM = {
+            'RECALL':    ('recall_gate', 'gate'),
+            'GATE':      ('gate_threshold', 'val'),
+            'ATTEND':    ('attend_gate', 'gate'),
+            'PROJECT':   ('project_gain', 'gate'),
+            'MODULATE':  ('modulation_gain', 'val'),
+            'ERROR':     ('novelty_bias', 'val'),
+            'SIGMOID':   ('sigmoid_gain', 'gate'),
+            'CMP_GT':    ('select_gate', 'dst'),
+            'EMIT_NT':   ('nt_emission', 'val'),
+            'READ_NT':   ('nt_sensitivity', 'val'),
+            'OSCILLATE': ('oscillate_freq', 'val'),
+            'WRITE_MEM': ('store_gate', 'gate'),
+            'MUL':       ('multiply_gain', 'gate'),
+            'ADD':       ('wander_gate', 'gate'),
+            'NORMALIZE': ('normalize_gate', 'gate'),
+            'BIND':      ('bind_gate', 'gate'),
+            'PREDICT':   ('predict_gate', 'gate'),
+        }
+        OPERAND_IDX = {'src': 0, 'dst': 1, 'val': 2, 'gate': 3}
+
+        for step in range(self.max_steps):
+            logits, ops = genome.get_step(step)
+            # gate value (sigmoid of ops[3])
+            gate = 1.0 / (1.0 + math.exp(-ops[3]))
+            if gate < 0.3:
+                continue  # inactive step
+            # dominant opcode
+            idx = max(range(len(logits)), key=lambda i: logits[i])
+            opcode = OPCODES[idx] if idx < len(OPCODES) else 'NOP'
+            if opcode in OPCODE_TO_PARAM:
+                param_name, operand_key = OPCODE_TO_PARAM[opcode]
+                operand_idx = OPERAND_IDX[operand_key]
+                raw_val = ops[operand_idx] if operand_key != 'gate' else gate
+                # For gate-type params, use sigmoid(raw) to get [0,1] → scale to useful range
+                if operand_key == 'gate':
+                    params[param_name] = gate  # already sigmoided
+                else:
+                    # operand values: use sigmoid to get [0,2] range
+                    params[param_name] = 2.0 / (1.0 + math.exp(-raw_val))
+                # If same opcode appears multiple times, average
+                # (handles e.g. two MODULATE steps)
+
+        # Also expose raw operand summaries
+        params['_n_active_steps'] = len(genome.active_steps())
+        return params
 
     def decompile_to_lisp(self, genome: ModuleGenome, top_k: int = 2) -> str:
         opcode_logits, operands = self.genome_to_tensors(genome)
@@ -505,7 +578,12 @@ class GenomeCompiler(nn.Module):
 
     def compile(self, genome: ModuleGenome, top_k: int = 2) -> dict:
         lisp_src = self.decompile_to_lisp(genome, top_k=top_k)
-        return self.execute_lisp(genome.region, lisp_src)
+        env = self.execute_lisp(genome.region, lisp_src)
+        # Merge opcode-level params — these are what modules actually read
+        genome_params = self._extract_genome_params(genome)
+        env.update(genome_params)
+        self._compiled_envs[genome.region] = env
+        return env
 
     def compile_batch(self, genomes: dict[str, ModuleGenome],
                       top_k: int = 2) -> dict[str, dict]:

@@ -444,6 +444,8 @@ def main():
                 if hasattr(brain, 'module_genomes'):
                     save_dict["module_genomes"] = brain.module_genomes.state()
                     save_dict["compiled_lisp"] = brain.get_all_module_lisp()
+                if hasattr(brain, 'brain_dna'):
+                    save_dict["brain_dna"] = brain.brain_dna.to_dict()
             torch.save(save_dict, path)
             if not cfg.baseline:
                 # ── Save portable memory checkpoint (.mem) ──
