@@ -187,6 +187,17 @@ def main():
                 except Exception as e:
                     print(f"[train] could not restore memory: {e}", flush=True)
             print(f"[train] resumed from {resume_path} @ step {start_step}", flush=True)
+            # Restore epigenetic optimizer state
+            if "epigenetic" in ckpt and hasattr(brain, 'epigenetic_optimizer'):
+                from .dna.epigenetics import EpigeneticOptimizer
+                brain.epigenetic_optimizer = EpigeneticOptimizer.from_state_dict(ckpt["epigenetic"])
+                print(f"[train] restored epigenetic state", flush=True)
+            # Restore module genomes
+            if "module_genomes" in ckpt and hasattr(brain, 'module_genomes'):
+                from .dna.compiler import ModuleGenomePool
+                brain.module_genomes = ModuleGenomePool.from_state(ckpt["module_genomes"])
+                brain._recompile_all_genomes()
+                print(f"[train] restored module genomes", flush=True)
     elif args.transfer and Path(args.transfer).exists():
         ckpt = torch.load(args.transfer, map_location=device, weights_only=False)
         brain.load_partial(ckpt["model"])
@@ -403,6 +414,16 @@ def main():
             brain.consolidate_memory()
             brain.update_narratives()
 
+        # 5. Epigenetic self-optimization: evolve DNA based on loss trends
+        if not cfg.baseline and hasattr(brain, 'epigenetic_optimizer'):
+            try:
+                brain.epigenetic_optimizer.step(
+                    step, float(loss.item()),
+                    brain.module_genomes, brain.genome_compiler, brain)
+            except Exception as e:
+                if (step + 1) % 1000 == 0:
+                    print(f"[train] epigenetic step failed: {e}", flush=True)
+
         # Slow homeostatic regulation of NT baselines & gains.
         if not cfg.baseline:
             brain.homeostasis.observe(brain.transmitters,
@@ -457,6 +478,8 @@ def main():
                     save_dict["compiled_lisp"] = brain.get_all_module_lisp()
                 if hasattr(brain, 'brain_dna'):
                     save_dict["brain_dna"] = brain.brain_dna.to_dict()
+                if hasattr(brain, 'epigenetic_optimizer'):
+                    save_dict["epigenetic"] = brain.epigenetic_optimizer.state_dict()
             torch.save(save_dict, path)
             if not cfg.baseline:
                 # ── Save portable memory checkpoint (.mem) ──

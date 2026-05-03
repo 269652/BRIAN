@@ -72,6 +72,8 @@ class BrainConfig:
     # ---- Intelligence-density features ----
     gradient_checkpointing: bool = False
     hebbian_rank: int = 0         # Hebbian trace rank (0=off, 8=default for novel attention)
+    mod_capacity: float = 1.0     # Mixture-of-Depths capacity ratio (1.0=all tokens, 0.5=half)
+    epigenetic_probe_every: int = 500  # Epigenetic self-optimization probe interval
     use_moe: bool = False
     moe_experts: int = 8
     moe_top_k: int = 2
@@ -197,6 +199,8 @@ def xl() -> BrainConfig:
     c.weight_decay = 0.1
     c.gradient_checkpointing = True
     c.hebbian_rank = 8            # Novel: Hebbian attention trace for in-context learning
+    c.mod_capacity = 0.6          # Novel: MoD — 60% of tokens processed per MoD layer
+    c.epigenetic_probe_every = 500  # Novel: self-optimizing DNA every 500 steps
     c.use_moe = False
     c.moe_experts = 8
     c.moe_top_k = 2

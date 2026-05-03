@@ -188,7 +188,8 @@ class Brain(nn.Module):
                                       n_kv_heads=self.cfg.lang_kv_heads,
                                       n_nt=N_NT,
                                       hebbian_rank=getattr(self.cfg, 'hebbian_rank', 8),
-                                      gradient_checkpointing=self.cfg.gradient_checkpointing)
+                                      gradient_checkpointing=self.cfg.gradient_checkpointing,
+                                      mod_capacity=getattr(self.cfg, 'mod_capacity', 1.0))
         self.sensory = TextSensoryCortex(self.cfg.d_sem)
         self.association = AssociationCortex(self.cfg.d_sem)
         self.gws = GlobalWorkspace(self.cfg.d_sem, self.cfg.gws_slots, self.cfg.gws_heads)
@@ -426,6 +427,13 @@ class Brain(nn.Module):
         self.brain_dna = BrainDNA.default(ALL_REGIONS)
         # Initial compilation: compile all genomes → extract params → push to modules
         self._recompile_all_genomes()
+
+        # ── Epigenetic Self-Optimization ──
+        # Benchmark-driven DNA mutation: the model self-optimizes its architecture
+        from .dna.epigenetics import EpigeneticOptimizer
+        self.epigenetic_optimizer = EpigeneticOptimizer(
+            probe_every=getattr(self.cfg, 'epigenetic_probe_every', 500),
+            mutation_scale=0.15)
 
         # ---- exposure for inspectability ----
         self.last_nt: dict | None = None

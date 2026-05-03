@@ -19,6 +19,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from .common import TransformerBlock, RMSNorm
 from .neuro_attention import PredictiveCodingHead
+from .differential_attention import DiffTransformerBlock
+from .mixture_of_depths import MoDBlock
 
 
 # ---------------------------------------------------------------------------
@@ -88,19 +90,38 @@ class LanguageCortex(nn.Module):
                  n_nt: int = 0,
                  hebbian_rank: int = 0,
                  geometry_expansion: float = 2.0,
-                 gradient_checkpointing: bool = False):
+                 gradient_checkpointing: bool = False,
+                 mod_capacity: float = 0.5):
         super().__init__()
         self.gradient_checkpointing = gradient_checkpointing
         self.n_nt = n_nt
         self.tok_emb = nn.Embedding(vocab_size, d_hidden)
 
-        # Interleaved: [TransformerBlock, GeometryAdapter] × n_layers
+        # Interleaved architecture (novel hybrid):
+        #   Layer pattern: [Standard, DiffAttn, MoD+DiffAttn, Standard, DiffAttn, MoD+DiffAttn, ...]
+        #   - Standard blocks: Hebbian traces + NT modulation (in-context learning)
+        #   - DiffAttn blocks: noise cancellation (hallucination reduction)
+        #   - MoD blocks: dynamic compute allocation (efficiency)
+        #   + NeuralGeometryAdapter after every block (meta-learnable wiring)
         self.blocks = nn.ModuleList()
         self.adapters = nn.ModuleList()
-        for _ in range(n_layers):
-            self.blocks.append(TransformerBlock(
-                d_hidden, n_heads, max_ctx, n_kv_heads,
-                n_nt=n_nt, hebbian_rank=hebbian_rank))
+        for i in range(n_layers):
+            pattern = i % 3
+            if pattern == 0:
+                # Standard attention + Hebbian traces
+                self.blocks.append(TransformerBlock(
+                    d_hidden, n_heads, max_ctx, n_kv_heads,
+                    n_nt=n_nt, hebbian_rank=hebbian_rank))
+            elif pattern == 1:
+                # Differential attention (noise cancellation)
+                self.blocks.append(DiffTransformerBlock(
+                    d_hidden, n_heads, max_ctx, n_kv_heads, n_nt=n_nt))
+            else:
+                # Mixture-of-Depths with differential attention
+                self.blocks.append(MoDBlock(
+                    d_hidden, n_heads, max_ctx, n_kv_heads,
+                    n_nt=n_nt, capacity_ratio=mod_capacity,
+                    use_diff_attn=True))
             self.adapters.append(
                 NeuralGeometryAdapter(d_hidden, expansion=geometry_expansion)
             )
