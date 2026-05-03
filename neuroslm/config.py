@@ -166,7 +166,7 @@ def xl() -> BrainConfig:
     c.d_sem = 768
     c.d_hidden = 2048
     c.lang_layers = 20
-    c.lang_heads = 12
+    c.lang_heads = 16
     c.lang_ctx = 2048
     c.dmn_layers = 3
     c.pfc_layers = 3
