@@ -66,10 +66,12 @@ class BrainConfig:
     w_forward: float = 0.2     # forward model
     w_value: float = 0.1       # evaluator (placeholder; needs RL signal)
     w_motor: float = 0.05      # SPEAK gate auxiliary loss
+    w_pred_coding: float = 0.1  # predictive coding (inter-layer surprise) — novel
     speak_conf_threshold: float = 0.25  # min next-token confidence to want to SPEAK
 
     # ---- Intelligence-density features ----
     gradient_checkpointing: bool = False
+    hebbian_rank: int = 0         # Hebbian trace rank (0=off, 8=default for novel attention)
     use_moe: bool = False
     moe_experts: int = 8
     moe_top_k: int = 2
@@ -194,6 +196,7 @@ def xl() -> BrainConfig:
     c.lr = 2e-4
     c.weight_decay = 0.1
     c.gradient_checkpointing = True
+    c.hebbian_rank = 8            # Novel: Hebbian attention trace for in-context learning
     c.use_moe = False
     c.moe_experts = 8
     c.moe_top_k = 2

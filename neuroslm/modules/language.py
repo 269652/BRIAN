@@ -18,6 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .common import TransformerBlock, RMSNorm
+from .neuro_attention import PredictiveCodingHead
 
 
 # ---------------------------------------------------------------------------
@@ -84,20 +85,31 @@ class LanguageCortex(nn.Module):
     def __init__(self, vocab_size: int, d_hidden: int, d_sem: int,
                  n_layers: int, n_heads: int, max_ctx: int,
                  n_kv_heads: int | None = None,
+                 n_nt: int = 0,
+                 hebbian_rank: int = 0,
                  geometry_expansion: float = 2.0,
                  gradient_checkpointing: bool = False):
         super().__init__()
         self.gradient_checkpointing = gradient_checkpointing
+        self.n_nt = n_nt
         self.tok_emb = nn.Embedding(vocab_size, d_hidden)
 
         # Interleaved: [TransformerBlock, GeometryAdapter] × n_layers
         self.blocks = nn.ModuleList()
         self.adapters = nn.ModuleList()
         for _ in range(n_layers):
-            self.blocks.append(TransformerBlock(d_hidden, n_heads, max_ctx, n_kv_heads))
+            self.blocks.append(TransformerBlock(
+                d_hidden, n_heads, max_ctx, n_kv_heads,
+                n_nt=n_nt, hebbian_rank=hebbian_rank))
             self.adapters.append(
                 NeuralGeometryAdapter(d_hidden, expansion=geometry_expansion)
             )
+
+        # Novel: Predictive Coding — each layer predicts next layer's output
+        # Deep supervision gives each layer its own gradient signal
+        self.pred_coding = nn.ModuleList([
+            PredictiveCodingHead(d_hidden) for _ in range(n_layers - 1)
+        ]) if n_layers > 1 else nn.ModuleList()
 
         self.norm_f = RMSNorm(d_hidden)
         # Tied output head
@@ -120,23 +132,48 @@ class LanguageCortex(nn.Module):
                     nn.init.normal_(p, mean=0.0, std=0.02)
 
     def forward(self, ids: torch.Tensor, thought: torch.Tensor | None = None,
-                motor_bias: torch.Tensor | None = None):
+                motor_bias: torch.Tensor | None = None,
+                nt: torch.Tensor | None = None):
         """ids: (B, T). thought: optional (B, d_sem) injected as a prefix bias.
         motor_bias: optional (B, d_hidden) added to the LAST position's hidden
-        state before the LM head."""
+        state before the LM head.
+        nt: optional (B, N_NT) neurotransmitter vector for attention modulation.
+
+        Returns: (logits, sem, h, pred_coding_loss)
+          pred_coding_loss: scalar predictive coding loss (0.0 if no PC heads).
+        """
         h = self.tok_emb(ids)
         if thought is not None:
             bias = self.from_sem(thought).unsqueeze(1)  # (B, 1, d_hidden)
             h = h + bias
-        for blk, adapter in zip(self.blocks, self.adapters):
+
+        # Collect layer hidden states for predictive coding
+        layer_states = []
+        pred_coding_loss = torch.tensor(0.0, device=ids.device)
+
+        for i, (blk, adapter) in enumerate(zip(self.blocks, self.adapters)):
             if self.gradient_checkpointing and self.training:
+                # checkpoint doesn't support kwargs well, so wrap in lambda
                 h = torch.utils.checkpoint.checkpoint(
-                    blk, h, use_reentrant=False)
+                    lambda x, _nt=nt: blk(x, nt=_nt), h, use_reentrant=False)
                 h = torch.utils.checkpoint.checkpoint(
                     adapter, h, use_reentrant=False)
             else:
-                h = blk(h)
+                h = blk(h, nt=nt)
                 h = adapter(h)     # geometry-adapted residual after each block
+
+            # Store for predictive coding
+            if len(self.pred_coding) > 0:
+                layer_states.append(h)
+
+        # Predictive coding loss: each layer predicts the next
+        if len(self.pred_coding) > 0 and len(layer_states) > 1:
+            for i, pc_head in enumerate(self.pred_coding):
+                if i + 1 < len(layer_states):
+                    pred_coding_loss = pred_coding_loss + pc_head(
+                        layer_states[i], layer_states[i + 1])
+            pred_coding_loss = pred_coding_loss / len(self.pred_coding)
+
         h = self.norm_f(h)
         if motor_bias is not None:
             # Add bias only to the last position (the one that will be sampled).
@@ -146,4 +183,4 @@ class LanguageCortex(nn.Module):
         else:
             logits = self.lm_head(h)
         sem = self.to_sem(h.mean(dim=1))
-        return logits, sem, h
+        return logits, sem, h, pred_coding_loss

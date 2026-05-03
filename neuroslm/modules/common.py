@@ -4,6 +4,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from .neuro_attention import NeuromodulatedScale, HebbianTrace
 
 
 class RMSNorm(nn.Module):
@@ -51,14 +52,15 @@ def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.T
 
 
 class CausalSelfAttention(nn.Module):
-    """Multi-head attention with optional Grouped Query Attention (GQA).
+    """Multi-head attention with GQA + neuromodulated temperature + Hebbian trace.
 
-    When n_kv_heads < n_heads, KV projections are shared across groups
-    of Q heads (Qwen2.5/Llama-3 style). Saves ~30% attention params
-    at n_kv_heads=n_heads//4 with minimal quality loss.
+    Novel mechanisms (no existing model has these):
+    1. NT-modulated attention temperature: DA sharpens, NE broadens, ACh precision
+    2. Hebbian fast-weight trace: accumulated co-activation biases attention
     """
     def __init__(self, dim: int, n_heads: int, max_ctx: int,
-                 n_kv_heads: int | None = None):
+                 n_kv_heads: int | None = None,
+                 n_nt: int = 0, hebbian_rank: int = 0):
         super().__init__()
         assert dim % n_heads == 0
         self.n_heads = n_heads
@@ -75,7 +77,13 @@ class CausalSelfAttention(nn.Module):
         self.register_buffer("cos", cos, persistent=False)
         self.register_buffer("sin", sin, persistent=False)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Novel: Neuromodulated attention temperature (if NT system active)
+        self.nt_scale = NeuromodulatedScale(n_nt, n_heads) if n_nt > 0 else None
+        # Novel: Hebbian attention trace (fast-weight relational memory)
+        self.hebbian = HebbianTrace(self.head_dim, rank=hebbian_rank) if hebbian_rank > 0 else None
+
+    def forward(self, x: torch.Tensor,
+                nt: torch.Tensor | None = None) -> torch.Tensor:
         B, T, C = x.shape
         # Q: (B, T, n_heads, head_dim) → (B, n_heads, T, head_dim)
         q = self.q_proj(x).view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
@@ -91,21 +99,45 @@ class CausalSelfAttention(nn.Module):
             k = k[:, :, None, :, :].expand(-1, -1, self.n_groups, -1, -1).reshape(B, self.n_heads, T, self.head_dim)
             v = v[:, :, None, :, :].expand(-1, -1, self.n_groups, -1, -1).reshape(B, self.n_heads, T, self.head_dim)
 
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        # ---- Novel: NT-modulated attention temperature ----
+        # DA sharpens attention (higher scale → lower temperature → exploit)
+        # NE broadens attention (lower scale → higher temperature → explore)
+        if self.nt_scale is not None and nt is not None:
+            scale = self.nt_scale(nt)  # (B, H, 1, 1)
+            q = q * scale  # modulates attention sharpness per-head
+
+        # ---- Novel: Hebbian trace bias ----
+        # Accumulated co-activation creates persistent relational memory
+        if self.hebbian is not None:
+            hebb_bias = self.hebbian(q, k)  # (B, H, T, T)
+            # Manual attention with Hebbian bias (can't use SDPA with custom bias + causal)
+            attn = (q @ k.transpose(-2, -1)) * (self.head_dim ** -0.5)
+            attn = attn + hebb_bias
+            causal_mask = torch.triu(
+                torch.ones(T, T, device=x.device, dtype=torch.bool), diagonal=1)
+            attn = attn.masked_fill(causal_mask, float('-inf'))
+            attn = F.softmax(attn, dim=-1)
+            y = attn @ v
+        else:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         return self.out(y)
 
 
 class TransformerBlock(nn.Module):
     def __init__(self, dim: int, n_heads: int, max_ctx: int,
-                 n_kv_heads: int | None = None):
+                 n_kv_heads: int | None = None,
+                 n_nt: int = 0, hebbian_rank: int = 0):
         super().__init__()
         self.n1 = RMSNorm(dim)
-        self.attn = CausalSelfAttention(dim, n_heads, max_ctx, n_kv_heads)
+        self.attn = CausalSelfAttention(dim, n_heads, max_ctx, n_kv_heads,
+                                        n_nt=n_nt, hebbian_rank=hebbian_rank)
         self.n2 = RMSNorm(dim)
         self.mlp = SwiGLU(dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.n1(x))
+    def forward(self, x: torch.Tensor,
+                nt: torch.Tensor | None = None) -> torch.Tensor:
+        x = x + self.attn(self.n1(x), nt=nt)
         x = x + self.mlp(self.n2(x))
         return x

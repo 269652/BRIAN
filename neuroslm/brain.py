@@ -182,9 +182,12 @@ class Brain(nn.Module):
         self.cfg = self.ribosome.cfg
 
         # ---- core cortex & models (built using scaled cfg) ----
+        from .neurochem.transmitters import N_NT
         self.language = LanguageCortex(self.cfg.vocab_size, self.cfg.d_hidden, self.cfg.d_sem,
                                       self.cfg.lang_layers, self.cfg.lang_heads, self.cfg.lang_ctx,
                                       n_kv_heads=self.cfg.lang_kv_heads,
+                                      n_nt=N_NT,
+                                      hebbian_rank=getattr(self.cfg, 'hebbian_rank', 8),
                                       gradient_checkpointing=self.cfg.gradient_checkpointing)
         self.sensory = TextSensoryCortex(self.cfg.d_sem)
         self.association = AssociationCortex(self.cfg.d_sem)
@@ -573,7 +576,7 @@ class Brain(nn.Module):
     def forward_lm(self, ids: torch.Tensor, targets: torch.Tensor | None = None):
         # ---- Baseline: pure language model, no bio modules ----
         if getattr(self, '_baseline', False):
-            logits, sem, h = self.language(ids)
+            logits, sem, h, _pc = self.language(ids)
             out = {"logits": logits}
             if targets is not None:
                 B, T = ids.shape
@@ -602,10 +605,11 @@ class Brain(nn.Module):
                        for i, n in enumerate(NT_NAMES)}
             self._apply_nt_modifiers_all(nt_mean)
 
-        # 1) Language cortex — modulated by ACh / eCB
+        # 1) Language cortex — modulated by ACh / eCB + NT-gated attention
         lang_in_thought = self.rcpt_lang.modulate(
             latents["floating_thought"].unsqueeze(1), nt).squeeze(1)
-        logits, sem, h_lang = self.language(ids, thought=lang_in_thought)
+        logits, sem, h_lang, pred_coding_loss = self.language(
+            ids, thought=lang_in_thought, nt=nt)
 
         # 2) Sensory + association
         sens, salience = self.sensory(sem)
@@ -806,7 +810,8 @@ class Brain(nn.Module):
             total = (cfg.w_lm * lm_loss
                      + cfg.w_world * world_loss
                      + cfg.w_forward * fwd_reg * 0.01
-                     + cfg.w_motor * motor_loss)
+                     + cfg.w_motor * motor_loss
+                     + cfg.w_pred_coding * pred_coding_loss)
 
             # ── Homeostatic stability loss (meta-training the orchestrator) ──
             # Penalizes identity drift + signal instability so the
@@ -822,6 +827,7 @@ class Brain(nn.Module):
             out["lm_loss"] = lm_loss_per.mean().detach()
             out["world_loss"] = world_loss.detach()
             out["motor_loss"] = motor_loss.detach()
+            out["pred_coding_loss"] = pred_coding_loss.detach()
             out["motor_speak_target_rate"] = speak_target.float().mean().detach()
             # Gene pool fitness = the unweighted LM loss
             self.gene_pool.report(float(lm_loss_per.mean().detach()))
@@ -857,7 +863,7 @@ class Brain(nn.Module):
         B, T = ids.shape
         # Compute logits from language cortex (no conditioning thought)
         # We run the language forward to get logits for all positions.
-        logits, _, _ = self.language(ids)
+        logits, _, _, _ = self.language(ids)
         # Compute log softmax across vocab
         logp = F.log_softmax(logits, dim=-1)  # (B, T, V)
         # Gather token log-probs for each position
@@ -898,7 +904,7 @@ class Brain(nn.Module):
         # 1) Language cortex — modulated by qualia + ACh/eCB
         lang_in_thought = self.rcpt_lang.modulate(
             state["floating_thought"].unsqueeze(1), nt).squeeze(1)
-        logits, sem, h_lang = self.language(ids, thought=lang_in_thought)
+        logits, sem, h_lang, _ = self.language(ids, thought=lang_in_thought)
 
         # 2) Sensory + association
         sens, salience = self.sensory(sem)
@@ -1396,7 +1402,7 @@ class Brain(nn.Module):
                     ids_t = torch.tensor([ids], dtype=torch.long, device=device)
                     self.language.eval()
                     with torch.no_grad():
-                        logits, sem, _ = self.language(ids_t)
+                        logits, sem, _, _ = self.language(ids_t)
                         # surprise: NLL of last token under prefix
                         log_p = torch.log_softmax(logits[0, -2], dim=-1)
                         surprise = float(-log_p[ids_t[0, -1]].item())
