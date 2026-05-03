@@ -92,7 +92,9 @@ class TransmitterSystem(nn.Module):
         """Time step: decay levels toward baseline, replenish vesicles."""
         device = self.level.device
         decay    = self._tau_decay.to(device)
-        baseline = (self._baseline.to(device) + self.bias).clamp(0.0, 1.0)
+        base_raw = self._baseline.to(device)
+        # Bias can modulate baseline but not kill it — floor at 50% of default
+        baseline = torch.clamp(base_raw + self.bias, min=base_raw * 0.5, max=torch.ones_like(base_raw))
         repl     = self._tau_vesicle.to(device)
         new_level = self.level * decay + baseline * (1.0 - decay)
         new_ves   = (self.vesicles + repl).clamp(0.0, 1.0)

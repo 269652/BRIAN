@@ -836,7 +836,7 @@ class Brain(nn.Module):
                         self.module_genomes.steps != old_step):
                     self._recompile_all_genomes()
 
-        self.last_nt = {n: float(self.transmitters.get(n).mean()) for n in NT_NAMES}
+        self.last_nt = {n: float(self.transmitters.get(n).detach().mean()) for n in NT_NAMES}
         self.last_learning_gain = learning_gain.detach()
         self.last_action_idx = action_idx.detach()
         self.last_threat = threat.detach()
