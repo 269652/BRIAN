@@ -149,45 +149,46 @@ def large() -> BrainConfig:
 
 
 def xl() -> BrainConfig:
-    """~3B params — fits on A100 (40GB) with batch_size=2, grad checkpointing.
+    """~1.5B params — fits on A100 (40GB) with batch_size=2, grad checkpointing.
 
-    Architecture targets beating Qwen2.5-3B / Phi-3-mini on reasoning
-    benchmarks by combining dense transformer backbone with bio-inspired
-    modules + MoE + adaptive compute.
+    Scaled to actually fit in 40GB VRAM with all bio modules active.
+    MoE and adaptive compute disabled until wired into forward pass.
 
     Budget rationale:
-        embed/unembed:  50257 * 1024 * 2        ≈ 103M
-        24 trans blocks: 24 * (4 * 1024² + ff)   ≈ 800M
-        MoE (8 experts, top-2):                   ≈ 1.6B
-        modules + memory + pfc + consciousness:   ≈ 500M
-        TOTAL                                     ≈ 3.0B
+        embed/unembed:  50257 * 768 * 2          ≈ 77M
+        20 trans blocks: 20 * (4 * 768² + ff)     ≈ 470M
+        bio modules (pfc, dmn, hippo, etc.):       ≈ 400M
+        buffers + activations (batch=2, ctx=2048): ≈ 12GB
+        TOTAL params                               ≈ 1.5B (~3GB fp16)
+        TOTAL VRAM                                 ≈ 18GB (fits A100)
     """
     c = BrainConfig()
-    c.d_sem = 1024
+    c.d_sem = 768
     c.d_hidden = 2048
-    c.lang_layers = 24
-    c.lang_heads = 16
+    c.lang_layers = 20
+    c.lang_heads = 12
     c.lang_ctx = 2048
-    c.dmn_layers = 4
-    c.pfc_layers = 4
+    c.dmn_layers = 3
+    c.pfc_layers = 3
     c.pfc_heads = 8
-    c.gws_slots = 16
+    c.gws_slots = 12
     c.gws_heads = 8
-    c.world_layers = 3
+    c.world_layers = 2
     c.self_layers = 2
-    c.forward_layers = 3
-    c.hippo_capacity = 16384
+    c.forward_layers = 2
+    c.hippo_capacity = 8192
     c.hippo_topk = 8
     c.hippo_sparse_k = 128
-    c.max_thinking_steps = 16
+    c.max_thinking_steps = 12
     c.warmup_steps = 1000
-    c.lr = 1.5e-4
+    c.lr = 2e-4
     c.weight_decay = 0.1
     c.gradient_checkpointing = True
-    c.use_moe = True
+    # MoE + adaptive compute disabled — not yet wired into forward pass
+    c.use_moe = False
     c.moe_experts = 8
     c.moe_top_k = 2
-    c.use_adaptive_compute = True
+    c.use_adaptive_compute = False
     c.max_ponder_steps = 8
     return c
 
