@@ -67,6 +67,14 @@ class BrainConfig:
     w_motor: float = 0.05      # SPEAK gate auxiliary loss
     speak_conf_threshold: float = 0.25  # min next-token confidence to want to SPEAK
 
+    # ---- Intelligence-density features ----
+    gradient_checkpointing: bool = False
+    use_moe: bool = False
+    moe_experts: int = 8
+    moe_top_k: int = 2
+    use_adaptive_compute: bool = False
+    max_ponder_steps: int = 8
+
 
 # ----- Preset sizes -----
 def tiny() -> BrainConfig:
@@ -140,4 +148,83 @@ def large() -> BrainConfig:
     return c
 
 
-PRESETS = {"tiny": tiny, "small": small, "medium": medium, "large": large}
+def xl() -> BrainConfig:
+    """~3B params — fits on A100 (40GB) with batch_size=2, grad checkpointing.
+
+    Architecture targets beating Qwen2.5-3B / Phi-3-mini on reasoning
+    benchmarks by combining dense transformer backbone with bio-inspired
+    modules + MoE + adaptive compute.
+
+    Budget rationale:
+        embed/unembed:  50257 * 1024 * 2        ≈ 103M
+        24 trans blocks: 24 * (4 * 1024² + ff)   ≈ 800M
+        MoE (8 experts, top-2):                   ≈ 1.6B
+        modules + memory + pfc + consciousness:   ≈ 500M
+        TOTAL                                     ≈ 3.0B
+    """
+    c = BrainConfig()
+    c.d_sem = 1024
+    c.d_hidden = 2048
+    c.lang_layers = 24
+    c.lang_heads = 16
+    c.lang_ctx = 2048
+    c.dmn_layers = 4
+    c.pfc_layers = 4
+    c.pfc_heads = 8
+    c.gws_slots = 16
+    c.gws_heads = 8
+    c.world_layers = 3
+    c.self_layers = 2
+    c.forward_layers = 3
+    c.hippo_capacity = 16384
+    c.hippo_topk = 8
+    c.hippo_sparse_k = 128
+    c.max_thinking_steps = 16
+    c.warmup_steps = 1000
+    c.lr = 1.5e-4
+    c.weight_decay = 0.1
+    c.gradient_checkpointing = True
+    c.use_moe = True
+    c.moe_experts = 8
+    c.moe_top_k = 2
+    c.use_adaptive_compute = True
+    c.max_ponder_steps = 8
+    return c
+
+
+def xxl() -> BrainConfig:
+    """~10B params — requires multi-GPU (4×A100 or 8×A100).
+
+    Target: outperform Qwen2.5-7B and compete with 14B-class models.
+    """
+    c = BrainConfig()
+    c.d_sem = 2048
+    c.d_hidden = 4096
+    c.lang_layers = 32
+    c.lang_heads = 32
+    c.lang_ctx = 4096
+    c.dmn_layers = 6
+    c.pfc_layers = 6
+    c.pfc_heads = 16
+    c.gws_slots = 24
+    c.gws_heads = 16
+    c.world_layers = 4
+    c.self_layers = 3
+    c.forward_layers = 4
+    c.hippo_capacity = 32768
+    c.hippo_topk = 12
+    c.hippo_sparse_k = 256
+    c.max_thinking_steps = 24
+    c.warmup_steps = 2000
+    c.lr = 1e-4
+    c.weight_decay = 0.1
+    c.gradient_checkpointing = True
+    c.use_moe = True
+    c.moe_experts = 16
+    c.moe_top_k = 2
+    c.use_adaptive_compute = True
+    c.max_ponder_steps = 12
+    return c
+
+
+PRESETS = {"tiny": tiny, "small": small, "medium": medium, "large": large, "xl": xl, "xxl": xxl}

@@ -38,8 +38,8 @@ def cosine_lr(step: int, warmup: int, total: int, peak: float) -> float:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--preset", default="small", choices=list(PRESETS.keys()))
-    ap.add_argument("--steps", type=int, default=2000)
+    ap.add_argument("--preset", default="xl", choices=list(PRESETS.keys()))
+    ap.add_argument("--steps", type=int, default=100000)
     ap.add_argument("--batch_size", type=int, default=4)
     ap.add_argument("--ctx", type=int, default=None,
                     help="override context length (must be <= cfg.lang_ctx)")
@@ -47,7 +47,8 @@ def main():
     ap.add_argument("--save_every", type=int, default=500)
     ap.add_argument("--log_every", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--resume", default=None)
+    ap.add_argument("--resume", default=None,
+                    help="Path to checkpoint, or 'latest' to auto-find the most recent.")
     ap.add_argument("--transfer", default=None,
                     help="Load only matching tensors from a previous checkpoint "
                          "(use when architecture changed).")
@@ -108,17 +109,49 @@ def main():
         meta_opt = AdamW(meta_params, lr=args.meta_lr)
 
     start_step = 0
-    if args.resume and Path(args.resume).exists():
-        ckpt = torch.load(args.resume, map_location=device)
-        brain.load_state_dict(ckpt["model"])
-        optim.load_state_dict(ckpt["optim"])
-        start_step = ckpt["step"]
-        if "gene_pool" in ckpt:
-            from .genome import GenePool
-            brain.gene_pool = GenePool.from_state(ckpt["gene_pool"])
-        print(f"[train] resumed from {args.resume} @ step {start_step}", flush=True)
+    if args.resume:
+        resume_path = args.resume
+        if resume_path == "latest":
+            # Auto-find the most recent checkpoint
+            import glob as _glob
+            candidates = sorted(
+                _glob.glob(os.path.join(args.ckpt_dir, "*.pt")),
+                key=lambda f: os.path.getmtime(f))
+            if not candidates:
+                candidates = sorted(
+                    _glob.glob(os.path.join(
+                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "lfs_checkpoints", "*.pt")),
+                    key=lambda f: os.path.getmtime(f))
+            if candidates:
+                resume_path = candidates[-1]
+                print(f"[train] auto-found latest checkpoint: {resume_path}", flush=True)
+            else:
+                print("[train] no checkpoint found, training from scratch", flush=True)
+                resume_path = None
+        if resume_path and Path(resume_path).exists():
+            ckpt = torch.load(resume_path, map_location=device, weights_only=False)
+            brain.load_state_dict(ckpt["model"], strict=False)
+            if "optim" in ckpt:
+                try:
+                    optim.load_state_dict(ckpt["optim"])
+                except Exception as e:
+                    print(f"[train] could not restore optimizer state: {e}", flush=True)
+            start_step = ckpt.get("step", 0)
+            if "gene_pool" in ckpt:
+                from .genome import GenePool
+                brain.gene_pool = GenePool.from_state(ckpt["gene_pool"])
+            # Restore memory checkpoint if available
+            mem_path = str(resume_path).replace(".pt", ".mem")
+            if Path(mem_path).exists():
+                try:
+                    brain.load_memory_checkpoint(mem_path)
+                    print(f"[train] restored memory from {mem_path}", flush=True)
+                except Exception as e:
+                    print(f"[train] could not restore memory: {e}", flush=True)
+            print(f"[train] resumed from {resume_path} @ step {start_step}", flush=True)
     elif args.transfer and Path(args.transfer).exists():
-        ckpt = torch.load(args.transfer, map_location=device)
+        ckpt = torch.load(args.transfer, map_location=device, weights_only=False)
         brain.load_partial(ckpt["model"])
         if "gene_pool" in ckpt:
             from .genome import GenePool

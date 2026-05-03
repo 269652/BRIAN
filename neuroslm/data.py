@@ -94,27 +94,86 @@ def _fmt_hh(ex: dict) -> str:
                 .strip())
 
 
+def _fmt_fineweb(ex: dict) -> str:
+    return (ex.get("text") or "").strip()
+
+
+def _fmt_ultrachat(ex: dict) -> str:
+    messages = ex.get("messages") or []
+    out = []
+    for m in messages:
+        role = m.get("role", "")
+        content = (m.get("content") or "").strip()
+        if role == "user":
+            out.append(f"User: {content}")
+        elif role == "assistant":
+            out.append(f"Assistant: {content}")
+        elif role == "system":
+            out.append(f"System: {content}")
+    return "\n".join(out)
+
+
+def _fmt_wildchat(ex: dict) -> str:
+    conv = ex.get("conversation") or []
+    out = []
+    for turn in conv:
+        role = turn.get("role", "")
+        content = (turn.get("content") or "").strip()
+        if role == "user":
+            out.append(f"User: {content}")
+        elif role == "assistant":
+            out.append(f"Assistant: {content}")
+    return "\n".join(out)
+
+
+def _fmt_flan(ex: dict) -> str:
+    inp = (ex.get("inputs") or "").strip()
+    tgt = (ex.get("targets") or "").strip()
+    if inp and tgt:
+        return f"User: {inp}\nAssistant: {tgt}"
+    return inp or tgt
+
+
+def _fmt_dolly(ex: dict) -> str:
+    ctx = (ex.get("context") or "").strip()
+    inst = (ex.get("instruction") or "").strip()
+    resp = (ex.get("response") or "").strip()
+    prompt = f"{ctx}\n{inst}".strip() if ctx else inst
+    return f"User: {prompt}\nAssistant: {resp}"
+
+
 # ----------------------------------------------------------------------
 # Dataset chains. Each entry: (path, config, split, formatter, label).
+# Ordered by quality/size — first dataset that loads wins.
+# More datasets = more diversity = better generalization.
 # ----------------------------------------------------------------------
 TEXT_CHAIN = [
-    ("roneneldan/TinyStories",      None,                "train", _fmt_plain("text"), "TinyStories"),
+    # High-quality curated web text (10B+ tokens available)
+    ("HuggingFaceFW/fineweb-edu",   "sample-10BT",       "train", _fmt_fineweb,       "FineWeb-Edu-10BT"),
+    ("HuggingFaceTB/smollm-corpus", "fineweb-edu-dedup", "train", _fmt_plain("text"), "SmolLM-FineWeb"),
     ("HuggingFaceTB/smollm-corpus", "cosmopedia-v2",     "train", _fmt_plain("text"), "Cosmopedia-v2"),
+    ("roneneldan/TinyStories",      None,                "train", _fmt_plain("text"), "TinyStories"),
     ("wikitext",                    "wikitext-2-raw-v1", "train", _fmt_plain("text"), "wikitext"),
 ]
 
 CHAT_CHAIN = [
-    ("teknium/OpenHermes-2.5", None, "train", _fmt_openhermes,   "OpenHermes-2.5"),
-    ("Open-Orca/SlimOrca",     None, "train", _fmt_slimorca,     "SlimOrca"),
-    ("daily_dialog",           None, "train", _fmt_daily_dialog, "DailyDialog"),
-    ("Anthropic/hh-rlhf",      None, "train", _fmt_hh,           "hh-rlhf"),
-    ("OpenAssistant/oasst1",   None, "train", _fmt_oasst1,       "oasst1"),
+    # High-quality instruction/chat datasets — diverse and large
+    ("teknium/OpenHermes-2.5",      None, "train", _fmt_openhermes,  "OpenHermes-2.5"),
+    ("HuggingFaceH4/ultrachat_200k",None, "train_sft",_fmt_ultrachat,"UltraChat-200k"),
+    ("allenai/WildChat-1M-Full",    None, "train", _fmt_wildchat,    "WildChat-1M"),
+    ("Open-Orca/SlimOrca",          None, "train", _fmt_slimorca,    "SlimOrca"),
+    ("Anthropic/hh-rlhf",           None, "train", _fmt_hh,          "hh-rlhf"),
+    ("databricks/databricks-dolly-15k", None, "train", _fmt_dolly,   "Dolly-15k"),
+    ("daily_dialog",                None, "train", _fmt_daily_dialog, "DailyDialog"),
+    ("OpenAssistant/oasst1",        None, "train", _fmt_oasst1,      "oasst1"),
 ]
 
 # QA-focused chain: instruction-following datasets for factual quality
 QA_CHAIN = [
-    ("teknium/OpenHermes-2.5", None, "train", _fmt_openhermes,   "OpenHermes-2.5"),
-    ("Open-Orca/SlimOrca",     None, "train", _fmt_slimorca,     "SlimOrca"),
+    ("teknium/OpenHermes-2.5",      None, "train", _fmt_openhermes,  "OpenHermes-2.5"),
+    ("HuggingFaceH4/ultrachat_200k",None, "train_sft",_fmt_ultrachat,"UltraChat-200k"),
+    ("Open-Orca/SlimOrca",          None, "train", _fmt_slimorca,    "SlimOrca"),
+    ("databricks/databricks-dolly-15k", None, "train", _fmt_dolly,   "Dolly-15k"),
 ]
 
 
