@@ -232,6 +232,141 @@ class NeuralProgramInterpreter(nn.Module):
         return h
 
 
+class LatentProgramDecompiler:
+    """Decompiles decoded opcode sequences back to human-readable Lisp.
+
+    After training, the latent programs have drifted from their initial
+    Lisp source. This decompiler reconstructs readable Lisp from the
+    learned opcode distributions, so every module's algorithm is
+    *inspectable* — no black boxes.
+
+    The decompiler works by:
+      1. Taking opcode_logits (B, S, N_OPS) → hard argmax per step
+      2. Reading operand values (register indices, scalars, gates)
+      3. Emitting Lisp s-expressions for each instruction
+
+    The output is *approximate* — a soft program with 60% GATE and 40%
+    PROJECT at a step becomes (gate 0.6 (project ...)), but it captures
+    the dominant learned behavior.
+    """
+
+    # Map opcodes to Lisp forms
+    _LISP_FORMS: dict[str, str] = {
+        'NOP':        '(nop)',
+        'LOAD':       '(load r{src})',
+        'STORE':      '(store r{dst} {val:.3f})',
+        'ADD':        '(+ r{src} r{dst})',
+        'SUB':        '(- r{src} r{dst})',
+        'MUL':        '(* r{src} r{dst})',
+        'DIV':        '(/ r{src} (max r{dst} 1e-6))',
+        'RELU':       '(relu r{src})',
+        'SIGMOID':    '(sigmoid r{src})',
+        'TANH':       '(tanh r{src})',
+        'CMP_GT':     '(> r{src} r{dst})',
+        'CMP_LT':     '(< r{src} r{dst})',
+        'CMP_EQ':     '(= r{src} r{dst})',
+        'BRANCH':     '(if r{src} (goto {dst}))',
+        'LOOP_START': '(loop-begin {val:.0f})',
+        'LOOP_END':   '(loop-end)',
+        'CALL':       '(call sub-{src})',
+        'RETURN':     '(return r{src})',
+        'EMIT_NT':    '(emit-nt {nt} {val:.3f})',
+        'READ_NT':    '(read-nt {nt})',
+        'ATTEND':     '(attend r{src} r{dst})',
+        'PROJECT':    '(project r{src} :dim {dst})',
+        'NORMALIZE':  '(layer-norm r{src})',
+        'GATE':       '(gate r{src} :alpha {val:.3f})',
+        'RECALL':     '(recall-memory r{src})',
+        'WRITE_MEM':  '(write-memory r{src} r{dst})',
+        'MODULATE':   '(modulate r{src} :gain {val:.3f})',
+        'OSCILLATE':  '(oscillate :freq {val:.3f})',
+        'BIND':       '(bind r{src} r{dst})',
+        'PREDICT':    '(predict r{src} :horizon {dst})',
+        'ERROR':      '(prediction-error r{src} r{dst})',
+    }
+
+    _NT_NAMES = ['DA', 'NE', '5HT', 'ACh', 'GABA', 'Glu', 'eCB']
+
+    @classmethod
+    def decompile_step(cls, opcode_idx: int, operands: list[float],
+                       gate: float) -> str:
+        """Decompile a single program step to a Lisp expression."""
+        op_name = OPCODES[opcode_idx] if opcode_idx < len(OPCODES) else 'NOP'
+        src = int(abs(operands[0]) * 8) % 8
+        dst = int(abs(operands[1]) * 8) % 8
+        val = operands[2]
+        nt = cls._NT_NAMES[int(abs(val) * len(cls._NT_NAMES)) % len(cls._NT_NAMES)]
+
+        template = cls._LISP_FORMS.get(op_name, f'({op_name.lower()})')
+        try:
+            expr = template.format(src=src, dst=dst, val=val, nt=nt)
+        except (KeyError, IndexError):
+            expr = f'({op_name.lower()} r{src} r{dst} {val:.3f})'
+
+        # Wrap with gate if gate < 0.95 (i.e. not fully active)
+        if gate < 0.95:
+            expr = f'(blend {gate:.2f} {expr} identity)'
+        return expr
+
+    @classmethod
+    def decompile(cls, opcode_logits: torch.Tensor,
+                  operands: torch.Tensor,
+                  region_name: str = 'unknown',
+                  top_k: int = 2,
+                  min_gate: float = 0.05) -> str:
+        """Decompile a full program to Lisp source.
+
+        Args:
+            opcode_logits: (S, N_OPS) logits per step
+            operands: (S, 4) per step
+            region_name: name for the region header
+            top_k: show top-k opcodes per step (for soft programs)
+            min_gate: skip steps where gate < this (effectively NOPs)
+
+        Returns:
+            Human-readable Lisp source string
+        """
+        S = opcode_logits.size(0)
+        probs = F.softmax(opcode_logits, dim=-1)  # (S, N_OPS)
+
+        lines = [f';; Decompiled latent program for region: {region_name}',
+                 f';; {S} steps, showing dominant ops (top-{top_k})',
+                 f'(region {region_name}',
+                 f'  (program']
+
+        active_steps = 0
+        for step in range(S):
+            gate = torch.sigmoid(operands[step, 3]).item()
+            if gate < min_gate:
+                continue  # effectively a NOP, skip
+
+            # Top-k opcodes for this step
+            topk_probs, topk_idx = probs[step].topk(top_k)
+            ops_raw = operands[step, :3].tolist()
+
+            # Primary opcode
+            primary_idx = topk_idx[0].item()
+            primary_prob = topk_probs[0].item()
+            primary_expr = cls.decompile_step(primary_idx, ops_raw, gate)
+
+            if top_k > 1 and topk_probs[1].item() > 0.15:
+                # Show secondary opcode as comment
+                sec_idx = topk_idx[1].item()
+                sec_prob = topk_probs[1].item()
+                sec_name = OPCODES[sec_idx] if sec_idx < len(OPCODES) else '?'
+                lines.append(
+                    f'    {primary_expr}  '
+                    f'; [{primary_prob:.0%} {OPCODES[primary_idx]}, '
+                    f'{sec_prob:.0%} {sec_name}]')
+            else:
+                lines.append(f'    {primary_expr}  ; [{primary_prob:.0%}]')
+            active_steps += 1
+
+        lines.append(f'  )  ; {active_steps} active steps')
+        lines.append(')')
+        return '\n'.join(lines)
+
+
 class LatentProgramSystem(nn.Module):
     """Complete system: encode Lisp → latent → decode → interpret.
 
@@ -310,3 +445,40 @@ class LatentProgramSystem(nn.Module):
             self.register_program(child_name)
             with torch.no_grad():
                 self._programs[child_name].copy_(child)
+
+    # ---- Decompilation (latent → readable Lisp) ----
+
+    def decompile(self, name: str, top_k: int = 2) -> str:
+        """Decompile a named program back to human-readable Lisp.
+
+        This is the key interpretability feature: after training, the
+        latent vector has been optimized by gradient descent, and this
+        method reveals *what algorithm it learned* in Lisp form.
+        """
+        if name not in self._programs:
+            return f';; No program registered for "{name}"'
+
+        latent = self._programs[name].unsqueeze(0)
+        with torch.no_grad():
+            opcode_logits, operands = self.decoder(latent)
+        return LatentProgramDecompiler.decompile(
+            opcode_logits.squeeze(0), operands.squeeze(0),
+            region_name=name, top_k=top_k)
+
+    def decompile_all(self, top_k: int = 2) -> dict[str, str]:
+        """Decompile all registered programs to Lisp source.
+
+        Returns a dict of {region_name: lisp_source_string}.
+        """
+        return {name: self.decompile(name, top_k=top_k)
+                for name in self._programs}
+
+    def save_decompiled(self, directory: str, top_k: int = 2):
+        """Decompile all programs and write .lisp files to a directory."""
+        import os
+        os.makedirs(directory, exist_ok=True)
+        for name, source in self.decompile_all(top_k=top_k).items():
+            path = os.path.join(directory, f'{name}_learned.lisp')
+            with open(path, 'w') as f:
+                f.write(source)
+        return directory

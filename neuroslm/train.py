@@ -459,6 +459,15 @@ def main():
                     print(f"[train] intelligence: {m}", flush=True)
                 except Exception as e:
                     print(f"[train] metrics snapshot failed: {e}", flush=True)
+                # ── Decompile latent programs to readable Lisp ──
+                try:
+                    if hasattr(brain, 'latent_programs') and brain.latent_programs._programs:
+                        decomp_dir = Path(args.ckpt_dir) / f"decompiled_step_{step+1}"
+                        brain.latent_programs.save_decompiled(str(decomp_dir))
+                        for name, src in brain.latent_programs.decompile_all().items():
+                            print(f"[train] decompiled {name}:\n{src}", flush=True)
+                except Exception as e:
+                    print(f"[train] decompilation failed: {e}", flush=True)
                 print(f"[train] saved {path} | genome={brain.gene_pool.active().id} "
                       f"gen={brain.gene_pool.active().generation} | "
                       f"trophic={brain.trophic.stats()}", flush=True)
