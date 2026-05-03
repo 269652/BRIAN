@@ -353,6 +353,22 @@ def main():
                 "gene_pool": brain.gene_pool.state(),
                 "trophic_stats": brain.trophic.stats(),
             }, path)
+            # ── Save portable memory checkpoint (.mem) ──
+            try:
+                mem_path = Path("lfs_checkpoints") / f"neuroslm_{args.preset}{tag}_{step+1}.mem"
+                mem_path.parent.mkdir(parents=True, exist_ok=True)
+                stats = brain.save_memory_checkpoint(mem_path)
+                print(f"[train] saved memory checkpoint {mem_path.name} | {stats}", flush=True)
+            except Exception as e:
+                print(f"[train] memory checkpoint failed: {e}", flush=True)
+            # ── Intelligence metrics snapshot ──
+            try:
+                brain.metrics.observe_narrative(brain.narrative_system)
+                brain.metrics.observe_memory(brain.episodic, brain.consolidated, brain.causal)
+                m = brain.metrics.format()
+                print(f"[train] intelligence: {m}", flush=True)
+            except Exception as e:
+                print(f"[train] metrics snapshot failed: {e}", flush=True)
             print(f"[train] saved {path} | genome={brain.gene_pool.active().id} "
                   f"gen={brain.gene_pool.active().generation} | "
                   f"trophic={brain.trophic.stats()}", flush=True)
@@ -384,7 +400,7 @@ def main():
                            cwd=repo_root, capture_output=True, check=True)
             subprocess.run(["git", "push"], cwd=repo_root,
                            capture_output=True, check=True)
-            print("[train] ✓ checkpoint pushed to remote (Git LFS)", flush=True)
+            print("[train] ✓ checkpoint + memory pushed to remote (Git LFS)", flush=True)
     except Exception as e:
         print(f"[train] ⚠ auto-push failed: {e}", flush=True)
         print("[train] checkpoint saved locally; push manually if needed", flush=True)

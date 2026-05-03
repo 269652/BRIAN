@@ -101,26 +101,42 @@ def medium() -> BrainConfig:
 
 
 def large() -> BrainConfig:
-    """~100M params. Targets high reasoning / instruction following.
-    Sized to fit on a T4 (16GB VRAM) with batch_size=2."""
+    """~100M params, allocated for maximum intelligence density.
+
+    Design choices (per the refactor):
+      * Narrower d_sem (256) to maximize compute-per-param.
+      * Deeper recurrent transformer (lang_layers=8) where most params
+        live; AdaptiveComputeBlock + ponder gives effective depth >24.
+      * Wider PFC for planning (pfc_layers=3) but conservative DMN.
+      * Long context (1024) so causal patterns over discourse are visible.
+      * Larger gws_slots (12) = more concurrent broadcast streams.
+
+    Sized to fit T4 16GB at batch_size=2 with grad checkpointing on the
+    language cortex. Budget rationale:
+        embed/unembed:  50257 * 256 * 2  ≈ 26M
+        8 trans blocks: 8 * (4 * 256² + ff(4×))  ≈ 25M
+        MoE (8 experts, top-2): ≈ 30M (only ~25% active per token)
+        modules + memory heads: ≈ 20M
+        TOTAL                                    ≈ 100M
+    """
     c = BrainConfig()
     c.d_sem = 256
     c.d_hidden = 384
-    c.lang_layers = 6
-    c.lang_heads = 6
-    c.lang_ctx = 512
+    c.lang_layers = 8
+    c.lang_heads = 8
+    c.lang_ctx = 1024
     c.dmn_layers = 3
     c.pfc_layers = 3
     c.pfc_heads = 4
-    c.gws_slots = 8
+    c.gws_slots = 12
     c.gws_heads = 4
     c.world_layers = 2
     c.forward_layers = 2
-    c.hippo_capacity = 4096
-    c.hippo_topk = 4
-    c.max_thinking_steps = 8
-    c.warmup_steps = 300
-    c.lr = 3e-4
+    c.hippo_capacity = 8192
+    c.hippo_topk = 6
+    c.max_thinking_steps = 12      # recurrent ponder depth
+    c.warmup_steps = 500
+    c.lr = 2.5e-4
     return c
 
 

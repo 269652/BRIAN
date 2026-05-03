@@ -204,6 +204,8 @@ class Brain(nn.Module):
         from .memory.mesolimbic import MesolimbicTagger
         from .memory.hippocampal import HippocampalEnrichment
         from .memory.relational_graph import RelationalMemoryGraph
+        from .memory.causal import CausalRuleStore
+        from .memory.comprehension_gate import ComprehensionGate
         self.episodic = EpisodicMemory(maxlen=2048)
         self.consolidated = ConsolidatedMemory()
         self.narrative_self = NarrativeBuffer(maxlen=2048)
@@ -215,6 +217,24 @@ class Brain(nn.Module):
         # encoding associativity, causality, temporality, patterns, NT state
         self.relational_memory = RelationalMemoryGraph(max_nodes=8192)
         self._last_memory_id: int | None = None  # for causal chaining
+
+        # Causal pattern store — generalizations of (action, ctx) → outcome.
+        # Persists across runs via the .mem checkpoint format.
+        self.causal = CausalRuleStore(merge_threshold=0.86, min_support=2)
+
+        # Comprehension gate — decides which observations become episodes.
+        # Tuned for ~10% write rate so QA training produces concept memories,
+        # not verbatim copies.
+        self.comprehension_gate = ComprehensionGate(
+            threshold=0.05, target_write_rate=0.10)
+
+        # Spontaneous self-reflection + theory-of-mind heads
+        from .intelligence.reflection import SpontaneousReflection
+        self.reflection = SpontaneousReflection(self.cfg.d_sem)
+
+        # Quantitative consciousness/intelligence metrics
+        from .intelligence.metrics import IntelligenceMetrics
+        self.metrics = IntelligenceMetrics()
 
         # ---- Qualia state module ----
         self.qualia = QualiaState(self.cfg.d_sem, len(NT_NAMES))
@@ -1123,30 +1143,56 @@ class Brain(nn.Module):
 
     # ------------------ Memory helpers ------------------
     def record_episode(self, content, content_vec=None, nt_state=None, emotion=None, tags=None, context=None):
-        """Record an episodic memory. If content_vec is None, compute a semantic
-        embedding using the model's LanguageCortex (in eval mode). This is a
-        best-effort operation — failures are swallowed so training isn't
-        interrupted by memory logging issues."""
+        """Record an episodic memory through the comprehension gate.
+
+        Most observations are *not* stored — only those that score high
+        on (surprise × comprehension × novelty). This is what turns QA
+        training into concept-memory formation rather than rote copying.
+
+        Returns the gate evaluation dict (use it to log gate behavior).
+        """
         try:
+            import numpy as np
             vec = content_vec
+            predicted_vec = None
+            surprise = 1.0
             if vec is None:
-                # Lazily import tokenizer to avoid circular imports at module load
                 from .tokenizer import Tokenizer
                 tok = Tokenizer()
                 ids = tok.encode(content)
-                # Truncate/pad to context length
                 ids = ids[-self.cfg.lang_ctx:]
                 import torch
                 device = next(self.language.parameters()).device if any(True for _ in self.language.parameters()) else torch.device('cpu')
-                ids_t = torch.tensor([ids], dtype=torch.long, device=device)
-                # Run LM in eval mode to get semantic vector
-                self.language.eval()
-                with torch.no_grad():
-                    _, sem, _ = self.language(ids_t)
-                vec = sem.squeeze(0).cpu().numpy()
-            self.episodic.add(content, content_vec=vec, nt_state=nt_state, emotion=emotion, tags=tags, context=context)
+                if len(ids) >= 2:
+                    ids_t = torch.tensor([ids], dtype=torch.long, device=device)
+                    self.language.eval()
+                    with torch.no_grad():
+                        logits, sem, _ = self.language(ids_t)
+                        # surprise: NLL of last token under prefix
+                        log_p = torch.log_softmax(logits[0, -2], dim=-1)
+                        surprise = float(-log_p[ids_t[0, -1]].item())
+                        # predicted "next" embedding (mean of last two)
+                        predicted_vec = sem[0, -2].cpu().numpy()
+                    vec = sem.squeeze(0).mean(0).cpu().numpy()
+                else:
+                    vec = np.zeros(self.cfg.d_sem, dtype=np.float32)
+            # Comprehension gate decision
+            gate = self.comprehension_gate.evaluate(
+                obs_vec=np.asarray(vec).flatten(),
+                predicted_vec=predicted_vec,
+                surprise=surprise,
+                consolidated=self.consolidated,
+            )
+            if gate["write"]:
+                tags = list(tags or []) + [
+                    f"comprehension={gate['comprehension']:.2f}",
+                    f"novelty={gate['novelty']:.2f}",
+                ]
+                self.episodic.add(content, content_vec=vec, nt_state=nt_state,
+                                  emotion=emotion, tags=tags, context=context)
+            return gate
         except Exception:
-            return
+            return {"write": False, "score": 0.0, "error": True}
 
     def tag_memory(self, memory_id: int, reward: float, insight=None):
         try:
@@ -1155,15 +1201,64 @@ class Brain(nn.Module):
             return
 
     def consolidate_memory(self, threshold: float = 0.85):
+        """Consolidate recent episodes into the graph AND extract causal
+        rules of the form (action_ctx) → outcome_valence.
+
+        Causal extraction reads the mesolimbic tag (reward) attached to
+        each consolidated episode and treats consecutive episodes as
+        (context_t, action_t) → outcome_t+1.
+        """
         try:
+            import numpy as np
             episodes = self.episodic.recent(256)
-            # Each episode should have a content_vec field; fall back to zero vectors
             for ep in episodes:
                 if 'content_vec' not in ep:
                     ep['content_vec'] = getattr(ep, 'content_vec', None) or (0.0,)
             self.consolidated.consolidate(episodes, threshold=threshold)
+
+            # Causal extraction: pair (prev → curr) and use mesolimbic
+            # reward tags as outcome valence. Generalizes "action made
+            # entity happy/sad" patterns over many examples.
+            for i in range(1, len(episodes)):
+                prev, curr = episodes[i - 1], episodes[i]
+                ctx = np.asarray(prev.get('content_vec', [0.0])).flatten()
+                act = np.asarray(curr.get('content_vec', [0.0])).flatten()
+                # outcome valence: prefer mesolimbic tag, fall back to NT
+                outcome = 0.0
+                try:
+                    tag = self.mesolimbic.get_tag(i) if hasattr(self.mesolimbic, 'get_tag') else None
+                    if tag is not None:
+                        outcome = float(tag.get('reward', 0.0))
+                except Exception:
+                    pass
+                if outcome == 0.0:
+                    nt = curr.get('nt_state')
+                    if nt is not None:
+                        nt = np.asarray(nt).flatten()
+                        # crude: DA-rich = positive; CRH/cortisol = negative
+                        outcome = float(nt[:1].mean() - nt[-1:].mean()) if nt.size >= 2 else 0.0
+                if abs(outcome) > 0.05:
+                    self.causal.observe(act, ctx, outcome,
+                                        step=getattr(self, '_global_step', 0))
+            self.causal.prune(max_rules=2048)
         except Exception:
             return
+
+    # ------------------ Memory checkpoint (Git-LFS shippable) ------------------
+    def save_memory_checkpoint(self, path):
+        """Save consolidated graph + narratives + causal rules to a `.mem`
+        file. Independent of model weights — transferable to a fresh
+        model with matching d_sem.
+        """
+        from .memory.store import save_memory
+        return save_memory(path, self)
+
+    def load_memory_checkpoint(self, path):
+        """Restore memory state from a `.mem` file (does not touch model
+        weights). Embeddings of differing dim are zero-padded/truncated.
+        """
+        from .memory.store import load_memory
+        return load_memory(path, self)
 
     def update_narratives(self):
         try:
