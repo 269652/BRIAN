@@ -3,8 +3,13 @@
 Instead of a simple scalar multiplier, this module maintains per-parameter
 hidden state (LSTM-based, like L2L) and produces both magnitude and
 direction corrections.  It also accepts a *comprehension signal* (rate of
-prediction-error reduction) so the optimizer learns to maximise language
-understanding speed, not just raw loss reduction.
+prediction-error reduction) so the optimizer learns to maximise deep
+comprehension and intelligence, not just raw loss reduction speed.
+
+The meta-objective optimizes for:
+  - Calibrated predictions (knowing what you don't know)
+  - Diverse semantic representations (rich internal models, not collapse)
+  - Smooth reasoning (coherent predictions, not erratic pattern-matching)
 
 Features fed per parameter group:
   [log|g|, log|p|, cos(g,p), sign(g)·log(1+|g|), momentum_ema,

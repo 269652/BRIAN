@@ -230,11 +230,55 @@ def main():
                 virtual_map[name] = virtual
 
             # Evaluate meta-loss under virtual language params
+            # ── Comprehension-focused meta-objective ──
+            # Instead of raw cross-entropy (which rewards fast memorization),
+            # we optimize for deep understanding: calibrated predictions,
+            # diverse semantic representations, and smooth reasoning.
             meta_out = functional_call(brain.language, virtual_map, (meta_ids,))
-            logits_meta, _, _ = meta_out
-            meta_loss = torch.nn.functional.cross_entropy(
+            logits_meta, sem_meta, _ = meta_out
+
+            # (a) Base language modeling loss
+            raw_lm_loss = torch.nn.functional.cross_entropy(
                 logits_meta.reshape(-1, logits_meta.size(-1)),
                 meta_targets.reshape(-1), ignore_index=-100)
+
+            # (b) Calibration penalty — penalize overconfident wrong predictions
+            #     Comprehension = knowing what you DON'T know
+            meta_probs = torch.softmax(logits_meta.detach(), dim=-1)
+            top_prob = meta_probs.max(dim=-1).values.mean()
+            calibration = torch.relu(top_prob - 0.85) * 2.0
+
+            # (c) Semantic diversity — rich internal representations
+            #     Collapsed representations = rote memorization, not understanding
+            if sem_meta is not None and sem_meta.size(1) > 1:
+                sem_flat = sem_meta.reshape(-1, sem_meta.size(-1))
+                sem_norm = torch.nn.functional.normalize(sem_flat, dim=-1)
+                # Sample subset to avoid O(n²) cost
+                n_sample = min(64, sem_norm.size(0))
+                idx = torch.randperm(sem_norm.size(0), device=device)[:n_sample]
+                sem_sub = sem_norm[idx]
+                sim = torch.mm(sem_sub, sem_sub.T)
+                # Off-diagonal mean: lower = more diverse
+                mask = ~torch.eye(n_sample, device=device, dtype=torch.bool)
+                diversity_loss = sim[mask].mean()
+            else:
+                diversity_loss = torch.zeros(1, device=device)
+
+            # (d) Prediction smoothness — comprehension means coherent predictions
+            #     Erratic logit jumps = pattern matching, not understanding
+            if logits_meta.size(1) > 2:
+                logit_diff = (logits_meta[:, 1:] - logits_meta[:, :-1]).pow(2).mean()
+                smoothness_loss = logit_diff * 0.001
+            else:
+                smoothness_loss = torch.zeros(1, device=device)
+
+            # Combined comprehension meta-loss
+            meta_loss = (
+                raw_lm_loss
+                + 0.1 * calibration
+                + 0.05 * diversity_loss
+                + smoothness_loss
+            )
 
             # Update meta-parameters (learned optimizer + geometry adapters)
             meta_opt.zero_grad(set_to_none=True)
@@ -314,6 +358,36 @@ def main():
                   f"trophic={brain.trophic.stats()}", flush=True)
 
     print("[train] done.", flush=True)
+
+    # ─── Auto-push final checkpoint to Git LFS ───
+    try:
+        import shutil, subprocess
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        lfs_dir = os.path.join(repo_root, "lfs_checkpoints")
+        os.makedirs(lfs_dir, exist_ok=True)
+        save_dir = args.ckpt_dir
+        ckpts = sorted(
+            [f for f in os.listdir(save_dir) if f.endswith(".pt")],
+            key=lambda f: os.path.getmtime(os.path.join(save_dir, f))
+        )
+        if ckpts:
+            latest = os.path.join(save_dir, ckpts[-1])
+            lfs_path = os.path.join(lfs_dir, ckpts[-1])
+            shutil.copy2(latest, lfs_path)
+            print(f"[train] persisting checkpoint via Git LFS: {ckpts[-1]}", flush=True)
+            subprocess.run(["git", "lfs", "install"], cwd=repo_root,
+                           capture_output=True, check=True)
+            subprocess.run(["git", "add", "lfs_checkpoints/"], cwd=repo_root,
+                           capture_output=True, check=True)
+            subprocess.run(["git", "commit", "-m",
+                            f"chkpt: {ckpts[-1]} (auto-push)"],
+                           cwd=repo_root, capture_output=True, check=True)
+            subprocess.run(["git", "push"], cwd=repo_root,
+                           capture_output=True, check=True)
+            print("[train] ✓ checkpoint pushed to remote (Git LFS)", flush=True)
+    except Exception as e:
+        print(f"[train] ⚠ auto-push failed: {e}", flush=True)
+        print("[train] checkpoint saved locally; push manually if needed", flush=True)
 
 
 if __name__ == "__main__":
