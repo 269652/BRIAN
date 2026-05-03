@@ -75,6 +75,9 @@ class BrainConfig:
     use_adaptive_compute: bool = False
     max_ponder_steps: int = 8
 
+    # ---- Ablation ----
+    baseline: bool = False  # True = vanilla transformer only, no bio modules
+
 
 # ----- Preset sizes -----
 def tiny() -> BrainConfig:

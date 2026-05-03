@@ -143,6 +143,15 @@ class Brain(nn.Module):
         # keep original config and allow a scaled build cfg to be applied via Ribosome
         self.base_cfg = cfg
 
+        # ---- Baseline mode: vanilla transformer only ----
+        if getattr(cfg, 'baseline', False):
+            self.cfg = cfg
+            self.language = LanguageCortex(cfg.vocab_size, cfg.d_hidden, cfg.d_sem,
+                                          cfg.lang_layers, cfg.lang_heads, cfg.lang_ctx)
+            self._baseline = True
+            return
+        self._baseline = False
+
         # ---- DNA-driven construction (load templates) ----
         from .dna.dsl import LispVM
         self.dna_vm = {}
@@ -422,6 +431,20 @@ class Brain(nn.Module):
     # Pretraining forward
     # ====================================================================
     def forward_lm(self, ids: torch.Tensor, targets: torch.Tensor | None = None):
+        # ---- Baseline: pure language model, no bio modules ----
+        if getattr(self, '_baseline', False):
+            logits, sem, h = self.language(ids)
+            out = {"logits": logits}
+            if targets is not None:
+                B, T = ids.shape
+                loss = F.cross_entropy(
+                    logits.reshape(-1, self.cfg.vocab_size), targets.reshape(-1),
+                    ignore_index=-100)
+                out["loss"] = loss
+                out["lm_loss"] = loss.detach()
+            return out
+
+        # ---- Full model with bio modules ----
         cfg = self.cfg
         B, T = ids.shape
         device = ids.device

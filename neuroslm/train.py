@@ -62,6 +62,8 @@ def main():
                          "mix=interleave (recommended once base LM is decent)")
     ap.add_argument("--chat_ratio", type=float, default=0.75,
                     help="(mix only) fraction of windows from chat datasets")
+    ap.add_argument("--baseline", action="store_true",
+                    help="Train vanilla transformer only (no bio modules) for ablation")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -83,12 +85,15 @@ def main():
     cfg = PRESETS[args.preset]()
     tok = Tokenizer()
     cfg.vocab_size = tok.vocab_size
+    if args.baseline:
+        cfg.baseline = True
     ctx_len = args.ctx or cfg.lang_ctx
     assert ctx_len <= cfg.lang_ctx
 
     brain = Brain(cfg).to(device)
     n_params = brain.num_parameters()
-    print(f"[train] model params: {n_params/1e6:.2f}M (preset={args.preset})", flush=True)
+    mode_label = "BASELINE (vanilla transformer)" if cfg.baseline else "FULL (bio modules)"
+    print(f"[train] {mode_label} | params: {n_params/1e6:.2f}M (preset={args.preset})", flush=True)
 
     # Separate optimizers: model optimizer updates model params; meta optimizer
     # updates the learned optimizer (`brain.learned_opt`). This avoids double
@@ -99,7 +104,7 @@ def main():
                   weight_decay=cfg.weight_decay, betas=(0.9, 0.95))
 
     meta_opt = None
-    if args.meta:
+    if args.meta and not cfg.baseline:
         # meta optimizer updates the learned optimizer + geometry adapters
         meta_params = list(brain.learned_opt.parameters())
         # Include geometry adapter parameters so the neural topology is meta-learned
@@ -138,11 +143,12 @@ def main():
                 except Exception as e:
                     print(f"[train] could not restore optimizer state: {e}", flush=True)
             start_step = ckpt.get("step", 0)
-            if "gene_pool" in ckpt:
+            if "gene_pool" in ckpt and not cfg.baseline:
                 from .genome import GenePool
                 brain.gene_pool = GenePool.from_state(ckpt["gene_pool"])
             # Restore memory checkpoint if available
-            mem_path = str(resume_path).replace(".pt", ".mem")
+            if not cfg.baseline:
+                mem_path = str(resume_path).replace(".pt", ".mem")
             if Path(mem_path).exists():
                 try:
                     brain.load_memory_checkpoint(mem_path)
@@ -153,7 +159,7 @@ def main():
     elif args.transfer and Path(args.transfer).exists():
         ckpt = torch.load(args.transfer, map_location=device, weights_only=False)
         brain.load_partial(ckpt["model"])
-        if "gene_pool" in ckpt:
+        if "gene_pool" in ckpt and not cfg.baseline:
             from .genome import GenePool
             brain.gene_pool = GenePool.from_state(ckpt["gene_pool"])
         print(f"[train] transferred matching tensors from {args.transfer}", flush=True)
@@ -190,13 +196,14 @@ def main():
 
     # --- Memory system integration ---
         # 1. Record episodic memory for this batch (use first sample for simplicity)
-        content = tok.decode(ids[0].tolist())
-        content_vec = ids[0].float().cpu().numpy()  # Placeholder: use embedding for real system
-        nt_state = brain.transmitters.vector()[0].cpu().numpy()
-        emotion = None  # Placeholder: can be inferred from NT or model output
-        tags = []
-        context = {'self': True}  # Placeholder: can be set based on batch/task
-        brain.record_episode(content, content_vec, nt_state, emotion, tags, context)
+        if not cfg.baseline:
+            content = tok.decode(ids[0].tolist())
+            content_vec = ids[0].float().cpu().numpy()  # Placeholder: use embedding for real system
+            nt_state = brain.transmitters.vector()[0].cpu().numpy()
+            emotion = None  # Placeholder: can be inferred from NT or model output
+            tags = []
+            context = {'self': True}  # Placeholder: can be set based on batch/task
+            brain.record_episode(content, content_vec, nt_state, emotion, tags, context)
 
         # 2. Forward pass (full brain pipeline — no create_graph needed here)
         out = brain.forward_lm(ids, targets)
@@ -205,7 +212,7 @@ def main():
         # If meta-training is enabled, perform a one-step differentiable unroll.
         # We do a SEPARATE language-only forward pass for the meta path to avoid
         # in-place modification issues from the full brain pipeline.
-        if args.meta:
+        if args.meta and not cfg.baseline:
             # FOMAML meta-training: first-order grads + meta-forward.
             # No need for math SDP or CuDNN disabling since we don't do
             # higher-order differentiation anymore.
@@ -335,25 +342,33 @@ def main():
             gnorm = torch.nn.utils.clip_grad_norm_(model_params, cfg.grad_clip)
             optim.step()
 
-        if not args.meta:
+        if not args.meta and not cfg.baseline:
+            optim.zero_grad(set_to_none=True)
+            loss.backward()
+            gnorm = torch.nn.utils.clip_grad_norm_(brain.parameters(), cfg.grad_clip)
+            optim.step()
+
+        if not args.meta and cfg.baseline:
             optim.zero_grad(set_to_none=True)
             loss.backward()
             gnorm = torch.nn.utils.clip_grad_norm_(brain.parameters(), cfg.grad_clip)
             optim.step()
 
         # 3. Tag memory with reward/insight (mesolimbic)
-        reward = float(out["learning_gain"][0].item()) if "learning_gain" in out else 0.0
-        insight = None  # Placeholder: can be set if new pattern detected
-        brain.tag_memory(len(brain.episodic.buffer)-1, reward, insight)
+        if not cfg.baseline:
+            reward = float(out["learning_gain"][0].item()) if "learning_gain" in out else 0.0
+            insight = None  # Placeholder: can be set if new pattern detected
+            brain.tag_memory(len(brain.episodic.buffer)-1, reward, insight)
 
         # 4. Consolidate and update narratives every 500 steps
-        if (step + 1) % 500 == 0:
+        if not cfg.baseline and (step + 1) % 500 == 0:
             brain.consolidate_memory()
             brain.update_narratives()
 
         # Slow homeostatic regulation of NT baselines & gains.
-        brain.homeostasis.observe(brain.transmitters,
-                                  float(out["lm_loss"].item()), float(gnorm))
+        if not cfg.baseline:
+            brain.homeostasis.observe(brain.transmitters,
+                                      float(out["lm_loss"].item()), float(gnorm))
 
         running_loss += float(loss.item())
         running_lm += float(out["lm_loss"].item())
@@ -365,46 +380,57 @@ def main():
             avg_lm = running_lm / n_obs
             ppl = math.exp(min(avg_lm, 20))
             tok_per_s = args.log_every * args.batch_size * ctx_len / max(dt, 1e-3)
-            nt_str = " ".join(f"{k}={v:.2f}" for k, v in (brain.last_nt or {}).items())
-            lg = float(brain.last_learning_gain.mean()) if brain.last_learning_gain is not None else 0.0
-            print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
-                  f"| ppl {ppl:.1f} | lr {optim.param_groups[0]['lr']:.2e} "
-                  f"| {tok_per_s:.0f} tok/s | mesoLG {lg:.2f} | NT[{nt_str}]", flush=True)
+            if cfg.baseline:
+                print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
+                      f"| ppl {ppl:.1f} | lr {optim.param_groups[0]['lr']:.2e} "
+                      f"| {tok_per_s:.0f} tok/s | BASELINE", flush=True)
+            else:
+                nt_str = " ".join(f"{k}={v:.2f}" for k, v in (brain.last_nt or {}).items())
+                lg = float(brain.last_learning_gain.mean()) if brain.last_learning_gain is not None else 0.0
+                print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
+                      f"| ppl {ppl:.1f} | lr {optim.param_groups[0]['lr']:.2e} "
+                      f"| {tok_per_s:.0f} tok/s | mesoLG {lg:.2f} | NT[{nt_str}]", flush=True)
             running_loss = running_lm = 0.0
             n_obs = 0
             t0 = time.time()
 
         if (step + 1) % args.save_every == 0 or (step + 1) == args.steps:
             tag = "" if args.mode == "text" else f"_{args.mode}"
-            path = Path(args.ckpt_dir) / f"neuroslm_{args.preset}{tag}_{step+1}.pt"
-            torch.save({
+            bflag = "_baseline" if cfg.baseline else ""
+            path = Path(args.ckpt_dir) / f"neuroslm_{args.preset}{tag}{bflag}_{step+1}.pt"
+            save_dict = {
                 "model": brain.state_dict(),
                 "optim": optim.state_dict(),
                 "cfg": cfg.__dict__,
                 "step": step + 1,
                 "preset": args.preset,
-                "gene_pool": brain.gene_pool.state(),
-                "trophic_stats": brain.trophic.stats(),
-            }, path)
-            # ── Save portable memory checkpoint (.mem) ──
-            try:
-                mem_path = Path("lfs_checkpoints") / f"neuroslm_{args.preset}{tag}_{step+1}.mem"
-                mem_path.parent.mkdir(parents=True, exist_ok=True)
-                stats = brain.save_memory_checkpoint(mem_path)
-                print(f"[train] saved memory checkpoint {mem_path.name} | {stats}", flush=True)
-            except Exception as e:
-                print(f"[train] memory checkpoint failed: {e}", flush=True)
-            # ── Intelligence metrics snapshot ──
-            try:
-                brain.metrics.observe_narrative(brain.narrative_system)
-                brain.metrics.observe_memory(brain.episodic, brain.consolidated, brain.causal)
-                m = brain.metrics.format()
-                print(f"[train] intelligence: {m}", flush=True)
-            except Exception as e:
-                print(f"[train] metrics snapshot failed: {e}", flush=True)
-            print(f"[train] saved {path} | genome={brain.gene_pool.active().id} "
-                  f"gen={brain.gene_pool.active().generation} | "
-                  f"trophic={brain.trophic.stats()}", flush=True)
+            }
+            if not cfg.baseline:
+                save_dict["gene_pool"] = brain.gene_pool.state()
+                save_dict["trophic_stats"] = brain.trophic.stats()
+            torch.save(save_dict, path)
+            if not cfg.baseline:
+                # ── Save portable memory checkpoint (.mem) ──
+                try:
+                    mem_path = Path("lfs_checkpoints") / f"neuroslm_{args.preset}{tag}_{step+1}.mem"
+                    mem_path.parent.mkdir(parents=True, exist_ok=True)
+                    stats = brain.save_memory_checkpoint(mem_path)
+                    print(f"[train] saved memory checkpoint {mem_path.name} | {stats}", flush=True)
+                except Exception as e:
+                    print(f"[train] memory checkpoint failed: {e}", flush=True)
+                # ── Intelligence metrics snapshot ──
+                try:
+                    brain.metrics.observe_narrative(brain.narrative_system)
+                    brain.metrics.observe_memory(brain.episodic, brain.consolidated, brain.causal)
+                    m = brain.metrics.format()
+                    print(f"[train] intelligence: {m}", flush=True)
+                except Exception as e:
+                    print(f"[train] metrics snapshot failed: {e}", flush=True)
+                print(f"[train] saved {path} | genome={brain.gene_pool.active().id} "
+                      f"gen={brain.gene_pool.active().generation} | "
+                      f"trophic={brain.trophic.stats()}", flush=True)
+            else:
+                print(f"[train] saved {path} (baseline)", flush=True)
 
     print("[train] done.", flush=True)
 
