@@ -441,6 +441,9 @@ def main():
             if not cfg.baseline:
                 save_dict["gene_pool"] = brain.gene_pool.state()
                 save_dict["trophic_stats"] = brain.trophic.stats()
+                if hasattr(brain, 'module_genomes'):
+                    save_dict["module_genomes"] = brain.module_genomes.state()
+                    save_dict["compiled_lisp"] = brain.get_all_module_lisp()
             torch.save(save_dict, path)
             if not cfg.baseline:
                 # ── Save portable memory checkpoint (.mem) ──
@@ -459,15 +462,21 @@ def main():
                     print(f"[train] intelligence: {m}", flush=True)
                 except Exception as e:
                     print(f"[train] metrics snapshot failed: {e}", flush=True)
-                # ── Decompile latent programs to readable Lisp ──
+                # ── Genome Compilation Report: Genome → Latent → Lisp → Execute ──
                 try:
-                    if hasattr(brain, 'latent_programs') and brain.latent_programs._programs:
-                        decomp_dir = Path(args.ckpt_dir) / f"decompiled_step_{step+1}"
-                        brain.latent_programs.save_decompiled(str(decomp_dir))
-                        for name, src in brain.latent_programs.decompile_all().items():
-                            print(f"[train] decompiled {name}:\n{src}", flush=True)
+                    if hasattr(brain, 'genome_compiler'):
+                        decomp_dir = Path(args.ckpt_dir) / f"compiled_step_{step+1}"
+                        brain.genome_compiler.save_all_lisp(str(decomp_dir))
+                        report = brain.genome_compilation_report()
+                        print(f"[train] genome compilation:\n{report}", flush=True)
+                        # Print first 3 modules' Lisp for quick inspection
+                        for i, (name, src) in enumerate(brain.get_all_module_lisp().items()):
+                            if i >= 3:
+                                print(f"[train] ... and {len(brain.get_all_module_lisp()) - 3} more modules", flush=True)
+                                break
+                            print(f"[train] {name} compiled Lisp:\n{src}", flush=True)
                 except Exception as e:
-                    print(f"[train] decompilation failed: {e}", flush=True)
+                    print(f"[train] genome compilation report failed: {e}", flush=True)
                 print(f"[train] saved {path} | genome={brain.gene_pool.active().id} "
                       f"gen={brain.gene_pool.active().generation} | "
                       f"trophic={brain.trophic.stats()}", flush=True)

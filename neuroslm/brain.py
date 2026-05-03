@@ -398,6 +398,24 @@ class Brain(nn.Module):
             except Exception:
                 pass
 
+        # ── Genome Compiler: Genome → Latent → Lisp → Execute ──
+        # This is the central pipeline: each module's behavior is defined by
+        # its genome, compiled to a latent embedding, decompiled to readable
+        # Lisp, then executed by the DSL interpreter.
+        from .dna.compiler import GenomeCompiler, ModuleGenomePool
+        _all_regions = [
+            'language', 'sensory', 'association', 'thalamus',
+            'world', 'self_model', 'pfc', 'dmn', 'hippocampus',
+            'basal_ganglia', 'critic', 'forward_model', 'evaluator',
+            'motor', 'cerebellum', 'entorhinal', 'claustrum',
+            'gws', 'cortical_sheet', 'neural_geometry',
+        ]
+        self.genome_compiler = GenomeCompiler(d_latent=128, max_steps=16)
+        self.module_genomes = ModuleGenomePool(
+            _all_regions, pool_size=4, tournament_period=200)
+        # Initial compilation: compile all genomes → Lisp → execute
+        self._recompile_all_genomes()
+
         # ---- exposure for inspectability ----
         self.last_nt: dict | None = None
         self.last_routing: torch.Tensor | None = None
@@ -410,6 +428,35 @@ class Brain(nn.Module):
     # ====================================================================
     # Helpers
     # ====================================================================
+    def _recompile_all_genomes(self):
+        """Compile all module genomes through the full pipeline:
+            Genome → Latent Embedding → Lisp Source → DSL Execute
+        Each module's behavior is now derived from its genome.
+        """
+        genomes = self.module_genomes.active_all()
+        self._compiled_envs = self.genome_compiler.compile_batch(genomes)
+        # Also register the compiled latents as latent programs
+        # so the differentiable interpreter can still be used
+        for region, genome in genomes.items():
+            latent = self.genome_compiler.get_latent(region)
+            if latent is not None and hasattr(self, 'latent_programs'):
+                if region not in self.latent_programs._programs:
+                    self.latent_programs.register_program(region)
+                with torch.no_grad():
+                    self.latent_programs._programs[region].copy_(latent)
+
+    def get_module_lisp(self, region: str) -> str:
+        """Get the current compiled Lisp for any module — full inspectability."""
+        return self.genome_compiler.get_lisp(region)
+
+    def get_all_module_lisp(self) -> dict[str, str]:
+        """Get compiled Lisp for ALL modules."""
+        return self.genome_compiler.get_all_lisp()
+
+    def genome_compilation_report(self) -> str:
+        """Full report of what each module's genome compiled to."""
+        return self.genome_compiler.compilation_report()
+
     def init_latents(self, batch_size: int, device):
         cfg = self.cfg
         self.transmitters.reset(batch_size, device)
@@ -677,6 +724,18 @@ class Brain(nn.Module):
             out["motor_speak_target_rate"] = speak_target.float().mean().detach()
             # Gene pool fitness = the unweighted LM loss
             self.gene_pool.report(float(lm_loss_per.mean()))
+
+            # Module genome evolution: report fitness, advance clock,
+            # recompile genomes when evolution produces new champions
+            if hasattr(self, 'module_genomes'):
+                self.module_genomes.report_all(float(lm_loss_per.mean()))
+                old_step = self.module_genomes.steps
+                self.module_genomes.step()
+                # Recompile if a tournament just ran (new genome may have won)
+                if (self.module_genomes.steps %
+                        self.module_genomes.tournament_period == 0 and
+                        self.module_genomes.steps != old_step):
+                    self._recompile_all_genomes()
 
         self.last_nt = {n: float(self.transmitters.get(n).mean()) for n in NT_NAMES}
         self.last_learning_gain = learning_gain.detach()
