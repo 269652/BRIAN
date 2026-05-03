@@ -1,4 +1,6 @@
-torch>=2.2
+# torch is NOT listed here — Colab/conda provides CUDA-enabled torch.
+# Installing torch from PyPI overwrites it with a CPU-only build.
+# If running locally: pip install torch --index-url https://download.pytorch.org/whl/cu121
 numpy>=1.26
 tiktoken>=0.6
 datasets>=2.18
