@@ -51,12 +51,25 @@ def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.T
 
 
 class CausalSelfAttention(nn.Module):
-    def __init__(self, dim: int, n_heads: int, max_ctx: int):
+    """Multi-head attention with optional Grouped Query Attention (GQA).
+
+    When n_kv_heads < n_heads, KV projections are shared across groups
+    of Q heads (Qwen2.5/Llama-3 style). Saves ~30% attention params
+    at n_kv_heads=n_heads//4 with minimal quality loss.
+    """
+    def __init__(self, dim: int, n_heads: int, max_ctx: int,
+                 n_kv_heads: int | None = None):
         super().__init__()
         assert dim % n_heads == 0
         self.n_heads = n_heads
+        self.n_kv_heads = n_kv_heads or n_heads  # default: MHA
+        assert n_heads % self.n_kv_heads == 0
+        self.n_groups = n_heads // self.n_kv_heads
         self.head_dim = dim // n_heads
-        self.qkv = nn.Linear(dim, 3 * dim, bias=False)
+
+        # Separate Q and KV projections for GQA
+        self.q_proj = nn.Linear(dim, n_heads * self.head_dim, bias=False)
+        self.kv_proj = nn.Linear(dim, 2 * self.n_kv_heads * self.head_dim, bias=False)
         self.out = nn.Linear(dim, dim, bias=False)
         cos, sin = build_rope_cache(max_ctx, self.head_dim)
         self.register_buffer("cos", cos, persistent=False)
@@ -64,20 +77,31 @@ class CausalSelfAttention(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.shape
-        qkv = self.qkv(x).view(B, T, 3, self.n_heads, self.head_dim).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]  # (B, H, T, D)
+        # Q: (B, T, n_heads, head_dim) → (B, n_heads, T, head_dim)
+        q = self.q_proj(x).view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
+        # KV: (B, T, 2*n_kv_heads, head_dim)
+        kv = self.kv_proj(x).view(B, T, 2, self.n_kv_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        k, v = kv[0], kv[1]  # (B, n_kv_heads, T, head_dim)
+
         q = apply_rope(q, self.cos.to(q.dtype), self.sin.to(q.dtype))
         k = apply_rope(k, self.cos.to(k.dtype), self.sin.to(k.dtype))
+
+        # Expand KV heads to match Q heads for GQA
+        if self.n_groups > 1:
+            k = k[:, :, None, :, :].expand(-1, -1, self.n_groups, -1, -1).reshape(B, self.n_heads, T, self.head_dim)
+            v = v[:, :, None, :, :].expand(-1, -1, self.n_groups, -1, -1).reshape(B, self.n_heads, T, self.head_dim)
+
         y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         return self.out(y)
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, dim: int, n_heads: int, max_ctx: int):
+    def __init__(self, dim: int, n_heads: int, max_ctx: int,
+                 n_kv_heads: int | None = None):
         super().__init__()
         self.n1 = RMSNorm(dim)
-        self.attn = CausalSelfAttention(dim, n_heads, max_ctx)
+        self.attn = CausalSelfAttention(dim, n_heads, max_ctx, n_kv_heads)
         self.n2 = RMSNorm(dim)
         self.mlp = SwiGLU(dim)
 

@@ -83,6 +83,7 @@ class NeuralGeometryAdapter(nn.Module):
 class LanguageCortex(nn.Module):
     def __init__(self, vocab_size: int, d_hidden: int, d_sem: int,
                  n_layers: int, n_heads: int, max_ctx: int,
+                 n_kv_heads: int | None = None,
                  geometry_expansion: float = 2.0,
                  gradient_checkpointing: bool = False):
         super().__init__()
@@ -93,7 +94,7 @@ class LanguageCortex(nn.Module):
         self.blocks = nn.ModuleList()
         self.adapters = nn.ModuleList()
         for _ in range(n_layers):
-            self.blocks.append(TransformerBlock(d_hidden, n_heads, max_ctx))
+            self.blocks.append(TransformerBlock(d_hidden, n_heads, max_ctx, n_kv_heads))
             self.adapters.append(
                 NeuralGeometryAdapter(d_hidden, expansion=geometry_expansion)
             )

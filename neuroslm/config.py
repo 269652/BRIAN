@@ -16,6 +16,7 @@ class BrainConfig:
     # ---- Sensory / language cortex ----
     lang_layers: int = 4
     lang_heads: int = 6
+    lang_kv_heads: int | None = None  # GQA: if set, KV heads < Q heads (saves ~30% attn params)
     lang_ctx: int = 512       # max context tokens
 
     # ---- World / self / forward models (SSM-style, but we use GRU for simplicity) ----
@@ -175,6 +176,7 @@ def xl() -> BrainConfig:
     c.d_hidden = 512
     c.lang_layers = 16
     c.lang_heads = 8
+    c.lang_kv_heads = 2           # GQA: 4:1 ratio (Qwen-style), saves ~30% attn params
     c.lang_ctx = 2048
     c.dmn_layers = 3
     c.pfc_layers = 3
