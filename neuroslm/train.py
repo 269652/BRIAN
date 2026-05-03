@@ -37,9 +37,9 @@ def cosine_lr(step: int, warmup: int, total: int, peak: float) -> float:
 
 
 def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
-    """Copy a checkpoint to lfs_checkpoints/ and push via Git LFS."""
+    """Copy a checkpoint + DNA state to lfs_checkpoints/ and push via Git LFS."""
     try:
-        import shutil, subprocess
+        import shutil, subprocess, json
         if repo_root is None:
             repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         lfs_dir = os.path.join(repo_root, "lfs_checkpoints")
@@ -51,13 +51,31 @@ def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
         mem_src = ckpt_path.replace('.pt', '.mem')
         if os.path.exists(mem_src):
             shutil.copy2(mem_src, os.path.join(lfs_dir, os.path.basename(mem_src)))
+        # Extract and save DNA state as inspectable JSON
+        try:
+            import torch as _torch
+            ckpt = _torch.load(ckpt_path, map_location='cpu', weights_only=False)
+            dna_state = {}
+            if 'module_genomes' in ckpt:
+                dna_state['module_genomes'] = ckpt['module_genomes']
+            if 'brain_dna' in ckpt:
+                dna_state['brain_dna'] = ckpt['brain_dna']
+            if 'epigenetic' in ckpt:
+                dna_state['epigenetic'] = ckpt['epigenetic']
+            if dna_state:
+                dna_path = os.path.join(lfs_dir, basename.replace('.pt', '.dna.json'))
+                with open(dna_path, 'w') as f:
+                    json.dump(dna_state, f, indent=1, default=str)
+            del ckpt
+        except Exception:
+            pass  # DNA JSON is optional; .pt already contains everything
         subprocess.run(["git", "add", "lfs_checkpoints/"], cwd=repo_root,
                        capture_output=True, timeout=30)
         subprocess.run(["git", "commit", "-m", f"chkpt: {basename}"],
                        cwd=repo_root, capture_output=True, timeout=30)
         subprocess.run(["git", "push"], cwd=repo_root,
                        capture_output=True, timeout=120)
-        print(f"[train] ✓ pushed {basename} to Git LFS", flush=True)
+        print(f"[train] ✓ pushed {basename} + DNA to Git LFS", flush=True)
     except Exception as e:
         print(f"[train] ⚠ LFS push failed: {e}", flush=True)
 
@@ -283,7 +301,7 @@ def main():
             # (the meta-learnable part) without needing second-order grads
             # through the language model forward pass itself.
             with amp_ctx():
-                inner_logits, _, _ = brain.language(ids)
+                inner_logits, _, _, _ = brain.language(ids)
                 inner_loss = torch.nn.functional.cross_entropy(
                 inner_logits.reshape(-1, inner_logits.size(-1)),
                 targets.reshape(-1), ignore_index=-100)
@@ -320,7 +338,7 @@ def main():
             # diverse semantic representations, and smooth reasoning.
             with amp_ctx():
                 meta_out = functional_call(brain.language, virtual_map, (meta_ids,))
-                logits_meta, sem_meta, _ = meta_out
+                logits_meta, sem_meta, _, _ = meta_out
 
             # (a) Base language modeling loss
             raw_lm_loss = torch.nn.functional.cross_entropy(
