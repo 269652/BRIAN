@@ -30,7 +30,7 @@ from .modules.neural_geometry import NeuralGeometryEngine
 
 from .neurochem import (
     TransmitterSystem, NT_NAMES,
-    ReceptorBank,
+    ReceptorBank, NTShapeRegistry, Receptor,
     Projection, ProjectionGraph,
     VTA, NucleusAccumbens, LocusCoeruleus, RapheNuclei, BasalForebrain,
     SubstantiaNigra, PeriaqueductalGray, HypothalamicCRH,
@@ -42,7 +42,6 @@ from .neurochem import (
     PlasticityGate,
 )
 from .neurochem.growth import TrophicSystem
-from .neurochem.receptors import Receptor
 from .genome import GenePool, Genome
 from .genomes import select_build_genome, apply_build_genome, BUILTIN_BUILDS
 from .learning import LearningLayer
@@ -309,6 +308,13 @@ class Brain(nn.Module):
         # Gene pool — the DMN's algorithmic CFG, evolved over training
         self.gene_pool = GenePool(pool_size=4, tournament_period=200)
 
+        # ── NT Shape Registry ────────────────────────────────────────
+        # Shared latent "protein shapes" for every neurotransmitter.
+        # NTs are no longer matched by name — they're matched by shape.
+        # Receptors have binding-pocket shapes; affinity = cosine_sim(pocket, nt).
+        # This is fully differentiable and evolvable.
+        self.nt_shapes = NTShapeRegistry()
+
         # Receptor banks per region (gain modulators on key streams)
         self.rcpt_pfc = ReceptorBank([
             Receptor("DA",   sign=+1, weight=0.6),  # D1 — enhances PFC working mem
@@ -336,6 +342,12 @@ class Brain(nn.Module):
             Receptor("5HT",  sign=-1, weight=0.4),  # 5HT suppresses DMN
             Receptor("ACh",  sign=-1, weight=0.2),
         ])
+
+        # Bind the latent shape registry to all receptor banks
+        # This inits each receptor's pocket shape from the NT it canonically binds
+        for bank in [self.rcpt_pfc, self.rcpt_hippo, self.rcpt_bg,
+                     self.rcpt_thal, self.rcpt_lang, self.rcpt_dmn]:
+            bank.bind_registry(self.nt_shapes)
 
         # Projections graph — built FROM DNA projection genome
         # The projection genome encodes the entire NT connectome:
@@ -452,6 +464,9 @@ class Brain(nn.Module):
             if mod is not None and hasattr(mod, 'configure_from_genome'):
                 structural = self.brain_dna.get_structural(region)
                 mod.configure_from_genome(env, structural=structural)
+                # Bind NT shape registry for protein-shape modifier matching
+                if hasattr(mod, 'bind_nt_shapes'):
+                    mod.bind_nt_shapes(self.nt_shapes)
 
         # Also sync latents if latent_programs exists (backward compat)
         for region, genome in genomes.items():

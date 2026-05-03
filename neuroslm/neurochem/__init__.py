@@ -13,7 +13,7 @@ Extended with:
   - Substantia Nigra (SNc/SNr), PAG, hypothalamic CRH
 """
 from .transmitters import TransmitterSystem, NT_NAMES
-from .receptors import ReceptorBank
+from .receptors import ReceptorBank, NTShapeRegistry, LatentReceptor, Receptor
 from .projections import Projection, ProjectionGraph
 from .nuclei import (VTA, NucleusAccumbens, LocusCoeruleus, RapheNuclei,
                      BasalForebrain, SubstantiaNigra, PeriaqueductalGray,
@@ -27,7 +27,7 @@ from .plasticity import PlasticityGate
 
 __all__ = [
     "TransmitterSystem", "NT_NAMES",
-    "ReceptorBank",
+    "ReceptorBank", "NTShapeRegistry", "LatentReceptor", "Receptor",
     "Projection", "ProjectionGraph",
     "VTA", "NucleusAccumbens", "LocusCoeruleus", "RapheNuclei", "BasalForebrain",
     "SubstantiaNigra", "PeriaqueductalGray", "HypothalamicCRH",
