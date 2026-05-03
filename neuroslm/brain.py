@@ -146,7 +146,8 @@ class Brain(nn.Module):
         if getattr(cfg, 'baseline', False):
             self.cfg = cfg
             self.language = LanguageCortex(cfg.vocab_size, cfg.d_hidden, cfg.d_sem,
-                                          cfg.lang_layers, cfg.lang_heads, cfg.lang_ctx)
+                                          cfg.lang_layers, cfg.lang_heads, cfg.lang_ctx,
+                                          gradient_checkpointing=cfg.gradient_checkpointing)
             self._baseline = True
             return
         self._baseline = False
@@ -181,7 +182,8 @@ class Brain(nn.Module):
 
         # ---- core cortex & models (built using scaled cfg) ----
         self.language = LanguageCortex(self.cfg.vocab_size, self.cfg.d_hidden, self.cfg.d_sem,
-                                      self.cfg.lang_layers, self.cfg.lang_heads, self.cfg.lang_ctx)
+                                      self.cfg.lang_layers, self.cfg.lang_heads, self.cfg.lang_ctx,
+                                      gradient_checkpointing=self.cfg.gradient_checkpointing)
         self.sensory = TextSensoryCortex(self.cfg.d_sem)
         self.association = AssociationCortex(self.cfg.d_sem)
         self.gws = GlobalWorkspace(self.cfg.d_sem, self.cfg.gws_slots, self.cfg.gws_heads)

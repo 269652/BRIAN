@@ -121,6 +121,11 @@ def main():
     mode_label = "BASELINE (vanilla transformer)" if cfg.baseline else "FULL (bio modules)"
     print(f"[train] {mode_label} | params: {n_params/1e6:.2f}M (preset={args.preset})", flush=True)
 
+    # AMP (mixed precision) — halves memory for activations on CUDA
+    use_amp = (device == "cuda")
+    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
+    amp_ctx = lambda: torch.amp.autocast('cuda', enabled=use_amp)
+
     # Separate optimizers: model optimizer updates model params; meta optimizer
     # updates the learned optimizer (`brain.learned_opt`). This avoids double
     # updating learned_opt with the main optimizer.
@@ -232,8 +237,9 @@ def main():
             brain.record_episode(content, content_vec, nt_state, emotion, tags, context)
 
         # 2. Forward pass (full brain pipeline — no create_graph needed here)
-        out = brain.forward_lm(ids, targets)
-        loss = out["loss"]
+        with amp_ctx():
+            out = brain.forward_lm(ids, targets)
+            loss = out["loss"]
 
         # If meta-training is enabled, perform a one-step differentiable unroll.
         # We do a SEPARATE language-only forward pass for the meta path to avoid
@@ -265,8 +271,9 @@ def main():
             # meta_loss.backward() still differentiates through learned_opt
             # (the meta-learnable part) without needing second-order grads
             # through the language model forward pass itself.
-            inner_logits, _, _ = brain.language(ids)
-            inner_loss = torch.nn.functional.cross_entropy(
+            with amp_ctx():
+                inner_logits, _, _ = brain.language(ids)
+                inner_loss = torch.nn.functional.cross_entropy(
                 inner_logits.reshape(-1, inner_logits.size(-1)),
                 targets.reshape(-1), ignore_index=-100)
 
@@ -300,8 +307,9 @@ def main():
             # Instead of raw cross-entropy (which rewards fast memorization),
             # we optimize for deep understanding: calibrated predictions,
             # diverse semantic representations, and smooth reasoning.
-            meta_out = functional_call(brain.language, virtual_map, (meta_ids,))
-            logits_meta, sem_meta, _ = meta_out
+            with amp_ctx():
+                meta_out = functional_call(brain.language, virtual_map, (meta_ids,))
+                logits_meta, sem_meta, _ = meta_out
 
             # (a) Base language modeling loss
             raw_lm_loss = torch.nn.functional.cross_entropy(
@@ -370,15 +378,19 @@ def main():
 
         if not args.meta and not cfg.baseline:
             optim.zero_grad(set_to_none=True)
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optim)
             gnorm = torch.nn.utils.clip_grad_norm_(brain.parameters(), cfg.grad_clip)
-            optim.step()
+            scaler.step(optim)
+            scaler.update()
 
         if not args.meta and cfg.baseline:
             optim.zero_grad(set_to_none=True)
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optim)
             gnorm = torch.nn.utils.clip_grad_norm_(brain.parameters(), cfg.grad_clip)
-            optim.step()
+            scaler.step(optim)
+            scaler.update()
 
         # 3. Tag memory with reward/insight (mesolimbic)
         if not cfg.baseline:

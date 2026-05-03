@@ -83,8 +83,10 @@ class NeuralGeometryAdapter(nn.Module):
 class LanguageCortex(nn.Module):
     def __init__(self, vocab_size: int, d_hidden: int, d_sem: int,
                  n_layers: int, n_heads: int, max_ctx: int,
-                 geometry_expansion: float = 2.0):
+                 geometry_expansion: float = 2.0,
+                 gradient_checkpointing: bool = False):
         super().__init__()
+        self.gradient_checkpointing = gradient_checkpointing
         self.tok_emb = nn.Embedding(vocab_size, d_hidden)
 
         # Interleaved: [TransformerBlock, GeometryAdapter] × n_layers
@@ -126,8 +128,14 @@ class LanguageCortex(nn.Module):
             bias = self.from_sem(thought).unsqueeze(1)  # (B, 1, d_hidden)
             h = h + bias
         for blk, adapter in zip(self.blocks, self.adapters):
-            h = blk(h)
-            h = adapter(h)     # geometry-adapted residual after each block
+            if self.gradient_checkpointing and self.training:
+                h = torch.utils.checkpoint.checkpoint(
+                    blk, h, use_reentrant=False)
+                h = torch.utils.checkpoint.checkpoint(
+                    adapter, h, use_reentrant=False)
+            else:
+                h = blk(h)
+                h = adapter(h)     # geometry-adapted residual after each block
         h = self.norm_f(h)
         if motor_bias is not None:
             # Add bias only to the last position (the one that will be sampled).
