@@ -192,13 +192,15 @@ class LanguageCortex(nn.Module):
                     # behavior which is compatible with modern PyTorch.
                     if nt is None:
                         # blk accepts only the activation tensor
-                        h = torch.utils.checkpoint.checkpoint(blk, h)
+                        h = torch.utils.checkpoint.checkpoint(blk, h, use_reentrant=False)
                     else:
                         # pass nt as an explicit tensor argument to the
                         # checkpointed function to ensure it is available
-                        # during recomputation.
+                        # during recomputation. use_reentrant=False is
+                        # required when the training loop calls
+                        # torch.autograd.grad()/backward with `inputs`.
                         h = torch.utils.checkpoint.checkpoint(
-                            lambda x, _nt: blk(x, nt=_nt), h, nt)
+                            lambda x, _nt: blk(x, nt=_nt), h, nt, use_reentrant=False)
                 else:
                     h = blk(h, nt=nt)
                 h = adapter(h)  # never checkpointed (lightweight + AMP-safe)
@@ -212,10 +214,10 @@ class LanguageCortex(nn.Module):
                                   and isinstance(blk, TransformerBlock))
                 if can_checkpoint:
                     if nt is None:
-                        h = torch.utils.checkpoint.checkpoint(blk, h)
+                        h = torch.utils.checkpoint.checkpoint(blk, h, use_reentrant=False)
                     else:
                         h = torch.utils.checkpoint.checkpoint(
-                            lambda x, _nt: blk(x, nt=_nt), h, nt)
+                            lambda x, _nt: blk(x, nt=_nt), h, nt, use_reentrant=False)
                 else:
                     h = blk(h, nt=nt)
                 if len(self.pred_coding) > 0:
