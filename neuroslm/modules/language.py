@@ -176,9 +176,11 @@ class LanguageCortex(nn.Module):
             bias = self.from_sem(thought).unsqueeze(1)  # (B, 1, d_hidden)
             h = h + bias
 
-        # Collect layer hidden states for predictive coding
-        layer_states = []
-        pred_coding_loss = torch.tensor(0.0, device=ids.device)
+        # Compute predictive coding loss incrementally to avoid storing
+        # all intermediate layer activations which increases peak memory.
+        prev_layer = None
+        pc_counter = 0
+        pred_coding_loss = torch.tensor(0.0, device=h.device)
 
         if hasattr(self, 'adapters') and len(self.adapters) > 0:
             for i, (blk, adapter) in enumerate(zip(self.blocks, self.adapters)):
@@ -186,29 +188,24 @@ class LanguageCortex(nn.Module):
                 can_checkpoint = (self.gradient_checkpointing and self.training
                                   and isinstance(blk, TransformerBlock))
                 if can_checkpoint:
-                    # Pass all tensor inputs explicitly to checkpoint to avoid
-                    # closure-capture mismatches during recomputation. Do not
-                    # force use_reentrant=False; use the default (reentrant)
-                    # behavior which is compatible with modern PyTorch.
                     if nt is None:
-                        # blk accepts only the activation tensor
                         h = torch.utils.checkpoint.checkpoint(blk, h, use_reentrant=False)
                     else:
-                        # pass nt as an explicit tensor argument to the
-                        # checkpointed function to ensure it is available
-                        # during recomputation. use_reentrant=False is
-                        # required when the training loop calls
-                        # torch.autograd.grad()/backward with `inputs`.
                         h = torch.utils.checkpoint.checkpoint(
                             lambda x, _nt: blk(x, nt=_nt), h, nt, use_reentrant=False)
                 else:
                     h = blk(h, nt=nt)
                 h = adapter(h)  # never checkpointed (lightweight + AMP-safe)
                 if len(self.pred_coding) > 0:
-                    layer_states.append(h)
+                    if prev_layer is not None:
+                        # Use the next predictive head in order
+                        if pc_counter < len(self.pred_coding):
+                            pred_coding_loss = pred_coding_loss + self.pred_coding[pc_counter](prev_layer, h)
+                        pc_counter += 1
+                    prev_layer = h
         else:
             # Baseline: no adapters
-            for blk in self.blocks:
+            for i, blk in enumerate(self.blocks):
                 from .common import TransformerBlock
                 can_checkpoint = (self.gradient_checkpointing and self.training
                                   and isinstance(blk, TransformerBlock))
@@ -221,14 +218,14 @@ class LanguageCortex(nn.Module):
                 else:
                     h = blk(h, nt=nt)
                 if len(self.pred_coding) > 0:
-                    layer_states.append(h)
+                    if prev_layer is not None:
+                        if pc_counter < len(self.pred_coding):
+                            pred_coding_loss = pred_coding_loss + self.pred_coding[pc_counter](prev_layer, h)
+                        pc_counter += 1
+                    prev_layer = h
 
-        # Predictive coding loss: each layer predicts the next
-        if len(self.pred_coding) > 0 and len(layer_states) > 1:
-            for i, pc_head in enumerate(self.pred_coding):
-                if i + 1 < len(layer_states):
-                    pred_coding_loss = pred_coding_loss + pc_head(
-                        layer_states[i], layer_states[i + 1])
+        # Normalize predictive coding loss by number of heads if present
+        if len(self.pred_coding) > 0 and pc_counter > 0:
             pred_coding_loss = pred_coding_loss / len(self.pred_coding)
 
         h = self.norm_f(h)
