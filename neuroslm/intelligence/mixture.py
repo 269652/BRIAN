@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Sparse Mixture-of-Experts.
 
 Top-2 gated MoE with load-balancing loss. At ~100M total params and

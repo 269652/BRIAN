@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Spontaneous self-reflection.
 
 When the brain is idle (not processing input), this module triggers a

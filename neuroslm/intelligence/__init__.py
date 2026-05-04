@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Intelligence-density mechanisms for NeuroSLM.
 
 These modules turn parameters into reasoning depth, not just memorization

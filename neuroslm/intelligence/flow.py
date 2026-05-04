@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Adaptive Compute Flow.
 
 Two complementary mechanisms that let a small model spend more compute on

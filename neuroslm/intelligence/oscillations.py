@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Neural Oscillation Metrics — multi-band spectral analysis of neural activity.
 
 Tracks oscillatory activity across biologically-inspired frequency bands,

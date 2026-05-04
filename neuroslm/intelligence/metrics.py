@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Quantifiable consciousness & intelligence metrics.
 
 Each metric is a single scalar in a documented, comparable range. Tracked

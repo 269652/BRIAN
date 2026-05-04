@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Active Inference / Free Energy Principle for NeuroSLM.
 
 Implements Karl Friston's Free Energy Principle as a novel ML architecture

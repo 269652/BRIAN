@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Contrastive Predictive Coding (CPC) for NeuroSLM.
 
 Standard next-token prediction (LM loss) maps the last hidden state to a

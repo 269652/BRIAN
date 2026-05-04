@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Memory cross-attention.
 
 Turns the consolidated memory graph + narrative streams into a queryable

@@ -99,6 +99,9 @@ class HomeostaticGate(nn.Module):
         with torch.no_grad():
             bm = h.mean((0, 1))
             bv = h.var((0, 1))
+            # Ensure stats have the same dtype and device as the running buffers
+            bm = bm.to(dtype=self.running_mean.dtype, device=self.running_mean.device)
+            bv = bv.to(dtype=self.running_var.dtype, device=self.running_var.device)
             a  = self.adaptation_rate
             self.running_mean.lerp_(bm, a)
             self.running_var.lerp_(bv, a)
@@ -353,11 +356,13 @@ class NeuralOrchestrator(nn.Module):
         # Identity coherence
         with torch.no_grad():
             out_mean = (output.mean(1) if output.dim() == 3 else output).mean(0)
+            # Detach and cast to baseline buffer dtype/device to support AMP/mixed-precision
+            out_mean_det = out_mean.detach().to(dtype=self._identity_baseline.dtype,
+                                                 device=self._identity_baseline.device)
             alpha    = min(1.0, 1.0 / (self._identity_count.item() + 1))
-            self._identity_baseline.lerp_(out_mean.detach(), alpha)
+            self._identity_baseline.lerp_(out_mean_det, alpha)
             self._identity_count += 1
-            metrics['identity_drift'] = F.mse_loss(
-                out_mean.detach(), self._identity_baseline).item()
+            metrics['identity_drift'] = F.mse_loss(out_mean_det, self._identity_baseline).item()
 
         metrics['n_active']      = len(outputs)
         metrics['stage_modules'] = [n for n, _ in stage_modules]
