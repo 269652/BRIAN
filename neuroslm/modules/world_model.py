@@ -257,3 +257,8 @@ class RecurrentStateSpaceModel(BrainModule):
                 (post_probs + eps).log() - (prior_probs + eps).log()
               )).sum(-1).sum(-1)   # sum over classes then cats → (B,)
         return torch.mean(torch.clamp(kl, min=free_nats))
+
+
+# Backwards-compatible export: some modules import WorldModel
+# so provide a simple alias to the implemented RecurrentStateSpaceModel.
+WorldModel = RecurrentStateSpaceModel

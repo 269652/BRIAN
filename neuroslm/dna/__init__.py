@@ -1,26 +1,52 @@
-"""DNA subsystem — evolvable algorithms, structural genomes, and NT wiring.
+"""Legacy DNA compatibility layer (stubs).
 
-Three genome types per module:
-  1. Algorithmic Genome: opcode program (what the module DOES)
-  2. Structural Genome: architecture + receptors + NT modifiers (what the module IS)
-  3. Projection Genome: NT wiring topology (how modules are connected)
-
-Pipeline:
-  ModuleGenome (alleles = opcode program) → decompile → Lisp → DSL execute → env
-  StructuralGenome → receptors, modifiers, architecture params
-  ProjectionGenome → NT flow topology between all regions
-
-NT modifiers activate at runtime: e.g. high 5HT → PFC selects safer actions.
+The original DNA / genome subsystem was removed. This module provides
+small, inert placeholders so older scripts that import symbols from
+``neuroslm.dna`` won't crash. All functionality is effectively a no-op.
 """
-from .latent_program import (
-    LatentProgramSystem, LatentProgramEncoder, LatentProgramDecoder,
-    LatentProgramDecompiler,
-)
-from .compiler import (
-    GenomeCompiler, ModuleGenome, ModuleGenomePool, ALL_REGIONS,
-)
-from .structural_genome import (
-    BrainDNA, StructuralGenome, ProjectionGenome, ProjectionGene,
-    NTModifier, ReceptorSpec,
-    default_projection_genome, STRUCTURAL_INIT_REGISTRY,
-)
+from typing import Dict, List
+
+ALL_REGIONS: List[str] = []
+
+
+class BrainDNA:
+  """Compatibility stub for BrainDNA. Use Brain.projections and config instead."""
+  def __init__(self):
+    self.structural = []
+    self.projection = type("P", (), {"projections": []})()
+
+  @classmethod
+  def default(cls, regions=None):
+    return cls()
+
+
+class GenomeCompiler:
+  def __init__(self, *args, **kwargs):
+    pass
+
+  def compile_batch(self, genomes: Dict[str, object]):
+    return {}
+
+  def get_lisp(self, region: str) -> str:
+    return ""
+
+  def get_env(self, region: str) -> dict:
+    return {}
+
+  def save_all_lisp(self, out_dir: str) -> str:
+    return out_dir
+
+
+class ModuleGenomePool:
+  def __init__(self, *args, **kwargs):
+    pass
+
+  def active_all(self):
+    return {}
+
+  @classmethod
+  def from_state(cls, state):
+    return cls()
+
+
+__all__ = ["ALL_REGIONS", "BrainDNA", "GenomeCompiler", "ModuleGenomePool"]

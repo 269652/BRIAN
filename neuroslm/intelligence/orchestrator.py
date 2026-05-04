@@ -240,8 +240,9 @@ class NeuralOrchestrator(nn.Module):
             if name not in self.module_names:
                 self.module_names.append(name)
 
-        pre  = self.pre_gates.get(name) if not self.baseline else None
-        post = self.post_gates.get(name) if not self.baseline else None
+        # nn.ModuleDict does not implement .get(), so use membership check
+        pre  = (self.pre_gates[name] if name in self.pre_gates else None) if not self.baseline else None
+        post = (self.post_gates[name] if name in self.post_gates else None) if not self.baseline else None
 
         self._registrations[name] = ModuleRegistration(
             name=name, stage=stage,
