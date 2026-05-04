@@ -1,31 +1,48 @@
 """Central configuration for NeuroSLM.
 
-All dimensions, layer counts, and training hyperparameters live here so
-scaling up is a one-file change.
+All dimensions, layer counts, training hyperparameters, and per-module
+enable flags live here — scaling up or toggling brain areas is a one-file change.
+
+Per-module flags (all default True):
+    enable_<area>: bool   — set False to bypass that brain area at runtime
+
+Neural topology:
+    neural_topology: str  — 'baseline' (language only) or 'full' (all modules)
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
 class BrainConfig:
+    # ---- Novel modules ----
+    enable_active_dendrite: bool = False
+    enable_dynamic_routing_moe: bool = False
+    enable_htm: bool = False
+    enable_relational_attention: bool = False
+    enable_fast_weight: bool = False
+    enable_differentiable_memory: bool = False
+    enable_phase_modulated_attention: bool = False
+    enable_neurogenesis: bool = False
+    enable_predictive_coding_loss: bool = False
+    enable_causal_inference: bool = False
     # ---- Shared semantic embedding space (the "GWS bus" dim) ----
-    d_sem: int = 256          # shared semantic embedding dimension
-    d_hidden: int = 384       # internal hidden dim for most modules
+    d_sem: int = 256
+    d_hidden: int = 384
     vocab_size: int = 50257   # GPT-2 BPE vocab (via tiktoken)
 
     # ---- Sensory / language cortex ----
     lang_layers: int = 4
     lang_heads: int = 6
-    lang_kv_heads: int | None = None  # GQA: if set, KV heads < Q heads (saves ~30% attn params)
-    lang_ctx: int = 512       # max context tokens
+    lang_kv_heads: int | None = None
+    lang_ctx: int = 512
 
-    # ---- World / self / forward models (SSM-style, but we use GRU for simplicity) ----
+    # ---- World / self / forward models ----
     world_layers: int = 2
     self_layers: int = 1
     forward_layers: int = 2
 
     # ---- Global workspace ----
-    gws_slots: int = 8        # number of broadcast slots
+    gws_slots: int = 8
     gws_heads: int = 4
 
     # ---- DMN / PFC ----
@@ -34,9 +51,9 @@ class BrainConfig:
     pfc_heads: int = 4
 
     # ---- Hippocampus ----
-    hippo_capacity: int = 4096    # max stored episodes
-    hippo_topk: int = 4           # recalls per query
-    hippo_sparse_k: int = 32      # DG sparse code active units (out of d_sem)
+    hippo_capacity: int = 4096
+    hippo_topk: int = 4
+    hippo_sparse_k: int = 32
     novelty_threshold: float = 0.6
 
     # ---- Basal ganglia ----
@@ -44,14 +61,14 @@ class BrainConfig:
     bg_n_candidates: int = 4
 
     # ---- Neuromodulators ----
-    n_neuromods: int = 4          # DA, NE, 5HT, ACh
+    n_neuromods: int = 4   # DA, NE, 5HT, ACh
 
     # ---- Loop control ----
-    dmn_period: int = 4           # sensory ticks per DMN tick
-    max_thinking_steps: int = 6   # max planning iterations before forced output
+    dmn_period: int = 4
+    max_thinking_steps: int = 6
 
     # ---- Floating thought ----
-    thought_alpha: float = 0.3    # base ACh-modulated update rate
+    thought_alpha: float = 0.3
 
     # ---- Training ----
     lr: float = 3e-4
@@ -59,29 +76,101 @@ class BrainConfig:
     warmup_steps: int = 200
     grad_clip: float = 1.0
 
-    # ---- Loss weights for multi-objective training ----
-    w_lm: float = 1.0          # language modeling
-    w_world: float = 0.3       # world model next-state prediction
-    w_self: float = 0.1        # self model consistency
-    w_forward: float = 0.2     # forward model
-    w_value: float = 0.1       # evaluator (placeholder; needs RL signal)
-    w_motor: float = 0.05      # SPEAK gate auxiliary loss
-    w_pred_coding: float = 0.1  # predictive coding (inter-layer surprise) — novel
-    speak_conf_threshold: float = 0.25  # min next-token confidence to want to SPEAK
+    # ---- Loss weights ----
+    w_lm: float = 1.0
+    w_world: float = 0.3
+    w_self: float = 0.1
+    w_forward: float = 0.2
+    w_value: float = 0.1
+    w_motor: float = 0.05
+    w_pred_coding: float = 0.1
+    speak_conf_threshold: float = 0.25
 
     # ---- Intelligence-density features ----
     gradient_checkpointing: bool = False
-    hebbian_rank: int = 0         # Hebbian trace rank (0=off, 8=default for novel attention)
-    mod_capacity: float = 1.0     # Mixture-of-Depths capacity ratio (1.0=all tokens, 0.5=half)
-    epigenetic_probe_every: int = 500  # Epigenetic self-optimization probe interval
+    hebbian_rank: int = 0
+    mod_capacity: float = 1.0
     use_moe: bool = False
     moe_experts: int = 8
     moe_top_k: int = 2
     use_adaptive_compute: bool = False
     max_ponder_steps: int = 8
 
+    # ---- Memory ----
+    consolidate_every: int = 500      # consolidate episodic→semantic every N steps
+
     # ---- Ablation ----
-    baseline: bool = False  # True = vanilla transformer only, no bio modules
+    baseline: bool = False   # True = vanilla transformer only
+
+    # ================================================================
+    # Neural topology: 'baseline' (language only) or 'full' (all modules)
+    # ================================================================
+    neural_topology: str = "full"
+
+    # ================================================================
+    # Per-module enable flags
+    # Set any to False to bypass that brain area without removing it.
+    # Brain areas that are disabled return neutral passthrough outputs.
+    # ================================================================
+    enable_hippocampus:       bool = True
+    enable_pfc:               bool = True
+    enable_basal_ganglia:     bool = True
+    enable_dmn:               bool = True
+    enable_thalamus:          bool = True
+    enable_cerebellum:        bool = True
+    enable_cortical_sheet:    bool = True
+    enable_entorhinal:        bool = True
+    enable_claustrum:         bool = True
+    enable_gws:               bool = True
+    enable_world_model:       bool = True
+    enable_self_model:        bool = True
+    enable_critic:            bool = True
+    enable_neural_geometry:   bool = True
+    enable_qualia:            bool = True
+    enable_thought_transformer: bool = True
+    enable_oscillations:      bool = True
+    enable_narrative:         bool = True
+    enable_mesolimbic:        bool = True
+
+    # ---- Novel cognitive modules ----
+    enable_tom:               bool = False  # Theory of Mind
+    enable_rssm:              bool = False  # Recurrent State Space Model (world model)
+    enable_active_inference:  bool = False  # Free Energy / predictive coding
+    enable_hypergraph:        bool = True   # multidimensional hypergraph memory
+    enable_entity_store:      bool = True   # entity recognition + per-entity profiles
+
+    # ---- Emotional / subcortical modules ----
+    enable_amygdala:          bool = True   # emotional tagging + fear conditioning
+    enable_acc:               bool = True   # anterior cingulate: conflict monitoring
+    enable_insula:            bool = True   # interoception + gut feelings
+    enable_lateral_habenula:  bool = True   # anti-reward, aversion learning
+    amygdala_d_emotion:       int  = 32     # amygdala emotional rep dimension
+
+    # ---- Novel ML objectives ----
+    enable_cpc:               bool = False  # contrastive predictive coding loss
+    cpc_steps:                int  = 5      # CPC prediction horizon
+    cpc_negatives:            int  = 32     # CPC negative samples
+    w_cpc:                    float = 0.05  # CPC loss weight
+
+    # ---- RSSM dimensions ----
+    rssm_n_cats: int = 8    # number of categorical latent variables
+    rssm_d_cat:  int = 16   # classes per categorical variable
+
+    # ---- Theory of Mind dimensions ----
+    tom_d_style:    int = 64   # entity style embedding size
+    tom_n_heads:    int = 4
+    tom_n_layers:   int = 2
+
+    # ---- Active inference ----
+    active_inf_layers: int = 3    # predictive hierarchy depth
+
+    # ---- Entity store ----
+    entity_d_style: int = 64     # entity style fingerprint dimension
+
+    # ---- Loss weights (new) ----
+    w_kl_world:    float = 0.1   # RSSM KL divergence
+    w_free_energy: float = 0.05  # active inference free energy
+    w_social:      float = 0.1   # social prediction error
 
 
 # ----- Preset sizes -----
@@ -117,24 +206,7 @@ def medium() -> BrainConfig:
 
 
 def large() -> BrainConfig:
-    """~100M params, allocated for maximum intelligence density.
-
-    Design choices (per the refactor):
-      * Narrower d_sem (256) to maximize compute-per-param.
-      * Deeper recurrent transformer (lang_layers=8) where most params
-        live; AdaptiveComputeBlock + ponder gives effective depth >24.
-      * Wider PFC for planning (pfc_layers=3) but conservative DMN.
-      * Long context (1024) so causal patterns over discourse are visible.
-      * Larger gws_slots (12) = more concurrent broadcast streams.
-
-    Sized to fit T4 16GB at batch_size=2 with grad checkpointing on the
-    language cortex. Budget rationale:
-        embed/unembed:  50257 * 256 * 2  ≈ 26M
-        8 trans blocks: 8 * (4 * 256² + ff(4×))  ≈ 25M
-        MoE (8 experts, top-2): ≈ 30M (only ~25% active per token)
-        modules + memory heads: ≈ 20M
-        TOTAL                                    ≈ 100M
-    """
+    """~100M params. T4 16GB at batch_size=2 with grad checkpointing."""
     c = BrainConfig()
     c.d_sem = 256
     c.d_hidden = 384
@@ -150,37 +222,20 @@ def large() -> BrainConfig:
     c.forward_layers = 2
     c.hippo_capacity = 8192
     c.hippo_topk = 6
-    c.max_thinking_steps = 12      # recurrent ponder depth
+    c.max_thinking_steps = 12
     c.warmup_steps = 500
     c.lr = 2.5e-4
     return c
 
 
 def xl() -> BrainConfig:
-    """~350M params — fits on A100 (40GB) with batch_size=4.
-
-    Scales up from `large` (100M on T4 15GB) to use 40GB A100.
-    The Brain has many bio modules beyond the language cortex
-    (PFC, DMN, cerebellum, cortical sheet, neural geometry, etc.)
-    so d_hidden must stay moderate.
-
-    Budget (approximate):
-        embed/unembed:  50257 * 512 * 2          ≈ 51M
-        16 trans blocks: 16 * (4*512² + ff)       ≈ 100M
-        16 geometry adapters                       ≈ 50M
-        bio modules (pfc, dmn, hippo, cerebellum,
-          cortical sheet, entorhinal, claustrum,
-          neural geometry, neurochemistry, etc.)   ≈ 150M
-        TOTAL                                      ≈ 350M
-        FP32 weights: ~1.4GB  +  activations/grads: ~15GB
-        Fits A100 40GB at batch=4, ctx=2048
-    """
+    """~350M params — A100 (40GB)."""
     c = BrainConfig()
     c.d_sem = 512
     c.d_hidden = 512
     c.lang_layers = 16
     c.lang_heads = 8
-    c.lang_kv_heads = 2           # GQA: 4:1 ratio (Qwen-style), saves ~30% attn params
+    c.lang_kv_heads = 2
     c.lang_ctx = 2048
     c.dmn_layers = 3
     c.pfc_layers = 3
@@ -198,22 +253,22 @@ def xl() -> BrainConfig:
     c.lr = 2e-4
     c.weight_decay = 0.1
     c.gradient_checkpointing = True
-    c.hebbian_rank = 8            # Novel: Hebbian attention trace for in-context learning
-    c.mod_capacity = 0.6          # Novel: MoD — 60% of tokens processed per MoD layer
-    c.epigenetic_probe_every = 500  # Novel: self-optimizing DNA every 500 steps
-    c.use_moe = False
-    c.moe_experts = 8
-    c.moe_top_k = 2
-    c.use_adaptive_compute = False
-    c.max_ponder_steps = 8
+    c.hebbian_rank = 8
+    c.mod_capacity = 0.6
+    # Novel modules enabled at XL scale
+    c.enable_rssm = True
+    c.rssm_n_cats = 16
+    c.rssm_d_cat  = 32
+    c.enable_active_inference = True
+    c.active_inf_layers = 3
+    c.enable_tom = True
+    c.tom_d_style = 128
+    c.tom_n_heads = 8
     return c
 
 
 def xxl() -> BrainConfig:
-    """~10B params — requires multi-GPU (4×A100 or 8×A100).
-
-    Target: outperform Qwen2.5-7B and compete with 14B-class models.
-    """
+    """~10B params — multi-GPU (4×A100 or 8×A100)."""
     c = BrainConfig()
     c.d_sem = 2048
     c.d_hidden = 4096
@@ -241,7 +296,20 @@ def xxl() -> BrainConfig:
     c.moe_top_k = 2
     c.use_adaptive_compute = True
     c.max_ponder_steps = 12
+    # Novel modules
+    c.enable_rssm = True
+    c.rssm_n_cats = 32
+    c.rssm_d_cat  = 32
+    c.enable_active_inference = True
+    c.active_inf_layers = 4
+    c.enable_tom = True
+    c.tom_d_style = 256
+    c.tom_n_heads = 16
+    c.tom_n_layers = 4
     return c
 
 
-PRESETS = {"tiny": tiny, "small": small, "medium": medium, "large": large, "xl": xl, "xxl": xxl}
+PRESETS = {
+    "tiny": tiny, "small": small, "medium": medium,
+    "large": large, "xl": xl, "xxl": xxl,
+}

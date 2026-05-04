@@ -1,4 +1,4 @@
-"""Interactive shell.
+"""Interactive shell — entity-aware conversational loop.
 
 Runs the brain continuously in a background thread. The user can type at
 any time; their text is routed through the TextInputCortex (the
@@ -7,13 +7,12 @@ any time; their text is routed through the TextInputCortex (the
   - triggers an NE surge so the LC sharpens attention on new input,
   - decays in salience over subsequent ticks if no fresh input arrives.
 
+Entity recognition: every user turn is passed through brain.identify_speaker()
+so the brain builds per-person profiles (preferences, beliefs, narrative).
+
 The brain ticks autonomously even when the user is silent — those
 "idle" ticks are mind-wandering: floating thought drifts, hippocampal
 recall fires, motor head can still SPEAK if it wants to.
-
-Display: brain emissions are word-buffered and printed on their own
-`Brain>` lines; the user's input prompt line is cleared and re-drawn
-around them so the two channels don't visually collide.
 
 Usage:
   python -m neuroslm.interactive --ckpt checkpoints\\neuroslm_small_750.pt
@@ -21,6 +20,9 @@ Usage:
 Special commands:
   /quit            exit
   /state           dump current brain state
+  /who             show active entity profile (known name, prefs, beliefs)
+  /entities        list all known entities
+  /rules           show learned social Markov rules
   /silence         disable model speaking until /unmute
   /unmute          re-enable speaking
   /clear           clear input cortex buffer & reset floating thought
@@ -38,12 +40,20 @@ import time
 import queue
 import torch
 
+import re
 from .config import small, tiny, medium
 from .brain import Brain
 from .tokenizer import Tokenizer
 from .modules.text_input import TextInputCortex
 from .modules.motor import ACTION_NAMES, ACTION_INDEX
 from .neurochem.transmitters import NT_NAMES
+
+
+def _extract_name_hint(text: str) -> str | None:
+    """Heuristically extract a speaker name from 'Hi, I'm Alice' etc."""
+    m = re.search(r"(?:I'?m|my name is|call me|I am)\s+([A-Z][a-z]{1,20})",
+                  text, re.IGNORECASE)
+    return m.group(1).capitalize() if m else None
 
 
 # ----------------------------------------------------------------------
@@ -113,6 +123,7 @@ class BrainRunner(threading.Thread):
         # or punctuation, then flushed as a chunk above the prompt.
         self.word_buf = ""
         self.tokens_since_flush = 0
+        self._pending_text: list = []
         self.state = brain.init_latents(1, torch.device(ctrl["device"]))
 
     # ------------------------------------------------------------------
@@ -153,20 +164,31 @@ class BrainRunner(threading.Thread):
                 msg = self.user_q.get_nowait()
             except queue.Empty:
                 break
+            self._pending_text.append(msg)
             if self.ctrl.get("scaffold"):
-                # Soft conversational frame — orients a TinyStories-trained
-                # model toward producing a reply rather than continuing
-                # whatever monologue it was generating.
                 msg = f"\n\nUser said: {msg}\nThe story continues:"
             self.txt_in.receive(msg)
             had_new_input = True
 
-        if had_new_input:
+        if had_new_input and self._pending_text:
             self._flush_word_buf(force=True)
             # Reset floating thought so the brain pivots toward new input.
             self.state["floating_thought"].zero_()
-            # Force speech for several ticks (motor SPEAK aux head is
-            # still green at step 750 — give it explicit pressure).
+            # Entity recognition — identify speaker from text style
+            if hasattr(self.brain, 'identify_speaker'):
+                full_text = " ".join(self._pending_text)
+                name_hint = _extract_name_hint(full_text)
+                eid, conf = self.brain.identify_speaker(full_text,
+                                                         name_hint=name_hint)
+                if eid is not None:
+                    profile = self.brain.entity_store.get_profile(eid) \
+                              if self.brain.entity_store else None
+                    name = profile.name if profile else eid
+                    if conf >= 0.7:
+                        print_above_prompt(
+                            f"{DIM}[entity: {name} | conf={conf:.2f} | "
+                            f"interactions={profile.interaction_count if profile else '?'}]{RESET}")
+            self._pending_text.clear()
             self.boost_ticks_remaining = self.ctrl["boost_ticks"]
             self.silent_streak = 0
 
@@ -325,8 +347,8 @@ def main():
         f"preset: {args.preset} | tps: {args.tps} | "
         f"temp: {args.temperature} | top_k: {args.top_k} | "
         f"scaffold: {args.scaffold}{RESET}\n"
-        f"{DIM}Commands: /quit /state /silence /unmute /clear "
-        f"/tps N /temp X /topk N /status /nostatus{RESET}"
+        f"{DIM}Commands: /quit /state /who /entities /rules /silence /unmute "
+        f"/clear /tps N /temp X /topk N /status /nostatus{RESET}"
     )
 
     try:
@@ -353,6 +375,25 @@ def main():
 
 
 def handle_command(line: str, ctrl: dict, runner: BrainRunner, brain: Brain):
+    if cmd == "/who":
+        entities = runner.state.get("entities", {})
+        if not entities:
+            msg("No entities tracked.", CYAN)
+        else:
+            lines = [f"{BOLD}Entities tracked:{RESET}"]
+            for eid, ent in entities.items():
+                status = ent.get("status", "?")
+                name = ent.get("name", eid)
+                extra = ', '.join(f"{k}={v}" for k, v in ent.items() if k not in ("id", "name", "status"))
+                lines.append(f"  - {name} (id={eid}, status={status}{', ' + extra if extra else ''})")
+            msg("\n".join(lines), CYAN)
+        return
+        # Show entity summary if present
+        entities = self.state.get("entities", {})
+        if entities:
+            ent_names = [ent.get("name", eid) for eid, ent in entities.items()]
+            ent_line = f"{CYAN}Entities: {', '.join(ent_names)}{RESET}"
+            print_above_prompt(ent_line)
     parts = line.split()
     cmd = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else None
@@ -378,6 +419,42 @@ def handle_command(line: str, ctrl: dict, runner: BrainRunner, brain: Brain):
                    for n in NT_NAMES},
         }
         msg(str(info), CYAN)
+    elif cmd in ("/who", "/entity"):
+        # Show active entity profile
+        if hasattr(brain, 'get_entity_knowledge'):
+            info = brain.get_entity_knowledge()
+            if info:
+                lines = [f"Entity: {info.get('name','?')} "
+                         f"(interactions={info.get('interactions',0)}, "
+                         f"conf={info.get('confidence',0):.2f})"]
+                for p in info.get("preferences", [])[:6]:
+                    lines.append(f"  {p['pred']} {p['obj']}  [{p['conf']:.0%}]")
+                narr = info.get("narrative", "")
+                if narr:
+                    lines.append(f"  narrative: {narr[:120]}")
+                msg("\n".join(lines), CYAN)
+            else:
+                msg("No active entity identified yet.", YEL)
+        else:
+            msg("Entity store not available.", RED)
+    elif cmd == "/entities":
+        if hasattr(brain, 'entity_store') and brain.entity_store:
+            msg(brain.entity_store.summary(), CYAN)
+        else:
+            msg("Entity store not available.", RED)
+    elif cmd == "/rules":
+        if hasattr(brain, 'get_social_rules'):
+            rules = brain.get_social_rules()
+            if rules:
+                lines = [f"Social Markov rules ({len(rules)}):"]
+                for r in rules[:12]:
+                    lines.append(f"  {r['action']:20s} → {r['response']:20s}  "
+                                 f"p={r['p']:.2f}  n={r['n']}")
+                msg("\n".join(lines), MAG)
+            else:
+                msg("No social rules learned yet.", YEL)
+        else:
+            msg("HyperGraph not available.", RED)
     elif cmd == "/silence":
         ctrl["muted"] = True
         msg("brain muted")

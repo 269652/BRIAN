@@ -13,7 +13,6 @@ import torch
 from .config import BrainConfig
 from .tokenizer import Tokenizer
 from .brain import Brain
-from .genome import GenePool
 
 
 def make_logger(verbose: bool):
@@ -48,7 +47,6 @@ def main():
     ap.add_argument("--device", default=None)
     ap.add_argument("--log_ticks", action="store_true")
     ap.add_argument("--wander_first", type=int, default=0)
-    ap.add_argument("--show_genome", action="store_true")
     ap.add_argument("--show_trophic", action="store_true")
     args = ap.parse_args()
 
@@ -58,12 +56,7 @@ def main():
     tok = Tokenizer()
     brain = Brain(cfg).to(device).eval()
     brain.load_partial(ckpt["model"], verbose=False)
-    if "gene_pool" in ckpt:
-        brain.gene_pool = GenePool.from_state(ckpt["gene_pool"])
 
-    if args.show_genome:
-        print("=== Active genome ===", file=sys.stderr)
-        print(json.dumps(brain.gene_pool.active().to_dict(), indent=2), file=sys.stderr)
     if args.show_trophic:
         print("=== Trophic stats ===", file=sys.stderr)
         print(json.dumps(brain.trophic.stats(), indent=2), file=sys.stderr)

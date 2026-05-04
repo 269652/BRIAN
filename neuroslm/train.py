@@ -37,9 +37,9 @@ def cosine_lr(step: int, warmup: int, total: int, peak: float) -> float:
 
 
 def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
-    """Copy a checkpoint + DNA state to lfs_checkpoints/ and push via Git LFS."""
+    """Copy a checkpoint + memory state to lfs_checkpoints/ and push via Git LFS."""
     try:
-        import shutil, subprocess, json
+        import shutil, subprocess
         if repo_root is None:
             repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         lfs_dir = os.path.join(repo_root, "lfs_checkpoints")
@@ -51,31 +51,13 @@ def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
         mem_src = ckpt_path.replace('.pt', '.mem')
         if os.path.exists(mem_src):
             shutil.copy2(mem_src, os.path.join(lfs_dir, os.path.basename(mem_src)))
-        # Extract and save DNA state as inspectable JSON
-        try:
-            import torch as _torch
-            ckpt = _torch.load(ckpt_path, map_location='cpu', weights_only=False)
-            dna_state = {}
-            if 'module_genomes' in ckpt:
-                dna_state['module_genomes'] = ckpt['module_genomes']
-            if 'brain_dna' in ckpt:
-                dna_state['brain_dna'] = ckpt['brain_dna']
-            if 'epigenetic' in ckpt:
-                dna_state['epigenetic'] = ckpt['epigenetic']
-            if dna_state:
-                dna_path = os.path.join(lfs_dir, basename.replace('.pt', '.dna.json'))
-                with open(dna_path, 'w') as f:
-                    json.dump(dna_state, f, indent=1, default=str)
-            del ckpt
-        except Exception:
-            pass  # DNA JSON is optional; .pt already contains everything
         subprocess.run(["git", "add", "lfs_checkpoints/"], cwd=repo_root,
                        capture_output=True, timeout=30)
         subprocess.run(["git", "commit", "-m", f"chkpt: {basename}"],
                        cwd=repo_root, capture_output=True, timeout=30)
         subprocess.run(["git", "push"], cwd=repo_root,
                        capture_output=True, timeout=120)
-        print(f"[train] ✓ pushed {basename} + DNA to Git LFS", flush=True)
+        print(f"[train] ✓ pushed {basename} to Git LFS", flush=True)
     except Exception as e:
         print(f"[train] ⚠ LFS push failed: {e}", flush=True)
 
@@ -192,36 +174,19 @@ def main():
                 except Exception as e:
                     print(f"[train] could not restore optimizer state: {e}", flush=True)
             start_step = ckpt.get("step", 0)
-            if "gene_pool" in ckpt and not cfg.baseline:
-                from .genome import GenePool
-                brain.gene_pool = GenePool.from_state(ckpt["gene_pool"])
             # Restore memory checkpoint if available
             if not cfg.baseline:
                 mem_path = str(resume_path).replace(".pt", ".mem")
-            if Path(mem_path).exists():
-                try:
-                    brain.load_memory_checkpoint(mem_path)
-                    print(f"[train] restored memory from {mem_path}", flush=True)
-                except Exception as e:
-                    print(f"[train] could not restore memory: {e}", flush=True)
+                if Path(mem_path).exists():
+                    try:
+                        brain.load_memory_checkpoint(mem_path)
+                        print(f"[train] restored memory from {mem_path}", flush=True)
+                    except Exception as e:
+                        print(f"[train] could not restore memory: {e}", flush=True)
             print(f"[train] resumed from {resume_path} @ step {start_step}", flush=True)
-            # Restore epigenetic optimizer state
-            if "epigenetic" in ckpt and hasattr(brain, 'epigenetic_optimizer'):
-                from .dna.epigenetics import EpigeneticOptimizer
-                brain.epigenetic_optimizer = EpigeneticOptimizer.from_state_dict(ckpt["epigenetic"])
-                print(f"[train] restored epigenetic state", flush=True)
-            # Restore module genomes
-            if "module_genomes" in ckpt and hasattr(brain, 'module_genomes'):
-                from .dna.compiler import ModuleGenomePool
-                brain.module_genomes = ModuleGenomePool.from_state(ckpt["module_genomes"])
-                brain._recompile_all_genomes()
-                print(f"[train] restored module genomes", flush=True)
     elif args.transfer and Path(args.transfer).exists():
         ckpt = torch.load(args.transfer, map_location=device, weights_only=False)
         brain.load_partial(ckpt["model"])
-        if "gene_pool" in ckpt and not cfg.baseline:
-            from .genome import GenePool
-            brain.gene_pool = GenePool.from_state(ckpt["gene_pool"])
         print(f"[train] transferred matching tensors from {args.transfer}", flush=True)
 
     Path(args.ckpt_dir).mkdir(parents=True, exist_ok=True)
@@ -424,23 +389,13 @@ def main():
         # 3. Tag memory with reward/insight (mesolimbic)
         if not cfg.baseline:
             reward = float(out["learning_gain"][0].item()) if "learning_gain" in out else 0.0
-            insight = None  # Placeholder: can be set if new pattern detected
-            brain.tag_memory(len(brain.episodic.buffer)-1, reward, insight)
+            da_level = float(brain.transmitters.vector()[0, 0].item()) if hasattr(brain, 'transmitters') else 0.5
+            brain.tag_memory(len(brain.episodic.buffer)-1, reward, da_level=da_level)
 
         # 4. Consolidate and update narratives every 500 steps
         if not cfg.baseline and (step + 1) % 500 == 0:
             brain.consolidate_memory()
             brain.update_narratives()
-
-        # 5. Epigenetic self-optimization: evolve DNA based on loss trends
-        if not cfg.baseline and hasattr(brain, 'epigenetic_optimizer'):
-            try:
-                brain.epigenetic_optimizer.step(
-                    step, float(loss.item()),
-                    brain.module_genomes, brain.genome_compiler, brain)
-            except Exception as e:
-                if (step + 1) % 1000 == 0:
-                    print(f"[train] epigenetic step failed: {e}", flush=True)
 
         # Slow homeostatic regulation of NT baselines & gains.
         if not cfg.baseline:
@@ -489,15 +444,7 @@ def main():
                 "preset": args.preset,
             }
             if not cfg.baseline:
-                save_dict["gene_pool"] = brain.gene_pool.state()
                 save_dict["trophic_stats"] = brain.trophic.stats()
-                if hasattr(brain, 'module_genomes'):
-                    save_dict["module_genomes"] = brain.module_genomes.state()
-                    save_dict["compiled_lisp"] = brain.get_all_module_lisp()
-                if hasattr(brain, 'brain_dna'):
-                    save_dict["brain_dna"] = brain.brain_dna.to_dict()
-                if hasattr(brain, 'epigenetic_optimizer'):
-                    save_dict["epigenetic"] = brain.epigenetic_optimizer.state_dict()
             torch.save(save_dict, path)
             if not cfg.baseline:
                 # ── Save portable memory checkpoint (.mem) ──
@@ -516,24 +463,7 @@ def main():
                     print(f"[train] intelligence: {m}", flush=True)
                 except Exception as e:
                     print(f"[train] metrics snapshot failed: {e}", flush=True)
-                # ── Genome Compilation Report: Genome → Latent → Lisp → Execute ──
-                try:
-                    if hasattr(brain, 'genome_compiler'):
-                        decomp_dir = Path(args.ckpt_dir) / f"compiled_step_{step+1}"
-                        brain.genome_compiler.save_all_lisp(str(decomp_dir))
-                        report = brain.genome_compilation_report()
-                        print(f"[train] genome compilation:\n{report}", flush=True)
-                        # Print first 3 modules' Lisp for quick inspection
-                        for i, (name, src) in enumerate(brain.get_all_module_lisp().items()):
-                            if i >= 3:
-                                print(f"[train] ... and {len(brain.get_all_module_lisp()) - 3} more modules", flush=True)
-                                break
-                            print(f"[train] {name} compiled Lisp:\n{src}", flush=True)
-                except Exception as e:
-                    print(f"[train] genome compilation report failed: {e}", flush=True)
-                print(f"[train] saved {path} | genome={brain.gene_pool.active().id} "
-                      f"gen={brain.gene_pool.active().generation} | "
-                      f"trophic={brain.trophic.stats()}", flush=True)
+                print(f"[train] saved {path} | trophic={brain.trophic.stats()}", flush=True)
             else:
                 print(f"[train] saved {path} (baseline)", flush=True)
 
