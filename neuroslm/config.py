@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Central configuration for NeuroSLM.
 
 All dimensions, layer counts, training hyperparameters, and per-module
@@ -229,41 +230,53 @@ def large() -> BrainConfig:
 
 
 def xl() -> BrainConfig:
-    """~350M params — A100 (40GB)."""
+    """~240M params — A100 (40GB). Reduced from previous XL to fit <249M param target."""
     c = BrainConfig()
-    c.d_sem = 512
+    # Compact semantic and hidden dimensions
+    c.d_sem = 384
     c.d_hidden = 512
-    c.lang_layers = 16
+
+    # Slightly fewer transformer layers for language cortex
+    c.lang_layers = 12
     c.lang_heads = 8
-    c.lang_kv_heads = 2
+    c.lang_kv_heads = None
     c.lang_ctx = 2048
+
+    # Moderate control / workspace sizes
     c.dmn_layers = 3
     c.pfc_layers = 3
     c.pfc_heads = 8
-    c.gws_slots = 12
+    c.gws_slots = 8
     c.gws_heads = 8
+
+    # Keep light world/self models
     c.world_layers = 2
-    c.self_layers = 2
+    c.self_layers = 1
     c.forward_layers = 2
-    c.hippo_capacity = 8192
-    c.hippo_topk = 8
-    c.hippo_sparse_k = 128
-    c.max_thinking_steps = 16
-    c.warmup_steps = 1000
+
+    # Smaller hippocampus footprint
+    c.hippo_capacity = 4096
+    c.hippo_topk = 6
+    c.hippo_sparse_k = 64
+
+    c.max_thinking_steps = 12
+    c.warmup_steps = 800
     c.lr = 2e-4
     c.weight_decay = 0.1
     c.gradient_checkpointing = True
-    c.hebbian_rank = 8
-    c.mod_capacity = 0.6
-    # Novel modules enabled at XL scale
-    c.enable_rssm = True
-    c.rssm_n_cats = 16
-    c.rssm_d_cat  = 32
-    c.enable_active_inference = True
-    c.active_inf_layers = 3
-    c.enable_tom = True
-    c.tom_d_style = 128
-    c.tom_n_heads = 8
+    c.hebbian_rank = 4
+    c.mod_capacity = 0.8
+
+    # Novel modules: keep defaults conservative to limit params
+    c.enable_rssm = False
+    c.rssm_n_cats = 8
+    c.rssm_d_cat  = 16
+    c.enable_active_inference = False
+    c.active_inf_layers = 2
+    c.enable_tom = False
+    c.tom_d_style = 64
+    c.tom_n_heads = 4
+
     return c
 
 
