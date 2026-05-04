@@ -186,8 +186,19 @@ class LanguageCortex(nn.Module):
                 can_checkpoint = (self.gradient_checkpointing and self.training
                                   and isinstance(blk, TransformerBlock))
                 if can_checkpoint:
-                    h = torch.utils.checkpoint.checkpoint(
-                        lambda x, _nt=nt: blk(x, nt=_nt), h, use_reentrant=False)
+                    # Pass all tensor inputs explicitly to checkpoint to avoid
+                    # closure-capture mismatches during recomputation. Do not
+                    # force use_reentrant=False; use the default (reentrant)
+                    # behavior which is compatible with modern PyTorch.
+                    if nt is None:
+                        # blk accepts only the activation tensor
+                        h = torch.utils.checkpoint.checkpoint(blk, h)
+                    else:
+                        # pass nt as an explicit tensor argument to the
+                        # checkpointed function to ensure it is available
+                        # during recomputation.
+                        h = torch.utils.checkpoint.checkpoint(
+                            lambda x, _nt: blk(x, nt=_nt), h, nt)
                 else:
                     h = blk(h, nt=nt)
                 h = adapter(h)  # never checkpointed (lightweight + AMP-safe)
@@ -200,8 +211,11 @@ class LanguageCortex(nn.Module):
                 can_checkpoint = (self.gradient_checkpointing and self.training
                                   and isinstance(blk, TransformerBlock))
                 if can_checkpoint:
-                    h = torch.utils.checkpoint.checkpoint(
-                        lambda x, _nt=nt: blk(x, nt=_nt), h, use_reentrant=False)
+                    if nt is None:
+                        h = torch.utils.checkpoint.checkpoint(blk, h)
+                    else:
+                        h = torch.utils.checkpoint.checkpoint(
+                            lambda x, _nt: blk(x, nt=_nt), h, nt)
                 else:
                     h = blk(h, nt=nt)
                 if len(self.pred_coding) > 0:
