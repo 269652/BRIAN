@@ -559,6 +559,20 @@ class Brain(nn.Module):
     def _act_scalar(x: torch.Tensor) -> torch.Tensor:
         return torch.sigmoid(x.detach().abs().mean(dim=-1) - 1.0)
 
+    @staticmethod
+    def _chunked_ce(logits: torch.Tensor, targets: torch.Tensor,
+                    chunk: int = 128, ignore_index: int = -100) -> torch.Tensor:
+        """Cross-entropy in T-dimension chunks to avoid a huge (B*T, V) allocation."""
+        B, T, V = logits.shape
+        acc = torch.zeros(B, T, dtype=torch.float32, device=logits.device)
+        for t0 in range(0, T, chunk):
+            t1 = min(t0 + chunk, T)
+            lg = logits[:, t0:t1, :].reshape(-1, V)
+            tg = targets[:, t0:t1].reshape(-1)
+            losses = F.cross_entropy(lg, tg, ignore_index=ignore_index, reduction="none")
+            acc[:, t0:t1] = losses.reshape(B, t1 - t0).float()
+        return acc.mean(dim=1)
+
     def init_latents(self, batch_size: int, device):
         cfg = self.cfg
         if (self.transmitters.level.size(0) != batch_size or
@@ -585,9 +599,7 @@ class Brain(nn.Module):
             out = {"logits": logits}
             if targets is not None:
                 B, T = ids.shape
-                loss = F.cross_entropy(
-                    logits.reshape(-1, self.cfg.vocab_size),
-                    targets.reshape(-1), ignore_index=-100)
+                loss = self._chunked_ce(logits, targets).mean()
                 out["loss"]    = loss
                 out["lm_loss"] = loss.detach()
             return out
@@ -618,9 +630,7 @@ class Brain(nn.Module):
         if cfg.neural_topology == "baseline":
             out = {"logits": logits}
             if targets is not None:
-                loss = F.cross_entropy(
-                    logits.reshape(-1, cfg.vocab_size),
-                    targets.reshape(-1), ignore_index=-100)
+                loss = self._chunked_ce(logits, targets).mean()
                 out.update({"loss": loss, "lm_loss": loss.detach()})
             return out
 
@@ -824,10 +834,7 @@ class Brain(nn.Module):
         }
 
         if targets is not None:
-            lm_loss_per = F.cross_entropy(
-                logits_motor.reshape(-1, cfg.vocab_size),
-                targets.reshape(-1), ignore_index=-100, reduction="none",
-            ).reshape(B, T).mean(dim=1)
+            lm_loss_per = self._chunked_ce(logits_motor, targets)
             meso_gain = (1.0 + 0.5 * learning_gain.detach() *
                          self.transmitters.get("DA").detach()).clamp(min=1.0)
             lm_loss    = (lm_loss_per * meso_gain).mean()
@@ -836,6 +843,7 @@ class Brain(nn.Module):
 
             with torch.no_grad():
                 p_motor   = F.softmax(logits_motor.detach(), dim=-1)
+                del logits_motor  # free (B,T,vocab) before further allocs
                 tgt       = targets.clamp_min(0)
                 tgt_p     = p_motor.gather(-1, tgt.unsqueeze(-1)).squeeze(-1)
                 mean_conf = tgt_p.mean(dim=1)

@@ -113,6 +113,8 @@ def main():
     cfg.vocab_size = tok.vocab_size
     if args.baseline:
         cfg.baseline = True
+    if device == "cuda":
+        cfg.gradient_checkpointing = True
     ctx_len = args.ctx or cfg.lang_ctx
     assert ctx_len <= cfg.lang_ctx
 

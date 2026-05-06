@@ -115,8 +115,8 @@ class HomeostaticGate(nn.Module):
 
     def stability_metrics(self) -> dict:
         return {
-            'gain_mean':   float(self.gain.mean()),
-            'gain_std':    float(self.gain.std()),
+            'gain_mean':   float(self.gain.detach().mean()),
+            'gain_std':    float(self.gain.detach().std()),
             'running_rms': float(self.running_var.sqrt().mean()),
             'n_updates':   int(self.n_updates.item()),
         }
