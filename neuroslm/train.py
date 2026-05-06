@@ -38,26 +38,59 @@ def cosine_lr(step: int, warmup: int, total: int, peak: float) -> float:
 
 def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
     """Copy a checkpoint + memory state to lfs_checkpoints/ and push via Git LFS."""
+    import shutil, subprocess
     try:
-        import shutil, subprocess
         if repo_root is None:
             repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         lfs_dir = os.path.join(repo_root, "lfs_checkpoints")
         os.makedirs(lfs_dir, exist_ok=True)
+
+        # Copy .pt
         basename = os.path.basename(ckpt_path)
         dest = os.path.join(lfs_dir, basename)
-        shutil.copy2(ckpt_path, dest)
-        # Also copy .mem file if it exists
-        mem_src = ckpt_path.replace('.pt', '.mem')
-        if os.path.exists(mem_src):
-            shutil.copy2(mem_src, os.path.join(lfs_dir, os.path.basename(mem_src)))
+        if os.path.abspath(ckpt_path) != os.path.abspath(dest):
+            shutil.copy2(ckpt_path, dest)
+
+        # Copy .mem — may be saved directly inside lfs_dir already
+        mem_name = basename.replace('.pt', '.mem')
+        for candidate in [
+            ckpt_path.replace('.pt', '.mem'),
+            os.path.join(lfs_dir, mem_name),
+        ]:
+            if os.path.exists(candidate):
+                dst_mem = os.path.join(lfs_dir, mem_name)
+                if os.path.abspath(candidate) != os.path.abspath(dst_mem):
+                    shutil.copy2(candidate, dst_mem)
+                break
+
+        # Inject token into remote URL so push works from inside a subprocess
+        token = (os.environ.get('GITHUB') or os.environ.get('GITHUB_TOKEN', '')).strip()
+        if token:
+            result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=repo_root, capture_output=True, text=True)
+            url = result.stdout.strip()
+            if token not in url:
+                # rebuild URL with token
+                import re
+                url = re.sub(r'https://([^@]*/)', f'https://{token}@\\1', url)
+                if '://' in url and '@' not in url:
+                    url = url.replace('https://', f'https://{token}@')
+                subprocess.run(["git", "remote", "set-url", "origin", url],
+                               cwd=repo_root, capture_output=True)
+
         subprocess.run(["git", "add", "lfs_checkpoints/"], cwd=repo_root,
                        capture_output=True, timeout=30)
-        subprocess.run(["git", "commit", "-m", f"chkpt: {basename}"],
-                       cwd=repo_root, capture_output=True, timeout=30)
-        subprocess.run(["git", "push"], cwd=repo_root,
-                       capture_output=True, timeout=120)
-        print(f"[train] ✓ pushed {basename} to Git LFS", flush=True)
+        r_commit = subprocess.run(
+            ["git", "commit", "-m", f"chkpt: {basename}"],
+            cwd=repo_root, capture_output=True, text=True, timeout=30)
+        r_push = subprocess.run(
+            ["git", "push"], cwd=repo_root,
+            capture_output=True, text=True, timeout=120)
+        if r_push.returncode == 0:
+            print(f"[train] ✓ pushed {basename} to Git LFS", flush=True)
+        else:
+            print(f"[train] ⚠ git push failed: {r_push.stderr.strip()[:200]}", flush=True)
     except Exception as e:
         print(f"[train] ⚠ LFS push failed: {e}", flush=True)
 
@@ -453,7 +486,8 @@ def main():
         if (step + 1) % args.save_every == 0 or (step + 1) == args.steps:
             tag = "" if args.mode == "text" else f"_{args.mode}"
             bflag = "_baseline" if cfg.baseline else ""
-            path = Path(args.ckpt_dir) / f"neuroslm_{args.preset}{tag}{bflag}_{step+1}.pt"
+            path = Path(os.path.abspath(args.ckpt_dir)) / f"neuroslm_{args.preset}{tag}{bflag}_{step+1}.pt"
+            path.parent.mkdir(parents=True, exist_ok=True)
             save_dict = {
                 "model": brain.state_dict(),
                 "optim": optim.state_dict(),
@@ -467,8 +501,7 @@ def main():
             if not cfg.baseline:
                 # ── Save portable memory checkpoint (.mem) ──
                 try:
-                    mem_path = Path("lfs_checkpoints") / f"neuroslm_{args.preset}{tag}_{step+1}.mem"
-                    mem_path.parent.mkdir(parents=True, exist_ok=True)
+                    mem_path = path.parent / f"neuroslm_{args.preset}{tag}_{step+1}.mem"
                     stats = brain.save_memory_checkpoint(mem_path)
                     print(f"[train] saved memory checkpoint {mem_path.name} | {stats}", flush=True)
                 except Exception as e:
