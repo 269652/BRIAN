@@ -90,6 +90,8 @@ def main():
                     help="(mix only) fraction of windows from chat datasets")
     ap.add_argument("--baseline", action="store_true",
                     help="Train vanilla transformer only (no bio modules) for ablation")
+    ap.add_argument("--grad_accum", type=int, default=1,
+                    help="gradient accumulation steps; effective_batch = batch_size * grad_accum")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -372,21 +374,35 @@ def main():
             gnorm = torch.nn.utils.clip_grad_norm_(model_params, cfg.grad_clip)
             optim.step()
 
-        if not args.meta and not cfg.baseline:
+        if not args.meta:
+            ga = max(args.grad_accum, 1)
             optim.zero_grad(set_to_none=True)
-            scaler.scale(loss).backward()
+            scaler.scale(loss / ga).backward()
+            total_lm_loss = float(out["lm_loss"].item())
+            # extra micro-batches for gradient accumulation
+            for _ga in range(1, ga):
+                try:
+                    ga_batch = next(it)
+                except StopIteration:
+                    it = batch_iterator(tok, ctx_len, args.batch_size,
+                                        seed=args.seed + step * ga + _ga,
+                                        mode=args.mode, chat_ratio=args.chat_ratio)
+                    ga_batch = next(it)
+                ga_batch = ga_batch.to(device)
+                ga_ids = ga_batch[:, :-1]
+                ga_tgt = ga_batch[:, 1:].contiguous()
+                with amp_ctx():
+                    ga_out = brain.forward_lm(ga_ids, ga_tgt)
+                    ga_loss = ga_out["loss"]
+                scaler.scale(ga_loss / ga).backward()
+                total_lm_loss += float(ga_out["lm_loss"].item())
             scaler.unscale_(optim)
             gnorm = torch.nn.utils.clip_grad_norm_(brain.parameters(), cfg.grad_clip)
             scaler.step(optim)
             scaler.update()
-
-        if not args.meta and cfg.baseline:
-            optim.zero_grad(set_to_none=True)
-            scaler.scale(loss).backward()
-            scaler.unscale_(optim)
-            gnorm = torch.nn.utils.clip_grad_norm_(brain.parameters(), cfg.grad_clip)
-            scaler.step(optim)
-            scaler.update()
+            # update loss/lm_loss for logging to reflect full accumulation
+            loss = torch.tensor(float(loss.item()))  # detach from graph
+            out["lm_loss"] = torch.tensor(total_lm_loss / ga)
 
         # 3. Tag memory with reward/insight (mesolimbic)
         if not cfg.baseline:
@@ -413,7 +429,7 @@ def main():
             avg = running_loss / n_obs
             avg_lm = running_lm / n_obs
             ppl = math.exp(min(avg_lm, 20))
-            tok_per_s = args.log_every * args.batch_size * ctx_len / max(dt, 1e-3)
+            tok_per_s = args.log_every * args.batch_size * max(args.grad_accum, 1) * ctx_len / max(dt, 1e-3)
             if cfg.baseline:
                 print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
                       f"| ppl {ppl:.1f} | lr {optim.param_groups[0]['lr']:.2e} "

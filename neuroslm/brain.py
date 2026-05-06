@@ -752,12 +752,14 @@ class Brain(nn.Module):
         # Motor-conditioned logits (one extra matmul, not a full second pass)
         h_biased      = h_lang + motor_lang_bias.unsqueeze(1)
         logits_motor  = self.language.lm_head(h_biased)
+        del logits  # free original (B,T,vocab) — replaced by logits_motor below
+        logits = logits_motor  # alias for output dict
 
         # 9) NT release
         with torch.no_grad():
             zero = torch.zeros(B, device=device)
             if targets is not None:
-                p = F.softmax(logits.detach(), dim=-1)
+                p = F.softmax(logits_motor.detach(), dim=-1)
                 tgt = targets.clamp_min(0)
                 correct_p    = p.gather(-1, tgt.unsqueeze(-1)).squeeze(-1)
                 reward_proxy = correct_p.mean(dim=1)
