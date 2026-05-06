@@ -114,7 +114,8 @@ reduces to vanilla transformer only (used for ablations).
 | Attribute | Mechanism | File |
 |-----------|-----------|------|
 | `tom` | Theory of Mind (belief/desire/intent, social prediction) | `modules/theory_of_mind.py` |
-| `active_inference` | Free Energy Principle / predictive hierarchy | `intelligence/active_inference.py` |
+| `active_inference` | Free Energy Principle / canonical Friston predictive hierarchy | `intelligence/active_inference.py` |
+| `vesicle_pool` | Neuro-vesicle content packets (migration, docking, degradation) | `neurochem/vesicles.py` |
 | `active_dendrite` | Dendritic computation (context-dependent gating) | `modules/active_dendrite.py` |
 | `dynamic_routing_moe` | Dynamic routing mixture-of-experts | `modules/dynamic_routing_moe.py` |
 | `htm` | Hierarchical Temporal Memory (sparse temporal coding) | `modules/htm_layer.py` |
@@ -142,11 +143,19 @@ Each layer is one of three block types, interleaved:
   noise and amplifies signal, effectively doubling SNR without extra params.
   Derived from Microsoft's 2024 Differential Transformer paper.
 
-- **`MoDBlock`** (Mixture of Depths) — each token independently decides
-  whether to skip the current layer or route through it.  A router assigns a
-  per-token capacity score; only the top-k% tokens execute the full FFN.
-  Unused tokens get a residual passthrough.  This gives adaptive compute where
-  easy tokens are cheap and hard tokens get full depth.
+- **`MoDBlock`** (Mixture of Depths + CALM) — each token independently decides
+  whether to skip the current layer or route through it.  A 2-layer MLP router
+  assigns a per-token capacity score; only the top-k% tokens execute the full
+  FFN.  Unused tokens get a residual passthrough.  Each `MoDBlock` also carries
+  a **`CALMHead`** (Confident Adaptive Language Modeling, Schuster 2022): a
+  small 2-layer MLP that estimates per-token confidence `∈ [0,1]` at every
+  layer during inference.  Tokens whose confidence exceeds a layer-dependent
+  threshold `θ_l = θ_base × exp(−decay × l/(L−1))` are frozen and skip all
+  remaining layers — giving full-depth computation to hard tokens and early exit
+  to easy tokens.  The threshold decays with depth: shallow layers are strict
+  (almost never exit); deep layers are lenient (uncertain tokens still have a
+  chance to resolve).  CALM operates inference-only and does not affect training
+  gradients.
 
 - **`TransformerBlock`** — standard pre-norm transformer block with RMSNorm +
   causal multi-head attention + SwiGLU FFN.  Used in `baseline` topology and
@@ -170,11 +179,15 @@ Each layer is one of three block types, interleaved:
 - **`PredictiveCodingHead`** — inside `neuro_attention.py`, handles the
   per-layer residual prediction and error computation.
 
-- **`NeuralGeometryAdapter`** — between transformer blocks, projects
-  `d_hidden → 2×d_hidden` (hyperbolic-like space), applies a learned low-rank
-  connectivity kernel (virtual neural wiring), then projects back.  Starts as
-  identity (zero-init down projection); learns to reshape the activation
-  manifold during training.
+- **`NeuralGeometryAdapter`** — inserted after every transformer block,
+  projects `d_hidden → 2×d_hidden` (hyperbolic-like expansion space), applies
+  a learned low-rank connectivity kernel `kern_a @ kern_b` (virtual neural
+  wiring that does not exist in the base transformer topology), then gates with
+  a per-dimension sigmoid and projects back.  Zero-init on the down projection
+  and `bias=-2` on the gate ensure it starts as a strict identity; the geometry
+  of the activation manifold is discovered entirely during training.  Parameters
+  are included in the meta-training set so the wiring topology itself is
+  meta-learned.
 
 ### Outputs
 
@@ -227,16 +240,41 @@ interoceptive self-model.
 
 ## Global Workspace (GWS)
 
-`modules/workspace.py` — implements Baars / Dehaene Global Workspace Theory.
+`modules/workspace.py` — implements Baars / Dehaene Global Workspace Theory
+via Modern Hopfield Networks (Ramsauer 2020) with Dehaene ignition dynamics.
 
-- Maintains `gws_slots` candidate embeddings (workspace slots).
-- Competitive attention: all brain areas broadcast their current embedding;
-  the workspace selects which signals get global access via cross-attention.
-- Output `gws_output` is the integrated "broadcast" representation passed to
-  all downstream modules.
-- The Claustrum (`modules/claustrum.py`) acts as a binding relay: it cross-
-  attends over 8 modality streams and outputs a single binding signal that is
-  added to the GWS output.
+### Hopfield iterative convergence
+
+The attention mechanism is the Hopfield update rule:
+
+```
+slot^{t+1} = softmax(β × C × slot^t^T) × C
+```
+
+where `C` is the candidate set and `β = softplus(log_beta) + 0.5` is a
+learned inverse temperature.  Iterating `hopfield_iters=2` times converges
+toward the energy minimum — the attractor closest to each slot's initial query.
+This corresponds to pattern completion, not merely pattern selection.
+
+### Ignition phase transition (Dehaene 2011)
+
+After Hopfield convergence:
+
+1. **Lateral competition** — off-diagonal cosine similarity between slots drives
+   15% inhibition of redundant patterns, ensuring each slot captures a distinct
+   representation (winner-take-all in feature space).
+2. **Ignition gate** — `activity = mean L2 norm of slots`.
+   `ign_prob = sigmoid((activity − θ) × 4)`, giving a sharp phase transition
+   around threshold `θ = 0.5`.
+   `broadcast_scale = 0.3 + 0.7 × ign_prob`:
+   pre-ignition ≈ 0.3 (local, sparse), post-ignition ≈ 1.0 (global broadcast).
+3. **Per-slot learned scale** — `output_scale ∈ R^{n_slots}` (init 1.0).
+
+The `_last_ignition` probability is detached and logged each step.
+
+The Claustrum (`modules/claustrum.py`) acts as a binding relay: it cross-
+attends over 8 modality streams and outputs a single binding signal added to
+the GWS output.
 
 ---
 
@@ -244,15 +282,58 @@ interoceptive self-model.
 
 ### Hippocampus (fast binding)
 
-`modules/hippocampus.py` — sparse key-value episodic memory.
+`modules/hippocampus.py` — sparse key-value episodic memory implementing
+Complementary Learning Systems (CLS) theory with five recall streams.
 
-- Stores up to `hippo_capacity` (4096–32768) memory vectors.
-- Writes: high novelty × high comprehension gate signal.
-- Reads: cosine k-NN retrieval, top-`hippo_topk` neighbours.
-- Sparse coding: only `hippo_sparse_k` of the stored vectors are active at
-  any time (HTM-style population codes).
-- Novelty threshold: cosine similarity below `novelty_threshold` triggers a
-  new memory write.
+#### Architecture
+
+| Sub-region | Role | Implementation |
+|------------|------|----------------|
+| DG (Dentate Gyrus) | Sparse pattern separation / orthogonalisation | Fixed random projection → top-k winners → back-project |
+| CA3 | Auto-associative pattern completion | Learned query/key/value attention over stored memories |
+| CA1 | Mismatch / novelty detection | MLP(`expected`, `actual`) → scalar novelty ∈ [0,1] |
+
+#### Multi-dimensional recall (five streams)
+
+All streams are fused before GWS integration via cross-attention:
+
+1. **Semantic** — cosine k-NN via chunked approximate kNN (see below).
+2. **Temporal** — recency-weighted retrieval; write-order timestamps boost recent memories by +0.4 in the scoring.
+3. **Mood/emotional** — weighted combination of semantic similarity (0.4), NT-state cosine similarity (0.4), and valence distance (0.2).  Implements mood-congruent memory bias.
+4. **Associative chain** — 2-hop attention chaining: the best semantic recall becomes the query for a second retrieval, surfacing narratively linked memories.
+5. **DNC temporal traversal** — forward write-order chains via the DNC link matrix `L` (see below).
+
+#### DNC Temporal Link Matrix (Graves 2016)
+
+`_dnc_L[i,j] ∈ [0,1]` approximates the probability that slot `j` was written
+immediately before slot `i`.  Updated at every `store()` call:
+
+```
+outer = w_w[:, None] × p[None, :]         # current write × precedence
+decay = (1 − w_w[:, None] − w_w[None, :]).clamp(0)
+L     = decay × L + outer                  # update
+L.fill_diagonal_(0)                        # no self-links
+p     = (1 − Σw_w) × p + w_w             # precedence update
+```
+
+`_dnc_temporal_recall(query, topk, direction)` traverses write-order chains:
+
+- `direction="forward"` → `w_blend = 0.3×w_r + 0.7×(w_r @ L^T)` — recalls what came *after* the best match (procedure steps, story continuation).
+- `direction="backward"` → `w_blend = 0.3×w_r + 0.7×(w_r @ L)` — recalls what came *before* (causal antecedents).
+
+#### Chunked approximate kNN
+
+Direct `q @ K.T` with `N=65K` creates an `(B, N)` tensor that OOMs on 40 GB
+GPUs.  `_approx_knn(query, keys, topk, chunk=2048)` processes keys in chunks
+of 2048, maintaining a running top-k merge at `O(B × 2048 × d)` peak memory.
+Scales to 65K+ stored memories without FAISS.
+
+#### Capacity and write policy
+
+- Stores up to `hippo_capacity` (4096–32768) memory vectors in a ring buffer.
+- Writes: gated by ComprehensionGate (`lm_loss × comprehension_score`).
+- Sparse coding: DG uses fixed orthogonal projection + top-`sparse_k` winners (encoding mode) or `2×sparse_k` winners (retrieval mode).
+- ACh-gated: high ACh → stronger memory enrichment (encoding-boosted retrieval).
 
 ### Episodic → Semantic Consolidation
 
@@ -346,6 +427,30 @@ Each forward pass:
 7. `LateralHabenula` drives anti-reward signal: spikes when expected reward
    is not delivered, suppressing DA release (learned aversion).
 
+### VesiclePool (neuromodulatory content packets)
+
+`neurochem/vesicles.py` — discrete synaptic-vesicle-like packets providing
+slow, long-range neuromodulation complementary to the fast NT scalar signals.
+
+Each vesicle carries:
+- **content vector** `c ∈ R^{d_sem}` — semantic payload
+- **lifetime τ** — ticks until degradation
+- **position** — which of the `n_modules` brain modules the vesicle is at
+- **active flag** — whether the vesicle is alive
+
+#### Life cycle (one tick per `cognitive_step`)
+
+| Phase | Mechanism |
+|-------|-----------|
+| **Synthesis** | High-surprise events (`novelty × floating_thought`) create new vesicles via a learned synthesis gate MLP; vesicle content encodes the surprise signal. |
+| **Migration** | Each active vesicle stochastically diffuses to a new module via a learned row-stochastic transition matrix `T = softmax(log_T)` — the migration dynamics are themselves trained. |
+| **Docking** | Cosine attention between vesicle content key and module activation query produces a dock score ∈ [0,1]; docked content is projected to a modulation delta `Δ ∈ R^{d_sem}`. |
+| **Degradation** | Lifetime decreases by 1 each tick; vesicles at τ ≤ 0 die and their slot becomes available for new synthesis. |
+
+The modulation output `(B, n_modules, d_sem)` is applied to GWS slots after
+the hippocampal enrichment step.  Enabled via `enable_vesicles=True`
+(`n_vesicles=32`, `vesicle_lifetime=16` by default).
+
 ---
 
 ## Intelligence Layer
@@ -405,16 +510,43 @@ levels.  Represents the "what it is like" quality of the current experience.
 
 ### ConsciousnessMetrics
 
-`modules/consciousness.py` — computes measurable proxies:
+`modules/consciousness.py` — computes measurable proxies each tick:
 
-- **Φ (integrated information)** — estimated as the mutual information between
-  the GWS broadcast and the partition of module outputs into two sets.  A
-  system with high Φ cannot be decomposed without information loss.
-- **Perturbational Complexity Index (PCI)** — simulated by injecting a small
-  noise perturbation into the GWS and measuring the complexity of the
-  propagated response (lossless compression ratio).
-- **Recurrent processing depth** — number of feedback loops active in the
-  current step.
+| Metric | Formula / Source | Meaning |
+|--------|-----------------|---------|
+| **γ (gamma)** | Mean off-diagonal cosine sim of GWS slots | Binding coherence |
+| **θ (theta)** | Mean CA1 novelty signal | Memory retrieval activity |
+| **α (alpha)** | Normalised routing entropy | Idling / suppression |
+| **Φ (phi)** | MIP lower bound (see below) | Integrated information |
+| **Coherence** | Cosine alignment of module outputs with GWS mean | Cross-module synchrony |
+| **Ignition** | Fraction of modules with norm > 0.6 | GWS broadcast reach |
+| **Metacognition** | `sigmoid(||thought|| − 1)` | Self-monitoring proxy |
+| **Binding** | γ × coherence | Phenomenal binding strength |
+
+#### IIT Φ via Minimum Information Partition (MIP)
+
+Φ is estimated as the **minimum mutual information over all bipartitions**
+`(A, B)` of the module output set — the weakest link in the system's
+integration.  High Φ means no bipartition can disconnect the system without
+losing mutual information (IIT postulate 5: irreducibility).
+
+Gaussian MI estimator (tractable, O(n²) per bipartition):
+
+```
+MI(A; B) = 0.5 × (log det Σ_A + log det Σ_B − log det Σ_AB)
+```
+
+where `Σ` is estimated from the Gram matrix of module output vectors.
+
+Two code paths:
+
+- **n ≤ 8 modules** — `_phi_enumerate`: exhaustive search over all
+  `2^(n−1) − 1` bipartitions (≤ 127 partitions); returns exact MIP lower bound.
+- **n > 8 modules** — `_phi_spectral`: Fiedler vector of the normalised
+  Laplacian provides the spectral bisection cut in `O(n³)`; returns a single
+  near-optimal partition.
+
+Φ is clamped to `[0, 10]` and logged to `_phi_history` (rolling 64-tick buffer).
 
 ### Theory of Mind (ToM)
 
@@ -429,13 +561,59 @@ levels.  Represents the "what it is like" quality of the current experience.
 
 ### Active Inference / Free Energy
 
-`intelligence/active_inference.py` — implements Friston's Free Energy
-Principle as a hierarchical prediction error processor.
+`intelligence/active_inference.py` — canonical Friston (2017) hierarchical
+message passing with explicit superficial/deep pyramidal cell separation.
 
-- `n_layers` (3–4) of prediction → residual → update.
-- Epistemic value: reduction in free energy from taking an action (explore).
-- Pragmatic value: expected reward from taking an action (exploit).
-- Both are passed to the BG action selection as additional value signals.
+#### PredictiveLayer — canonical microcircuit
+
+Each layer implements the Bastos et al. (2012) canonical microcircuit:
+
+| Cell type | Variable | Computation |
+|-----------|----------|-------------|
+| Superficial pyramidal (error units) | `ε^l` | `Π^l ⊙ (x^l − pred^l)` where `Π = exp(log_precision)` |
+| Deep pyramidal (state units) | `μ^l` | `recognition(x^l, ε^l)` — integrates evidence + error |
+| Generative model (top-down) | `pred^{l-1}` | `generative(μ^l)` — predicts level below; zero-init |
+
+Precision `Π^l` is a learned per-feature vector (inverse variance).
+High precision → that feature's prediction error dominates learning.
+Zero-initialised generative projection ensures the network starts with
+uninformative priors and learns non-trivial predictions from data.
+
+#### Two-pass forward
+
+```
+Pass 1 — Bottom-up (recognition):
+  for l = 0..L-1:  μ^l = recognition(x^l, Π^l ⊙ (x^l − 0))
+                   x^{l+1} = μ^l
+
+Pass 2 — Top-down (generation):
+  pred = None   (top layer has no prior from above)
+  for l = L-1..0:
+    ε^l, pred_down = layer_l(x^l, prior_pred=pred)
+    pred = pred_down      ← this layer's prediction for level l−1
+```
+
+The top-down pass recomputes all `ε^l` with the generative prior, giving
+each layer an error signal that accounts for both bottom-up evidence and
+top-down predictions — the defining property of predictive coding.
+
+#### Free energy
+
+```
+F = Σ_l ||ε^l||² + 0.05 × Σ_l ||μ^l||²
+      accuracy          complexity prior
+```
+
+`F` is returned as a scalar auxiliary loss (`w_fe ≈ 0.1`).
+
+#### Value signals
+
+- **Epistemic value** — `EpistemicValueEstimator`: expected reduction in
+  posterior uncertainty from taking an action; drives exploration.
+- **Pragmatic value** — `pragmatic(μ^L)`: expected reward from current beliefs;
+  drives exploitation.
+- NT-modulated balance: high DA → pragmatic dominates; high NE → epistemic
+  dominates.  Both signals pass to BG action selection.
 
 ---
 
@@ -519,13 +697,14 @@ AdamW with:
 ## Inference Pipeline (`Brain.cognitive_step`)
 
 ```
-token → LanguageCortex (with floating_thought + NT)
+token → LanguageCortex (with floating_thought + NT) [CALM early exit at MoDBlocks]
       → Sensory → Association → Thalamus
-      → World + Self state update
+      → World + Self state update (RSSM if enable_rssm)
       → Amygdala, Insula (emotional colouring)
       → QualiaState update
-      → GlobalWorkspace broadcast
-      → Hippocampus recall (+ EntorhinalCortex grid encoding)
+      → GlobalWorkspace broadcast [Hopfield iters → lateral competition → ignition]
+      → Hippocampus recall (5 streams: semantic/temporal/mood/associative/DNC)
+          + EntorhinalCortex grid encoding
       → Cerebellum prediction error update
       → PFC thought selection + replace-gate
       → ACC conflict check
@@ -533,7 +712,14 @@ token → LanguageCortex (with floating_thought + NT)
       → ForwardModel + Evaluator
       → DMN (every dmn_period steps: spontaneous reflection)
       → ThoughtTransformer + Claustrum
-      → ConsciousnessMetrics snapshot
+      → ToM update (if enable_tom)
+      → RSSM world state (if enable_rssm)
+      → ActiveInference / Free Energy (if enable_active_inference)
+          [two-pass: bottom-up recognition → top-down error recomputation]
+      → VesiclePool.tick() (if enable_vesicles)
+          [synthesize from surprise → migrate → dock → degrade]
+          → apply vesicle modulation to GWS slots
+      → ConsciousnessMetrics snapshot [Φ-MIP, gamma/theta/alpha, ignition]
       → MotorCortex → LanguageCortex.from_sem (action-conditioned token bias)
       → NT release via nuclei + projection graph
       → Episodic memory write (gated by ComprehensionGate)
@@ -587,8 +773,20 @@ immediately after creation.
 - **Hebbian updates are offline** — fast-weight traces update within the
   forward pass but are not a true online local learning rule; they still
   require backprop.
-- **Φ estimation is approximate** — true integrated information computation
-  is NP-hard; the mutual-information proxy is a tractable lower bound.
+- **Φ estimation is approximate** — true IIT Φ computation is NP-hard; the
+  MIP lower bound via Gaussian mutual information is tractable and principled
+  but not the full Φ_max.  For n ≤ 8 modules the enumeration is exact over
+  all bipartitions; for n > 8 the Fiedler bisection is a near-optimal heuristic.
+- **CALM threshold is not trained** — the base threshold and decay are fixed
+  hyperparameters; adaptive calibration (e.g. via policy gradient on exit-vs-
+  accuracy trade-off) is left for future work.
+- **Vesicle migration is stochastic at inference** — `torch.multinomial` in
+  `VesiclePool.migrate()` introduces non-determinism during inference.  For
+  reproducible evaluation, seed the RNG or replace with argmax migration.
+- **DNC link matrix is dense** — `_dnc_L: (capacity, capacity)` is stored as
+  a float32 dense buffer.  At `capacity=4096` this is 64 MB; at 32768 it is
+  4 GB.  The xl preset caps capacity at 4096.  Sparse storage (COO or CSR)
+  would be needed for larger capacities.
 - **Genome evolution is slow** — the epigenetic optimiser requires many
   evaluations; in practice only genome checkpointing is used during training,
   with evolution reserved for post-training search.

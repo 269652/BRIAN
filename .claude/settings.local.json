@@ -2,7 +2,28 @@
   "permissions": {
     "allow": [
       "Bash(python -c ' *)",
-      "Bash(py -3 -c ' *)"
+      "Bash(py -3 -c ' *)",
+      "Bash(py -3 -c \"import ast; [ast.parse\\(open\\(f, encoding='utf-8'\\).read\\(\\)\\) or print\\('OK:', f\\) for f in ['neuroslm/brain.py', 'neuroslm/train.py', 'neuroslm/intelligence/orchestrator.py']]\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(python -c \"import json; nb=json.load\\(open\\('colab_run.ipynb',encoding='utf-8'\\)\\); [print\\(i, c['source'][:80] if isinstance\\(c['source'],str\\) else ''.join\\(c['source']\\)[:80]\\) for i,c in enumerate\\(nb['cells']\\)]\")",
+      "Bash(py -3)",
+      "Bash(py -3 -c \"import ast; ast.parse\\(open\\('neuroslm/train.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python3 -c ' *)",
+      "Bash(python -c \"import json; f=open\\('colab_run.ipynb'\\); nb=json.load\\(f\\); f.close\\(\\); [print\\(repr\\(''.join\\(c['source']\\)\\)\\) for c in nb['cells'] if c.get\\('id'\\)=='3c7c310c']\")",
+      "Bash(py -c \"import json; f=open\\('colab_run.ipynb'\\); nb=json.load\\(f\\); f.close\\(\\); src=''.join\\([c for c in nb['cells'] if c.get\\('id'\\)=='3c7c310c'][0]['source']\\); print\\(src\\)\")",
+      "Bash(py -c \"import json; f=open\\('colab_run.ipynb',encoding='utf-8'\\); nb=json.load\\(f\\); f.close\\(\\); src=''.join\\([c for c in nb['cells'] if c.get\\('id'\\)=='3c7c310c'][0]['source']\\); print\\(src\\)\")",
+      "PowerShell(py -c \"import json,sys; f=open\\('colab_run.ipynb',encoding='utf-8'\\); nb=json.load\\(f\\); f.close\\(\\); src=''.join\\([c for c in nb['cells'] if c.get\\('id'\\)=='3c7c310c'][0]['source']\\); sys.stdout.buffer.write\\(src.encode\\('utf-8'\\)\\)\")",
+      "Bash(py fix_cell2.py)",
+      "Bash(py check_cells.py)",
+      "Bash(py fix_cell3.py)",
+      "Bash(py verify_cell2.py)",
+      "Bash(py fix_cell2_v2.py)",
+      "Bash(git commit *)",
+      "Bash(py fix_cell5.py)",
+      "Bash(py fix_cell5_v2.py)",
+      "Bash(py fix_cell5_v3.py)"
     ]
   }
 }
