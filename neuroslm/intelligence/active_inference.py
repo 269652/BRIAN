@@ -1,30 +1,29 @@
 # -*- coding: utf-8 -*-
 """Active Inference / Free Energy Principle for NeuroSLM.
 
-Implements Karl Friston's Free Energy Principle as a novel ML architecture
-add-on that can sit on top of any transformer-based cognitive architecture:
+Canonical Friston (2017) hierarchical message passing:
 
-  F = E_q[log q(s) - log p(o,s)]
-    = KL(q(s)||p(s)) - E_q[log p(o|s)]
-    = complexity - accuracy
+  Superficial pyramidal cells (error units ε^l):
+      ε^l = Π^l ⊙ (x^l − g^l(μ^{l+1}))
+      — precision-weighted prediction errors propagated bottom-up
 
-Where:
-  q(s) — posterior over hidden states (what the model currently believes)
-  p(s) — prior over hidden states (the generative model's expectation)
-  p(o|s) — likelihood of observations given states
+  Deep pyramidal cells (state units μ^l):
+      μ^l = recognition(x^l, ε^l)
+      — beliefs integrate sensory evidence + prediction errors
 
-Novel contributions to SLM architecture:
-  1. HierarchicalPredictiveProcessor — each cognitive layer predicts the
-     layer below; residuals propagate up as prediction errors
-  2. PrecisionWeightedAttention — attention weights modulated by precision
-     (inverse variance) → high-confidence predictions dominate
-  3. EpistemicValue — measures information gain from potential actions;
-     drives exploration toward uncertain, informative states
-  4. PragmaticValue — expected reward under posterior beliefs;
-     drives exploitation toward high-reward states
-  5. Free-energy gradient as auxiliary loss signal — improves learning
-     efficiency by ~30% compared to standard cross-entropy alone
-     (analogous to predictive coding in biological neurons)
+  Generative model (top-down predictions):
+      g^l(μ^l) = pred of level l−1 given level l beliefs
+
+  Free energy:
+      F = Σ_l ||ε^l||^2  (accuracy) + complexity prior
+
+Two-pass forward:
+  Pass 1 (bottom-up):  compute initial μ^l with no top-down prior
+  Pass 2 (top-down):   generate predictions downward, recompute ε^l
+
+References:
+  Friston et al. (2017) "Active Inference: A Process Theory" Neural Computation
+  Bastos et al. (2012) "Canonical Microcircuits for Predictive Coding" Neuron
 """
 from __future__ import annotations
 import torch
@@ -34,134 +33,118 @@ from typing import List, Optional, Tuple
 
 
 class PredictiveLayer(nn.Module):
-    """Single hierarchical predictive coding layer.
+    """Canonical Friston predictive coding layer.
 
-    Maintains:
-      • A top-down prediction of its input (prior)
-      • A bottom-up representation from actual input (posterior)
-      • Precision weights (inverse variance) per feature
+    Superficial pyramidal cells (error units):
+        ε^l = Π^l ⊙ (x^l − prior_pred^l)
+        Precision Π = exp(log_precision) is learned per feature.
 
-    The prediction error = (actual - predicted) / precision is propagated
-    upward to the next layer, driving updates only where predictions fail.
-    This is equivalent to residual learning, but with learned precision
-    gating: low-precision channels carry little gradient (ignored noise).
+    Deep pyramidal cells (state units):
+        μ^l = recognition(x^l, ε^l)
+        Integrates sensory evidence with precision-weighted prediction error.
+
+    Generative model (top-down):
+        pred^{l-1} = generative(μ^l)
+        Zero-initialised so the network starts with uninformative priors.
     """
 
     def __init__(self, d_in: int, d_out: int):
         super().__init__()
-        # Bottom-up (recognition) model: input → representation
-        self.bu_proj = nn.Linear(d_in, d_out)
-        # Top-down (generative) model: representation → prediction of input
-        self.td_proj = nn.Linear(d_out, d_in)
-        # Precision weights: log-variance per input feature
+        # Precision weights for superficial pyramidal error units
         self.log_precision = nn.Parameter(torch.zeros(d_in))
-        # Posterior update: combine prior prediction + bottom-up
-        self.update = nn.Sequential(
+
+        # Deep pyramidal: recognition model μ^l = f(x, ε)
+        self.recognition = nn.Sequential(
             nn.Linear(d_in * 2, d_out),
             nn.LayerNorm(d_out),
             nn.GELU(),
         )
 
+        # Generative model: g^l(μ^l) → prediction of level l-1
+        self.generative = nn.Linear(d_out, d_in, bias=False)
+        nn.init.zeros_(self.generative.weight)  # uninformative prior at init
+
     def forward(self, x: torch.Tensor,
                 prior_pred: Optional[torch.Tensor] = None
                ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        x:          (B, d_in)  — actual input (sensory or lower-layer output)
-        prior_pred: (B, d_in)  — top-down prediction (from layer above)
-                                  None on first pass → use learned prior
+        x:          (B, d_in)  — sensory input or lower-layer belief
+        prior_pred: (B, d_in)  — top-down generative prediction; None → zero prior
 
         Returns:
-          posterior:  (B, d_out) — updated belief state (for next layer)
-          error:      (B, d_in)  — precision-weighted prediction error
-          pred_of_x:  (B, d_in)  — prediction of x (for reconstruction loss)
+          posterior:  (B, d_out) — deep pyramidal state (belief μ^l)
+          error:      (B, d_in)  — precision-weighted prediction error ε^l
+          pred_down:  (B, d_in)  — generative prediction of level l−1
         """
         if prior_pred is None:
             prior_pred = torch.zeros_like(x)
 
-        # Precision-weighted prediction error
-        precision = torch.exp(self.log_precision)   # (d_in,)
-        raw_error  = x - prior_pred
-        pw_error   = raw_error * precision          # high-precision dims dominate
+        # Superficial pyramidal: ε^l = Π^l ⊙ (x − pred)
+        precision = torch.exp(self.log_precision)   # (d_in,) — inverse variance
+        error = precision * (x - prior_pred)
 
-        # Posterior: combine bottom-up signal with precision-weighted error
-        combined  = torch.cat([x, pw_error], dim=-1)
-        posterior = self.update(combined)           # (B, d_out)
+        # Deep pyramidal: μ^l integrates evidence + prediction error
+        posterior = self.recognition(torch.cat([x, error], dim=-1))
 
-        # Reconstruct prediction of x from posterior (for generative loss)
-        pred_of_x = self.td_proj(posterior)        # (B, d_in)
+        # Generative: what does this level predict about the level below?
+        pred_down = self.generative(posterior)
 
-        return posterior, pw_error, pred_of_x
+        return posterior, error, pred_down
 
 
 class HierarchicalPredictiveProcessor(nn.Module):
-    """Stack of PredictiveLayers forming a predictive hierarchy.
+    """Canonical two-pass hierarchical predictive processor.
 
-    Information flow:
-      Bottom-up:  x → layer_0 → layer_1 → ... → layer_n (recognition)
-      Top-down:   layer_n → layer_{n-1} → ... → layer_0 (generation)
+    Pass 1 — Bottom-up (recognition):
+        For each layer l bottom to top: compute μ^l from x^l with no prior.
+    Pass 2 — Top-down (generation):
+        For each layer l top to bottom: generate pred^{l-1} = g^l(μ^l),
+        recompute ε^l with the top-down prior, producing final error signals.
 
-    Free energy components:
-      accuracy:   sum of reconstruction losses per layer
-      complexity: KL between posterior and prior at each layer
+    Free energy = Σ_l ||ε^l||^2 + 0.05 × Σ_l ||μ^l||^2
     """
 
     def __init__(self, d_in: int, d_hidden: int, n_layers: int = 3):
         super().__init__()
         dims = [d_in] + [d_hidden] * n_layers
         self.layers = nn.ModuleList([
-            PredictiveLayer(dims[i], dims[i+1])
+            PredictiveLayer(dims[i], dims[i + 1])
             for i in range(n_layers)
         ])
         self.output_dim = d_hidden
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        x: (B, d_in)
-        Returns:
-          representation: (B, d_hidden)  — top layer posterior (refined beliefs)
-          free_energy:    ()              — scalar free energy (complexity - accuracy)
-        """
-        posteriors: list = []
-        errors: list = []
-        preds: list = []
+        """x: (B, d_in)
 
-        # Bottom-up pass: recognition
+        Returns:
+          posterior:    (B, d_hidden) — top-layer belief state μ^{L}
+          free_energy:  ()            — scalar F = accuracy + complexity
+        """
+        n = len(self.layers)
+
+        # --- Pass 1: Bottom-up — no top-down prior ---
+        posteriors: list[torch.Tensor] = []
         current = x
         for layer in self.layers:
-            post, err, pred = layer(current, prior_pred=None)
+            post, _, _ = layer(current, prior_pred=None)
             posteriors.append(post)
-            errors.append(err)
-            preds.append(pred)
             current = post
 
-        # Top-down pass: generation
-        # Each layer i generates a top-down prediction of layer i-1's output.
-        # We iterate top → bottom, updating each layer's error with the
-        # top-down prior from the layer above.
-        #
-        # preds[i] = layer_i.td_proj(posteriors[i]) = prediction of what
-        # layer i-1's output *should* be according to layer i's beliefs.
-        # This becomes the prior_pred for layer i-1.
-        td_prior = None  # top layer has no prior from above
-        for i in range(len(self.layers) - 1, -1, -1):
-            if td_prior is not None:
-                # Re-compute this layer's error given the top-down prior
-                inp = posteriors[i - 1] if i > 0 else x
-                _, td_err, td_pred = self.layers[i](inp, prior_pred=td_prior)
-                errors[i] = td_err
-                preds[i]  = td_pred
-            # This layer's prediction of the layer below becomes the next prior
-            td_prior = self.layers[i].td_proj(posteriors[i])
+        # --- Pass 2: Top-down — recompute errors with generative predictions ---
+        errors: list[torch.Tensor] = []
+        td_pred: Optional[torch.Tensor] = None   # top layer has no prior from above
+        for i in range(n - 1, -1, -1):
+            inp = posteriors[i - 1] if i > 0 else x
+            _, err, pred_down = self.layers[i](inp, prior_pred=td_pred)
+            errors.insert(0, err)
+            td_pred = pred_down   # this layer's prediction becomes prior for level below
 
-        # Free energy = accuracy (reconstruction) + complexity (KL proxy)
-        # Accuracy: how well does each layer reconstruct its input?
-        accuracy = sum(err.pow(2).mean() for err in errors)
-        # Complexity: how much does each posterior deviate from a unit Gaussian?
-        # KL(N(mu,1) || N(0,1)) ≈ 0.5*(mu² - 1 + 1) = 0.5*mu²
-        complexity = sum(0.5 * post.pow(2).mean() for post in posteriors)
-        fe = accuracy + 0.1 * complexity
+        # --- Free energy ---
+        accuracy   = sum(err.pow(2).mean() for err in errors)
+        complexity = sum(0.05 * post.pow(2).mean() for post in posteriors)
+        free_energy = accuracy + complexity
 
-        return posteriors[-1], fe
+        return posteriors[-1], free_energy
 
 
 class PrecisionWeightedAttention(nn.Module):

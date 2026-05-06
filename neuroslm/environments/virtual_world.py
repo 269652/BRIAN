@@ -88,8 +88,12 @@ class Environment:
         self.rng = random.Random(seed)
         self.tick = 0
 
-    def step(self) -> SensoryFrame:
+    def step(self, action=None) -> SensoryFrame:
         raise NotImplementedError
+
+    def current_frame(self) -> SensoryFrame:
+        """Return the last frame without advancing; passive envs generate one."""
+        return self.step()
 
     def stream(self, max_ticks: int = 10000) -> Iterator[SensoryFrame]:
         for _ in range(max_ticks):
@@ -114,7 +118,7 @@ class BusStop(Environment):
         self.weather = self.rng.choice(["overcast", "sunny", "drizzling", "windy"])
         self.time = self.rng.choice(["morning", "afternoon", "evening"])
 
-    def step(self) -> SensoryFrame:
+    def step(self, action=None) -> SensoryFrame:
         self.tick += 1
         self.waited_minutes += self.rng.uniform(0.5, 2.0)
         t = self.tick
@@ -226,7 +230,7 @@ class MeadowTree(Environment):
         self.season = self.rng.choice(["spring", "summer", "early_autumn"])
         self.time = "afternoon"
 
-    def step(self) -> SensoryFrame:
+    def step(self, action=None) -> SensoryFrame:
         self.tick += 1
         elapsed = self.tick * 1.5  # ~1.5 min per tick
 
@@ -321,7 +325,7 @@ class RainyWindow(Environment):
         self.time = self.rng.choice(["morning", "afternoon", "evening"])
         self.has_tea = self.rng.random() > 0.3
 
-    def step(self) -> SensoryFrame:
+    def step(self, action=None) -> SensoryFrame:
         self.tick += 1
         elapsed = self.tick * 2.0
 
@@ -388,7 +392,7 @@ class OceanCliff(Environment):
         super().__init__(seed)
         self.time = self.rng.choice(["sunrise", "midday", "sunset"])
 
-    def step(self) -> SensoryFrame:
+    def step(self, action=None) -> SensoryFrame:
         self.tick += 1
         elapsed = self.tick * 1.0
 
@@ -454,7 +458,7 @@ class Library(Environment):
         super().__init__(seed)
         self.time = "afternoon"
 
-    def step(self) -> SensoryFrame:
+    def step(self, action=None) -> SensoryFrame:
         self.tick += 1
         elapsed = self.tick * 3.0
 
@@ -508,7 +512,7 @@ class Campfire(Environment):
         self.time = "night"
         self.wood_remaining = 1.0
 
-    def step(self) -> SensoryFrame:
+    def step(self, action=None) -> SensoryFrame:
         self.tick += 1
         elapsed = self.tick * 2.0
         self.wood_remaining = max(0.1, self.wood_remaining - 0.005)
@@ -575,6 +579,7 @@ ENVIRONMENTS = {
     "library": Library,
     "campfire": Campfire,
 }
+# GridWorld is registered below after its definition
 
 
 def create_environment(name: str = "random", seed: int = 42) -> Environment:
@@ -603,3 +608,207 @@ def environment_stream(seed: int = 42,
         env = create_environment(name, seed=rng.randint(0, 99999))
         for frame in env.stream(max_ticks=switch_every):
             yield frame
+
+
+# ---------------------------------------------------------------------------
+# Symbolic grid-world: supports action-conditioned step()
+# ---------------------------------------------------------------------------
+
+# Named discrete actions exported for use by Brain.run_continuous()
+GRID_ACTIONS = ["WAIT", "MOVE_N", "MOVE_S", "MOVE_E", "MOVE_W", "INTERACT"]
+GRID_ACTION_IDX = {a: i for i, a in enumerate(GRID_ACTIONS)}
+
+_DEFAULT_MAP = [
+    "#####",
+    "#A.K#",
+    "#.#.#",
+    "#.DG#",
+    "#####",
+]
+# Legend: # wall, A agent start, . floor, K key, D door (locked), G goal
+
+
+class GridWorld(Environment):
+    """Symbolic 5×5 grid-world — a minimal embodied environment.
+
+    Objects:
+        '#'  wall            —  impassable
+        '.'  floor           —  passable, empty
+        'A'  agent start     —  initial position (replaced by '.' after spawn)
+        'K'  key             —  pick up to unlock the door
+        'D'  door (locked)   —  passable only with key; becomes 'x' when opened
+        'x'  door (open)     —  passable
+        'G'  goal / treasure —  episode success on INTERACT
+
+    Actions (indexed 0–5, cyclic-mapped from brain's action_idx):
+        0 WAIT      —  no movement
+        1 MOVE_N    —  move north  (row -= 1)
+        2 MOVE_S    —  move south  (row += 1)
+        3 MOVE_E    —  move east   (col += 1)
+        4 MOVE_W    —  move west   (col -= 1)
+        5 INTERACT  —  pick up key / open door / claim goal
+
+    Reward encoded in SensoryFrame.valence:
+        +1.0  claimed goal
+        +0.5  picked up key
+        +0.3  opened door
+        -0.05 bumped into wall (wasted move)
+         0.0  floor walk / wait
+    """
+    name = "grid_world"
+    n_actions = len(GRID_ACTIONS)
+
+    _DELTA = {
+        "MOVE_N": (-1, 0),
+        "MOVE_S": (+1, 0),
+        "MOVE_E": (0, +1),
+        "MOVE_W": (0, -1),
+    }
+
+    def __init__(self, seed: int = 42, map_lines: list[str] | None = None):
+        super().__init__(seed)
+        raw = map_lines or _DEFAULT_MAP
+        self.grid = [list(row) for row in raw]
+        self.rows = len(self.grid)
+        self.cols = len(self.grid[0]) if self.grid else 0
+        # Find agent start
+        self.agent_row, self.agent_col = 1, 1
+        for r, row in enumerate(self.grid):
+            for c, ch in enumerate(row):
+                if ch == "A":
+                    self.agent_row, self.agent_col = r, c
+                    self.grid[r][c] = "."
+        self.has_key   = False
+        self.done      = False
+        self._last_frame: SensoryFrame = self._make_frame(0.0, 0.0)
+
+    # ---- internal helpers ------------------------------------------------
+
+    def _cell(self, r: int, c: int) -> str:
+        if 0 <= r < self.rows and 0 <= c < self.cols:
+            return self.grid[r][c]
+        return "#"
+
+    def _view(self) -> str:
+        """3×3 egocentric text view around the agent."""
+        r, c = self.agent_row, self.agent_col
+        rows_out = []
+        for dr in (-1, 0, 1):
+            row_str = ""
+            for dc in (-1, 0, 1):
+                nr, nc = r + dr, c + dc
+                if dr == 0 and dc == 0:
+                    row_str += "[@]"
+                else:
+                    ch = self._cell(nr, nc)
+                    row_str += f"[{ch}]"
+            rows_out.append(row_str)
+        return " | ".join(rows_out)
+
+    def _make_frame(self, valence: float, novelty: float) -> SensoryFrame:
+        view = self._view()
+        r, c = self.agent_row, self.agent_col
+        inv  = "key" if self.has_key else "nothing"
+        visual    = f"Grid position ({r},{c}). View: {view}."
+        tactile   = f"Standing on {'goal' if self._cell(r,c)=='G' else 'floor'}."
+        intero    = f"Carrying: {inv}. Steps taken: {self.tick}."
+        auditory  = "Silence in the grid."
+        olfactory = ""
+        return SensoryFrame(
+            visual=visual, auditory=auditory,
+            tactile=tactile, olfactory=olfactory,
+            interoceptive=intero,
+            valence=valence, arousal=min(1.0, novelty + 0.1),
+            novelty=novelty, comfort=0.5,
+            time_pressure=0.0, social_presence=0.0,
+            environment=self.name,
+            tick=self.tick,
+            time_of_day="none",
+            elapsed_minutes=float(self.tick),
+        )
+
+    # ---- public interface ------------------------------------------------
+
+    def current_frame(self) -> SensoryFrame:
+        """Return the most recent frame without advancing time."""
+        return self._last_frame
+
+    def step(self, action: int | str | None = None) -> SensoryFrame:  # type: ignore[override]
+        """Advance the grid-world by one tick with an optional action.
+
+        action: int index into GRID_ACTIONS, string action name, or None (WAIT).
+        Returns SensoryFrame encoding the new observation + reward.
+        """
+        self.tick += 1
+        valence  = 0.0
+        novelty  = 0.0
+
+        if self.done:
+            frame = self._make_frame(0.0, 0.0)
+            self._last_frame = frame
+            return frame
+
+        # Resolve action name
+        if isinstance(action, int):
+            act_name = GRID_ACTIONS[action % self.n_actions]
+        elif isinstance(action, str):
+            act_name = action if action in GRID_ACTION_IDX else "WAIT"
+        else:
+            act_name = "WAIT"
+
+        r, c = self.agent_row, self.agent_col
+
+        if act_name in self._DELTA:
+            dr, dc = self._DELTA[act_name]
+            nr, nc = r + dr, c + dc
+            target = self._cell(nr, nc)
+            if target == "#":
+                valence = -0.05     # bumped into wall
+            elif target == "D":
+                if self.has_key:
+                    # Key unlocks door automatically on move
+                    self.grid[nr][nc] = "x"
+                    self.agent_row, self.agent_col = nr, nc
+                    valence = 0.3
+                    novelty = 0.5
+                else:
+                    valence = -0.05  # locked door
+            elif target in (".", "x", "G", "K"):
+                self.agent_row, self.agent_col = nr, nc
+                if target == "K":
+                    self.has_key = True
+                    self.grid[nr][nc] = "."
+                    valence = 0.5
+                    novelty = 0.6
+                elif target == "G":
+                    valence = 0.1   # walking onto goal is minor reward
+                    novelty = 0.2
+
+        elif act_name == "INTERACT":
+            cell = self._cell(r, c)
+            if cell == "G":
+                valence = 1.0
+                novelty = 1.0
+                self.done = True
+            elif cell == "K":
+                self.has_key = True
+                self.grid[r][c] = "."
+                valence = 0.5
+                novelty = 0.6
+            elif cell == "D" and self.has_key:
+                self.grid[r][c] = "x"
+                valence = 0.3
+                novelty = 0.5
+            # else: no effect
+
+        frame = self._make_frame(valence, novelty)
+        self._last_frame = frame
+        return frame
+
+    def stream(self, max_ticks: int = 10000) -> Iterator[SensoryFrame]:
+        for _ in range(max_ticks):
+            yield self.step(action=None)
+
+
+# Register GridWorld now that the class is defined
+ENVIRONMENTS["grid_world"] = GridWorld

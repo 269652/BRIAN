@@ -253,6 +253,7 @@ class Brain(nn.Module):
         from .memory.entity_store import EntityStore
         from .modules.theory_of_mind import TheoryOfMindModule
         from .intelligence.active_inference import FreeEnergyProcessor
+        from .neurochem.vesicles import VesiclePool
 
         self.hypergraph = (
             MemoryHyperGraph(d_emb=cfg.d_sem,
@@ -278,6 +279,16 @@ class Brain(nn.Module):
                 n_layers=getattr(cfg, 'active_inf_layers', 3),
             ) if getattr(cfg, 'enable_active_inference', False) else None
         )
+        # VesiclePool: slow long-range neuromodulation via content packets
+        _n_brain_modules = 8  # approximate count for migration graph
+        self.vesicle_pool = (
+            VesiclePool(
+                d_sem=cfg.d_sem,
+                n_modules=_n_brain_modules,
+                n_vesicles=getattr(cfg, 'n_vesicles', 32),
+                lifetime=getattr(cfg, 'vesicle_lifetime', 16),
+            ) if getattr(cfg, 'enable_vesicles', False) else None
+        )
 
         # RSSM: replace WorldModel with RSSM if enabled
         self._use_rssm = getattr(cfg, 'enable_rssm', False)
@@ -292,6 +303,7 @@ class Brain(nn.Module):
             )
 
         self._active_entity_id: str | None = None
+        self.entities: dict = {}
 
         # ---- Novel ML / neuroscience modules ----
         from .modules.active_dendrite        import ActiveDendriteLayer
@@ -1345,14 +1357,11 @@ class Brain(nn.Module):
                     self.entities[eid] = ent
         state['entities'] = self.entities
 
-        # --- ToM (Theory of Mind) ---
-        if cfg.enable_tom and self.tom is not None:
-            tom_out = self.tom(slots_enriched, self.entities)
-            state['tom'] = tom_out
+        # ToM is already handled above (lines ~10c) when _active_entity_id is set
 
         # --- RSSM world state ---
-        if cfg.enable_rssm and self.rssm is not None:
-            rssm_out, rssm_state = self.rssm(z_world, state.get('rssm_state', None))
+        if self._use_rssm:
+            rssm_out, rssm_state = self.world(z_world, state.get('rssm_state', None))
             state['rssm_state'] = rssm_state
             state['rssm_out'] = rssm_out
 
@@ -1367,6 +1376,25 @@ class Brain(nn.Module):
             state['epistemic_value'] = fe_out['epistemic_value']
             state['pragmatic_value'] = fe_out['pragmatic_value']
             state['uncertainty'] = fe_out['uncertainty']
+
+        # --- Vesicle neuromodulation (slow long-range content packets) ---
+        if self.vesicle_pool is not None:
+            # Build (B, n_modules, d_sem) module activation tensor for docking
+            _mod_acts = torch.stack([
+                slots_enriched.mean(1),   # 0: GWS summary
+                z_world,                  # 1: world model
+                z_self,                   # 2: self state
+                dmn_query,                # 3: DMN
+                selected,                 # 4: PFC selection
+                sens,                     # 5: sensory
+                sem.mean(1),              # 6: language
+                state["floating_thought"],# 7: floating thought
+            ], dim=1)  # (B, 8, d_sem)
+            surprise_signal = novelty.unsqueeze(-1) * state["floating_thought"]
+            vesicle_mod = self.vesicle_pool.tick(
+                _mod_acts, surprise=surprise_signal)
+            # Apply GWS slot modulation (module 0 = GWS)
+            slots_enriched = slots_enriched + vesicle_mod[:, 0:1, :].expand_as(slots_enriched)
 
         # Consciousness metrics
         c_metrics = self.consciousness.update(
@@ -1489,6 +1517,153 @@ class Brain(nn.Module):
                     content=text[:200], valence=frame.valence,
                     salience=frame.arousal)
         return last
+
+    # ------------------------------------------------------------------
+    # Continuous sensory-motor loop
+    # ------------------------------------------------------------------
+    @torch.no_grad()
+    def run_continuous(
+        self,
+        env=None,
+        max_steps: int = 500,
+        device=None,
+        on_step=None,
+        gamma: float = 0.99,
+        seed: int = 42,
+    ) -> dict:
+        """Closed perception-action loop grounded in a virtual environment.
+
+        Each tick:
+          1. Read sensory frame from env (or env.current_frame() if first)
+          2. Tokenize frame text → ids
+          3. Run cognitive_step → GWS broadcast, motor selection, metrics
+          4. Map BG action_idx → env action index (cyclic modulo)
+          5. Step env with that action → next frame (with reward in valence)
+          6. Inject env valence as DA reward signal
+          7. Write high-salience frames to hippocampal memory
+
+        Args:
+            env:       Environment instance. None → GridWorld (action-capable).
+            max_steps: Maximum ticks before returning.
+            device:    Torch device string or object. None → infer from model.
+            on_step:   Callback(step_idx, frame, logits, info) per tick.
+            gamma:     Discount factor for cumulative return tracking.
+            seed:      RNG seed used when creating the default GridWorld.
+
+        Returns:
+            dict: episode statistics
+              total_return    — discounted cumulative valence reward
+              steps           — actual ticks executed
+              mean_phi        — mean integrated information Φ
+              mean_novelty    — mean CA1 novelty signal
+              final_nt        — NT levels at episode end
+              action_histogram — count of each env action taken
+        """
+        from .environments.virtual_world import GridWorld, GRID_ACTIONS
+        from .tokenizer import Tokenizer
+
+        if device is None:
+            device = next(self.parameters()).device
+
+        if env is None:
+            env = GridWorld(seed=seed)
+
+        tok = Tokenizer()
+        n_env_actions = len(GRID_ACTIONS)
+
+        state   = self.init_latents(1, device)
+        total_return   = 0.0
+        discount       = 1.0
+        phi_history    : list[float] = []
+        novelty_history: list[float] = []
+        action_hist    = {a: 0 for a in GRID_ACTIONS}
+
+        # Bootstrap: get first frame without sending an action
+        frame = env.step(action=None)
+
+        for step in range(max_steps):
+            # --- encode observation ---
+            text     = frame.to_text()
+            ids_list = tok.encode(text)
+            ids_list = ids_list[-self.cfg.lang_ctx:]
+            if len(ids_list) < 2:
+                ids_list = [0, 0]
+            ids = torch.tensor([ids_list], dtype=torch.long, device=device)
+
+            # --- full cognitive step (GWS + motor + memory) ---
+            logits, state, info = self.cognitive_step(ids, state, allow_emit=False)
+
+            # --- select environment action ---
+            # BG action_idx → cyclic map to env's discrete action space
+            raw_idx  = int(info.get("action_idx", torch.zeros(1))[0].item())
+            env_act  = raw_idx % n_env_actions
+            act_name = GRID_ACTIONS[env_act]
+            action_hist[act_name] += 1
+
+            # --- step environment ---
+            next_frame = env.step(action=env_act)
+
+            # --- reward shaping ---
+            # Intrinsic: curiosity (novelty) + DA (reward expectation)
+            # Extrinsic: env valence (sparse structured reward)
+            da_now = float(self.transmitters.get("DA").mean().item())
+            nov    = float(info["novelty"].mean().item())
+            intrinsic  = nov * 0.3 + da_now * 0.3
+            extrinsic  = next_frame.valence               # env-defined reward
+            step_reward = intrinsic + extrinsic * 0.5
+            total_return += discount * step_reward
+            discount     *= gamma
+
+            # Inject extrinsic reward as DA signal so NT system tracks it
+            if next_frame.valence > 0.1:
+                self.transmitters.release(
+                    "DA",
+                    torch.full((1,), min(next_frame.valence, 1.0), device=device),
+                )
+            if next_frame.arousal > 0.4:
+                self.transmitters.release(
+                    "NE",
+                    torch.full((1,), next_frame.arousal * 0.4, device=device),
+                )
+
+            # Store salient frames in hippocampus
+            if next_frame.novelty > 0.4 or next_frame.valence > 0.3:
+                sem_vec = state["floating_thought"].detach()
+                nt_now  = self.transmitters.vector().detach()
+                self.hippo.store(
+                    sem_vec, sem_vec,
+                    nt_state=nt_now,
+                    valence=next_frame.valence,
+                    salience=next_frame.novelty,
+                )
+
+            # --- log consciousness metrics ---
+            c_metrics = info.get("consciousness", {})
+            phi_history.append(c_metrics.get("phi", 0.0))
+            novelty_history.append(float(info["novelty"].mean().item()))
+
+            if on_step is not None:
+                on_step(step, next_frame, logits, info)
+
+            frame = next_frame
+
+            # Stop if goal reached (GridWorld sets valence=1.0 on goal)
+            if getattr(env, "done", False):
+                break
+            # Stop if survival mode fires (extreme threat)
+            if info.get("survival", torch.zeros(1)).any():
+                break
+
+        n = max(len(phi_history), 1)
+        return {
+            "total_return":     total_return,
+            "steps":            step + 1,
+            "mean_phi":         sum(phi_history) / n,
+            "mean_novelty":     sum(novelty_history) / n,
+            "final_nt":         {k: float(self.transmitters.get(k).mean())
+                                 for k in ["DA", "NE", "5HT", "ACh"]},
+            "action_histogram": action_hist,
+        }
 
     # ------------------------------------------------------------------
     # Generate

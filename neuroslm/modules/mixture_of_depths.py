@@ -1,31 +1,64 @@
-"""Mixture of Depths — dynamic layer skipping per token.
+"""Mixture of Depths + CALM early exit — dynamic per-token compute allocation.
 
-Paper: "Mixture-of-Depths" (Raposo et al., Google DeepMind, 2024)
-Key insight: not all tokens need the same number of layers. Easy tokens
-(function words, predictable continuations) can skip layers. Hard tokens
-(novel concepts, reasoning steps) use all layers. A lightweight router
-per layer decides which tokens proceed vs skip.
+MoD (Raposo et al. 2024): easy tokens skip layers via a learned router.
+CALM (Schuster et al. 2022): confident tokens exit the entire stack early,
+  carrying their frozen hidden state through remaining layers.
 
-    For each layer l:
-      router_score = Linear(x) → scalar per token
-      top-C tokens (by score) pass through the layer
-      remaining tokens skip with identity (residual only)
+Combined effect:
+  - MoD:  per-layer token routing (spatial compute allocation)
+  - CALM: cross-layer early exit (depth compute allocation)
+  - Net:  hard tokens get full depth + full width; trivial tokens get neither
 
-This gives:
-  - 2× throughput at same quality (50% of tokens skip ~half the layers)
-  - Better quality at same FLOPs (hard tokens get more compute)
-  - Naturally genome-controllable: genome sets capacity C per layer
-
-Integration with NeuroSLM:
-  - NT modulation: NE (arousal) → increase capacity (more tokens processed)
-  - Genome controls per-layer capacity ratio
-  - Router scores contribute to consciousness metrics (which tokens "enter awareness")
+CALM threshold decays with layer depth:
+  θ_l = θ_base × exp(−decay × l / (L−1))
+Easy layers (l ≈ 0) have high θ (almost never exit); deep layers have lower θ
+so tokens that remain uncertain deep in the stack still have a chance to exit.
 """
 from __future__ import annotations
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+# ---------------------------------------------------------------------------
+# CALM: Confident Adaptive Language Modeling early-exit head
+# ---------------------------------------------------------------------------
+
+class CALMHead(nn.Module):
+    """Per-token confidence estimator for CALM early exit.
+
+    Predicts how "done" each token position is after this layer.
+    Zero-initialised so no exits happen at the start of training;
+    the network learns when exiting is safe.
+
+    Threshold schedule: θ_l = θ_base × exp(−decay × l/(L−1))
+    High threshold at shallow layers (almost never exit early) → decays
+    so tokens still undecided at deep layers can still exit.
+    """
+
+    def __init__(self, dim: int, base_threshold: float = 0.9, decay: float = 2.0):
+        super().__init__()
+        hidden = max(16, dim // 16)
+        self.head = nn.Sequential(
+            nn.Linear(dim, hidden, bias=True),
+            nn.GELU(),
+            nn.Linear(hidden, 1, bias=True),
+        )
+        self.base_threshold = base_threshold
+        self.decay = decay
+        nn.init.zeros_(self.head[0].weight)
+        nn.init.zeros_(self.head[2].weight)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """x: (B, T, D) → confidence: (B, T) ∈ [0, 1]"""
+        return torch.sigmoid(self.head(x).squeeze(-1))
+
+    def threshold(self, layer_idx: int, n_layers: int) -> float:
+        if n_layers <= 1:
+            return self.base_threshold
+        return self.base_threshold * math.exp(
+            -self.decay * layer_idx / max(n_layers - 1, 1))
 
 
 class MoDRouter(nn.Module):
@@ -84,10 +117,12 @@ class MoDRouter(nn.Module):
 
 
 class MoDBlock(nn.Module):
-    """Transformer block with Mixture-of-Depths token routing.
+    """Transformer block with Mixture-of-Depths routing + CALM early-exit head.
 
     Only top-C tokens (by router score) pass through the attention+MLP.
     Remaining tokens get identity (residual passthrough).
+    CALM head provides per-token confidence scores for cross-layer early exit
+    (managed by LanguageCortex.forward, not by this block directly).
     """
 
     def __init__(self, dim: int, n_heads: int, max_ctx: int,
@@ -97,6 +132,7 @@ class MoDBlock(nn.Module):
         super().__init__()
         from .common import SwiGLU, RMSNorm
         self.router = MoDRouter(dim, capacity_ratio, n_nt)
+        self.calm_head = CALMHead(dim)          # CALM early-exit confidence
 
         if use_diff_attn:
             from .differential_attention import DifferentialAttention

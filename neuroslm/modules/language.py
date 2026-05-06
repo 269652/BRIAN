@@ -194,15 +194,46 @@ class LanguageCortex(nn.Module):
                         use_reentrant=False)
             return blk(x, nt=nt_vec)
 
+        # CALM early-exit state (inference only: no overhead during training)
+        B, T = h.shape[:2]
+        # Gradient checkpointing is also activated on XLA (TPU rematerialisation).
+        # The existing self.gradient_checkpointing flag covers both CUDA and XLA.
+        use_calm = (not self.training
+                    and hasattr(self, 'adapters')
+                    and len(self.adapters) > 0)
+        if use_calm:
+            n_layers_total = len(self.blocks)
+            calm_frozen = torch.zeros_like(h)   # frozen hidden states for exited tokens
+            calm_mask   = torch.zeros(B, T, dtype=torch.bool, device=h.device)
+
         if hasattr(self, 'adapters') and len(self.adapters) > 0:
             for i, (blk, adapter) in enumerate(zip(self.blocks, self.adapters)):
+                # Inject frozen states for CALM-exited tokens before the block
+                if use_calm and calm_mask.any():
+                    h = torch.where(calm_mask.unsqueeze(-1), calm_frozen, h)
+
                 h = _run_block(blk, h, nt)
-                h = adapter(h)   # lightweight — never checkpointed
+                h = adapter(h)
+
+                # CALM: evaluate per-token confidence; freeze tokens that are "done"
+                if use_calm and hasattr(blk, 'calm_head'):
+                    thresh = blk.calm_head.threshold(i, n_layers_total)
+                    with torch.no_grad():
+                        conf = blk.calm_head(h.detach())   # (B, T)
+                    new_exits = (conf > thresh) & ~calm_mask
+                    if new_exits.any():
+                        calm_frozen = torch.where(new_exits.unsqueeze(-1), h, calm_frozen)
+                        calm_mask   = calm_mask | new_exits
+
                 if len(self.pred_coding) > 0:
                     if prev_layer is not None and pc_counter < len(self.pred_coding):
                         pred_coding_loss = pred_coding_loss + self.pred_coding[pc_counter](prev_layer, h)
                         pc_counter += 1  # only advance when a head is consumed
                     prev_layer = h
+
+            # Apply any remaining frozen states after the final layer
+            if use_calm and calm_mask.any():
+                h = torch.where(calm_mask.unsqueeze(-1), calm_frozen, h)
         else:
             for i, blk in enumerate(self.blocks):
                 h = _run_block(blk, h, nt)

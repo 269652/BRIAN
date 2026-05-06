@@ -26,6 +26,10 @@ from .config import PRESETS
 from .tokenizer import Tokenizer
 from .brain import Brain
 from .data import batch_iterator
+from .xla_utils import (
+    get_device, is_xla, mark_step, optimizer_step,
+    should_use_gradient_checkpointing, to_bfloat16, make_loader,
+)
 from torch.func import functional_call
 
 
@@ -63,21 +67,31 @@ def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
                     shutil.copy2(candidate, dst_mem)
                 break
 
-        # Inject token into remote URL so push works from inside a subprocess
+        # Inject token into remote URL so push works from inside a subprocess.
+        # Strategy: strip any existing credentials first, then inject the PAT.
+        # This handles the common Colab case where the URL already contains
+        # a bare username (https://269652@github.com/...) which GitHub rejects
+        # because there is no password — the PAT must be the credential.
         token = (os.environ.get('GITHUB') or os.environ.get('GITHUB_TOKEN', '')).strip()
         if token:
+            import re
             result = subprocess.run(
                 ["git", "remote", "get-url", "origin"],
                 cwd=repo_root, capture_output=True, text=True)
             url = result.stdout.strip()
-            if token not in url:
-                # rebuild URL with token
-                import re
-                url = re.sub(r'https://([^@]*/)', f'https://{token}@\\1', url)
-                if '://' in url and '@' not in url:
-                    url = url.replace('https://', f'https://{token}@')
-                subprocess.run(["git", "remote", "set-url", "origin", url],
-                               cwd=repo_root, capture_output=True)
+            # Remove any existing userinfo (user or user:pass) from the URL
+            clean_url = re.sub(r'https://[^@]+@', 'https://', url)
+            # Inject PAT as the credential
+            auth_url = clean_url.replace('https://', f'https://{token}@', 1)
+            subprocess.run(["git", "remote", "set-url", "origin", auth_url],
+                           cwd=repo_root, capture_output=True)
+            # Ensure git has a committer identity for the checkpoint commit
+            subprocess.run(
+                ["git", "config", "user.email", "train@neuroslm"],
+                cwd=repo_root, capture_output=True)
+            subprocess.run(
+                ["git", "config", "user.name", "NeuroSLM Train"],
+                cwd=repo_root, capture_output=True)
 
         subprocess.run(["git", "add", "lfs_checkpoints/"], cwd=repo_root,
                        capture_output=True, timeout=30)
@@ -125,51 +139,70 @@ def main():
                     help="Train vanilla transformer only (no bio modules) for ablation")
     ap.add_argument("--grad_accum", type=int, default=1,
                     help="gradient accumulation steps; effective_batch = batch_size * grad_accum")
+    ap.add_argument("--optimizer", default="adafactor",
+                    choices=["adafactor", "adamw"],
+                    help="adafactor (default, TPU-optimal) or adamw (CUDA/debug)")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
-    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[train] device={device}", flush=True)
+    # ── Device selection (XLA → CUDA → CPU) ────────────────────────────
+    if args.device:
+        import os as _os
+        _os.environ["NEUROSLM_DEVICE"] = args.device
+    device = get_device()
+    backend = "XLA/TPU" if is_xla() else ("CUDA" if torch.cuda.is_available() else "CPU")
+    print(f"[train] device={device}  backend={backend}", flush=True)
 
-    # Meta-mode requires higher-order gradients through the inner update.
-    # Some CPU attention kernels (flash attention variants) do not implement
-    # higher-order derivatives on CPU. Detect this early and emit a helpful
-    # error to avoid confusing low-level runtime failures.
-    if args.meta and device != "cuda":
-        raise RuntimeError(
-            "Meta-training (--meta) requires a CUDA-capable device because some CPU\n"
-            "attention kernels lack support for higher-order gradients.\n"
-            "Please run with --device cuda on a machine with an NVIDIA GPU (or on Colab),\n"
-            "or disable --meta for CPU runs."
-        )
+    # Meta-mode: no second-order grads are needed (FOMAML), works on XLA too.
+    # Warn if trying to use meta on plain CPU (slower, not unsupported).
+    if args.meta and backend == "CPU":
+        print("[train] WARNING: meta-training on CPU is slow. Consider --device cuda or TPU.",
+              flush=True)
 
     cfg = PRESETS[args.preset]()
     tok = Tokenizer()
     cfg.vocab_size = tok.vocab_size
     if args.baseline:
         cfg.baseline = True
-    if device == "cuda":
+    # Gradient checkpointing is beneficial on both XLA and CUDA
+    if should_use_gradient_checkpointing():
         cfg.gradient_checkpointing = True
     ctx_len = args.ctx or cfg.lang_ctx
     assert ctx_len <= cfg.lang_ctx
 
+    # ── Build model and cast to native precision ────────────────────────
+    # TPU native format: bfloat16 (same dynamic range as fp32, half memory).
+    # CUDA: bfloat16 (Ampere+) or fp32 on older cards.
+    # CPU: fp32 (bfloat16 is slow on CPU).
+    # AMP (GradScaler) is NOT used — bfloat16 does not need loss scaling because
+    # it has the same exponent range as fp32 (unlike float16 which underflows).
     brain = Brain(cfg).to(device)
-    n_params = brain.num_parameters()
+    brain = to_bfloat16(brain)
+    amp_ctx = nullcontext   # no autocast needed; model is already in bfloat16
+    n_params = sum(p.numel() for p in brain.parameters())
     mode_label = "BASELINE (vanilla transformer)" if cfg.baseline else "FULL (bio modules)"
-    print(f"[train] {mode_label} | params: {n_params/1e6:.2f}M (preset={args.preset})", flush=True)
+    print(f"[train] {mode_label} | params: {n_params/1e6:.2f}M "
+          f"(preset={args.preset}, dtype={next(brain.parameters()).dtype})", flush=True)
 
-    # AMP (mixed precision) — halves memory for activations on CUDA
-    use_amp = (device == "cuda")
-    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
-    amp_ctx = lambda: torch.amp.autocast('cuda', enabled=use_amp)
-
-    # Separate optimizers: model optimizer updates model params; meta optimizer
-    # updates the learned optimizer (`brain.learned_opt`). This avoids double
-    # updating learned_opt with the main optimizer.
+    # ── Optimizer ────────────────────────────────────────────────────────
+    # Adafactor: factor-wise second moment — ~8× less optimizer memory than
+    # AdamW, essential for 258M+ params on TPU HBM.  Falls back to AdamW
+    # when --optimizer=adamw is passed (useful for debugging).
     named = list(brain.named_parameters())
     model_params = [p for n, p in named if not n.startswith('learned_opt.')]
-    optim = AdamW(model_params, lr=cfg.lr,
-                  weight_decay=cfg.weight_decay, betas=(0.9, 0.95))
+    if args.optimizer == "adafactor":
+        from torch.optim import Adafactor   # type: ignore[attr-defined]
+        optim = Adafactor(
+            model_params,
+            lr=None,                 # uses per-param scale_parameter logic
+            scale_parameter=True,
+            relative_step=True,
+            warmup_init=True,
+            weight_decay=cfg.weight_decay,
+        )
+    else:
+        optim = AdamW(model_params, lr=cfg.lr,
+                      weight_decay=cfg.weight_decay, betas=(0.9, 0.95))
 
     meta_opt = None
     if args.meta and not cfg.baseline:
@@ -231,8 +264,10 @@ def main():
     print(f"[train] starting; ctx={ctx_len}, batch={args.batch_size}, "
         f"steps={args.steps}, mode={args.mode}"
         + (f" (chat_ratio={args.chat_ratio})" if args.mode == "mix" else ""), flush=True)
-    it = batch_iterator(tok, ctx_len, args.batch_size, seed=args.seed,
-                        mode=args.mode, chat_ratio=args.chat_ratio)
+    _raw_it = batch_iterator(tok, ctx_len, args.batch_size, seed=args.seed,
+                             mode=args.mode, chat_ratio=args.chat_ratio)
+    # Wrap with XLA's parallel loader so data prefetch shadows TPU compute
+    it = make_loader(_raw_it, device)
     t0 = time.time()
     running_loss = 0.0
     running_lm = 0.0
@@ -243,17 +278,21 @@ def main():
             batch = next(it)
         except StopIteration:
             print("[train] dataset exhausted; restarting iterator", flush=True)
-            it = batch_iterator(tok, ctx_len, args.batch_size,
-                                seed=args.seed + step,
-                                mode=args.mode, chat_ratio=args.chat_ratio)
+            _raw_it = batch_iterator(tok, ctx_len, args.batch_size,
+                                     seed=args.seed + step,
+                                     mode=args.mode, chat_ratio=args.chat_ratio)
+            it = make_loader(_raw_it, device)
             batch = next(it)
 
-        batch = batch.to(device)
+        # MpDeviceLoader already places tensors on the correct device; plain
+        # _IdentityLoader also does .to(device) — so no explicit .to() here.
         ids, targets = batch[:, :-1], batch[:, 1:].contiguous()
 
-        # LR schedule
-        for pg in optim.param_groups:
-            pg["lr"] = cosine_lr(step, cfg.warmup_steps, args.steps, cfg.lr)
+        # LR schedule — Adafactor manages its own LR when relative_step=True;
+        # only apply the cosine schedule when using AdamW.
+        if args.optimizer != "adafactor":
+            for pg in optim.param_groups:
+                pg["lr"] = cosine_lr(step, cfg.warmup_steps, args.steps, cfg.lr)
 
 
     # --- Memory system integration ---
@@ -295,11 +334,11 @@ def main():
             try:
                 meta_batch = next(it)
             except StopIteration:
-                it = batch_iterator(tok, ctx_len, args.batch_size,
-                                    seed=args.seed + step,
-                                    mode=args.mode, chat_ratio=args.chat_ratio)
+                _raw_meta = batch_iterator(tok, ctx_len, args.batch_size,
+                                           seed=args.seed + step,
+                                           mode=args.mode, chat_ratio=args.chat_ratio)
+                it = make_loader(_raw_meta, device)
                 meta_batch = next(it)
-            meta_batch = meta_batch.to(device)
             meta_ids, meta_targets = meta_batch[:, :-1], meta_batch[:, 1:].contiguous()
 
             # FOMAML: compute first-order grads (no create_graph).
@@ -414,29 +453,28 @@ def main():
         if not args.meta:
             ga = max(args.grad_accum, 1)
             optim.zero_grad(set_to_none=True)
-            scaler.scale(loss / ga).backward()
+            # bfloat16 has fp32-equivalent exponent range → no loss scaling needed
+            (loss / ga).backward()
             total_lm_loss = float(out["lm_loss"].item())
             # extra micro-batches for gradient accumulation
             for _ga in range(1, ga):
                 try:
                     ga_batch = next(it)
                 except StopIteration:
-                    it = batch_iterator(tok, ctx_len, args.batch_size,
-                                        seed=args.seed + step * ga + _ga,
-                                        mode=args.mode, chat_ratio=args.chat_ratio)
+                    _raw_it2 = batch_iterator(tok, ctx_len, args.batch_size,
+                                              seed=args.seed + step * ga + _ga,
+                                              mode=args.mode, chat_ratio=args.chat_ratio)
+                    it = make_loader(_raw_it2, device)
                     ga_batch = next(it)
-                ga_batch = ga_batch.to(device)
                 ga_ids = ga_batch[:, :-1]
                 ga_tgt = ga_batch[:, 1:].contiguous()
                 with amp_ctx():
                     ga_out = brain.forward_lm(ga_ids, ga_tgt)
                     ga_loss = ga_out["loss"]
-                scaler.scale(ga_loss / ga).backward()
+                (ga_loss / ga).backward()
                 total_lm_loss += float(ga_out["lm_loss"].item())
-            scaler.unscale_(optim)
-            gnorm = torch.nn.utils.clip_grad_norm_(brain.parameters(), cfg.grad_clip)
-            scaler.step(optim)
-            scaler.update()
+            gnorm = optimizer_step(optim, brain.parameters(), cfg.grad_clip)
+            mark_step()   # XLA: flush graph; no-op on CUDA/CPU
             # update loss/lm_loss for logging to reflect full accumulation
             loss = torch.tensor(float(loss.item()))  # detach from graph
             out["lm_loss"] = torch.tensor(total_lm_loss / ga)

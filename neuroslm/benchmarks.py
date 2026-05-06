@@ -8,7 +8,8 @@ models at any stage of training. Run standalone:
 Or from Python:
 
     from neuroslm.benchmarks import eval_all
-    results = eval_all(brain, tok, device="cuda", max_samples=500)
+    from .xla_utils import get_device
+    results = eval_all(brain, tok, device=str(get_device()), max_samples=500)
 """
 from __future__ import annotations
 import argparse
@@ -70,7 +71,7 @@ def _tokenize_and_score(brain, tok, prefix: str, continuation: str,
 
 # ── HellaSwag ────────────────────────────────────────────────────────
 
-def eval_hellaswag(brain, tok, device="cuda", max_samples=1000) -> dict:
+def eval_hellaswag(brain, tok, device="cpu", max_samples=1000) -> dict:
     """HellaSwag: commonsense sentence completion (4-way)."""
     from datasets import load_dataset
     print("\n[bench] HellaSwag ...", flush=True)
@@ -100,7 +101,7 @@ def eval_hellaswag(brain, tok, device="cuda", max_samples=1000) -> dict:
 
 # ── ARC ──────────────────────────────────────────────────────────────
 
-def eval_arc(brain, tok, device="cuda", challenge=False,
+def eval_arc(brain, tok, device="cpu", challenge=False,
              max_samples=500) -> dict:
     """ARC-Easy or ARC-Challenge: science reasoning (3-5 way)."""
     from datasets import load_dataset
@@ -147,7 +148,7 @@ MMLU_SUBJECTS = [
     "professional_law", "clinical_knowledge",
 ]
 
-def eval_mmlu(brain, tok, device="cuda", max_per_subject=30) -> dict:
+def eval_mmlu(brain, tok, device="cpu", max_per_subject=30) -> dict:
     """MMLU: multi-subject multiple-choice knowledge (4-way)."""
     from datasets import load_dataset
     print(f"\n[bench] MMLU ({len(MMLU_SUBJECTS)} subjects) ...", flush=True)
@@ -193,7 +194,7 @@ def eval_mmlu(brain, tok, device="cuda", max_per_subject=30) -> dict:
 
 # ── Combined ─────────────────────────────────────────────────────────
 
-def eval_all(brain, tok, device="cuda", max_samples=500) -> dict:
+def eval_all(brain, tok, device="cpu", max_samples=500) -> dict:
     """Run all benchmarks and print comparison table."""
     brain.eval()
     results = {}

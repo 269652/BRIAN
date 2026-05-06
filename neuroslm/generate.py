@@ -50,12 +50,17 @@ def main():
     ap.add_argument("--show_trophic", action="store_true")
     args = ap.parse_args()
 
-    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    ckpt = torch.load(args.ckpt, map_location=device)
+    from .xla_utils import get_device, to_bfloat16
+    import os as _os
+    if args.device:
+        _os.environ["NEUROSLM_DEVICE"] = args.device
+    device = get_device()
+    ckpt = torch.load(args.ckpt, map_location="cpu")
     cfg = BrainConfig(**ckpt["cfg"])
     tok = Tokenizer()
-    brain = Brain(cfg).to(device).eval()
+    brain = Brain(cfg).eval()
     brain.load_partial(ckpt["model"], verbose=False)
+    brain = to_bfloat16(brain).to(device)
 
     if args.show_trophic:
         print("=== Trophic stats ===", file=sys.stderr)
