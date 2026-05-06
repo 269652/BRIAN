@@ -30,7 +30,13 @@ from .xla_utils import (
     get_device, is_xla, mark_step, optimizer_step,
     should_use_gradient_checkpointing, to_bfloat16, make_loader,
 )
-from torch.func import functional_call
+try:
+    from torch.func import functional_call
+except ImportError:
+    try:
+        from functorch import functional_call  # type: ignore[no-redef]
+    except ImportError:
+        functional_call = None  # type: ignore[assignment]
 
 
 def cosine_lr(step: int, warmup: int, total: int, peak: float) -> float:
@@ -176,7 +182,13 @@ def main():
     # CPU: fp32 (bfloat16 is slow on CPU).
     # AMP (GradScaler) is NOT used — bfloat16 does not need loss scaling because
     # it has the same exponent range as fp32 (unlike float16 which underflows).
-    brain = Brain(cfg).to(device)
+    print("[train] building Brain...", flush=True)
+    try:
+        brain = Brain(cfg).to(device)
+    except Exception as _e:
+        print(f"[train] FATAL: Brain() failed: {_e}", flush=True)
+        import traceback; traceback.print_exc()
+        raise
     brain = to_bfloat16(brain)
     amp_ctx = nullcontext   # no autocast needed; model is already in bfloat16
     n_params = sum(p.numel() for p in brain.parameters())
@@ -191,20 +203,39 @@ def main():
     named = list(brain.named_parameters())
     model_params = [p for n, p in named if not n.startswith('learned_opt.')]
     if args.optimizer == "adafactor":
-        from torch.optim import Adafactor   # type: ignore[attr-defined]
-        optim = Adafactor(
-            model_params,
-            lr=None,                 # uses per-param scale_parameter logic
-            scale_parameter=True,
-            relative_step=True,
-            warmup_init=True,
-            weight_decay=cfg.weight_decay,
-        )
-    else:
+        _Adafactor = None
+        try:
+            from transformers.optimization import Adafactor as _Adafactor  # type: ignore[attr-defined]
+        except ImportError:
+            pass
+        if _Adafactor is None:
+            try:
+                from torch.optim import Adafactor as _Adafactor  # type: ignore[attr-defined]
+            except ImportError:
+                pass
+        if _Adafactor is not None:
+            optim = _Adafactor(
+                model_params,
+                lr=None,
+                scale_parameter=True,
+                relative_step=True,
+                warmup_init=True,
+                weight_decay=cfg.weight_decay,
+            )
+            print("[train] optimizer=Adafactor (TPU-native)", flush=True)
+        else:
+            print("[train] WARNING: Adafactor not found; falling back to AdamW. "
+                  "Install transformers: pip install transformers", flush=True)
+            args.optimizer = "adamw"
+    if args.optimizer == "adamw":
         optim = AdamW(model_params, lr=cfg.lr,
                       weight_decay=cfg.weight_decay, betas=(0.9, 0.95))
 
     meta_opt = None
+    if args.meta and functional_call is None:
+        print("[train] WARNING: torch.func.functional_call unavailable; "
+              "disabling meta-training", flush=True)
+        args.meta = False
     if args.meta and not cfg.baseline:
         # meta optimizer updates the learned optimizer + geometry adapters
         meta_params = list(brain.learned_opt.parameters())
@@ -273,7 +304,13 @@ def main():
     running_lm = 0.0
     n_obs = 0
 
-    for step in range(start_step, args.steps):
+    total_steps = args.steps
+    if start_step >= total_steps:
+        print(f"[train] already at step {start_step} >= {total_steps}; nothing to do.", flush=True)
+        return
+    print(f"[train] >>> training loop starting: steps {start_step}..{total_steps} <<<", flush=True)
+
+    for step in range(start_step, total_steps):
         try:
             batch = next(it)
         except StopIteration:
@@ -525,7 +562,7 @@ def main():
             n_obs = 0
             t0 = time.time()
 
-        if (step + 1) % args.save_every == 0 or (step + 1) == args.steps:
+        if (step + 1) % args.save_every == 0 or (step + 1) == total_steps:
             tag = "" if args.mode == "text" else f"_{args.mode}"
             bflag = "_baseline" if cfg.baseline else ""
             path = Path(os.path.abspath(args.ckpt_dir)) / f"neuroslm_{args.preset}{tag}{bflag}_{step+1}.pt"
