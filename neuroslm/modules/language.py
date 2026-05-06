@@ -182,45 +182,33 @@ class LanguageCortex(nn.Module):
         pc_counter = 0
         pred_coding_loss = torch.tensor(0.0, device=h.device)
 
+        def _run_block(blk, x, nt_vec):
+            """Run one block, with gradient checkpointing for all block types."""
+            if self.gradient_checkpointing and self.training:
+                if nt_vec is None:
+                    return torch.utils.checkpoint.checkpoint(
+                        blk, x, use_reentrant=False)
+                else:
+                    return torch.utils.checkpoint.checkpoint(
+                        lambda _x, _nt: blk(_x, nt=_nt), x, nt_vec,
+                        use_reentrant=False)
+            return blk(x, nt=nt_vec)
+
         if hasattr(self, 'adapters') and len(self.adapters) > 0:
             for i, (blk, adapter) in enumerate(zip(self.blocks, self.adapters)):
-                from .common import TransformerBlock
-                can_checkpoint = (self.gradient_checkpointing and self.training
-                                  and isinstance(blk, TransformerBlock))
-                if can_checkpoint:
-                    if nt is None:
-                        h = torch.utils.checkpoint.checkpoint(blk, h, use_reentrant=False)
-                    else:
-                        h = torch.utils.checkpoint.checkpoint(
-                            lambda x, _nt: blk(x, nt=_nt), h, nt, use_reentrant=False)
-                else:
-                    h = blk(h, nt=nt)
-                h = adapter(h)  # never checkpointed (lightweight + AMP-safe)
+                h = _run_block(blk, h, nt)
+                h = adapter(h)   # lightweight — never checkpointed
                 if len(self.pred_coding) > 0:
-                    if prev_layer is not None:
-                        # Use the next predictive head in order
-                        if pc_counter < len(self.pred_coding):
-                            pred_coding_loss = pred_coding_loss + self.pred_coding[pc_counter](prev_layer, h)
-                        pc_counter += 1
+                    if prev_layer is not None and pc_counter < len(self.pred_coding):
+                        pred_coding_loss = pred_coding_loss + self.pred_coding[pc_counter](prev_layer, h)
+                        pc_counter += 1  # only advance when a head is consumed
                     prev_layer = h
         else:
-            # Baseline: no adapters
             for i, blk in enumerate(self.blocks):
-                from .common import TransformerBlock
-                can_checkpoint = (self.gradient_checkpointing and self.training
-                                  and isinstance(blk, TransformerBlock))
-                if can_checkpoint:
-                    if nt is None:
-                        h = torch.utils.checkpoint.checkpoint(blk, h, use_reentrant=False)
-                    else:
-                        h = torch.utils.checkpoint.checkpoint(
-                            lambda x, _nt: blk(x, nt=_nt), h, nt, use_reentrant=False)
-                else:
-                    h = blk(h, nt=nt)
+                h = _run_block(blk, h, nt)
                 if len(self.pred_coding) > 0:
-                    if prev_layer is not None:
-                        if pc_counter < len(self.pred_coding):
-                            pred_coding_loss = pred_coding_loss + self.pred_coding[pc_counter](prev_layer, h)
+                    if prev_layer is not None and pc_counter < len(self.pred_coding):
+                        pred_coding_loss = pred_coding_loss + self.pred_coding[pc_counter](prev_layer, h)
                         pc_counter += 1
                     prev_layer = h
 

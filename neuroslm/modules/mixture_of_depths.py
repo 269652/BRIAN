@@ -29,17 +29,28 @@ import torch.nn.functional as F
 
 
 class MoDRouter(nn.Module):
-    """Per-layer router that selects which tokens pass through vs skip."""
+    """Per-layer router: 2-layer MLP scores token hardness for top-k selection.
 
-    def __init__(self, dim: int, capacity_ratio: float = 0.5,
-                 n_nt: int = 0):
+    Hard tokens (novel concepts, reasoning steps) receive full layer depth.
+    Easy tokens (function words, predictable continuations) skip via residual.
+    The MLP router captures non-linear token hardness better than a linear probe.
+    """
+
+    def __init__(self, dim: int, capacity_ratio: float = 0.5, n_nt: int = 0):
         super().__init__()
         self.capacity_ratio = capacity_ratio
-        self.router = nn.Linear(dim, 1, bias=True)
-        nn.init.zeros_(self.router.weight)
-        nn.init.constant_(self.router.bias, 1.0)  # start with all tokens passing
+        # 2-layer MLP: captures token hardness (local context, surprisal proxy)
+        hidden = max(32, dim // 8)
+        self.router = nn.Sequential(
+            nn.Linear(dim, hidden, bias=True),
+            nn.SiLU(),
+            nn.Linear(hidden, 1, bias=True),
+        )
+        # Zero-init so routing starts uniform (all tokens score 0)
+        nn.init.zeros_(self.router[0].weight)
+        nn.init.zeros_(self.router[2].weight)
+        nn.init.zeros_(self.router[2].bias)
 
-        # NT modulation of capacity
         if n_nt > 0:
             self.nt_capacity = nn.Linear(n_nt, 1, bias=False)
             nn.init.zeros_(self.nt_capacity.weight)
@@ -49,34 +60,26 @@ class MoDRouter(nn.Module):
     def forward(self, x: torch.Tensor,
                 nt: torch.Tensor | None = None
                 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Returns (selected_x, indices, router_weights).
+        """Returns (selected_x, indices, router_logits).
 
-        selected_x: (B, C, D) — the top-C tokens
-        indices: (B, C) — which positions were selected
-        router_weights: (B, T, 1) — router logits for all tokens (for aux loss)
+        selected_x: (B, C, D) — top-C hard tokens
+        indices:    (B, C)    — sorted positions (causal order preserved)
+        router_logits: (B, T, 1) — raw scores for aux loss
         """
         B, T, D = x.shape
         router_logits = self.router(x)  # (B, T, 1)
 
-        # Effective capacity: base + NT modulation
         cap = self.capacity_ratio
         if self.nt_capacity is not None and nt is not None:
-            # NE increases capacity (more tokens enter processing)
-            nt_mod = torch.sigmoid(self.nt_capacity(nt))  # (B, 1)
+            nt_mod = torch.sigmoid(self.nt_capacity(nt))   # (B, 1)
             cap = cap * (0.5 + nt_mod.squeeze(-1).mean().item())
-            cap = min(1.0, max(0.1, cap))
+            cap = float(min(1.0, max(0.1, cap)))
 
         C = max(1, int(T * cap))
-
-        scores = router_logits.squeeze(-1)  # (B, T)
-        # Top-C selection (differentiable via straight-through)
-        topk_vals, topk_idx = scores.topk(C, dim=-1, sorted=False)
-        # Sort indices to preserve causal order
-        topk_idx, sort_order = topk_idx.sort(dim=-1)
-
-        # Gather selected tokens
+        scores = router_logits.squeeze(-1)                  # (B, T)
+        _, topk_idx = scores.topk(C, dim=-1, sorted=False)
+        topk_idx, _ = topk_idx.sort(dim=-1)                 # preserve causal order
         selected_x = x.gather(1, topk_idx.unsqueeze(-1).expand(-1, -1, D))
-
         return selected_x, topk_idx, router_logits
 
 
@@ -135,13 +138,17 @@ class MoDBlock(nn.Module):
 
     @property
     def router_aux_loss(self) -> torch.Tensor:
-        """Load-balancing auxiliary loss to prevent router collapse."""
+        """Load-balancing loss: keeps mean routing fraction ≈ capacity_ratio.
+        Also penalises variance to prevent batch-level routing collapse."""
         logits = getattr(self, '_last_router_logits', None)
         if logits is None:
             return torch.tensor(0.0)
-        # Encourage uniform routing (prevent all tokens from being selected/rejected)
-        probs = torch.sigmoid(logits.squeeze(-1))
-        mean_prob = probs.mean(dim=-1)  # (B,)
-        # Variance penalty: want mean_prob ≈ capacity_ratio
-        target = self.router.capacity_ratio
-        return ((mean_prob - target) ** 2).mean()
+        probs = torch.sigmoid(logits.squeeze(-1))       # (B, T)
+        mean_prob = probs.mean(dim=-1)                  # (B,)
+        target = self.router.capacity_ratio if hasattr(self.router, 'capacity_ratio') \
+                 else 0.5
+        mean_loss = ((mean_prob - target) ** 2).mean()
+        # Entropy bonus: reward routing diversity within each batch item
+        entropy = -(probs * (probs + 1e-8).log() +
+                    (1 - probs) * (1 - probs + 1e-8).log()).mean()
+        return mean_loss - 0.01 * entropy

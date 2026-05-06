@@ -59,39 +59,59 @@ class NeuromodulatedScale(nn.Module):
 # ============================================================================
 
 class PredictiveCodingHead(nn.Module):
-    """Layer i predicts layer i+1's output. Prediction error = aux loss.
+    """Layer i predicts layer i+1's output. Prediction error = auxiliary loss.
 
     Biology: Cortical predictive coding (Rao & Ballard 1999).
-    Each cortical area generates top-down predictions of the next area's
-    activity. Only the *surprise* (prediction error) propagates upward.
+    Each cortical area predicts the next area's activity; only *surprise*
+    (prediction error) propagates upward.  This provides deep supervision:
+    every layer receives its own gradient signal, not just final-loss backprop.
 
-    ML benefit: Deep supervision — each layer gets its own gradient signal,
-    not just backprop from the final loss. Proven to improve sample efficiency
-    by 15-30% in deep networks (deeply-supervised nets, Szegedy et al.).
+    Architecture: 2-layer residual MLP predictor.
+    - Layer 1: linear + SiLU (extracts nonlinear features of current rep)
+    - Layer 2: linear projection back to dim (residual from identity)
+    - Loss: cosine prediction error (scale-invariant) +
+            0.1 × L2 reconstruction error (magnitude)
 
-    Implementation: lightweight linear predictor per layer, MSE loss on
-    the normalized representations. The predictor is deliberately small
-    so it doesn't steal capacity from the main network.
+    The predictor is deliberately lightweight (hidden = dim // 4) so it
+    adds minimal parameters while providing richer deep-supervision signal
+    than a single linear layer.
     """
 
     def __init__(self, dim: int):
         super().__init__()
-        # Predict next layer's (normed) representation from current layer's
-        self.pred = nn.Linear(dim, dim, bias=False)
-        nn.init.eye_(self.pred.weight)  # start as identity (predict "no change")
+        hidden = max(dim // 4, 32)
+        # Residual predictor: predict "what changes from layer i to i+1"
+        self.pred = nn.Sequential(
+            nn.Linear(dim, hidden, bias=True),
+            nn.SiLU(),
+            nn.Linear(hidden, dim, bias=False),
+        )
+        # Zero-init so prediction starts as "no change" (identity residual)
+        nn.init.zeros_(self.pred[0].weight)
+        nn.init.zeros_(self.pred[2].weight)
 
     def forward(self, h_current: torch.Tensor,
                 h_next: torch.Tensor) -> torch.Tensor:
         """Returns scalar prediction error loss.
 
-        h_current, h_next: (B, T, D) — hidden states from consecutive layers.
+        h_current, h_next: (B, T, D) — consecutive layer hidden states.
+        Two complementary errors:
+          cosine_err: direction mismatch (orientation in representation space)
+          l2_err:     magnitude mismatch (activation scale)
         """
         with torch.no_grad():
             target = F.layer_norm(h_next.detach(), [h_next.size(-1)])
-        pred = F.layer_norm(self.pred(h_current), [h_current.size(-1)])
-        # Cosine prediction error — scale-invariant, stable gradients
-        error = 1.0 - F.cosine_similarity(pred, target, dim=-1).mean()
-        return error
+
+        # Residual prediction: predict the *delta* from current to next layer
+        delta = self.pred(h_current)
+        pred = F.layer_norm(h_current + delta, [h_current.size(-1)])
+
+        # Cosine error: angular mismatch (primary signal)
+        cosine_err = 1.0 - F.cosine_similarity(pred, target, dim=-1).mean()
+        # L2 error on normed reps: magnitude mismatch (secondary regulariser)
+        l2_err = (pred - target).pow(2).mean()
+
+        return cosine_err + 0.1 * l2_err
 
 
 # ============================================================================

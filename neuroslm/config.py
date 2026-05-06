@@ -101,7 +101,8 @@ class BrainConfig:
     consolidate_every: int = 500      # consolidate episodic→semantic every N steps
 
     # ---- Ablation ----
-    baseline: bool = False   # True = vanilla transformer only
+    baseline: bool = False          # True = vanilla transformer only
+    baseline_lang_layers: int = 0   # 0 = use lang_layers; >0 overrides for param-parity
 
     # ================================================================
     # Neural topology: 'baseline' (language only) or 'full' (all modules)
@@ -266,6 +267,9 @@ def xl() -> BrainConfig:
     c.gradient_checkpointing = True
     c.hebbian_rank = 4
     c.mod_capacity = 0.8
+
+    # Baseline param parity: ~56 std transformer layers at d_hidden=512 ≈ 212M
+    c.baseline_lang_layers = 56
 
     # Novel modules: keep defaults conservative to limit params
     c.enable_rssm = False

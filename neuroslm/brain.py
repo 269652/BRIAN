@@ -74,9 +74,10 @@ class Brain(nn.Module):
 
         # ---- Baseline: vanilla transformer only ----
         if getattr(cfg, 'baseline', False):
+            _bl_layers = getattr(cfg, 'baseline_lang_layers', 0) or cfg.lang_layers
             self.language = LanguageCortex(
                 cfg.vocab_size, cfg.d_hidden, cfg.d_sem,
-                cfg.lang_layers, cfg.lang_heads, cfg.lang_ctx,
+                _bl_layers, cfg.lang_heads, cfg.lang_ctx,
                 n_kv_heads=cfg.lang_kv_heads,
                 gradient_checkpointing=cfg.gradient_checkpointing,
                 baseline=True)
@@ -873,22 +874,27 @@ class Brain(nn.Module):
             if self.cpc is not None and slots.shape[1] > 1:
                 cpc_loss, _ = self.cpc(slots)
 
-            total = (cfg.w_lm         * lm_loss
-                     + cfg.w_world    * world_loss
-                     + cfg.w_forward  * fwd_reg * 0.01
-                     + cfg.w_motor    * motor_loss
-                     + cfg.w_pred_coding * pred_coding_loss
-                     + getattr(cfg, 'w_kl_world', 0.1) * rssm_kl
-                     + 0.05 * novel_aux_loss
-                     + getattr(cfg, 'w_cpc', 0.05) * cpc_loss)
+            def _safe(t):
+                if isinstance(t, torch.Tensor):
+                    return t.nan_to_num(0.0, posinf=0.0, neginf=0.0)
+                return torch.tensor(float(t) if not (t != t) else 0.0, device=device)
+
+            total = (cfg.w_lm            * lm_loss
+                     + cfg.w_world       * _safe(world_loss)
+                     + cfg.w_forward     * _safe(fwd_reg) * 0.01
+                     + cfg.w_motor       * _safe(motor_loss)
+                     + cfg.w_pred_coding * _safe(pred_coding_loss)
+                     + getattr(cfg, 'w_kl_world', 0.1) * _safe(rssm_kl)
+                     + 0.05              * _safe(novel_aux_loss)
+                     + getattr(cfg, 'w_cpc', 0.05) * _safe(cpc_loss))
 
             if hasattr(self, 'orchestrator') and not self.orchestrator.baseline:
                 orch_out, orch_metrics = self.orchestrator.route(
                     routed, {'world': self.world, 'cerebellum': self.cerebellum,
                              'entorhinal': self.entorhinal, 'claustrum': self.claustrum})
-                id_drift   = orch_metrics.get('identity_drift', 0.0)
-                calm       = orch_metrics.get('neural_calm', 1.0)
-                total      = total + 0.01 * id_drift + 0.01 * (1.0 - calm)
+                id_drift = orch_metrics.get('identity_drift', 0.0)
+                calm     = orch_metrics.get('neural_calm', 1.0)
+                total    = total + 0.01 * _safe(id_drift) + 0.01 * (1.0 - _safe(calm))
 
             out.update({
                 "loss":                   total,

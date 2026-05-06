@@ -82,10 +82,11 @@ class ThoughtTransformer(nn.Module):
     """
 
     def __init__(self, d_sem: int, n_layers: int = 4, n_heads: int = 8,
-                 n_thought_tokens: int = 8):
+                 n_thought_tokens: int = 8, gradient_checkpointing: bool = False):
         super().__init__()
         self.d_sem = d_sem
         self.n_thought_tokens = n_thought_tokens
+        self.gradient_checkpointing = gradient_checkpointing
 
         # Learnable thought token embeddings (like a reasoning scratchpad)
         self.thought_tokens = nn.Parameter(
@@ -167,12 +168,16 @@ class ThoughtTransformer(nn.Module):
             for i in range(n_inject):
                 tokens[:, 2 + i] = tokens[:, 2 + i] + self.gws_proj(gws_slots[:, i])
 
-        # Run reasoning blocks with layer-wise gating
+        # Run reasoning blocks with layer-wise gating + optional grad checkpointing
         layer_gates = torch.sigmoid(self.layer_gates).to(device)
+        use_ckpt = getattr(self, 'gradient_checkpointing', False) and self.training
         for i, block in enumerate(self.blocks):
             residual = tokens
-            tokens = block(tokens, context=lang_hidden)
-            # Gated residual: meta-learned how much each layer contributes
+            if use_ckpt:
+                tokens = torch.utils.checkpoint.checkpoint(
+                    block, tokens, lang_hidden, use_reentrant=False)
+            else:
+                tokens = block(tokens, context=lang_hidden)
             tokens = residual + layer_gates[i] * (tokens - residual)
 
         # Extract outputs from thought tokens

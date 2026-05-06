@@ -118,13 +118,14 @@ class HierarchicalPredictiveProcessor(nn.Module):
         """
         x: (B, d_in)
         Returns:
-          representation: (B, d_hidden)  — top layer posterior belief
-          free_energy:    ()              — scalar free energy estimate
+          representation: (B, d_hidden)  — top layer posterior (refined beliefs)
+          free_energy:    ()              — scalar free energy (complexity - accuracy)
         """
-        posteriors = []
-        errors = []
-        preds  = []
+        posteriors: list = []
+        errors: list = []
+        preds: list = []
 
+        # Bottom-up pass: recognition
         current = x
         for layer in self.layers:
             post, err, pred = layer(current, prior_pred=None)
@@ -133,20 +134,32 @@ class HierarchicalPredictiveProcessor(nn.Module):
             preds.append(pred)
             current = post
 
-        # Top-down reconstruction pass
-        td_pred = None
+        # Top-down pass: generation
+        # Each layer i generates a top-down prediction of layer i-1's output.
+        # We iterate top → bottom, updating each layer's error with the
+        # top-down prior from the layer above.
+        #
+        # preds[i] = layer_i.td_proj(posteriors[i]) = prediction of what
+        # layer i-1's output *should* be according to layer i's beliefs.
+        # This becomes the prior_pred for layer i-1.
+        td_prior = None  # top layer has no prior from above
         for i in range(len(self.layers) - 1, -1, -1):
-            layer = self.layers[i]
-            if td_pred is not None:
-                # Re-run with top-down prior
+            if td_prior is not None:
+                # Re-compute this layer's error given the top-down prior
                 inp = posteriors[i - 1] if i > 0 else x
-                _, err, pred = layer(inp, prior_pred=td_pred)
-                errors[i] = err
-                preds[i]  = pred
-            td_pred = preds[i]
+                _, td_err, td_pred = self.layers[i](inp, prior_pred=td_prior)
+                errors[i] = td_err
+                preds[i]  = td_pred
+            # This layer's prediction of the layer below becomes the next prior
+            td_prior = self.layers[i].td_proj(posteriors[i])
 
-        # Free energy = sum of squared reconstruction errors (accuracy term)
-        fe = sum(err.pow(2).mean() for err in errors)
+        # Free energy = accuracy (reconstruction) + complexity (KL proxy)
+        # Accuracy: how well does each layer reconstruct its input?
+        accuracy = sum(err.pow(2).mean() for err in errors)
+        # Complexity: how much does each posterior deviate from a unit Gaussian?
+        # KL(N(mu,1) || N(0,1)) ≈ 0.5*(mu² - 1 + 1) = 0.5*mu²
+        complexity = sum(0.5 * post.pow(2).mean() for post in posteriors)
+        fe = accuracy + 0.1 * complexity
 
         return posteriors[-1], fe
 
@@ -331,21 +344,38 @@ class FreeEnergyProcessor(nn.Module):
         epistemic_val, uncertainty = self.epistemic(posterior, action_probs)
         pragmatic_val = self.pragmatic(posterior).squeeze(-1)
 
-        # NT modulation of free energy weighting
-        # ACh ↑ → weight accuracy (attend to details)
-        # NE ↑  → weight complexity (expect unusual)
+        # NT-modulated balance between epistemic (explore) and pragmatic (exploit).
+        # Neurobiological grounding:
+        #   DA ↑  → pragmatic dominates (reward is available, exploit it)
+        #   NE ↑  → epistemic dominates (novelty/uncertainty, explore)
+        #   ACh ↑ → sharpen accuracy term of free energy (attend to details)
         fe_weight = torch.ones(1, device=gws_state.device)
+        ep_weight = torch.ones(1, device=gws_state.device)   # epistemic scale
+        pr_weight = torch.ones(1, device=gws_state.device)   # pragmatic scale
+
         if nt_levels is not None:
             nt = nt_levels.float()
             if nt.dim() == 2:
                 nt = nt.mean(0)
-            ach = nt[3] if nt.size(0) > 3 else torch.tensor(0.5)
+            da  = nt[0].clamp(0, 1) if nt.size(0) > 0 else torch.tensor(0.5)
+            ne  = nt[1].clamp(0, 1) if nt.size(0) > 1 else torch.tensor(0.5)
+            ach = nt[3].clamp(0, 1) if nt.size(0) > 3 else torch.tensor(0.5)
+            # ACh sharpens accuracy attention
             fe_weight = (0.5 + 0.5 * ach)
+            # DA promotes pragmatic value; NE promotes epistemic value
+            pr_weight = (0.5 + da)          # in [0.5, 1.5]
+            ep_weight = (0.5 + ne)          # in [0.5, 1.5]
+
+        # Combined value signal passed to BG: weighted sum of explore/exploit
+        combined_value = ep_weight * epistemic_val + pr_weight * pragmatic_val
 
         return {
             "posterior":        posterior,
             "free_energy":      free_energy * fe_weight,
             "epistemic_value":  epistemic_val,
             "pragmatic_value":  pragmatic_val,
+            "combined_value":   combined_value,   # → BG action selection
             "uncertainty":      uncertainty,
+            "epistemic_weight": float(ep_weight.mean()),
+            "pragmatic_weight": float(pr_weight.mean()),
         }

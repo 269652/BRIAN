@@ -271,6 +271,10 @@ def main():
         with amp_ctx():
             out = brain.forward_lm(ids, targets)
             loss = out["loss"]
+            if torch.isnan(loss) or torch.isinf(loss):
+                loss = out["lm_loss"]
+                out["loss"] = loss
+                print(f"[train] ⚠ NaN/Inf in total loss at step {step+1}, using lm_loss={float(loss):.4f}", flush=True)
 
         # If meta-training is enabled, perform a one-step differentiable unroll.
         # We do a SEPARATE language-only forward pass for the meta path to avoid
