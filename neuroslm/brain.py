@@ -30,7 +30,7 @@ import torch.nn.functional as F
 
 from .config import BrainConfig
 from .modules.language import LanguageCortex
-from .modules.sensory import TextSensoryCortex
+from .modules.sensory import TextSensoryCortex, SensoryFrameEncoder
 from .modules.association import AssociationCortex
 from .modules.world_model import WorldModel
 from .modules.self_model import SelfModel
@@ -453,6 +453,8 @@ class Brain(nn.Module):
         # ---- Virtual environment (sensory grounding) ----
         from .environments.virtual_world import environment_stream
         self._env_stream = environment_stream(seed=42, switch_every=50)
+        # Continuous sensory world loop: encode 6-dim frame signal → d_sem grounding
+        self.sensory_encoder = SensoryFrameEncoder(cfg.d_sem)
 
         # ---- State tracking ----
         self.last_nt:            dict | None = None
@@ -690,6 +692,16 @@ class Brain(nn.Module):
         z_self,  _sh             = self.self_m(
             latents["last_action"], nt[:, :cfg.n_neuromods],
             latents["floating_thought"], latents["self_h"])
+
+        # Continuous sensory world loop: pull one frame, encode, ground z_world
+        try:
+            _frame = next(self._env_stream)
+            _frame_vec = _frame.to_vec()
+            _frame_emb = self.sensory_encoder.encode_frame(
+                _frame_vec, device=device, dtype=z_world.dtype)  # (1, d_sem)
+            z_world = z_world + _frame_emb.expand(B, -1)
+        except StopIteration:
+            pass  # stream exhausted (shouldn't happen — generator is infinite)
 
         # Novel: fast-weight associative memory — enrich sem with world context
         if self.fast_weight is not None:

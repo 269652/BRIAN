@@ -78,6 +78,17 @@ class SensoryFrame:
             "tick": self.tick,
         }
 
+    def to_vec(self) -> list[float]:
+        """6-dim numeric signal vector for the SensoryFrameEncoder."""
+        return [
+            float(self.valence),
+            float(self.arousal),
+            float(self.novelty),
+            float(self.comfort),
+            float(self.time_pressure),
+            float(self.social_presence),
+        ]
+
 
 class Environment:
     """Base class for virtual environments."""
