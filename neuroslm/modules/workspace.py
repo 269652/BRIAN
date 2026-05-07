@@ -41,8 +41,11 @@ class GlobalWorkspace(nn.Module):
         self.attn = nn.MultiheadAttention(d_sem, num_heads=n_heads, batch_first=True)
         self.norm = nn.LayerNorm(d_sem)
 
-        # Ignition: sigmoid gate on mean slot activity vs threshold
+        # Ignition: per-slot learnable threshold (starts at ignition_threshold)
+        # Sharper tanh gate → true phase transition (not smooth sigmoid)
         self.ignition_threshold = ignition_threshold
+        self.slot_thresholds = nn.Parameter(
+            torch.full((n_slots,), ignition_threshold))
         # Learned per-slot output scale (starts at 1.0)
         self.output_scale = nn.Parameter(torch.ones(n_slots))
 
@@ -104,15 +107,17 @@ class GlobalWorkspace(nn.Module):
             mean_sim = off_diag_sim.sum(-1, keepdim=True) / max(self.n_slots - 1, 1)
             slots = slots * (1.0 - 0.15 * mean_sim)      # attenuate similar slots
 
-            # Ignition phase transition
-            # activity = mean L2 norm of slots across the slot dimension
-            activity = slots.norm(dim=-1).mean(-1)        # (B,)
-            # Soft sigmoid gate: pre-ignition ≈ 0.3, post-ignition ≈ 1.0
-            ign_prob = torch.sigmoid(
-                (activity - self.ignition_threshold) * 4.0)  # (B,)
-            self._last_ignition = ign_prob.detach()
-            broadcast_scale = 0.3 + 0.7 * ign_prob.view(B, 1, 1)
-            slots = slots * broadcast_scale
+            # Ignition phase transition — per-slot learnable threshold
+            # activity: (B, n_slots) — L2 norm of each slot
+            activity = slots.norm(dim=-1)                 # (B, n_slots)
+            # Per-slot threshold (clamped positive to avoid sign flip)
+            thresh = self.slot_thresholds.abs().unsqueeze(0)  # (1, n_slots)
+            # Sharper tanh gate: pre-ignition → 0.15, post-ignition → 1.0
+            # tanh has a steeper transition than sigmoid → cleaner phase change
+            ign_per_slot = 0.15 + 0.85 * (0.5 + 0.5 * torch.tanh(
+                (activity - thresh) * 6.0))              # (B, n_slots)
+            self._last_ignition = ign_per_slot.mean(-1).detach()  # (B,)
+            slots = slots * ign_per_slot.unsqueeze(-1)   # broadcast per-slot
 
             # Per-slot learned scale
             slots = slots * self.output_scale.unsqueeze(0).unsqueeze(-1)
