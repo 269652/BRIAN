@@ -47,12 +47,13 @@ class NeuralGeometryAdapter(nn.Module):
     """
 
     def __init__(self, d_hidden: int, expansion: float = 2.0,
-                 rank: int = 0):
+                 rank: int = 0, max_rank: int = 0):
         super().__init__()
         self.d_hyper = int(d_hidden * expansion)
         if rank <= 0:
             rank = max(8, self.d_hyper // 8)
         self.rank = rank
+        self.max_rank = max_rank if max_rank > 0 else self.d_hyper // 2
 
         self.norm = RMSNorm(d_hidden)
         self.up = nn.Linear(d_hidden, self.d_hyper, bias=False)
@@ -67,6 +68,52 @@ class NeuralGeometryAdapter(nn.Module):
         # Init down projection to zero so the adapter starts as identity
         nn.init.zeros_(self.down.weight)
         nn.init.constant_(self.gate.bias, -2.0)  # gates start mostly closed
+
+        # BDNF accumulator and cooldown for structural growth
+        self._bdnf_accum: float = 0.0
+        self._bdnf_cooldown: int = 0
+
+    @torch.no_grad()
+    def bdnf_grow(self, bdnf: float, phi: float,
+                  growth_threshold: float = 1.5,
+                  delta_rank: int = 4,
+                  cooldown_steps: int = 200) -> bool:
+        """Accumulate BDNF×Φ signal; grow kernel rank when threshold is crossed.
+
+        Called between training steps (outside autograd graph).
+        Returns True if growth happened.
+
+        bdnf: BDNF proxy signal in [0, 1] (from TrophicSystem)
+        phi:  Integrated information proxy in [0, 1] (from ConsciousnessMetrics)
+        """
+        if self._bdnf_cooldown > 0:
+            self._bdnf_cooldown -= 1
+            return False
+        if self.rank >= self.max_rank:
+            return False
+
+        self._bdnf_accum += float(bdnf) * float(phi)
+        if self._bdnf_accum < growth_threshold:
+            return False
+
+        # Grow: append delta_rank zero-initialized columns to kern_a, rows to kern_b
+        new_rank = min(self.rank + delta_rank, self.max_rank)
+        dr = new_rank - self.rank
+
+        # kern_a: (d_hyper, rank) → (d_hyper, new_rank)
+        new_a = torch.zeros(self.d_hyper, dr, device=self.kern_a.device,
+                            dtype=self.kern_a.dtype)
+        self.kern_a = nn.Parameter(torch.cat([self.kern_a.data, new_a], dim=1))
+
+        # kern_b: (rank, d_hyper) → (new_rank, d_hyper)
+        new_b = torch.zeros(dr, self.d_hyper, device=self.kern_b.device,
+                            dtype=self.kern_b.dtype)
+        self.kern_b = nn.Parameter(torch.cat([self.kern_b.data, new_b], dim=0))
+
+        self.rank = new_rank
+        self._bdnf_accum = 0.0
+        self._bdnf_cooldown = cooldown_steps
+        return True
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """x: (B, T, d_hidden) → (B, T, d_hidden) with geometry-adapted residual."""
@@ -257,3 +304,18 @@ class LanguageCortex(nn.Module):
             logits = self.lm_head(h)
         sem = self.to_sem(h.mean(dim=1))
         return logits, sem, h, pred_coding_loss
+
+    def bdnf_grow_all(self, bdnf: float, phi: float) -> int:
+        """Trigger BDNF-driven structural growth on all NeuralGeometryAdapters.
+
+        Should be called between training steps (not inside the forward pass).
+        Returns the number of adapters that grew.
+        """
+        if not hasattr(self, 'adapters') or len(self.adapters) == 0:
+            return 0
+        grew = 0
+        for adapter in self.adapters:
+            if isinstance(adapter, NeuralGeometryAdapter):
+                if adapter.bdnf_grow(bdnf, phi):
+                    grew += 1
+        return grew

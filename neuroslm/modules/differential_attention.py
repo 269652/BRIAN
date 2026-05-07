@@ -86,6 +86,12 @@ class DifferentialAttention(nn.Module):
         k, v = kv[0], kv[1]
         k1, k2 = k[..., :self.half_dim], k[..., self.half_dim:]
 
+        # Query-Key normalisation (prevents stale attention entropy collapse)
+        q1 = F.normalize(q1, dim=-1)
+        q2 = F.normalize(q2, dim=-1)
+        k1 = F.normalize(k1, dim=-1)
+        k2 = F.normalize(k2, dim=-1)
+
         # Apply RoPE to each half separately
         q1 = apply_rope(q1, self.cos.to(q1.dtype), self.sin.to(q1.dtype))
         q2 = apply_rope(q2, self.cos.to(q2.dtype), self.sin.to(q2.dtype))

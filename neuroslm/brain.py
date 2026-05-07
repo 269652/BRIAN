@@ -55,7 +55,7 @@ from .modules.neural_geometry import NeuralGeometryEngine
 
 from .neurochem import (
     TransmitterSystem, NT_NAMES,
-    ReceptorBank, NTShapeRegistry, Receptor,
+    ReceptorBank, NTShapeRegistry, Receptor, GPCRBank,
     Projection, ProjectionGraph,
     VTA, NucleusAccumbens, LocusCoeruleus, RapheNuclei, BasalForebrain,
     SubstantiaNigra, PeriaqueductalGray, HypothalamicCRH,
@@ -413,6 +413,15 @@ class Brain(nn.Module):
                      self.rcpt_thal, self.rcpt_lang, self.rcpt_dmn]:
             bank.bind_registry(self.nt_shapes)
 
+        # GPCR metabotropic bank: sustained NT window for slow modulation
+        # ACh gate → widens DG sparse_k (more encoding winners under high ACh)
+        # NE arousal → raises CALM exit threshold (forces full-depth processing)
+        self.gpcr = GPCRBank(
+            window_size=getattr(cfg, 'gpcr_window', 16),
+            ach_threshold=getattr(cfg, 'gpcr_ach_threshold', 0.55),
+            ne_threshold=getattr(cfg, 'gpcr_ne_threshold', 0.55),
+        )
+
         # NT projection connectome (hardcoded SOTA anatomy)
         self.projections = ProjectionGraph([
             Projection("VTA",   "NAcc",  "DA",   release_scale=1.0),
@@ -622,13 +631,33 @@ class Brain(nn.Module):
         device = ids.device
         latents = self.init_latents(B, device)
         nt      = self.transmitters.vector().detach()
-        nt_d    = {n: float(nt[:, i].mean()) for i, n in enumerate(NT_NAMES)}
+        nt_d    = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
+
+        # GPCR observe on initial NT state (will be updated after threat critic too)
+        with torch.no_grad():
+            self.gpcr.observe(nt)
+        _ne_arousal_lang = self.gpcr.ne_arousal()
+
+        # NE arousal → raise CALM base_threshold so fewer tokens exit early under stress
+        # (arousal forces full-depth processing — the model "pays attention")
+        _calm_heads = []
+        if _ne_arousal_lang > 0.5 and not self.training:
+            _arousal_boost = 1.0 + _ne_arousal_lang  # 1.0–2.0×
+            for blk in self.language.blocks:
+                if hasattr(blk, 'calm_head'):
+                    _calm_heads.append((blk.calm_head, blk.calm_head.base_threshold))
+                    blk.calm_head.base_threshold = min(
+                        0.99, blk.calm_head.base_threshold * _arousal_boost)
 
         # 1) Language cortex
         lang_thought = self.rcpt_lang.modulate(
             latents["floating_thought"].unsqueeze(1), nt).squeeze(1)
         logits, sem, h_lang, pred_coding_loss = self.language(
             ids, thought=lang_thought, nt=nt)
+
+        # Restore CALM thresholds after language forward
+        for _ch, _orig_thresh in _calm_heads:
+            _ch.base_threshold = _orig_thresh
 
         # Novel: phase-coded attention + HTM temporal structure on language output
         novel_aux_loss = torch.tensor(0.0, device=device)
@@ -668,11 +697,11 @@ class Brain(nn.Module):
 
         # 4b) Threat critic
         threat, survival = self.critic.forward_safe(z_world, z_self)
-        if survival.any():
-            self.transmitters.release("NE", torch.where(
-                survival, torch.full_like(threat, 0.9), torch.zeros_like(threat)))
-            nt   = self.transmitters.vector().detach()
-            nt_d = {n: float(nt[:, i].mean()) for i, n in enumerate(NT_NAMES)}
+        # Use torch.where instead of Python bool-on-tensor (avoids XLA graph break)
+        ne_release = torch.where(survival, torch.full_like(threat, 0.9), torch.zeros_like(threat))
+        self.transmitters.release("NE", ne_release)
+        nt   = self.transmitters.vector().detach()
+        nt_d = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
 
         # 4b-ext) Amygdala + LHb in training forward pass
         if self.amygdala is not None:
@@ -685,7 +714,7 @@ class Brain(nn.Module):
             latents["floating_thought"] = (latents["floating_thought"]
                                            + 0.2 * amyg_tr["thought_tint"])
             nt   = self.transmitters.vector().detach()
-            nt_d = {n: float(nt[:, i].mean()) for i, n in enumerate(NT_NAMES)}
+            nt_d = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
 
         # 4c) Qualia — emotion modulates floating thought before GWS
         if cfg.enable_qualia:
@@ -697,7 +726,7 @@ class Brain(nn.Module):
                     self.transmitters.release(
                         nt_name, q_out["thought_nt_demand"][:, i] * 0.2)
             nt   = self.transmitters.vector().detach()
-            nt_d = {n: float(nt[:, i].mean()) for i, n in enumerate(NT_NAMES)}
+            nt_d = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
         else:
             modulated_thought_lm = latents["floating_thought"]
 
@@ -718,11 +747,26 @@ class Brain(nn.Module):
         dmn_query, _stop = self.dmn.forward_safe(slots, latents["floating_thought"], nt_d)
         dmn_query_mod    = self.rcpt_dmn.modulate(dmn_query.unsqueeze(1), nt).squeeze(1)
 
+        # GPCR metabotropic modulation — observe sustained NT levels
+        with torch.no_grad():
+            self.gpcr.observe(nt)
+        _ach_gate = self.gpcr.ach_gate()    # 0–1: high ACh → broader DG encoding
+        _ne_arousal = self.gpcr.ne_arousal()  # 0–1: high NE → block CALM early-exit
+
+        # ACh gate: when sustained ACh is high, widen DG winners (more pattern encoding)
+        _orig_sparse_k = self.hippo.sparse_k
+        self.hippo.sparse_k = max(
+            _orig_sparse_k,
+            int(_orig_sparse_k * (1.0 + _ach_gate)))
+
         # Hippocampal enrichment: multi-dimensional recall → enriched GWS
         val_t = latents["thought_valence"]
         slots_enriched, novelty, all_recalls = self.hippo.forward_safe(
             slots, dmn_query_mod, nt_d, valence=val_t)
         recalls = self.rcpt_hippo.modulate(all_recalls, nt)
+
+        # Restore sparse_k after hippocampal call
+        self.hippo.sparse_k = _orig_sparse_k
 
         # Novel: differentiable external memory read/write
         if self.diff_memory is not None:
@@ -807,10 +851,12 @@ class Brain(nn.Module):
         self.transmitters.step()
 
         with torch.no_grad():
+            _val_f = signals["valence"].mean().item()
+            _sal_f = salience.detach().mean().item()
             self.hippo.store(dmn_query.detach(), selected.detach(),
                              nt_state=nt.detach(),
-                             valence=float(signals["valence"].mean()),
-                             salience=float(salience.detach().mean()))
+                             valence=_val_f,
+                             salience=_sal_f)
 
         # Oscillation tracking
         if cfg.enable_oscillations and hasattr(self, 'oscillation_tracker'):
@@ -829,9 +875,23 @@ class Brain(nn.Module):
                 self.oscillation_tracker.tick()
 
         with torch.no_grad():
+            _bdnf_val = reward_proxy.mean().item()
             self.trophic.update(activities,
-                                bdnf=float(reward_proxy.mean()),
-                                ngf=float(novelty.detach().mean()))
+                                bdnf=_bdnf_val,
+                                ngf=novelty.detach().mean().item())
+
+            # BDNF structural growth: Φ-triggered rank increase in NeuralGeometryAdapters
+            # Φ approximated by consciousness integration score (idle when no consciousness module)
+            _phi_val = 0.0
+            if hasattr(self, 'consciousness') and self.consciousness is not None:
+                try:
+                    _phi_val = float(getattr(self, '_last_phi', 0.0))
+                except Exception:
+                    _phi_val = 0.0
+            if hasattr(self, 'language') and hasattr(self.language, 'bdnf_grow_all'):
+                _grew = self.language.bdnf_grow_all(_bdnf_val, _phi_val)
+                if _grew > 0:
+                    pass  # growth happened; optimizer will pick up new params next step
 
         out = {
             "logits":        logits,
@@ -999,7 +1059,7 @@ class Brain(nn.Module):
         cfg    = self.cfg
         B      = ids.size(0)
         nt     = self.transmitters.vector()
-        nt_d   = {n: float(nt[:, i].mean()) for i, n in enumerate(NT_NAMES)}
+        nt_d   = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
 
         # 1) Language
         lang_thought = self.rcpt_lang.modulate(
@@ -1045,7 +1105,7 @@ class Brain(nn.Module):
             self.transmitters.release("NE", torch.where(
                 survival, torch.full_like(threat, 0.9), torch.zeros_like(threat)))
             nt   = self.transmitters.vector()
-            nt_d = {n: float(nt[:, i].mean()) for i, n in enumerate(NT_NAMES)}
+            nt_d = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
 
         # 5b) Amygdala — emotional tagging before qualia
         reward_proxy_for_amyg = torch.zeros(B, device=ids.device)
@@ -1060,7 +1120,7 @@ class Brain(nn.Module):
                 if i < amyg_out["nt_demand"].size(-1):
                     self.transmitters.release(nt_name, amyg_out["nt_demand"][:, i] * 0.25)
             nt   = self.transmitters.vector()
-            nt_d = {n: float(nt[:, i].mean()) for i, n in enumerate(NT_NAMES)}
+            nt_d = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
             # Amygdala tints the floating thought before qualia
             amyg_tint = amyg_out["thought_tint"]
         else:
@@ -1079,7 +1139,7 @@ class Brain(nn.Module):
                     if delta < 0:
                         self.transmitters.release(nt_name, torch.abs(delta) * (-1))
                 nt   = self.transmitters.vector()
-                nt_d = {n: float(nt[:, i].mean()) for i, n in enumerate(NT_NAMES)}
+                nt_d = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
 
         # 6) Qualia — receives amygdala-tinted thought
         thought_for_qualia = state["floating_thought"] + 0.3 * amyg_tint
@@ -1092,7 +1152,7 @@ class Brain(nn.Module):
                     self.transmitters.release(
                         nt_name, q_out["thought_nt_demand"][:, i] * 0.3)
             nt   = self.transmitters.vector()
-            nt_d = {n: float(nt[:, i].mean()) for i, n in enumerate(NT_NAMES)}
+            nt_d = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
             modulated_thought = q_out["modulated_thought"]
         else:
             modulated_thought = thought_for_qualia
@@ -1174,7 +1234,7 @@ class Brain(nn.Module):
                 for i, nt_name in enumerate(["DA", "NE", "5HT", "ACh"]):
                     self.transmitters.release(nt_name, affect[:, i] * 0.15)
                 nt   = self.transmitters.vector()
-                nt_d = {n: float(nt[:, i].mean()) for i, n in enumerate(NT_NAMES)}
+                nt_d = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
 
         # 10c) Insula — interoception + gut feelings
         if self.insula is not None:
@@ -1193,7 +1253,7 @@ class Brain(nn.Module):
                 if i < insula_out["nt_demand"].size(-1):
                     self.transmitters.release(nt_name, insula_out["nt_demand"][:, i] * 0.15)
             nt   = self.transmitters.vector()
-            nt_d = {n: float(nt[:, i].mean()) for i, n in enumerate(NT_NAMES)}
+            nt_d = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
         else:
             insula_salience = torch.zeros(B, device=ids.device)
 
@@ -1207,7 +1267,7 @@ class Brain(nn.Module):
             # ACh release from conflict
             self.transmitters.release("ACh", acc_out["ach_demand"] * 0.4)
             nt   = self.transmitters.vector()
-            nt_d = {n: float(nt[:, i].mean()) for i, n in enumerate(NT_NAMES)}
+            nt_d = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
             state["conflict"]       = acc_out["conflict"]
             state["effort_steps"]   = acc_out["effort_steps"]
             # Affect regulation: ACC suppresses amygdala emotional reactivity
@@ -1336,7 +1396,7 @@ class Brain(nn.Module):
                     content_vec = vec,
                     nt_state    = nt_snap,
                     valence     = float(state["thought_valence"][0]),
-                    arousal     = float(nt[:, NT_NAMES.index("NE")].mean()),
+                    arousal     = float(nt[0, NT_NAMES.index("NE")].item()),
                     salience    = max(sal_v, consol),
                     reward      = float(meso_out["wanting"].mean()),
                     causal_parent = self._last_memory_id,
@@ -1407,6 +1467,8 @@ class Brain(nn.Module):
             floating_thought=state["floating_thought"],
             novelty=novelty, routing=routing,
         )
+        # Cache Φ for BDNF structural growth (used in forward_lm between steps)
+        self._last_phi = float(c_metrics.get("phi", 0.0))
 
         # Narrative
         if cfg.enable_narrative:

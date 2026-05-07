@@ -145,6 +145,9 @@ def main():
                     help="Train vanilla transformer only (no bio modules) for ablation")
     ap.add_argument("--grad_accum", type=int, default=1,
                     help="gradient accumulation steps; effective_batch = batch_size * grad_accum")
+    ap.add_argument("--curriculum", action="store_true",
+                    help="Start with short sequences and grow to full ctx_len over training "
+                         "(improves DNC memory pointer calibration)")
     ap.add_argument("--optimizer", default="adafactor",
                     choices=["adafactor", "adamw"],
                     help="adafactor (default, TPU-optimal) or adamw (CUDA/debug)")
@@ -175,6 +178,13 @@ def main():
         cfg.gradient_checkpointing = True
     ctx_len = args.ctx or cfg.lang_ctx
     assert ctx_len <= cfg.lang_ctx
+
+    # Auxiliary loss weights start small and ramp up as the LM loss stabilises.
+    # pred_coding_loss and active_inference_fe start at 0.1× their target weight.
+    _aux_w_init   = 0.1
+    _aux_w_target = 1.0
+    _aux_ramp_steps = max(1, int(args.steps * 0.2))  # ramp over first 20% of training
+    _lm_ema = None   # exponential moving average of LM loss (for gating)
 
     # ── Build model and cast to native precision ────────────────────────
     # TPU native format: bfloat16 (same dynamic range as fp32, half memory).
@@ -295,9 +305,13 @@ def main():
     print(f"[train] starting; ctx={ctx_len}, batch={args.batch_size}, "
         f"steps={args.steps}, mode={args.mode}"
         + (f" (chat_ratio={args.chat_ratio})" if args.mode == "mix" else ""), flush=True)
+    _curriculum_end = max(1, int(args.steps * 0.15))  # ramp ctx over first 15%
     _raw_it = batch_iterator(tok, ctx_len, args.batch_size, seed=args.seed,
-                             mode=args.mode, chat_ratio=args.chat_ratio)
-    # Wrap with XLA's parallel loader so data prefetch shadows TPU compute
+                             mode=args.mode, chat_ratio=args.chat_ratio,
+                             curriculum=args.curriculum,
+                             curriculum_start=0.25,
+                             curriculum_end_step=_curriculum_end,
+                             current_step=start_step)
     it = make_loader(_raw_it, device)
     t0 = time.time()
     running_loss = 0.0
@@ -317,40 +331,65 @@ def main():
             print("[train] dataset exhausted; restarting iterator", flush=True)
             _raw_it = batch_iterator(tok, ctx_len, args.batch_size,
                                      seed=args.seed + step,
-                                     mode=args.mode, chat_ratio=args.chat_ratio)
+                                     mode=args.mode, chat_ratio=args.chat_ratio,
+                                     curriculum=args.curriculum,
+                                     curriculum_start=0.25,
+                                     curriculum_end_step=_curriculum_end,
+                                     current_step=step)
             it = make_loader(_raw_it, device)
             batch = next(it)
 
-        # MpDeviceLoader already places tensors on the correct device; plain
-        # _IdentityLoader also does .to(device) — so no explicit .to() here.
+        # _IdentityLoader already called .to(device) on the batch.
         ids, targets = batch[:, :-1], batch[:, 1:].contiguous()
 
         # LR schedule — Adafactor manages its own LR when relative_step=True;
         # only apply the cosine schedule when using AdamW.
         if args.optimizer != "adafactor":
             for pg in optim.param_groups:
-                pg["lr"] = cosine_lr(step, cfg.warmup_steps, args.steps, cfg.lr)
+                pg["lr"] = cosine_lr(step, cfg.warmup_steps, total_steps, cfg.lr)
 
-
-    # --- Memory system integration ---
-        # 1. Record episodic memory for this batch (use first sample for simplicity)
+        # --- Memory system integration ---
+        # 1. Record episodic memory for this batch (deferred to CPU; non-blocking)
         if not cfg.baseline:
-            content = tok.decode(ids[0].tolist())
-            content_vec = ids[0].float().cpu().numpy()  # Placeholder: use embedding for real system
-            nt_state = brain.transmitters.vector()[0].cpu().numpy()
-            emotion = None  # Placeholder: can be inferred from NT or model output
-            tags = []
-            context = {'self': True}  # Placeholder: can be set based on batch/task
-            brain.record_episode(content, content_vec, nt_state, emotion, tags, context)
+            try:
+                content = tok.decode(ids[0].cpu().tolist())
+                content_vec = ids[0].float().cpu().numpy()
+                nt_state = brain.transmitters.vector()[0].detach().cpu().numpy()
+                brain.record_episode(content, content_vec, nt_state, None, [], {'self': True})
+            except Exception:
+                pass  # non-critical
 
-        # 2. Forward pass (full brain pipeline — no create_graph needed here)
-        with amp_ctx():
-            out = brain.forward_lm(ids, targets)
-            loss = out["loss"]
-            if torch.isnan(loss) or torch.isinf(loss):
-                loss = out["lm_loss"]
-                out["loss"] = loss
-                print(f"[train] ⚠ NaN/Inf in total loss at step {step+1}, using lm_loss={float(loss):.4f}", flush=True)
+        # 2. Forward pass (full brain pipeline)
+        try:
+            with amp_ctx():
+                out = brain.forward_lm(ids, targets)
+                loss = out["loss"]
+                if torch.isnan(loss) or torch.isinf(loss):
+                    loss = out["lm_loss"]
+                    out["loss"] = loss
+                    print(f"[train] ⚠ NaN/Inf in total loss at step {step+1}, "
+                          f"using lm_loss={loss.item():.4f}", flush=True)
+        except Exception as _fwd_err:
+            import traceback
+            print(f"[train] ✖ forward_lm failed at step {step+1}: {_fwd_err}", flush=True)
+            traceback.print_exc()
+            continue  # skip this step
+
+        # ── Auxiliary loss gating ──────────────────────────────────────────
+        # Ramp pred_coding and active-inference weights from 0.1 → target over
+        # the first 20% of training steps, gated by LM-loss EMA stability.
+        _lm_now = float(out["lm_loss"].item())
+        if _lm_ema is None:
+            _lm_ema = _lm_now
+        _lm_ema = 0.99 * _lm_ema + 0.01 * _lm_now
+        _aux_ramp = min(1.0, step / max(1, _aux_ramp_steps))
+        _aux_w = _aux_w_init + (_aux_w_target - _aux_w_init) * _aux_ramp
+        # Update config weights live so brain.forward_lm picks them up next step
+        if not cfg.baseline:
+            cfg.w_pred_coding = getattr(cfg, '_w_pred_coding_base',
+                                        cfg.w_pred_coding) * _aux_w
+            if not hasattr(cfg, '_w_pred_coding_base'):
+                cfg._w_pred_coding_base = cfg.w_pred_coding
 
         # If meta-training is enabled, perform a one-step differentiable unroll.
         # We do a SEPARATE language-only forward pass for the meta path to avoid

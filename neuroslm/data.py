@@ -271,13 +271,50 @@ def token_window_iterator(tokenizer: Tokenizer, ctx_len: int,
 
 def batch_iterator(tokenizer: Tokenizer, ctx_len: int, batch_size: int,
                    seed: int = 0, mode: str = "text",
-                   chat_ratio: float = 0.75) -> Iterator[torch.Tensor]:
-    it = token_window_iterator(tokenizer, ctx_len, seed=seed,
+                   chat_ratio: float = 0.75,
+                   curriculum: bool = False,
+                   curriculum_start: float = 0.1,
+                   curriculum_end_step: int = 5000,
+                   current_step: int = 0) -> Iterator[torch.Tensor]:
+    """Yield (B, ctx_len+1) token windows.
+
+    curriculum=True: start with short subsequences (ctx_len * curriculum_start
+    tokens) and linearly grow to full ctx_len over curriculum_end_step steps.
+    This is critical for structured memory systems (DNC) whose gradients diverge
+    on long sequences before the memory pointer is well-calibrated.
+    """
+    if curriculum and current_step < curriculum_end_step:
+        # Linear schedule: effective_len grows from start_frac*ctx_len → ctx_len
+        frac = min(1.0, current_step / max(1, curriculum_end_step))
+        eff_len = max(32, int(ctx_len * (curriculum_start + (1.0 - curriculum_start) * frac)))
+    else:
+        eff_len = ctx_len
+
+    it = token_window_iterator(tokenizer, eff_len, seed=seed,
                                mode=mode, chat_ratio=chat_ratio)
+    step = current_step
     while True:
         batch = list(itertools.islice(it, batch_size))
         if len(batch) < batch_size:
             return
-        t = torch.tensor(batch, dtype=torch.long)  # (B, ctx_len+1)
+
+        # Re-evaluate curriculum length every batch so it grows smoothly.
+        if curriculum and step < curriculum_end_step:
+            frac = min(1.0, step / max(1, curriculum_end_step))
+            new_len = max(32, int(ctx_len * (curriculum_start + (1.0 - curriculum_start) * frac)))
+            if new_len != eff_len:
+                eff_len = new_len
+                it = token_window_iterator(tokenizer, eff_len, seed=seed + step,
+                                           mode=mode, chat_ratio=chat_ratio)
+
+        # Pad or truncate each window to ctx_len+1 for consistent batch shape
+        padded = []
+        for w in batch:
+            if len(w) < ctx_len + 1:
+                w = w + [tokenizer.eos_id] * (ctx_len + 1 - len(w))
+            padded.append(w[:ctx_len + 1])
+
+        t = torch.tensor(padded, dtype=torch.long)  # (B, ctx_len+1)
         yield t
+        step += 1
 

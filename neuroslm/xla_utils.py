@@ -21,12 +21,23 @@ import torch.nn as nn
 # ---------------------------------------------------------------------------
 # XLA availability detection (import once, cache the result)
 # ---------------------------------------------------------------------------
+_XLA_AVAILABLE = False
+_xla_device_fn = None  # callable() -> torch.device
+
 try:
-    import torch_xla.core.xla_model as xm          # type: ignore[import]
+    # torch_xla 2.x new API
+    import torch_xla  # type: ignore[import]
+    import torch_xla.core.xla_model as xm  # type: ignore[import]
     _XLA_AVAILABLE = True
+
+    # torch_xla ≥ 2.1 exposes torch_xla.device(); older builds only have xm.xla_device()
+    if hasattr(torch_xla, "device"):
+        _xla_device_fn = torch_xla.device
+    else:
+        _xla_device_fn = xm.xla_device  # type: ignore[assignment]
+
 except ImportError:
-    xm = None                                        # type: ignore[assignment]
-    _XLA_AVAILABLE = False
+    xm = None  # type: ignore[assignment]
 
 
 def is_xla() -> bool:
@@ -34,7 +45,7 @@ def is_xla() -> bool:
     return _XLA_AVAILABLE
 
 
-def get_device() -> str | torch.device:
+def get_device() -> torch.device:
     """Return the best available device.
 
     Priority: XLA (TPU) > CUDA > CPU
@@ -43,8 +54,8 @@ def get_device() -> str | torch.device:
     env = os.environ.get("NEUROSLM_DEVICE", "").strip()
     if env:
         return torch.device(env)
-    if _XLA_AVAILABLE:
-        return xm.xla_device()
+    if _XLA_AVAILABLE and _xla_device_fn is not None:
+        return _xla_device_fn()
     if torch.cuda.is_available():
         return torch.device("cuda")
     return torch.device("cpu")
@@ -56,7 +67,7 @@ def mark_step() -> None:
     On TPU this triggers the async execution of all pending XLA ops.
     On CUDA / CPU this is a no-op.  Call once per optimizer step.
     """
-    if _XLA_AVAILABLE:
+    if _XLA_AVAILABLE and xm is not None:
         xm.mark_step()
 
 
@@ -72,7 +83,7 @@ def optimizer_step(optimizer: torch.optim.Optimizer,
     else:
         gnorm = 0.0
 
-    if _XLA_AVAILABLE:
+    if _XLA_AVAILABLE and xm is not None:
         xm.optimizer_step(optimizer, barrier=False)
     else:
         optimizer.step()
@@ -106,29 +117,34 @@ def to_bfloat16(model: nn.Module) -> nn.Module:
 
 
 # ---------------------------------------------------------------------------
-# Data-loader shim — wraps a plain iterator with XLA's ParallelLoader when
-# running on TPU so that the data pipeline shadows compute on all cores.
+# Data-loader shim.
+#
+# MpDeviceLoader requires a torch.utils.data.DataLoader — NOT a plain Python
+# generator.  Our batch_iterator is a plain generator, so we always use the
+# lightweight _IdentityLoader which just calls .to(device) per batch.
+# On XLA the tensors are placed on the TPU via the same .to(xla_device) path.
 # ---------------------------------------------------------------------------
 
 class _IdentityLoader:
-    """Thin wrapper that makes a plain iterator look like an XLA loader."""
+    """Wraps any iterable and moves each tensor batch to the target device."""
     def __init__(self, iterator, device):
         self._it = iterator
         self._device = device
 
     def __iter__(self):
-        for batch in self._it:
-            yield batch.to(self._device)
+        return self
+
+    def __next__(self):
+        batch = next(self._it)
+        return batch.to(self._device)
 
 
 def make_loader(iterator, device) -> _IdentityLoader:
-    """Wrap an iterator for the given device.
+    """Wrap an iterator so every batch lands on *device*.
 
-    On XLA: uses MpDeviceLoader so the host pre-fetches data onto TPU cores
-    in parallel with computation, hiding H2D transfer latency.
-    On CUDA/CPU: returns a lightweight wrapper that calls .to(device) per batch.
+    We use _IdentityLoader for both XLA and CUDA/CPU because MpDeviceLoader
+    requires a torch.utils.data.DataLoader object (not a plain generator).
+    The identity loader is simpler, equally correct, and avoids threading
+    issues with the reconnecting stream iterator.
     """
-    if _XLA_AVAILABLE:
-        from torch_xla.distributed.parallel_loader import MpDeviceLoader  # type: ignore
-        return MpDeviceLoader(iterator, device)
     return _IdentityLoader(iterator, device)

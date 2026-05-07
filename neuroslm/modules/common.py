@@ -91,6 +91,12 @@ class CausalSelfAttention(nn.Module):
         kv = self.kv_proj(x).view(B, T, 2, self.n_kv_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         k, v = kv[0], kv[1]  # (B, n_kv_heads, T, head_dim)
 
+        # Query-Key normalisation: unit-sphere projection before RoPE.
+        # Prevents distributional shift from causing attention entropy collapse
+        # ("stale" keys/queries that all look similar after training diverges).
+        q = F.normalize(q, dim=-1)
+        k = F.normalize(k, dim=-1)
+
         q = apply_rope(q, self.cos.to(q.dtype), self.sin.to(q.dtype))
         k = apply_rope(k, self.cos.to(k.dtype), self.sin.to(k.dtype))
 

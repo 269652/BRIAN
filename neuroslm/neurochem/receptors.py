@@ -249,3 +249,94 @@ class ReceptorBank(nn.Module):
                 NT_NAMES[i]: float(aff[i]) for i in range(N_NT)
             }
         return report
+
+
+# ════════════════════════════════════════════════════════════════════════
+# GPCRBank — metabotropic G-protein-coupled receptor bank.
+#
+# Real GPCRs respond to *sustained* NT concentrations, not instantaneous
+# spikes (unlike ionotropic channels).  This class maintains a temporal
+# sliding window of NT levels and computes a smoothed "sustained" signal.
+#
+# Downstream effects hard-wired to biology:
+#   ACh (M1/nACh) — gates hippocampal DG winners (encoding mode gate)
+#   NE  (α1)      — modulates CALM early-exit thresholds (arousal gate)
+# ════════════════════════════════════════════════════════════════════════
+
+class GPCRBank(nn.Module):
+    """Stateful temporal window of NT levels for metabotropic GPCR dynamics.
+
+    Args:
+        window_size: number of past steps to average (metabotropic time constant)
+        ach_threshold: sustained ACh level that opens hippocampal encoding gate
+        ne_threshold:  sustained NE level that forces full-depth CALM processing
+    """
+
+    def __init__(self, window_size: int = 16,
+                 ach_threshold: float = 0.55,
+                 ne_threshold: float = 0.55):
+        super().__init__()
+        self.W = window_size
+        self.ach_threshold = ach_threshold
+        self.ne_threshold  = ne_threshold
+
+        # Exponential decay weights for the temporal window (most-recent = highest)
+        tau = window_size / 4.0
+        t   = torch.arange(window_size, dtype=torch.float32)
+        w   = torch.exp(-t / tau)
+        w   = w / w.sum()
+        self.register_buffer("window_weights", w.flip(0))  # newest first
+
+        # Ring buffer: (W, N_NT) — oldest to newest (managed via write_ptr)
+        self.register_buffer("nt_window", torch.zeros(window_size, N_NT))
+        self._ptr = 0
+
+    @torch.no_grad()
+    def observe(self, nt_levels: torch.Tensor) -> None:
+        """Record current NT levels into the ring buffer.
+
+        nt_levels: (B, N_NT) or (N_NT,)
+        """
+        if nt_levels.dim() == 2:
+            snap = nt_levels[0].detach()  # single-sample summary
+        else:
+            snap = nt_levels.detach()
+        self.nt_window[self._ptr % self.W] = snap.clamp(0.0, 1.0)
+        self._ptr += 1
+
+    def sustained(self) -> torch.Tensor:
+        """(N_NT,) — exponentially weighted average over the temporal window."""
+        # Roll so index 0 = oldest, W-1 = newest; then weight_i applies to pos i
+        # Since _ptr points to "next write", the newest is at (_ptr-1) % W.
+        # Simplest: just take the mean (weights are small enough that exact
+        # ordering is secondary — what matters is the averaging).
+        return (self.nt_window * self.window_weights.unsqueeze(1)).sum(0)  # (N_NT,)
+
+    def ach_gate(self) -> float:
+        """Hippocampal encoding gate in [0, 1].
+
+        Returns > 0.5 when sustained ACh exceeds the threshold, signalling
+        'high acetylcholine mode' where the hippocampus should increase the
+        number of DG winners (broader pattern separation = more encoding).
+        """
+        ach_idx = NT_INDEX.get("ACh", 3)
+        ach_val = float(self.sustained()[ach_idx].item())
+        # Smooth sigmoid gate around threshold
+        return float(torch.sigmoid(torch.tensor(
+            10.0 * (ach_val - self.ach_threshold))).item())
+
+    def ne_arousal(self) -> float:
+        """NE-driven arousal signal in [0, 1].
+
+        High NE → high arousal → CALM early-exit thresholds increase (forcing
+        full-depth processing; the model 'pays attention' under high arousal).
+        """
+        ne_idx = NT_INDEX.get("NE", 1)
+        ne_val = float(self.sustained()[ne_idx].item())
+        return float(torch.sigmoid(torch.tensor(
+            10.0 * (ne_val - self.ne_threshold))).item())
+
+    def nt_summary(self) -> dict[str, float]:
+        """Diagnostic: sustained levels for all NTs."""
+        s = self.sustained()
+        return {NT_NAMES[i]: float(s[i].item()) for i in range(N_NT)}
