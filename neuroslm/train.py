@@ -47,7 +47,11 @@ def cosine_lr(step: int, warmup: int, total: int, peak: float) -> float:
 
 
 def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
-    """Copy a checkpoint + memory state to lfs_checkpoints/ and push via Git LFS."""
+    """Copy checkpoint + memory to lfs_checkpoints/ and push via Git LFS.
+
+    Auth: relies on ~/.git-credentials written by the Colab setup cell.
+    Falls back to injecting the GITHUB env-var token into the remote URL.
+    """
     import shutil, subprocess
     try:
         if repo_root is None:
@@ -55,58 +59,43 @@ def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
         lfs_dir = os.path.join(repo_root, "lfs_checkpoints")
         os.makedirs(lfs_dir, exist_ok=True)
 
-        # Copy .pt
         basename = os.path.basename(ckpt_path)
+
+        # Copy .pt
         dest = os.path.join(lfs_dir, basename)
         if os.path.abspath(ckpt_path) != os.path.abspath(dest):
             shutil.copy2(ckpt_path, dest)
 
-        # Copy .mem — may be saved directly inside lfs_dir already
-        mem_name = basename.replace('.pt', '.mem')
-        for candidate in [
-            ckpt_path.replace('.pt', '.mem'),
-            os.path.join(lfs_dir, mem_name),
-        ]:
-            if os.path.exists(candidate):
-                dst_mem = os.path.join(lfs_dir, mem_name)
-                if os.path.abspath(candidate) != os.path.abspath(dst_mem):
-                    shutil.copy2(candidate, dst_mem)
-                break
+        # Copy .mem if present
+        mem_src = ckpt_path.replace('.pt', '.mem')
+        mem_dst = os.path.join(lfs_dir, basename.replace('.pt', '.mem'))
+        if os.path.exists(mem_src) and os.path.abspath(mem_src) != os.path.abspath(mem_dst):
+            shutil.copy2(mem_src, mem_dst)
 
-        # Inject token into remote URL so push works from inside a subprocess.
-        # Strategy: strip any existing credentials first, then inject the PAT.
-        # This handles the common Colab case where the URL already contains
-        # a bare username (https://269652@github.com/...) which GitHub rejects
-        # because there is no password — the PAT must be the credential.
+        # Ensure git identity
+        subprocess.run(["git", "config", "user.email", "train@neuroslm"],
+                       cwd=repo_root, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "NeuroSLM Train"],
+                       cwd=repo_root, capture_output=True)
+
+        # Prefer credential store (written by Colab cell 2); fall back to URL injection
+        creds_file = os.path.expanduser("~/.git-credentials")
         token = (os.environ.get('GITHUB') or os.environ.get('GITHUB_TOKEN', '')).strip()
-        if token:
+        if token and not os.path.exists(creds_file):
             import re
-            result = subprocess.run(
-                ["git", "remote", "get-url", "origin"],
-                cwd=repo_root, capture_output=True, text=True)
-            url = result.stdout.strip()
-            # Remove any existing userinfo (user or user:pass) from the URL
-            clean_url = re.sub(r'https://[^@]+@', 'https://', url)
-            # Inject PAT as the credential
-            auth_url = clean_url.replace('https://', f'https://{token}@', 1)
-            subprocess.run(["git", "remote", "set-url", "origin", auth_url],
+            result = subprocess.run(["git", "remote", "get-url", "origin"],
+                                    cwd=repo_root, capture_output=True, text=True)
+            url = re.sub(r'https://[^@]+@', 'https://', result.stdout.strip())
+            subprocess.run(["git", "remote", "set-url", "origin",
+                            url.replace('https://', f'https://{token}@', 1)],
                            cwd=repo_root, capture_output=True)
-            # Ensure git has a committer identity for the checkpoint commit
-            subprocess.run(
-                ["git", "config", "user.email", "train@neuroslm"],
-                cwd=repo_root, capture_output=True)
-            subprocess.run(
-                ["git", "config", "user.name", "NeuroSLM Train"],
-                cwd=repo_root, capture_output=True)
 
-        subprocess.run(["git", "add", "lfs_checkpoints/"], cwd=repo_root,
-                       capture_output=True, timeout=30)
-        r_commit = subprocess.run(
-            ["git", "commit", "-m", f"chkpt: {basename}"],
-            cwd=repo_root, capture_output=True, text=True, timeout=30)
-        r_push = subprocess.run(
-            ["git", "push"], cwd=repo_root,
-            capture_output=True, text=True, timeout=120)
+        subprocess.run(["git", "add", "-f", "lfs_checkpoints/"],
+                       cwd=repo_root, capture_output=True, timeout=30)
+        subprocess.run(["git", "commit", "--allow-empty", "-m", f"chkpt: {basename}"],
+                       cwd=repo_root, capture_output=True, text=True, timeout=30)
+        r_push = subprocess.run(["git", "push"], cwd=repo_root,
+                                 capture_output=True, text=True, timeout=120)
         if r_push.returncode == 0:
             print(f"[train] ✓ pushed {basename} to Git LFS", flush=True)
         else:
@@ -128,6 +117,11 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--resume", default=None,
                     help="Path to checkpoint, or 'latest' to auto-find the most recent.")
+    ap.add_argument("--overwrite_ckpt", action="store_true",
+                    help="Save to a fixed '_latest.pt' filename (overwrite each save) instead "
+                         "of accumulating step-numbered files. Keeps LFS storage constant. "
+                         "If the saved architecture no longer matches, loading is skipped "
+                         "automatically and training starts fresh.")
     ap.add_argument("--transfer", default=None,
                     help="Load only matching tensors from a previous checkpoint "
                          "(use when architecture changed).")
@@ -259,42 +253,63 @@ def main():
     if args.resume:
         resume_path = args.resume
         if resume_path == "latest":
-            # Auto-find the most recent checkpoint
             import glob as _glob
-            candidates = sorted(
-                _glob.glob(os.path.join(args.ckpt_dir, "*.pt")),
-                key=lambda f: os.path.getmtime(f))
-            if not candidates:
-                candidates = sorted(
-                    _glob.glob(os.path.join(
-                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "lfs_checkpoints", "*.pt")),
-                    key=lambda f: os.path.getmtime(f))
-            if candidates:
-                resume_path = candidates[-1]
-                print(f"[train] auto-found latest checkpoint: {resume_path}", flush=True)
+            # With --overwrite_ckpt prefer the fixed _latest file
+            _latest_fixed = os.path.join(
+                args.ckpt_dir,
+                f"neuroslm_{args.preset}_{'baseline_' if args.baseline else ''}latest.pt")
+            if args.overwrite_ckpt and os.path.exists(_latest_fixed):
+                resume_path = _latest_fixed
             else:
-                print("[train] no checkpoint found, training from scratch", flush=True)
-                resume_path = None
+                candidates = sorted(
+                    _glob.glob(os.path.join(args.ckpt_dir, "*.pt")),
+                    key=lambda f: os.path.getmtime(f))
+                if not candidates:
+                    candidates = sorted(
+                        _glob.glob(os.path.join(
+                            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "lfs_checkpoints", "*.pt")),
+                        key=lambda f: os.path.getmtime(f))
+                resume_path = candidates[-1] if candidates else None
+                if resume_path:
+                    print(f"[train] auto-found latest checkpoint: {resume_path}", flush=True)
+                else:
+                    print("[train] no checkpoint found, training from scratch", flush=True)
+
         if resume_path and Path(resume_path).exists():
-            ckpt = torch.load(resume_path, map_location=device, weights_only=False)
-            brain.load_state_dict(ckpt["model"], strict=False)
-            if "optim" in ckpt:
-                try:
-                    optim.load_state_dict(ckpt["optim"])
-                except Exception as e:
-                    print(f"[train] could not restore optimizer state: {e}", flush=True)
-            start_step = ckpt.get("step", 0)
-            # Restore memory checkpoint if available
-            if not cfg.baseline:
-                mem_path = str(resume_path).replace(".pt", ".mem")
-                if Path(mem_path).exists():
-                    try:
-                        brain.load_memory_checkpoint(mem_path)
-                        print(f"[train] restored memory from {mem_path}", flush=True)
-                    except Exception as e:
-                        print(f"[train] could not restore memory: {e}", flush=True)
-            print(f"[train] resumed from {resume_path} @ step {start_step}", flush=True)
+            try:
+                ckpt = torch.load(resume_path, map_location=device, weights_only=False)
+                missing, unexpected = brain.load_state_dict(ckpt["model"], strict=False)
+                # With --overwrite_ckpt, treat large key-mismatch as architecture change
+                # and start fresh rather than loading a partly-matching checkpoint.
+                _mismatch = len(missing) + len(unexpected)
+                if args.overwrite_ckpt and _mismatch > 20:
+                    print(f"[train] ⚠ architecture mismatch ({_mismatch} keys differ) "
+                          f"— starting fresh (--overwrite_ckpt)", flush=True)
+                    start_step = 0
+                else:
+                    if "optim" in ckpt:
+                        try:
+                            optim.load_state_dict(ckpt["optim"])
+                        except Exception as e:
+                            print(f"[train] could not restore optimizer state: {e}", flush=True)
+                    start_step = ckpt.get("step", 0)
+                    if not cfg.baseline:
+                        mem_path = str(resume_path).replace(".pt", ".mem")
+                        if Path(mem_path).exists():
+                            try:
+                                brain.load_memory_checkpoint(mem_path)
+                                print(f"[train] restored memory from {mem_path}", flush=True)
+                            except Exception as e:
+                                print(f"[train] could not restore memory: {e}", flush=True)
+                    print(f"[train] resumed from {resume_path} @ step {start_step}", flush=True)
+            except Exception as _load_err:
+                if args.overwrite_ckpt:
+                    print(f"[train] ⚠ could not load checkpoint ({_load_err}) "
+                          f"— starting fresh (--overwrite_ckpt)", flush=True)
+                    start_step = 0
+                else:
+                    raise
     elif args.transfer and Path(args.transfer).exists():
         ckpt = torch.load(args.transfer, map_location=device, weights_only=False)
         brain.load_partial(ckpt["model"])
@@ -604,7 +619,13 @@ def main():
         if (step + 1) % args.save_every == 0 or (step + 1) == total_steps:
             tag = "" if args.mode == "text" else f"_{args.mode}"
             bflag = "_baseline" if cfg.baseline else ""
-            path = Path(os.path.abspath(args.ckpt_dir)) / f"neuroslm_{args.preset}{tag}{bflag}_{step+1}.pt"
+            if args.overwrite_ckpt:
+                # Fixed filename — overwritten every save, keeps LFS storage constant.
+                # Step number is stored inside the file so resume still works.
+                fname = f"neuroslm_{args.preset}{bflag}_latest.pt"
+            else:
+                fname = f"neuroslm_{args.preset}{tag}{bflag}_{step+1}.pt"
+            path = Path(os.path.abspath(args.ckpt_dir)) / fname
             path.parent.mkdir(parents=True, exist_ok=True)
             save_dict = {
                 "model": brain.state_dict(),
