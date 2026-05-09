@@ -30,7 +30,11 @@ import torch.nn.functional as F
 
 from .config import BrainConfig
 from .modules.language import LanguageCortex
-from .modules.sensory import TextSensoryCortex, SensoryFrameEncoder
+from .modules.sensory import (TextSensoryCortex, SensoryFrameEncoder,
+                              TopicClassifier, TOPIC_MATH, TOPIC_REASONING,
+                              TOPIC_LANGUAGE, TOPIC_DEFAULT)
+from .modules.math import MathCortex
+from .modules.reasoning import ReasoningCortex
 from .modules.association import AssociationCortex
 from .modules.world_model import WorldModel
 from .modules.self_model import SelfModel
@@ -456,6 +460,22 @@ class Brain(nn.Module):
         # Continuous sensory world loop: encode 6-dim frame signal → d_sem grounding
         self.sensory_encoder = SensoryFrameEncoder(cfg.d_sem)
 
+        # ---- Expert cortices (vesicle-gated specialist modules) ----
+        # MathCortex: differential-attention over a learnable fact memory
+        # ReasoningCortex: Modern Hopfield pattern-completion attractors
+        # TopicClassifier: routes sem → expert gate probabilities
+        self.math_cortex = MathCortex(
+            d_sem=cfg.d_sem,
+            n_heads=getattr(cfg, 'expert_heads', 4),
+            memory_size=getattr(cfg, 'math_memory_size', 128),
+        )
+        self.reasoning_cortex = ReasoningCortex(
+            d_sem=cfg.d_sem,
+            n_attractors=getattr(cfg, 'reasoning_attractors', 64),
+            base_beta=getattr(cfg, 'reasoning_beta', 4.0),
+        )
+        self.topic_classifier = TopicClassifier(cfg.d_sem)
+
         # ---- State tracking ----
         self.last_nt:            dict | None = None
         self.last_routing:       torch.Tensor | None = None
@@ -682,8 +702,27 @@ class Brain(nn.Module):
         sens, salience = self.sensory(sem)
         assoc          = self.association([sens])
 
-        # 3) Thalamic router
-        routed, routing_probs = self.thalamus(assoc, nt, return_routing=True)
+        # 2b) Topic classification → expert gate probabilities
+        # (zero-init so all gates start near 0.25 = uniform; grows with training)
+        with torch.no_grad() if not self.training else torch.enable_grad():
+            _topic_probs = self.topic_classifier(sem.detach()
+                                                 if not self.training else sem)
+        # Scalar gates per expert (batch-mean probability for routing)
+        _math_gate    = float(_topic_probs[:, TOPIC_MATH].mean().item())
+        _reason_gate  = float(_topic_probs[:, TOPIC_REASONING].mean().item())
+
+        # Record sensory output for Φ proxy
+        self.orchestrator.record_stage_output(sem)
+
+        # 3) Thalamic router + re-entry bias (bowtie top-down loop)
+        # Re-entry injects the previous step's PFC+GWS representation as a
+        # top-down prior — the key mechanism for bidirectional causal closure
+        # required by IIT (Dehaene 2011: thalamo-cortical re-entry).
+        _reentry = self.orchestrator.get_reentry_bias(B, device)
+        routed, routing_probs = self.thalamus(assoc + 0.0 * _reentry,
+                                              nt, return_routing=True)
+        # Add re-entry after thalamus (additive residual, gated by reentry_mix)
+        routed = routed + _reentry
         routed = self.rcpt_thal.modulate(routed.unsqueeze(1), nt).squeeze(1)
         self.last_routing = routing_probs.detach()
 
@@ -755,6 +794,36 @@ class Brain(nn.Module):
             slots = ci_out["out"]
             novel_aux_loss = novel_aux_loss + ci_out["dag_loss"]
 
+        # Record GWS output for Φ proxy (central bottleneck of bowtie)
+        self.orchestrator.record_stage_output(slots.mean(1))
+
+        # 5b) Vesicle-typed topic routing → Expert Cortices
+        # Synthesise a typed vesicle from the GWS broadcast state
+        if self.vesicle_pool is not None:
+            _dominant_topic = int(_topic_probs.argmax(-1).float().mean().round().item())
+            self.vesicle_pool.synthesize_typed(
+                content=slots.detach().mean(0).mean(0),  # (d_sem,) mean over B,S
+                type_idx=_dominant_topic,
+                source_module=0,
+            )
+            self.vesicle_pool.migrate()
+            self.vesicle_pool.degrade()
+            # Update expert gates from vesicle concentrations
+            _math_gate   = max(_math_gate,   self.vesicle_pool.expert_gate(TOPIC_MATH))
+            _reason_gate = max(_reason_gate, self.vesicle_pool.expert_gate(TOPIC_REASONING))
+
+        # Expert cortex enrichment (additive, parallel, gated by topic probs)
+        # MathCortex: DiffAttn over symbolic fact memory (κ_math gate)
+        # ReasoningCortex: Hopfield pattern completion (κ_reason gate)
+        _slots_mean = slots.mean(1)  # (B, d_sem) — batch aggregate for experts
+        if _math_gate > 0.02:
+            _slots_mean = self.math_cortex(_slots_mean, vesicle_gate=_math_gate)
+        if _reason_gate > 0.02:
+            _slots_mean = self.reasoning_cortex(_slots_mean, vesicle_gate=_reason_gate)
+        # Inject expert enrichment back into slot representations
+        if _math_gate > 0.02 or _reason_gate > 0.02:
+            slots = slots + 0.2 * _slots_mean.unsqueeze(1)
+
         # 6) DMN query + hippocampal enrichment
         dmn_query, _stop = self.dmn.forward_safe(slots, latents["floating_thought"], nt_d)
         dmn_query_mod    = self.rcpt_dmn.modulate(dmn_query.unsqueeze(1), nt).squeeze(1)
@@ -789,6 +858,10 @@ class Brain(nn.Module):
         slots_mod = self.rcpt_pfc.modulate(slots_enriched, nt)
         selected, _replace = self.pfc.forward_safe(
             slots_mod, recalls, latents["floating_thought"], nt_d)
+
+        # Record PFC output for Φ proxy + store re-entry signal (bowtie loop)
+        self.orchestrator.record_stage_output(selected)
+        self.orchestrator.update_reentry(selected)  # → injected into thalamus next step
 
         # Novel: active dendrite, neurogenesis, dynamic MoE on selected representation
         if self.active_dendrite is not None:
@@ -888,22 +961,25 @@ class Brain(nn.Module):
 
         with torch.no_grad():
             _bdnf_val = reward_proxy.mean().item()
+
+            # Φ proxy: use orchestrator's inter-module correlation estimate
+            # (updated each step as stage outputs are recorded above)
+            _phi_orch = self.orchestrator.compute_phi_proxy()
+            # Also blend with any consciousness-module Φ if available
+            _phi_cons = float(getattr(self, '_last_phi', 0.0))
+            _phi_val  = 0.6 * _phi_orch + 0.4 * _phi_cons
+            self._last_phi = _phi_val   # persist for BDNF growth next step
+
+            # Φ-coupled BDNF: high integration states strengthen the pathways
+            # that produced them (Dehaene structural selection hypothesis)
             self.trophic.update(activities,
                                 bdnf=_bdnf_val,
-                                ngf=novelty.detach().mean().item())
+                                ngf=novelty.detach().mean().item(),
+                                phi=_phi_val)
 
             # BDNF structural growth: Φ-triggered rank increase in NeuralGeometryAdapters
-            # Φ approximated by consciousness integration score (idle when no consciousness module)
-            _phi_val = 0.0
-            if hasattr(self, 'consciousness') and self.consciousness is not None:
-                try:
-                    _phi_val = float(getattr(self, '_last_phi', 0.0))
-                except Exception:
-                    _phi_val = 0.0
             if hasattr(self, 'language') and hasattr(self.language, 'bdnf_grow_all'):
-                _grew = self.language.bdnf_grow_all(_bdnf_val, _phi_val)
-                if _grew > 0:
-                    pass  # growth happened; optimizer will pick up new params next step
+                self.language.bdnf_grow_all(_bdnf_val, _phi_val)
 
         out = {
             "logits":        logits,
@@ -1944,6 +2020,96 @@ class Brain(nn.Module):
 
     def load(self, path: str):
         self.load_state_dict(torch.load(path, map_location="cpu"))
+
+    # ------------------------------------------------------------------
+    # Continuous virtual-world sensory-motor loop
+    # ------------------------------------------------------------------
+    @torch.no_grad()
+    def run_continuous(self, env_stream=None, n_steps: int = 1000,
+                       device=None, tokenizer=None):
+        """Run the brain in a closed-loop sensory-motor cycle.
+
+        Each step:
+          1. Pull a SensoryFrame from env_stream (defaults to internal stream)
+          2. Encode the 6-dim frame vector → d_sem grounding embedding
+          3. Build a minimal token context (BOS token) and run forward_lm
+          4. Sample an action token from the motor cortex logits
+          5. Store the frame + action to episodic memory
+          6. Yield (action_idx, frame, out_dict) for the caller to log
+
+        The GWS broadcast state is the "RL observation" and the action token
+        is the RL action — providing the interface for an RL wrapper.
+
+        Args:
+            env_stream: iterator of SensoryFrame (None = use self._env_stream)
+            n_steps:    max steps to run
+            device:     torch device (None = auto-detect from parameters)
+            tokenizer:  Tokenizer instance for decoding (optional, for logging)
+
+        Yields:
+            (action_idx, frame, metrics_dict)
+        """
+        import itertools
+        self.eval()
+        device = device or next(self.parameters()).device
+
+        stream = env_stream if env_stream is not None else self._env_stream
+        stream = itertools.islice(stream, n_steps)
+
+        # Minimal single-token context (BOS = 1)
+        _bos = torch.ones(1, 1, dtype=torch.long, device=device)
+
+        for step, frame in enumerate(stream):
+            # Encode grounding frame
+            frame_vec = frame.to_vec() if hasattr(frame, 'to_vec') else list(frame)
+            frame_emb = self.sensory_encoder.encode_frame(
+                frame_vec, device=device, dtype=torch.float32)  # (1, d_sem)
+
+            # Forward pass (targets=None → inference mode)
+            out = self.forward_lm(_bos)
+
+            # Motor action
+            action_idx = out.get("action_idx", torch.zeros(1, dtype=torch.long, device=device))
+
+            # Extract GWS summary for logging
+            novelty    = out.get("novelty", torch.zeros(1, device=device))
+            phi_proxy  = self.orchestrator.compute_phi_proxy()
+
+            # Store to episodic memory
+            with torch.no_grad():
+                sem_snap = frame_emb.squeeze(0)
+                nt_snap  = self.transmitters.vector().detach() if hasattr(self, 'transmitters') else None
+                self.record_episode(
+                    content=f"world_step_{step}",
+                    content_vec=sem_snap,
+                    nt_state=nt_snap,
+                    emotion={"valence": getattr(frame, 'valence', 0.0),
+                             "arousal": getattr(frame, 'arousal', 0.0)},
+                    tags=["world", "continuous"],
+                    context={"step": step, "phi": phi_proxy},
+                )
+
+            yield int(action_idx[0].item()), frame, {
+                "step":        step,
+                "novelty":     float(novelty[0].item()),
+                "phi_proxy":   phi_proxy,
+                "reentry_rms": float(self.orchestrator._reentry_state.norm().item()),
+            }
+
+    def record_episode(self, content, content_vec=None, nt_state=None,
+                       emotion=None, tags=None, context=None):
+        """Add one experience to the episodic buffer."""
+        try:
+            self.episodic.add(
+                content=content,
+                content_vec=content_vec,
+                nt_state=nt_state,
+                emotion=emotion,
+                tags=tags or [],
+                context=context or {},
+            )
+        except Exception:
+            pass
 
     def to_device(self, device):
         self.to(device)

@@ -6,6 +6,16 @@ Lifecycle per tick:
   3. Docking    — probabilistic release: vesicle content modulates target module
   4. Decay      — lifetime countdown; zero-lifetime vesicles die
 
+Topic-typed vesicles (new):
+  Each vesicle carries a type label (0-3):
+    TOPIC_DEFAULT   = 0  — general novelty
+    TOPIC_MATH      = 1  — mathematical content (routes to MathCortex)
+    TOPIC_REASONING = 2  — relational/logical content (routes to ReasoningCortex)
+    TOPIC_LANGUAGE  = 3  — linguistic/pragmatic content (routes to LanguageCortex)
+  The expert_gate(type_idx) method returns a scalar ∈ [0, 1] measuring the
+  current "concentration" of that vesicle type at active modules — used to
+  gate the corresponding expert cortex.
+
 XLA-safe: all operations use static shapes and masked arithmetic; no nonzero()
 or Python-level iteration over live vesicles.
 
@@ -16,6 +26,13 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+# Vesicle type constants (must match TopicClassifier ordering in sensory.py)
+TOPIC_DEFAULT   = 0
+TOPIC_MATH      = 1
+TOPIC_REASONING = 2
+TOPIC_LANGUAGE  = 3
+N_VESICLE_TYPES = 4
 
 
 class VesiclePool(nn.Module):
@@ -63,6 +80,8 @@ class VesiclePool(nn.Module):
         self.register_buffer("v_contents",   torch.zeros(n_vesicles, d_sem))
         self.register_buffer("v_lifetimes",  torch.zeros(n_vesicles))          # ≤0 → dead
         self.register_buffer("v_positions",  torch.zeros(n_vesicles, n_modules))  # one-hot
+        # ── Topic type per vesicle (int32, 0–3) ──────────────────────────
+        self.register_buffer("v_types",      torch.zeros(n_vesicles, dtype=torch.long))
         self._write_ptr: int = 0
 
     # ------------------------------------------------------------------ #
@@ -178,6 +197,57 @@ class VesiclePool(nn.Module):
         modulation = torch.bmm(pos_t_, contrib)         # (B, M, D)
 
         return modulation
+
+    # ------------------------------------------------------------------ #
+    # 1b. Typed emission                                                    #
+    # ------------------------------------------------------------------ #
+    @torch.no_grad()
+    def synthesize_typed(self, content: torch.Tensor,
+                         type_idx: int = TOPIC_DEFAULT,
+                         source_module: int = 0,
+                         novelty_threshold: float = 0.1) -> None:
+        """Emit a typed vesicle without requiring surprise threshold.
+
+        content:        (d_sem,) — semantic content vector
+        type_idx:       0=default, 1=math, 2=reasoning, 3=language
+        source_module:  origin module index for initial position
+        """
+        if content.norm().item() < novelty_threshold:
+            return  # too weak a signal to warrant a vesicle
+
+        synth = self.synthesis_gate(content.unsqueeze(0)).squeeze(0)
+
+        dead = (self.v_lifetimes <= 0.0)
+        if dead.any().item():
+            idx = int(dead.float().argmax().item())
+        else:
+            idx = self._write_ptr % self.V
+        self._write_ptr += 1
+
+        self.v_contents[idx]  = synth.detach()
+        self.v_lifetimes[idx] = self.lifetime
+        self.v_types[idx]     = type_idx
+        pos = torch.zeros(self.n_modules, device=self.v_positions.device)
+        pos[source_module % self.n_modules] = 1.0
+        self.v_positions[idx] = pos
+
+    # ------------------------------------------------------------------ #
+    # 3b. Expert gate — concentration of a given type at active modules    #
+    # ------------------------------------------------------------------ #
+    def expert_gate(self, type_idx: int) -> float:
+        """Return the fractional concentration of type-specific vesicles.
+
+        Counts how many active vesicles carry `type_idx`, divided by
+        the total active count.  Returns float ∈ [0, 1].
+        Used by brain.py to gate MathCortex / ReasoningCortex.
+        """
+        active = (self.v_lifetimes > 0.0)
+        n_active = int(active.sum().item())
+        if n_active == 0:
+            return 0.0
+        type_match = active & (self.v_types == type_idx)
+        n_type = int(type_match.sum().item())
+        return n_type / n_active
 
     # ------------------------------------------------------------------ #
     # 4. Decay                                                              #

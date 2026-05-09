@@ -34,7 +34,8 @@ class TrophicSystem(nn.Module):
                  sprout_threshold: float = 0.95,
                  bdnf_baseline: float = 0.005,
                  ngf_decay: float = 0.002,
-                 max_projections: int = 64):
+                 max_projections: int = 64,
+                 phi_boost: float = 2.0):
         super().__init__()
         self.graph = graph
         self.prune_threshold = prune_threshold
@@ -42,6 +43,9 @@ class TrophicSystem(nn.Module):
         self.bdnf_baseline = bdnf_baseline
         self.ngf_decay = ngf_decay
         self.max_projections = max_projections
+        # phi_boost: multiplier on BDNF when Φ is high (couples structural
+        # growth to high integrated-information states — locks high-Φ pathways)
+        self.phi_boost = phi_boost
         n = len(graph.projections)
         # Start every existing projection at mid trophic level
         self.register_buffer("trophic", torch.full((n,), 0.5))
@@ -51,12 +55,19 @@ class TrophicSystem(nn.Module):
         self._steps = 0
 
     @torch.no_grad()
-    def update(self, activities: dict[str, torch.Tensor], bdnf: float, ngf: float):
+    def update(self, activities: dict[str, torch.Tensor], bdnf: float, ngf: float,
+               phi: float = 0.0):
         """activities: {region: (B,) ∈ [0,1]}.
         bdnf, ngf: scalar floats from `Brain` (driven by reward / novelty).
+        phi:       Integrated information proxy ∈ [0, 1].
+                   High Φ boosts BDNF, structurally locking high-integration
+                   pathways (Dehaene 2011: global workspace selects circuits).
         """
+        # Φ-gated BDNF: high integration states release more trophic factor,
+        # strengthening the connectivity that enabled that integration.
+        bdnf_phi = bdnf * (1.0 + self.phi_boost * max(0.0, phi))
         # Scale neurotrophin signals so they don't overwhelm the dynamics.
-        bdnf = max(0.0, min(0.05, bdnf * 0.05))
+        bdnf = max(0.0, min(0.05, bdnf_phi * 0.05))
         ngf  = max(0.0, min(0.01, ngf  * 0.01))
         self._steps += 1
         for i, p in enumerate(self.graph.projections):

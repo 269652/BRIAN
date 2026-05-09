@@ -4,10 +4,20 @@ In this text-only prototype, the only modality is language. This module is a
 thin wrapper that takes a comprehension embedding from the language cortex and
 exposes it as a 'sensory token'. It is the integration point for adding vision
 or audio later (each modality would own a SensoryEncoder subclass).
+
+Topic classification (new):
+  TopicClassifier classifies the semantic embedding into 4 domains:
+    0 = DEFAULT   (general conversation)
+    1 = MATH      (numerical / symbolic reasoning)
+    2 = REASONING (relational / logical)
+    3 = LANGUAGE  (linguistic / pragmatic)
+  The topic probabilities gate the corresponding expert cortices
+  and trigger typed vesicle synthesis in VesiclePool.
 """
 from __future__ import annotations
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class TextSensoryCortex(nn.Module):
@@ -62,3 +72,41 @@ class SensoryFrameEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """x: (B, N_CHANNELS) → (B, d_sem)"""
         return self.enc(x)
+
+
+# Topic type constants (must stay in sync with neurochem/vesicles.py)
+TOPIC_DEFAULT   = 0
+TOPIC_MATH      = 1
+TOPIC_REASONING = 2
+TOPIC_LANGUAGE  = 3
+N_TOPICS        = 4
+
+
+class TopicClassifier(nn.Module):
+    """Classifies a semantic embedding into topic domains for expert routing.
+
+    Outputs a probability distribution over N_TOPICS topic types.
+    Used by brain.py to:
+      (a) gate MathCortex and ReasoningCortex (vesicle_gate argument)
+      (b) synthesize typed vesicles (VesiclePool.synthesize_typed)
+
+    Zero-init output so classification starts uniform (no routing bias).
+    """
+
+    def __init__(self, d_sem: int):
+        super().__init__()
+        hidden = max(64, d_sem // 2)
+        self.net = nn.Sequential(
+            nn.Linear(d_sem, hidden),
+            nn.GELU(),
+            nn.LayerNorm(hidden),
+            nn.Linear(hidden, N_TOPICS),
+        )
+        # Zero-init output so classifier starts as uniform (no spurious routing)
+        nn.init.zeros_(self.net[3].weight)
+        nn.init.zeros_(self.net[3].bias)
+
+    def forward(self, sem: torch.Tensor) -> torch.Tensor:
+        """sem: (B, d_sem) → topic_probs: (B, N_TOPICS) summing to 1."""
+        logits = self.net(sem)
+        return F.softmax(logits, dim=-1)
