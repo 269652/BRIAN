@@ -166,6 +166,11 @@ class RecurrentStateSpaceModel(BrainModule):
 
         h_prev, z_prev = state["h"], state["z"]
 
+        # Cast inputs to the module weight dtype (handles float32/bfloat16 mismatch)
+        w_dtype = self.inp_proj.weight.dtype
+        sensory = sensory.to(dtype=w_dtype)
+        z_prev  = z_prev.to(dtype=w_dtype)
+
         # 1. Deterministic update h_t = GRU(h_{t-1}, proj([z_{t-1}; x_t]))
         inp = torch.cat([sensory, z_prev], dim=-1)   # (B, d_sem + d_z)
         inp = self.inp_proj(inp).unsqueeze(1)         # (B, 1, d_hidden)

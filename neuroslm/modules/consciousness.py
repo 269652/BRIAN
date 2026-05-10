@@ -21,6 +21,93 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Optional
+
+
+@torch.no_grad()
+def estimate_fiedler(
+    module_outputs: dict,
+    n_power_iter: int = 20,
+    device: Optional[torch.device] = None,
+) -> tuple[float, Optional[torch.Tensor]]:
+    """Power-iteration estimate of the Fiedler value (spectral gap λ₁).
+
+    Builds a pairwise cosine-similarity graph from module output vectors,
+    constructs the normalised Laplacian, then uses two rounds of deflated
+    power iteration to approximate the second-smallest eigenvalue (Fiedler
+    value) and its eigenvector (Fiedler vector).
+
+    Returns:
+      (fiedler_value, fiedler_vector | None)
+      fiedler_value ≈ λ₁ ∈ [0, 2]:
+        - Near 0 → graph almost disconnected (weak integration, low Φ risk)
+        - Large  → well-connected major complex (strong integration)
+      fiedler_vector: (n,) — identifies the approximate minimum bisection cut.
+    """
+    keys = [k for k, v in module_outputs.items() if torch.is_tensor(v)]
+    n = len(keys)
+    if n < 3:
+        return 0.0, None
+
+    if device is None:
+        first = next((v for v in module_outputs.values() if torch.is_tensor(v)), None)
+        device = first.device if first is not None else torch.device('cpu')
+
+    vecs = []
+    for k in keys:
+        v = module_outputs[k]
+        v = (v.mean(1) if v.dim() > 1 else v).detach().float()
+        v = v.mean(0).flatten()
+        vecs.append(F.normalize(v, dim=0).to(device))
+
+    d = min(v.size(0) for v in vecs)
+    vecs = [v[:d] for v in vecs]
+
+    try:
+        M = torch.stack(vecs)               # (n, d) unit-normed rows
+        W = (M @ M.T).clamp(0.0, 1.0)      # cosine similarity graph
+        W.fill_diagonal_(0.0)
+
+        deg = W.sum(-1).clamp(min=1e-8)
+        D_inv_sqrt = deg.pow(-0.5)
+        L = (torch.eye(n, device=device)
+             - D_inv_sqrt.unsqueeze(1) * W * D_inv_sqrt.unsqueeze(0))
+
+        # Shifted matrix A = I - L puts the dominant eigenvector first.
+        A = torch.eye(n, device=device) - L
+
+        # Power iteration for v₀ (the all-ones eigenvector, λ=0 in L)
+        v0 = torch.ones(n, device=device) / math.sqrt(n)
+        for _ in range(n_power_iter):
+            v0 = A @ v0
+            nrm = v0.norm()
+            if nrm < 1e-10:
+                break
+            v0 = v0 / nrm
+        v0 = v0 / v0.norm().clamp(min=1e-10)
+
+        # Deflated power iteration for v₁ (Fiedler vector)
+        Av0 = A @ v0
+        A_def = A - torch.outer(Av0, v0)   # removes top eigenpair
+
+        v1 = torch.randn(n, device=device)
+        v1 = v1 - (v1 @ v0) * v0
+        v1 = v1 / v1.norm().clamp(min=1e-10)
+        for _ in range(n_power_iter):
+            v1 = A_def @ v1
+            v1 = v1 - (v1 @ v0) * v0      # re-orthogonalise
+            nrm = v1.norm()
+            if nrm < 1e-10:
+                break
+            v1 = v1 / nrm
+
+        # Rayleigh quotient on L gives λ₁
+        lambda1 = float((v1 @ (L @ v1)).item())
+        lambda1 = max(0.0, min(2.0, lambda1))
+        return lambda1, v1
+
+    except Exception:
+        return 0.0, None
 
 
 class ConsciousnessMetrics(nn.Module):

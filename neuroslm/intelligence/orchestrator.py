@@ -48,6 +48,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Dict, List, Tuple, Any, Callable
+from ..modules.fast_weight import FastWeightLayer
 
 
 class HomeostaticGate(nn.Module):
@@ -120,6 +121,37 @@ class HomeostaticGate(nn.Module):
             'running_rms': float(self.running_var.sqrt().mean()),
             'n_updates':   int(self.n_updates.item()),
         }
+
+
+class LateralGridMixer(nn.Module):
+    """Horizontal lateral connections between co-active modules at the same stage.
+
+    Implements grid-like spatial binding via multi-head attention across
+    all modules in a stage.  A per-slot gate allows excitatory/inhibitory
+    modulation.  Grid architectures are noted to yield high Φ_max by
+    providing a spatial framework for integration.
+    """
+
+    def __init__(self, d_model: int, n_heads: int = 4):
+        super().__init__()
+        n_h = n_heads
+        while d_model % n_h != 0 and n_h > 1:
+            n_h -= 1
+        self.norm = nn.LayerNorm(d_model)
+        self.attn = nn.MultiheadAttention(d_model, n_h, batch_first=True)
+        self.gate = nn.Linear(d_model, 1)   # excitatory/inhibitory lateral gate
+
+    def forward(self, slot_outputs: List[torch.Tensor]) -> List[torch.Tensor]:
+        """slot_outputs: list of N tensors each (B, D).  Returns N mixed tensors."""
+        n = len(slot_outputs)
+        if n < 2:
+            return slot_outputs
+        stacked = torch.stack(slot_outputs, dim=1)          # (B, N, D)
+        normed  = self.norm(stacked)
+        mixed, _ = self.attn(normed, normed, normed, need_weights=False)
+        gate = torch.sigmoid(self.gate(stacked))            # (B, N, 1)
+        result = stacked + gate * mixed
+        return [result[:, i] for i in range(n)]
 
 
 class ModuleRegistration:
@@ -239,6 +271,31 @@ class NeuralOrchestrator(nn.Module):
             # Stores the most recent stage outputs for computing inter-module MI
             self._last_stage_outputs: List[torch.Tensor] = []
 
+            # ── Per-module GWS feedback projections (re-entrant backward loop) ──
+            # Zero-initialised: starts inactive, learns to the extent feedback helps.
+            # Provides backward causal link GWS → expert module, satisfying IIT
+            # intrinsicality: every part has both causes and effects.
+            self.gws_feedback_projs: nn.ModuleDict = nn.ModuleDict()
+
+            # ── Per-stage lateral grid mixers ──
+            # Horizontal connections between co-active modules at the same stage.
+            self.lateral_mixers: nn.ModuleDict = nn.ModuleDict({
+                str(s): LateralGridMixer(d_sem, max(1, min(n_heads, d_sem // 16)))
+                for s in range(11)
+            })
+
+            # ── HFW at expert cortex outputs (stages 7-8) ──
+            # Added dynamically in register_module_brain when stage ∈ {7, 8}.
+            self.hfw_layers: nn.ModuleDict = nn.ModuleDict()
+
+            # Current-pass GWS broadcast (set after Stage 5 completes)
+            self.register_buffer('_gws_broadcast', torch.zeros(d_sem))
+            self.register_buffer('_gws_broadcast_ready',
+                                 torch.zeros(1, dtype=torch.bool))
+
+            # Fast-weight carry-over per module (not Parameters; reset per sequence)
+            self._hfw_states: Dict[str, torch.Tensor] = {}
+
         # Dynamic registration (populated at runtime, not nn.Parameters)
         self._registrations: Dict[str, ModuleRegistration] = {}
         self._stage_signals: Dict[int, List[torch.Tensor]] = {}
@@ -265,6 +322,21 @@ class NeuralOrchestrator(nn.Module):
             if name not in self.module_names:
                 self.module_names.append(name)
 
+        if not self.baseline:
+            # GWS backward feedback projection — zero-init (starts inactive)
+            if name not in self.gws_feedback_projs:
+                proj = nn.Linear(self.d_sem, self.d_sem, bias=False)
+                nn.init.zeros_(proj.weight)
+                self.gws_feedback_projs[name] = proj
+
+            # HFW for expert cortex stages only
+            if stage in (STAGE_COGNITIVE_CTL, STAGE_EXECUTIVE) and name not in self.hfw_layers:
+                n_h = max(1, min(4, self.d_sem // 16))
+                while self.d_sem % n_h != 0 and n_h > 1:
+                    n_h -= 1
+                self.hfw_layers[name] = FastWeightLayer(
+                    self.d_sem, decay=0.95, base_eta=0.05, n_heads=n_h)
+
         # nn.ModuleDict does not implement .get(), so use membership check
         pre  = (self.pre_gates[name] if name in self.pre_gates else None) if not self.baseline else None
         post = (self.post_gates[name] if name in self.post_gates else None) if not self.baseline else None
@@ -281,10 +353,11 @@ class NeuralOrchestrator(nn.Module):
     # ------------------------------------------------------------------
 
     def begin_pass(self):
-        """Reset per-pass stage signal accumulator and Φ output history."""
+        """Reset per-pass state: stage signals, Φ history, and GWS broadcast."""
         self._stage_signals.clear()
         if not self.baseline:
             self._last_stage_outputs.clear()
+            self._gws_broadcast_ready.fill_(False)
 
     def route_stage(self, stage: int,
                     signal: torch.Tensor,
@@ -318,6 +391,19 @@ class NeuralOrchestrator(nn.Module):
                 pre_out = reg.pre_gate(s)
                 pre_out = pre_out.squeeze(1) if squeeze else pre_out
 
+                # Re-entrant GWS feedback: backward projection GWS → module input.
+                # Satisfies IIT causal reciprocity — every part has causes AND effects.
+                if (not self.baseline
+                        and name in self.gws_feedback_projs
+                        and bool(self._gws_broadcast_ready.item())):
+                    gws_b = self._gws_broadcast.to(dtype=pre_out.dtype,
+                                                   device=pre_out.device)
+                    fb = self.gws_feedback_projs[name](gws_b)  # (d_sem,)
+                    fb = fb.unsqueeze(0).expand(pre_out.shape[0], -1)
+                    if pre_out.dim() == 3:
+                        fb = fb.unsqueeze(1)
+                    pre_out = pre_out + fb
+
                 # Call module
                 if reg.call_fn is not None:
                     out = reg.call_fn(reg.callable_ref, pre_out, **context)
@@ -345,6 +431,21 @@ class NeuralOrchestrator(nn.Module):
                 post_out = reg.post_gate(
                     out.unsqueeze(1) if squeeze else out)
                 post_out = post_out.squeeze(1) if squeeze else post_out
+
+                # Hebbian Fast Weights at expert cortex output (stages 7-8).
+                # Increases state differentiation (key IIT Φ component).
+                if not self.baseline and name in self.hfw_layers:
+                    hfw_in = post_out.unsqueeze(1) if post_out.dim() == 2 else post_out
+                    ctx_vec = None
+                    if bool(self._gws_broadcast_ready.item()):
+                        ctx_vec = (self._gws_broadcast
+                                   .to(dtype=hfw_in.dtype, device=hfw_in.device)
+                                   .unsqueeze(0).expand(hfw_in.shape[0], -1))
+                    hfw_out, W_new = self.hfw_layers[name](
+                        hfw_in, context=ctx_vec, W_fast=self._hfw_states.get(name))
+                    self._hfw_states[name] = W_new
+                    post_out = hfw_out.squeeze(1) if squeeze else hfw_out
+
                 outputs.append(post_out)
 
             except Exception:
@@ -352,6 +453,11 @@ class NeuralOrchestrator(nn.Module):
 
         if not outputs:
             return signal, metrics
+
+        # Lateral grid mixing: horizontal binding across co-active stage modules.
+        # Grid-like topologies yield high Φ_max by integrating neighbouring slots.
+        if not self.baseline and len(outputs) >= 2 and str(stage) in self.lateral_mixers:
+            outputs = self.lateral_mixers[str(stage)](outputs)
 
         # Fuse all stage outputs with the original signal
         stacked = torch.stack(outputs, dim=1)             # (B, N, D) or fuse
@@ -503,6 +609,25 @@ class NeuralOrchestrator(nn.Module):
         # EMA: α = 0.15 gives ~6-step effective window (100ms at 60fps ≈ thalamo-cortical loop)
         self._reentry_state.lerp_(mean_signal, 0.15)
         self._reentry_count += 1
+
+    def set_gws_broadcast(self, gws_out: torch.Tensor) -> None:
+        """Store the GWS stage output for within-pass re-entrant feedback.
+
+        Call this immediately after Stage 5 (GWS) completes.  All subsequent
+        route_stage() calls in the same pass will inject this as a backward
+        feedback residual into each registered module (GWS → expert).
+        """
+        if self.baseline:
+            return
+        mean_out = (gws_out.mean(1) if gws_out.dim() == 3 else gws_out).detach().mean(0)
+        mean_out = mean_out.to(dtype=self._gws_broadcast.dtype,
+                               device=self._gws_broadcast.device)
+        self._gws_broadcast.copy_(mean_out)
+        self._gws_broadcast_ready.fill_(True)
+
+    def reset_fast_weights(self) -> None:
+        """Clear HFW carry-over states between sequences."""
+        self._hfw_states.clear()
 
     # ------------------------------------------------------------------
     # Integrated Information proxy (Φ)

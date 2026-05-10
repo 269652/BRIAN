@@ -56,16 +56,22 @@ class TrophicSystem(nn.Module):
 
     @torch.no_grad()
     def update(self, activities: dict[str, torch.Tensor], bdnf: float, ngf: float,
-               phi: float = 0.0):
+               phi: float = 0.0, fiedler: float = 1.0):
         """activities: {region: (B,) ∈ [0,1]}.
-        bdnf, ngf: scalar floats from `Brain` (driven by reward / novelty).
-        phi:       Integrated information proxy ∈ [0, 1].
-                   High Φ boosts BDNF, structurally locking high-integration
-                   pathways (Dehaene 2011: global workspace selects circuits).
+        bdnf, ngf:  scalar floats from Brain (driven by reward / novelty).
+        phi:        Integrated information proxy ∈ [0, 1].
+                    High Φ boosts BDNF, locking high-integration pathways.
+        fiedler:    Spectral gap λ₁ of the module interaction graph ∈ [0, 2].
+                    Near 0 → graph nearly disconnected → homeostatic BDNF
+                    boost to strengthen weak cross-module connections and
+                    prevent a collapse in global Φ (Cheeger's inequality).
+                    Large → well-integrated → normal pruning dynamics.
         """
-        # Φ-gated BDNF: high integration states release more trophic factor,
-        # strengthening the connectivity that enabled that integration.
-        bdnf_phi = bdnf * (1.0 + self.phi_boost * max(0.0, phi))
+        # Φ-gated BDNF: high integration states release more trophic factor.
+        # Fiedler-gated homeostasis: when spectral gap is small (graph close
+        # to disconnected), release extra BDNF to rewire the fault line.
+        fiedler_boost = max(0.0, 1.0 - fiedler / 0.3) * 2.0   # large when λ₁ < 0.3
+        bdnf_phi = bdnf * (1.0 + self.phi_boost * max(0.0, phi) + fiedler_boost)
         # Scale neurotrophin signals so they don't overwhelm the dynamics.
         bdnf = max(0.0, min(0.05, bdnf_phi * 0.05))
         ngf  = max(0.0, min(0.01, ngf  * 0.01))

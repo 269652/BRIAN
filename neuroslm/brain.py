@@ -50,7 +50,7 @@ from .modules.thalamus import Thalamus
 from .modules.critic import SubconsciousCritic
 from .modules.qualia import QualiaState
 from .modules.thought_transformer import ThoughtTransformer
-from .modules.consciousness import ConsciousnessMetrics
+from .modules.consciousness import ConsciousnessMetrics, estimate_fiedler
 from .modules.cortical_column import CorticalSheet
 from .modules.entorhinal import EntorhinalCortex
 from .modules.claustrum import Claustrum
@@ -799,6 +799,9 @@ class Brain(nn.Module):
 
         # Record GWS output for Φ proxy (central bottleneck of bowtie)
         self.orchestrator.record_stage_output(slots.mean(1))
+        # Broadcast GWS output for within-pass re-entrant feedback
+        # (enables backward GWS → expert projections in all subsequent stages)
+        self.orchestrator.set_gws_broadcast(slots.mean(1))
 
         # 5b) Vesicle-typed topic routing → Expert Cortices
         # Synthesise a typed vesicle from the GWS broadcast state
@@ -973,12 +976,20 @@ class Brain(nn.Module):
             _phi_val  = 0.6 * _phi_orch + 0.4 * _phi_cons
             self._last_phi = _phi_val   # persist for BDNF growth next step
 
-            # Φ-coupled BDNF: high integration states strengthen the pathways
-            # that produced them (Dehaene structural selection hypothesis)
+            # Spectral gap: low λ₁ signals near-disconnection → homeostatic BDNF
+            _fiedler_val, _fiedler_vec = estimate_fiedler(
+                {n: o for n, o in zip(self.orchestrator.module_names,
+                                      self.orchestrator._last_stage_outputs)
+                 if o is not None})
+
+            self._last_fiedler = _fiedler_val   # persist for secondary trophic call
+            # Φ-coupled + Fiedler-gated BDNF: locks high-integration pathways
+            # and homeostically rewires near-disconnected module graph edges.
             self.trophic.update(activities,
                                 bdnf=_bdnf_val,
                                 ngf=novelty.detach().mean().item(),
-                                phi=_phi_val)
+                                phi=_phi_val,
+                                fiedler=_fiedler_val)
 
             # BDNF structural growth: Φ-triggered rank increase in NeuralGeometryAdapters
             if hasattr(self, 'language') and hasattr(self.language, 'bdnf_grow_all'):
@@ -1461,7 +1472,8 @@ class Brain(nn.Module):
         for nt_name, amt in self.gated_projections.gated_release(nt_ref, activities).items():
             self.transmitters.release(nt_name, amt.clamp(0, 0.5))
         self._release_via_projections(activities)
-        self.trophic.update(activities, bdnf=0.0, ngf=float(novelty.mean()))
+        self.trophic.update(activities, bdnf=0.0, ngf=float(novelty.mean()),
+                            fiedler=float(getattr(self, '_last_fiedler', 1.0)))
 
         self.reuptake.clear(self.transmitters)
         self.reuptake.adapt_density(self.transmitters)
