@@ -50,6 +50,7 @@ class Thalamus(nn.Module):
         logits = self.router(x)                                  # (B, S)
 
         if nt_levels is not None:
+            nt_levels = nt_levels.to(dtype=x.dtype)
             ne  = nt_levels[:, NT_INDEX["NE"]].unsqueeze(-1)     # (B,1)
             ach = nt_levels[:, NT_INDEX["ACh"]].unsqueeze(-1)
             # NE sharpens (lower temperature); base T=1.0, range ~ [0.5, 1.0]

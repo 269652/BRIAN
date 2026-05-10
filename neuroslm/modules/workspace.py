@@ -75,13 +75,15 @@ class GlobalWorkspace(nn.Module):
     def _forward(self, candidates: torch.Tensor,
                  ne_temp: torch.Tensor | None = None) -> torch.Tensor:
         B = candidates.size(0)
+        w_dtype = self.slot_queries.dtype
+        candidates = candidates.to(dtype=w_dtype)
 
         # Initialise slots from learned queries
         slots = self.slot_queries.unsqueeze(0).expand(B, -1, -1)
 
         # Optional NE temperature scaling of initial queries
         if ne_temp is not None:
-            slots = slots * ne_temp.view(B, 1, 1)
+            slots = slots * ne_temp.to(dtype=w_dtype).view(B, 1, 1)
 
         if self.hopfield_iters > 0:
             # Iterative Hopfield convergence — fully unrolled so XLA compiles

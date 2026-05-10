@@ -233,7 +233,7 @@ class ReceptorBank(nn.Module):
 
     def modulate(self, x: torch.Tensor, nt_levels: torch.Tensor) -> torch.Tensor:
         """Apply gain to last-dim of x."""
-        g = self.gain(nt_levels)
+        g = self.gain(nt_levels).to(dtype=x.dtype)
         shape = [g.size(0)] + [1] * (x.dim() - 1)
         return x * g.view(shape)
 
