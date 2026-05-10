@@ -91,6 +91,15 @@ def _bf16_safe_mha_fwd(self, query, key, value, *args, **kwargs):
     return _orig_mha_fwd(self, query, key, value, *args, **kwargs)
 
 torch.nn.MultiheadAttention.forward = _bf16_safe_mha_fwd
+
+_orig_linear_fwd = torch.nn.Linear.forward
+
+def _bf16_safe_linear_fwd(self, x: torch.Tensor) -> torch.Tensor:
+    if x.dtype != self.weight.dtype:
+        x = x.to(dtype=self.weight.dtype)
+    return _orig_linear_fwd(self, x)
+
+torch.nn.Linear.forward = _bf16_safe_linear_fwd
 # ---------------------------------------------------------------------------
 
 
