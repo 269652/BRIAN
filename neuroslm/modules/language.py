@@ -117,7 +117,7 @@ class NeuralGeometryAdapter(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """x: (B, T, d_hidden) → (B, T, d_hidden) with geometry-adapted residual."""
-        h = self.norm(x)
+        h = self.norm(x.float()).to(dtype=x.dtype)
         z = self.up(h)                                    # (B, T, d_hyper)
         # Connectivity kernel: low-rank transform in hyper-space
         # This is the "virtual wiring" — neurons interact through a

@@ -75,15 +75,14 @@ class GlobalWorkspace(nn.Module):
     def _forward(self, candidates: torch.Tensor,
                  ne_temp: torch.Tensor | None = None) -> torch.Tensor:
         B = candidates.size(0)
-        w_dtype = self.slot_queries.dtype
-        candidates = candidates.to(dtype=w_dtype)
+        act_dtype = candidates.dtype
 
-        # Initialise slots from learned queries
-        slots = self.slot_queries.unsqueeze(0).expand(B, -1, -1)
+        # Initialise slots — cast from parameter dtype to match incoming activations
+        slots = self.slot_queries.unsqueeze(0).expand(B, -1, -1).to(dtype=act_dtype)
 
         # Optional NE temperature scaling of initial queries
         if ne_temp is not None:
-            slots = slots * ne_temp.to(dtype=w_dtype).view(B, 1, 1)
+            slots = slots * ne_temp.to(dtype=act_dtype).view(B, 1, 1)
 
         if self.hopfield_iters > 0:
             # Iterative Hopfield convergence — fully unrolled so XLA compiles
@@ -104,7 +103,7 @@ class GlobalWorkspace(nn.Module):
             # cos-sim off-diagonal → suppress redundant patterns
             s_norm = F.normalize(slots, dim=-1)           # (B, n_slots, d)
             sim = torch.bmm(s_norm, s_norm.transpose(1, 2))  # (B, n_slots, n_slots)
-            eye = torch.eye(self.n_slots, device=slots.device).unsqueeze(0)
+            eye = torch.eye(self.n_slots, device=slots.device, dtype=slots.dtype).unsqueeze(0)
             off_diag_sim = (sim * (1.0 - eye)).clamp(min=0)   # (B, n_slots, n_slots)
             mean_sim = off_diag_sim.sum(-1, keepdim=True) / max(self.n_slots - 1, 1)
             slots = slots * (1.0 - 0.15 * mean_sim)      # attenuate similar slots
@@ -126,12 +125,12 @@ class GlobalWorkspace(nn.Module):
 
         else:
             # Legacy: standard MHA (hopfield_iters == 0 disables Hopfield)
-            q = self.slot_queries.unsqueeze(0).expand(B, -1, -1)
+            q = self.slot_queries.unsqueeze(0).expand(B, -1, -1).to(dtype=act_dtype)
             if ne_temp is not None:
-                q = q * ne_temp.view(B, 1, 1)
+                q = q * ne_temp.to(dtype=act_dtype).view(B, 1, 1)
             slots, _ = self.attn(q, candidates, candidates, need_weights=False)
 
-        return self.norm(slots)
+        return self.norm(slots.float()).to(dtype=slots.dtype)
 
     # ------------------------------------------------------------------
     # Public forward

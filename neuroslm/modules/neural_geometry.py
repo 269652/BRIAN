@@ -153,10 +153,10 @@ class FractalAttentionBlock(nn.Module):
         self.ff_norm = nn.LayerNorm(d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = self.norm(x)
+        h = self.norm(x.float()).to(dtype=x.dtype)
         a, _ = self.attn(h, h, h)
         x = x + a
-        x = x + self.ff(self.ff_norm(x))
+        x = x + self.ff(self.ff_norm(x.float()).to(dtype=x.dtype))
         return x
 
 

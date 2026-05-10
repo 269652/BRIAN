@@ -115,7 +115,7 @@ class ReasoningCortex(BrainModule):
         """
         A = F.normalize(self.attractors, dim=-1)           # (K, d)
         sim = A @ A.T                                       # (K, K)
-        eye = torch.eye(self.n_attractors, device=A.device)
+        eye = torch.eye(self.n_attractors, device=A.device, dtype=sim.dtype)
         off = (sim * (1 - eye)).clamp(min=0).mean(-1)      # (K,) — mean sim
         # Attenuate attractors that are highly similar to others
         gate = (1.0 - 0.2 * off).unsqueeze(-1)             # (K, 1)
@@ -141,8 +141,8 @@ class ReasoningCortex(BrainModule):
         else:
             x_flat = x          # (B, d_sem)
 
-        h = self.norm(x_flat)
-        h = self.query_norm(h)
+        h = self.norm(x_flat.float()).to(dtype=x_flat.dtype)
+        h = self.query_norm(h.float()).to(dtype=h.dtype)
 
         # Unrolled Hopfield iterations (static depth → XLA-compilable)
         state = h

@@ -65,7 +65,7 @@ class MemoryCrossAttention(nn.Module):
             mem_vals = mem_keys
 
         B, T, D = x.shape
-        h_in = self.norm(x)
+        h_in = self.norm(x.float()).to(dtype=x.dtype)
 
         # Top-K memory selection per batch element (avg over time first)
         with torch.no_grad():

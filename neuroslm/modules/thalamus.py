@@ -32,7 +32,8 @@ class StreamAdapter(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = F.gelu(self.fc1(x))
         h = self.fc2(h)
-        return self.norm(x + h)
+        residual = x + h
+        return self.norm(residual.float()).to(dtype=residual.dtype)
 
 
 class Thalamus(nn.Module):
@@ -68,7 +69,7 @@ class Thalamus(nn.Module):
         else:
             mixed = (outs * probs.unsqueeze(-1)).sum(dim=1)
 
-        out = self.norm(mixed)
+        out = self.norm(mixed.float()).to(dtype=mixed.dtype)
         if return_routing:
             return out, probs
         return out

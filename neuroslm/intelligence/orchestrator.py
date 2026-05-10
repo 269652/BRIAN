@@ -92,10 +92,10 @@ class HomeostaticGate(nn.Module):
         if squeeze:
             x = x.unsqueeze(1)
 
-        h = self.norm(x)
+        h = self.norm(x.float()).to(dtype=x.dtype)
         attn_out, _ = self.attn(h, h, h, need_weights=False)
         h = x + attn_out
-        h = h + self.ff(self.ff_norm(h))
+        h = h + self.ff(self.ff_norm(h.float()).to(dtype=h.dtype))
 
         with torch.no_grad():
             bm = h.mean((0, 1))
@@ -147,7 +147,7 @@ class LateralGridMixer(nn.Module):
         if n < 2:
             return slot_outputs
         stacked = torch.stack(slot_outputs, dim=1)          # (B, N, D)
-        normed  = self.norm(stacked)
+        normed  = self.norm(stacked.float()).to(dtype=stacked.dtype)
         mixed, _ = self.attn(normed, normed, normed, need_weights=False)
         gate = torch.sigmoid(self.gate(stacked))            # (B, N, 1)
         result = stacked + gate * mixed

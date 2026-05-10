@@ -151,7 +151,7 @@ class MathCortex(BrainModule):
         else:
             x_flat = x          # (B, d_sem)
 
-        h = self.norm(x_flat)
+        h = self.norm(x_flat.float()).to(dtype=x_flat.dtype)
 
         # 1) Attend over learned fact memory
         fact_enrichment = self._diff_attn(h, self.fact_keys, self.fact_vals)

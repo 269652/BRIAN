@@ -19,5 +19,5 @@ class AssociationCortex(nn.Module):
         x = torch.stack(modality_embeds, dim=1)
         # Self-attend across modalities, then pool
         y, _ = self.attn(x, x, x, need_weights=False)
-        fused = self.norm(y.mean(dim=1))  # (B, d_sem)
+        fused = self.norm(y.mean(dim=1).float()).to(dtype=y.dtype)  # (B, d_sem)
         return fused

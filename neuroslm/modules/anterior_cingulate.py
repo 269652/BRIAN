@@ -90,7 +90,7 @@ class ConflictMonitor(nn.Module):
         norm = F.normalize(proj, dim=-1)   # (B, N, D/2)
         sim_mat = torch.bmm(norm, norm.transpose(1, 2))  # (B, N, N)
         # Mean off-diagonal similarity (high sim = low conflict)
-        eye_mask = torch.eye(N, device=proj.device).unsqueeze(0)
+        eye_mask = torch.eye(N, device=proj.device, dtype=sim_mat.dtype).unsqueeze(0)
         off_diag = (sim_mat * (1 - eye_mask)).sum(-1).sum(-1) / max(N * (N - 1), 1)
         conflict = 1.0 - (off_diag + 1.0) / 2.0   # map [-1,1] → [1,0], then invert
 
