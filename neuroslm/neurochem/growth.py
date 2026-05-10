@@ -55,6 +55,53 @@ class TrophicSystem(nn.Module):
         self._steps = 0
 
     @torch.no_grad()
+    def _try_sprout(self, activities: dict[str, torch.Tensor]) -> int:
+        """Spawn new projections between high-activity, weakly-connected modules.
+
+        Implements structural plasticity (Hebb): when two modules consistently
+        co-activate but have no/weak existing trophic-supported edge, sprout
+        a new projection.  Capped at self.max_projections.
+
+        Returns the number of new projections created this call.
+        """
+        if len(self.graph.projections) >= self.max_projections:
+            return 0
+
+        # High-activity modules (mean activity in top quartile)
+        names = list(activities.keys())
+        if len(names) < 2:
+            return 0
+        acts = {n: float(activities[n].mean()) for n in names}
+        sorted_names = sorted(names, key=lambda n: -acts[n])
+        top_n = max(2, len(sorted_names) // 4)
+        hot = sorted_names[:top_n]
+
+        # Build set of existing edges
+        existing = {(p.src, p.dst) for p in self.graph.projections}
+
+        # Find best candidate: co-activation × novelty (no existing edge)
+        spawned = 0
+        for i, src in enumerate(hot):
+            if spawned > 0:
+                break  # at most one sprout per update tick (slow growth)
+            for dst in hot[i + 1:]:
+                if (src, dst) in existing or (dst, src) in existing:
+                    continue
+                if src not in self.graph.regions or dst not in self.graph.regions:
+                    continue
+                # Hebbian co-activation (both fire above 0.5)
+                if acts[src] > 0.5 and acts[dst] > 0.5:
+                    new_proj = Projection(src, dst, "Glu", release_scale=0.4)
+                    self.graph.add_projection(new_proj)
+                    # Extend trophic buffers by one slot
+                    self.trophic   = torch.cat([self.trophic,   torch.full((1,), 0.5, device=self.trophic.device)])
+                    self.active    = torch.cat([self.active,    torch.ones(1, device=self.active.device)])
+                    self.ema_coact = torch.cat([self.ema_coact, torch.zeros(1, device=self.ema_coact.device)])
+                    spawned += 1
+                    break
+        return spawned
+
+    @torch.no_grad()
     def update(self, activities: dict[str, torch.Tensor], bdnf: float, ngf: float,
                phi: float = 0.0, fiedler: float = 1.0):
         """activities: {region: (B,) ∈ [0,1]}.
@@ -92,6 +139,14 @@ class TrophicSystem(nn.Module):
                 self.active[i] = 0.0
             elif new > self.prune_threshold * 2.0 and self.active[i] == 0.0:
                 self.active[i] = 1.0
+
+        # Homeostatic sprouting: when many edges saturate, attempt to grow new
+        # connections between high-activity, currently-disconnected modules.
+        # Triggered when at least 25% of projections are above sprout_threshold.
+        n_total = self.trophic.numel()
+        n_saturated = int((self.trophic > self.sprout_threshold).sum().item())
+        if n_total > 0 and n_saturated / n_total >= 0.25:
+            self._try_sprout(activities)
 
     def gain(self, idx: int) -> float:
         """Multiplicative gain to apply to projection idx's signal map."""

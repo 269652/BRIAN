@@ -56,6 +56,7 @@ from .modules.entorhinal import EntorhinalCortex
 from .modules.claustrum import Claustrum
 from .modules.cerebellum import Cerebellum
 from .modules.neural_geometry import NeuralGeometryEngine
+from .modules.boundary import BoundaryDetector
 
 from .neurochem import (
     TransmitterSystem, NT_NAMES,
@@ -251,6 +252,14 @@ class Brain(nn.Module):
             'language', 'pfc', 'dmn', 'hippo', 'world',
             'cerebellum', 'gws', 'motor',
         ])
+
+        # Spectral boundary screening (Fiedler MIP detector)
+        # Estimates the algebraic connectivity λ₁ of the inter-module graph
+        # to track Integrated Information irreducibility (IIT 4.0).  Low λ₁
+        # signals near-disconnection → trophic homeostasis triggers extra BDNF.
+        self.boundary_detector = BoundaryDetector(
+            n_modules=max(32, len(_orch_module_names)),
+            ema_decay=0.95, recompute_every=10)
 
         # ---- Novel cognitive modules: HyperGraph, EntityStore, ToM, Active Inference ----
         from .memory.hypergraph import MemoryHyperGraph
@@ -658,6 +667,11 @@ class Brain(nn.Module):
         nt      = self.transmitters.vector().detach()
         nt_d    = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
 
+        # Reset per-pass orchestrator state. Without this, stage-output buffers
+        # accumulate across steps and Φ computations mix stale graph references.
+        if hasattr(self, 'orchestrator') and not getattr(self.orchestrator, 'baseline', False):
+            self.orchestrator.begin_pass()
+
         # GPCR observe on initial NT state (will be updated after threat critic too)
         with torch.no_grad():
             self.gpcr.observe(nt)
@@ -722,9 +736,12 @@ class Brain(nn.Module):
         # top-down prior — the key mechanism for bidirectional causal closure
         # required by IIT (Dehaene 2011: thalamo-cortical re-entry).
         _reentry = self.orchestrator.get_reentry_bias(B, device)
-        routed, routing_probs = self.thalamus(assoc + 0.0 * _reentry,
+        _reentry = _reentry.to(dtype=assoc.dtype)
+        # Re-entry feeds BOTH the routing decision (top-down bias on the
+        # thalamic gate) and the post-routing residual (so the bias survives
+        # the softmax gate even when the router prefers a different stream).
+        routed, routing_probs = self.thalamus(assoc + _reentry,
                                               nt, return_routing=True)
-        # Add re-entry after thalamus (additive residual, gated by reentry_mix)
         routed = routed + _reentry
         routed = self.rcpt_thal.modulate(routed.unsqueeze(1), nt).squeeze(1)
         self.last_routing = routing_probs.detach()
@@ -821,11 +838,18 @@ class Brain(nn.Module):
         # Expert cortex enrichment (additive, parallel, gated by topic probs)
         # MathCortex: DiffAttn over symbolic fact memory (κ_math gate)
         # ReasoningCortex: Hopfield pattern completion (κ_reason gate)
+        # GWS broadcast is also passed as plasticity context — this is the
+        # dual-timescale Hebbian fast-weight binding stage at each expert.
         _slots_mean = slots.mean(1)  # (B, d_sem) — batch aggregate for experts
+        _gws_ctx    = _slots_mean.detach()   # broadcast as plasticity context
         if _math_gate > 0.02:
-            _slots_mean = self.math_cortex(_slots_mean, vesicle_gate=_math_gate)
+            _slots_mean = self.math_cortex(_slots_mean,
+                                           vesicle_gate=_math_gate,
+                                           gws_context=_gws_ctx)
         if _reason_gate > 0.02:
-            _slots_mean = self.reasoning_cortex(_slots_mean, vesicle_gate=_reason_gate)
+            _slots_mean = self.reasoning_cortex(_slots_mean,
+                                                vesicle_gate=_reason_gate,
+                                                gws_context=_gws_ctx)
         # Inject expert enrichment back into slot representations
         if _math_gate > 0.02 or _reason_gate > 0.02:
             slots = slots + 0.2 * _slots_mean.unsqueeze(1)
@@ -968,19 +992,22 @@ class Brain(nn.Module):
         with torch.no_grad():
             _bdnf_val = reward_proxy.mean().item()
 
-            # Φ proxy: use orchestrator's inter-module correlation estimate
-            # (updated each step as stage outputs are recorded above)
-            _phi_orch = self.orchestrator.compute_phi_proxy()
-            # Also blend with any consciousness-module Φ if available
-            _phi_cons = float(getattr(self, '_last_phi', 0.0))
-            _phi_val  = 0.6 * _phi_orch + 0.4 * _phi_cons
-            self._last_phi = _phi_val   # persist for BDNF growth next step
+            # Φ: IIT-style MIP estimate (Gaussian-MI lower bound across the
+            # bowtie module bipartition). Uses the stage outputs recorded
+            # earlier in this forward pass — single source of truth.
+            _phi_val = self.orchestrator.compute_phi_proxy()
+            self._last_phi = _phi_val   # persist for next-step BDNF / metrics
 
             # Spectral gap: low λ₁ signals near-disconnection → homeostatic BDNF
-            _fiedler_val, _fiedler_vec = estimate_fiedler(
-                {n: o for n, o in zip(self.orchestrator.module_names,
-                                      self.orchestrator._last_stage_outputs)
-                 if o is not None})
+            # BoundaryDetector solves the normalised-Laplacian eigensystem to
+            # extract the Fiedler value/vector — the authoritative MIP screen.
+            _bd_obs = {n: o for n, o in zip(self.orchestrator.module_names,
+                                            self.orchestrator._last_stage_outputs)
+                       if o is not None}
+            if len(_bd_obs) >= 2:
+                _fiedler_val, _fiedler_vec = self.boundary_detector.observe(_bd_obs)
+            else:
+                _fiedler_val, _fiedler_vec = 1.0, torch.zeros(0)
 
             self._last_fiedler = _fiedler_val   # persist for secondary trophic call
             # Φ-coupled + Fiedler-gated BDNF: locks high-integration pathways
@@ -1048,6 +1075,39 @@ class Brain(nn.Module):
             if self.cpc is not None and slots.shape[1] > 1:
                 cpc_loss, _ = self.cpc(slots)
 
+            # ── IIT Φ objective (differentiable) ──
+            # The orchestrator has been recording (still-live) stage outputs
+            # since the start of this pass. phi_tensor() computes the
+            # Gaussian-MI lower bound across the MIP bisection — a real
+            # integrated-information signal, not a correlation heuristic.
+            # We *minimise* `-phi`, so backprop pushes module outputs toward
+            # configurations where every bipartition has high MI.
+            phi_t = None
+            if getattr(cfg, 'enable_phi_objective', True) \
+                    and hasattr(self, 'orchestrator') \
+                    and not self.orchestrator.baseline:
+                try:
+                    phi_t = self.orchestrator.phi_tensor(module_outputs={
+                        "language": sem,
+                        "thalamus": routed,
+                        "world":    z_world,
+                        "self":     z_self,
+                        "gws":      slots.mean(1) if slots.dim() == 3 else slots,
+                        "pfc":      selected,
+                    })
+                except Exception:
+                    phi_t = None
+            if phi_t is None:
+                phi_loss_term = torch.tensor(0.0, device=device, dtype=dtype)
+                phi_value = torch.tensor(0.0, device=device, dtype=dtype)
+            else:
+                # Bound the contribution: very high Φ should not dominate the
+                # gradient or push the model into a degenerate fully-coupled
+                # state where differentiation collapses. softplus(phi) is
+                # smoothly clipped via tanh-like saturation at ~3 nats.
+                phi_value = phi_t.to(dtype=dtype)
+                phi_loss_term = -torch.tanh(phi_value / 3.0) * 3.0
+
             def _safe(t):
                 if isinstance(t, torch.Tensor):
                     return t.nan_to_num(0.0, posinf=0.0, neginf=0.0)
@@ -1060,7 +1120,8 @@ class Brain(nn.Module):
                      + cfg.w_pred_coding * _safe(pred_coding_loss)
                      + getattr(cfg, 'w_kl_world', 0.1) * _safe(rssm_kl)
                      + 0.05              * _safe(novel_aux_loss)
-                     + getattr(cfg, 'w_cpc', 0.05) * _safe(cpc_loss))
+                     + getattr(cfg, 'w_cpc', 0.05) * _safe(cpc_loss)
+                     + getattr(cfg, 'w_phi', 0.02) * _safe(phi_loss_term))
 
             if hasattr(self, 'orchestrator') and not self.orchestrator.baseline:
                 orch_out, orch_metrics = self.orchestrator.route(
@@ -1077,7 +1138,34 @@ class Brain(nn.Module):
                 "motor_loss":             motor_loss.detach(),
                 "pred_coding_loss":       pred_coding_loss.detach(),
                 "motor_speak_target_rate": speak_target.float().mean().detach(),
+                "phi":                    phi_value.detach(),
+                "phi_loss":               phi_loss_term.detach(),
             })
+
+            # Run ConsciousnessMetrics on the live training pass so phi /
+            # gamma / coherence histories are populated continuously
+            # rather than only during inference.
+            try:
+                with torch.no_grad():
+                    c_metrics = self.consciousness.update(
+                        module_outputs={
+                            "pfc":      selected.detach(),
+                            "world":    z_world.detach(),
+                            "self":     z_self.detach(),
+                            "language": sem.detach().mean(1),
+                        },
+                        gws_slots=slots.detach(),
+                        floating_thought=latents["floating_thought"].detach(),
+                        novelty=novelty.detach(),
+                        routing=routing_probs.detach(),
+                    )
+                # Cache real Φ for trophic / BDNF use (single source of truth)
+                self._last_phi = float(c_metrics.get("phi", float(phi_value.detach().item())))
+                out["consciousness"] = c_metrics
+            except Exception:
+                # ConsciousnessMetrics expects shapes that may not always match
+                # in baseline-like configs; if it fails, fall back to phi_value.
+                self._last_phi = float(phi_value.detach().item())
 
             # ---- Training insights → RelationalMemoryGraph ----
             self._maybe_store_insight(ids, sem, nt, lm_loss_per, targets, device)
@@ -1151,6 +1239,72 @@ class Brain(nn.Module):
             return stats
         except Exception:
             return {}
+
+    # ------------------------------------------------------------------
+    # Continuous sensory world loop (closed-loop active inference)
+    # ------------------------------------------------------------------
+    @torch.no_grad()
+    def run_continuous(self, n_ticks: int = 1000,
+                       seed_ids: torch.Tensor | None = None,
+                       on_tick=None) -> dict:
+        """Run the brain as a closed-loop perception/action agent.
+
+        Each tick:
+          1. Pull a sensory frame from the virtual environment stream
+          2. Encode it via the VAE-style sensory front-end
+          3. Add the encoding as a prior on floating_thought (active inference)
+          4. Run cognitive_step → logits, state, info
+          5. Sample next token (greedy) and append to context
+          6. Record per-tick Φ / Fiedler / action / salience
+
+        Pass `on_tick(metrics, state)` for online consumption.
+        """
+        device = next(self.parameters()).device
+        dtype  = next(self.parameters()).dtype
+        if seed_ids is None:
+            seed_ids = torch.zeros(1, 1, dtype=torch.long, device=device)
+        state = self.init_latents(seed_ids.size(0), device, dtype=dtype)
+
+        history = {"phi": [], "fiedler": [], "actions": [], "salience": []}
+        for t in range(n_ticks):
+            try:
+                _frame     = next(self._env_stream)
+                _frame_vec = _frame.to_vec()
+                _frame_emb = self.sensory_encoder.encode_frame(
+                    _frame_vec, device=device, dtype=dtype)   # (1, d_sem)
+            except StopIteration:
+                break
+
+            # Active-inference prior: ground floating_thought in the new sense
+            state["floating_thought"] = (
+                state["floating_thought"]
+                + 0.3 * _frame_emb.expand_as(state["floating_thought"]))
+
+            logits, state, info = self.cognitive_step(seed_ids, state)
+
+            next_tok = int(logits[:, -1, :].argmax(-1).item())
+            seed_ids = torch.cat([
+                seed_ids,
+                torch.full((seed_ids.size(0), 1), next_tok,
+                           dtype=torch.long, device=device)
+            ], dim=1)
+            if seed_ids.size(1) > self.cfg.lang_ctx:
+                seed_ids = seed_ids[:, -self.cfg.lang_ctx:]
+
+            phi = float(getattr(self, "_last_phi", 0.0))
+            fid = float(getattr(self, "_last_fiedler", 1.0))
+            act = int(self.last_action_idx[0].item()) if self.last_action_idx is not None else 0
+            sal = float(info.get("salience", 0.0)) if isinstance(info, dict) else 0.0
+            history["phi"].append(phi)
+            history["fiedler"].append(fid)
+            history["actions"].append(act)
+            history["salience"].append(sal)
+
+            if on_tick is not None:
+                on_tick({"phi": phi, "fiedler": fid, "action": act,
+                         "tick": t, "next_tok": next_tok}, state)
+
+        return history
 
     # ------------------------------------------------------------------
     # Inference cognitive loop

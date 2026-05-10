@@ -23,6 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .brain_module import BrainModule
+from .fast_weight import FastWeightLayer
 
 
 # Topic index for this expert (must match TopicClassifier.N_TOPICS ordering)
@@ -54,7 +55,8 @@ class ReasoningCortex(BrainModule):
     def __init__(self, d_sem: int,
                  n_attractors: int = 64,
                  base_beta: float = 4.0,
-                 n_iters: int = 3):
+                 n_iters: int = 3,
+                 enable_hfw: bool = True):
         super().__init__()
         self.d_sem = d_sem
         self.n_attractors = n_attractors
@@ -80,6 +82,17 @@ class ReasoningCortex(BrainModule):
         nn.init.zeros_(self.out_proj.weight)  # start as identity (no contribution)
 
         self.norm = nn.LayerNorm(d_sem)
+
+        # Hebbian fast weights — final binding stage.  When the cortex completes
+        # a pattern, bind the answer with the current GWS broadcast so future
+        # inference within the same conversation can recall it associatively
+        # (dual-timescale: slow attractors × fast episodic).
+        n_h = max(1, n_attractors // 16)
+        while d_sem % n_h != 0 and n_h > 1:
+            n_h -= 1
+        self.hfw = FastWeightLayer(d_sem, decay=0.95, base_eta=0.1, n_heads=n_h) \
+                   if enable_hfw else None
+        self._hfw_state: torch.Tensor | None = None
 
     # ------------------------------------------------------------------
     # Single Hopfield update step
@@ -127,9 +140,12 @@ class ReasoningCortex(BrainModule):
     # Forward
     # ------------------------------------------------------------------
     def forward(self, x: torch.Tensor,
-                vesicle_gate: float = 0.0) -> torch.Tensor:
+                vesicle_gate: float = 0.0,
+                gws_context: torch.Tensor | None = None) -> torch.Tensor:
         """x: (B, d_sem) or (B, S, d_sem).
         vesicle_gate ∈ [0, 1]: strength of reasoning-cortex activation.
+        gws_context: optional (B, d_sem) — Global Workspace broadcast used as
+                     plasticity context for the Hebbian fast-weight binding.
         Returns same shape as x.
         """
         if vesicle_gate < 1e-3:
@@ -157,6 +173,14 @@ class ReasoningCortex(BrainModule):
 
         enrichment = self.out_proj(state)
         enriched   = x_flat + vesicle_gate * enrichment
+
+        # Hebbian fast-weight binding stage — bind GWS context ↔ retrieved schema
+        if self.hfw is not None and vesicle_gate > 0.1:
+            ctx = gws_context if gws_context is not None else enriched
+            seq = enriched.unsqueeze(1)
+            seq, self._hfw_state = self.hfw(seq, context=ctx,
+                                             W_fast=self._hfw_state)
+            enriched = seq.squeeze(1)
 
         if squeeze:
             delta = (enriched - x_flat).unsqueeze(1)  # (B, 1, d_sem)

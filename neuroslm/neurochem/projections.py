@@ -32,12 +32,38 @@ class ProjectionGraph(nn.Module):
     def __init__(self, projections: list[Projection], region_dims: dict[str, int]):
         super().__init__()
         self.projections = projections
+        self.region_dims = dict(region_dims)
+        self.regions = set(region_dims.keys())
         self.maps = nn.ModuleDict()
         for i, p in enumerate(projections):
             if p.carries_signal:
                 self.maps[f"p{i}"] = nn.Linear(region_dims[p.src], region_dims[p.dst], bias=False)
                 # Init small so projections start as gentle modulations.
                 nn.init.normal_(self.maps[f"p{i}"].weight, std=0.02)
+
+    def add_projection(self, p: Projection) -> int:
+        """Append a new projection (structural plasticity sprouting).
+
+        Creates the corresponding signal-carrying linear map if needed and
+        returns the index of the new projection.  Used by TrophicSystem to
+        grow the connectome between high-activity, weakly-connected regions.
+        """
+        idx = len(self.projections)
+        self.projections.append(p)
+        if p.carries_signal:
+            if p.src not in self.region_dims or p.dst not in self.region_dims:
+                # Unknown regions — fall back to non-carrying NT-only edge
+                p.carries_signal = False
+            else:
+                m = nn.Linear(self.region_dims[p.src],
+                              self.region_dims[p.dst], bias=False)
+                nn.init.normal_(m.weight, std=0.02)
+                # Place the new map on the same device as existing ones
+                if len(self.maps) > 0:
+                    any_w = next(iter(self.maps.values())).weight
+                    m = m.to(device=any_w.device, dtype=any_w.dtype)
+                self.maps[f"p{idx}"] = m
+        return idx
 
     def transmit(self, idx: int, src_signal: torch.Tensor) -> Optional[torch.Tensor]:
         """Carry `src_signal` (B, D_src) through the i-th projection, returning

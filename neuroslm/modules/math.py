@@ -19,6 +19,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .brain_module import BrainModule
+from .fast_weight import FastWeightLayer
 
 
 # Topic index for this expert (must match TopicClassifier.N_TOPICS ordering)
@@ -43,7 +44,8 @@ class MathCortex(BrainModule):
     """
 
     def __init__(self, d_sem: int, n_heads: int = 4,
-                 memory_size: int = 128):
+                 memory_size: int = 128,
+                 enable_hfw: bool = True):
         super().__init__()
         self.d_sem      = d_sem
         self.n_heads    = max(1, n_heads)
@@ -76,6 +78,13 @@ class MathCortex(BrainModule):
         self.register_buffer("_wm_vals", torch.zeros(memory_size, d_sem))
         self.register_buffer("_wm_ptr",  torch.zeros(1, dtype=torch.long))
         self._wm_size = memory_size
+
+        # Hebbian Fast-Weight binding (final stage, episodic associations)
+        # Dual-timescale: slow weights = fact memory; fast weights = inference-time
+        # bindings between current GWS broadcast and discovered math patterns.
+        self.hfw = FastWeightLayer(d_sem, decay=0.95, base_eta=0.1, n_heads=self.n_heads) \
+                   if enable_hfw else None
+        self._hfw_state: torch.Tensor | None = None  # carry-over W_fast across calls
 
     # ------------------------------------------------------------------
     # Differential attention over memory
@@ -137,9 +146,13 @@ class MathCortex(BrainModule):
     # Forward
     # ------------------------------------------------------------------
     def forward(self, x: torch.Tensor,
-                vesicle_gate: float = 0.0) -> torch.Tensor:
+                vesicle_gate: float = 0.0,
+                gws_context: torch.Tensor | None = None) -> torch.Tensor:
         """x: (B, d_sem) or (B, S, d_sem).
         vesicle_gate ∈ [0, 1]: strength of math-cortex activation.
+        gws_context: optional (B, d_sem) — Global Workspace broadcast used as
+                     plasticity context for the Hebbian fast-weight layer.
+                     Enables dual-timescale binding (slow facts × fast episodic).
         Returns same shape as x.
         """
         if vesicle_gate < 1e-3:
@@ -168,6 +181,16 @@ class MathCortex(BrainModule):
 
         enrichment = fact_enrichment + 0.3 * wm_enrichment
         enriched   = x_flat + vesicle_gate * enrichment
+
+        # 3) Hebbian fast-weight binding (final stage)
+        # Bind current GWS state ↔ discovered math pattern for within-inference
+        # episodic recall.  Slow weights (fact memory) remain unchanged.
+        if self.hfw is not None and vesicle_gate > 0.1:
+            ctx = gws_context if gws_context is not None else enriched
+            seq = enriched.unsqueeze(1)
+            seq, self._hfw_state = self.hfw(seq, context=ctx,
+                                             W_fast=self._hfw_state)
+            enriched = seq.squeeze(1)
 
         # Update working memory with this forward's output
         self._update_wm(enriched)
