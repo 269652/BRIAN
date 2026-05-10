@@ -40,10 +40,21 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Global bfloat16 safety patch for nn.LayerNorm
-# On some CUDA/PyTorch builds, F.layer_norm requires float32 for both input
-# and weight/bias.  This patch promotes everything to float32 internally and
-# casts back, so all LayerNorm calls work regardless of model dtype.
+# Global bfloat16 safety patches.
+#
+# Two issues need fixing on this PyTorch/CUDA build:
+#
+# 1. LayerNorm: F.layer_norm requires float32 for both input and weight/bias
+#    on some kernels.  The patch promotes everything to float32 internally
+#    and casts the output back to the input dtype.
+#
+# 2. MultiheadAttention: the MHA fast path can leave the query in a different
+#    dtype than the in_proj_weight (e.g. when the input was just normalised in
+#    fp32 round-trip).  The patch coerces query/key/value to the weight dtype
+#    before calling the original forward, so linear() always sees matching
+#    dtypes.
+#
+# Both patches are no-ops in pure-fp32 training.
 # ---------------------------------------------------------------------------
 import torch.nn.functional as _F
 _orig_ln_fwd = torch.nn.LayerNorm.forward
@@ -61,6 +72,25 @@ def _bf16_safe_ln_fwd(self, x: torch.Tensor) -> torch.Tensor:
     ).to(dtype)
 
 torch.nn.LayerNorm.forward = _bf16_safe_ln_fwd
+
+_orig_mha_fwd = torch.nn.MultiheadAttention.forward
+
+def _bf16_safe_mha_fwd(self, query, key, value, *args, **kwargs):
+    if self.in_proj_weight is not None:
+        w_dtype = self.in_proj_weight.dtype
+    elif getattr(self, "q_proj_weight", None) is not None:
+        w_dtype = self.q_proj_weight.dtype
+    else:
+        w_dtype = query.dtype
+    if query.dtype != w_dtype:
+        query = query.to(dtype=w_dtype)
+    if key is not None and key.dtype != w_dtype:
+        key = key.to(dtype=w_dtype)
+    if value is not None and value.dtype != w_dtype:
+        value = value.to(dtype=w_dtype)
+    return _orig_mha_fwd(self, query, key, value, *args, **kwargs)
+
+torch.nn.MultiheadAttention.forward = _bf16_safe_mha_fwd
 # ---------------------------------------------------------------------------
 
 

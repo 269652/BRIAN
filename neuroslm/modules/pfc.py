@@ -159,6 +159,13 @@ class PrefrontalCortex(BrainModule):
 
         # Concatenate all inputs: [exec_query, gws_slots, recalls, floating_thought]
         x = torch.cat([q, gws_slots, recalls, ft], dim=1)   # (B, total_seq, d)
+        # nn.TransformerEncoder uses MHA whose linear projection requires the
+        # input dtype to match the weight dtype.  Cast defensively in case any
+        # upstream module (LayerNorm fp32 round-trip, receptor mix, etc.) has
+        # promoted the activations.
+        _tr_w_dtype = next(self.transformer.parameters()).dtype
+        if x.dtype != _tr_w_dtype:
+            x = x.to(dtype=_tr_w_dtype)
         y = self.transformer(x)                              # (B, total_seq, d)
 
         # Candidates = everything except the executive query token
