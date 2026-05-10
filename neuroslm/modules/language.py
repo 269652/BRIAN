@@ -231,7 +231,9 @@ class LanguageCortex(nn.Module):
 
         def _run_block(blk, x, nt_vec):
             """Run one block, with gradient checkpointing for all block types."""
-            if self.gradient_checkpointing and self.training:
+            # torch.utils.checkpoint calls getattr(torch, device_type) internally;
+            # 'xla' is not a torch attribute — XLA rematerializes automatically.
+            if self.gradient_checkpointing and self.training and x.device.type != "xla":
                 if nt_vec is None:
                     return torch.utils.checkpoint.checkpoint(
                         blk, x, use_reentrant=False)
