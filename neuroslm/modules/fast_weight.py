@@ -132,7 +132,7 @@ class FastWeightLayer(nn.Module):
             # Read from fast weights: y_t = W_fast · q_t
             # W_fast: (B, H, Dh, Dh),  qt: (B, H, Dh, 1)
             read = torch.einsum("bhij,bhj->bhi", W_fast, qt)  # (B, H, Dh)
-            read_norm = F.layer_norm(read, [Dh])
+            read_norm = F.layer_norm(read.float(), [Dh]).to(dtype=read.dtype)
 
             out_heads.append(read_norm)
 
@@ -147,6 +147,7 @@ class FastWeightLayer(nn.Module):
 
         out_seq = torch.stack(out_heads, dim=2)           # (B, H, T, Dh)
         out_seq = out_seq.permute(0, 2, 1, 3).reshape(B, T, D)
-        out = self.ln(x + self.out_proj(out_seq))
+        _r = x + self.out_proj(out_seq)
+        out = self.ln(_r.float()).to(dtype=_r.dtype)
 
         return out, W_fast.detach()

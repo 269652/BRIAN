@@ -39,6 +39,31 @@ except ImportError:
         functional_call = None  # type: ignore[assignment]
 
 
+# ---------------------------------------------------------------------------
+# Global bfloat16 safety patch for nn.LayerNorm
+# On some CUDA/PyTorch builds, F.layer_norm requires float32 for both input
+# and weight/bias.  This patch promotes everything to float32 internally and
+# casts back, so all LayerNorm calls work regardless of model dtype.
+# ---------------------------------------------------------------------------
+import torch.nn.functional as _F
+_orig_ln_fwd = torch.nn.LayerNorm.forward
+
+def _bf16_safe_ln_fwd(self, x: torch.Tensor) -> torch.Tensor:
+    dtype = x.dtype
+    if dtype == torch.float32 and (self.weight is None or self.weight.dtype == torch.float32):
+        return _orig_ln_fwd(self, x)
+    return _F.layer_norm(
+        x.float(),
+        self.normalized_shape,
+        self.weight.float() if self.weight is not None else None,
+        self.bias.float() if self.bias is not None else None,
+        self.eps,
+    ).to(dtype)
+
+torch.nn.LayerNorm.forward = _bf16_safe_ln_fwd
+# ---------------------------------------------------------------------------
+
+
 def cosine_lr(step: int, warmup: int, total: int, peak: float) -> float:
     if step < warmup:
         return peak * step / max(1, warmup)
