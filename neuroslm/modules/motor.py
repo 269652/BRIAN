@@ -54,7 +54,7 @@ class MotorCortex(nn.Module):
         lang_bias = self.to_lang_bias(action_emb)
         logits = self.action_head(action_emb)
         if survival is not None:
-            mask = survival.unsqueeze(-1).float()
+            mask = survival.unsqueeze(-1).to(logits.dtype)
             override = torch.zeros_like(logits)
             override[:, ACTION_INDEX["FLEE"]] = 5.0
             override[:, ACTION_INDEX["REMAIN_SILENT"]] = 1.0

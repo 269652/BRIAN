@@ -61,7 +61,7 @@ class Thalamus(nn.Module):
         outs = torch.stack([s(x) for s in self.streams], dim=1)  # (B, S, d_sem)
         if nt_levels is not None:
             # ACh boosts the top stream's contribution
-            top_mask = (probs == probs.max(dim=-1, keepdim=True).values).float()
+            top_mask = (probs == probs.max(dim=-1, keepdim=True).values).to(probs.dtype)
             boost = 1.0 + 0.5 * ach * top_mask                   # (B, S)
             mixed = (outs * (probs * boost).unsqueeze(-1)).sum(dim=1)
         else:

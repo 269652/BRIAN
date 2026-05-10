@@ -49,7 +49,7 @@ class GranuleLayer(nn.Module):
             k = max(1, int(sparse.size(-1) * (1 - self.sparsity)))
             topk_vals, _ = sparse.topk(k, dim=-1)
             threshold = topk_vals[:, -1:].detach()
-            sparse = sparse * (sparse >= threshold).float()
+            sparse = sparse * (sparse >= threshold).to(sparse.dtype)
         return sparse
 
 

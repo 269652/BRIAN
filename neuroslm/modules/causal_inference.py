@@ -158,7 +158,7 @@ class CausalInferenceModule(nn.Module):
         # Cut incoming edges at intervened nodes
         if do_mask is not None:
             # Zero column i of A for each intervened token i
-            A_mod = A * (1 - do_mask.float().unsqueeze(1))
+            A_mod = A * (1 - do_mask.to(A.dtype).unsqueeze(1))
         else:
             A_mod = A
 

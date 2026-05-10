@@ -54,7 +54,7 @@ class CategoricalStraightThrough(nn.Module):
         if self.training or straight_through:
             # Gumbel straight-through
             indices = probs.detach().argmax(-1)   # (B, n_cats)
-            one_hot = F.one_hot(indices, self.d_cat).float()
+            one_hot = F.one_hot(indices, self.d_cat).to(probs.dtype)
             # Straight-through: use probs in backward, one_hot in forward
             sample = one_hot + probs - probs.detach()
         else:

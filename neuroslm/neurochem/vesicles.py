@@ -139,7 +139,7 @@ class VesiclePool(nn.Module):
         The soft transition: new_pos = one_hot(argmax(v_pos @ T + Gumbel))
         This is equivalent to categorical sampling from T[current_pos].
         """
-        active = self._active_mask().float().unsqueeze(1)  # (V, 1)
+        active = self._active_mask().to(self.v_positions.dtype).unsqueeze(1)  # (V, 1)
 
         T = F.softmax(self.log_T, dim=-1)   # (n_modules, n_modules)
 
@@ -152,7 +152,7 @@ class VesiclePool(nn.Module):
             torch.rand_like(dest_logits).clamp(1e-6, 1 - 1e-6)))
         new_pos_idx = (dest_logits + gumbel).argmax(dim=-1)  # (V,)
 
-        new_pos = F.one_hot(new_pos_idx, self.n_modules).float()  # (V, n_modules)
+        new_pos = F.one_hot(new_pos_idx, self.n_modules).to(self.v_positions.dtype)  # (V, n_modules)
 
         # Only update active vesicles
         self.v_positions = torch.where(
@@ -169,7 +169,7 @@ class VesiclePool(nn.Module):
                  if no vesicles are active.
         """
         B, M, D = module_activations.shape
-        active_f = self._active_mask().float()          # (V,) — 1 for live, 0 for dead
+        active_f = self._active_mask().to(self.v_contents.dtype)  # (V,) — 1 for live, 0 for dead
 
         # Vesicle key vectors — only live ones carry meaningful content
         k = F.normalize(self.dock_key(self.v_contents), dim=-1)  # (V, D)
@@ -259,7 +259,7 @@ class VesiclePool(nn.Module):
         dead_mask = (self.v_lifetimes <= 0.0)           # (V,) bool, static shape
         # Zero out dead vesicle content so they don't contribute even if
         # the mask isn't checked (avoids stale gradient paths)
-        self.v_contents = self.v_contents * (~dead_mask).float().unsqueeze(1)
+        self.v_contents = self.v_contents * (~dead_mask).to(self.v_contents.dtype).unsqueeze(1)
 
     # ------------------------------------------------------------------ #
     # Public API                                                            #
