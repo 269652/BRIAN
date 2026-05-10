@@ -1210,7 +1210,7 @@ class Brain(nn.Module):
             nt_d = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
 
         # 5b) Amygdala — emotional tagging before qualia
-        reward_proxy_for_amyg = torch.zeros(B, device=ids.device)
+        reward_proxy_for_amyg = torch.zeros(B, device=device, dtype=dtype)
         if self.amygdala is not None:
             amyg_out = self.amygdala(
                 z_world, threat=threat, reward=reward_proxy_for_amyg,
@@ -1227,8 +1227,8 @@ class Brain(nn.Module):
             amyg_tint = amyg_out["thought_tint"]
         else:
             amyg_tint = torch.zeros_like(state["floating_thought"])
-            state["emotional_valence"] = torch.zeros(B, device=ids.device)
-            state["arousal"]           = torch.zeros(B, device=ids.device)
+            state["emotional_valence"] = torch.zeros(B, device=device, dtype=dtype)
+            state["arousal"]           = torch.zeros(B, device=device, dtype=dtype)
 
         # 5c) LHb — anti-reward: suppress DA when expected reward missed
         if self.lhb is not None:
@@ -1273,7 +1273,7 @@ class Brain(nn.Module):
                 state["qualia"], cortical_out["output"],
             ])
         else:
-            claustrum_out = {"salience": torch.zeros(B, device=ids.device),
+            claustrum_out = {"salience": torch.zeros(B, device=device, dtype=dtype),
                              "gestalt":  torch.zeros_like(modulated_thought)}
 
         # 7c) Neural geometry
@@ -1281,8 +1281,8 @@ class Brain(nn.Module):
             geo_out = self.neural_geometry(slots, state["floating_thought"])
             slots   = slots + 0.3 * geo_out["output"].unsqueeze(1).expand_as(slots)
         else:
-            geo_out = {"curvature": torch.zeros(B, device=ids.device),
-                       "stream_gates": torch.zeros(1, device=ids.device)}
+            geo_out = {"curvature": torch.zeros(B, device=device, dtype=dtype),
+                       "stream_gates": torch.zeros(1, device=device, dtype=dtype)}
 
         # 8) DMN query + hippocampal enrichment
         dmn_query, stop_logit = self.dmn.forward_safe(
@@ -1357,7 +1357,7 @@ class Brain(nn.Module):
             nt   = self.transmitters.vector()
             nt_d = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
         else:
-            insula_salience = torch.zeros(B, device=ids.device)
+            insula_salience = torch.zeros(B, device=device, dtype=dtype)
 
         # 10d) ACC — conflict monitoring, effort gating, ACh demand
         if self.acc is not None:
@@ -1406,7 +1406,7 @@ class Brain(nn.Module):
             cereb_out  = self.cerebellum(state["floating_thought"], selected_bg, actual_next=wp)
             cereb_error = cereb_out["error"]
         else:
-            cereb_error = torch.zeros(B, device=ids.device)
+            cereb_error = torch.zeros(B, device=device, dtype=dtype)
 
         # 12) Motor
         _mt, motor_lang_bias, action_idx, action_logits, action_probs = \
@@ -1415,7 +1415,7 @@ class Brain(nn.Module):
         logits2  = self.language.lm_head(h_biased)
 
         # 13) Mesolimbic reward circuit
-        zero      = torch.zeros(B, device=ids.device)
+        zero      = torch.zeros(B, device=device, dtype=dtype)
         state_sum = slots_enriched.mean(1)
         meso_out  = self.mesolimbic(
             state_vec=state_sum, reward=zero,

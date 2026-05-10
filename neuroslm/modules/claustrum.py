@@ -134,7 +134,7 @@ class Claustrum(nn.Module):
         # Pad if fewer modalities than expected
         flat_parts = [p for p in projected]
         while len(flat_parts) < self.n_modalities:
-            flat_parts.append(torch.zeros(B, self.d_sem, device=device))
+            flat_parts.append(torch.zeros(B, self.d_sem, device=device, dtype=projected[0].dtype))
         flat = torch.cat(flat_parts[:self.n_modalities], dim=-1)
         cell_out = self.cells(flat)  # (B, D)
 

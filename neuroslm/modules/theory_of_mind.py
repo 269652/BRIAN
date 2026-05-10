@@ -226,14 +226,15 @@ class TheoryOfMindModule(BrainModule):
         B = situation.shape[0] if hasattr(situation, "shape") else 1
         d = self.d_sem
         dev = situation.device if hasattr(situation, "device") else torch.device("cpu")
+        dt = situation.dtype if hasattr(situation, "dtype") else self.affect_proj[0].weight.dtype
         return {
-            "entity_belief":   torch.zeros(B, d, device=dev),
-            "entity_desire":   torch.zeros(B, d, device=dev),
-            "intention_logits":torch.zeros(B, self.N_ACTION_TYPES, device=dev),
-            "cf_response":     torch.zeros(B, self.N_ACTION_TYPES, device=dev),
-            "social_reward":   torch.zeros(B, device=dev),
-            "social_error":    torch.zeros(B, device=dev),
-            "affect_bleed":    torch.zeros(B, 4, device=dev),
+            "entity_belief":   torch.zeros(B, d, device=dev, dtype=dt),
+            "entity_desire":   torch.zeros(B, d, device=dev, dtype=dt),
+            "intention_logits":torch.zeros(B, self.N_ACTION_TYPES, device=dev, dtype=dt),
+            "cf_response":     torch.zeros(B, self.N_ACTION_TYPES, device=dev, dtype=dt),
+            "social_reward":   torch.zeros(B, device=dev, dtype=dt),
+            "social_error":    torch.zeros(B, device=dev, dtype=dt),
+            "affect_bleed":    torch.zeros(B, 4, device=dev, dtype=dt),
         }
 
     def forward(self,
@@ -267,7 +268,7 @@ class TheoryOfMindModule(BrainModule):
             cf_resp = self.cf_simulator(entity_ctx, my_action_logits)
         else:
             B = entity_ctx.shape[0]
-            cf_resp = torch.zeros(B, self.N_ACTION_TYPES, device=entity_ctx.device)
+            cf_resp = torch.zeros(B, self.N_ACTION_TYPES, device=entity_ctx.device, dtype=entity_ctx.dtype)
 
         # 5. Social prediction error (if we observed actual response)
         if actual_response is not None:
@@ -275,8 +276,8 @@ class TheoryOfMindModule(BrainModule):
                 belief_emb, actual_response)
         else:
             B = entity_ctx.shape[0]
-            social_error  = torch.zeros(B, device=entity_ctx.device)
-            social_reward = torch.zeros(B, device=entity_ctx.device)
+            social_error  = torch.zeros(B, device=entity_ctx.device, dtype=entity_ctx.dtype)
+            social_reward = torch.zeros(B, device=entity_ctx.device, dtype=entity_ctx.dtype)
 
         # 6. Emotional contagion signal (entity's predicted affect → own NTs)
         affect_bleed = self.affect_proj(belief_emb)   # (B, 4): DA, NE, 5HT, ACh
@@ -300,4 +301,4 @@ class TheoryOfMindModule(BrainModule):
         """Return stored entity hidden state for GWS injection."""
         if entity_id in self._entity_hidden:
             return self._entity_hidden[entity_id].to(device)
-        return torch.zeros(self.d_sem, device=device)
+        return torch.zeros(self.d_sem, device=device, dtype=self.affect_proj[0].weight.dtype)

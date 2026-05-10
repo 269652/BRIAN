@@ -107,7 +107,7 @@ class HTMLayer(nn.Module):
         B, T, D = x.shape
 
         if h_prev is None:
-            h_prev = [torch.zeros(B, D, device=x.device) for _ in range(self.n_scales)]
+            h_prev = [torch.zeros(B, D, device=x.device, dtype=x.dtype) for _ in range(self.n_scales)]
 
         # Accumulators
         scale_outputs = [[] for _ in range(self.n_scales)]  # per scale: list of (B, D)

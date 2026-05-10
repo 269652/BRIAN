@@ -247,7 +247,7 @@ class Insula(BrainModule):
             fat_inp = torch.cat([nt_vec, effort_proxy.unsqueeze(-1)], dim=-1)
         else:
             fat_inp = torch.cat([nt_vec,
-                                  torch.zeros(B, 1, device=device)], dim=-1)
+                                  torch.zeros(B, 1, device=device, dtype=nt_vec.dtype)], dim=-1)
         fatigue = self.fatigue_head(fat_inp).squeeze(-1)        # (B,)
 
         # NT demands

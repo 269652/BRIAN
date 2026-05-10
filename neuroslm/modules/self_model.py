@@ -18,8 +18,10 @@ class SelfModel(nn.Module):
         self.d_hidden = d_hidden
         self.n_layers = n_layers
 
-    def init_state(self, batch_size: int, device) -> torch.Tensor:
-        return torch.zeros(self.n_layers, batch_size, self.d_hidden, device=device)
+    def init_state(self, batch_size: int, device, dtype=None) -> torch.Tensor:
+        if dtype is None:
+            dtype = self.in_proj.weight.dtype
+        return torch.zeros(self.n_layers, batch_size, self.d_hidden, device=device, dtype=dtype)
 
     def forward(self, last_action: torch.Tensor, neuromods: torch.Tensor,
                 floating_thought: torch.Tensor, h: torch.Tensor):

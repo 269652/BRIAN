@@ -62,8 +62,9 @@ class LearnedBackprop(nn.Module):
 
     def _get_state(self, key: str, device: torch.device):
         if key not in self._hidden_states:
-            h = torch.zeros(1, self.hidden_dim, device=device)
-            c = torch.zeros(1, self.hidden_dim, device=device)
+            dtype = self.lstm.weight_ih.dtype
+            h = torch.zeros(1, self.hidden_dim, device=device, dtype=dtype)
+            c = torch.zeros(1, self.hidden_dim, device=device, dtype=dtype)
             self._hidden_states[key] = (h, c)
         return self._hidden_states[key]
 

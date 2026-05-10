@@ -93,7 +93,7 @@ class HyperdimensionalVSA(nn.Module):
         tokens: (B, T, D) → (B, D) holographic sequence encoding
         """
         B, T, D = tokens.shape
-        result = torch.zeros(B, D, device=tokens.device)
+        result = torch.zeros(B, D, device=tokens.device, dtype=tokens.dtype)
         for t in range(min(T, self.n_roles)):
             role = self.roles[t]  # (D,)
             bound = self.bind(tokens[:, t], role)

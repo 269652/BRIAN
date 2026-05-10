@@ -108,7 +108,7 @@ class FastWeightLayer(nn.Module):
         Dh = self.d_head
 
         if W_fast is None:
-            W_fast = torch.zeros(B, self.n_heads, Dh, Dh, device=x.device)
+            W_fast = torch.zeros(B, self.n_heads, Dh, Dh, device=x.device, dtype=x.dtype)
 
         if context is None:
             context = x.mean(1)   # (B, D)
