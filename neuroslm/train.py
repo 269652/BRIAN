@@ -669,10 +669,30 @@ def main():
             else:
                 nt_str = " ".join(f"{k}={v:.2f}" for k, v in (brain.last_nt or {}).items())
                 lg = float(brain.last_learning_gain.mean()) if brain.last_learning_gain is not None else 0.0
+
+                # IIT 4.0 / bowtie observability — Φ proxy, Fiedler λ₁, GWS
+                # ignition, and trophic state. Pulled from `brain` attrs that
+                # forward_lm sets on every pass (None-safe defaults so the log
+                # never crashes a step).
+                phi   = float(getattr(brain, "_last_phi",      0.0))
+                fid   = float(getattr(brain, "_last_fiedler",  1.0))
+                ign_t = getattr(getattr(brain, "gws", None), "_last_ignition", None)
+                ign   = float(ign_t.mean()) if ign_t is not None else 0.0
+                troph = brain.trophic.stats() if hasattr(brain, "trophic") else {}
+                t_act = troph.get("n_active", 0)
+                t_tot = troph.get("n_projections", 0)
+                t_mu  = troph.get("trophic_mean", 0.0)
+
                 print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
                       f"| ppl {ppl:.1f} | lr {_lr_str} "
-                      f"| {tok_per_s:.0f} tok/s | mesoLG {lg:.2f} | NT[{nt_str}]", flush=True)
-                # Log oscillation spectrum (tick() now called in forward_lm)
+                      f"| {tok_per_s:.0f} tok/s "
+                      f"| Φ {phi:.3f} | λ₁ {fid:.3f} | ign {ign:.2f} "
+                      f"| mesoLG {lg:.2f} "
+                      f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
+                      f"| NT[{nt_str}]", flush=True)
+
+                # Oscillation spectrum (gamma/theta/alpha + Φ-history + coherence).
+                # tick() is invoked inside forward_lm so the buffers are warm.
                 try:
                     osc = brain.oscillation_tracker.compute_spectrum()
                     print(f"         oscillations: {osc.format()}", flush=True)

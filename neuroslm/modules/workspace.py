@@ -108,14 +108,18 @@ class GlobalWorkspace(nn.Module):
             mean_sim = off_diag_sim.sum(-1, keepdim=True) / max(self.n_slots - 1, 1)
             slots = slots * (1.0 - 0.15 * mean_sim)      # attenuate similar slots
 
-            # Ignition phase transition — per-slot learnable threshold
-            # activity: (B, n_slots) — L2 norm of each slot
+            # Ignition phase transition — per-slot learnable threshold.
+            # Activity is the L2 norm of each slot; gate jumps from a
+            # sub-conscious "leak" scale to full broadcast scale once the
+            # slot crosses its learnable threshold.
+            #
+            # Spec (Dehaene 2011 ignition + IIT 4.0): pre-ignition broadcast
+            # scale 0.3, post-ignition scale 1.0, transition centred on θ.
+            # The tanh slope of 6.0 keeps the transition sharp enough to
+            # behave as a phase change rather than a smooth sigmoid.
             activity = slots.norm(dim=-1)                 # (B, n_slots)
-            # Per-slot threshold (clamped positive to avoid sign flip)
             thresh = self.slot_thresholds.abs().unsqueeze(0)  # (1, n_slots)
-            # Sharper tanh gate: pre-ignition → 0.15, post-ignition → 1.0
-            # tanh has a steeper transition than sigmoid → cleaner phase change
-            ign_per_slot = 0.15 + 0.85 * (0.5 + 0.5 * torch.tanh(
+            ign_per_slot = 0.3 + 0.7 * (0.5 + 0.5 * torch.tanh(
                 (activity - thresh) * 6.0))              # (B, n_slots)
             self._last_ignition = ign_per_slot.mean(-1).detach()  # (B,)
             slots = slots * ign_per_slot.unsqueeze(-1)   # broadcast per-slot

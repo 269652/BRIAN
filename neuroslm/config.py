@@ -177,6 +177,18 @@ class BrainConfig:
     w_free_energy: float = 0.05  # active inference free energy
     w_social:      float = 0.1   # social prediction error
 
+    # ---- Φ (integrated information) objective ----
+    # Maximises the IIT-style Gaussian-MI lower bound across the
+    # bowtie module bipartition. Loss term is `-w_phi * phi`, so the
+    # gradient pushes module outputs toward configurations where no
+    # bipartition disconnects them cheaply (high integration).
+    enable_phi_objective: bool = True
+    w_phi:                float = 0.02
+    # When phi exceeds this threshold (logged in `_last_phi`) the trophic
+    # system increases BDNF on active edges to "lock in" the integrated
+    # configuration (Dehaene structural selection).
+    phi_lock_threshold:   float = 0.5
+
 
 # ----- Preset sizes -----
 def tiny() -> BrainConfig:

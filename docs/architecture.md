@@ -1,9 +1,447 @@
 # NeuroSLM — Architecture Reference
 
-> **Reproduction-ready technical specification.**  Every section provides
-> enough mathematical detail, tensor shape annotations, and pseudo-code that
-> a developer can implement or replicate each subsystem in PyTorch XLA or JAX
-> from scratch.
+This document is a reproduction-ready technical specification for NeuroSLM.
+It places the Φ-structure (integrated information) front-and-center as the
+primary representational unit and details the topology, math, dynamics, and
+implementation primitives required to reproduce the system in PyTorch/XLA or
+JAX.
+
+Key guarantees for this spec:
+- Concrete tensor shapes and dtypes where relevant.
+- Algorithmic pseudocode for Φ estimation, Fiedler computation, trophic
+  updates, vesicle routing, Hebbian fast-weights (HFW), Hopfield GWS, and
+  chunked approximate kNN retrieval.
+- Practical XLA/TPU notes: bfloat16, chunking, checkpointing, and stable
+  numerics.
+
+Begin by defining the Φ-structure as the primary representational unit.
+
+---
+
+## 0. Executive summary (single-paragraph)
+
+NeuroSLM is a neuro-inspired small language model designed to increase
+computational irreducibility (Φ) through a bowtie topology (Global Workspace
+as a narrow bottleneck), re-entrant loops (within-pass and cross-pass),
+multi-timescale memory (Hebbian fast weights + slow backbone), and a
+trophic-driven structural plasticity mechanism that dynamically adapts
+adapter connectivity ranks. The architecture aims to provide the emergent
+benefits of much larger models (1B+) while remaining parameter-efficient
+(~258M for the `xl` preset) by privileging topology over raw scale.
+
+---
+
+## 1. System Philosophy & Objectives
+
+1.1 Topology over Scale
+
+The thesis: topology (who talks to whom, when, and at which timescale) is
+the main determinant of capability. Specifically, re-entry and a narrow
+broadcast bottleneck force modules to form richer interdependencies. These
+dependencies raise integrated information (Φ) per parameter, enabling a
+~250M model to match certain reasoning behaviors of much larger transformers.
+
+1.2 Consciousness-First Design
+
+Primary learning objective is not only low perplexity but also homeostatic
+maximization of two coupled signals:
+
+- Φ_proxy — proxy for Integrated Information (irreducibility of module graph)
+- cmp (Comprehension Index) — probability that an input is both surprising
+  and compressible (worthy of long-term storage)
+
+These signals drive structural plasticity (BDNF-style), memory writing, and
+meta-parameter updates (e.g., trophic gating of adapter rank). The aim is to
+make architectural improvements that increase Φ and useful long-term
+representations rather than blindly adding parameters.
+
+---
+
+## 2. Mathematical Foundations — The Five Postulates (IIT 4.0 mapping)
+
+All algorithms below are implemented as computational proxies that are
+tractable on neural hardware.
+
+2.1 The Φ-structure (primary representational unit)
+
+Let N be the number of registered modules. For a single forward tick, collect
+module outputs and project them into a shared semantic space with projection
+matrices p_i ∈ R^{d_module -> d_sem}. After mean-pooling across time (or an
+EMA over a short window), assemble an output matrix O ∈ R^{N×d} where row i
+is module i's representation.
+
+Core quantities:
+
+- O: (N, d)  — module embeddings (mean-pooled over tokens or temporally)
+- G = Oc Oc^T / (d - 1)  — Gram matrix (N × N)
+- W = |G| normalized  — empirical interaction matrix (N × N)
+
+Φ_proxy is estimated by partitioning modules into A and B (the MIP proxy)
+and computing a Gaussian MI approximation across that cut (see §7).
+
+2.2 Five Postulates (practical implementations)
+
+- Intrinsicality: only registered module projections are used to compute O.
+- Information: estimate mutual information from covariance/Gram matrices.
+- Integration: measured via spectral gap (Fiedler value λ_1) and MIP proxy.
+- Exclusion: the Major Complex is explicitly chosen (default: GWS + executive
+  modules). Modules outside this set are excluded from Φ computations.
+- Composition: Φ is computed from the composed pairwise relations in W.
+
+2.3 TPM-like approximations
+
+Discrete TPMs are intractable at realistic module sizes. We approximate
+transition information using continuous Gaussian assumptions and conditional
+covariances derived from the Gram matrix. This yields the MI surrogate used
+in the MIP proxy (see §7 for code).
+
+2.4 Spectral Graph Theory & the Fiedler vector
+
+W is converted to normalized Laplacian L = I - D^{-1/2} W D^{-1/2}, where
+D = diag(W 1). The Fiedler vector (second-smallest eigenvector of L) is
+computed via deflated power iteration. The sign of the Fiedler vector
+components defines a candidate bipartition (A,B) that approximates the MIP.
+Cheeger's inequality provides theoretical justification: small λ_1 → weak
+connectivity → target for trophic plasticity.
+
+Pseudocode for Fiedler estimation: see Appendix (end of doc).
+
+---
+
+## 3. Core Module Specifications (implementable descriptions)
+
+All module implementations must expose a projection to the shared semantic
+space: proj: R^{d_module} → R^{d_sem} (nn.Linear in PyTorch). Register these
+projections with the NeuralOrchestrator.
+
+3.1 Language Cortex (modules/language.py)
+
+- Input: ids → tok_emb (B, T, d_hidden)
+- Architecture: interleaved blocks: [TransformerBlock, DiffTransformerBlock, MoDBlock] × L
+- Predictive coding heads: predict next-layer outputs; loss scalar returned.
+
+DiffTransformerBlock (SNR-doubling): compute two QKV sets, two attention maps
+A1, A2, then y = (softmax(A1) - λ softmax(A2)) V. λ per-head learned.
+
+MoDBlock (Mixture-of-Depths): router produces r_t ∈ [0,1]; top-k tokens run
+full block. Implementation uses topk on router scores (Gumbel-softmax optional
+for differentiability if needed).
+
+Tensor shapes (example):
+- ids: (B, T)
+- tok_emb(ids): (B, T, d_hidden)
+- logits: (B, T, Vocab)
+
+3.2 Math Cortex (DNC-heavy)
+
+- External memory M ∈ R^{N_mem, Dm}
+- Link matrix L ∈ R^{N_mem, N_mem} sparse (store as indices+values)
+- Read/write: content-based addressing + temporal links
+
+3.3 Reasoning Cortex (Modern Hopfield)
+
+- Store a library of K reasoning templates (K up to 64k depending on device)
+- Query via spherical energy landscape and retrieve via two-step Hopfield
+  convergence (fast on XLA with large matrix multiplications).
+
+3.4 Global Workspace (GWS) — Bowtie Waist
+
+GWS is the architectural bottleneck that compresses candidate module outputs
+into K slots and broadcasts a compact summary back to modules via per-module
+feedback projections (Linear(d_sem, d_module) with zero init).
+
+Hopfield-like slot convergence (pseudocode):
+
+```python
+# C: (B, N_cand, d_sem)
+slots = init_slots(B, K, d_sem)
+beta = softplus(log_beta) + 0.5
+for _ in range(n_iter):
+    scores = einsum('bkd,bnd->bkn', slots, C)
+    attn = softmax(beta * scores, dim=-1)
+    slots = attn @ C
+```
+
+Broadcast: slots_mean = slots.mean(dim=1)  # (B, d_sem)
+For each module i: h_i = h_i + feedback_proj_i(slots_mean)
+
+---
+
+## 4. Wiring Diagram & NeuralOrchestrator API
+
+Two re-entrant loops:
+
+- Loop A (cross-temporal): at the end of a pass, store a summary s_prev = f(h_pfc, slots_mean).
+  Next pass, inject bias = from_sem(s_prev) into the thalamic input.
+- Loop B (within-pass): after GWS fills, immediately broadcast slots_mean to downstream modules.
+
+NeuralOrchestrator API (minimal):
+
+```python
+class NeuralOrchestrator(nn.Module):
+    def register_module(self, name: str, proj: nn.Module, stage: int):
+        # proj: Linear(d_mod, d_sem)
+    def set_gws_broadcast(self, slots: Tensor):
+    def get_reentry_bias(self, B, device) -> Tensor:  # (B, d_sem)
+    def estimate_phi(self, O: Tensor) -> float:
+        # O: (N, d) mean-pooled module outputs
+```
+
+---
+
+## 5. Dynamical Biological Mechanics (implementation ready)
+
+5.1 Neuro-Vesicle Pool (stochastic neuromodulator routing)
+
+Model: vesicles are discrete events carrying a small payload across directed
+projections. Vectorize the queue by using padded tensors and masks for XLA
+efficiency.
+
+Vesicle record (vectorized):
+- src_idx: (V,) int32
+- dst_idx: (V,) int32
+- pos: (V,) float32 ∈ [0,1]  # normalized along projection
+- speed: (V,) float32
+- payload: (V, D_mod) float32  # D_mod ~ 4 (DA, NE, 5HT, ACh)
+- state: (V,) int8  # 0=emitted,1=migrating,2=docked
+
+Vectorized step function (PyTorch-like pseudocode):
+
+```python
+def step_vesicles(vesicles, receptor_open_mask, dt=1.0):
+    # vesicles: dict of tensors as above
+    vesicles['pos'] += vesicles['speed'] * dt
+    arrived = vesicles['pos'] >= 1.0
+    arrived_idx = torch.nonzero(arrived).squeeze(-1)
+    if arrived_idx.numel() > 0:
+        dst = vesicles['dst_idx'][arrived_idx]
+        payload = vesicles['payload'][arrived_idx]  # (A, D_mod)
+        # apply only where receptor open
+        open_mask = receptor_open_mask[dst]  # (A,)
+        apply_payload = payload[open_mask.bool()]
+        # aggregate per destination (scatter_add)
+        mod_delta = scatter_add(apply_payload, dst[open_mask.bool()], dim=0, dim_size=E)
+        neuromod_levels += mod_delta  # (E, D_mod)
+    # decay and purge small vesicles
+    vesicles['payload'] *= torch.exp(-dt / tau)
+    keep = vesicles['payload'].norm(dim=-1) > EPS
+    for k in vesicles: vesicles[k] = vesicles[k][keep]
+    return vesicles, neuromod_levels
+```
+
+Notes:
+- receptor_open_mask depends on local state (e.g., gated by cmp or context)
+- Use scatter_add for aggregation; implement with XLA-friendly ops.
+
+5.2 Trophic System (BDNF/NGF structural plasticity)
+
+We maintain a trophic scalar τ_e ∈ [0,1] per projection edge e. Trophic
+updates are driven by: base_bdnf, Φ_proxy, and fiedler_boost when the MIP
+identifies a weak boundary.
+
+Vectorized trophic update pseudocode:
+
+```python
+def update_trophic(trophic, coact, bdnf_base, ngf, phi, lambda_1, decay=0.01):
+    fiedler_boost = torch.clamp(1.0 - lambda_1 / 0.3, min=0.0) * 2.0
+    bdnf_eff = bdnf_base * (1.0 + phi_boost * phi + fiedler_boost)
+    delta = bdnf_eff * (0.1 + coact) - (ngf + decay + 0.001 * (1.0 - coact))
+    trophic = torch.clamp(trophic + delta, 0.0, 1.0)
+    return trophic
+```
+
+Effect on NeuralGeometryAdapter
+- Adapter parametrizes kernel as A (d_hyper × rank_max) and B (rank_max × d_hyper).
+- We gate rank contribution by trophic fraction α_e = trophic[e]; at runtime
+  compute effective kernel = (A * α_e) @ (B * α_e). This lets us avoid
+  reallocation while increasing effective rank.
+
+Pseudocode to gate kernel:
+
+```python
+def gated_kernel(A, B, trophic_scalar):
+    # A: (d_hyper, rank_max), B: (rank_max, d_hyper)
+    a = A * trophic_scalar
+    b = B * trophic_scalar
+    return a @ b
+```
+
+5.3 Hebbian Fast Weights (HFW)
+
+HFW binds co-activations inside a single context window for rapid episodic
+association. Use low-rank factorization to keep memory low.
+
+Representation:
+- For each head h: use low-rank factors U_h ∈ R^{r × Dh}, V_h ∈ R^{r × Dh}
+- Reconstruct W_fast_h = U_h^T @ V_h (Dh × Dh)
+
+Update (per token t):
+
+```python
+q_t, v_t = q[:,t], v[:,t]  # (B, H, Dh)
+outer = einsum('bhd,bhe->bhde', q_t, v_t)  # (B, H, Dh, Dh)
+# Project outer into low-rank factors (learned small MLP) or update U,V
+U += eta * project_to_U(outer)
+V += eta * project_to_V(outer)
+read = einsum('brd,brd->bd', U @ q_t, V @ q_t)
+```
+
+Implementation note: keep U,V small (r <= 16) and share across batch where
+possible to reduce memory.
+
+---
+
+## 6. Optimization & Infrastructure
+
+6.1 Adaptive Compute: CALM & MoD
+
+CALM (Confident Adaptive Language Modeling): each layer emits a confidence
+score c_t ∈ [0,1]. If c_t > θ_l, token t is considered solved and may skip
+remaining layers. θ_l decays with depth so deeper layers are increasingly
+selective.
+
+Router & MoD specifics:
+- Router: small two-layer MLP yields r_t ∈ R. Use top-k selection on r_t.
+- For differentiable training consider a Gumbel-TopK relaxation.
+
+6.2 TPU / XLA & bfloat16 notes
+
+- Use bfloat16 for matmuls and storage for large tensors. Keep numerically
+  sensitive ops in float32 (layernorm, loss, Gram, eigenvector iterations).
+- Chunk large retrievals (keys N up to 65k) into manageable blocks to avoid
+  peak memory with a final merge step (see chunked_topk pseudocode below).
+
+Chunked topk pseudocode (repeated for clarity):
+
+```python
+def chunked_topk(q, keys, K, chunk=2048):
+    # q: (B, d), keys: (N, d)
+    best_vals = None
+    best_idx = None
+    for i in range(0, N, chunk):
+        chunk_keys = keys[i:i+chunk]
+        vals = q @ chunk_keys.T  # (B, chunk)
+        v, idx = vals.topk(K, dim=-1)
+        idx = idx + i
+        best_vals, best_idx = merge_topk(best_vals, best_idx, v, idx, K)
+    return best_vals, best_idx
+```
+
+6.3 Checkpointing & autograd
+
+- When using torch.autograd.grad with inputs or passing `inputs` to
+  backward(), use checkpoint with use_reentrant=False. Avoid closures that
+  capture tensors; pass tensors explicitly into checkpointed functions.
+
+---
+
+## 7. Intelligence & Integration Metrics (implementation)
+
+7.1 Φ Proxy (exact steps)
+
+```python
+def estimate_phi(O: Tensor):
+    # O: (N, d) mean-pooled module outputs (float32)
+    Oc = O - O.mean(dim=1, keepdim=True)
+    G = Oc @ Oc.T / max(1, Oc.size(1) - 1)  # (N,N)
+    W = torch.abs(G)
+    D = torch.diag(W.sum(dim=1))
+    D_inv_sqrt = torch.diag(1.0 / torch.sqrt(torch.clamp(D.diag(), min=1e-8)))
+    L = torch.eye(N, device=O.device) - D_inv_sqrt @ W @ D_inv_sqrt
+    v1 = estimate_fiedler(L)
+    A_mask = v1 >= 0
+    B_mask = ~A_mask
+    SIG_A = cov(O[A_mask])
+    SIG_B = cov(O[B_mask])
+    SIG_AB = cov(O[A_mask | B_mask])
+    mi = 0.5 * (logdet(SIG_A + eps) + logdet(SIG_B + eps) - logdet(SIG_AB + eps))
+    return float(mi), float(torch.linalg.eigvals(L)[1].real)  # mi and lambda_1
+```
+
+Numerical details: add small `eps` jitter (1e-6) before logdet, compute
+determinants/logdets in float32.
+
+7.2 Comprehension Index (cmp)
+
+Define surprise(x) = -log p(x) under current LM. Define recon_err(x) via a
+small autoencoder over projected module outputs. Then:
+
+$$
+cmp(x) = \sigma\left(\alpha \cdot \frac{\mathrm{surprise}(x)}{1 + \mathrm{recon\_err}(x)} + b\right)
+$$
+
+Write trigger: cmp(x) > τ_write
+
+When triggered and Φ_proxy is above a threshold, enqueue the example for
+long-term memory write and apply trophic updates to projections active when
+the example occurred.
+
+---
+
+## 8. Parameter Presets
+
+| Preset | Params (approx) | Accelerator | VRAM | d_hidden | d_sem | lang_layers | lang_ctx | gws_slots | hippo_capacity |
+|--------|-----------------:|-----------:|-----:|---------:|------:|-----------:|--------:|----------:|---------------:|
+| s      | ~5M              | CPU        | —    | 192      | 128   | 2          | 256     | 8         | 4096           |
+| m      | ~15M             | CPU        | —    | 384      | 256   | 4          | 512     | 8         | 4096           |
+| l      | ~100M            | T4         | 15GB | 384      | 256   | 8          | 1024    | 12        | 8192           |
+| xl     | ~258M            | A100       | 40GB | 512      | 384   | 12         | 2048    | 8         | 4096           |
+| xxl    | ~10B             | 4×A100     | 320GB| 4096     | 2048  | 32         | 4096    | 24        | 32768          |
+
+Each preset adjusts hebbian_rank, mod_capacity, gradient_checkpointing,
+and optional module toggles.
+
+---
+
+## 9. Appendix — Algorithms & Utilities
+
+estimate_fiedler(L) (deflated power iteration)
+
+```python
+def estimate_fiedler(L, n_iter=20):
+    N = L.shape[0]
+    A = torch.eye(N, device=L.device) - L
+    v0 = torch.ones(N, device=L.device) / math.sqrt(N)
+    for _ in range(n_iter):
+        v0 = A @ v0; v0 = v0 / (v0.norm() + 1e-12)
+    A_def = A - torch.ger(A @ v0, v0)
+    v1 = torch.randn(N, device=L.device)
+    v1 -= (v1 @ v0) * v0; v1 /= (v1.norm() + 1e-12)
+    for _ in range(n_iter):
+        v1 = A_def @ v1
+        v1 -= (v1 @ v0) * v0
+        v1 /= (v1.norm() + 1e-12)
+    return v1
+```
+
+chunked_topk and merge_topk utilities (for retrieval on large key-sets)
+
+```python
+def merge_topk(best_vals, best_idx, v, idx, K):
+    if best_vals is None:
+        return v, idx
+    vals = torch.cat([best_vals, v], dim=-1)
+    idxs = torch.cat([best_idx, idx], dim=-1)
+    vals2, pos = vals.topk(K, dim=-1)
+    idx2 = gather_by_pos(idxs, pos)
+    return vals2, idx2
+```
+
+---
+
+## 10. Operational guidance
+
+- Monitor λ_1 (Fiedler) and Φ_proxy. If λ_1 drifts towards 0 repeatedly,
+  temporarily dampen BDNF (bdnf_base) to avoid runaway rewiring.
+- Use the repo-level git config to ensure privacy-sensitive emails are set
+  before any history rewrite or CI hooks that snapshot training logs.
+
+---
+
+If you want, I can generate a companion `arch_impl.ipynb` with runnable
+snippets for the Fiedler estimator, trophic update, Hopfield GWS, and
+approximate kNN to validate everything on CPU and TPU emulation.
+
 
 ---
 
@@ -528,18 +966,32 @@ pattern *completion*, not mere selection.
 
 #### Ignition Phase Transition (Dehaene 2011)
 
-1. **Lateral competition** — off-diagonal cosine similarity between slots
+1. **Lateral competition.** Off-diagonal cosine similarity between slots
    drives 15% inhibition of redundant patterns (winner-take-all in feature
-   space, ensures distinct slot representations).
-2. **Ignition gate:**
+   space — ensures distinct, informative slot states).
 
-$$p_{\text{ign}} = \sigma\!\left(4 \cdot (\bar{\lVert\text{slots}\rVert} - \theta)\right), \qquad \theta = 0.5$$
+   $$\text{slots} \leftarrow \text{slots} \cdot \bigl(1 - 0.15 \cdot \overline{\cos\text{-sim}_{\text{off-diag}}}\bigr)$$
 
-   Sharp sigmoid transition: pre-ignition $\approx 0.3$, post-ignition $\approx 1.0$.
-3. **Broadcast scale** $= 0.3 + 0.7 \times p_{\text{ign}}$
+2. **Ignition gate** (per slot, learnable threshold $\theta_k$):
+
+   $$p_{\text{ign},k} = \tfrac{1}{2} + \tfrac{1}{2}\tanh\!\bigl(6 \cdot (\lVert\text{slot}_k\rVert - \theta_k)\bigr)$$
+
+   The slope-6 $\tanh$ delivers a steeper transition than a $\sigma$ at
+   the same effective gain — closer to a true phase change.
+
+3. **Broadcast scale** is a clamped linear lift from sub-conscious leak to
+   full ignition:
+
+   $$\text{scale}_k = 0.3 + 0.7 \cdot p_{\text{ign},k}$$
+
+   Pre-ignition slots therefore contribute at $\sim 0.3$ (sub-conscious),
+   ignited slots at $\sim 1.0$ (broadcast). The default initial threshold
+   is $\theta_k = 0.5$.
 
 After Stage 5, `orchestrator.set_gws_broadcast(slots.mean(1))` stores the
-mean slot for all subsequent within-pass feedback loops (§4.2 Loop B).
+mean slot for all subsequent within-pass feedback loops (§4.2 Loop B), and
+`workspace._last_ignition` is exposed as a $(B,)$ tensor used by the
+trainer's per-step log line (`ign` field).
 
 ---
 

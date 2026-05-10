@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git config *)",
+      "Bash(git filter-repo *)",
+      "Bash(git filter-branch -f --env-filter ' *)"
+    ]
+  }
+}

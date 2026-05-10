@@ -23,7 +23,18 @@
       "Bash(git commit *)",
       "Bash(py fix_cell5.py)",
       "Bash(py fix_cell5_v2.py)",
-      "Bash(py fix_cell5_v3.py)"
+      "Bash(py fix_cell5_v3.py)",
+      "Bash(python -c \"from neuroslm.intelligence.orchestrator import NeuralOrchestrator; print\\('orchestrator OK'\\)\")",
+      "Bash(py -3 -c \"from neuroslm.intelligence.orchestrator import NeuralOrchestrator; print\\('orchestrator OK'\\)\")",
+      "Bash(py -3 -c \"import pytest; print\\(pytest.__version__\\)\")",
+      "Bash(py -3 -m pytest tests/ -x --tb=short --no-header)",
+      "Bash(py -3 -m pytest tests/ --tb=short --no-header)",
+      "Bash(py -3 -m pytest tests/ --tb=line --no-header)",
+      "Bash(python -m pytest tests/test_consciousness.py tests/test_orchestrator.py tests/test_phi.py -x --tb=short -q)",
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/test_consciousness.py tests/test_orchestrator.py tests/test_phi.py -x --tb=short -q)",
+      "Bash(./.venv-2/Scripts/python.exe -c \"import pytest, torch; print\\('pytest', pytest.__version__, 'torch', torch.__version__\\)\")",
+      "Bash(./.venv/Scripts/python.exe -m pip install pytest -q)",
+      "Bash(./.venv/Scripts/python.exe -c ' *)"
     ]
   }
 }
