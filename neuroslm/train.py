@@ -596,15 +596,17 @@ def main():
             avg_lm = running_lm / n_obs
             ppl = math.exp(min(avg_lm, 20))
             tok_per_s = args.log_every * args.batch_size * max(args.grad_accum, 1) * ctx_len / max(dt, 1e-3)
+            _raw_lr = optim.param_groups[0].get('lr')
+            _lr_str = f"{_raw_lr:.2e}" if _raw_lr is not None else "auto"
             if cfg.baseline:
                 print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
-                      f"| ppl {ppl:.1f} | lr {optim.param_groups[0]['lr']:.2e} "
+                      f"| ppl {ppl:.1f} | lr {_lr_str} "
                       f"| {tok_per_s:.0f} tok/s | BASELINE", flush=True)
             else:
                 nt_str = " ".join(f"{k}={v:.2f}" for k, v in (brain.last_nt or {}).items())
                 lg = float(brain.last_learning_gain.mean()) if brain.last_learning_gain is not None else 0.0
                 print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
-                      f"| ppl {ppl:.1f} | lr {optim.param_groups[0]['lr']:.2e} "
+                      f"| ppl {ppl:.1f} | lr {_lr_str} "
                       f"| {tok_per_s:.0f} tok/s | mesoLG {lg:.2f} | NT[{nt_str}]", flush=True)
                 # Log oscillation spectrum (tick() now called in forward_lm)
                 try:
