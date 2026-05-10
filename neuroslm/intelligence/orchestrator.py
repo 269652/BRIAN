@@ -97,10 +97,18 @@ class HomeostaticGate(nn.Module):
         h = x + attn_out
         h = h + self.ff(self.ff_norm(h.float()).to(dtype=h.dtype))
 
+        # Snapshot running stats BEFORE the in-place EMA update so the
+        # autograd-tracked normalisation below does not pin a tensor whose
+        # version is about to be bumped (lerp_ would otherwise raise the
+        # "modified by an inplace operation" error in backward).
+        rm = self.running_mean.detach().clone()
+        rv = self.running_var.detach().clone()
+
         with torch.no_grad():
             bm = h.mean((0, 1))
-            bv = h.var((0, 1))
-            # Ensure stats have the same dtype and device as the running buffers
+            # unbiased=False avoids the "dof <= 0" warning at B=T=1 and
+            # gives the population-variance estimate that the EMA assumes.
+            bv = h.var((0, 1), unbiased=False)
             bm = bm.to(dtype=self.running_mean.dtype, device=self.running_mean.device)
             bv = bv.to(dtype=self.running_var.dtype, device=self.running_var.device)
             a  = self.adaptation_rate
@@ -108,8 +116,8 @@ class HomeostaticGate(nn.Module):
             self.running_var.lerp_(bv, a)
             self.n_updates += 1
 
-        rms = (self.running_var + 1e-8).sqrt()
-        h   = (h - self.running_mean) / rms * self.target_magnitude
+        rms = (rv + 1e-8).sqrt()
+        h   = (h - rm) / rms * self.target_magnitude
         h   = h * self.gain + self.bias
 
         return h.squeeze(1) if squeeze else h
@@ -590,7 +598,11 @@ class NeuralOrchestrator(nn.Module):
         """
         if self.baseline:
             return torch.zeros(B, self.d_sem, device=device)
-        bias = self._reentry_state.to(device).unsqueeze(0).expand(B, -1)
+        # Clone the buffer view before any graph-tracking op: `update_reentry`
+        # later does an inplace `lerp_` on the underlying _reentry_state,
+        # which would otherwise version-bump the saved-for-backward tensor
+        # and raise the "modified by inplace operation" error.
+        bias = self._reentry_state.to(device).clone().unsqueeze(0).expand(B, -1)
         mix  = torch.sigmoid(self.reentry_mix)   # ∈ (0, 1) — learnable gate
         return mix * bias
 
@@ -633,67 +645,189 @@ class NeuralOrchestrator(nn.Module):
     # Integrated Information proxy (Φ)
     # ------------------------------------------------------------------
 
-    def compute_phi_proxy(self) -> float:
-        """Estimate Φ from inter-module output correlations.
+    # ------------------------------------------------------------------
+    # IIT 4.0 Φ via Gaussian-MI minimum information partition (MIP).
+    # We expose two entry points:
+    #   compute_phi_proxy()  → float, no_grad, fast (used for logging + trophic gates)
+    #   phi_tensor()         → torch.Tensor, differentiable (used as loss term)
+    # Both share the same estimator: cov-of-Gram → Fiedler bisection → MI(A;B).
+    # ------------------------------------------------------------------
 
-        IIT interpretation:
-          High Φ requires BOTH:
-            (a) integration — modules are coupled (non-zero mean pairwise correlation)
-            (b) differentiation — modules are distinct (variance across correlations)
-
-          Φ_proxy = mean_corr × (1 + std_corr)
-            - If all modules output identical signals: std_corr = 0, Φ ≈ 1 × 1 = 1
-              But this means NO differentiation, so this proxy saturates correctly
-              only when we use the bipartition form below.
-            - If modules are independent: mean_corr ≈ 0, Φ ≈ 0 ✓
-            - Optimal: moderate mean_corr + high std_corr → Φ > 0.5 ✓
-
-        Returns float in [0, 1].
-        """
+    def _stack_module_outputs(self, *, detach: bool) -> Optional[torch.Tensor]:
+        """Build M ∈ R^{n × d}: one mean-pooled, batch-mean row per module."""
         outputs = self._last_stage_outputs
         if len(outputs) < 2:
-            return 0.0
+            return None
+        vecs: List[torch.Tensor] = []
+        for o in outputs:
+            if o is None:
+                continue
+            t = o
+            if detach:
+                t = t.detach()
+            t = t.float()
+            if t.dim() == 3:
+                t = t.mean(1)        # (B, d)
+            if t.dim() == 2:
+                t = t.mean(0)        # (d,)
+            t = t.flatten()
+            vecs.append(t)
+        if len(vecs) < 2:
+            return None
+        d = min(int(v.size(0)) for v in vecs)
+        d = min(d, 256)
+        if d < 2:
+            return None
+        return torch.stack([v[:d] for v in vecs], dim=0)   # (n, d)
 
-        try:
-            # Normalise and collect
-            vecs: List[torch.Tensor] = []
-            for o in outputs:
-                if o is None:
+    @staticmethod
+    def _phi_from_M(M: torch.Tensor) -> torch.Tensor:
+        """Return a non-negative scalar Φ ≈ min over bipartitions of MI(A;B).
+
+        Implementation:
+          1. Mean-centre M; compute n×n Gram covariance.
+          2. Build similarity W from |Σ| / (σ_i σ_j); zero diagonal.
+          3. Normalised Laplacian L = I - D^{-1/2} W D^{-1/2}.
+          4. For n ≤ 8: enumerate all 2^(n-1)-1 bipartitions (true MIP).
+             For n  > 8: spectral bisection via Fiedler vector of L.
+          5. MI(A;B) = ½(logdet Σ_A + logdet Σ_B − logdet Σ_AB), clamped ≥ 0.
+
+        Differentiable: uses torch.linalg.slogdet which has a defined gradient
+        for full-rank, symmetric, positive-definite inputs (jittered with eps).
+        """
+        n, d = M.shape
+        device = M.device
+        dtype  = M.dtype
+        Mc  = M - M.mean(dim=1, keepdim=True)
+        cov = (Mc @ Mc.T) / max(d - 1, 1)                  # (n, n)
+        eps_n = 1e-6 * torch.eye(n, device=device, dtype=dtype)
+        ld_full = torch.linalg.slogdet(cov + eps_n).logabsdet
+
+        if n <= 8:
+            best = None
+            # Iterate half the partitions (symmetry); skip empty splits.
+            for mask_int in range(1, 1 << (n - 1)):
+                a_idx = [i for i in range(n) if (mask_int >> i) & 1]
+                b_idx = [i for i in range(n) if not (mask_int >> i) & 1]
+                if not a_idx or not b_idx:
                     continue
-                v = (o.mean(1) if o.dim() == 3 else o).detach().float()
-                v = v.mean(0)   # (d_sem,) batch-mean
-                v = F.normalize(v, dim=0)
-                vecs.append(v)
+                ai = torch.tensor(a_idx, device=device)
+                bi = torch.tensor(b_idx, device=device)
+                cov_A = cov.index_select(0, ai).index_select(1, ai)
+                cov_B = cov.index_select(0, bi).index_select(1, bi)
+                eps_A = 1e-6 * torch.eye(len(a_idx), device=device, dtype=dtype)
+                eps_B = 1e-6 * torch.eye(len(b_idx), device=device, dtype=dtype)
+                ld_A = torch.linalg.slogdet(cov_A + eps_A).logabsdet
+                ld_B = torch.linalg.slogdet(cov_B + eps_B).logabsdet
+                mi = 0.5 * (ld_A + ld_B - ld_full)
+                mi = torch.clamp(mi, min=0.0)
+                best = mi if best is None else torch.minimum(best, mi)
+            return best if best is not None else torch.zeros((), device=device, dtype=dtype)
 
+        # n > 8 — spectral bisection (Fiedler) gives a single, differentiable
+        # cut. We use slogdet on the resulting bipartition.
+        diag = cov.diagonal().clamp(min=1e-8).sqrt()
+        W = (cov.abs() / (diag.unsqueeze(1) * diag.unsqueeze(0))).clamp(0.0, 1.0)
+        # Zero diagonal without a non-differentiable mutation
+        W = W * (1.0 - torch.eye(n, device=device, dtype=dtype))
+        deg = W.sum(-1).clamp(min=1e-8)
+        D_inv_sqrt = deg.pow(-0.5)
+        L = torch.eye(n, device=device, dtype=dtype) \
+            - D_inv_sqrt.unsqueeze(1) * W * D_inv_sqrt.unsqueeze(0)
+        # eigh works best in float32; cast for stability and back.
+        with torch.no_grad():
+            eigvecs = torch.linalg.eigh(L.float())[1]
+            fiedler = eigvecs[:, 1]
+        a_mask = fiedler >= 0
+        b_mask = ~a_mask
+        if not bool(a_mask.any().item()) or not bool(b_mask.any().item()):
+            return torch.zeros((), device=device, dtype=dtype)
+        a_idx = a_mask.nonzero(as_tuple=True)[0]
+        b_idx = b_mask.nonzero(as_tuple=True)[0]
+        cov_A = cov.index_select(0, a_idx).index_select(1, a_idx)
+        cov_B = cov.index_select(0, b_idx).index_select(1, b_idx)
+        eps_A = 1e-6 * torch.eye(int(a_idx.numel()), device=device, dtype=dtype)
+        eps_B = 1e-6 * torch.eye(int(b_idx.numel()), device=device, dtype=dtype)
+        ld_A = torch.linalg.slogdet(cov_A + eps_A).logabsdet
+        ld_B = torch.linalg.slogdet(cov_B + eps_B).logabsdet
+        mi = 0.5 * (ld_A + ld_B - ld_full)
+        return torch.clamp(mi, min=0.0)
+
+    def phi_tensor(self,
+                   module_outputs: Optional[Dict[str, torch.Tensor]] = None
+                  ) -> Optional[torch.Tensor]:
+        """Differentiable Φ. Returns None when fewer than 2 module outputs.
+
+        When `module_outputs` is provided, computes Φ directly from those
+        (still graph-connected) tensors. This is the path used for the
+        training-time Φ objective in brain.forward_lm.
+
+        When called with no argument, falls back to the detached buffer of
+        stage outputs — i.e. the same data the no_grad proxy sees, so the
+        result is float-equivalent but the gradient will be empty.
+        """
+        if self.baseline:
+            return None
+        if module_outputs is not None:
+            # Build M from the supplied (live) tensors.
+            vecs: List[torch.Tensor] = []
+            for v in module_outputs.values():
+                if v is None or not torch.is_tensor(v):
+                    continue
+                t = v.float()
+                if t.dim() == 3:
+                    t = t.mean(1)
+                if t.dim() == 2:
+                    t = t.mean(0)
+                vecs.append(t.flatten())
             if len(vecs) < 2:
+                return None
+            d = min(int(v.size(0)) for v in vecs)
+            d = min(d, 256)
+            if d < 2:
+                return None
+            M = torch.stack([v[:d] for v in vecs], dim=0)
+        else:
+            M = self._stack_module_outputs(detach=False)
+            if M is None:
+                return None
+        try:
+            return self._phi_from_M(M)
+        except Exception:
+            return None
+
+    @torch.no_grad()
+    def compute_phi_proxy(self) -> float:
+        """Real IIT MIP estimate as a python float — for logging / gating.
+
+        Returns 0.0 if the MIP could not be computed (e.g. <2 stages logged
+        this pass, or numerical failure).
+        """
+        if self.baseline:
+            return 0.0
+        M = self._stack_module_outputs(detach=True)
+        if M is None:
+            return 0.0
+        try:
+            phi = self._phi_from_M(M)
+            v = float(phi.item())
+            if v != v or v == float('inf') or v == float('-inf'):
                 return 0.0
-
-            # Pairwise cosine similarities (off-diagonal)
-            cors: List[float] = []
-            for i in range(len(vecs)):
-                for j in range(i + 1, len(vecs)):
-                    c = float((vecs[i] * vecs[j]).sum().item())
-                    cors.append(abs(c))
-
-            if not cors:
-                return 0.0
-
-            mean_c = sum(cors) / len(cors)
-            var_c  = sum((c - mean_c) ** 2 for c in cors) / max(len(cors) - 1, 1)
-            std_c  = var_c ** 0.5
-
-            # Bipartition penalty: Φ = 0 if all outputs are identical (no differentiation)
-            # Φ_proxy: high mean coupling AND high diversity of coupling
-            phi = mean_c * (1.0 + std_c)
-            return float(min(max(phi, 0.0), 1.0))
+            return max(0.0, v)
         except Exception:
             return 0.0
 
     def record_stage_output(self, signal: torch.Tensor) -> None:
-        """Accumulate a stage output for the next Φ computation."""
+        """Accumulate a *detached* stage output for the next Φ proxy.
+
+        Detached because downstream modules may mutate slices of the same
+        tensor in-place; storing a graph-connected reference here would
+        poison the backward graph. The differentiable Φ path (`phi_tensor`)
+        receives still-live tensors directly from the forward pass via its
+        `module_outputs` argument.
+        """
         if self.baseline:
             return
-        # Keep a bounded list (at most 16 entries)
         if len(self._last_stage_outputs) >= 16:
             self._last_stage_outputs.pop(0)
         self._last_stage_outputs.append(signal.detach())

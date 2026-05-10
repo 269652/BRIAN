@@ -173,8 +173,12 @@ class MathCortex(BrainModule):
         has_wm = int(self._wm_ptr.item()) > 0
         if has_wm:
             n_filled = min(int(self._wm_ptr.item()), self._wm_size)
-            wm_k = self._wm_keys[:n_filled]
-            wm_v = self._wm_vals[:n_filled]
+            # Clone the slice — _update_wm later writes to self._wm_keys/_wm_vals
+            # in-place; without the clone the saved-for-backward tensor would
+            # have its version bumped and autograd would raise the
+            # "modified by an inplace operation" error.
+            wm_k = self._wm_keys[:n_filled].clone()
+            wm_v = self._wm_vals[:n_filled].clone()
             wm_enrichment = self._diff_attn(h, wm_k, wm_v)
         else:
             wm_enrichment = torch.zeros_like(x_flat)
