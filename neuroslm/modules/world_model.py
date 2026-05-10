@@ -136,12 +136,14 @@ class RecurrentStateSpaceModel(BrainModule):
 
     # ── State shape helpers ───────────────────────────────────────────────────
 
-    def init_state(self, batch_size: int, device) -> dict:
+    def init_state(self, batch_size: int, device, dtype=None) -> dict:
         """Returns dict with keys 'h' and 'z'."""
+        if dtype is None:
+            dtype = self.inp_proj.weight.dtype
         return {
             "h": torch.zeros(self.n_layers, batch_size, self.d_hidden,
-                             device=device),
-            "z": torch.zeros(batch_size, self.d_z, device=device),
+                             device=device, dtype=dtype),
+            "z": torch.zeros(batch_size, self.d_z, device=device, dtype=dtype),
         }
 
     # ── Forward (observation mode) ────────────────────────────────────────────
