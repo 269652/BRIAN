@@ -220,7 +220,7 @@ class LanguageCortex(nn.Module):
         """
         h = self.tok_emb(ids)
         if thought is not None:
-            bias = self.from_sem(thought).unsqueeze(1)  # (B, 1, d_hidden)
+            bias = self.from_sem(thought.to(h.dtype)).unsqueeze(1)  # (B, 1, d_hidden)
             h = h + bias
 
         # Compute predictive coding loss incrementally to avoid storing

@@ -617,20 +617,22 @@ class Brain(nn.Module):
             acc[:, t0:t1] = losses.reshape(B, t1 - t0).float()
         return acc.mean(dim=1)
 
-    def init_latents(self, batch_size: int, device):
+    def init_latents(self, batch_size: int, device, dtype=None):
         cfg = self.cfg
+        if dtype is None:
+            dtype = next(self.parameters()).dtype
         if (self.transmitters.level.size(0) != batch_size or
                 self.transmitters.level.device != device):
             self.transmitters.reset(batch_size, device)
         return {
-            "floating_thought": torch.zeros(batch_size, cfg.d_sem, device=device),
-            "last_action":      torch.zeros(batch_size, cfg.bg_action_dim, device=device),
+            "floating_thought": torch.zeros(batch_size, cfg.d_sem, device=device, dtype=dtype),
+            "last_action":      torch.zeros(batch_size, cfg.bg_action_dim, device=device, dtype=dtype),
             "world_h":          self.world.init_state(batch_size, device),
             "self_h":           self.self_m.init_state(batch_size, device),
-            "novelty":          torch.zeros(batch_size, device=device),
-            "qualia":           torch.zeros(batch_size, cfg.d_sem, device=device),
+            "novelty":          torch.zeros(batch_size, device=device, dtype=dtype),
+            "qualia":           torch.zeros(batch_size, cfg.d_sem, device=device, dtype=dtype),
             "prev_action_idx":  torch.full((batch_size,), -1, device=device, dtype=torch.long),
-            "thought_valence":  torch.zeros(batch_size, device=device),
+            "thought_valence":  torch.zeros(batch_size, device=device, dtype=dtype),
         }
 
     # ------------------------------------------------------------------
@@ -651,7 +653,8 @@ class Brain(nn.Module):
         cfg    = self.cfg
         B, T   = ids.shape
         device = ids.device
-        latents = self.init_latents(B, device)
+        dtype  = next(self.parameters()).dtype
+        latents = self.init_latents(B, device, dtype=dtype)
         nt      = self.transmitters.vector().detach()
         nt_d    = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
 
@@ -758,7 +761,7 @@ class Brain(nn.Module):
         if self.amygdala is not None:
             amyg_tr = self.amygdala(
                 z_world, threat=self.critic.forward_safe(z_world, z_self)[0],
-                reward=torch.zeros(B, device=device))
+                reward=torch.zeros(B, device=device, dtype=dtype))
             for i, nt_name in enumerate(NT_NAMES):
                 if i < amyg_tr["nt_demand"].size(-1):
                     self.transmitters.release(nt_name, amyg_tr["nt_demand"][:, i] * 0.2)
@@ -899,7 +902,7 @@ class Brain(nn.Module):
 
         # 9) NT release
         with torch.no_grad():
-            zero = torch.zeros(B, device=device)
+            zero = torch.zeros(B, device=device, dtype=dtype)
             if targets is not None:
                 p = F.softmax(logits_motor.detach(), dim=-1)
                 tgt = targets.clamp_min(0)
