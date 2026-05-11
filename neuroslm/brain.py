@@ -208,6 +208,13 @@ class Brain(nn.Module):
 
         self._last_memory_id = None
         self._global_step    = 0
+        # Auxiliary-loss scale (0..1) — set per-step by train.py to gate every
+        # non-LM loss together during infancy. 1.0 = full aux weights.
+        self._aux_w_scale    = 1.0
+        # Infancy flag — when True, structural/homeostatic side-effects
+        # (trophic update, vesicle dynamics) are suppressed so they don't
+        # ride on random-init gradients.
+        self._infancy        = False
 
         # ---- Intelligence flow ----
         from .intelligence.reflection import SpontaneousReflection
@@ -1012,15 +1019,18 @@ class Brain(nn.Module):
             self._last_fiedler = _fiedler_val   # persist for secondary trophic call
             # Φ-coupled + Fiedler-gated BDNF: locks high-integration pathways
             # and homeostically rewires near-disconnected module graph edges.
-            self.trophic.update(activities,
-                                bdnf=_bdnf_val,
-                                ngf=novelty.detach().mean().item(),
-                                phi=_phi_val,
-                                fiedler=_fiedler_val)
+            # Suppressed during infancy: trophic signals are meaningless when
+            # phi/fiedler/novelty all come from a random-init network.
+            if not getattr(self, '_infancy', False):
+                self.trophic.update(activities,
+                                    bdnf=_bdnf_val,
+                                    ngf=novelty.detach().mean().item(),
+                                    phi=_phi_val,
+                                    fiedler=_fiedler_val)
 
-            # BDNF structural growth: Φ-triggered rank increase in NeuralGeometryAdapters
-            if hasattr(self, 'language') and hasattr(self.language, 'bdnf_grow_all'):
-                self.language.bdnf_grow_all(_bdnf_val, _phi_val)
+                # BDNF structural growth: Φ-triggered rank increase in NeuralGeometryAdapters
+                if hasattr(self, 'language') and hasattr(self.language, 'bdnf_grow_all'):
+                    self.language.bdnf_grow_all(_bdnf_val, _phi_val)
 
         out = {
             "logits":        logits,
@@ -1113,15 +1123,19 @@ class Brain(nn.Module):
                     return t.nan_to_num(0.0, posinf=0.0, neginf=0.0)
                 return torch.tensor(float(t) if not (t != t) else 0.0, device=device)
 
+            # All non-LM losses share a single infancy-gated scale so they
+            # don't inject random-init gradient noise upstream before the LM
+            # has stabilised. train.py sets _aux_w_scale per step.
+            aux_w = float(getattr(self, '_aux_w_scale', 1.0))
             total = (cfg.w_lm            * lm_loss
-                     + cfg.w_world       * _safe(world_loss)
-                     + cfg.w_forward     * _safe(fwd_reg) * 0.01
-                     + cfg.w_motor       * _safe(motor_loss)
-                     + cfg.w_pred_coding * _safe(pred_coding_loss)
-                     + getattr(cfg, 'w_kl_world', 0.1) * _safe(rssm_kl)
-                     + 0.05              * _safe(novel_aux_loss)
-                     + getattr(cfg, 'w_cpc', 0.05) * _safe(cpc_loss)
-                     + getattr(cfg, 'w_phi', 0.02) * _safe(phi_loss_term))
+                     + aux_w * cfg.w_world       * _safe(world_loss)
+                     + aux_w * cfg.w_forward     * _safe(fwd_reg) * 0.01
+                     + aux_w * cfg.w_motor       * _safe(motor_loss)
+                     + aux_w * cfg.w_pred_coding * _safe(pred_coding_loss)
+                     + aux_w * getattr(cfg, 'w_kl_world', 0.1) * _safe(rssm_kl)
+                     + aux_w * 0.05              * _safe(novel_aux_loss)
+                     + aux_w * getattr(cfg, 'w_cpc', 0.05) * _safe(cpc_loss)
+                     + aux_w * getattr(cfg, 'w_phi', 0.02) * _safe(phi_loss_term))
 
             if hasattr(self, 'orchestrator') and not self.orchestrator.baseline:
                 orch_out, orch_metrics = self.orchestrator.route(
@@ -1129,7 +1143,8 @@ class Brain(nn.Module):
                              'entorhinal': self.entorhinal, 'claustrum': self.claustrum})
                 id_drift = orch_metrics.get('identity_drift', 0.0)
                 calm     = orch_metrics.get('neural_calm', 1.0)
-                total    = total + 0.01 * _safe(id_drift) + 0.01 * (1.0 - _safe(calm))
+                total    = total + aux_w * (0.01 * _safe(id_drift)
+                                            + 0.01 * (1.0 - _safe(calm)))
 
             out.update({
                 "loss":                   total,

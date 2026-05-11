@@ -180,8 +180,8 @@ class NeuralOscillationTracker(nn.Module):
             if effective_w < 4:
                 continue
 
-            # FFT
-            spectrum = torch.fft.rfft(rms)
+            # FFT — torch.fft.rfft does not support bfloat16, upcast to float32
+            spectrum = torch.fft.rfft(rms.float())
             power = spectrum.abs().pow(2)
 
             # Band extraction (map to FFT bins)

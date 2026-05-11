@@ -417,7 +417,9 @@ def main():
     t0 = time.time()
     running_loss = 0.0
     running_lm = 0.0
+    running_gnorm = 0.0
     n_obs = 0
+    gnorm = 0.0  # last optimizer step's grad norm (set in non-meta branch)
 
     total_steps = args.steps
     if start_step >= total_steps:
@@ -527,12 +529,13 @@ def main():
             _aux_ramp = 0.0
 
         _aux_w = _aux_w_init + (_aux_w_target - _aux_w_init) * _aux_ramp
-        # Update config weights live so brain.forward_lm picks them up next step
+        # Single per-step gate that scales ALL auxiliary losses uniformly
+        # (world / motor / cpc / phi / kl / novel / pred_coding / id_drift).
+        # During infancy this is ~0.001, ramping to 1.0 after lm_loss stabilises.
+        # Trophic/BDNF structural updates are suppressed while _infancy=True.
         if not cfg.baseline:
-            cfg.w_pred_coding = getattr(cfg, '_w_pred_coding_base',
-                                        cfg.w_pred_coding) * _aux_w
-            if not hasattr(cfg, '_w_pred_coding_base'):
-                cfg._w_pred_coding_base = cfg.w_pred_coding
+            brain._aux_w_scale = float(_aux_w)
+            brain._infancy     = bool(in_infancy)
 
         # If meta-training is enabled, perform a one-step differentiable unroll.
         # We do a SEPARATE language-only forward pass for the meta path to avoid
@@ -710,18 +713,23 @@ def main():
             brain.update_narratives()
 
         # Slow homeostatic regulation of NT baselines & gains.
-        if not cfg.baseline:
+        # Suppressed during infancy — the controller's targets (NT mean/std,
+        # grad-norm bands) are calibrated for a learning network, not a
+        # random-init one. Letting it run during infancy drives NT to ceiling.
+        if not cfg.baseline and _maturation_awakened:
             brain.homeostasis.observe(brain.transmitters,
                                       float(out["lm_loss"].item()), float(gnorm))
 
         running_loss += float(loss.item())
         running_lm += float(out["lm_loss"].item())
+        running_gnorm += float(gnorm)
         n_obs += 1
 
         if (step + 1) % args.log_every == 0:
             dt = time.time() - t0
             avg = running_loss / n_obs
             avg_lm = running_lm / n_obs
+            avg_gnorm = running_gnorm / n_obs
             ppl = math.exp(min(avg_lm, 20))
             tok_per_s = args.log_every * args.batch_size * max(args.grad_accum, 1) * ctx_len / max(dt, 1e-3)
             _raw_lr = optim.param_groups[0].get('lr')
@@ -742,7 +750,7 @@ def main():
 
             if cfg.baseline:
                 print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
-                      f"| ppl {ppl:.1f} | lr {_lr_str} "
+                      f"| ppl {ppl:.1f} | gnorm {avg_gnorm:.3f} | lr {_lr_str} "
                       f"| {tok_per_s:.0f} tok/s | BASELINE{osc_str}", flush=True)
             else:
                 nt_str = " ".join(f"{k}={v:.2f}" for k, v in (brain.last_nt or {}).items())
@@ -762,13 +770,13 @@ def main():
                 t_mu  = troph.get("trophic_mean", 0.0)
 
                 print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
-                      f"| ppl {ppl:.1f} | lr {_lr_str} "
+                      f"| ppl {ppl:.1f} | gnorm {avg_gnorm:.3f} | lr {_lr_str} "
                       f"| {tok_per_s:.0f} tok/s "
                       f"| Φ {phi:.3f} | λ₁ {fid:.3f} | ign {ign:.2f} "
                       f"| mesoLG {lg:.2f} "
                       f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
                       f"| NT[{nt_str}]{osc_str}", flush=True)
-            running_loss = running_lm = 0.0
+            running_loss = running_lm = running_gnorm = 0.0
             n_obs = 0
             t0 = time.time()
 
