@@ -734,7 +734,11 @@ def main():
                     osc = brain.oscillation_tracker.compute_spectrum()
                     osc_str = f" | osc[δ={osc.delta:.3f} θ={osc.theta:.3f} γ={osc.gamma:.3f}]"
                 except Exception as e:
-                    pass  # tracker exists but compute failed; skip
+                    # Log oscillation compute errors for debugging
+                    import traceback
+                    print(f"[train] ⚠ oscillation compute failed: {e}", flush=True)
+                    if not cfg.baseline:
+                        traceback.print_exc()
 
             if cfg.baseline:
                 print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
