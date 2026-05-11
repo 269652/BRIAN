@@ -50,7 +50,7 @@ A freshly initialised model has near-zero cross-module covariance — the module
 
 ### 2.1 Topology Over Scale
 
-NeuroSLM's core thesis is that **computational graph topology — not raw parameter count — determines intelligence density**. The `xl` preset (≈226 M parameters) is designed to match or outperform vanilla transformer baselines at 1 B+ parameters on comprehension and reasoning benchmarks. The mechanism is threefold:
+NeuroSLM's core thesis is that **computational graph topology — not raw parameter count — determines intelligence density**. The `xl` preset (≈240 M parameters) is designed to match or outperform vanilla transformer baselines at 1 B+ parameters on comprehension and reasoning benchmarks. The mechanism is threefold:
 
 | Mechanism | Vanilla Transformer | NeuroSLM |
 |---|---|---|
@@ -66,9 +66,9 @@ The primary training objective is:
 
 $$\mathcal{L} = w_\text{lm} \cdot \mathcal{L}_\text{CE} + w_\text{world} \cdot \mathcal{L}_\text{world} + w_\text{self} \cdot \mathcal{L}_\text{self} + w_\text{fwd} \cdot \mathcal{L}_\text{fwd} + w_\text{value} \cdot \mathcal{L}_\text{value} + w_\text{motor} \cdot \mathcal{L}_\text{motor}$$
 
-with default weights $w_\text{lm}=1.0$, $w_\text{world}=0.3$, $w_\text{self}=0.1$, $w_\text{fwd}=0.2$, $w_\text{value}=0.1$, $w_\text{motor}=0.05$.
+with default weights $w_\text{lm}=2.0$, $w_\text{world}=0.3$, $w_\text{self}=0.1$, $w_\text{fwd}=0.2$, $w_\text{value}=0.1$, $w_\text{motor}=0.05$.
 
-Φ is not directly back-propagated (it is computed `@torch.no_grad()`) but drives two auxiliary mechanisms:
+Φ is differentiable — it back-propagates through `torch.linalg.slogdet` into every contributing module, creating a direct gradient signal for integration. Additionally, Φ drives two auxiliary mechanisms:
 
 1. **BDNF gating** — high Φ amplifies trophic factor release, growing the NeuralGeometryAdapter's connectivity kernel rank (§6.2).  
 2. **Comprehension-gated memory writing** — only observations that are simultaneously surprising, comprehensible, and novel are stored in the episodic hippocampus (§8.2).
@@ -271,7 +271,7 @@ Slots that are too similar to others are attenuated, ensuring diverse coverage o
 
 $$\alpha_s = 0.15 + 0.85 \cdot \frac{1 + \tanh\!\left(6(\|S_s\| - \theta_s)\right)}{2}$$
 
-$\theta_s$ is a learnable per-slot threshold (initialised to 0.5). Below threshold: $\alpha_s \approx 0.15$ (pre-ignition, sparse). Above threshold: $\alpha_s \approx 1.0$ (ignited, globally broadcast). The tanh provides a sharp phase transition — sharper than sigmoid at the same slope.
+$\theta_s$ is a learnable per-slot threshold (initialised to 0.8). Below threshold: $\alpha_s \approx 0.15$ (pre-ignition, sparse). Above threshold: $\alpha_s \approx 1.0$ (ignited, globally broadcast). The tanh provides a sharp phase transition — sharper than sigmoid at the same slope. Higher threshold prevents representational noise from triggering global broadcast.
 
 NE temperature modulation: $S^{(0)} \leftarrow S^{(0)} \cdot \text{NE}$ — norepinephrine scales the initial slot activations, sharpening GWS selectivity under arousal.
 
@@ -757,7 +757,7 @@ All presets share the same module topology (`neural_topology="full"`). Differenc
 | `small` (s) | ~15 M | 256 | 384 | 4 | 512 | 8 | 4 096 | CPU (hours) |
 | `medium` (m) | ~80 M | 512 | 768 | 8 | 1 024 | 8 | 4 096 | Single GPU T4 |
 | `large` (l) | ~100 M | 256 | 384 | 8 | 1 024 | 12 | 8 192 | T4 16 GB |
-| `xl` | ~226 M | 384 | 512 | 12 | 2 048 | 8 | 4 096 | A100 40 GB |
+| `xl` | ~240 M | 384 | 512 | 12 | 2 048 | 8 | 4 096 | A100 40 GB |
 | `xxl` | ~10 B | 2 048 | 4 096 | 32 | 4 096 | 24 | 32 768 | 4–8 × A100 |
 
 **xl-specific flags** (the primary research preset):
