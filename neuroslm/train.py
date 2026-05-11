@@ -705,21 +705,22 @@ def main():
                 t_tot = troph.get("n_projections", 0)
                 t_mu  = troph.get("trophic_mean", 0.0)
 
+                # Oscillation spectrum (multi-band: gamma/theta/alpha + cross-frequency coupling)
+                osc_str = ""
+                if hasattr(brain, 'oscillation_tracker'):
+                    try:
+                        osc = brain.oscillation_tracker.compute_spectrum()
+                        osc_str = f" | osc[γ={osc.gamma:.3f} θ={osc.theta:.3f} α={osc.alpha:.3f}]"
+                    except Exception as e:
+                        pass  # tracker exists but compute failed; skip
+
                 print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
                       f"| ppl {ppl:.1f} | lr {_lr_str} "
                       f"| {tok_per_s:.0f} tok/s "
                       f"| Φ {phi:.3f} | λ₁ {fid:.3f} | ign {ign:.2f} "
                       f"| mesoLG {lg:.2f} "
                       f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
-                      f"| NT[{nt_str}]", flush=True)
-
-                # Oscillation spectrum (gamma/theta/alpha + Φ-history + coherence).
-                # tick() is invoked inside forward_lm so the buffers are warm.
-                try:
-                    osc = brain.oscillation_tracker.compute_spectrum()
-                    print(f"         oscillations: {osc.format()}", flush=True)
-                except Exception:
-                    pass
+                      f"| NT[{nt_str}]{osc_str}", flush=True)
             running_loss = running_lm = 0.0
             n_obs = 0
             t0 = time.time()
