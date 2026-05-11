@@ -237,12 +237,16 @@ def main():
     ctx_len = args.ctx or cfg.lang_ctx
     assert ctx_len <= cfg.lang_ctx
 
-    # Auxiliary loss weights start small and ramp up as the LM loss stabilises.
-    # pred_coding_loss and active_inference_fe start at 0.1× their target weight.
-    _aux_w_init   = 0.1
+    # Auxiliary loss weights start small and ramp up once the LM loss drops below 8.0.
+    # pred_coding_loss and active_inference_fe start at 0.01× their target weight,
+    # ramping up only after lm_loss < 8.0 for a sustained window (100 steps).
+    _aux_w_init   = 0.01
     _aux_w_target = 1.0
-    _aux_ramp_steps = max(1, int(args.steps * 0.2))  # ramp over first 20% of training
+    _loss_ramp_threshold = 8.0
+    _loss_ramp_window = 100  # steps below threshold to trigger ramp
+    _loss_below_threshold_count = 0
     _lm_ema = None   # exponential moving average of LM loss (for gating)
+    _ramp_started = False  # flag tracking if we've passed the threshold
 
     # ── Build model and cast to native precision ────────────────────────
     # TPU native format: bfloat16 (same dynamic range as fp32, half memory).
@@ -455,13 +459,31 @@ def main():
             continue  # skip this step
 
         # ── Auxiliary loss gating ──────────────────────────────────────────
-        # Ramp pred_coding and active-inference weights from 0.1 → target over
-        # the first 20% of training steps, gated by LM-loss EMA stability.
+        # Ramp auxiliary weights from 0.01 → target only after lm_loss < 8.0
+        # for a sustained window (100 steps), ensuring core LM competency first.
         _lm_now = float(out["lm_loss"].item())
         if _lm_ema is None:
             _lm_ema = _lm_now
         _lm_ema = 0.99 * _lm_ema + 0.01 * _lm_now
-        _aux_ramp = min(1.0, step / max(1, _aux_ramp_steps))
+
+        # Track when we've sustained below-threshold loss
+        if _lm_now < _loss_ramp_threshold:
+            _loss_below_threshold_count += 1
+        else:
+            _loss_below_threshold_count = 0
+
+        # Once sustained below threshold, ramp auxiliary weights linearly
+        if _loss_below_threshold_count >= _loss_ramp_window:
+            _ramp_started = True
+
+        if _ramp_started:
+            # Linear ramp from 0.01 to target over remaining training
+            steps_ramped = _loss_below_threshold_count - _loss_ramp_window
+            max_ramp_steps = args.steps - step
+            _aux_ramp = min(1.0, steps_ramped / max(1, max_ramp_steps))
+        else:
+            _aux_ramp = 0.0
+
         _aux_w = _aux_w_init + (_aux_w_target - _aux_w_init) * _aux_ramp
         # Update config weights live so brain.forward_lm picks them up next step
         if not cfg.baseline:

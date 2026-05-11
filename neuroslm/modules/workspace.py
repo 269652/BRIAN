@@ -27,7 +27,7 @@ class GlobalWorkspace(nn.Module):
     def __init__(self, d_sem: int, n_slots: int, n_heads: int = 4,
                  gradient_checkpointing: bool = False,
                  hopfield_iters: int = 2,
-                 ignition_threshold: float = 0.5):
+                 ignition_threshold: float = 0.8):
         super().__init__()
         self.n_slots = n_slots
         self.d_sem   = d_sem

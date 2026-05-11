@@ -38,7 +38,7 @@ NT_DEFAULTS = {
     "ACh":  NTParams(tau_decay=0.75, baseline=0.20),
     "eCB":  NTParams(tau_decay=0.60, baseline=0.05),  # retrograde, fast
     "Glu":  NTParams(tau_decay=0.50, baseline=0.40),  # fast excitatory
-    "GABA": NTParams(tau_decay=0.50, baseline=0.40),  # fast inhibitory
+    "GABA": NTParams(tau_decay=0.90, baseline=0.10),  # homeostatic decay γ=0.9, target=0.1
 }
 
 

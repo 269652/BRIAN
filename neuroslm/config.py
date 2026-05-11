@@ -78,7 +78,7 @@ class BrainConfig:
     grad_clip: float = 1.0
 
     # ---- Loss weights ----
-    w_lm: float = 1.0
+    w_lm: float = 2.0
     w_world: float = 0.3
     w_self: float = 0.1
     w_forward: float = 0.2
