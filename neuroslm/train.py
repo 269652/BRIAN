@@ -494,13 +494,15 @@ def main():
                 print(f"[train] 🧠 Neural awakening at step {step+1}: "
                       f"lm_loss={_lm_now:.4f}, entering growth phase", flush=True)
 
-        # During infancy: suppress neuromodulatory dynamics (DA/NE stay at baseline)
+        # During infancy: suppress auxiliary weights and suppress DA/NE escalation
         # This forces "Linguistic First" convergence (LM before global integration)
-        if in_infancy and not cfg.baseline:
-            # Force DA/NE to baseline 0.1 during infancy
-            with torch.no_grad():
-                brain.transmitters.level[:, 0] = 0.1  # DA
-                brain.transmitters.level[:, 1] = 0.1  # NE
+        # Note: DA/NE suppression is handled by keeping aux_ramp=0 (below), which
+        # indirectly suppresses neuromod escalation since they're tied to comprehension
+        if in_infancy and not cfg.baseline and hasattr(brain, 'gws'):
+            # Reduce ignition threshold during infancy to prevent saturation
+            # This naturally reduces broadcast width during language stabilization
+            brain.gws.slot_thresholds.data = torch.full_like(
+                brain.gws.slot_thresholds, 1.2)  # raise threshold → harder to ignite
 
         # Track when we've sustained below-threshold loss (only after infancy)
         if _maturation_awakened:

@@ -140,7 +140,7 @@ class BrainConfig:
     enable_active_inference:  bool = False  # Free Energy / predictive coding
     enable_hypergraph:        bool = True   # multidimensional hypergraph memory
     enable_entity_store:      bool = True   # entity recognition + per-entity profiles
-    enable_vesicles:          bool = False  # Neuro-vesicle neuromodulation packets
+    enable_vesicles:          bool = True   # Neuro-vesicle homeostatic GABA regulation (enabled for stability)
     n_vesicles:               int  = 32     # max live vesicles
     vesicle_lifetime:         int  = 16     # ticks until vesicle degradation
 
