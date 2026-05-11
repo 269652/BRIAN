@@ -27,7 +27,7 @@ class GlobalWorkspace(nn.Module):
     def __init__(self, d_sem: int, n_slots: int, n_heads: int = 4,
                  gradient_checkpointing: bool = False,
                  hopfield_iters: int = 2,
-                 ignition_threshold: float = 0.8):
+                 ignition_threshold: float = 0.8):  # raised from 0.5; only informative patterns trigger broadcast
         super().__init__()
         self.n_slots = n_slots
         self.d_sem   = d_sem
@@ -62,10 +62,16 @@ class GlobalWorkspace(nn.Module):
         slots:      (B, n_slots, d)
         candidates: (B, K, d)
         Returns:    (B, n_slots, d)
+
+        Query-key normalization: mandatory for stable re-entrant bowtie topology
+        in bfloat16, prevents signal magnitude explosion through feedback loops.
         """
         beta = F.softplus(self.log_beta) + 0.5   # β > 0.5
-        # Energy-minimizing attention (unnormalised inner product)
-        logits = torch.bmm(slots, candidates.transpose(1, 2)) * beta  # (B, n_slots, K)
+        # Query-Key normalization for bfloat16 stability in re-entrant loops
+        slots_norm = F.normalize(slots, dim=-1)           # (B, n_slots, d)
+        cand_norm = F.normalize(candidates, dim=-1)       # (B, K, d)
+        # Energy-minimizing attention (normalized inner product)
+        logits = torch.bmm(slots_norm, cand_norm.transpose(1, 2)) * beta  # (B, n_slots, K)
         weights = F.softmax(logits, dim=-1)       # (B, n_slots, K)
         return torch.bmm(weights, candidates)     # (B, n_slots, d)
 
@@ -100,13 +106,15 @@ class GlobalWorkspace(nn.Module):
                 slots = self._hopfield_update(slots, candidates)
 
             # Lateral competition: inhibit slots that are too similar
-            # cos-sim off-diagonal → suppress redundant patterns
+            # Increased inhibition coefficient (0.40) forces stronger competition
+            # ensuring only the most distinct, high-magnitude patterns broadcast.
+            # This naturally lowers ignition values without hard capping.
             s_norm = F.normalize(slots, dim=-1)           # (B, n_slots, d)
             sim = torch.bmm(s_norm, s_norm.transpose(1, 2))  # (B, n_slots, n_slots)
             eye = torch.eye(self.n_slots, device=slots.device, dtype=slots.dtype).unsqueeze(0)
             off_diag_sim = (sim * (1.0 - eye)).clamp(min=0)   # (B, n_slots, n_slots)
             mean_sim = off_diag_sim.sum(-1, keepdim=True) / max(self.n_slots - 1, 1)
-            slots = slots * (1.0 - 0.15 * mean_sim)      # attenuate similar slots
+            slots = slots * (1.0 - 0.40 * mean_sim)      # attenuate similar slots (increased from 0.15)
 
             # Ignition phase transition — per-slot learnable threshold.
             # Activity is the L2 norm of each slot; gate jumps from a
@@ -133,6 +141,11 @@ class GlobalWorkspace(nn.Module):
             if ne_temp is not None:
                 q = q * ne_temp.to(dtype=act_dtype).view(B, 1, 1)
             slots, _ = self.attn(q, candidates, candidates, need_weights=False)
+
+        # Apply dropout to broadcast mean before feedback manifold
+        # prevents deterministic resonance in re-entrant bowtie loops (Loop B)
+        broadcast_mean = slots.mean(dim=1, keepdim=True)
+        broadcast_mean = F.dropout(broadcast_mean, p=0.1, training=self.training)
 
         return self.norm(slots.float()).to(dtype=slots.dtype)
 

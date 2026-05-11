@@ -102,6 +102,38 @@ class TrophicSystem(nn.Module):
         return spawned
 
     @torch.no_grad()
+    def update_sdnr_gated(self, activities: dict[str, torch.Tensor],
+                         signal_contrib: torch.Tensor | None = None,
+                         noise_contrib: torch.Tensor | None = None,
+                         sdnr_threshold: float = 0.5):
+        """SDNR-gated structural pruning: prune projections with low signal-to-noise.
+
+        If a re-entrant projection contributes more to global variance (noise)
+        than to predictive accuracy (signal), aggressively prune its trophic level.
+
+        Args:
+            activities: {region: (B,)} tensor of module activities
+            signal_contrib: (n_projections,) — contribution to predictive accuracy
+            noise_contrib: (n_projections,) — contribution to global variance
+            sdnr_threshold: SDNR below this triggers aggressive pruning
+        """
+        if signal_contrib is None or noise_contrib is None:
+            return  # skip if signal/noise not available
+
+        # Compute SDNR per projection (signal / noise + eps)
+        sdnr = signal_contrib / (noise_contrib + 1e-6)
+        low_quality = sdnr < sdnr_threshold  # (n_projections,) bool
+
+        # Aggressively prune low-quality re-entrant projections
+        prune_rate = 0.05  # drop trophic by 5% per update
+        self.trophic[low_quality] = self.trophic[low_quality] * (1.0 - prune_rate)
+        self.trophic.clamp_(0.0, 1.0)
+
+        # Deactivate if pruned below threshold
+        below_prune = self.trophic < self.prune_threshold
+        self.active[below_prune] = 0.0
+
+    @torch.no_grad()
     def update(self, activities: dict[str, torch.Tensor], bdnf: float, ngf: float,
                phi: float = 0.0, fiedler: float = 1.0):
         """activities: {region: (B,) ∈ [0,1]}.

@@ -1707,9 +1707,12 @@ class Brain(nn.Module):
                 sem.mean(1),              # 6: language
                 state["floating_thought"],# 7: floating thought
             ], dim=1)  # (B, 8, d_sem)
+            # Compute global activation variance for homeostatic GABA regulation
+            # Flattened across batch and modules; σ²_global used to control GABA decay
+            global_variance = _mod_acts.reshape(B, -1).var().item()
             surprise_signal = novelty.unsqueeze(-1) * state["floating_thought"]
             vesicle_mod = self.vesicle_pool.tick(
-                _mod_acts, surprise=surprise_signal)
+                _mod_acts, surprise=surprise_signal, global_variance=global_variance)
             # Apply GWS slot modulation (module 0 = GWS)
             slots_enriched = slots_enriched + vesicle_mod[:, 0:1, :].expand_as(slots_enriched)
 

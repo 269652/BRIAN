@@ -35,6 +35,37 @@ TOPIC_LANGUAGE  = 3
 N_VESICLE_TYPES = 4
 
 
+class PIDController:
+    """Simple PID controller for homeostatic regulation.
+
+    Controls GABA decay based on global activation variance error:
+        error = σ²_global - σ²_target
+        output = Kp·error + Ki·∫error + Kd·(error - prev_error)
+    """
+    def __init__(self, kp: float = 0.5, ki: float = 0.1, kd: float = 0.1):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.integral = 0.0
+        self.prev_error = 0.0
+
+    def step(self, variance: float, target: float = 0.5) -> float:
+        """Compute PID output to regulate variance toward target.
+
+        Returns: multiplicative gain for GABA decay (typically in [0.5, 2.0])
+        """
+        error = variance - target
+        self.integral += error
+        derivative = error - self.prev_error
+        self.prev_error = error
+
+        output = (self.kp * error +
+                 self.ki * self.integral +
+                 self.kd * derivative)
+        # Clamp to reasonable decay multiplier range [0.5, 2.0]
+        return max(0.5, min(2.0, 1.0 + output))
+
+
 class VesiclePool(nn.Module):
     """Population of V discrete vesicle-like content packets.
 
@@ -46,12 +77,18 @@ class VesiclePool(nn.Module):
     """
 
     def __init__(self, d_sem: int, n_modules: int,
-                 n_vesicles: int = 32, lifetime: int = 16):
+                 n_vesicles: int = 32, lifetime: int = 16,
+                 gaba_pid_kp: float = 0.5, gaba_pid_ki: float = 0.1,
+                 gaba_pid_kd: float = 0.1):
         super().__init__()
         self.d_sem     = d_sem
         self.n_modules = n_modules
         self.V         = n_vesicles
         self.lifetime  = float(lifetime)
+
+        # ── Homeostatic GABA controller (PID) ──────────────────────────────
+        # Adjusts GABA decay based on global activation variance
+        self.gaba_pid = PIDController(kp=gaba_pid_kp, ki=gaba_pid_ki, kd=gaba_pid_kd)
 
         # ── Learnable stochastic transition matrix T ──────────────────────
         # T[i, j] = probability a vesicle at module i moves to module j.
@@ -250,12 +287,22 @@ class VesiclePool(nn.Module):
         return n_type / n_active
 
     # ------------------------------------------------------------------ #
-    # 4. Decay                                                              #
+    # 4. Decay — Homeostatic (variance-responsive)                          #
     # ------------------------------------------------------------------ #
     @torch.no_grad()
-    def degrade(self, decay: float = 1.0) -> None:
-        """Subtract decay from all vesicle lifetimes; dead → content zeroed."""
-        self.v_lifetimes = self.v_lifetimes - decay
+    def degrade(self, decay: float = 1.0, global_variance: float | None = None) -> None:
+        """Subtract decay from all vesicle lifetimes; dead → content zeroed.
+
+        If global_variance is provided, decay is modulated by PID controller
+        to regulate activation variance (homeostatic damping). High variance
+        → higher decay (spike GABA to inhibit). Low variance → normal decay.
+        """
+        # Apply PID-based variance regulation to decay rate if variance provided
+        decay_mult = 1.0
+        if global_variance is not None:
+            decay_mult = self.gaba_pid.step(global_variance, target=0.5)
+
+        self.v_lifetimes = self.v_lifetimes - decay * decay_mult
         dead_mask = (self.v_lifetimes <= 0.0)           # (V,) bool, static shape
         # Zero out dead vesicle content so they don't contribute even if
         # the mask isn't checked (avoids stale gradient paths)
@@ -266,23 +313,26 @@ class VesiclePool(nn.Module):
     # ------------------------------------------------------------------ #
     def tick(self, module_activations: torch.Tensor,
              surprise: torch.Tensor | None = None,
-             source_module: int = 0) -> torch.Tensor:
+             source_module: int = 0,
+             global_variance: float | None = None) -> torch.Tensor:
         """Full lifecycle step.
 
         module_activations: (B, n_modules, d_sem)
         surprise:           (B, d_sem) or None
+        global_variance:    σ²_global for homeostatic GABA regulation
         Returns: modulation (B, n_modules, d_sem)
         """
         if surprise is not None:
             self.synthesize(surprise, source_module=source_module)
         self.migrate()
         modulation = self.dock(module_activations)
-        self.degrade()
+        self.degrade(global_variance=global_variance)
         return modulation
 
     def active_count(self) -> int:
         return int((self.v_lifetimes > 0).sum().item())
 
     def forward(self, module_activations: torch.Tensor,
-                surprise: torch.Tensor | None = None) -> torch.Tensor:
-        return self.tick(module_activations, surprise)
+                surprise: torch.Tensor | None = None,
+                global_variance: float | None = None) -> torch.Tensor:
+        return self.tick(module_activations, surprise, global_variance=global_variance)

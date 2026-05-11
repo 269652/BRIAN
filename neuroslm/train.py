@@ -245,13 +245,23 @@ def main():
     ctx_len = args.ctx or cfg.lang_ctx
     assert ctx_len <= cfg.lang_ctx
 
-    # Auxiliary loss weights start small and ramp up once the LM loss drops below 8.0.
-    # pred_coding_loss and active_inference_fe start at 0.01× their target weight,
-    # ramping up only after lm_loss < 8.0 for a sustained window (100 steps).
-    _aux_w_init   = 0.01
+    # Topological Maturation Schedule (neural infancy → awakening)
+    # ── Infancy stage (first 5,000 steps or until lm_loss < 7.5) ────────
+    # - Re-entrant loops are physically present but chemically suppressed
+    # - DA/NE forced to baseline 0.1 (no natural fluctuation)
+    # - Auxiliary weights clamped at 0.001 (world/self models silent)
+    # - Forces "Linguistic First" convergence (LM before global integration)
+    #
+    # ── Awakening stage (after infancy && lm_loss < 7.5) ────────────────
+    # - DA/NE allowed to fluctuate naturally (homeostasis adjusts)
+    # - Auxiliary weights ramp from 0.001 → config target
+    _maturation_infancy_steps = 5000
+    _maturation_lm_threshold = 7.5
+    _maturation_awakened = False
+    _aux_w_init = 0.001  # infancy weight (reduced from 0.01)
     _aux_w_target = 1.0
-    _loss_ramp_threshold = 8.0
-    _loss_ramp_window = 100  # steps below threshold to trigger ramp
+    _loss_ramp_threshold = 7.5  # trigger awakening at this threshold
+    _loss_ramp_window = 100  # steps below threshold to trigger full ramping
     _loss_below_threshold_count = 0
     _lm_ema = None   # exponential moving average of LM loss (for gating)
     _ramp_started = False  # flag tracking if we've passed the threshold
@@ -466,30 +476,52 @@ def main():
             traceback.print_exc()
             continue  # skip this step
 
-        # ── Auxiliary loss gating ──────────────────────────────────────────
-        # Ramp auxiliary weights from 0.01 → target only after lm_loss < 8.0
-        # for a sustained window (100 steps), ensuring core LM competency first.
+        # ── Topological Maturation & Auxiliary loss gating ─────────────────
+        # Maturation has two phases:
+        # 1. Infancy (step < 5000): suppress DA/NE, keep aux_weights at 0.001
+        # 2. Awakening (step >= 5000 && lm_loss < 7.5): allow DA/NE to run,
+        #    ramp auxiliary weights from 0.001 to target
         _lm_now = float(out["lm_loss"].item())
         if _lm_ema is None:
             _lm_ema = _lm_now
         _lm_ema = 0.99 * _lm_ema + 0.01 * _lm_now
 
-        # Track when we've sustained below-threshold loss
-        if _lm_now < _loss_ramp_threshold:
-            _loss_below_threshold_count += 1
-        else:
-            _loss_below_threshold_count = 0
+        # Check for maturation phase transition
+        in_infancy = step < _maturation_infancy_steps
+        if not in_infancy and not _maturation_awakened and _lm_now < _maturation_lm_threshold:
+            _maturation_awakened = True
+            if not cfg.baseline:
+                print(f"[train] 🧠 Neural awakening at step {step+1}: "
+                      f"lm_loss={_lm_now:.4f}, entering growth phase", flush=True)
 
-        # Once sustained below threshold, ramp auxiliary weights linearly
-        if _loss_below_threshold_count >= _loss_ramp_window:
-            _ramp_started = True
+        # During infancy: suppress neuromodulatory dynamics (DA/NE stay at baseline)
+        # This forces "Linguistic First" convergence (LM before global integration)
+        if in_infancy and not cfg.baseline:
+            # Force DA/NE to baseline 0.1 during infancy
+            with torch.no_grad():
+                brain.transmitters.level[:, 0] = 0.1  # DA
+                brain.transmitters.level[:, 1] = 0.1  # NE
 
-        if _ramp_started:
-            # Linear ramp from 0.01 to target over remaining training
-            steps_ramped = _loss_below_threshold_count - _loss_ramp_window
-            max_ramp_steps = args.steps - step
-            _aux_ramp = min(1.0, steps_ramped / max(1, max_ramp_steps))
+        # Track when we've sustained below-threshold loss (only after infancy)
+        if _maturation_awakened:
+            if _lm_now < _loss_ramp_threshold:
+                _loss_below_threshold_count += 1
+            else:
+                _loss_below_threshold_count = 0
+
+            # Once sustained below threshold, ramp auxiliary weights linearly
+            if _loss_below_threshold_count >= _loss_ramp_window:
+                _ramp_started = True
+
+            if _ramp_started:
+                # Linear ramp from 0.001 to target over remaining training
+                steps_ramped = _loss_below_threshold_count - _loss_ramp_window
+                max_ramp_steps = args.steps - step
+                _aux_ramp = min(1.0, steps_ramped / max(1, max_ramp_steps))
+            else:
+                _aux_ramp = 0.0
         else:
+            # During infancy, auxiliary weights stay at 0.001
             _aux_ramp = 0.0
 
         _aux_w = _aux_w_init + (_aux_w_target - _aux_w_init) * _aux_ramp

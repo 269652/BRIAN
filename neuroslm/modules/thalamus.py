@@ -47,7 +47,14 @@ class Thalamus(nn.Module):
     def forward(self, x: torch.Tensor, nt_levels: torch.Tensor | None = None,
                 return_routing: bool = False):
         """x: (B, d_sem). Returns (gated_output, routing_probs).
-        nt_levels (B, N_NT): NE controls softmax temperature, ACh boosts top-stream."""
+        nt_levels (B, N_NT): NE controls softmax temperature, ACh boosts top-stream.
+
+        Homeostatic max-norm enforcement: all incoming signals clamped to max norm 1.0
+        to prevent signal magnitude explosion in re-entrant bowtie loops."""
+        # Enforce max norm on input (homeostatic gate)
+        x_norm = torch.norm(x, dim=-1, keepdim=True).clamp(min=1e-6)
+        x = x / x_norm.clamp(min=1.0)  # clip signals with norm > 1.0
+
         logits = self.router(x)                                  # (B, S)
 
         if nt_levels is not None:
