@@ -692,10 +692,20 @@ def main():
             tok_per_s = args.log_every * args.batch_size * max(args.grad_accum, 1) * ctx_len / max(dt, 1e-3)
             _raw_lr = optim.param_groups[0].get('lr')
             _lr_str = f"{_raw_lr:.2e}" if _raw_lr is not None else "auto"
+
+            # Oscillation spectrum (multi-band: delta/theta/gamma) — available in all modes
+            osc_str = ""
+            if hasattr(brain, 'oscillation_tracker'):
+                try:
+                    osc = brain.oscillation_tracker.compute_spectrum()
+                    osc_str = f" | osc[δ={osc.delta:.3f} θ={osc.theta:.3f} γ={osc.gamma:.3f}]"
+                except Exception as e:
+                    pass  # tracker exists but compute failed; skip
+
             if cfg.baseline:
                 print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
                       f"| ppl {ppl:.1f} | lr {_lr_str} "
-                      f"| {tok_per_s:.0f} tok/s | BASELINE", flush=True)
+                      f"| {tok_per_s:.0f} tok/s | BASELINE{osc_str}", flush=True)
             else:
                 nt_str = " ".join(f"{k}={v:.2f}" for k, v in (brain.last_nt or {}).items())
                 lg = float(brain.last_learning_gain.mean()) if brain.last_learning_gain is not None else 0.0
@@ -712,15 +722,6 @@ def main():
                 t_act = troph.get("n_active", 0)
                 t_tot = troph.get("n_projections", 0)
                 t_mu  = troph.get("trophic_mean", 0.0)
-
-                # Oscillation spectrum (multi-band: gamma/theta/alpha + cross-frequency coupling)
-                osc_str = ""
-                if hasattr(brain, 'oscillation_tracker'):
-                    try:
-                        osc = brain.oscillation_tracker.compute_spectrum()
-                        osc_str = f" | osc[γ={osc.gamma:.3f} θ={osc.theta:.3f} α={osc.alpha:.3f}]"
-                    except Exception as e:
-                        pass  # tracker exists but compute failed; skip
 
                 print(f"step {step+1:5d} | loss {avg:.4f} | lm {avg_lm:.4f} "
                       f"| ppl {ppl:.1f} | lr {_lr_str} "
