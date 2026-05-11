@@ -154,12 +154,20 @@ def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
                             url.replace('https://', f'https://{token}@', 1)],
                            cwd=repo_root, capture_output=True)
 
-        subprocess.run(["git", "add", "-f", "lfs_checkpoints/"],
-                       cwd=repo_root, capture_output=True, timeout=30)
-        subprocess.run(["git", "commit", "--allow-empty", "-m", f"chkpt: {basename}"],
-                       cwd=repo_root, capture_output=True, text=True, timeout=30)
-        r_push = subprocess.run(["git", "push"], cwd=repo_root,
-                                 capture_output=True, text=True, timeout=120)
+        r_add = subprocess.run(["git", "add", "-f", "lfs_checkpoints/"],
+                               cwd=repo_root, capture_output=True, timeout=30, text=True)
+        if r_add.returncode != 0:
+            print(f"[train] ⚠ git add failed: {r_add.stderr[:100]}", flush=True)
+            return
+
+        r_commit = subprocess.run(["git", "commit", "--allow-empty", "-m", f"chkpt: {basename}"],
+                                  cwd=repo_root, capture_output=True, text=True, timeout=30)
+        if r_commit.returncode != 0 and "nothing to commit" not in r_commit.stdout.lower():
+            print(f"[train] ⚠ git commit failed: {r_commit.stderr[:100]}", flush=True)
+            return
+
+        r_push = subprocess.run(["git", "push", "origin", "HEAD"],
+                                cwd=repo_root, capture_output=True, text=True, timeout=120)
         if r_push.returncode == 0:
             print(f"[train] ✓ pushed {basename} to Git LFS", flush=True)
         else:
