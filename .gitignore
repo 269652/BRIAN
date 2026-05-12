@@ -1,10 +1,5 @@
 # Checkpoints / model weights
-checkpoints/
-*.pt
-*.pth
-*.ckpt
 # LFS-tracked checkpoints are allowed
-!lfs_checkpoints/
 
 # Python caches
 __pycache__/
