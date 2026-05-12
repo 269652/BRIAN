@@ -452,8 +452,12 @@ def main():
                 pg["lr"] = cosine_lr(step, cfg.warmup_steps, total_steps, cfg.lr)
 
         # --- Memory system integration ---
-        # 1. Record episodic memory for this batch (deferred to CPU; non-blocking)
-        if not cfg.baseline:
+        # 1. Record episodic memory for this batch (deferred to CPU; non-blocking).
+        # Skipped during infancy — the content vector is meaningful but the
+        # nt_state and downstream consolidation depend on a learning network.
+        # The tokenizer.decode + .cpu().numpy() round-trip also costs wall time.
+        _in_infancy_step = step < _maturation_infancy_steps
+        if not cfg.baseline and not _in_infancy_step:
             try:
                 content = tok.decode(ids[0].cpu().tolist())
                 content_vec = ids[0].float().cpu().numpy()
@@ -701,14 +705,15 @@ def main():
             loss = torch.tensor(float(loss.item()))  # detach from graph
             out["lm_loss"] = torch.tensor(total_lm_loss / ga)
 
-        # 3. Tag memory with reward/insight (mesolimbic)
-        if not cfg.baseline:
+        # 3. Tag memory with reward/insight (mesolimbic) — paired with the
+        # episodic record above, so gated identically.
+        if not cfg.baseline and not _in_infancy_step:
             reward = float(out["learning_gain"][0].item()) if "learning_gain" in out else 0.0
             da_level = float(brain.transmitters.vector()[0, 0].item()) if hasattr(brain, 'transmitters') else 0.5
             brain.tag_memory(len(brain.episodic.buffer)-1, reward, da_level=da_level)
 
-        # 4. Consolidate and update narratives every 500 steps
-        if not cfg.baseline and (step + 1) % 500 == 0:
+        # 4. Consolidate and update narratives every 500 steps (post-infancy only)
+        if not cfg.baseline and not _in_infancy_step and (step + 1) % 500 == 0:
             brain.consolidate_memory()
             brain.update_narratives()
 

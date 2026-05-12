@@ -674,6 +674,15 @@ class Brain(nn.Module):
         nt      = self.transmitters.vector().detach()
         nt_d    = {n: float(nt[0, i].item()) for i, n in enumerate(NT_NAMES)}
 
+        # Infancy fast-path: when True, skip heavy decorative/no-grad
+        # operations (orchestrator stage recording, phi_proxy, boundary
+        # eigensystem, oscillation tracker, consciousness metrics, episodic
+        # insight writes, vesicle pool). Their outputs go into auxiliary
+        # losses already gated to ~0 by _aux_w_scale, or into log strings —
+        # they contribute no useful signal during infancy and dominate
+        # wall-clock for a 228M bf16 model.
+        _in = bool(getattr(self, '_infancy', False))
+
         # Reset per-pass orchestrator state. Without this, stage-output buffers
         # accumulate across steps and Φ computations mix stale graph references.
         if hasattr(self, 'orchestrator') and not getattr(self.orchestrator, 'baseline', False):
@@ -735,8 +744,9 @@ class Brain(nn.Module):
         _math_gate    = float(_topic_probs[:, TOPIC_MATH].mean().item())
         _reason_gate  = float(_topic_probs[:, TOPIC_REASONING].mean().item())
 
-        # Record sensory output for Φ proxy
-        self.orchestrator.record_stage_output(sem)
+        # Record sensory output for Φ proxy (skipped during infancy)
+        if not _in:
+            self.orchestrator.record_stage_output(sem)
 
         # 3) Thalamic router + re-entry bias (bowtie top-down loop)
         # Re-entry injects the previous step's PFC+GWS representation as a
@@ -822,14 +832,19 @@ class Brain(nn.Module):
             novel_aux_loss = novel_aux_loss + ci_out["dag_loss"]
 
         # Record GWS output for Φ proxy (central bottleneck of bowtie)
-        self.orchestrator.record_stage_output(slots.mean(1))
-        # Broadcast GWS output for within-pass re-entrant feedback
-        # (enables backward GWS → expert projections in all subsequent stages)
+        # — skipped during infancy. set_gws_broadcast is kept because it
+        # feeds within-pass re-entry into expert projections.
+        if not _in:
+            self.orchestrator.record_stage_output(slots.mean(1))
         self.orchestrator.set_gws_broadcast(slots.mean(1))
 
         # 5b) Vesicle-typed topic routing → Expert Cortices
-        # Synthesise a typed vesicle from the GWS broadcast state
-        if self.vesicle_pool is not None:
+        # Synthesise a typed vesicle from the GWS broadcast state.
+        # Skipped during infancy — the topic classifier is at random init,
+        # so vesicle synthesis is uniform noise; expert gates derived from
+        # vesicle concentrations would just toggle the heavy math/reasoning
+        # cortices for no useful signal.
+        if not _in and self.vesicle_pool is not None:
             _dominant_topic = int(_topic_probs.argmax(-1).float().mean().round().item())
             self.vesicle_pool.synthesize_typed(
                 content=slots.detach().mean(0).mean(0),  # (d_sem,) mean over B,S
@@ -897,8 +912,11 @@ class Brain(nn.Module):
             slots_mod, recalls, latents["floating_thought"], nt_d)
 
         # Record PFC output for Φ proxy + store re-entry signal (bowtie loop)
-        self.orchestrator.record_stage_output(selected)
-        self.orchestrator.update_reentry(selected)  # → injected into thalamus next step
+        # — stage recording skipped during infancy; update_reentry kept so the
+        # bowtie loop still seeds thalamic re-entry for the next step.
+        if not _in:
+            self.orchestrator.record_stage_output(selected)
+        self.orchestrator.update_reentry(selected)
 
         # Novel: active dendrite, neurogenesis, dynamic MoE on selected representation
         if self.active_dendrite is not None:
@@ -972,51 +990,59 @@ class Brain(nn.Module):
         self._release_via_projections(activities)
         self.transmitters.step()
 
-        with torch.no_grad():
-            _val_f = signals["valence"].mean().item()
-            _sal_f = salience.detach().mean().item()
-            self.hippo.store(dmn_query.detach(), selected.detach(),
-                             nt_state=nt.detach(),
-                             valence=_val_f,
-                             salience=_sal_f)
-
-        # Oscillation tracking
-        if cfg.enable_oscillations and hasattr(self, 'oscillation_tracker'):
+        # Hippocampal store + oscillation tracking — pure observability,
+        # both skipped during infancy. Hippocampal recalls during infancy
+        # would be random-init noise anyway.
+        if not _in:
             with torch.no_grad():
-                _om = {'language': 0, 'pfc': 1, 'hippocampus': 2,
-                       'thalamus': 3, 'basal_ganglia': 4, 'dmn': 5,
-                       'gws': 6, 'motor': 7}
-                self.oscillation_tracker.record(_om['language'],  sem.detach().mean(1))
-                self.oscillation_tracker.record(_om['pfc'],       selected.detach())
-                self.oscillation_tracker.record(_om['hippocampus'], dmn_query.detach())
-                self.oscillation_tracker.record(_om['thalamus'],  routed.detach())
-                self.oscillation_tracker.record(_om['basal_ganglia'], action.detach())
-                self.oscillation_tracker.record(_om['dmn'],       dmn_query_mod.detach())
-                self.oscillation_tracker.record(_om['gws'],       slots.detach().mean(1))
-                self.oscillation_tracker.record(_om['motor'],     motor_lang_bias.detach())
-                self.oscillation_tracker.tick()
+                _val_f = signals["valence"].mean().item()
+                _sal_f = salience.detach().mean().item()
+                self.hippo.store(dmn_query.detach(), selected.detach(),
+                                 nt_state=nt.detach(),
+                                 valence=_val_f,
+                                 salience=_sal_f)
+
+            if cfg.enable_oscillations and hasattr(self, 'oscillation_tracker'):
+                with torch.no_grad():
+                    _om = {'language': 0, 'pfc': 1, 'hippocampus': 2,
+                           'thalamus': 3, 'basal_ganglia': 4, 'dmn': 5,
+                           'gws': 6, 'motor': 7}
+                    self.oscillation_tracker.record(_om['language'],  sem.detach().mean(1))
+                    self.oscillation_tracker.record(_om['pfc'],       selected.detach())
+                    self.oscillation_tracker.record(_om['hippocampus'], dmn_query.detach())
+                    self.oscillation_tracker.record(_om['thalamus'],  routed.detach())
+                    self.oscillation_tracker.record(_om['basal_ganglia'], action.detach())
+                    self.oscillation_tracker.record(_om['dmn'],       dmn_query_mod.detach())
+                    self.oscillation_tracker.record(_om['gws'],       slots.detach().mean(1))
+                    self.oscillation_tracker.record(_om['motor'],     motor_lang_bias.detach())
+                    self.oscillation_tracker.tick()
 
         with torch.no_grad():
             _bdnf_val = reward_proxy.mean().item()
 
-            # Φ: IIT-style MIP estimate (Gaussian-MI lower bound across the
-            # bowtie module bipartition). Uses the stage outputs recorded
-            # earlier in this forward pass — single source of truth.
-            _phi_val = self.orchestrator.compute_phi_proxy()
-            self._last_phi = _phi_val   # persist for next-step BDNF / metrics
-
-            # Spectral gap: low λ₁ signals near-disconnection → homeostatic BDNF
-            # BoundaryDetector solves the normalised-Laplacian eigensystem to
-            # extract the Fiedler value/vector — the authoritative MIP screen.
-            _bd_obs = {n: o for n, o in zip(self.orchestrator.module_names,
-                                            self.orchestrator._last_stage_outputs)
-                       if o is not None}
-            if len(_bd_obs) >= 2:
-                _fiedler_val, _fiedler_vec = self.boundary_detector.observe(_bd_obs)
+            if _in:
+                # Skip Φ proxy + Laplacian eigensystem during infancy — both
+                # are expensive (Gaussian-MI over bipartitions; symmetric
+                # eigendecomp) and feed only trophic/logging which are also
+                # gated off. Use neutral placeholders.
+                _phi_val = 0.0
+                _fiedler_val = 1.0
             else:
-                _fiedler_val, _fiedler_vec = 1.0, torch.zeros(0)
+                # Φ: IIT-style MIP estimate (Gaussian-MI lower bound across the
+                # bowtie module bipartition).
+                _phi_val = self.orchestrator.compute_phi_proxy()
 
-            self._last_fiedler = _fiedler_val   # persist for secondary trophic call
+                # Spectral gap via normalised-Laplacian eigensystem.
+                _bd_obs = {n: o for n, o in zip(self.orchestrator.module_names,
+                                                self.orchestrator._last_stage_outputs)
+                           if o is not None}
+                if len(_bd_obs) >= 2:
+                    _fiedler_val, _fiedler_vec = self.boundary_detector.observe(_bd_obs)
+                else:
+                    _fiedler_val = 1.0
+
+            self._last_phi     = _phi_val
+            self._last_fiedler = _fiedler_val
             # Φ-coupled + Fiedler-gated BDNF: locks high-integration pathways
             # and homeostically rewires near-disconnected module graph edges.
             # Suppressed during infancy: trophic signals are meaningless when
@@ -1093,9 +1119,13 @@ class Brain(nn.Module):
             # We *minimise* `-phi`, so backprop pushes module outputs toward
             # configurations where every bipartition has high MI.
             phi_t = None
-            if getattr(cfg, 'enable_phi_objective', True) \
-                    and hasattr(self, 'orchestrator') \
-                    and not self.orchestrator.baseline:
+            # Skip differentiable Φ during infancy: its loss contribution is
+            # aux_w * w_phi ≈ 1e-5 anyway, but the Gaussian-MI bipartition
+            # computation is one of the heaviest ops in forward_lm.
+            if (not _in
+                    and getattr(cfg, 'enable_phi_objective', True)
+                    and hasattr(self, 'orchestrator')
+                    and not self.orchestrator.baseline):
                 try:
                     phi_t = self.orchestrator.phi_tensor(module_outputs={
                         "language": sem,
@@ -1137,7 +1167,12 @@ class Brain(nn.Module):
                      + aux_w * getattr(cfg, 'w_cpc', 0.05) * _safe(cpc_loss)
                      + aux_w * getattr(cfg, 'w_phi', 0.02) * _safe(phi_loss_term))
 
-            if hasattr(self, 'orchestrator') and not self.orchestrator.baseline:
+            # Orchestrator.route runs the cerebellum/entorhinal/claustrum
+            # subnetworks for id_drift / neural_calm metrics. Heavy and only
+            # contributes scaled aux signal — skip during infancy.
+            if (not _in
+                    and hasattr(self, 'orchestrator')
+                    and not self.orchestrator.baseline):
                 orch_out, orch_metrics = self.orchestrator.route(
                     routed, {'world': self.world, 'cerebellum': self.cerebellum,
                              'entorhinal': self.entorhinal, 'claustrum': self.claustrum})
@@ -1157,33 +1192,33 @@ class Brain(nn.Module):
                 "phi_loss":               phi_loss_term.detach(),
             })
 
-            # Run ConsciousnessMetrics on the live training pass so phi /
-            # gamma / coherence histories are populated continuously
-            # rather than only during inference.
-            try:
-                with torch.no_grad():
-                    c_metrics = self.consciousness.update(
-                        module_outputs={
-                            "pfc":      selected.detach(),
-                            "world":    z_world.detach(),
-                            "self":     z_self.detach(),
-                            "language": sem.detach().mean(1),
-                        },
-                        gws_slots=slots.detach(),
-                        floating_thought=latents["floating_thought"].detach(),
-                        novelty=novelty.detach(),
-                        routing=routing_probs.detach(),
-                    )
-                # Cache real Φ for trophic / BDNF use (single source of truth)
-                self._last_phi = float(c_metrics.get("phi", float(phi_value.detach().item())))
-                out["consciousness"] = c_metrics
-            except Exception:
-                # ConsciousnessMetrics expects shapes that may not always match
-                # in baseline-like configs; if it fails, fall back to phi_value.
-                self._last_phi = float(phi_value.detach().item())
+            # ConsciousnessMetrics — pure observability (phi/gamma/coherence
+            # history). Skipped during infancy.
+            if not _in:
+                try:
+                    with torch.no_grad():
+                        c_metrics = self.consciousness.update(
+                            module_outputs={
+                                "pfc":      selected.detach(),
+                                "world":    z_world.detach(),
+                                "self":     z_self.detach(),
+                                "language": sem.detach().mean(1),
+                            },
+                            gws_slots=slots.detach(),
+                            floating_thought=latents["floating_thought"].detach(),
+                            novelty=novelty.detach(),
+                            routing=routing_probs.detach(),
+                        )
+                    self._last_phi = float(c_metrics.get("phi", float(phi_value.detach().item())))
+                    out["consciousness"] = c_metrics
+                except Exception:
+                    self._last_phi = float(phi_value.detach().item())
 
             # ---- Training insights → RelationalMemoryGraph ----
-            self._maybe_store_insight(ids, sem, nt, lm_loss_per, targets, device)
+            # Skipped during infancy: surprise/comprehension/valence are all
+            # random-init noise; nothing meaningful to store.
+            if not _in:
+                self._maybe_store_insight(ids, sem, nt, lm_loss_per, targets, device)
 
             # ---- Periodic consolidation ----
             self._global_step += 1
