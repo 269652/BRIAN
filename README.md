@@ -1,5 +1,7 @@
 # NeuroSLM — A Neuroanatomically Inspired Small Language Model
 
+> **BRIAN: Biologically Realistic Information Architecture Network.**
+
 A research prototype of a brain-inspired small language model. Three claims set
 NeuroSLM apart from a flat transformer of the same parameter budget:
 

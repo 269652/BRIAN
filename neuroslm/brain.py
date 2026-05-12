@@ -215,6 +215,28 @@ class Brain(nn.Module):
         # (trophic update, vesicle dynamics) are suppressed so they don't
         # ride on random-init gradients.
         self._infancy        = False
+        # Cached previous-step module outputs (for ActualCausationHead's
+        # (t, t+1) transition). Populated post-awakening in forward_lm.
+        self._prev_module_outputs: torch.Tensor | None = None
+        # Strong-α causal edges observed last step (for κ_cause vesicle emission)
+        self._last_causal_edges: list = []
+
+        # ── BRIAN narrative + causal stack (post-awakening only) ────────
+        # ActualCausationHead, PersonalityVector, and SleepCycle are
+        # constructed eagerly so their parameters participate in the model
+        # state-dict and checkpoint round-trip cleanly. All three are
+        # **inert during infancy** — their forward effects only kick in
+        # once `_maturation_awakened` is True (set by train.py).
+        from .modules.actual_causation import ActualCausationHead
+        from .neurochem.personality import PersonalityVector
+        from .memory.sleep_cycle import SleepCycle
+        self.actual_causation = ActualCausationHead(
+            n_modules=8, d_sem=cfg.d_sem)
+        self.personality = PersonalityVector(enable=True)
+        self.sleep_cycle = SleepCycle(
+            d_sem=cfg.d_sem,
+            sleep_period_steps=5000,
+            enable=True)
 
         # ---- Intelligence flow ----
         from .intelligence.reflection import SpontaneousReflection
@@ -1220,6 +1242,75 @@ class Brain(nn.Module):
             if not _in:
                 self._maybe_store_insight(ids, sem, nt, lm_loss_per, targets, device)
 
+            # ---- BRIAN: post-awakening narrative / causal stack ─────────
+            # All gated on `not _in` so the heavy bookkeeping is inert
+            # during infancy. ActualCausationHead runs in no-grad here;
+            # its aux_loss is added to total only if requested by train.
+            if not _in:
+                try:
+                    with torch.no_grad():
+                        # Stack the 8 canonical module outputs (mean over
+                        # B,S) into a (n_modules, d_sem) tensor for the
+                        # actual-causation head.
+                        _module_stack = torch.stack([
+                            sem.detach().mean(dim=(0, 1)),
+                            selected.detach().mean(0),
+                            (dmn_query.detach().mean(0)
+                                if dmn_query.dim() >= 1 else dmn_query.detach()),
+                            routed.detach().mean(0),
+                            action.detach().mean(0),
+                            (dmn_query_mod.detach().mean(0)
+                                if dmn_query_mod.dim() >= 1 else dmn_query_mod.detach()),
+                            slots.detach().mean(dim=(0, 1)),
+                            motor_lang_bias.detach().mean(0),
+                        ], dim=0).to(dtype=torch.float32)
+
+                        if self._prev_module_outputs is not None:
+                            try:
+                                alpha = self.actual_causation(
+                                    self._prev_module_outputs, _module_stack)
+                                self._last_causal_edges = \
+                                    self.actual_causation.strong_edges(alpha)
+
+                                # κ_cause vesicle emission for high-α edges
+                                if (self.vesicle_pool is not None
+                                        and self._last_causal_edges):
+                                    from .neurochem.vesicles import TOPIC_CAUSE
+                                    # Synthesise one vesicle from the strongest
+                                    # edge's destination module embedding
+                                    _, _j, _ = self._last_causal_edges[0]
+                                    _content = _module_stack[_j].detach()
+                                    self.vesicle_pool.synthesize_typed(
+                                        content=_content.to(
+                                            dtype=next(self.vesicle_pool.parameters()).dtype
+                                            if any(True for _ in self.vesicle_pool.parameters())
+                                            else _content.dtype),
+                                        type_idx=TOPIC_CAUSE,
+                                        source_module=0,
+                                    )
+                            except Exception:
+                                pass
+
+                        self._prev_module_outputs = _module_stack
+
+                        # Personality: apply trust-driven NT bias if ToM is
+                        # tracking active entities right now.
+                        active_ents = {}
+                        if self.tom is not None and hasattr(self.tom,
+                                                            "active_entities"):
+                            active_ents = self.tom.active_entities()
+                        if active_ents:
+                            self.personality.apply_bias(
+                                self.transmitters, active_ents)
+
+                        # Sleep-cycle scheduler — fires every N awake steps.
+                        if self.sleep_cycle.maybe_sleep(self._global_step):
+                            self._run_sleep_cycle()
+                except Exception:
+                    # BRIAN stack is best-effort; never crash the training
+                    # loop because of a memory-system side-effect.
+                    pass
+
             # ---- Periodic consolidation ----
             self._global_step += 1
             if (self._global_step % cfg.consolidate_every == 0):
@@ -1233,6 +1324,77 @@ class Brain(nn.Module):
         self.last_survival      = survival.detach()
         self.transmitters.detach_()
         return out
+
+    # ------------------------------------------------------------------
+    # BRIAN: sleep cycle (predictive-coding distillation + trophic renorm)
+    # ------------------------------------------------------------------
+    @torch.no_grad()
+    def _run_sleep_cycle(self) -> None:
+        """Run one sleep phase. Called by forward_lm when
+        `sleep_cycle.maybe_sleep(step)` returns True. Always best-effort:
+        catches and logs exceptions instead of breaking the training loop.
+        """
+        try:
+            from .modules.hippocampus import Hippocampus  # for typing only
+            episodes = self.episodic.recent(256) if hasattr(self, "episodic") else []
+            # Episode → embedding callable: use the cached vector if any,
+            # else zeros.
+            d = self.cfg.d_sem
+
+            def _to_embed(ep) -> torch.Tensor:
+                vec = ep.get("content_vec") if isinstance(ep, dict) \
+                      else getattr(ep, "content_vec", None)
+                if vec is None:
+                    return torch.zeros(d)
+                import numpy as _np
+                if isinstance(vec, _np.ndarray):
+                    t = torch.from_numpy(vec).float().flatten()
+                else:
+                    t = torch.as_tensor(vec).float().flatten()
+                if t.numel() >= d:
+                    return t[:d]
+                pad = torch.zeros(d)
+                pad[:t.numel()] = t
+                return pad
+
+            def _to_known_nll(ep) -> float:
+                # If the episode carries a stored surprise, use it; else 0.
+                if isinstance(ep, dict):
+                    return float(ep.get("surprise", 0.0))
+                return float(getattr(ep, "surprise", 0.0))
+
+            report = self.sleep_cycle.sleep(
+                step=self._global_step,
+                episodes=[ep if isinstance(ep, dict) else getattr(ep, "__dict__", {})
+                           for ep in episodes],
+                episode_to_embed=_to_embed,
+                episode_to_known_nll=_to_known_nll,
+                actual_causation=self.actual_causation,
+                trophic_system=getattr(self, "trophic", None),
+            )
+            print(f"[brain] 🛌 sleep cycle @step {report.step}: "
+                  f"replays={report.n_replays}  "
+                  f"distill={report.distillation_loss:.4f}  "
+                  f"ΔMI={report.mi_reduction:+.3f}  "
+                  f"pruned={report.pruned_edges}/{report.pruned_edges + report.strengthened_edges}  "
+                  f"{report.duration_s:.2f}s", flush=True)
+        except Exception as e:
+            print(f"[brain] sleep cycle skipped ({e})", flush=True)
+
+    # ------------------------------------------------------------------
+    # Awakening propagation — called by train.py once at the maturation
+    # transition. Flips internal flags on the BRIAN subcomponents that
+    # need to know about it.
+    # ------------------------------------------------------------------
+    def set_awakened(self, awakened: bool = True) -> None:
+        try:
+            self.personality.set_awakened(awakened)
+        except Exception:
+            pass
+        try:
+            self.sleep_cycle.set_awakened(awakened)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Insight storage: training loss → memory graph

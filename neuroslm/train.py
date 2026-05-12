@@ -522,6 +522,12 @@ def main():
         if not in_infancy and not _maturation_awakened and _lm_now < _maturation_lm_threshold:
             _maturation_awakened = True
             if not cfg.baseline:
+                # Flip the BRIAN narrative+causal stack on
+                if hasattr(brain, "set_awakened"):
+                    try:
+                        brain.set_awakened(True)
+                    except Exception as _e:
+                        print(f"[train] ⚠ brain.set_awakened failed: {_e}", flush=True)
                 print(f"[train] 🧠 Neural awakening at step {step+1}: "
                       f"lm_loss={_lm_now:.4f}, entering growth phase", flush=True)
 

@@ -31,6 +31,12 @@ from enum import Enum, auto
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
+from .sheaf import (
+    SheafConsistencyChecker, SheafSection,
+    EDGE_CAUSAL, EDGE_TEMPORAL, EDGE_QUALIA, EDGE_SUPERSEDES,
+    fisher_information_distance,
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Enumerations
@@ -44,14 +50,16 @@ class MemoryType(Enum):
 
 class RelationType(Enum):
     SEMANTIC   = "semantic"     # cosine similarity
-    TEMPORAL   = "temporal"     # recency proximity
-    CAUSAL     = "causal"       # A caused B
+    TEMPORAL   = "temporal"     # recency proximity / DNC link matrix
+    CAUSAL     = "causal"       # IIT 4.0 actual-causation α
     SOCIAL     = "social"       # inter-entity interaction
     CONTEXTUAL = "contextual"   # shared context / topic
     MOOD       = "mood"         # NT-state congruence
+    QUALIA     = "qualia"       # Fisher-information feeling similarity
     REWARD     = "reward"       # DA-tagged high value
     PROCEDURAL = "procedural"   # sequential skill step
     IDENTITY   = "identity"     # entity-self relation
+    SUPERSEDES = "supersedes"   # newer node overrides contradicted older one
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -432,7 +440,8 @@ class MemoryHyperGraph:
     """
 
     def __init__(self, d_emb: int = 256, max_nodes: int = 16384,
-                 decay_rate: float = 0.9997):
+                 decay_rate: float = 0.9997,
+                 temporal_link_capacity: int = 256):
         self.d_emb       = d_emb
         self.max_nodes   = max_nodes
         self.decay_rate  = decay_rate
@@ -454,6 +463,29 @@ class MemoryHyperGraph:
         self._schema_ids: List[str] = []
         # Accumulated social rules
         self.social_rules: List[SocialRule] = []
+
+        # ── DNC Temporal Link Matrix L ────────────────────────────────────
+        # L[i, j] = strength of "node i was written immediately before node j"
+        # Independent of wall-clock time — records write-order transitions
+        # for sequence-aware recall (Graves et al. 2016, DNC).
+        # We keep an N×N dense matrix over the most recent N nodes only,
+        # which keeps the cost bounded regardless of total memory size.
+        self._L_capacity = temporal_link_capacity
+        self._L = np.zeros((self._L_capacity, self._L_capacity),
+                           dtype=np.float32)
+        self._L_slots: List[Optional[str]] = [None] * self._L_capacity
+        self._L_slot_of: Dict[str, int] = {}      # node_id → slot index
+        self._L_precedence = np.zeros(self._L_capacity, dtype=np.float32)
+        self._L_last_slot: Optional[int] = None   # slot of the previous write
+
+        # ── Sheaf consistency layer ──────────────────────────────────────
+        # A SheafConsistencyChecker over node embeddings; identity
+        # restriction maps by default — node-pair-specific maps are
+        # installed when typed edges (causal/temporal/qualia) are wired.
+        self.sheaf = SheafConsistencyChecker(d_emb=d_emb)
+        # supersedes_edges[older_id] = newer_id (only ever one supersedes
+        # edge per superseded node — most recent wins).
+        self._supersedes: Dict[str, str] = {}
 
     # ── Node I/O ─────────────────────────────────────────────────────────────
 
@@ -503,6 +535,9 @@ class MemoryHyperGraph:
         self.nodes[node.id] = node
         self._write_idx += 1
 
+        # Update DNC temporal link matrix (no-op for the first write)
+        self._update_temporal_link(node.id)
+
         # Wire edges to recent nodes
         self._wire_edges(node)
 
@@ -515,6 +550,83 @@ class MemoryHyperGraph:
             self._prune()
 
         return node.id
+
+    # ── DNC temporal-link maintenance ────────────────────────────────────────
+
+    def _allocate_slot(self, node_id: str) -> int:
+        """Return the slot index for `node_id`, allocating one if needed.
+        Recycles the slot of the oldest node when full."""
+        if node_id in self._L_slot_of:
+            return self._L_slot_of[node_id]
+        # Find a free slot (None) or the oldest occupied one
+        free = None
+        for i, s in enumerate(self._L_slots):
+            if s is None:
+                free = i
+                break
+        if free is None:
+            # Recycle the slot whose precedence is smallest (oldest write)
+            free = int(np.argmin(self._L_precedence))
+            old_id = self._L_slots[free]
+            if old_id is not None:
+                self._L_slot_of.pop(old_id, None)
+            # Reset that row/column
+            self._L[free, :] = 0.0
+            self._L[:, free] = 0.0
+            self._L_precedence[free] = 0.0
+        self._L_slots[free] = node_id
+        self._L_slot_of[node_id] = free
+        return free
+
+    def _update_temporal_link(self, node_id: str) -> None:
+        """Implements the DNC link-matrix update (Graves et al. 2016 eq. 5):
+
+            L[i, j] ← (1 − p[i] − p[j]) · L[i, j] + p[i] · prev_prec[j]
+
+        Here we use a simplified hard variant: prev_prec is the one-hot
+        on the previously-written slot. p is the one-hot on the current
+        write slot. This matches the DNC behaviour while staying cheap.
+        """
+        slot = self._allocate_slot(node_id)
+        if self._L_last_slot is not None and self._L_last_slot != slot:
+            # Decay the row/col where i=slot (about to be written) and
+            # j=slot (no incoming for new node), then set the link.
+            self._L[slot, :] *= (1.0 - 1.0)              # zero out (p[i]=1)
+            self._L[:, slot] *= (1.0 - 1.0)              # zero out (p[j]=1)
+            # Set L[slot, j] = prev_precedence[j] (one-hot on last_slot)
+            self._L[slot, self._L_last_slot] = 1.0
+        # Update precedence vector — current slot is the new "last write"
+        self._L_precedence *= 0.0                        # hard one-hot variant
+        self._L_precedence[slot] = 1.0
+        self._L_last_slot = slot
+
+    def temporal_link_neighbours(self,
+                                   node_id: str,
+                                   direction: str = "forward",
+                                   topk: int = 4) -> List[str]:
+        """Look up topk write-order neighbours of a node via L.
+
+        direction='forward'  → nodes typically written *after* this one
+        direction='backward' → nodes typically written *before* this one.
+        """
+        slot = self._L_slot_of.get(node_id)
+        if slot is None:
+            return []
+        if direction == "forward":
+            scores = self._L[:, slot]              # who came after?
+        else:
+            scores = self._L[slot, :]              # who came before?
+        ranked = np.argsort(-scores)
+        out: List[str] = []
+        for s in ranked:
+            if scores[s] <= 0.0:
+                break
+            sid = self._L_slots[int(s)]
+            if sid is not None and sid != node_id:
+                out.append(sid)
+            if len(out) >= topk:
+                break
+        return out
 
     def encode_insight(self, content: str, embedding: np.ndarray,
                        surprise: float, comprehension: float,
@@ -576,10 +688,13 @@ class MemoryHyperGraph:
         edge = HyperEdge(id=eid, node_ids=node_ids,
                          relation=relation, weight=weight)
         self.edges[eid] = edge
-        if node_ids[0] in self.entity_subgraphs.get(
-                self.nodes.get(node_ids[0], HyperNode(
-                    "", "", np.array([]))).entity_ref or "", EntitySubgraph("")):
-            pass
+        # Register the edge with the entity subgraph of the source node
+        # (if any), so per-entity edge listings reflect connections that
+        # involve the entity. Both source and dest are tagged when they
+        # share the same entity_ref; otherwise only the source.
+        src_node = self.nodes.get(node_ids[0])
+        if src_node is not None and src_node.entity_ref:
+            self._entity_subgraph(src_node.entity_ref).add_edge(eid)
         return eid
 
     # ── Social Markov observations ────────────────────────────────────────────
@@ -836,6 +951,167 @@ class MemoryHyperGraph:
             return 0.0
         d = min(a.size, b.size)
         return float(np.dot(a[:d], b[:d]) / (na * nb))
+
+    # ── Typed edges: causal / temporal / qualia ──────────────────────────────
+
+    def add_causal_edge(self, src_id: str, dst_id: str, alpha: float,
+                          confidence: float = 1.0) -> Optional[str]:
+        """Add an IIT 4.0 actual-causation edge E_c with strength α ∈ [0, 1].
+
+        α below 0.05 is discarded as noise.
+        """
+        if src_id not in self.nodes or dst_id not in self.nodes:
+            return None
+        if alpha < 0.05:
+            return None
+        eid = self._add_edge([src_id, dst_id], RelationType.CAUSAL,
+                              weight=float(max(0.0, min(1.0, alpha))))
+        # Register a (slightly noisy) identity restriction map for sheaf
+        self.sheaf.set_restriction(eid, mat=None, weight=alpha)
+        # Reflect α into edge's probability slot for sheaf weighting
+        if eid in self.edges:
+            self.edges[eid].probability = float(confidence)
+        return eid
+
+    def add_temporal_link_edge(self, src_id: str, dst_id: str,
+                                weight: float = 1.0) -> Optional[str]:
+        """E_t: persistent edge derived from the DNC link matrix L. Distinct
+        from the wall-clock proximity edge added in _wire_edges."""
+        if src_id not in self.nodes or dst_id not in self.nodes:
+            return None
+        eid = self._add_edge([src_id, dst_id], RelationType.TEMPORAL,
+                              weight=float(weight))
+        self.sheaf.set_restriction(eid, mat=None, weight=weight)
+        return eid
+
+    def add_qualia_edge(self, src_id: str, dst_id: str,
+                         eps: float = 1e-3) -> Optional[str]:
+        """E_q: bind two memories whose NT-state distributions are close
+        in Fisher–Rao distance. Smaller distance → stronger qualia edge."""
+        if src_id not in self.nodes or dst_id not in self.nodes:
+            return None
+        a = self.nodes[src_id].nt_state
+        b = self.nodes[dst_id].nt_state
+        if a is None or b is None:
+            return None
+        d_f = fisher_information_distance(a, b, eps=eps)
+        # Convert distance → similarity weight in (0, 1]
+        sim = float(math.exp(-2.0 * d_f))
+        if sim < 0.3:
+            return None
+        eid = self._add_edge([src_id, dst_id], RelationType.QUALIA, weight=sim)
+        self.sheaf.set_restriction(eid, mat=None, weight=sim)
+        return eid
+
+    # ── Sheaf retrieval (Global Section) ─────────────────────────────────────
+
+    def retrieve_global_section(self,
+                                  query_emb: np.ndarray,
+                                  topk_seeds: int = 4,
+                                  hops: int = 2,
+                                  contradiction_threshold: Optional[float] = None
+                                  ) -> SheafSection:
+        """Retrieve a coherent global section over a small neighbourhood of
+        the query. Steps:
+
+          1. Seed: topk_seeds semantically-nearest nodes to the query.
+          2. Expand: 1–2 hop traversal across CAUSAL / TEMPORAL / QUALIA
+                     edges to collect a candidate sub-collection.
+          3. Solve: damped-Jacobi global-section update under the sheaf's
+                     restriction maps.
+          4. Check: H¹ residual; if above threshold, mark inconsistent
+                     and (caller's choice) emit SUPERSEDES edges.
+
+        Returns the SheafSection; the consistency field is exp(−H¹).
+        """
+        seeds = [n.id for n in self.query_semantic(query_emb, topk=topk_seeds)]
+        if not seeds:
+            return SheafSection(node_ids=[], values={})
+
+        # Expand neighbourhood through typed edges
+        visited = set(seeds)
+        frontier = list(seeds)
+        for _ in range(hops):
+            new_frontier = []
+            for nid in frontier:
+                for edge in self.edges.values():
+                    if nid not in edge.node_ids:
+                        continue
+                    if edge.relation not in (RelationType.CAUSAL,
+                                              RelationType.TEMPORAL,
+                                              RelationType.QUALIA):
+                        continue
+                    for o in edge.node_ids:
+                        if o != nid and o not in visited:
+                            visited.add(o)
+                            new_frontier.append(o)
+            frontier = new_frontier[:16]
+            if not frontier:
+                break
+
+        node_ids = list(visited)
+        values = {nid: self.nodes[nid].embedding
+                  for nid in node_ids if nid in self.nodes}
+
+        # Collect edges in the induced subgraph
+        relevant_edges: List[Tuple[str, str, str]] = []
+        for eid, edge in self.edges.items():
+            if (edge.relation in (RelationType.CAUSAL,
+                                   RelationType.TEMPORAL,
+                                   RelationType.QUALIA)
+                    and len(edge.node_ids) == 2
+                    and edge.node_ids[0] in values
+                    and edge.node_ids[1] in values):
+                relevant_edges.append(
+                    (eid, edge.node_ids[0], edge.node_ids[1]))
+
+        section = self.sheaf.global_section(
+            node_ids=node_ids, values=values, edges=relevant_edges)
+
+        # Contradiction-detection threshold
+        thr = (contradiction_threshold
+               if contradiction_threshold is not None
+               else self.sheaf.contradiction_threshold)
+        if section.h1_residual >= thr and len(node_ids) >= 2:
+            ts = {nid: self.nodes[nid].timestamp for nid in node_ids
+                  if nid in self.nodes}
+            newer, older = self.sheaf.resolve_contradiction(section, ts)
+            if newer and older and newer != older:
+                self._add_edge([newer, older], RelationType.SUPERSEDES,
+                                weight=1.0)
+                self._supersedes[older] = newer
+
+        return section
+
+    def detect_contradiction(self,
+                              node_ids_subset: List[str]
+                              ) -> Tuple[bool, SheafSection]:
+        """Test whether a specified collection of nodes is inconsistent.
+
+        Returns (is_contradiction, section). Used directly by the unit
+        test `test_sheaf_contradiction_detection`.
+        """
+        node_ids = [nid for nid in node_ids_subset if nid in self.nodes]
+        values = {nid: self.nodes[nid].embedding for nid in node_ids}
+        relevant_edges: List[Tuple[str, str, str]] = []
+        for eid, edge in self.edges.items():
+            if len(edge.node_ids) == 2 and \
+               edge.node_ids[0] in values and edge.node_ids[1] in values:
+                relevant_edges.append(
+                    (eid, edge.node_ids[0], edge.node_ids[1]))
+        section = self.sheaf.global_section(
+            node_ids=node_ids, values=values, edges=relevant_edges)
+        is_contra = self.sheaf.is_contradiction(section)
+        if is_contra and len(node_ids) >= 2:
+            ts = {nid: self.nodes[nid].timestamp for nid in node_ids}
+            newer, older = self.sheaf.resolve_contradiction(section, ts)
+            if newer and older and newer != older:
+                self._add_edge([newer, older], RelationType.SUPERSEDES, 1.0)
+                self._supersedes[older] = newer
+        return is_contra, section
+
+    def is_superseded(self, node_id: str) -> bool:
+        return node_id in self._supersedes
 
     def stats(self) -> dict:
         return {

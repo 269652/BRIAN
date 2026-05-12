@@ -32,7 +32,11 @@ TOPIC_DEFAULT   = 0
 TOPIC_MATH      = 1
 TOPIC_REASONING = 2
 TOPIC_LANGUAGE  = 3
-N_VESICLE_TYPES = 4
+# κ_cause — emitted on high IIT 4.0 actual-causation events to stabilise
+# causal-rule attractors in the ReasoningCortex. Routed via VesiclePool.dock
+# whenever the ActualCausationHead reports α ≥ gate_threshold on any edge.
+TOPIC_CAUSE     = 4
+N_VESICLE_TYPES = 5
 
 
 class PIDController:

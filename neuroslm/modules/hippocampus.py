@@ -449,9 +449,17 @@ class Hippocampus(BrainModule):
     @torch.no_grad()
     def store(self, query: torch.Tensor, value: torch.Tensor,
               nt_state: torch.Tensor | None = None,
-              valence: float = 0.0, salience: float = 0.0) -> None:
+              valence: float = 0.0, salience: float = 0.0,
+              narrative_meta: dict | None = None) -> None:
         """Store (key, value) pairs. query/value: (B, d_sem).
         Also updates DNC temporal link matrix and precedence vector.
+
+        ``narrative_meta`` (optional, **post-awakening only**): a JSON-ish
+        dict carrying the structured narrative episode (content, entity_id,
+        subject, predicate, object, predicted_action, observed_response).
+        When present, the episode is appended to ``self.narrative_log``
+        (capped at 4096) so the consolidation/sleep cycle can replay it
+        as a distilled chunk rather than only a raw embedding.
         """
         key = self._dg_sparse(query, mode="encode").detach()
         B = key.size(0)
@@ -478,6 +486,28 @@ class Hippocampus(BrainModule):
 
             self.write_ptr      += 1
             self._global_tick   += 1
+
+        # ── Narrative-episode log (post-awakening) ────────────────────────
+        if narrative_meta is not None:
+            if not hasattr(self, "narrative_log"):
+                self.narrative_log: list[dict] = []
+            self.narrative_log.append({
+                **narrative_meta,
+                "tick":     int(self._global_tick.item()
+                                if hasattr(self._global_tick, "item")
+                                else self._global_tick),
+                "valence":  float(valence),
+                "salience": float(salience),
+            })
+            # Keep bounded (oldest dropped first)
+            if len(self.narrative_log) > 4096:
+                self.narrative_log = self.narrative_log[-4096:]
+
+    def recent_narrative_episodes(self, n: int = 256) -> list[dict]:
+        """Return the last `n` narrative-meta dicts (empty if none recorded)."""
+        if not hasattr(self, "narrative_log"):
+            return []
+        return list(self.narrative_log[-n:])
 
     # ------------------------------------------------------------------
     # forward() and _disabled_output() for BrainModule protocol

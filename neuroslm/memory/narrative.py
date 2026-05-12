@@ -182,3 +182,118 @@ class NarrativeSystem(nn.Module):
             "entities": {k: v.info() for k, v in self.entities.items()},
         }
 
+    # ── JSON story export ────────────────────────────────────────────────────
+
+    def self_summary(self,
+                      identity: str = "Self",
+                      max_events: int = 12) -> dict:
+        """Distil the autobiographical stream into a coherent third-person
+        story dict (JSON-serialisable) that other modules / external
+        consumers can inspect.
+
+        The story preserves chronological order, links every event back
+        to the same identity, and exposes valence + coherence so a downstream
+        renderer can compose the prose without losing structure.
+        """
+        events = sorted(self.autobiographical.events, key=lambda e: e.timestamp)
+        if max_events and len(events) > max_events:
+            # Keep first + last halves so beginning and current state both show
+            head = events[: max_events // 2]
+            tail = events[-(max_events - len(head)):]
+            events = head + tail
+        return {
+            "identity": identity,
+            "tone": float(self.autobiographical.tone.item()
+                          if hasattr(self.autobiographical.tone, "item")
+                          else self.autobiographical.tone),
+            "coherence": float(self.autobiographical.coherence.item()
+                                if hasattr(self.autobiographical.coherence, "item")
+                                else self.autobiographical.coherence),
+            "events": [
+                {
+                    "t": int(e.timestamp),
+                    "subject": identity,
+                    "content": str(e.content),
+                    "valence": float(e.valence),
+                    "salience": float(e.salience),
+                }
+                for e in events
+            ],
+        }
+
+    def entity_summary(self,
+                        entity_id: str,
+                        trust_score: float | None = None,
+                        confidence: float | None = None,
+                        nt_bias: dict | None = None,
+                        max_events: int = 12) -> dict:
+        """Per-entity JSON narrative, including persistent trust score
+        and neurochemical bias (filled by the brain from PersonalityVector)."""
+        if entity_id not in self.entities:
+            return {
+                "entity": entity_id, "exists": False,
+                "trust": float(trust_score) if trust_score is not None else 0.5,
+                "confidence": float(confidence) if confidence is not None else 0.0,
+                "nt_bias": nt_bias or {},
+                "events": [],
+            }
+        stream = self.entities[entity_id]
+        events = sorted(stream.events, key=lambda e: e.timestamp)
+        if max_events and len(events) > max_events:
+            events = events[-max_events:]
+        return {
+            "entity": entity_id,
+            "exists": True,
+            "tone": float(stream.tone.item() if hasattr(stream.tone, "item")
+                          else stream.tone),
+            "coherence": float(stream.coherence.item() if hasattr(stream.coherence, "item")
+                                else stream.coherence),
+            "trust": float(trust_score) if trust_score is not None else 0.5,
+            "confidence": float(confidence) if confidence is not None else 0.0,
+            "nt_bias": nt_bias or {},
+            "events": [
+                {
+                    "t": int(e.timestamp),
+                    "subject": entity_id,
+                    "content": str(e.content),
+                    "valence": float(e.valence),
+                }
+                for e in events
+            ],
+        }
+
+    def full_story(self,
+                    identity: str = "Self",
+                    personality_vector=None) -> dict:
+        """Aggregate JSON story across self + all known entities.
+
+        If a PersonalityVector is provided, each entity's trust score and
+        NT bias contribution are embedded into the per-entity sub-story.
+        """
+        # Per-entity trust + bias
+        ent_dicts: list[dict] = []
+        if personality_vector is not None:
+            for eid in list(self.entities.keys()):
+                t = float(personality_vector.trust(eid))
+                c = float(personality_vector.confidence(eid))
+                ent_dicts.append(self.entity_summary(
+                    eid, trust_score=t, confidence=c))
+        else:
+            for eid in list(self.entities.keys()):
+                ent_dicts.append(self.entity_summary(eid))
+
+        return {
+            "identity": identity,
+            "self": self.self_summary(identity=identity),
+            "world": {
+                "tone": float(self.world.tone.item()
+                              if hasattr(self.world.tone, "item")
+                              else self.world.tone),
+                "coherence": float(self.world.coherence.item()
+                                    if hasattr(self.world.coherence, "item")
+                                    else self.world.coherence),
+                "n_events": len(self.world.events),
+            },
+            "entities": ent_dicts,
+        }
+

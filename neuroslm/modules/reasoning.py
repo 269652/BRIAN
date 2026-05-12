@@ -56,7 +56,9 @@ class ReasoningCortex(BrainModule):
                  n_attractors: int = 64,
                  base_beta: float = 4.0,
                  n_iters: int = 3,
-                 enable_hfw: bool = True):
+                 enable_hfw: bool = True,
+                 n_action_types: int = 14,        # match SocialMarkovMemory N_TYPES
+                 rec_rank: int = 16):
         super().__init__()
         self.d_sem = d_sem
         self.n_attractors = n_attractors
@@ -82,6 +84,36 @@ class ReasoningCortex(BrainModule):
         nn.init.zeros_(self.out_proj.weight)  # start as identity (no contribution)
 
         self.norm = nn.LayerNorm(d_sem)
+
+        # ── Low-rank recurrent dynamics (causal attractor layer) ──────────
+        # Implements:  h_{t+1} = tanh(A · B · h_t + W_in · x_t)
+        # with A ∈ ℝ^{d × r}, B ∈ ℝ^{r × d}, r ≪ d. Two unrolled steps so
+        # the model learns abstract relational schemas (e.g. "Insult → Offense")
+        # as low-rank fixed points. Zero-init so the network starts as a
+        # pure passthrough of the Hopfield retrieval.
+        self.rec_rank = rec_rank
+        self.rec_A = nn.Parameter(
+            torch.randn(d_sem, rec_rank) * (1.0 / math.sqrt(d_sem)))
+        self.rec_B = nn.Parameter(
+            torch.zeros(rec_rank, d_sem))                # zero-init: identity
+        self.rec_in = nn.Parameter(
+            torch.eye(d_sem) * 0.0 + torch.randn(d_sem, d_sem) * 0.01)
+        self.rec_norm = nn.LayerNorm(d_sem)
+
+        # ── Action → Reaction predictor ──────────────────────────────────
+        # Markov / Hopfield-style outcome distribution: given an action
+        # embedding, predict a distribution over reaction-type prototypes.
+        # The prototypes are learned simultaneously with the projection.
+        # n_action_types matches SocialMarkovMemory's ACTION_LABELS length
+        # so the two systems can hand off cleanly.
+        self.n_action_types = n_action_types
+        self.reaction_prototypes = nn.Parameter(
+            torch.randn(n_action_types, d_sem) * (1.0 / math.sqrt(d_sem)))
+        self.action_to_logits = nn.Sequential(
+            nn.Linear(d_sem, d_sem),
+            nn.GELU(),
+            nn.Linear(d_sem, n_action_types),
+        )
 
         # Hebbian fast weights — final binding stage.  When the cortex completes
         # a pattern, bind the answer with the current GWS broadcast so future
@@ -171,6 +203,14 @@ class ReasoningCortex(BrainModule):
         if self.n_iters >= 4:
             state = self._hopfield_step(state)
 
+        # ── Low-rank recurrent dynamics on top of Hopfield retrieval ─────
+        # state acts as the input drive; we unroll two recurrent steps.
+        h = state
+        for _ in range(2):
+            rec_update = h @ self.rec_A @ self.rec_B + state @ self.rec_in
+            h = torch.tanh(self.rec_norm(rec_update.float()).to(rec_update.dtype))
+        state = h
+
         enrichment = self.out_proj(state)
         enriched   = x_flat + vesicle_gate * enrichment
 
@@ -186,6 +226,64 @@ class ReasoningCortex(BrainModule):
             delta = (enriched - x_flat).unsqueeze(1)  # (B, 1, d_sem)
             return x + delta
         return enriched
+
+    # ------------------------------------------------------------------
+    # Action → Reaction predictor (Modern Hopfield / Markov-style)
+    # ------------------------------------------------------------------
+    def predict_reaction(self,
+                          action_emb: torch.Tensor,
+                          temperature: float = 1.0,
+                          ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Predict the distribution over reaction types given an action.
+
+        action_emb: (B, d_sem) or (d_sem,).
+        temperature: softmax temperature; lower → sharper prediction.
+
+        Returns:
+          probs:  (B, n_action_types) — categorical posterior over reactions.
+          completed_pattern: (B, d_sem) — Modern-Hopfield pattern completion
+                              onto the reaction-prototype bank.
+
+        Two routes that complement each other:
+          1. A direct MLP classifier from the action embedding to logits.
+          2. A Modern-Hopfield completion over the prototype bank.
+        We average both for robustness; the two routes co-train.
+        """
+        a = action_emb
+        if a.dim() == 1:
+            a = a.unsqueeze(0)
+
+        # Route 1: direct classifier
+        logits_mlp = self.action_to_logits(a) / max(1e-3, temperature)
+
+        # Route 2: Hopfield completion over reaction prototypes
+        beta = F.softplus(self.log_beta) + self.base_beta
+        P = F.normalize(self.reaction_prototypes, dim=-1)         # (T, d)
+        q = F.normalize(a.float(), dim=-1).to(a.dtype)            # (B, d)
+        logits_hop = beta * (q @ P.T) / max(1e-3, temperature)    # (B, T)
+
+        # Average the two route logits (geometric mean ≈ averaging logits)
+        logits = 0.5 * (logits_mlp + logits_hop)
+        probs = F.softmax(logits, dim=-1)
+
+        # Completed pattern = expected prototype under the posterior
+        completed = probs @ self.reaction_prototypes               # (B, d)
+        return probs, completed
+
+    def causal_aux_loss(self,
+                         action_emb: torch.Tensor,
+                         reaction_target: torch.Tensor,
+                         ) -> torch.Tensor:
+        """Cross-entropy auxiliary loss for the action → reaction predictor.
+
+        action_emb:       (B, d_sem)
+        reaction_target:  (B,) int64 — index into [0, n_action_types).
+
+        train.py adds this loss scaled by `_aux_w_scale * w_causal`.
+        Naturally suppressed during infancy.
+        """
+        probs, _ = self.predict_reaction(action_emb)
+        return F.nll_loss(torch.log(probs + 1e-9), reaction_target.long())
 
     def _disabled_output(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return x

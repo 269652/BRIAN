@@ -221,6 +221,19 @@ class TheoryOfMindModule(BrainModule):
         self.entity_rnn = nn.GRUCell(d_sem, d_sem)
         self._entity_hidden: Dict[str, torch.Tensor] = {}
 
+        # ── Persistent per-entity trust score ─────────────────────────────
+        # Maintains Beta(α, β) posterior independent of `belief_vec`. The
+        # belief_vec captures immediate mental state; trust is the
+        # cumulative outcome history. PersonalityVector reads from this
+        # to bias NT baselines whenever the entity is in focus.
+        self._trust_alpha: Dict[str, float] = {}
+        self._trust_beta:  Dict[str, float] = {}
+        self._trust_obs:   Dict[str, int]   = {}
+
+        # Active-entity attention weights — read by personality.apply_bias()
+        # when called by the brain at consolidation time.
+        self._active_entities: Dict[str, float] = {}
+
     def _disabled_output(self, entity_emb, belief_vec, log_n_inter,
                          situation, my_action_logits=None, **_):
         B = situation.shape[0] if hasattr(situation, "shape") else 1
@@ -282,6 +295,14 @@ class TheoryOfMindModule(BrainModule):
         # 6. Emotional contagion signal (entity's predicted affect → own NTs)
         affect_bleed = self.affect_proj(belief_emb)   # (B, 4): DA, NE, 5HT, ACh
 
+        # 7. Update active-entity attention weight (used by PersonalityVector
+        #    to decide whose trust score biases NT baselines this step).
+        if entity_id is not None:
+            # Attention weight = social-reward-attended salience, in [0, 1]
+            sr = float(social_reward.mean().item()) if social_reward.numel() else 0.0
+            self._active_entities[entity_id] = max(
+                self._active_entities.get(entity_id, 0.0) * 0.9, abs(sr))
+
         return {
             "entity_belief":   belief_emb,
             "entity_desire":   desire_emb,
@@ -290,6 +311,58 @@ class TheoryOfMindModule(BrainModule):
             "social_reward":   social_reward,
             "social_error":    social_error,
             "affect_bleed":    affect_bleed,
+        }
+
+    # ── Persistent trust score (Beta-Bernoulli) ──────────────────────────────
+
+    def update_trust(self, entity_id: str, valence: float) -> None:
+        """Update the persistent trust posterior for an entity.
+
+        valence ∈ [−1, 1]. Positive valence → α (positive-outcome count)
+        increases; negative → β (negative-outcome count) increases.
+
+        Should be called from the brain post-interaction, once per turn
+        with a tracked entity. Should NOT be called during infancy
+        (gated by the caller via `_maturation_awakened`).
+        """
+        if not entity_id:
+            return
+        if entity_id not in self._trust_alpha:
+            self._trust_alpha[entity_id] = 1.0
+            self._trust_beta[entity_id]  = 1.0
+            self._trust_obs[entity_id]   = 0
+        v = max(-1.0, min(1.0, float(valence)))
+        self._trust_alpha[entity_id] += 0.5 * (1.0 + v)
+        self._trust_beta[entity_id]  += 0.5 * (1.0 - v)
+        self._trust_obs[entity_id]   += 1
+
+    def trust(self, entity_id: str) -> float:
+        """Posterior trust mean α / (α + β). 0.5 for unknown entities."""
+        a = self._trust_alpha.get(entity_id)
+        b = self._trust_beta.get(entity_id)
+        if a is None or b is None:
+            return 0.5
+        return float(a / (a + b + 1e-9))
+
+    def trust_confidence(self, entity_id: str) -> float:
+        """Pseudocount mass (α + β − 2). 0 for unknown entities."""
+        a = self._trust_alpha.get(entity_id, 1.0)
+        b = self._trust_beta.get(entity_id, 1.0)
+        return float(a + b - 2.0)
+
+    def active_entities(self, threshold: float = 0.05) -> Dict[str, float]:
+        """Return the current attention-weighted entity set."""
+        return {eid: w for eid, w in self._active_entities.items() if w >= threshold}
+
+    def trust_summary(self) -> dict:
+        """All entities with current trust posteriors — used by NarrativeEngine."""
+        return {
+            eid: {
+                "trust": self.trust(eid),
+                "confidence": self.trust_confidence(eid),
+                "n_obs": int(self._trust_obs.get(eid, 0)),
+            }
+            for eid in self._trust_alpha.keys()
         }
 
     def reset_entity(self, entity_id: str):

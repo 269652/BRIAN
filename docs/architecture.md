@@ -24,6 +24,16 @@
    - 7.4 Optimizer Selection (Adafactor vs AdamW)
 8. [Intelligence & Integration Metrics](#8-intelligence--integration-metrics)
 9. [Parameter Presets & Training Commands](#9-parameter-presets)
+10. [BRIAN — Narrative + Causal Memory Stack](#10-brian--narrative--causal-memory-stack)
+    - 10.1 Contextual Sheaf F & H¹ Contradiction Detection
+    - 10.2 Actual-Causation Head (IIT 4.0)
+    - 10.3 ReasoningCortex Action → Reaction Predictor
+    - 10.4 Narrative Engine (JSON stories) + EntityNarrative trust
+    - 10.5 PersonalityVector → NT-baseline coupling
+    - 10.6 NEMORI Predictive-Forgetting Gate
+    - 10.7 Sleep-Cycle CLS (PC distillation + trophic renormalisation)
+    - 10.8 DNC Temporal-Link Matrix L
+    - 10.9 κ_cause Vesicles
 
 ---
 
@@ -1034,4 +1044,199 @@ python -m neuroslm.train --preset xl --steps 1000 \
 
 ---
 
-*Last updated: 2026-05-12. Source of truth: `neuroslm/` on branch `tpu`.*
+---
+
+## 10. BRIAN — Narrative + Causal Memory Stack
+
+*Biologically Realistic Information Architecture Network — the codename for the post-awakening narrative + causal memory subsystem layered on top of the bowtie.*
+
+Everything in this section is **gated by `_maturation_awakened`**: the structural primitives are constructed at brain init time (so checkpoints round-trip), but their effects on dynamics are inert during infancy. Awakening (§6.4) flips them on.
+
+### 10.1 Contextual Sheaf F & H¹ Contradiction Detection
+
+*`neuroslm/memory/sheaf.py`*
+
+The relational hypergraph (§4.2 / `memory/hypergraph.py`) is overlaid with a **sheaf structure** F that assigns:
+
+  • a local belief vector (the *section*) to each node U_i ∈ ℝ^{d_emb},
+  • a learned linear *restriction map* R_{ij} : ℝ^{d_emb} → ℝ^{d_emb} to each edge (identity by default; learnable per-edge for non-trivial types).
+
+The **1-cochain** on edge (i, j) is:
+
+$$c_{ij} = R_{ij} \cdot v_i - v_j$$
+
+Strict cohomological H¹ projects this cochain onto the orthogonal complement of im(δ⁰) — the part not explainable by a 0-coboundary correction. We compute that via a `lstsq` against the incidence matrix B ∈ ℝ^{|E| × |V|}.
+
+**However**, two-node identity-restriction "contradictions" (the canonical "Alice likes coffee" / "Alice hates coffee" case) are 0-coboundaries in the strict sense — shifting both nodes equally resolves them. So for practical contradiction detection we additionally maintain a **raw pairwise inconsistency** signal:
+
+$$\text{raw}(F) = \frac{\sum_{(i,j) \in E} w_{ij} \cdot \|R_{ij} v_i - v_j\|_2}{\sum_{(i,j) \in E} w_{ij}}$$
+
+`SheafSection.h1_residual` holds this raw measure. `SheafConsistencyChecker.is_contradiction(section)` returns True when it exceeds the threshold (default 0.7). On contradiction, the **newer timestamp wins**: a `SUPERSEDES` edge is created from the newer node to the older one, and `is_superseded(older)` returns True for downstream gating.
+
+**Global-section retrieval** runs damped Jacobi (4 iters, damping=0.5) over the node values to produce the maximum-consistency joint interpretation across multiple context patches. Retrieved via `MemoryHyperGraph.retrieve_global_section(query_emb)`.
+
+### 10.2 Actual-Causation Head (IIT 4.0)
+
+*`neuroslm/modules/actual_causation.py` — `ActualCausationHead`*
+
+IIT 4.0 defines actual causation between source state $s_t$ and effect $e_{t+1}$ via the integrated information $\phi_c$ of the intervention $do(s = \text{counterfactual})$. The full enumeration is intractable; we use the standard tractable proxy:
+
+$$\alpha(i \to j; t) = \big\| f_j(z_i^t) - f_j(z_i^{\text{baseline}}) \big\|_2^2 \cdot \sigma\!\left(\frac{\langle q(z_j^{t+1}),\ k(f_j(z_i^t)) \rangle}{\sqrt{d_h}}\right)$$
+
+where $z_i^t$ is module i's mean output at time t, $f_j$ is a small shared MLP conditioned on (i, j) one-hots, and the **do(s = baseline)** reference is each module's running EMA of its own output. The attention term gates pairs where module j actually attended to module i.
+
+Output: per-edge causal strength $\alpha \in [0, 1]^{n \times n}$, normalised across destinations per pass.
+
+The head is trained passively via `aux_loss(prev, cur)` — an MSE that forces $f_{i \to j}(z_i^t) \approx z_j^{t+1}$, giving the do-intervention proxy its semantic grounding. Added to the total loss with weight `_aux_w_scale · w_causal = 0.05`, naturally suppressed during infancy.
+
+A running EMA `alpha_ema` is the input to two downstream consumers:
+
+  • **κ_cause vesicle emission** when any α ≥ `gate_threshold = 0.3` (§10.9)
+  • **Trophic renormalisation** during the sleep cycle (§10.7)
+
+### 10.3 ReasoningCortex Action → Reaction Predictor
+
+*`neuroslm/modules/reasoning.py`*
+
+The existing Hopfield-attractor cortex (§4.2.2) is extended with two new components:
+
+**Low-rank recurrent dynamics** (causal attractor layer):
+
+$$h_{t+1} = \tanh\!\big( A B \cdot h_t + W_{\text{in}} \cdot x_t \big), \quad A \in \mathbb{R}^{d \times r},\ B \in \mathbb{R}^{r \times d},\ r = 16$$
+
+Two unrolled steps. Zero-init on B so the network starts as a pure passthrough of the Hopfield retrieval; the recurrent term learns low-rank fixed points that encode abstract relational schemas ("Insult → Offense").
+
+**Action → Reaction predictor**:
+
+```python
+probs, completed = cortex.predict_reaction(action_emb)   # (B, n_action_types), (B, d_sem)
+```
+
+Two routes co-trained:
+
+  1. Direct MLP classifier: `action_emb → logits / temperature`
+  2. Modern Hopfield completion over a learnable prototype bank `reaction_prototypes ∈ ℝ^{T × d_sem}`
+
+Logits are averaged across the two routes; `softmax` produces the categorical reaction distribution. `n_action_types = 14` to match `SocialMarkovMemory.ACTION_LABELS`.
+
+Auxiliary cross-entropy loss `causal_aux_loss(action_emb, reaction_target_idx)` trains both routes simultaneously. **Test `test_causal_generalization`** confirms that after 120 epochs on 10 Gift→Joy and 10 Insult→Offense pairs, novel Gift inputs receive P(Joy) > 0.8.
+
+### 10.4 Narrative Engine (JSON stories) + EntityNarrative trust
+
+*`neuroslm/memory/narrative.py` — `NarrativeSystem`*
+
+The existing autobiographical / world / entity narrative streams are extended with **structured JSON exports**:
+
+```python
+ns.self_summary(identity="Self") → {
+    "identity": "Self",
+    "tone": float, "coherence": float,
+    "events": [
+        {"t": int, "subject": "Self", "content": str, "valence": float, "salience": float},
+        ...
+    ]
+}
+
+ns.full_story(personality_vector=personality) → {
+    "identity": "Self",
+    "self": <self_summary>,
+    "world": {"tone": ..., "coherence": ..., "n_events": int},
+    "entities": [
+        {
+            "entity": "alice", "trust": 0.83, "confidence": 12.0,
+            "nt_bias": {"DA": +0.08, "5HT": +0.05, "NE": -0.07},
+            "events": [...]
+        }
+    ]
+}
+```
+
+Trust and NT-bias fields are filled by `PersonalityVector` when passed in. Chronological order across events is preserved by sorting on `entry.timestamp`. **Test `test_autobiographical_coherence`** verifies the JSON structure stays consistent across three sequential events.
+
+### 10.5 PersonalityVector → NT-baseline coupling
+
+*`neuroslm/neurochem/personality.py` — `PersonalityVector`*
+
+A slowly-evolving 5-dim trait vector P = (curiosity, agreeableness, vigilance, patience, hedonic_tone) and a per-entity **Beta-Bernoulli trust posterior**:
+
+$$\alpha_e \leftarrow \alpha_e + \tfrac12(1 + v), \quad \beta_e \leftarrow \beta_e + \tfrac12(1 - v), \quad \text{trust}(e) = \frac{\alpha_e}{\alpha_e + \beta_e}$$
+
+Personality drifts under a small learning rate $\eta_P = 5 \times 10^{-3}$ (≈ 200 consolidations to halve a trait) toward a drive vector supplied at consolidation time.
+
+The vector and trust scores **bias the homeostasis baseline targets**:
+
+| Personality dim | NT coefficients |
+|---|---|
+| curiosity     | +0.08 DA, +0.06 ACh, +0.02 NE |
+| agreeableness | +0.06 5HT, +0.04 GABA |
+| vigilance     | +0.10 NE, +0.03 ACh, −0.02 GABA |
+| patience      | +0.08 5HT, +0.05 GABA, −0.02 DA |
+| hedonic_tone  | +0.07 DA, +0.05 5HT |
+
+Per-entity trust contributes additively when that entity is in the working set:
+
+  • $\Delta b_{\text{DA}} = +0.10 \cdot w_e \cdot (\text{trust}(e) - 0.5)$ (trusted → DA up)
+  • $\Delta b_{\text{5HT}} = +0.06 \cdot w_e \cdot (\text{trust}(e) - 0.5)$ (trusted → 5HT up)
+  • $\Delta b_{\text{NE}} = +0.10 \cdot w_e \cdot (0.5 - \text{trust}(e))$ (distrusted → NE up)
+
+All bias contributions sum and are then clamped to [−0.5, +0.5] inside `Homeostasis.observe`. **Test `test_theory_of_mind_consistency`** confirms Alice (positive valence history) accumulates higher DA bias and lower NE bias than Bob (negative valence history).
+
+### 10.6 NEMORI Predictive-Forgetting Gate
+
+*`neuroslm/memory/comprehension_gate.py`*
+
+The existing surprise × comprehension × novelty gate is extended with the **NEMORI prior**: only the part of an observation that exceeds the model's anticipated surprise survives. The episode is rejected unless
+
+$$\text{unpredicted\_surprise} = \text{surprise} - \text{anticipated\_surprise} \geq \text{nemori\_floor}$$
+
+`nemori_floor = 0` is the default (back-compat); set positive to enforce predictive forgetting. The returned dict carries `unpredicted_surprise` and `nemori_kept` flags for telemetry.
+
+### 10.7 Sleep-Cycle CLS
+
+*`neuroslm/memory/sleep_cycle.py` — `SleepCycle`*
+
+Every `sleep_period_steps = 5000` *awake* steps, the brain enters a brief sleep phase. Four operations:
+
+  1. **Replay**: sample `replay_batch = 16` episodes per iteration (`n_iters = 4`) weighted by `salience × decay × |valence|`.
+  2. **Bidirectional predictive coding distillation**: for each replayed episode, compute (a) the top-down predicted code `pc = predictor(emb)` and (b) the bottom-up reconstruction through the low-rank slow-weights adapter `bu = emb + emb @ slow_a @ slow_b`. The MSE between pc and bu is minimised, but **only on episodes where the NEMORI gate fires**.
+  3. **Trophic renormalisation**: edges with `α_ema < 0.3` get their trophic level decayed by 0.05 (eventually pruned); edges with `α_ema ≥ 0.3` get boosted by 0.05.
+  4. **Gaussian I(X;Z) proxy**: empirical MI between input embeddings and predictor output. Reported as `mi_reduction = post - pre` — negative values indicate compression.
+
+A `SleepReport` is logged each cycle with `n_replays`, `distillation_loss`, `mi_reduction`, `pruned_edges`, `strengthened_edges`, and `duration_s`. **Test `test_predictive_forgetting_gain`** confirms 100 sleep iterations on a noisy buffer do not blow up I(X;Z) and do not degrade a held-out LM-proxy fit.
+
+### 10.8 DNC Temporal-Link Matrix L
+
+*`neuroslm/memory/hypergraph.py`*
+
+The hypergraph maintains a **fixed-size DNC link matrix** L ∈ ℝ^{N × N} (N = 256 slots, recycled by oldest precedence). Each write updates:
+
+$$L[\text{cur}, j] = \mathbf{1}[\text{prev\_slot} = j]$$
+
+This records *write-order* transitions independently of wall-clock time. `temporal_link_neighbours(node_id, direction)` returns the top-k nodes typically written before or after a given node — the substrate for sequence-aware recall in the bowtie's hippocampal stage.
+
+### 10.9 κ_cause Vesicles
+
+*`neuroslm/neurochem/vesicles.py`*
+
+New vesicle type `TOPIC_CAUSE = 4` (raising `N_VESICLE_TYPES = 5`). Emitted in `Brain.forward_lm` whenever `ActualCausationHead` reports any pair with α ≥ `gate_threshold = 0.3`. The vesicle carries the destination module's embedding as its content; on docking it stabilises causal-rule attractors in the ReasoningCortex by raising the activation of the corresponding prototype.
+
+### 10.10 Forward-Pass Wiring
+
+The BRIAN stack hooks into `brain.forward_lm` immediately after `_maybe_store_insight` and before the periodic consolidation block — all guarded by `if not _in:` so the entire stack is inert during infancy. The order of operations:
+
+```text
+1. Stack 8 canonical module outputs: (sem, selected, dmn_query, routed,
+                                       action, dmn_query_mod, slots, motor_lang_bias)
+2. ActualCausationHead(prev, cur)               # α (n, n), updates EMA
+3. Emit κ_cause vesicle for strongest α edge   # type=TOPIC_CAUSE
+4. PersonalityVector.apply_bias(transmitters,   # if any entity is in focus
+                                  active_ents)
+5. SleepCycle.maybe_sleep(step)                 # every 5000 awake steps
+6. Cache cur as prev for next forward
+```
+
+Awakening is propagated via `Brain.set_awakened(True)`, called from `train.py` at the maturation transition. PersonalityVector and SleepCycle gate themselves internally on this flag.
+
+---
+
+*Last updated: 2026-05-13. Source of truth: `neuroslm/` on branch `tpu`.*
