@@ -228,6 +228,8 @@ class Brain(nn.Module):
         # **inert during infancy** — their forward effects only kick in
         # once `_maturation_awakened` is True (set by train.py).
         from .modules.actual_causation import ActualCausationHead
+        from .modules.survival_causal import SurvivalCausalHead
+        from .modules.sensory import SensoryVAE
         from .neurochem.personality import PersonalityVector
         from .memory.sleep_cycle import SleepCycle
         self.actual_causation = ActualCausationHead(
@@ -237,6 +239,21 @@ class Brain(nn.Module):
             d_sem=cfg.d_sem,
             sleep_period_steps=5000,
             enable=True)
+        # ── Cognitive Closure stack — embodied survival loop ─────────────
+        # SensoryVAE compresses (vision, affordance, homeostatic) grid
+        # frames into the d_sem manifold. SurvivalCausalHead estimates
+        # how much each action contributes to next-step survival vars.
+        # Both are part of the model state-dict; their gradient effects
+        # are gated through `_aux_w_scale` like every other aux loss.
+        self.sensory_vae = SensoryVAE(d_sem=cfg.d_sem)
+        self.survival_causal = SurvivalCausalHead(
+            d_action=cfg.bg_action_dim if hasattr(cfg, 'bg_action_dim') else 256)
+        # Persistent survival-state vector (energy, hydration, integrity).
+        # Initialised to 1.0; ticked via Homeostasis.step on each embodied
+        # forward pass. Tests can mutate it directly via set_survival().
+        self.register_buffer(
+            "survival_state",
+            torch.ones(3, dtype=torch.float32))
 
         # ---- Intelligence flow ----
         from .intelligence.reflection import SpontaneousReflection
@@ -1324,6 +1341,94 @@ class Brain(nn.Module):
         self.last_survival      = survival.detach()
         self.transmitters.detach_()
         return out
+
+    # ------------------------------------------------------------------
+    # Cognitive Closure: embodied grid-frame ingestion
+    # ------------------------------------------------------------------
+    @torch.no_grad()
+    def set_survival(self, energy: float = None,
+                      hydration: float = None,
+                      integrity: float = None) -> None:
+        """Direct mutation of the persistent survival-state vector. Used
+        by tests + by Brain.run_continuous when an env frame arrives."""
+        if energy is not None:
+            self.survival_state[0] = float(energy)
+        if hydration is not None:
+            self.survival_state[1] = float(hydration)
+        if integrity is not None:
+            self.survival_state[2] = float(integrity)
+
+    @torch.no_grad()
+    def ingest_grid_frame(self, frame) -> torch.Tensor:
+        """Encode a GridFrame via SensoryVAE → d_sem latent + update the
+        persistent survival_state from the frame's homeostatic vector.
+
+        Returns the (1, d_sem) latent z to be added as a sensory residual.
+        Triggers κ_neg vesicle emission if QualiaState reports high aversive
+        pressure on the new homeostat values. Used by Brain.run_continuous
+        (the embodied loop) — NOT in forward_lm for text-only training.
+        """
+        # Update survival_state from the frame
+        s = torch.as_tensor(frame.homeostatic,
+                              dtype=self.survival_state.dtype,
+                              device=self.survival_state.device)
+        self.survival_state.copy_(s)
+
+        # Encode the frame
+        device = self.survival_state.device
+        dtype = next(self.sensory_vae.parameters()).dtype
+        try:
+            z = self.sensory_vae.encode_frame(frame, device=device, dtype=dtype)
+        except Exception:
+            z = torch.zeros(1, self.cfg.d_sem, device=device, dtype=dtype)
+
+        # Homeostatic warp: pull the QualiaState's broadcast warp toward
+        # the new survival state. We expose the aversive pressure scalar
+        # for κ_neg emission.
+        if hasattr(self, 'qualia'):
+            try:
+                z_warped = self.qualia.warp_broadcast(z, s.unsqueeze(0))
+                z = z_warped
+            except Exception:
+                pass
+
+        # κ_neg emission gated on aversive pressure threshold
+        if hasattr(self, 'qualia') and self.vesicle_pool is not None:
+            try:
+                pressure = float(self.qualia.aversive_pressure())
+                if pressure > 0.10:
+                    from .neurochem.vesicles import TOPIC_NEG
+                    # Aversive vesicles synthesised at the reasoning cortex
+                    # module index — they migrate from there. Module index
+                    # 1 = PFC / executive in the canonical 8-module stack,
+                    # but for vesicle source-module we use 0 (GWS) so the
+                    # vesicle's diffusion T-matrix routes it to ReasoningCortex.
+                    self.vesicle_pool.synthesize_typed(
+                        content=z.squeeze(0).to(dtype=dtype),
+                        type_idx=TOPIC_NEG,
+                        source_module=0,
+                    )
+            except Exception:
+                pass
+
+        return z
+
+    @torch.no_grad()
+    def tick_homeostasis(self,
+                           reward_action: bool = False,
+                           reward_value: float = 0.0,
+                           decay: float = 0.01) -> None:
+        """Apply one tick of survival-variable decay. Called by
+        Brain.run_continuous after each env step."""
+        if hasattr(self, 'homeostasis'):
+            try:
+                self.homeostasis.step(
+                    self.survival_state,
+                    decay=decay,
+                    reward_action=reward_action,
+                    reward_value=reward_value)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # BRIAN: sleep cycle (predictive-coding distillation + trophic renorm)

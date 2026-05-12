@@ -36,7 +36,12 @@ TOPIC_LANGUAGE  = 3
 # causal-rule attractors in the ReasoningCortex. Routed via VesiclePool.dock
 # whenever the ActualCausationHead reports α ≥ gate_threshold on any edge.
 TOPIC_CAUSE     = 4
-N_VESICLE_TYPES = 5
+# κ_neg — aversive vesicles. Emitted by the QualiaState when homeostatic
+# pressure exceeds the aversive threshold. Migrates preferentially to the
+# ReasoningCortex (escape / foraging schemas) and biases the BG toward
+# survival-relevant actions.
+TOPIC_NEG       = 5
+N_VESICLE_TYPES = 6
 
 
 class PIDController:

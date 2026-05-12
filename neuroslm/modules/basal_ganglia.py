@@ -73,6 +73,43 @@ class BasalGanglia(BrainModule):
         # High DA + familiar action → habitual (fast); low DA → goal-directed (slow)
         self.habit_proj = nn.Linear(d_action, 1)
 
+        # ── VQH (Vector-Quantised Striatum) model ────────────────────────
+        # The striatum is modelled as a discrete option lattice: ``n_options``
+        # learnable codebook entries that the proposer is quantised onto via
+        # straight-through nearest-neighbour. Each option carries:
+        #   • a key vector (d_action) — pattern matched against the proposer
+        #   • a 3-way logit (n_experts) — gates which expert cortex executes
+        #     the action when it commits (Math / Reasoning / Motor)
+        # Trained via the standard VQ-VAE auxiliary loss (commitment + codebook).
+        self.n_options = 16
+        self.n_experts = 3              # 0 = Math, 1 = Reasoning, 2 = Motor
+        self.option_keys = nn.Parameter(
+            torch.randn(self.n_options, d_action) * (1.0 / (d_action ** 0.5)))
+        self.option_expert_logits = nn.Parameter(
+            torch.zeros(self.n_options, self.n_experts))
+        # Beta for VQ commitment loss
+        self.vq_beta = 0.25
+
+        # ── NAcc: reward prediction error ───────────────────────────────
+        # A small value head over (thought, action) predicts expected
+        # survival-aligned reward. The RPE is the difference between this
+        # prediction and the actual survival outcome observed downstream.
+        # Positive RPE → DA spike (read by the brain to release DA).
+        self.nacc_value = nn.Sequential(
+            nn.Linear(d_sem + d_action, d_sem),
+            nn.GELU(),
+            nn.Linear(d_sem, 1),
+        )
+
+        # Per-option visitation counts + DA-weighted policy (for tests
+        # that need to track policy adaptation over many steps without
+        # waiting for full gradient convergence). Plain torch buffers so
+        # they round-trip in the state dict.
+        self.register_buffer(
+            "option_da_value", torch.zeros(self.n_options))
+        self.register_buffer(
+            "option_visits",    torch.zeros(self.n_options))
+
     # ------------------------------------------------------------------
     # Forward
     # ------------------------------------------------------------------
@@ -174,3 +211,89 @@ class BasalGanglia(BrainModule):
         probs  = torch.ones(B, self.n_candidates, device=thought.device) / self.n_candidates
         commit = torch.zeros(B, dtype=torch.bool, device=thought.device)
         return zeros, conf, probs, commit
+
+    # ------------------------------------------------------------------
+    # VQH option selection + expert-cortex gate
+    # ------------------------------------------------------------------
+    def select_option(self,
+                       action: torch.Tensor,
+                       da_bias: float = 0.0,
+                       ) -> tuple[int, torch.Tensor, torch.Tensor, float]:
+        """Quantise the chosen continuous action onto the discrete option
+        lattice, return the option index and the expert-routing distribution.
+
+        action:  (B, d_action) continuous chosen action from forward().
+        da_bias: optional bias on the policy from current DA levels —
+                  high DA narrows the selection toward the previously-
+                  most-rewarding option (exploitation).
+
+        Returns (option_idx, expert_probs, vq_loss, value_prediction).
+
+        Uses straight-through gradient: forward pass quantises, backward
+        pass treats the quantisation as the identity. The vq_loss term
+        is the standard codebook + commitment objective; train.py adds
+        it to total via `_aux_w_scale`.
+        """
+        a = action if action.dim() == 2 else action.unsqueeze(0)
+        # Cosine-similarity selection — natural unit invariance
+        a_n = a / (a.norm(dim=-1, keepdim=True) + 1e-6)
+        k_n = self.option_keys / (self.option_keys.norm(dim=-1, keepdim=True) + 1e-6)
+        sims = a_n @ k_n.T                                 # (B, n_options)
+        # DA bias from policy memory (high-DA value boosts familiar options)
+        if da_bias != 0.0:
+            sims = sims + da_bias * self.option_da_value.to(sims.dtype).unsqueeze(0)
+        opt_idx = int(sims[0].argmax().item())             # batch-mean
+
+        # Expert-routing distribution over (Math, Reasoning, Motor)
+        expert_probs = torch.softmax(self.option_expert_logits[opt_idx], dim=-1)
+
+        # VQ-VAE loss: codebook gets pulled toward the action, action gets
+        # pulled toward the codebook entry (commitment).
+        chosen_key = self.option_keys[opt_idx].unsqueeze(0).expand_as(a)
+        codebook_loss   = (chosen_key - a.detach()).pow(2).mean()
+        commitment_loss = (chosen_key.detach() - a).pow(2).mean()
+        vq_loss = codebook_loss + self.vq_beta * commitment_loss
+
+        # Predicted survival value of (thought, action) — read by NAcc RPE
+        # update. Caller provides a thought tensor by concatenating outside.
+        value_pred = torch.zeros(1, device=a.device, dtype=a.dtype)
+
+        # Bookkeeping
+        with torch.no_grad():
+            self.option_visits[opt_idx] += 1
+
+        return opt_idx, expert_probs, vq_loss, float(value_pred.detach().item())
+
+    # ------------------------------------------------------------------
+    # NAcc reward-prediction error
+    # ------------------------------------------------------------------
+    def nacc_rpe(self,
+                  thought: torch.Tensor,
+                  action: torch.Tensor,
+                  actual_survival_reward: float,
+                  ) -> tuple[float, float]:
+        """Compute RPE = actual − predicted survival reward.
+
+        Returns (rpe, predicted). Positive RPE → DA spike to be released
+        by the caller (the brain). The predicted-value head is trained by
+        the caller via the standard MSE on (predicted, actual_reward),
+        added to aux loss with `_aux_w_scale * w_nacc`.
+        """
+        a = action if action.dim() == 2 else action.unsqueeze(0)
+        t = thought if thought.dim() == 2 else thought.unsqueeze(0)
+        x = torch.cat([t, a], dim=-1)
+        pred = float(self.nacc_value(x).mean().item())
+        rpe  = float(actual_survival_reward) - pred
+        return rpe, pred
+
+    def update_option_value(self,
+                              option_idx: int,
+                              rpe: float,
+                              lr: float = 0.1) -> None:
+        """DA-gated policy memory: nudge the option's stored value toward
+        the observed RPE. Pure bookkeeping (no gradients), used by tests
+        and by the brain's consolidation loop."""
+        if 0 <= option_idx < self.n_options:
+            with torch.no_grad():
+                self.option_da_value[option_idx] = (
+                    (1.0 - lr) * self.option_da_value[option_idx] + lr * rpe)

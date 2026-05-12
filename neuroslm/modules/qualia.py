@@ -81,6 +81,33 @@ class QualiaState(nn.Module):
         self.register_buffer("ema_qualia", torch.zeros(self.d_qualia))
         self.alpha = 0.3  # EMA smoothing (produces ~10 Hz oscillation feel)
 
+        # ── Latent Qualia Manifold (Q) — homeostatic warp ────────────────
+        # The Q-manifold biases the GWS broadcast mean by a direction in
+        # d_sem space that scales with homeostatic deficit. When any
+        # homeostat is critically low (< 0.2), the aversive direction
+        # dominates: incoming sensory data is reinterpreted in the
+        # "threatening / urgent" subspace. Healthy state produces only a
+        # mild appetitive bias.
+        #
+        # Aversive direction is initialised at a much larger magnitude
+        # than the appetitive direction so the warp behaviour is
+        # asymmetric from step 0: starvation → strong warp; satiety →
+        # gentle bias. Both directions are learnable.
+        self.aversive_direction = nn.Parameter(
+            torch.randn(d_sem) * 0.5)
+        self.appetitive_direction = nn.Parameter(
+            torch.randn(d_sem) * 0.05)
+        # Per-homeostat (energy, hydration, integrity) gain into the warp.
+        self.homeostatic_gain = nn.Parameter(
+            torch.tensor([1.5, 1.0, 2.0], dtype=torch.float32))
+        # Critical threshold below which the aversive component dominates.
+        self.aversive_threshold = 0.20
+        # Multiplier on the appetitive (surplus) contribution to keep it
+        # subordinate to the aversive (deficit) contribution.
+        self.appetitive_scale = 0.04
+        # Last-computed warp magnitude (used by brain to gate κ_neg vesicle)
+        self.register_buffer("last_aversive_pressure", torch.zeros(1))
+
     def forward(self, floating_thought: torch.Tensor,
                 nt_vec: torch.Tensor,
                 threat: torch.Tensor,
@@ -136,3 +163,61 @@ class QualiaState(nn.Module):
             "thought_nt_demand": thought_nt_demand,
             "thought_valence": thought_valence,
         }
+
+    # ── Homeostatic warp of the GWS broadcast ────────────────────────────────
+
+    def warp_broadcast(self,
+                        broadcast: torch.Tensor,
+                        homeostatic: torch.Tensor | list[float] | None = None,
+                        ) -> torch.Tensor:
+        """Apply a homeostatic-pressure warp to a GWS broadcast vector.
+
+        broadcast:   (B, d_sem) — the mean GWS slot output for this pass
+        homeostatic: (B, 3) or list/Tensor of [energy, hydration, integrity]
+                     ∈ [0, 1]^3. If None, returns broadcast unchanged.
+
+        When any homeostatic variable drops below `aversive_threshold`
+        the aversive direction is added to the broadcast with magnitude
+        proportional to the deficit. When all three are healthy, the
+        appetitive direction nudges the broadcast slightly toward an
+        exploratory bias. Net effect: low energy → all incoming sensory
+        data is reinterpreted in the aversive subspace ("threatening" /
+        "urgent"); high energy → the same data feels safe / interesting.
+
+        The aversive pressure scalar is stored on `last_aversive_pressure`
+        and read by the brain to gate κ_neg vesicle emission.
+        """
+        if homeostatic is None:
+            return broadcast
+        if not isinstance(homeostatic, torch.Tensor):
+            homeostatic = torch.as_tensor(
+                homeostatic, dtype=broadcast.dtype, device=broadcast.device)
+        if homeostatic.dim() == 1:
+            homeostatic = homeostatic.unsqueeze(0)
+        # Deficit per channel (clamped to be non-negative)
+        deficit = (self.aversive_threshold - homeostatic).clamp(min=0.0)
+        # Weighted by per-homeostat gain
+        gain = self.homeostatic_gain.to(
+            device=homeostatic.device, dtype=homeostatic.dtype)
+        weighted_deficit = (deficit * gain).sum(dim=-1, keepdim=True)   # (B, 1)
+        # Surplus (when above threshold) contributes to appetitive bias
+        surplus = (homeostatic - self.aversive_threshold).clamp(min=0.0)
+        weighted_surplus = (surplus * gain).sum(dim=-1, keepdim=True)   # (B, 1)
+
+        # Warp direction (aversive dominates over appetitive — see __init__)
+        av = self.aversive_direction.to(dtype=broadcast.dtype).unsqueeze(0)
+        ap = self.appetitive_direction.to(dtype=broadcast.dtype).unsqueeze(0)
+        warped = (broadcast
+                  + weighted_deficit * av
+                  + self.appetitive_scale * weighted_surplus * ap)
+
+        # Persist the aversive pressure scalar (mean over batch)
+        with torch.no_grad():
+            self.last_aversive_pressure.copy_(
+                weighted_deficit.detach().mean().to(self.last_aversive_pressure.dtype))
+        return warped
+
+    def aversive_pressure(self) -> float:
+        """Last computed aversive-pressure scalar — used by the brain to
+        decide whether to emit a κ_neg vesicle this pass."""
+        return float(self.last_aversive_pressure.item())

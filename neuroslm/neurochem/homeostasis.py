@@ -76,3 +76,38 @@ class Homeostasis(nn.Module):
             "ema_loss":  float(self.ema_loss) if not torch.isnan(self.ema_loss) else None,
             "steps":     int(self.steps.item()),
         }
+
+    # ── Survival-variable decay per tick ─────────────────────────────────────
+
+    @torch.no_grad()
+    def step(self, survival_state: torch.Tensor,
+             decay: float = 0.01,
+             reward_action: bool = False,
+             reward_value: float = 0.0) -> torch.Tensor:
+        """Apply per-tick decay to the survival-variable vector.
+
+        survival_state: (3,) tensor — energy, hydration, integrity ∈ [0, 1].
+        decay:          per-tick passive depletion of energy + hydration.
+        reward_action:  when True, the agent took an action that yields a
+                        reward (e.g. consume food); ``reward_value`` is
+                        added to the appropriate channel(s).
+
+        Returns the updated survival_state (in-place). Integrity is
+        bled when energy or hydration drops below 0.1 (starvation).
+        """
+        s = survival_state
+        if s.numel() < 3:
+            return s
+        # Passive decay
+        s[0] = max(0.0, float(s[0]) - decay)         # energy
+        s[1] = max(0.0, float(s[1]) - decay)         # hydration
+        # Reward action: caller decides which channel
+        if reward_action and reward_value > 0:
+            # By default boost the most-depleted channel
+            idx_min = int(torch.argmin(s[:2]).item())
+            s[idx_min] = min(1.0, float(s[idx_min]) + reward_value)
+        # Starvation bleed
+        for i in (0, 1):
+            if s[i] < 0.10:
+                s[2] = max(0.0, float(s[2]) - 0.005)
+        return s

@@ -34,6 +34,15 @@
     - 10.7 Sleep-Cycle CLS (PC distillation + trophic renormalisation)
     - 10.8 DNC Temporal-Link Matrix L
     - 10.9 κ_cause Vesicles
+11. [Cognitive Closure — Survival-Gated Action Loop](#11-cognitive-closure--survival-gated-action-loop)
+    - 11.1 GridWorld Environment (10×10 SHRDLU)
+    - 11.2 Sensory VAE Front-End
+    - 11.3 Latent Qualia Manifold Q & Homeostatic Warp
+    - 11.4 κ_neg Aversive Vesicles
+    - 11.5 Basal Ganglia VQH + Expert Gating
+    - 11.6 NAcc Reward-Prediction-Error
+    - 11.7 SurvivalCausalHead (action → ΔS_{t+1})
+    - 11.8 Homeostasis.step Tick
 
 ---
 
@@ -1239,4 +1248,172 @@ Awakening is propagated via `Brain.set_awakened(True)`, called from `train.py` a
 
 ---
 
-*Last updated: 2026-05-13. Source of truth: `neuroslm/` on branch `tpu`.*
+---
+
+## 11. Cognitive Closure — Survival-Gated Action Loop
+
+*The embodied half of BRIAN. Where §10 covers post-awakening narrative + causal memory over text, §11 closes the loop on action: the model **acts to survive** in a latent grid manifold and uses the resulting survival signal to shape its own neurochemistry, attractor structure, and policy memory.*
+
+All components in this section are constructed at brain init time (parameters round-trip in checkpoints) and are **idle for text-only training**. They only fire when the embodied loop is active — `Brain.ingest_grid_frame(frame)` and `Brain.tick_homeostasis(...)` are the entry points the embodied runner calls per env step.
+
+### 11.1 GridWorld Environment (10×10 SHRDLU)
+
+*`neuroslm/env/grid_world.py` — `GridWorld`, `GridFrame`*
+
+A 10×10 cell grid populated with 7 tile types (`EMPTY`, `AGENT`, `FOOD`, `WATER`, `OBSTACLE`, `RUDE_USER`, `FRIENDLY`). The agent issues one of 6 discrete actions per tick: `NOOP / UP / DOWN / LEFT / RIGHT / INTERACT`.
+
+Each tick emits a `GridFrame` carrying **three parallel sensory streams**:
+
+| Stream | Shape | Content |
+|---|---|---|
+| `vision` | `(10, 10, 7)` one-hot | Spatial block positions, agent stamped on top |
+| `affordance` | `dict[str → list]` | Typed adjacency relations (`above`, `below`, `left_of`, `right_of`, `next_to`, `on_top_of`) over occupied cells |
+| `homeostatic` | `(3,)` ∈ `[0,1]³` | `(energy, hydration, integrity)` — the agent's internal state |
+
+Plus the frame's `reward`, `survival_pressure`, `agent_pos`, `tick`, `caption`, and `done` flag.
+
+**Dynamics:**
+
+  • `INTERACT` on `FOOD` → +0.5 energy, tile cleared.
+  • `INTERACT` on `WATER` → +0.5 hydration, tile cleared.
+  • `INTERACT` on `RUDE_USER` → −0.20 integrity.
+  • Adjacency to `RUDE_USER` → −0.02 integrity per tick.
+  • Adjacency to `FRIENDLY` + `INTERACT` → +0.05 integrity.
+  • Every tick: energy and hydration each decay by `decay_per_tick = 0.01`.
+  • Starvation (E or H < 0.1) bleeds integrity at −0.005 per tick.
+  • Episode terminates when integrity ≤ 0.
+
+`GridWorld.stream(policy_fn)` is an infinite generator that calls the policy each tick and yields the resulting frame — `Brain.run_continuous` is meant to consume from it directly.
+
+### 11.2 Sensory VAE Front-End
+
+*`neuroslm/modules/sensory.py` — `SensoryVAE`*
+
+A tiny β-VAE that compresses one `GridFrame` into the bowtie's `d_sem` manifold:
+
+  • **Vision encoder**: 2-conv stack `(7, 10, 10) → (16, 10, 10) → (32, 5, 5)` → flatten → `d_sem / 2`.
+  • **Homeostatic encoder**: 2-layer MLP `(3,) → d_sem / 4`.
+  • **Affordance encoder**: 2-layer MLP on the 6-vec of relation counts → `d_sem / 4`.
+  • **Mix + posterior heads** produce `(μ, log σ²) ∈ ℝ^{d_sem}`; reparameterise → `z`.
+  • **Decoder** reconstructs only the vision channel (homeostat + affordance are too low-dim to need decode; KL pressure shapes their slice of z).
+
+Loss: `MSE(decoded, vision) + β · KL(N(μ,σ²) || N(0,I))`. Trained as part of the auxiliary loss block, gated by `_aux_w_scale` like every other aux objective.
+
+`Brain.ingest_grid_frame(frame)` calls `SensoryVAE.encode_frame` to produce the residual that the embodied loop injects into the bowtie.
+
+### 11.3 Latent Qualia Manifold Q & Homeostatic Warp
+
+*`neuroslm/modules/qualia.py` — `QualiaState.warp_broadcast`*
+
+The Q-manifold biases the GWS broadcast mean by a learnable direction whose magnitude scales with homeostatic deficit:
+
+$$\text{deficit}_c = \max(0, \tau_{\text{av}} - s_c), \quad \text{surplus}_c = \max(0, s_c - \tau_{\text{av}})$$
+
+$$D = \sum_c g_c \cdot \text{deficit}_c, \quad S = \sum_c g_c \cdot \text{surplus}_c$$
+
+$$\text{warp}(b) = b + D \cdot \hat{n}_{\text{av}} + \alpha_S \cdot S \cdot \hat{n}_{\text{ap}}$$
+
+with aversive threshold $\tau_{\text{av}} = 0.20$, per-channel gains $g = (1.5, 1.0, 2.0)$ for energy/hydration/integrity, appetitive scale $\alpha_S = 0.04$. The aversive direction $\hat{n}_{\text{av}}$ and appetitive direction $\hat{n}_{\text{ap}}$ are learnable; aversive is initialised at 10× the magnitude of appetitive so the warp behaviour is asymmetric from step 0 (starvation → strong reinterpretation; satiety → mild bias).
+
+`QualiaState.aversive_pressure()` exposes the scalar $D$ for downstream gating (§11.4). **Test `test_survival_imperative_qualia_shift`** confirms that setting energy to 0.05 produces a substantially higher aversive pressure than full-health, with a warp magnitude ≥ 2× the healthy bias.
+
+### 11.4 κ_neg Aversive Vesicles
+
+*`neuroslm/neurochem/vesicles.py`*
+
+New vesicle type `TOPIC_NEG = 5` (raising `N_VESICLE_TYPES = 6`). Emitted in `Brain.ingest_grid_frame` whenever `QualiaState.aversive_pressure() > 0.10`. The vesicle carries the homeostat-warped sensory latent `z` as its content; it migrates from the GWS module through the vesicle-pool's learnable transition matrix `T` — by training-time these routes preferentially terminate at the **ReasoningCortex** to stabilise escape / foraging attractor schemas.
+
+This is the inverse of the κ_cause vesicle (§10.9): κ_cause locks in *learned* high-causation pathways, κ_neg drives *novel* search when survival pressure rises.
+
+### 11.5 Basal Ganglia VQH + Expert Gating
+
+*`neuroslm/modules/basal_ganglia.py` — `BasalGanglia.select_option`*
+
+The continuous action vector from the existing Go/NoGo selection is now additionally quantised onto a **discrete option lattice** (`n_options = 16` learnable codebook entries). Each option carries:
+
+  • a key vector `k_i ∈ ℝ^{d_action}` (matched against the proposer via cosine similarity),
+  • an **expert-routing logit** triplet `e_i ∈ ℝ^{n_experts}` with `n_experts = 3` covering `{Math, Reasoning, Motor}`.
+
+VQ-VAE-style straight-through quantisation. The standard codebook + commitment loss:
+
+$$\mathcal{L}_{VQ} = \|k_{i^*} - \text{sg}[a]\|^2 + \beta \cdot \|\text{sg}[k_{i^*}] - a\|^2, \quad \beta = 0.25$$
+
+`select_option(action, da_bias)` returns `(option_idx, expert_probs, vq_loss, value_pred)`. The expert-routing distribution gates which downstream expert cortex actually drives the next motor output — the BG is now functioning as a **discrete cortical controller**, not just an action filter.
+
+### 11.6 NAcc Reward-Prediction-Error
+
+*`neuroslm/modules/basal_ganglia.py` — `BasalGanglia.nacc_rpe`, `update_option_value`*
+
+A small 2-layer value head over `(thought, action) → ℝ` predicts the expected survival-aligned reward of the current (state, action) pair. After observing the env's actual survival outcome, the brain computes:
+
+$$\text{RPE} = r_{\text{actual}} - \hat{V}(s, a)$$
+
+Positive RPE → the brain releases a DA spike (read by `TransmitterSystem.release("DA", ...)`). The DA spike then:
+
+  1. Boosts the **option's persistent policy value** via `update_option_value(idx, rpe, lr=0.1)`: EMA-blends the option's `option_da_value` toward the RPE.
+  2. Amplifies trophic factor release on the active edges (the Φ-coupled BDNF mechanism, §6.2) — turning successful survival actions into structural plasticity (kernel rank increase in the NeuralGeometryAdapters that mediate the policy).
+  3. Stabilises the current Φ-structure in the hippocampal hypergraph (§4.2) by raising the salience tag of recent episodes.
+
+**Test `test_basal_ganglia_policy_adaptation`** confirms that 100 +0.8 RPE updates on a target option pull its DA-value above 0.5 while leaving the other 15 options near zero.
+
+### 11.7 SurvivalCausalHead — action → ΔS_{t+1}
+
+*`neuroslm/modules/survival_causal.py` — `SurvivalCausalHead`*
+
+The sister of `ActualCausationHead`. Where §10.2 estimates module→module actual causation across the bowtie, this head estimates **action → next-step survival contribution**:
+
+$$\alpha_{\text{surv}}(a_t) = \sigma\!\left(\|f(a_t) - f(a_{\text{baseline}})\|^2\right)$$
+
+with $f : \mathbb{R}^{d_{\text{action}}} \to \mathbb{R}^3$ a small MLP that predicts $\Delta S_{t+1} = (S_{t+1} - S_t)$ from the action embedding, and $a_{\text{baseline}}$ an EMA of recent action embeddings.
+
+Trained via the MSE auxiliary loss `loss(action, actual_delta_S)`. The output `α_surv` is the scalar that tells the brain "this action class meaningfully altered survival" — read by the trophic system to gate BDNF release on the active pathway. **Test `test_world_model_causal_predictivity`** confirms that 40 training epochs on a deterministic action → ΔS dataset drop the predictor's MSE by ≥ 50%.
+
+### 11.8 Homeostasis.step Tick
+
+*`neuroslm/neurochem/homeostasis.py` — `Homeostasis.step`*
+
+Per-tick decay applied by the embodied loop:
+
+  • Energy and hydration each decrement by `decay = 0.01`.
+  • When `reward_action=True`, the channel that is currently most depleted is incremented by `reward_value` (clamped to 1.0).
+  • Starvation (E or H < 0.10) bleeds integrity at −0.005 per tick.
+
+This is invariant to the env: the env's own `step()` applies the same decay rule, so the agent's *internal* survival_state (held on the Brain as a buffer) stays in lockstep with the env's external one. `Brain.tick_homeostasis(reward_action, reward_value)` is the entry point.
+
+### 11.9 Wiring Summary
+
+```text
+GridWorld.step(action)
+   │
+   ├── GridFrame {vision, affordance, homeostatic, reward, survival_pressure}
+   │
+   ▼
+Brain.ingest_grid_frame(frame)
+   │
+   ├── SensoryVAE.encode_frame(frame)             → z ∈ ℝ^{d_sem}
+   ├── QualiaState.warp_broadcast(z, homeostatic) → z_warped (aversive bias)
+   ├── if aversive_pressure > 0.10:
+   │     VesiclePool.synthesize_typed(z, TOPIC_NEG, source=GWS)
+   │     → migrates → ReasoningCortex
+   ├── Brain.survival_state ← frame.homeostatic
+   │
+   ▼
+[BOWTIE FORWARD PASS — modified by z_warped + κ_neg vesicles]
+   │
+   ▼
+BasalGanglia.forward(...)            → continuous action a
+BasalGanglia.select_option(a)        → discrete option_idx + expert_probs
+                                       + vq_loss
+BasalGanglia.nacc_rpe(...)           → RPE; +RPE → DA release → BDNF amp
+SurvivalCausalHead(action)           → α_surv → BDNF on active pathway
+BasalGanglia.update_option_value(idx, rpe)   ← policy memory
+   │
+   ▼
+Brain.tick_homeostasis(reward_action=bool(rpe>0), reward_value=rpe.clamp(0,1))
+```
+
+The closed loop runs at the env's tick rate (10 Hz default); the bowtie's forward pass is what shapes the next action.
+
+---
+
+*Last updated: 2026-05-13. Source of truth: `neuroslm/` on branch `master`.*
