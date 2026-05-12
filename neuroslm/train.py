@@ -340,27 +340,47 @@ def main():
         resume_path = args.resume
         if resume_path == "latest":
             import glob as _glob
+            # Checkpoint streams are partitioned by (preset, optimizer,
+            # baseline-or-not). `--resume latest` only matches files in the
+            # current run's stream — an Adafactor checkpoint can never be
+            # picked up by an AdamW resume, so they coexist on disk.
+            _otag  = f"_{args.optimizer}"
+            _bflag = "_baseline" if args.baseline else ""
+            _prefix = f"neuroslm_{args.preset}{_otag}{_bflag}"
+
+            def _matches_stream(path: str) -> bool:
+                name = os.path.basename(path)
+                if not name.startswith(_prefix):
+                    return False
+                # Non-baseline runs must not accidentally pick up baseline
+                # files (whose names extend the prefix with `_baseline`).
+                if not args.baseline and name.startswith(
+                        f"neuroslm_{args.preset}{_otag}_baseline"):
+                    return False
+                return True
+
             # With --overwrite_ckpt prefer the fixed _latest file
-            _latest_fixed = os.path.join(
-                args.ckpt_dir,
-                f"neuroslm_{args.preset}_{'baseline_' if args.baseline else ''}latest.pt")
+            _latest_fixed = os.path.join(args.ckpt_dir, f"{_prefix}_latest.pt")
             if args.overwrite_ckpt and os.path.exists(_latest_fixed):
                 resume_path = _latest_fixed
             else:
-                candidates = sorted(
-                    _glob.glob(os.path.join(args.ckpt_dir, "*.pt")),
-                    key=lambda f: os.path.getmtime(f))
+                candidates = [f for f in _glob.glob(
+                                os.path.join(args.ckpt_dir, "*.pt"))
+                              if _matches_stream(f)]
+                candidates.sort(key=lambda f: os.path.getmtime(f))
                 if not candidates:
-                    candidates = sorted(
-                        _glob.glob(os.path.join(
-                            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "lfs_checkpoints", "*.pt")),
-                        key=lambda f: os.path.getmtime(f))
+                    _lfs = os.path.join(
+                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "lfs_checkpoints")
+                    candidates = [f for f in _glob.glob(os.path.join(_lfs, "*.pt"))
+                                  if _matches_stream(f)]
+                    candidates.sort(key=lambda f: os.path.getmtime(f))
                 resume_path = candidates[-1] if candidates else None
                 if resume_path:
                     print(f"[train] auto-found latest checkpoint: {resume_path}", flush=True)
                 else:
-                    print("[train] no checkpoint found, training from scratch", flush=True)
+                    print(f"[train] no checkpoint found for stream {_prefix}* "
+                          f"— training from scratch", flush=True)
 
         if resume_path and Path(resume_path).exists():
             try:
@@ -375,40 +395,15 @@ def main():
                     start_step = 0
                 else:
                     if "optim" in ckpt:
-                        # Skip optimizer-state load when the optimizer class
-                        # has changed (e.g. resuming an Adafactor checkpoint
-                        # with --optimizer adamw). Without this guard,
-                        # load_state_dict silently replaces param_groups with
-                        # the saved optimizer's keys, then .step() crashes
-                        # later with KeyError on missing hyperparams.
-                        _ckpt_opt = ckpt.get("optim_class")
-                        _cur_opt  = type(optim).__name__
-                        if _ckpt_opt is not None and _ckpt_opt != _cur_opt:
-                            print(f"[train] ⚠ optimizer class changed "
-                                  f"({_ckpt_opt} → {_cur_opt}); "
-                                  f"keeping model weights, starting optimizer state fresh",
+                        # Checkpoints are partitioned by optimizer in the
+                        # filename (see save block + resume glob), so a class
+                        # mismatch here only happens when --resume points at
+                        # an explicit path the user chose to override.
+                        try:
+                            optim.load_state_dict(ckpt["optim"])
+                        except Exception as e:
+                            print(f"[train] could not restore optimizer state: {e}",
                                   flush=True)
-                        else:
-                            # Back-compat: older checkpoints didn't store
-                            # optim_class. Probe the saved param_groups for
-                            # hyperparam keys the current optimizer requires.
-                            _saved_groups = ckpt["optim"].get("param_groups") or []
-                            _saved_keys   = set(_saved_groups[0].keys()) if _saved_groups else set()
-                            _need_keys    = (set(optim.param_groups[0].keys())
-                                             if optim.param_groups else set())
-                            # AdamW needs 'betas', Adafactor needs 'relative_step'
-                            _required = {"betas"} if _cur_opt == "AdamW" else (
-                                        {"relative_step"} if _cur_opt == "Adafactor" else set())
-                            if _required and not _required.issubset(_saved_keys):
-                                print(f"[train] ⚠ saved optimizer state lacks "
-                                      f"{sorted(_required)} required by {_cur_opt}; "
-                                      f"starting optimizer state fresh", flush=True)
-                            else:
-                                try:
-                                    optim.load_state_dict(ckpt["optim"])
-                                except Exception as e:
-                                    print(f"[train] could not restore optimizer state: {e}",
-                                          flush=True)
                     start_step = ckpt.get("step", 0)
                     if not cfg.baseline:
                         mem_path = str(resume_path).replace(".pt", ".mem")
@@ -818,12 +813,16 @@ def main():
         if (step + 1) % args.save_every == 0 or (step + 1) == total_steps:
             tag = "" if args.mode == "text" else f"_{args.mode}"
             bflag = "_baseline" if cfg.baseline else ""
+            otag = f"_{args.optimizer}"  # e.g. _adafactor / _adamw — partitions
+                                          # checkpoint streams so an Adafactor
+                                          # save and an AdamW save coexist on
+                                          # disk without ever clashing.
             if args.overwrite_ckpt:
                 # Fixed filename — overwritten every save, keeps LFS storage constant.
                 # Step number is stored inside the file so resume still works.
-                fname = f"neuroslm_{args.preset}{bflag}_latest.pt"
+                fname = f"neuroslm_{args.preset}{otag}{bflag}_latest.pt"
             else:
-                fname = f"neuroslm_{args.preset}{tag}{bflag}_{step+1}.pt"
+                fname = f"neuroslm_{args.preset}{otag}{bflag}{tag}_{step+1}.pt"
             path = Path(os.path.abspath(args.ckpt_dir)) / fname
             path.parent.mkdir(parents=True, exist_ok=True)
             save_dict = {
@@ -839,8 +838,11 @@ def main():
             torch.save(save_dict, path)
             if not cfg.baseline:
                 # ── Save portable memory checkpoint (.mem) ──
+                # Mirror the .pt stem (including optimizer + baseline + mode
+                # + step tags) so the resume logic's `.replace('.pt', '.mem')`
+                # always finds the matching memory file.
                 try:
-                    mem_path = path.parent / f"neuroslm_{args.preset}{tag}_{step+1}.mem"
+                    mem_path = path.with_suffix(".mem")
                     stats = brain.save_memory_checkpoint(mem_path)
                     print(f"[train] saved memory checkpoint {mem_path.name} | {stats}", flush=True)
                 except Exception as e:
