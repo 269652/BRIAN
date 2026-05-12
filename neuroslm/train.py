@@ -375,10 +375,40 @@ def main():
                     start_step = 0
                 else:
                     if "optim" in ckpt:
-                        try:
-                            optim.load_state_dict(ckpt["optim"])
-                        except Exception as e:
-                            print(f"[train] could not restore optimizer state: {e}", flush=True)
+                        # Skip optimizer-state load when the optimizer class
+                        # has changed (e.g. resuming an Adafactor checkpoint
+                        # with --optimizer adamw). Without this guard,
+                        # load_state_dict silently replaces param_groups with
+                        # the saved optimizer's keys, then .step() crashes
+                        # later with KeyError on missing hyperparams.
+                        _ckpt_opt = ckpt.get("optim_class")
+                        _cur_opt  = type(optim).__name__
+                        if _ckpt_opt is not None and _ckpt_opt != _cur_opt:
+                            print(f"[train] ⚠ optimizer class changed "
+                                  f"({_ckpt_opt} → {_cur_opt}); "
+                                  f"keeping model weights, starting optimizer state fresh",
+                                  flush=True)
+                        else:
+                            # Back-compat: older checkpoints didn't store
+                            # optim_class. Probe the saved param_groups for
+                            # hyperparam keys the current optimizer requires.
+                            _saved_groups = ckpt["optim"].get("param_groups") or []
+                            _saved_keys   = set(_saved_groups[0].keys()) if _saved_groups else set()
+                            _need_keys    = (set(optim.param_groups[0].keys())
+                                             if optim.param_groups else set())
+                            # AdamW needs 'betas', Adafactor needs 'relative_step'
+                            _required = {"betas"} if _cur_opt == "AdamW" else (
+                                        {"relative_step"} if _cur_opt == "Adafactor" else set())
+                            if _required and not _required.issubset(_saved_keys):
+                                print(f"[train] ⚠ saved optimizer state lacks "
+                                      f"{sorted(_required)} required by {_cur_opt}; "
+                                      f"starting optimizer state fresh", flush=True)
+                            else:
+                                try:
+                                    optim.load_state_dict(ckpt["optim"])
+                                except Exception as e:
+                                    print(f"[train] could not restore optimizer state: {e}",
+                                          flush=True)
                     start_step = ckpt.get("step", 0)
                     if not cfg.baseline:
                         mem_path = str(resume_path).replace(".pt", ".mem")
@@ -799,6 +829,7 @@ def main():
             save_dict = {
                 "model": brain.state_dict(),
                 "optim": optim.state_dict(),
+                "optim_class": type(optim).__name__,
                 "cfg": cfg.__dict__,
                 "step": step + 1,
                 "preset": args.preset,
