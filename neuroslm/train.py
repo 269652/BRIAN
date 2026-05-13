@@ -364,17 +364,34 @@ def main():
             if args.overwrite_ckpt and os.path.exists(_latest_fixed):
                 resume_path = _latest_fixed
             else:
+                # Rank by the step number in the filename. Step-numbered files
+                # always beat a `_latest.pt` of the same stream — otherwise an
+                # older `_latest.pt` (overwritten at a low step) can shadow a
+                # later step-numbered checkpoint just because its mtime is fresher.
+                import re as _re
+                _step_re = _re.compile(r"_(\d+)\.pt$")
+
+                def _step_of(path: str) -> tuple:
+                    name = os.path.basename(path)
+                    if name.endswith("_latest.pt"):
+                        # _latest files rank below any step-numbered file; among
+                        # themselves, mtime breaks ties
+                        return (0, os.path.getmtime(path))
+                    m = _step_re.search(name)
+                    step = int(m.group(1)) if m else 0
+                    return (1, step)
+
                 candidates = [f for f in _glob.glob(
                                 os.path.join(args.ckpt_dir, "*.pt"))
                               if _matches_stream(f)]
-                candidates.sort(key=lambda f: os.path.getmtime(f))
+                candidates.sort(key=_step_of)
                 if not candidates:
                     _lfs = os.path.join(
                         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "lfs_checkpoints")
                     candidates = [f for f in _glob.glob(os.path.join(_lfs, "*.pt"))
                                   if _matches_stream(f)]
-                    candidates.sort(key=lambda f: os.path.getmtime(f))
+                    candidates.sort(key=_step_of)
                 resume_path = candidates[-1] if candidates else None
                 if resume_path:
                     print(f"[train] auto-found latest checkpoint: {resume_path}", flush=True)
