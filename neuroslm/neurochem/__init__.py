@@ -12,7 +12,7 @@ Extended with:
   - LTP/LTD plasticity gating (NMDA, D1/D2, ACh, NE explore/exploit)
   - Substantia Nigra (SNc/SNr), PAG, hypothalamic CRH
 """
-from .transmitters import TransmitterSystem, NT_NAMES
+from .transmitters import TransmitterSystem, NT_NAMES, compute_mat, L_RANDOM_DEFAULT
 from .receptors import ReceptorBank, NTShapeRegistry, LatentReceptor, Receptor, GPCRBank
 from .projections import Projection, ProjectionGraph
 from .nuclei import (VTA, NucleusAccumbens, LocusCoeruleus, RapheNuclei,
@@ -26,7 +26,7 @@ from .mesolimbic_circuit import MesolimbicCircuit
 from .plasticity import PlasticityGate
 
 __all__ = [
-    "TransmitterSystem", "NT_NAMES",
+    "TransmitterSystem", "NT_NAMES", "compute_mat", "L_RANDOM_DEFAULT",
     "ReceptorBank", "NTShapeRegistry", "LatentReceptor", "Receptor", "GPCRBank",
     "Projection", "ProjectionGraph",
     "VTA", "NucleusAccumbens", "LocusCoeruleus", "RapheNuclei", "BasalForebrain",

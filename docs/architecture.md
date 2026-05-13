@@ -350,6 +350,25 @@ $$\text{out} = \sum_s \text{probs}_s \cdot (1 + 0.5 \cdot \text{ACh} \cdot \math
 
 **Lateral binding:** The thalamic routing probability vector `probs: (B, 5)` is logged as `routing` and fed into `ConsciousnessMetrics.update()` where its entropy measures the $\alpha$ oscillation proxy (high routing entropy → high alpha, broad idling; low entropy → focused, low alpha, high attention).
 
+#### 4.4.1 Stochastic Thalamic Exploration
+
+To prevent expert cortices from going dormant while the LM bootstraps on pure-text data, the router operates in a **stochastic ε-exploration** mode during training. With probability $\varepsilon$ the softmax distribution for a given batch item is replaced by a one-hot mass on a random **non-language** stream:
+
+```python
+# thalamus.py :: Thalamus.forward, training-only branch
+explore = (rand(B, 1) < ε_eff).bool()
+probs   = where(explore, one_hot(rand_int over {math, reasoning, spatial, social}), probs)
+```
+
+ε is **maturity-scaled** so young networks explore more aggressively:
+
+$$\varepsilon_{\text{eff}} \;=\; \varepsilon\cdot(1 - M_t)
+\qquad \varepsilon = 0.1\ \text{by default}$$
+
+At $M=0$ a 10% slice of every batch is rerouted into an expert; at $M=1$ exploration is off (the router's learned policy takes over). This guarantees the MathCortex / ReasoningCortex / spatial / social streams receive non-zero gradient even during pure language training, so their parameters develop a baseline vocabulary and the Major Complex retains a non-trivial Φ across modules.
+
+The choice of "non-language" pool (`EXPLORE_STREAMS = (1, 2, 3, 4)`) is deliberate: language already gets >99% of natural routing mass, so exploring into it would be a no-op. The rule is implemented as `torch.where` over a precomputed `one_hot` tensor → fully XLA-static, no Python branching on the trace.
+
 ---
 
 ## 5. Wiring Diagram — NeuralOrchestrator Re-entrant Loops
@@ -645,22 +664,50 @@ return layer_norm(x + out), W_fast
 | `eta` | `(B, 4)` |
 | `outer` | `(B, 4, 96, 96)` |
 
-### 6.4 Topological Maturation — Infancy → Awakening
+### 6.4 Topological Maturation — The Maturity Index (MAT)
 
-*`neuroslm/train.py` (per-step scheduler) and `neuroslm/brain.py` (forward-pass gates: `_aux_w_scale`, `_infancy`)*
+*`neuroslm/neurochem/transmitters.py::compute_mat`, `neuroslm/brain.py::update_maturity`, `neuroslm/train.py` (per-step scheduler)*
 
-Training proceeds in two distinct chemical regimes. The bio pipeline is structurally identical in both — only the **strength** of auxiliary objectives and the **activation** of decorative side-effects change.
+Training is governed by a continuous **Maturity Index** $M_t \in [0, 1]$ — a virtual "MAT protein" computed from the live LM loss:
 
-#### Infancy (step $< 5000$)
+$$M_t \;=\; \mathrm{clamp}\!\Bigl(1 - \frac{L_{\text{lm}}}{L_{\text{random}}},\ 0,\ 1\Bigr)
+\qquad L_{\text{random}} \approx \log(\text{vocab}) \approx 10.84$$
 
-The model is at near-random initialisation. Every non-LM signal (world prediction, motor decisions, Φ proxy, vesicle docking, NT homeostasis targets, oscillation spectra, consciousness metrics, hippocampal recall) is drawn from a noisy substrate where downstream targets carry no usable signal. Letting these systems run their full course at this stage corrupts the LM gradient and inflates wall-clock 3–4× per forward pass.
-
-During infancy the scheduler sets:
+The Brain stores a running EMA of $M_t$ as the buffer `brain.maturity`:
 
 ```
-brain._aux_w_scale  = 0.001     # uniform multiplier on every non-LM loss
-brain._infancy      = True      # gates decorative no-grad operations
-gws.slot_thresholds = 1.2       # raise ignition threshold to suppress saturation
+brain.maturity ← (1 - α)·brain.maturity + α·M_t        (α = 0.05)
+brain._infancy ← (brain.maturity < 0.3)                 # legacy gate, auto-derived
+```
+
+`update_maturity(lm_loss)` is called once per training step in `train.py`. The EMA smooths transient bumps so the fade-in does not whiplash on noisy mini-batches.
+
+#### Continuous "Fade-In" of expert cortices
+
+Replaces the hard binary switch with **convex-combination residuals**:
+
+$$h_{\text{out}} \;=\; (1 - m_{\text{eff}})\cdot h_{\text{in}} \;+\; m_{\text{eff}}\cdot \mathrm{Expert}(h_{\text{in}}),
+\qquad m_{\text{eff}} = \max(M_t,\,0.05)$$
+
+The 0.05 floor is a **noise broadcast** — at $M_t<0.1$ the network still "feels" the architectural boundary at 5% strength, so gradients reach the expert cortices long before they become load-bearing. `MathCortex.forward`, `ReasoningCortex.forward`, and the orchestrator's GWS-side integration all take `maturity` as a kwarg and apply this rule via simple arithmetic (XLA-static, no `if` branching).
+
+#### Maturity-aware GABA homeostasis
+
+A mature network is *allowed* to fire at higher variance because its activity is signal, not noise. The GABA PID controller (`neurochem/vesicles.py::PIDController.step`) shifts its target variance with $M_t$:
+
+$$\sigma^2_{\text{target,eff}} \;=\; \sigma^2_{\text{target}}\cdot(1 + 1.5\,M_t)
+\qquad \sigma^2_{\text{target}} = 0.5,\quad \text{range}\ 0.5\!\to\!1.25$$
+
+So the dampening cuts in at low $M_t$ (suppress bowtie screech during random-init) and relaxes as $M_t$ climbs.
+
+#### Legacy compute-skip gates (still useful)
+
+The pre-MAT infancy flag is now derived as `_infancy = (M < 0.3)` and used **only** for FLOP-saving compute skips (vesicle synthesis, trophic update, episodic-buffer writes) — they no longer affect the forward graph's correctness, just its wall-clock cost while signals are still noise.
+
+```
+brain._aux_w_scale  = 0.001 → 1.0          # ramps after awakening (see below)
+brain._infancy      = (M < 0.3)            # auto-derived, compute-skip only
+gws.slot_thresholds = lerp(1.2, 0.8, M/0.3)  # ignition threshold relaxes with M
 ```
 
 **Gated off in `brain.forward_lm`** (all guarded by `if not _in`):
@@ -697,16 +744,18 @@ gws.slot_thresholds = 1.2       # raise ignition threshold to suppress saturatio
 
 #### Awakening Transition
 
-Two conditions must be met simultaneously:
+Two conditions must be met **simultaneously**:
 
-1. **`step ≥ 5000`** (infancy minimum duration)
-2. **`lm_loss < 7.5`** (raw LM has stabilised below random; for vocab≈50k, ln(50k)≈10.84 is the random ceiling)
+1. **`brain.maturity > 0.3`** (the EMA-smoothed MAT has cleared the infancy band)
+2. **`lm_loss < 7.5`** (raw LM has stabilised below random; for vocab≈50k, $\ln(50\text{k})\approx 10.84$ is the random ceiling)
 
 When both hold, the scheduler sets `_maturation_awakened = True` permanently and:
 
-- `_infancy = False` — every gated operation above resumes
 - `homeostasis.observe` begins correcting NT bias/gain toward targets
-- Ramping of $\alpha$ begins
+- Auxiliary-loss ramping ($\alpha$) begins
+- Trophic structural plasticity and vesicle dynamics fully engage
+
+The step-count gate (formerly `step ≥ 5000`) is gone — awakening is now purely **performance-driven**, so a fast learner can awaken early and a slow learner can stay in linguistic-bootstrap mode for as long as it needs.
 
 #### Awakening Ramp
 
@@ -739,17 +788,27 @@ The infancy/awakening split implements **"linguistic first" convergence**: let t
 
 ## 7. Optimization & Infrastructure
 
-### 7.1 Adaptive Compute
+### 7.1 Adaptive Compute (Maturity-aware)
 
 #### Mixture of Depths (MoD)
 
-*`neuroslm/modules/mixture_of_depths.py` — `MoDRouter`*
+*`neuroslm/modules/mixture_of_depths.py` — `MoDRouter`, `MoDBlock`*
 
 Each `MoDBlock` routes only the top-$C$ "hard" tokens through the transformer sublayer; the rest skip via residual:
 
-$$C = \max\!\left(1,\ \lfloor T \cdot \rho \rfloor\right), \quad \rho = \rho_0 \cdot \left(0.5 + \sigma(W_\text{nt} \cdot \text{NT})\right)$$
+$$C = \max\!\left(1,\ \lfloor T \cdot \rho \rfloor\right), \quad \rho = \rho_0 \cdot \left(0.5 + \sigma(W_\text{nt} \cdot \text{NT})\right) \cdot s_{\text{mat}}$$
 
 $\rho_0$ is the base capacity ratio (`mod_capacity=0.8` for xl). The NT modulation adjusts capacity dynamically: high ACh → higher capacity (more tokens processed in full), high NE → lower (focused on hardest tokens only).
+
+**Maturity gating** ($s_{\text{mat}}$ via the per-block `_maturity_gate` attribute set by Brain before each forward):
+
+| $M_t$ band | MoD behaviour | Why |
+|---|---|---|
+| $M_t < 0.2$ | **Hard skip** — block returns input as-is (zero FLOPs in attn+MLP) | Expert layers add ~noise while the LM head is still bootstrapping |
+| $0.2 \le M_t < 1$ | $s_{\text{mat}} = 0.5 + 0.5\cdot\frac{M_t - 0.2}{0.8}$, scales router capacity 0.5×→1.0× | Gradual return of expert capacity as the network matures |
+| $M_t = 1$ | Full base capacity | Steady-state behaviour matches the pre-MAT release |
+
+The hard skip is a Python branch on a plain-Python `float` attribute (set outside the trace), so XLA does not retrace per-step — `_maturity_gate` is read once per forward and the chosen graph is reused.
 
 Router: 2-layer MLP with zero-init (all tokens start with equal score, routing emerges during training).
 

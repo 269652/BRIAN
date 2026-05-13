@@ -173,11 +173,20 @@ class ReasoningCortex(BrainModule):
     # ------------------------------------------------------------------
     def forward(self, x: torch.Tensor,
                 vesicle_gate: float = 0.0,
-                gws_context: torch.Tensor | None = None) -> torch.Tensor:
+                gws_context: torch.Tensor | None = None,
+                maturity: float | None = None) -> torch.Tensor:
         """x: (B, d_sem) or (B, S, d_sem).
+
         vesicle_gate ∈ [0, 1]: strength of reasoning-cortex activation.
         gws_context: optional (B, d_sem) — Global Workspace broadcast used as
                      plasticity context for the Hebbian fast-weight binding.
+        maturity: optional MAT scalar in [0, 1] — convex fade-in weight applied
+                  to the Hopfield-retrieved residual:
+                      h_out = (1 - m_eff)·h_in + m_eff·Expert(h_in)
+                  with m_eff = max(maturity, 0.05) so a 5% noise broadcast
+                  flows through even at very low maturity. None preserves
+                  legacy (full-weight) behaviour.
+
         Returns same shape as x.
         """
         if vesicle_gate < 1e-3:
@@ -212,7 +221,9 @@ class ReasoningCortex(BrainModule):
         state = h
 
         enrichment = self.out_proj(state)
-        enriched   = x_flat + vesicle_gate * enrichment
+        # Maturity fade-in: 5% noise floor pre-awakening, full weight at M ≈ 1.0.
+        m_eff = 1.0 if maturity is None else max(float(maturity), 0.05)
+        enriched   = x_flat + m_eff * vesicle_gate * enrichment
 
         # Hebbian fast-weight binding stage — bind GWS context ↔ retrieved schema
         if self.hfw is not None and vesicle_gate > 0.1:

@@ -214,7 +214,21 @@ class Brain(nn.Module):
         # Infancy flag — when True, structural/homeostatic side-effects
         # (trophic update, vesicle dynamics) are suppressed so they don't
         # ride on random-init gradients.
+        # NOTE: hard infancy gates are being phased out in favour of the
+        # continuous Maturity Index (`maturity`); this flag is now derived
+        # from `maturity < 0.3` inside update_maturity. Default is False
+        # so test/inference paths start "mature" (full module fade-in),
+        # while train.py drives it back to True via update_maturity()
+        # whenever the LM loss is still near random init.
         self._infancy        = False
+        # ── Maturity Index (MAT virtual protein) ──────────────────────────
+        # Continuous scalar in [0, 1] computed as 1 - L_lm / L_random and
+        # smoothed with an EMA. Drives expert fade-in, MoD compute gating,
+        # ε-routing strength, and GABA tolerance. Updated by train.py via
+        # `brain.update_maturity(lm_loss)`. Defaults to 1.0 so the expert
+        # cortices use full-weight residuals outside training (tests etc.).
+        self.register_buffer("maturity", torch.ones(()))
+        self._maturity_ema_alpha = 0.05   # EMA smoothing (slow integration)
         # Cached previous-step module outputs (for ActualCausationHead's
         # (t, t+1) transition). Populated post-awakening in forward_lm.
         self._prev_module_outputs: torch.Tensor | None = None
@@ -691,6 +705,35 @@ class Brain(nn.Module):
         }
 
     # ------------------------------------------------------------------
+    # Maturity Index (MAT virtual protein)
+    # ------------------------------------------------------------------
+    @torch.no_grad()
+    def update_maturity(self, lm_loss: float, l_random: float | None = None) -> float:
+        """Update the smoothed Maturity Index from the current LM loss.
+
+        M_t = clamp(1.0 - L_lm / L_random, 0, 1) with L_random ≈ log(vocab).
+        Stored as an EMA on `self.maturity`. Drives the continuous fade-in
+        of expert cortices, MoD compute, ε-routing strength, and GABA
+        tolerance.
+
+        Side-effect: also flips `self._infancy` based on M < 0.3 so legacy
+        code paths that still consult the flag continue to work.
+        """
+        from .neurochem.transmitters import compute_mat, L_RANDOM_DEFAULT
+        l_random = l_random if l_random is not None else L_RANDOM_DEFAULT
+        m_now = compute_mat(lm_loss, l_random)
+        alpha = self._maturity_ema_alpha
+        cur = float(self.maturity.item())
+        m_ema = (1.0 - alpha) * cur + alpha * m_now
+        self.maturity.fill_(m_ema)
+        self._infancy = bool(m_ema < 0.3)
+        return m_ema
+
+    def maturity_scalar(self) -> float:
+        """Plain-Python float of the current MAT level (avoids autograd)."""
+        return float(self.maturity.detach().item())
+
+    # ------------------------------------------------------------------
     # Training forward pass
     # ------------------------------------------------------------------
     def forward_lm(self, ids: torch.Tensor,
@@ -742,6 +785,14 @@ class Brain(nn.Module):
                     _calm_heads.append((blk.calm_head, blk.calm_head.base_threshold))
                     blk.calm_head.base_threshold = min(
                         0.99, blk.calm_head.base_threshold * _arousal_boost)
+
+        # Propagate the current MAT level to every MoD block so its compute
+        # gate (skip when M < 0.2) can take effect for this forward pass.
+        # Plain Python float → no XLA cost, set once outside the traced graph.
+        _mat_for_lang = self.maturity_scalar() if hasattr(self, "maturity_scalar") else 1.0
+        for _blk in self.language.blocks:
+            if hasattr(_blk, "_maturity_gate"):
+                _blk._maturity_gate = _mat_for_lang
 
         # 1) Language cortex
         lang_thought = self.rcpt_lang.modulate(
@@ -796,8 +847,9 @@ class Brain(nn.Module):
         # Re-entry feeds BOTH the routing decision (top-down bias on the
         # thalamic gate) and the post-routing residual (so the bias survives
         # the softmax gate even when the router prefers a different stream).
-        routed, routing_probs = self.thalamus(assoc + _reentry,
-                                              nt, return_routing=True)
+        routed, routing_probs = self.thalamus(
+            assoc + _reentry, nt, return_routing=True,
+            maturity=self.maturity_scalar() if hasattr(self, "maturity_scalar") else None)
         routed = routed + _reentry
         routed = self.rcpt_thal.modulate(routed.unsqueeze(1), nt).squeeze(1)
         self.last_routing = routing_probs.detach()
@@ -901,16 +953,21 @@ class Brain(nn.Module):
         # ReasoningCortex: Hopfield pattern completion (κ_reason gate)
         # GWS broadcast is also passed as plasticity context — this is the
         # dual-timescale Hebbian fast-weight binding stage at each expert.
+        # Maturity (MAT) drives a 5%-noise-floor → full-weight fade-in on the
+        # expert residual (handled inside each cortex).
         _slots_mean = slots.mean(1)  # (B, d_sem) — batch aggregate for experts
         _gws_ctx    = _slots_mean.detach()   # broadcast as plasticity context
+        _mat = self.maturity_scalar() if hasattr(self, "maturity_scalar") else 1.0
         if _math_gate > 0.02:
             _slots_mean = self.math_cortex(_slots_mean,
                                            vesicle_gate=_math_gate,
-                                           gws_context=_gws_ctx)
+                                           gws_context=_gws_ctx,
+                                           maturity=_mat)
         if _reason_gate > 0.02:
             _slots_mean = self.reasoning_cortex(_slots_mean,
                                                 vesicle_gate=_reason_gate,
-                                                gws_context=_gws_ctx)
+                                                gws_context=_gws_ctx,
+                                                maturity=_mat)
         # Inject expert enrichment back into slot representations
         if _math_gate > 0.02 or _reason_gate > 0.02:
             slots = slots + 0.2 * _slots_mean.unsqueeze(1)
@@ -2028,8 +2085,10 @@ class Brain(nn.Module):
             # Flattened across batch and modules; σ²_global used to control GABA decay
             global_variance = _mod_acts.reshape(B, -1).var().item()
             surprise_signal = novelty.unsqueeze(-1) * state["floating_thought"]
+            _mat_vp = self.maturity_scalar() if hasattr(self, "maturity_scalar") else 0.0
             vesicle_mod = self.vesicle_pool.tick(
-                _mod_acts, surprise=surprise_signal, global_variance=global_variance)
+                _mod_acts, surprise=surprise_signal,
+                global_variance=global_variance, maturity=_mat_vp)
             # Apply GWS slot modulation (module 0 = GWS)
             slots_enriched = slots_enriched + vesicle_mod[:, 0:1, :].expand_as(slots_enriched)
 

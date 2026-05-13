@@ -9,9 +9,16 @@ Each NT has:
 Updates use simple Euler integration. State is kept as plain tensors so it
 participates in the autograd graph for the duration of a batch (we detach
 between batches to prevent unbounded graph growth).
+
+Maturity Index (MAT virtual protein):
+  M_t = clamp(1.0 - L_lm / L_random, 0, 1)
+  where L_random = log(vocab_size) ≈ 10.84 for the default GPT-2 BPE.
+  Drives the continuous fade-in of expert cortices, MoD compute, and the
+  GABA homeostatic dampening tolerance.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+import math
 import torch
 import torch.nn as nn
 
@@ -20,6 +27,28 @@ import torch.nn as nn
 NT_NAMES = ("DA", "NE", "5HT", "ACh", "eCB", "Glu", "GABA")
 N_NT = len(NT_NAMES)
 NT_INDEX = {n: i for i, n in enumerate(NT_NAMES)}
+
+
+# Random-init LM loss floor for a 50257-vocab tokenizer (GPT-2 BPE):
+# log(50257) ≈ 10.825
+L_RANDOM_DEFAULT: float = math.log(50257)
+
+
+def compute_mat(lm_loss: float, l_random: float = L_RANDOM_DEFAULT) -> float:
+    """Compute MAT (Maturity Index) from current LM loss.
+
+        M_t = clamp(1.0 - L_lm / L_random, 0, 1)
+
+    Returns a scalar in [0, 1]. 0 = freshly-initialised, 1 = perfect prediction.
+    """
+    if l_random <= 0:
+        return 0.0
+    m = 1.0 - (float(lm_loss) / float(l_random))
+    if m < 0.0:
+        return 0.0
+    if m > 1.0:
+        return 1.0
+    return m
 
 
 @dataclass

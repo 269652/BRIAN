@@ -144,13 +144,37 @@ class MoDBlock(nn.Module):
         self.n1 = RMSNorm(dim)
         self.n2 = RMSNorm(dim)
         self.mlp = SwiGLU(dim)
+        self._base_capacity_ratio = capacity_ratio
+        # Maturity-aware compute gating: set externally by Brain/Language before
+        # each forward pass. 1.0 = full decoder capacity (legacy). When < 0.2
+        # the block becomes a pure passthrough to save FLOPs while the network
+        # is still language-bootstrapping. Plain Python float → XLA-static.
+        self._maturity_gate: float = 1.0
 
     def forward(self, x: torch.Tensor,
                 nt: torch.Tensor | None = None) -> torch.Tensor:
         B, T, D = x.shape
 
+        # ── Maturity-aware compute skip ────────────────────────────────────
+        # If MAT < 0.2 the expert layers add ~random noise; cheaper and safer
+        # to passthrough until the LM head has stabilised. This is a static
+        # Python branch (maturity is set outside the trace), so XLA is happy.
+        if self._maturity_gate < 0.2:
+            return x
+
+        # Maturity also softly modulates the router capacity so deeper layers
+        # come online gradually (0.2..1.0 maps to 0.5..1.0× of base capacity).
+        # The router itself uses the value via the attribute below.
+        m = self._maturity_gate
+        eff_cap_scale = 0.5 + 0.5 * min(1.0, max(0.0, (m - 0.2) / 0.8))
+        # Temporarily override capacity_ratio for this call only
+        _orig_cap = self.router.capacity_ratio
+        self.router.capacity_ratio = _orig_cap * eff_cap_scale
+
         # Route: select which tokens get processed
         selected_x, indices, router_logits = self.router(x, nt)
+        # Restore capacity_ratio for any external readers / aux loss
+        self.router.capacity_ratio = _orig_cap
         C = selected_x.size(1)
 
         if C == T:

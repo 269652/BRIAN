@@ -147,12 +147,21 @@ class MathCortex(BrainModule):
     # ------------------------------------------------------------------
     def forward(self, x: torch.Tensor,
                 vesicle_gate: float = 0.0,
-                gws_context: torch.Tensor | None = None) -> torch.Tensor:
+                gws_context: torch.Tensor | None = None,
+                maturity: float | None = None) -> torch.Tensor:
         """x: (B, d_sem) or (B, S, d_sem).
-        vesicle_gate ∈ [0, 1]: strength of math-cortex activation.
+
+        vesicle_gate ∈ [0, 1]: topic-routing strength (math-cortex activation).
         gws_context: optional (B, d_sem) — Global Workspace broadcast used as
                      plasticity context for the Hebbian fast-weight layer.
                      Enables dual-timescale binding (slow facts × fast episodic).
+        maturity: optional MAT scalar in [0, 1] — convex fade-in weight applied
+                  to the expert residual:
+                      h_out = (1 - m_eff)·h_in + m_eff·Expert(h_in)
+                  with m_eff = max(maturity, 0.05) so a 5% noise broadcast
+                  flows through even at very low maturity. None preserves
+                  legacy (full-weight) behaviour.
+
         Returns same shape as x.
         """
         if vesicle_gate < 1e-3:
@@ -184,7 +193,10 @@ class MathCortex(BrainModule):
             wm_enrichment = torch.zeros_like(x_flat)
 
         enrichment = fact_enrichment + 0.3 * wm_enrichment
-        enriched   = x_flat + vesicle_gate * enrichment
+        # Maturity fade-in: m_eff = max(M, 0.05) → 5% noise floor pre-awakening,
+        # full weight once M ≥ ~1.0. None → legacy full-weight passthrough.
+        m_eff = 1.0 if maturity is None else max(float(maturity), 0.05)
+        enriched   = x_flat + m_eff * vesicle_gate * enrichment
 
         # 3) Hebbian fast-weight binding (final stage)
         # Bind current GWS state ↔ discovered math pattern for within-inference

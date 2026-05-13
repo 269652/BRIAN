@@ -58,12 +58,20 @@ class PIDController:
         self.integral = 0.0
         self.prev_error = 0.0
 
-    def step(self, variance: float, target: float = 0.5) -> float:
+    def step(self, variance: float, target: float = 0.5,
+             maturity: float = 0.0) -> float:
         """Compute PID output to regulate variance toward target.
+
+        Maturity-aware: a mature network is allowed to run at higher
+        variance/ignition without homeostatic dampening, because by then
+        the activity *is* coherent signal rather than noise. The effective
+        target is shifted upward by maturity:
+            target_eff = target * (1 + 1.5 · M)    # M=0 → 0.5; M=1 → 1.25
 
         Returns: multiplicative gain for GABA decay (typically in [0.5, 2.0])
         """
-        error = variance - target
+        target_eff = target * (1.0 + 1.5 * max(0.0, min(1.0, maturity)))
+        error = variance - target_eff
         self.integral += error
         derivative = error - self.prev_error
         self.prev_error = error
@@ -299,17 +307,22 @@ class VesiclePool(nn.Module):
     # 4. Decay — Homeostatic (variance-responsive)                          #
     # ------------------------------------------------------------------ #
     @torch.no_grad()
-    def degrade(self, decay: float = 1.0, global_variance: float | None = None) -> None:
+    def degrade(self, decay: float = 1.0, global_variance: float | None = None,
+                maturity: float = 0.0) -> None:
         """Subtract decay from all vesicle lifetimes; dead → content zeroed.
 
-        If global_variance is provided, decay is modulated by PID controller
-        to regulate activation variance (homeostatic damping). High variance
-        → higher decay (spike GABA to inhibit). Low variance → normal decay.
+        If global_variance is provided, decay is modulated by the PID
+        controller to regulate activation variance (homeostatic damping).
+        High variance → higher decay (spike GABA to inhibit).
+
+        The `maturity` argument lets a mature network tolerate higher
+        ignition without the GABA controller fighting it — see
+        PIDController.step for the target shift.
         """
-        # Apply PID-based variance regulation to decay rate if variance provided
         decay_mult = 1.0
         if global_variance is not None:
-            decay_mult = self.gaba_pid.step(global_variance, target=0.5)
+            decay_mult = self.gaba_pid.step(global_variance, target=0.5,
+                                            maturity=maturity)
 
         self.v_lifetimes = self.v_lifetimes - decay * decay_mult
         dead_mask = (self.v_lifetimes <= 0.0)           # (V,) bool, static shape
@@ -323,19 +336,23 @@ class VesiclePool(nn.Module):
     def tick(self, module_activations: torch.Tensor,
              surprise: torch.Tensor | None = None,
              source_module: int = 0,
-             global_variance: float | None = None) -> torch.Tensor:
+             global_variance: float | None = None,
+             maturity: float = 0.0) -> torch.Tensor:
         """Full lifecycle step.
 
         module_activations: (B, n_modules, d_sem)
         surprise:           (B, d_sem) or None
         global_variance:    σ²_global for homeostatic GABA regulation
+        maturity:           MAT scalar — high maturity raises the GABA
+                            controller's variance target so the network
+                            is allowed to "fire" without being clamped down.
         Returns: modulation (B, n_modules, d_sem)
         """
         if surprise is not None:
             self.synthesize(surprise, source_module=source_module)
         self.migrate()
         modulation = self.dock(module_activations)
-        self.degrade(global_variance=global_variance)
+        self.degrade(global_variance=global_variance, maturity=maturity)
         return modulation
 
     def active_count(self) -> int:

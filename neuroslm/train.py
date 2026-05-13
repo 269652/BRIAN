@@ -245,6 +245,12 @@ def main():
     ctx_len = args.ctx or cfg.lang_ctx
     assert ctx_len <= cfg.lang_ctx
 
+    # Reset MAT to cold start (the Brain defaults maturity=1.0 for testing,
+    # but training must always begin from the L_random plateau).
+    if not cfg.baseline and hasattr(brain, "maturity"):
+        brain.maturity.zero_()
+        brain._infancy = True
+
     # Topological Maturation Schedule (neural infancy → awakening)
     # ── Infancy stage (first 5,000 steps or until lm_loss < 7.5) ────────
     # - Re-entrant loops are physically present but chemically suppressed
@@ -495,10 +501,14 @@ def main():
 
         # --- Memory system integration ---
         # 1. Record episodic memory for this batch (deferred to CPU; non-blocking).
-        # Skipped during infancy — the content vector is meaningful but the
+        # Skipped pre-awakening — the content vector is meaningful but the
         # nt_state and downstream consolidation depend on a learning network.
         # The tokenizer.decode + .cpu().numpy() round-trip also costs wall time.
-        _in_infancy_step = step < _maturation_infancy_steps
+        # Gate is now the continuous MAT (pre-update reads the previous step).
+        _prev_maturity = (brain.maturity_scalar()
+                          if (not cfg.baseline and hasattr(brain, "maturity_scalar"))
+                          else 0.0)
+        _in_infancy_step = _prev_maturity < 0.3
         if not cfg.baseline and not _in_infancy_step:
             try:
                 content = tok.decode(ids[0].cpu().tolist())
@@ -524,41 +534,51 @@ def main():
             traceback.print_exc()
             continue  # skip this step
 
-        # ── Topological Maturation & Auxiliary loss gating ─────────────────
-        # Maturation has two phases:
-        # 1. Infancy (step < 5000): suppress DA/NE, keep aux_weights at 0.001
-        # 2. Awakening (step >= 5000 && lm_loss < 7.5): allow DA/NE to run,
-        #    ramp auxiliary weights from 0.001 to target
+        # ── Maturity-Driven Topological Maturation ─────────────────────────
+        # We have replaced the hard "step < 5000" infancy gate with a continuous
+        # MAT (Maturity Index): M_t = clamp(1 - L_lm / L_random, 0, 1).
+        # Smoothed via EMA on `brain.maturity`. Modules consume this directly
+        # to fade in (expert cortices, MoD compute, ε-routing strength).
+        #
+        # Awakening criterion (auxiliary-loss ramp activation):
+        #   brain.maturity > 0.3  AND  lm_loss < 7.5
         _lm_now = float(out["lm_loss"].item())
         if _lm_ema is None:
             _lm_ema = _lm_now
         _lm_ema = 0.99 * _lm_ema + 0.01 * _lm_now
 
-        # Check for maturation phase transition
-        in_infancy = step < _maturation_infancy_steps
-        if not in_infancy and not _maturation_awakened and _lm_now < _maturation_lm_threshold:
+        # Update MAT (continuous maturation signal). Baseline runs skip this
+        # because the bio brain isn't built.
+        if not cfg.baseline and hasattr(brain, "update_maturity"):
+            _maturity = brain.update_maturity(_lm_now)
+        else:
+            _maturity = 0.0
+
+        # Awakening transition: M > 0.3 AND lm_loss < 7.5 (sustained drop)
+        if (not _maturation_awakened
+                and _maturity > 0.3
+                and _lm_now < _maturation_lm_threshold):
             _maturation_awakened = True
             if not cfg.baseline:
-                # Flip the BRIAN narrative+causal stack on
                 if hasattr(brain, "set_awakened"):
                     try:
                         brain.set_awakened(True)
                     except Exception as _e:
                         print(f"[train] ⚠ brain.set_awakened failed: {_e}", flush=True)
                 print(f"[train] 🧠 Neural awakening at step {step+1}: "
-                      f"lm_loss={_lm_now:.4f}, entering growth phase", flush=True)
+                      f"maturity={_maturity:.3f}, lm_loss={_lm_now:.4f}, "
+                      f"entering growth phase", flush=True)
 
-        # During infancy: suppress auxiliary weights and suppress DA/NE escalation
-        # This forces "Linguistic First" convergence (LM before global integration)
-        # Note: DA/NE suppression is handled by keeping aux_ramp=0 (below), which
-        # indirectly suppresses neuromod escalation since they're tied to comprehension
-        if in_infancy and not cfg.baseline and hasattr(brain, 'gws'):
-            # Reduce ignition threshold during infancy to prevent saturation
-            # This naturally reduces broadcast width during language stabilization
+        # Pre-awakening: damp GWS ignition by raising the threshold so the
+        # broadcast doesn't pin at 1.0 while modules are still random. We
+        # interpolate the threshold linearly with maturity: at M=0 → 1.2
+        # (hard to ignite); at M=0.3 → 0.8 (config default).
+        if not cfg.baseline and not _maturation_awakened and hasattr(brain, 'gws'):
+            _thresh = 1.2 - (1.2 - 0.8) * min(1.0, _maturity / 0.3)
             brain.gws.slot_thresholds.data = torch.full_like(
-                brain.gws.slot_thresholds, 1.2)  # raise threshold → harder to ignite
+                brain.gws.slot_thresholds, _thresh)
 
-        # Track when we've sustained below-threshold loss (only after infancy)
+        # Track when we've sustained below-threshold loss (only after awakening)
         if _maturation_awakened:
             if _lm_now < _loss_ramp_threshold:
                 _loss_below_threshold_count += 1
@@ -577,17 +597,18 @@ def main():
             else:
                 _aux_ramp = 0.0
         else:
-            # During infancy, auxiliary weights stay at 0.001
+            # Pre-awakening: auxiliary weights pinned at 0.001
             _aux_ramp = 0.0
 
         _aux_w = _aux_w_init + (_aux_w_target - _aux_w_init) * _aux_ramp
         # Single per-step gate that scales ALL auxiliary losses uniformly
         # (world / motor / cpc / phi / kl / novel / pred_coding / id_drift).
-        # During infancy this is ~0.001, ramping to 1.0 after lm_loss stabilises.
-        # Trophic/BDNF structural updates are suppressed while _infancy=True.
+        # Pre-awakening this is ~0.001, ramping to 1.0 after lm_loss stabilises.
+        # Trophic/BDNF structural updates are suppressed while _infancy=True
+        # (now derived from MAT < 0.3 inside Brain.update_maturity).
         if not cfg.baseline:
             brain._aux_w_scale = float(_aux_w)
-            brain._infancy     = bool(in_infancy)
+            # _infancy is now set by Brain.update_maturity (MAT < 0.3).
 
         # If meta-training is enabled, perform a one-step differentiable unroll.
         # We do a SEPARATE language-only forward pass for the meta path to avoid
