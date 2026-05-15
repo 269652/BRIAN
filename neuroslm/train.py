@@ -245,12 +245,6 @@ def main():
     ctx_len = args.ctx or cfg.lang_ctx
     assert ctx_len <= cfg.lang_ctx
 
-    # Reset MAT to cold start (the Brain defaults maturity=1.0 for testing,
-    # but training must always begin from the L_random plateau).
-    if not cfg.baseline and hasattr(brain, "maturity"):
-        brain.maturity.zero_()
-        brain._infancy = True
-
     # Topological Maturation Schedule (neural infancy → awakening)
     # ── Infancy stage (first 5,000 steps or until lm_loss < 7.5) ────────
     # - Re-entrant loops are physically present but chemically suppressed
@@ -448,6 +442,15 @@ def main():
         ckpt = torch.load(args.transfer, map_location=device, weights_only=False)
         brain.load_partial(ckpt["model"])
         print(f"[train] transferred matching tensors from {args.transfer}", flush=True)
+
+    # Reset MAT to cold start when training fresh. Brain defaults
+    # `maturity=1.0` so tests/inference see a mature graph; training must
+    # begin from the L_random plateau. If we resumed from a checkpoint
+    # (start_step > 0), the saved `maturity` buffer is already loaded —
+    # leave it intact so the maturation schedule continues seamlessly.
+    if not cfg.baseline and start_step == 0 and hasattr(brain, "maturity"):
+        brain.maturity.zero_()
+        brain._infancy = True
 
     Path(args.ckpt_dir).mkdir(parents=True, exist_ok=True)
 
