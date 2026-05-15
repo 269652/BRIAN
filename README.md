@@ -115,6 +115,52 @@ The full Colab workflow (clone → ablation → full training → benchmarks) is
 
 ---
 
+## Checkpoints (Git LFS)
+
+Training checkpoints live in `lfs_checkpoints/` and are tracked via Git LFS. A single `.pt` file is multi-GB, so a full `git pull` on a laptop can be very slow — and you usually don't need the binaries locally.
+
+### Skip LFS downloads for this repo (recommended on laptops)
+
+```bash
+# In the repo root, run once:
+git lfs install --local --skip-smudge
+```
+
+`git pull` will now fetch only the tiny pointer stubs (~130 B each). The repo metadata stays in sync, but `lfs_checkpoints/*.pt` become text stubs on disk.
+
+### Pull a specific checkpoint when you need it
+
+```bash
+git lfs pull --include="lfs_checkpoints/neuroslm_xl_adamw_mix_800.pt"
+# Or by glob — get all 800-step files:
+git lfs pull --include="lfs_checkpoints/*_800.*"
+```
+
+### Pull every LFS file (re-hydrate the whole repo)
+
+```bash
+git lfs pull
+```
+
+### Turn skip-smudge off again for this repo
+
+```bash
+git lfs install --local --force          # re-enable smudge for this repo
+git lfs pull                              # then fetch the binaries you want
+```
+
+### Make skip-smudge the global default
+
+```bash
+git lfs install --skip-smudge             # applies to every repo on this machine
+```
+
+After global skip-smudge, `git clone` of *any* LFS-tracked repo only downloads stubs by default; use `git lfs pull --include=...` to materialise specific files.
+
+> Training on Colab/TPU/A100 uses `git lfs pull` explicitly inside the notebook (cell 2) so the runtime always has the latest checkpoint — skip-smudge on your laptop won't affect that.
+
+---
+
 ## The five Φ-positive claims
 
 The bowtie + Φ objective + re-entry loops produce **measurable consciousness-flavoured properties** that a flat transformer of the same size lacks. We test each one:
