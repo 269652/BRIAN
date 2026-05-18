@@ -769,6 +769,7 @@ def main():
             # bfloat16 has fp32-equivalent exponent range → no loss scaling needed
             (loss / ga).backward()
             total_lm_loss = float(out["lm_loss"].item())
+            total_loss    = float(loss.item())            # ← bug fix: track total
             # extra micro-batches for gradient accumulation
             for _ga in range(1, ga):
                 try:
@@ -786,10 +787,16 @@ def main():
                     ga_loss = ga_out["loss"]
                 (ga_loss / ga).backward()
                 total_lm_loss += float(ga_out["lm_loss"].item())
+                total_loss    += float(ga_loss.item())     # ← bug fix
             gnorm = optimizer_step(optim, brain.parameters(), cfg.grad_clip)
             mark_step()   # XLA: flush graph; no-op on CUDA/CPU
-            # update loss/lm_loss for logging to reflect full accumulation
-            loss = torch.tensor(float(loss.item()))  # detach from graph
+            # Display values must reflect the FULL grad-accum window — the old
+            # code averaged lm_loss across micro-batches but used only the
+            # first micro-batch's `loss`, which made the printed "loss" column
+            # swing wildly while "lm" stayed smooth (false "surge" pattern
+            # observed in the awakening logs).
+            loss = torch.tensor(total_loss / ga)
+            out["loss"]    = loss
             out["lm_loss"] = torch.tensor(total_lm_loss / ga)
 
         # 3. Tag memory with reward/insight (mesolimbic) — paired with the

@@ -52,6 +52,29 @@ class GlobalWorkspace(nn.Module):
         # Last ignition probability (detached scalar, for logging / metrics)
         self._last_ignition: torch.Tensor | None = None
 
+        # ── Adaptive ignition (post SRC-TEH fix) ─────────────────────────
+        # Static thresholds saturate `ign` at 1.00 once the trunk delivers
+        # high-magnitude candidates (observed in 200-350 step log: slot
+        # norms ≫ 0.8, so every slot ignites every step, GWS bottleneck
+        # disappears, and Φ saturates degenerately).  We track an EMA of
+        # the per-slot activity median; the effective threshold = EMA +
+        # adaptive_margin*EMA_std, which keeps the ignition fraction
+        # centred near 50% (the right operating point for a competitive
+        # broadcast bus).  The learnable `slot_thresholds` is preserved
+        # as a residual bias on top of the EMA so explicit per-slot
+        # discrimination still learns.
+        self.adaptive_ignition: bool = True
+        self.adaptive_alpha:    float = 0.02      # EMA on the activity statistic
+        self.adaptive_margin:   float = 0.05      # margin above median (in std units)
+        # Per-slot EMA of activity (norm). Initialised to the static threshold
+        # so step-0 behaviour matches the legacy formula.
+        self.register_buffer(
+            "_activity_ema",
+            torch.full((n_slots,), float(ignition_threshold)))
+        self.register_buffer(
+            "_activity_var_ema",
+            torch.full((n_slots,), 0.04))   # var ≈ (0.2)² initial
+
     # ------------------------------------------------------------------
     # Hopfield update step
     # ------------------------------------------------------------------
@@ -126,7 +149,37 @@ class GlobalWorkspace(nn.Module):
             # The tanh slope of 6.0 keeps the transition sharp enough to
             # behave as a phase change rather than a smooth sigmoid.
             activity = slots.norm(dim=-1)                 # (B, n_slots)
-            thresh = self.slot_thresholds.abs().unsqueeze(0)  # (1, n_slots)
+            if self.adaptive_ignition:
+                # Adaptive threshold tracks current activity scale via EMA
+                # so the bottleneck stays competitive as candidate magnitudes
+                # drift over training. Formula:
+                #   θ_eff[s] = EMA_mean[s] + margin·sqrt(EMA_var[s])
+                #            + slot_thresholds[s]  (learnable residual bias)
+                # With margin=0.05 about half the slots exceed θ_eff each step
+                # → ignition fraction settles near 0.5, GWS stays a real
+                # bottleneck, Φ stops saturating degenerately.
+                with torch.no_grad():
+                    a_now    = activity.detach().mean(0).to(
+                        dtype=self._activity_ema.dtype,
+                        device=self._activity_ema.device)              # (n_slots,)
+                    a_var    = activity.detach().var(0, unbiased=False).to(
+                        dtype=self._activity_var_ema.dtype,
+                        device=self._activity_var_ema.device)
+                    a = self.adaptive_alpha
+                    self._activity_ema.mul_(1.0 - a).add_(a_now, alpha=a)
+                    self._activity_var_ema.mul_(1.0 - a).add_(a_var, alpha=a)
+                ema   = self._activity_ema.to(dtype=activity.dtype,
+                                              device=activity.device)
+                std   = self._activity_var_ema.clamp(min=1e-6).sqrt().to(
+                    dtype=activity.dtype, device=activity.device)
+                thresh_adapt = ema + self.adaptive_margin * std        # (n_slots,)
+                # Add the learnable residual bias (can be 0 → no extra shift).
+                # Use a smaller magnitude than the static branch (×0.1) so the
+                # learned param doesn't undo the adaptive component.
+                thresh = (thresh_adapt + 0.1 * self.slot_thresholds.abs()
+                         ).unsqueeze(0)                                # (1, n_slots)
+            else:
+                thresh = self.slot_thresholds.abs().unsqueeze(0)       # (1, n_slots)
             ign_per_slot = 0.3 + 0.7 * (0.5 + 0.5 * torch.tanh(
                 (activity - thresh) * 6.0))              # (B, n_slots)
             self._last_ignition = ign_per_slot.mean(-1).detach()  # (B,)

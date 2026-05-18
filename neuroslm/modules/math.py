@@ -293,7 +293,14 @@ class MathCortex(BrainModule):
         h = h + self.fact_out(enrich)
         h = self.expert_norm(h.float()).to(h.dtype)
 
-        m_eff = 1.0 if maturity is None else max(float(maturity), 0.05)
+        # SRC-TEH path: caller (brain.forward_lm) passes an already
+        # phase-gated maturity, so we honour it directly without the legacy
+        # 5% floor — that floor was useful for the d_sem residual path but
+        # pumps unconditional noise into the trunk when applied at d_hidden.
+        # Below MAT-phase 1e-3 the residual is effectively zero (passthrough).
+        m_eff = 1.0 if maturity is None else max(float(maturity), 0.0)
+        if m_eff < 1e-3:
+            return x
         return x + m_eff * (h - x)
 
     def _disabled_output(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:

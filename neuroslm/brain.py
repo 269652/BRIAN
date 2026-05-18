@@ -887,15 +887,25 @@ class Brain(nn.Module):
         # use the EMA slots for now; full retrieval is a TODO with no
         # accuracy regression on bring-up).
         memory_kv = None
+        # MAT-gate the memory injection.  At low MAT the bowtie EMA is mostly
+        # random-init noise; attending to it pollutes the trunk's later layers
+        # with no useful retrieval signal.  We gate the *strength* with a
+        # phase factor centred at MAT 0.55 (same window as the token-level
+        # expert residual) so the trunk's last 2 blocks ramp into memory
+        # consumption alongside the experts learning to produce useful
+        # bowtie slots.
         if (getattr(self, '_src_teh_enabled', False)
                 and self.memory_kv_proj is not None
                 and bool(self._bowtie_step.item() > 0)):
-            # Clone the buffer view so the EMA in-place update at the end of
-            # this forward does not version-bump a tensor that the backward
-            # graph still references through `memory_kv_proj`.
-            mem = self._bowtie_ema_slots.detach().clone().to(
-                device=device, dtype=dtype)                               # (S, d_sem)
-            memory_kv = self.memory_kv_proj(mem)                          # (S, d_hidden)
+            _mat_now    = self.maturity_scalar() if hasattr(self, 'maturity_scalar') else 1.0
+            _mem_phase  = self._phase_gate(_mat_now, center=0.55, width=0.15)
+            if _mem_phase > 1e-3:
+                # Clone the buffer view so the EMA in-place update at the end
+                # of this forward does not version-bump a tensor that the
+                # backward graph still references through `memory_kv_proj`.
+                mem = self._bowtie_ema_slots.detach().clone().to(
+                    device=device, dtype=dtype)                           # (S, d_sem)
+                memory_kv = _mem_phase * self.memory_kv_proj(mem)         # (S, d_hidden)
         _want_tap = bool(getattr(self, '_src_teh_enabled', False))
         if _want_tap:
             logits, sem, h_lang, pred_coding_loss, tap_sem = self.language(
