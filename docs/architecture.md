@@ -217,6 +217,86 @@ preserves the exact legacy forward path; checkpoint round-trip works for
 those presets unchanged. Switching `xl` to/from SRC-TEH changes parameter
 shapes — checkpoints are NOT cross-compatible across the flag.
 
+Checkpoint filenames carry the live param count
+(`neuroslm_<preset>_<N>M_<optimizer>[_baseline]_<step>.pt`) so config
+edits that change parameter shape (SRC-TEH on/off, d_hidden bumps,
+expert resizes) are disambiguated on disk and the resume path can refuse
+to cross-load mismatched shapes. The resume matcher accepts both the
+new and the pre-tag naming so older checkpoints still resume.
+
+### 0.10 Phased Maturation Engine
+
+The first SRC-TEH training run (`commit c7cc8f7`) surfaced a regression
+that was actually pre-existing but had been masked by infancy gates:
+**awakening was a single switch**. At the moment MAT crossed 0.30 the
+system simultaneously activated 8+ destabilising subsystems on top of a
+model that had only barely beaten random — the LM stalled at
+`lm_loss ≈ 7.0`, 5HT and GABA pinned at the 1.0 ceiling, Φ saturated at
+~7 where `tanh(Φ/3)·3` has gradient ≈0.01, and 11-14 of 16 projections
+were pruned within 100 awakened steps.
+
+The fix replaces single-switch awakening with **per-subsystem MAT phase
+gates** (smooth sigmoid `½(1 + tanh((MAT−c)/w))`). The aux-loss ramp
+`α(t)` from `train.py` still multiplies on top, but each loss now has
+its own onset window centred at the MAT level where that signal becomes
+informative.
+
+| Subsystem | Phase centre | Notes |
+|---|---|---|
+| `pred_coding` | 0.35 | Cheap internal supervision; engages earliest |
+| `world` | 0.45 | World-model grounding once LM is past the random barrier |
+| `motor` / `forward` | 0.50 | Action-space objectives need a working world model |
+| `novel_aux` / `cpc` | 0.55 | Contrastive / novelty objectives |
+| `kl_world` / `phi` | 0.60 | Heaviest objectives — last to engage |
+| Mesolimbic CE gain | 0.55 | `learning_gain` is at random init below this MAT |
+| Token-expert residual | 0.55 | Was pumping 31% noise into trunk at MAT 0.31 |
+| Trophic structural pruning | 0.60 (`trophic_prune_mat`) | Suppresses `active[i]=0` through the post-awakening resolution window |
+
+Implementation: `Brain._phase_gate(mat, center, width=0.10)` returns
+0→1 smoothly across `[center−width, center+width]`. Loss assembly in
+`forward_lm` multiplies each aux term by its phase factor; expert
+dispatch passes `_mat_inner = phase_gate(MAT, 0.55, 0.15)` to
+`forward_tokens(..., maturity=)`.
+
+### 0.11 NT Saturation Scavenging
+
+Independently of phasing, 5HT (`τ=0.95`) and GABA (`τ=0.90`) had a
+structural problem: once a level pinned to 1.0, the maximum homeostatic
+bias correction (`Δb = −0.5`) only dropped the level by ~1% per step
+while every forward pass kept releasing fresh quanta. The level was
+*physically incapable* of returning to the operating band.
+
+`TransmitterSystem.step` now adds a **fast-reuptake scavenge**: whenever
+`level > 0.9`, an extra 0.85× multiplicative drop is applied after the
+normal `τ`-decay. Empirically 5HT/GABA at 1.0 return to ~0.72 / 0.54
+within 5 steps. Models physiological auto-receptor inhibition and fast
+extracellular reuptake triggered by transmitter excess.
+
+```python
+new_level = level * τ_decay + baseline * (1 − τ_decay)
+sat_mask  = (new_level > 0.9).float()
+new_level = new_level * (1 − 0.15 * sat_mask)            # scavenge
+```
+
+### 0.12 Φ-Loss Compression Widening
+
+Previous: `L_Φ = −tanh(Φ/3) · 3`. At the observed Φ ≈ 7 this gives
+gradient ≈ 0.01 of nominal — the Φ objective went silent exactly when
+SRC-TEH started producing high-Φ states. New: `L_Φ = −tanh(Φ/8) · 8`,
+which keeps the linear regime out to Φ ≈ 16 while still bounded.
+
+| Φ | Old loss / grad | New loss / grad |
+|---|---|---|
+| 1 | −0.965 / −0.897 | −0.995 / −0.984 |
+| 3 | −2.285 / −0.420 | −2.867 / −0.872 |
+| 5 | −2.793 / −0.133 | −4.437 / −0.692 |
+| **7** | **−2.944 / −0.037** | **−5.631 / −0.504** |
+| 10 | −2.992 / −0.005 | −6.786 / −0.280 |
+
+At the symptom value Φ = 7, the new compression returns a gradient
+**13.6× stronger** than the old one — Φ becomes a useful objective
+again.
+
 ---
 
 ## 1. Primary Representational Unit — The Φ-Structure
@@ -274,9 +354,9 @@ $$\mathcal{L}_\text{lm} = \text{mean}\big( \text{CE}_t \cdot \text{meso}(t) \big
 
 where $g_\text{learn}$ is the learning gain and DA is dopamine — both detached, so meso acts as a constant gradient amplifier.
 
-The **Φ loss term is bounded** so very high Φ does not dominate the gradient or push the network into a degenerate fully-coupled state where bipartition MIs collapse:
+The **Φ loss term is bounded** so very high Φ does not dominate the gradient or push the network into a degenerate fully-coupled state where bipartition MIs collapse. The bound is `tanh(Φ/8)·8` (widened from the original `tanh(Φ/3)·3` per SRC-TEH §0.12 — the narrower form saturated at Φ≈6 and silenced the objective in the regime SRC-TEH reaches):
 
-$$\mathcal{L}_{\Phi} = -\tanh(\Phi / 3) \cdot 3 \in [-3,\ 3]$$
+$$\mathcal{L}_{\Phi} = -\tanh(\Phi / 8) \cdot 8 \in [-8,\ 8]$$
 
 The coefficient $\alpha(t) \in [0.001, 1.0]$ is the **auxiliary-loss ramp** (`brain._aux_w_scale`) controlled by the topological-maturation scheduler — see §6.4. During infancy the entire aux block is gated to ~0.001 so the LM gradient direction dominates while the network forms its first language-level representations.
 
@@ -991,7 +1071,19 @@ else:
     α(t)           = 0.0       # still in infancy-equivalent — no aux load
 ```
 
-Once $\alpha$ reaches 1.0, every auxiliary loss applies at its config-default weight and trophic/BDNF growth begins shaping the projection graph based on real Φ and Fiedler signals.
+**Per-subsystem phase gates (SRC-TEH §0.10).** `α(t)` is now the *master*
+scale; on top of it, each individual aux loss has its own MAT-keyed
+phase gate so awakening is no longer a single switch. Effective weight
+of aux loss $i$:
+
+$$w_i^\text{eff}(t) = \alpha(t) \cdot \sigma_i(M_t) \cdot w_i, \qquad \sigma_i(M) = \tfrac{1}{2}\bigl(1 + \tanh\bigl((M - c_i)/w\bigr)\bigr)$$
+
+with per-loss centres $c_i$ from §0.10 (pred_coding 0.35, world 0.45,
+motor 0.50, novel/cpc 0.55, kl_world / phi 0.60). The mesolimbic CE
+gain, the token-level expert residual, and the trophic structural
+pruning all use the same gate shape with their own centres.
+
+Once $\alpha$ reaches 1.0 *and* MAT clears every $c_i$ window, every auxiliary loss applies at its config-default weight and trophic/BDNF growth begins shaping the projection graph based on real Φ and Fiedler signals.
 
 #### Why this matters
 
@@ -1069,6 +1161,19 @@ Seven NTs with Euler-integrated dynamics (per tick). Channel order `NT_NAMES = (
 $$\text{level}_i(t+1) = \tau_i \cdot \text{level}_i(t) + \big(b_i + \Delta b_i\big) \cdot (1 - \tau_i)$$
 
 where $b_i$ is the canonical baseline above and $\Delta b_i$ is the learned homeostatic bias (clamped to $[-0.5, 0.5]$). Levels are clamped to $[0, 1]$; `release(name, amount)` is vesicle-limited via `vesicles[name] / release_cost`.
+
+**Saturation scavenging (SRC-TEH §0.11).** Slow-decay transmitters
+(5HT τ=0.95, GABA τ=0.90) can pin to the 1.0 ceiling under sustained
+release because even the maximum negative homeostatic bias (Δb = −0.5)
+only drops the level ~1% per step. To prevent permanent saturation,
+after the τ-decay update an extra **0.85× scavenge** is applied to any
+channel whose updated level exceeds 0.9:
+
+$$\text{sat\_mask} = \mathbf{1}[\text{level}_i(t+1) > 0.9],\qquad \text{level}_i \leftarrow \text{level}_i \cdot (1 - 0.15 \cdot \text{sat\_mask})$$
+
+Empirically returns ceiling-pinned 5HT/GABA (1.0) to ~0.72/0.54 within
+5 steps. Models physiological auto-receptor inhibition / fast
+extracellular reuptake triggered by transmitter excess.
 
 **Homeostasis loop** (`neurochem/homeostasis.py — Homeostasis.observe`, **gated on `_maturation_awakened`** — see §6.4):
 
@@ -1714,4 +1819,4 @@ The closed loop runs at the env's tick rate (10 Hz default); the bowtie's forwar
 
 ---
 
-*Last updated: 2026-05-18 (SRC-TEH refactor — see §0 and [`docs/RFC.md`](RFC.md)). Source of truth: `neuroslm/` on branch `master`.*
+*Last updated: 2026-05-18 (SRC-TEH refactor §0 + Phased Maturation Engine §§0.10-0.12 — see [`docs/RFC.md`](RFC.md)). Source of truth: `neuroslm/` on branch `master`.*
