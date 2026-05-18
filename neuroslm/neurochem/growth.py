@@ -107,7 +107,7 @@ class TrophicSystem(nn.Module):
                          noise_contrib: torch.Tensor | None = None,
                          sdnr_threshold: float = 0.5,
                          maturity: float | None = None,
-                         prune_mat_threshold: float = 0.3):
+                         prune_mat_threshold: float = 0.6):  # raised from 0.3
         """SDNR-gated structural pruning: prune projections with low signal-to-noise.
 
         If a re-entrant projection contributes more to global variance (noise)
@@ -142,7 +142,7 @@ class TrophicSystem(nn.Module):
     def update(self, activities: dict[str, torch.Tensor], bdnf: float, ngf: float,
                phi: float = 0.0, fiedler: float = 1.0,
                maturity: float | None = None,
-               prune_mat_threshold: float = 0.3):
+               prune_mat_threshold: float = 0.6):
         """activities: {region: (B,) ∈ [0,1]}.
         bdnf, ngf:  scalar floats from Brain (driven by reward / novelty).
         phi:        Integrated information proxy ∈ [0, 1].

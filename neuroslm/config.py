@@ -217,7 +217,10 @@ class BrainConfig:
     bowtie_period:         int   = 4          # run heavy bowtie every K steps
     bowtie_ema_alpha:      float = 0.4        # EMA decay for off-step fallback
     # Softened trophic gate: pruning disabled while MAT < trophic_prune_mat.
-    trophic_prune_mat:     float = 0.3
+    # Bumped from 0.3 → 0.6 so structural pruning stays suppressed for the
+    # post-awakening window where projections are still resolving — closes
+    # the observed "n_active: 2/16" collapse pattern.
+    trophic_prune_mat:     float = 0.6
 
 
 # ----- Preset sizes -----
@@ -352,7 +355,7 @@ def xl() -> BrainConfig:
     c.bus_ema_alpha          = 0.5
     c.bowtie_period          = 4
     c.bowtie_ema_alpha       = 0.4
-    c.trophic_prune_mat      = 0.3
+    c.trophic_prune_mat      = 0.6
 
     return c
 

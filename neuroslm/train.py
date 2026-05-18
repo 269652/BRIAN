@@ -346,23 +346,38 @@ def main():
             # picked up by an AdamW resume, so they coexist on disk.
             _otag  = f"_{args.optimizer}"
             _bflag = "_baseline" if args.baseline else ""
-            _prefix = f"neuroslm_{args.preset}{_otag}{_bflag}"
+            # Legacy prefix (pre-param-tag).  Kept so checkpoints written
+            # before the `_<N>M` tag was added still resume cleanly.
+            _prefix_legacy = f"neuroslm_{args.preset}{_otag}{_bflag}"
+            # New-style pattern: neuroslm_<preset>_<N>M_<optimizer>[_baseline]_...
+            import re as _re
+            _ptag_re = _re.compile(
+                rf"^neuroslm_{_re.escape(args.preset)}_(\d+)M{_re.escape(_otag)}"
+                rf"{_re.escape(_bflag)}(?:_|$)")
 
             def _matches_stream(path: str) -> bool:
                 name = os.path.basename(path)
-                if not name.startswith(_prefix):
-                    return False
-                # Non-baseline runs must not accidentally pick up baseline
-                # files (whose names extend the prefix with `_baseline`).
-                if not args.baseline and name.startswith(
-                        f"neuroslm_{args.preset}{_otag}_baseline"):
-                    return False
-                return True
+                if name.startswith(_prefix_legacy):
+                    # Non-baseline runs must not accidentally pick up baseline
+                    # files (whose names extend the prefix with `_baseline`).
+                    if not args.baseline and name.startswith(
+                            f"neuroslm_{args.preset}{_otag}_baseline"):
+                        return False
+                    return True
+                if _ptag_re.match(name):
+                    return True
+                return False
 
-            # With --overwrite_ckpt prefer the fixed _latest file
-            _latest_fixed = os.path.join(args.ckpt_dir, f"{_prefix}_latest.pt")
-            if args.overwrite_ckpt and os.path.exists(_latest_fixed):
-                resume_path = _latest_fixed
+            # With --overwrite_ckpt prefer the fixed _latest file (either
+            # naming convention; new takes precedence if both exist).
+            import glob as _g2
+            _latest_glob = _g2.glob(os.path.join(
+                args.ckpt_dir, f"neuroslm_{args.preset}_*{_otag}{_bflag}_latest.pt"))
+            _latest_legacy = os.path.join(args.ckpt_dir, f"{_prefix_legacy}_latest.pt")
+            if args.overwrite_ckpt and _latest_glob:
+                resume_path = max(_latest_glob, key=os.path.getmtime)
+            elif args.overwrite_ckpt and os.path.exists(_latest_legacy):
+                resume_path = _latest_legacy
             else:
                 # Rank by the step number in the filename. Step-numbered files
                 # always beat a `_latest.pt` of the same stream — otherwise an
@@ -396,7 +411,7 @@ def main():
                 if resume_path:
                     print(f"[train] auto-found latest checkpoint: {resume_path}", flush=True)
                 else:
-                    print(f"[train] no checkpoint found for stream {_prefix}* "
+                    print(f"[train] no checkpoint found for stream {_prefix_legacy}* "
                           f"— training from scratch", flush=True)
 
         if resume_path and Path(resume_path).exists():
@@ -864,12 +879,17 @@ def main():
                                           # checkpoint streams so an Adafactor
                                           # save and an AdamW save coexist on
                                           # disk without ever clashing.
+            # Encode param count so checkpoints across config edits
+            # (e.g. SRC-TEH on/off, d_hidden bumps, expert resizes) are
+            # disambiguated on disk and the resume path can refuse to
+            # cross-load a file whose param shape no longer matches.
+            ptag = f"_{round(n_params / 1e6)}M"
             if args.overwrite_ckpt:
                 # Fixed filename — overwritten every save, keeps LFS storage constant.
                 # Step number is stored inside the file so resume still works.
-                fname = f"neuroslm_{args.preset}{otag}{bflag}_latest.pt"
+                fname = f"neuroslm_{args.preset}{ptag}{otag}{bflag}_latest.pt"
             else:
-                fname = f"neuroslm_{args.preset}{otag}{bflag}{tag}_{step+1}.pt"
+                fname = f"neuroslm_{args.preset}{ptag}{otag}{bflag}{tag}_{step+1}.pt"
             path = Path(os.path.abspath(args.ckpt_dir)) / fname
             path.parent.mkdir(parents=True, exist_ok=True)
             save_dict = {

@@ -796,6 +796,18 @@ class Brain(nn.Module):
         """Plain-Python float of the current MAT level (avoids autograd)."""
         return float(self.maturity.detach().item())
 
+    @staticmethod
+    def _phase_gate(mat: float, center: float, width: float = 0.10) -> float:
+        """Smooth sigmoid 0→1 across a maturity window [center−width, center+width].
+
+        Used to phase in each destabilising subsystem at its own MAT level so
+        awakening is no longer a single switch.  Returns ≈0 below `center−width`,
+        crosses 0.5 at `center`, and saturates at 1 above `center+width`.
+        """
+        x = (float(mat) - float(center)) / max(1e-6, float(width))
+        # Approximate sigmoid via tanh (cheaper, no exp underflow risk).
+        return 0.5 * (1.0 + math.tanh(x))
+
     # ------------------------------------------------------------------
     # Training forward pass
     # ------------------------------------------------------------------
@@ -903,10 +915,18 @@ class Brain(nn.Module):
         # and emits a residual enrichment scattered back into h_lang. Then
         # we re-norm + re-emit logits so the LM head sees the enriched
         # hidden state instead of the raw trunk output.
+        # Residual strength is MAT-phase-gated (0 below MAT 0.4, full above
+        # MAT 0.7) so un-trained experts can't pump noise into the trunk
+        # immediately after awakening at MAT 0.3.
         expert_aux_loss = torch.tensor(0.0, device=device)
         if (getattr(self, '_src_teh_enabled', False)
                 and self.expert_router is not None):
             _mat = self.maturity_scalar() if hasattr(self, "maturity_scalar") else 1.0
+            _expert_phase = self._phase_gate(_mat, center=0.55, width=0.15)
+            # Internal expert MAT — pass to inner residual so token-level
+            # output is _expert_phase * expert(x) - x; legacy d_sem path
+            # still calls forward(..., maturity=_mat) directly.
+            _mat_inner = _expert_phase
             route = self.expert_router(h_lang, maturity=_mat)
             assignments = route["assignments"]                  # 3 × (B, C)
             weights     = route["weights"]                      # 3 × (B, C)
@@ -924,7 +944,7 @@ class Brain(nn.Module):
                 idx = assignments[e]                            # (B, C)
                 gate = weights[e].unsqueeze(-1)                 # (B, C, 1)
                 tokens = self._gather_tokens(h_lang, idx)       # (B, C, d_hidden)
-                enriched = fn(tokens, maturity=_mat)            # (B, C, d_hidden)
+                enriched = fn(tokens, maturity=_mat_inner)      # (B, C, d_hidden)
                 contrib = gate * (enriched - tokens)            # residual
                 h_enriched = self._scatter_add_tokens(h_enriched, idx, contrib)
             # Re-norm and re-emit logits using the post-expert hidden state.
@@ -1335,9 +1355,16 @@ class Brain(nn.Module):
 
         if targets is not None:
             lm_loss_per = self._chunked_ce(logits_motor, targets)
-            meso_gain = (1.0 + 0.5 * learning_gain.detach() *
-                         self.transmitters.get("DA").detach()).clamp(min=1.0)
-            lm_loss    = (lm_loss_per * meso_gain).mean()
+            # Mesolimbic CE gain: clamped OFF (=1.0) until MAT > 0.55 because
+            # `learning_gain` comes from a randomly-initialised LearningLayer
+            # whose output is uncorrelated with reward early on — gating it
+            # on prevents pre-trained LM gradient from being modulated by
+            # uninformed DA noise.  See diagnosis in docs/RFC.md §1.
+            _mat_now    = self.maturity_scalar() if hasattr(self, 'maturity_scalar') else 1.0
+            _meso_phase = self._phase_gate(_mat_now, center=0.55, width=0.10)
+            meso_gain   = (1.0 + 0.5 * _meso_phase * learning_gain.detach() *
+                           self.transmitters.get("DA").detach()).clamp(min=1.0)
+            lm_loss     = (lm_loss_per * meso_gain).mean()
             world_loss = F.mse_loss(world_pred, z_world.detach())
             fwd_reg    = (wp.pow(2).mean() + sp.pow(2).mean()) * 0.5
 
@@ -1401,31 +1428,46 @@ class Brain(nn.Module):
                 phi_loss_term = torch.tensor(0.0, device=device, dtype=dtype)
                 phi_value = torch.tensor(0.0, device=device, dtype=dtype)
             else:
-                # Bound the contribution: very high Φ should not dominate the
-                # gradient or push the model into a degenerate fully-coupled
-                # state where differentiation collapses. softplus(phi) is
-                # smoothly clipped via tanh-like saturation at ~3 nats.
+                # Bound the contribution AND keep useful gradient at high Φ.
+                # Old: -tanh(Φ/3)·3 saturates at Φ≈6 (gradient ≈1%); the Φ
+                # objective went silent in observed runs where Φ pinned at 7.
+                # New: -tanh(Φ/8)·8 keeps the linear regime out to Φ≈16
+                # while still bounded — same protection from runaway
+                # integration, restored gradient signal.
                 phi_value = phi_t.to(dtype=dtype)
-                phi_loss_term = -torch.tanh(phi_value / 3.0) * 3.0
+                phi_loss_term = -torch.tanh(phi_value / 8.0) * 8.0
 
             def _safe(t):
                 if isinstance(t, torch.Tensor):
                     return t.nan_to_num(0.0, posinf=0.0, neginf=0.0)
                 return torch.tensor(float(t) if not (t != t) else 0.0, device=device)
 
-            # All non-LM losses share a single infancy-gated scale so they
-            # don't inject random-init gradient noise upstream before the LM
-            # has stabilised. train.py sets _aux_w_scale per step.
-            aux_w = float(getattr(self, '_aux_w_scale', 1.0))
-            total = (cfg.w_lm            * lm_loss
-                     + aux_w * cfg.w_world       * _safe(world_loss)
-                     + aux_w * cfg.w_forward     * _safe(fwd_reg) * 0.01
-                     + aux_w * cfg.w_motor       * _safe(motor_loss)
-                     + aux_w * cfg.w_pred_coding * _safe(pred_coding_loss)
-                     + aux_w * getattr(cfg, 'w_kl_world', 0.1) * _safe(rssm_kl)
-                     + aux_w * 0.05              * _safe(novel_aux_loss)
-                     + aux_w * getattr(cfg, 'w_cpc', 0.05) * _safe(cpc_loss)
-                     + aux_w * getattr(cfg, 'w_phi', 0.02) * _safe(phi_loss_term))
+            # ── Phased Maturation Engine ─────────────────────────────────
+            # Each auxiliary loss has its own MAT phase window so the
+            # awakening event no longer simultaneously activates 8 noisy
+            # objectives.  Centres chosen to preserve a clean "language
+            # first → world/motor next → bowtie integration → causal Φ"
+            # learning curriculum.  `_aux_w_scale` from train.py still
+            # multiplies on top (master scale).
+            _mat      = self.maturity_scalar() if hasattr(self, 'maturity_scalar') else 1.0
+            aux_w     = float(getattr(self, '_aux_w_scale', 1.0))
+            ph_pred   = self._phase_gate(_mat, center=0.35, width=0.08)
+            ph_world  = self._phase_gate(_mat, center=0.45, width=0.08)
+            ph_motor  = self._phase_gate(_mat, center=0.50, width=0.08)
+            ph_fwd    = self._phase_gate(_mat, center=0.50, width=0.08)
+            ph_novel  = self._phase_gate(_mat, center=0.55, width=0.08)
+            ph_cpc    = self._phase_gate(_mat, center=0.55, width=0.08)
+            ph_kl     = self._phase_gate(_mat, center=0.60, width=0.08)
+            ph_phi    = self._phase_gate(_mat, center=0.60, width=0.08)
+            total = (cfg.w_lm * lm_loss
+                     + aux_w * ph_world * cfg.w_world       * _safe(world_loss)
+                     + aux_w * ph_fwd   * cfg.w_forward     * _safe(fwd_reg) * 0.01
+                     + aux_w * ph_motor * cfg.w_motor       * _safe(motor_loss)
+                     + aux_w * ph_pred  * cfg.w_pred_coding * _safe(pred_coding_loss)
+                     + aux_w * ph_kl    * getattr(cfg, 'w_kl_world', 0.1) * _safe(rssm_kl)
+                     + aux_w * ph_novel * 0.05              * _safe(novel_aux_loss)
+                     + aux_w * ph_cpc   * getattr(cfg, 'w_cpc', 0.05) * _safe(cpc_loss)
+                     + aux_w * ph_phi   * getattr(cfg, 'w_phi', 0.02) * _safe(phi_loss_term))
 
             # Orchestrator.route runs the cerebellum/entorhinal/claustrum
             # subnetworks for id_drift / neural_calm metrics. Heavy and only

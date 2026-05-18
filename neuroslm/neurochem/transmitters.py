@@ -118,7 +118,15 @@ class TransmitterSystem(nn.Module):
         return actual
 
     def step(self):
-        """Time step: decay levels toward baseline, replenish vesicles."""
+        """Time step: decay levels toward baseline, replenish vesicles.
+
+        Saturation scavenging: when any channel's level exceeds 0.9, apply
+        an extra multiplicative drop of 0.85× so chronically ceiling-pinned
+        transmitters (5HT/GABA at τ≈0.95 cannot escape the ceiling with the
+        normal +0.5 max homeostasis bias) get aggressively returned to the
+        operating band.  Mirrors physiological auto-receptor / fast-reuptake
+        scavenging triggered by extracellular excess.
+        """
         device = self.level.device
         decay    = self._tau_decay.to(device)
         base_raw = self._baseline.to(device)
@@ -126,6 +134,9 @@ class TransmitterSystem(nn.Module):
         baseline = torch.clamp(base_raw + self.bias, min=base_raw * 0.5, max=torch.ones_like(base_raw))
         repl     = self._tau_vesicle.to(device)
         new_level = self.level * decay + baseline * (1.0 - decay)
+        # Saturation scavenge — fast reuptake when level > 0.9.
+        sat_mask = (new_level > 0.9).to(new_level.dtype)
+        new_level = new_level * (1.0 - 0.15 * sat_mask)
         new_ves   = (self.vesicles + repl).clamp(0.0, 1.0)
         self.level    = new_level
         self.vesicles = new_ves
