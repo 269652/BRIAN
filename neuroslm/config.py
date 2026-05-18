@@ -189,6 +189,36 @@ class BrainConfig:
     # configuration (Dehaene structural selection).
     phi_lock_threshold:   float = 0.5
 
+    # ================================================================
+    # SRC-TEH (Shared Reading Cortex + Token-Level Expert Heads)
+    # See docs/RFC.md.  Default OFF so legacy presets / tests keep
+    # working unchanged; flipped on by the xl preset.
+    # ================================================================
+    enable_src_teh:        bool  = False
+    # Mid-trunk bowtie tap (0-based layer after which the trunk emits an
+    # AttentionPool pooled summary to feed the bowtie).  None → middle.
+    mid_trunk_tap_layer:   int   = 0       # 0 = auto (= lang_layers // 2)
+    # Memory-augmented trunk (RETRO-style).  Last N blocks accept extra
+    # K/V rows: pooled bowtie output + top-N consolidated memory entries.
+    enable_memory_xattn:   bool  = False
+    n_memory_xattn_layers: int   = 2
+    n_memory_entries:      int   = 64       # top-N consolidated entries
+    # Expert-Choice routing across {Lang, Math, Reason}.
+    n_token_experts:       int   = 3
+    expert_capacity_factor: float = 1.5
+    expert_n_blocks:       int   = 3
+    expert_n_heads:        int   = 8
+    w_expert_aux:          float = 0.01
+    # Latent Program Bus (replaces vesicle gating for routing).
+    enable_latent_bus:     bool  = False
+    bus_dim:               int   = 16
+    bus_ema_alpha:         float = 0.5
+    # Lazy Bowtie + EMA fallback.
+    bowtie_period:         int   = 4          # run heavy bowtie every K steps
+    bowtie_ema_alpha:      float = 0.4        # EMA decay for off-step fallback
+    # Softened trophic gate: pruning disabled while MAT < trophic_prune_mat.
+    trophic_prune_mat:     float = 0.3
+
 
 # ----- Preset sizes -----
 def tiny() -> BrainConfig:
@@ -246,14 +276,24 @@ def large() -> BrainConfig:
 
 
 def xl() -> BrainConfig:
-    """~240M params — A100 (40GB). Reduced from previous XL to fit <249M param target."""
-    c = BrainConfig()
-    # Compact semantic and hidden dimensions
-    c.d_sem = 384
-    c.d_hidden = 512
+    """~240M params — A100 (40GB). SRC-TEH topology (RFC).
 
-    # Slightly fewer transformer layers for language cortex
-    c.lang_layers = 12
+    Two-tier design:
+      • Shared Reading Cortex: 10 layers @ d_hidden=576 (≈60% of params)
+      • 3 token-level expert heads (Language/Math/Reason): 3 blocks @ d_hidden each
+      • Mid-trunk bowtie tap @ layer 5, RETRO-style memory injection on last 2 layers
+      • Latent Program Bus (16-dim) for across-step reasoning state
+      • Lazy bowtie (every 4 steps with EMA fallback)
+    """
+    c = BrainConfig()
+    # Tier-1 trunk width — modest bump from 512 → 576 makes room for the
+    # shared reading cortex to do the LM/comprehension heavy lifting.
+    c.d_sem = 384
+    c.d_hidden = 576
+
+    # 10 deep trunk layers (down from 12) — the freed param budget goes
+    # to 3 token-level experts (Lang/Math/Reason) at d_hidden=576.
+    c.lang_layers = 10
     c.lang_heads = 8
     c.lang_kv_heads = None
     c.lang_ctx = 2048
@@ -283,8 +323,8 @@ def xl() -> BrainConfig:
     c.hebbian_rank = 4
     c.mod_capacity = 0.8
 
-    # Baseline param parity: ~56 std transformer layers at d_hidden=512 ≈ 212M
-    c.baseline_lang_layers = 56
+    # Baseline param parity: trimmed for the bumped d_hidden=576.
+    c.baseline_lang_layers = 48
 
     # Novel modules: keep defaults conservative to limit params
     c.enable_rssm = False
@@ -295,6 +335,24 @@ def xl() -> BrainConfig:
     c.enable_tom = False
     c.tom_d_style = 64
     c.tom_n_heads = 4
+
+    # ---- SRC-TEH topology (default ON for xl) ----
+    c.enable_src_teh         = True
+    c.enable_memory_xattn    = True
+    c.n_memory_xattn_layers  = 2
+    c.n_memory_entries       = 64
+    c.mid_trunk_tap_layer    = 5      # tap at half-depth (layer 5 of 10)
+    c.n_token_experts        = 3
+    c.expert_capacity_factor = 1.5
+    c.expert_n_blocks        = 3
+    c.expert_n_heads         = 8
+    c.w_expert_aux           = 0.01
+    c.enable_latent_bus      = True
+    c.bus_dim                = 16
+    c.bus_ema_alpha          = 0.5
+    c.bowtie_period          = 4
+    c.bowtie_ema_alpha       = 0.4
+    c.trophic_prune_mat      = 0.3
 
     return c
 

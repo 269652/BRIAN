@@ -90,8 +90,10 @@ class Brain(nn.Module):
             return
         self._baseline = False
 
-        # ---- Language cortex ----
+        # ---- Language cortex (SRC-TEH Tier-1 Shared Reading Cortex) ----
         from .neurochem.transmitters import N_NT
+        _src_teh = bool(getattr(cfg, 'enable_src_teh', False))
+        _mid_tap = getattr(cfg, 'mid_trunk_tap_layer', 0) or (cfg.lang_layers // 2)
         self.language = LanguageCortex(
             cfg.vocab_size, cfg.d_hidden, cfg.d_sem,
             cfg.lang_layers, cfg.lang_heads, cfg.lang_ctx,
@@ -100,7 +102,11 @@ class Brain(nn.Module):
             hebbian_rank=getattr(cfg, 'hebbian_rank', 8),
             gradient_checkpointing=cfg.gradient_checkpointing,
             mod_capacity=getattr(cfg, 'mod_capacity', 1.0),
-            baseline=False)
+            baseline=False,
+            enable_memory_xattn=bool(getattr(cfg, 'enable_memory_xattn', False)),
+            n_memory_xattn_layers=int(getattr(cfg, 'n_memory_xattn_layers', 2)),
+            mid_trunk_tap_layer=int(_mid_tap),
+            use_attention_pool=_src_teh)
 
         # ---- Sensory + association ----
         self.sensory     = TextSensoryCortex(cfg.d_sem)
@@ -529,21 +535,78 @@ class Brain(nn.Module):
         # Continuous sensory world loop: encode 6-dim frame signal → d_sem grounding
         self.sensory_encoder = SensoryFrameEncoder(cfg.d_sem)
 
-        # ---- Expert cortices (vesicle-gated specialist modules) ----
+        # ---- Expert cortices ----
+        # Legacy mode: vesicle-gated specialist modules at d_sem.
+        # SRC-TEH mode: token-level transformer experts at d_hidden,
+        # dispatched by ExpertChoiceRouter on the trunk's hidden state.
         # MathCortex: differential-attention over a learnable fact memory
         # ReasoningCortex: Modern Hopfield pattern-completion attractors
         # TopicClassifier: routes sem → expert gate probabilities
+        _expert_d_hidden = cfg.d_hidden if _src_teh else None
+        _expert_blocks   = int(getattr(cfg, 'expert_n_blocks', 0)) if _src_teh else 0
+        _expert_heads    = int(getattr(cfg, 'expert_n_heads', cfg.lang_heads))
         self.math_cortex = MathCortex(
             d_sem=cfg.d_sem,
             n_heads=getattr(cfg, 'expert_heads', 4),
             memory_size=getattr(cfg, 'math_memory_size', 128),
+            d_hidden=_expert_d_hidden,
+            n_blocks=_expert_blocks,
+            max_ctx=cfg.lang_ctx,
         )
         self.reasoning_cortex = ReasoningCortex(
             d_sem=cfg.d_sem,
             n_attractors=getattr(cfg, 'reasoning_attractors', 64),
             base_beta=getattr(cfg, 'reasoning_beta', 4.0),
+            d_hidden=_expert_d_hidden,
+            n_blocks=_expert_blocks,
+            max_ctx=cfg.lang_ctx,
+            expert_n_heads=_expert_heads,
         )
         self.topic_classifier = TopicClassifier(cfg.d_sem)
+
+        # ---- SRC-TEH: Expert-Choice router, Language expert, Latent Bus ----
+        # Built unconditionally so checkpoints round-trip even if cfg
+        # toggles change between runs.  Inert when enable_src_teh=False.
+        from .modules.expert_router import (
+            ExpertChoiceRouter, LanguageExpert,
+            gather_tokens as _gather_tokens, scatter_add_tokens as _scatter_add_tokens,
+        )
+        from .intelligence.latent_program_bus import LatentProgramBus
+        self._src_teh_enabled = _src_teh
+        self._gather_tokens = staticmethod(_gather_tokens).__func__
+        self._scatter_add_tokens = staticmethod(_scatter_add_tokens).__func__
+        if _src_teh:
+            self.expert_router = ExpertChoiceRouter(
+                d_hidden=cfg.d_hidden,
+                n_experts=int(getattr(cfg, 'n_token_experts', 3)),
+                capacity_factor=float(getattr(cfg, 'expert_capacity_factor', 1.5)),
+            )
+            self.language_expert = LanguageExpert(
+                d_hidden=cfg.d_hidden,
+                n_blocks=_expert_blocks,
+                n_heads=_expert_heads,
+                max_ctx=cfg.lang_ctx,
+            )
+            self.latent_program_bus = LatentProgramBus(
+                d_hidden=cfg.d_hidden,
+                bus_dim=int(getattr(cfg, 'bus_dim', 16)),
+                ema_alpha=float(getattr(cfg, 'bus_ema_alpha', 0.5)),
+                d_sem=cfg.d_sem,
+            ) if bool(getattr(cfg, 'enable_latent_bus', False)) else None
+            # Memory injector: lift d_sem entries → d_hidden K/V rows.
+            self.memory_kv_proj = nn.Linear(cfg.d_sem, cfg.d_hidden, bias=False)
+            nn.init.normal_(self.memory_kv_proj.weight, std=0.02)
+            # Lazy-bowtie EMA caches: slots (B,S,d_sem) and selected (B,d_sem).
+            self.register_buffer('_bowtie_ema_slots',
+                                 torch.zeros(cfg.gws_slots, cfg.d_sem))
+            self.register_buffer('_bowtie_ema_selected',
+                                 torch.zeros(cfg.d_sem))
+            self.register_buffer('_bowtie_step', torch.zeros(1, dtype=torch.long))
+        else:
+            self.expert_router = None
+            self.language_expert = None
+            self.latent_program_bus = None
+            self.memory_kv_proj = None
 
         # ---- State tracking ----
         self.last_nt:            dict | None = None
@@ -795,17 +858,94 @@ class Brain(nn.Module):
                 _blk._maturity_gate = _mat_for_lang
 
         # 1) Language cortex
+        # Inject latent program bus as an extra prefix bias on the trunk
+        # input (across-step reasoning state).  Zero-init read head so the
+        # bias is zero at step 0 — gradient-equivalent to legacy on init.
         lang_thought = self.rcpt_lang.modulate(
             latents["floating_thought"].unsqueeze(1), nt).squeeze(1)
-        logits, sem, h_lang, pred_coding_loss = self.language(
-            ids, thought=lang_thought, nt=nt)
+        if getattr(self, '_src_teh_enabled', False) and self.latent_program_bus is not None:
+            # Read the across-step bus state → (B, d_sem) bias on the
+            # `thought` channel.  Zero-init projection so this is identity
+            # on step 0 and grows only as the read_head learns to be useful.
+            bus_bias_s = self.latent_program_bus.read_sem(B, device, dtype)
+            if bus_bias_s.size(-1) == cfg.d_sem:
+                lang_thought = lang_thought + bus_bias_s
+        # Build memory_kv for RETRO-style injection: EMA of recent bowtie
+        # output plus optional top-N consolidated entries (cheap path: just
+        # use the EMA slots for now; full retrieval is a TODO with no
+        # accuracy regression on bring-up).
+        memory_kv = None
+        if (getattr(self, '_src_teh_enabled', False)
+                and self.memory_kv_proj is not None
+                and bool(self._bowtie_step.item() > 0)):
+            # Clone the buffer view so the EMA in-place update at the end of
+            # this forward does not version-bump a tensor that the backward
+            # graph still references through `memory_kv_proj`.
+            mem = self._bowtie_ema_slots.detach().clone().to(
+                device=device, dtype=dtype)                               # (S, d_sem)
+            memory_kv = self.memory_kv_proj(mem)                          # (S, d_hidden)
+        _want_tap = bool(getattr(self, '_src_teh_enabled', False))
+        if _want_tap:
+            logits, sem, h_lang, pred_coding_loss, tap_sem = self.language(
+                ids, thought=lang_thought, nt=nt,
+                memory_kv=memory_kv, return_tap=True)
+        else:
+            tap_sem = None
+            logits, sem, h_lang, pred_coding_loss = self.language(
+                ids, thought=lang_thought, nt=nt)
 
         # Restore CALM thresholds after language forward
         for _ch, _orig_thresh in _calm_heads:
             _ch.base_threshold = _orig_thresh
 
+        # ── SRC-TEH: Token-level Expert-Choice routing ────────────────────
+        # Each expert (Lang / Math / Reason) pulls top-C tokens by affinity
+        # and emits a residual enrichment scattered back into h_lang. Then
+        # we re-norm + re-emit logits so the LM head sees the enriched
+        # hidden state instead of the raw trunk output.
+        expert_aux_loss = torch.tensor(0.0, device=device)
+        if (getattr(self, '_src_teh_enabled', False)
+                and self.expert_router is not None):
+            _mat = self.maturity_scalar() if hasattr(self, "maturity_scalar") else 1.0
+            route = self.expert_router(h_lang, maturity=_mat)
+            assignments = route["assignments"]                  # 3 × (B, C)
+            weights     = route["weights"]                      # 3 × (B, C)
+            expert_aux_loss = route["aux_loss"]
+            # Experts in canonical order: 0=Language, 1=Math, 2=Reasoning.
+            experts_fwd = [
+                self.language_expert.forward_tokens,
+                self.math_cortex.forward_tokens,
+                self.reasoning_cortex.forward_tokens,
+            ]
+            h_enriched = h_lang
+            for e, fn in enumerate(experts_fwd):
+                if e >= len(assignments):
+                    break
+                idx = assignments[e]                            # (B, C)
+                gate = weights[e].unsqueeze(-1)                 # (B, C, 1)
+                tokens = self._gather_tokens(h_lang, idx)       # (B, C, d_hidden)
+                enriched = fn(tokens, maturity=_mat)            # (B, C, d_hidden)
+                contrib = gate * (enriched - tokens)            # residual
+                h_enriched = self._scatter_add_tokens(h_enriched, idx, contrib)
+            # Re-norm and re-emit logits using the post-expert hidden state.
+            h_post = self.language.norm_f(h_enriched)
+            logits = self.language.lm_head(h_post)
+            # Refresh `sem` and `h_lang` to track the enriched stream so
+            # downstream modules (motor cond. head, bowtie) see it.
+            h_lang = h_enriched
+            if self.language.use_attention_pool:
+                sem = self.language.sem_pool(h_post)
+            else:
+                sem = self.language.to_sem(h_post.mean(dim=1))
+            # Write the new trunk pool into the latent program bus for
+            # next-step readback.
+            if self.latent_program_bus is not None:
+                _summary = h_post.mean(dim=1)                  # (B, d_hidden)
+                self.latent_program_bus.write(_summary.detach())
+
         # Novel: phase-coded attention + HTM temporal structure on language output
         novel_aux_loss = torch.tensor(0.0, device=device)
+        novel_aux_loss = novel_aux_loss + getattr(cfg, 'w_expert_aux', 0.01) * expert_aux_loss
         if self.phase_attn is not None:
             nt4 = nt[:, :4] if nt.shape[1] >= 4 else None
             sem, _ = self.phase_attn(sem, step_offset=self._global_step, nt_levels=nt4)
@@ -820,6 +960,17 @@ class Brain(nn.Module):
                 loss = self._chunked_ce(logits, targets).mean()
                 out.update({"loss": loss, "lm_loss": loss.detach()})
             return out
+
+        # ── Lazy Bowtie decision ─────────────────────────────────────────
+        # When SRC-TEH is on AND the cache has been primed at least once,
+        # only run the heavy bowtie modules every `bowtie_period` steps;
+        # on off-steps we substitute the cached EMA of slots+selected.
+        _bowtie_period = int(getattr(cfg, 'bowtie_period', 1))
+        _run_bowtie = True
+        if (getattr(self, '_src_teh_enabled', False)
+                and _bowtie_period > 1
+                and bool(self._bowtie_step.item() > 0)):
+            _run_bowtie = (int(self._bowtie_step.item()) % _bowtie_period == 0)
 
         # 2) Sensory + association
         sens, salience = self.sensory(sem)
@@ -949,28 +1100,38 @@ class Brain(nn.Module):
             _reason_gate = max(_reason_gate, self.vesicle_pool.expert_gate(TOPIC_REASONING))
 
         # Expert cortex enrichment (additive, parallel, gated by topic probs)
-        # MathCortex: DiffAttn over symbolic fact memory (κ_math gate)
-        # ReasoningCortex: Hopfield pattern completion (κ_reason gate)
-        # GWS broadcast is also passed as plasticity context — this is the
-        # dual-timescale Hebbian fast-weight binding stage at each expert.
-        # Maturity (MAT) drives a 5%-noise-floor → full-weight fade-in on the
-        # expert residual (handled inside each cortex).
+        # Legacy d_sem path. Skipped when SRC-TEH is on — the token-level
+        # experts already enriched the trunk's hidden state at d_hidden, so
+        # running the same cortices again at d_sem would be double-counting.
         _slots_mean = slots.mean(1)  # (B, d_sem) — batch aggregate for experts
-        _gws_ctx    = _slots_mean.detach()   # broadcast as plasticity context
         _mat = self.maturity_scalar() if hasattr(self, "maturity_scalar") else 1.0
-        if _math_gate > 0.02:
-            _slots_mean = self.math_cortex(_slots_mean,
-                                           vesicle_gate=_math_gate,
-                                           gws_context=_gws_ctx,
-                                           maturity=_mat)
-        if _reason_gate > 0.02:
-            _slots_mean = self.reasoning_cortex(_slots_mean,
-                                                vesicle_gate=_reason_gate,
-                                                gws_context=_gws_ctx,
-                                                maturity=_mat)
-        # Inject expert enrichment back into slot representations
-        if _math_gate > 0.02 or _reason_gate > 0.02:
-            slots = slots + 0.2 * _slots_mean.unsqueeze(1)
+        if not getattr(self, '_src_teh_enabled', False):
+            _gws_ctx = _slots_mean.detach()   # broadcast as plasticity context
+            if _math_gate > 0.02:
+                _slots_mean = self.math_cortex(_slots_mean,
+                                               vesicle_gate=_math_gate,
+                                               gws_context=_gws_ctx,
+                                               maturity=_mat)
+            if _reason_gate > 0.02:
+                _slots_mean = self.reasoning_cortex(_slots_mean,
+                                                    vesicle_gate=_reason_gate,
+                                                    gws_context=_gws_ctx,
+                                                    maturity=_mat)
+            # Inject expert enrichment back into slot representations
+            if _math_gate > 0.02 or _reason_gate > 0.02:
+                slots = slots + 0.2 * _slots_mean.unsqueeze(1)
+
+        # Bowtie EMA cache update — feeds RETRO-style memory_kv on the
+        # NEXT forward pass (zero on the first step, then warms up).
+        if getattr(self, '_src_teh_enabled', False):
+            with torch.no_grad():
+                slots_mean_batch = slots.detach().mean(0)        # (S, d_sem)
+                alpha = float(getattr(cfg, 'bowtie_ema_alpha', 0.4))
+                slots_mean_batch = slots_mean_batch.to(
+                    dtype=self._bowtie_ema_slots.dtype,
+                    device=self._bowtie_ema_slots.device)
+                self._bowtie_ema_slots.mul_(1.0 - alpha).add_(slots_mean_batch, alpha=alpha)
+                self._bowtie_step += 1
 
         # 6) DMN query + hippocampal enrichment
         dmn_query, _stop = self.dmn.forward_safe(slots, latents["floating_thought"], nt_d)
@@ -1148,7 +1309,10 @@ class Brain(nn.Module):
                                     bdnf=_bdnf_val,
                                     ngf=novelty.detach().mean().item(),
                                     phi=_phi_val,
-                                    fiedler=_fiedler_val)
+                                    fiedler=_fiedler_val,
+                                    maturity=self.maturity_scalar(),
+                                    prune_mat_threshold=float(getattr(
+                                        cfg, 'trophic_prune_mat', 0.3)))
 
                 # BDNF structural growth: Φ-triggered rank increase in NeuralGeometryAdapters
                 if hasattr(self, 'language') and hasattr(self.language, 'bdnf_grow_all'):
@@ -2001,7 +2165,10 @@ class Brain(nn.Module):
             self.transmitters.release(nt_name, amt.clamp(0, 0.5))
         self._release_via_projections(activities)
         self.trophic.update(activities, bdnf=0.0, ngf=float(novelty.mean()),
-                            fiedler=float(getattr(self, '_last_fiedler', 1.0)))
+                            fiedler=float(getattr(self, '_last_fiedler', 1.0)),
+                            maturity=self.maturity_scalar() if hasattr(self, 'maturity_scalar') else None,
+                            prune_mat_threshold=float(getattr(
+                                self.cfg, 'trophic_prune_mat', 0.3)))
 
         self.reuptake.clear(self.transmitters)
         self.reuptake.adapt_density(self.transmitters)

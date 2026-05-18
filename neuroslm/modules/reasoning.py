@@ -23,6 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .brain_module import BrainModule
+from .common import TransformerBlock, RMSNorm
 from .fast_weight import FastWeightLayer
 
 
@@ -58,13 +59,30 @@ class ReasoningCortex(BrainModule):
                  n_iters: int = 3,
                  enable_hfw: bool = True,
                  n_action_types: int = 14,        # match SocialMarkovMemory N_TYPES
-                 rec_rank: int = 16):
+                 rec_rank: int = 16,
+                 d_hidden: int | None = None,
+                 n_blocks: int = 0,
+                 max_ctx: int = 2048,
+                 expert_n_heads: int = 4):
+        """SRC-TEH extension args:
+
+        d_hidden: per-token expert width.  When None (legacy/test path) only
+            the d_sem Hopfield attractor path is active.  When set, the
+            cortex additionally constructs `n_blocks` TransformerBlocks at
+            d_hidden plus a learnable attractor-bank cross-attention layer —
+            invoked via `forward_tokens(x)` from the expert-choice router.
+        n_blocks: depth of the token-level expert (default 3 per SRC-TEH).
+        max_ctx: max sequence length per token-level call (router caps it).
+        expert_n_heads: heads used by the token-level transformer blocks.
+        """
         super().__init__()
         self.d_sem = d_sem
         self.n_attractors = n_attractors
         self.base_beta = base_beta
         # Static: unroll exactly n_iters steps at compile time (XLA-safe)
         self.n_iters = min(n_iters, 4)
+        self.d_hidden = d_hidden
+        self.n_blocks = int(n_blocks)
 
         # Learnable attractor library (reasoning schema bank)
         self.attractors = nn.Parameter(
@@ -125,6 +143,31 @@ class ReasoningCortex(BrainModule):
         self.hfw = FastWeightLayer(d_sem, decay=0.95, base_eta=0.1, n_heads=n_h) \
                    if enable_hfw else None
         self._hfw_state: torch.Tensor | None = None
+
+        # ── Token-level expert stack (SRC-TEH) ────────────────────────────
+        # Constructed only when d_hidden + n_blocks > 0.  Otherwise the
+        # cortex is the lightweight (legacy) Hopfield enrichment.
+        if self.d_hidden is not None and self.n_blocks > 0:
+            eh = max(1, expert_n_heads)
+            while self.d_hidden % eh != 0 and eh > 1:
+                eh -= 1
+            self.expert_blocks = nn.ModuleList([
+                TransformerBlock(self.d_hidden, n_heads=eh, max_ctx=max_ctx)
+                for _ in range(self.n_blocks)
+            ])
+            # Attractor bank at the expert width — Hopfield-style schema bank
+            # for relational completion at token-level.
+            self.attractors_h = nn.Parameter(
+                torch.randn(n_attractors, self.d_hidden)
+                * (1.0 / math.sqrt(self.d_hidden)))
+            self.attr_log_beta = nn.Parameter(torch.zeros(1))
+            self.attr_norm     = RMSNorm(self.d_hidden)
+            self.attr_q        = nn.Linear(self.d_hidden, self.d_hidden, bias=False)
+            self.attr_out      = nn.Linear(self.d_hidden, self.d_hidden, bias=False)
+            nn.init.zeros_(self.attr_out.weight)
+            self.expert_norm   = RMSNorm(self.d_hidden)
+        else:
+            self.expert_blocks = None
 
     # ------------------------------------------------------------------
     # Single Hopfield update step
@@ -295,6 +338,40 @@ class ReasoningCortex(BrainModule):
         """
         probs, _ = self.predict_reaction(action_emb)
         return F.nll_loss(torch.log(probs + 1e-9), reaction_target.long())
+
+    # ------------------------------------------------------------------
+    # Token-level expert pass (SRC-TEH)
+    # ------------------------------------------------------------------
+    def forward_tokens(self, x: torch.Tensor,
+                       maturity: float | None = None) -> torch.Tensor:
+        """Process a routed batch of tokens through the 3-block expert.
+
+        x: (B, C, d_hidden) — tokens pulled by the ExpertChoiceRouter.
+        Returns (B, C, d_hidden) with attractor-completion residual applied.
+        Falls back to identity when the token-level stack was not constructed.
+        """
+        if self.expert_blocks is None:
+            return x
+
+        B, C, D = x.shape
+        h = x
+        for blk in self.expert_blocks:
+            h = blk(h)
+
+        # Hopfield attractor cross-attention at d_hidden — each token
+        # softly retrieves the best-matching reasoning schema.
+        beta = F.softplus(self.attr_log_beta) + self.base_beta
+        q   = self.attr_q(self.attr_norm(h.float()).to(h.dtype))      # (B, C, D)
+        q   = F.normalize(q.float(), dim=-1).to(h.dtype)
+        A   = F.normalize(self.attractors_h.float(), dim=-1).to(h.dtype)
+        logits  = beta * torch.einsum("bcd,kd->bck", q, A)
+        weights = F.softmax(logits.float(), dim=-1).to(h.dtype)
+        retrieved = torch.einsum("bck,kd->bcd", weights, A)
+        h = h + self.attr_out(retrieved)
+        h = self.expert_norm(h.float()).to(h.dtype)
+
+        m_eff = 1.0 if maturity is None else max(float(maturity), 0.05)
+        return x + m_eff * (h - x)
 
     def _disabled_output(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return x

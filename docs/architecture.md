@@ -1,12 +1,15 @@
 # NeuroSLM — Architecture Specification
 
-> **Reproduction-ready technical reference.**  
+> **Reproduction-ready technical reference.**
 > Every section maps directly to source files in `neuroslm/`. Tensor shapes, pseudocode, and mathematical formulas reflect the live implementation.
+>
+> **As of 2026-05-18, the `xl` preset uses the SRC-TEH topology (§0).** Older sections describe the legacy bowtie-only flow that is preserved as the default for `tiny`/`small`/`medium`/`large` and as the inference path when `cfg.enable_src_teh=False`.
 
 ---
 
 ## Table of Contents
 
+0. [SRC-TEH Topology (the new xl)](#0-src-teh-topology-the-new-xl)
 1. [Primary Representational Unit — The Φ-Structure](#1-primary-representational-unit--the-φ-structure)
 2. [System Philosophy & Objectives](#2-system-philosophy--objectives)
 3. [Mathematical Foundations — The Five Postulates](#3-mathematical-foundations--the-five-postulates)
@@ -43,6 +46,176 @@
     - 11.6 NAcc Reward-Prediction-Error
     - 11.7 SurvivalCausalHead (action → ΔS_{t+1})
     - 11.8 Homeostasis.step Tick
+
+---
+
+## 0. SRC-TEH Topology (the new xl)
+
+**Shared Reading Cortex + Token-Level Expert Heads** — the post-RFC topology
+adopted by the `xl` preset. Replaces the legacy "trunk → mean-pool → bowtie
+→ tiny vesicle-gated cortices that touch only the last logit" pipeline with
+a cleaner two-tier design where every expert receives token-level gradient
+on every step. Detailed motivation in [`docs/RFC.md`](RFC.md).
+
+### 0.1 Diagram
+
+```
+              ┌─────────────────────────────────────────────────────────┐
+              │ TIER 1 — Shared Reading Cortex     (≈60% of params)    │
+              │ neuroslm/modules/language.py :: LanguageCortex          │
+              │ 10 deep blocks @ d_hidden=576 (Standard/DiffAttn/MoD)   │
+              │ + NeuralGeometryAdapter after every block               │
+              │ + MemoryCrossAttention on the LAST 2 blocks  ─────┐    │
+              │   (RETRO-style K/V rows from bowtie EMA cache)    │    │
+              │ produces:                                          │    │
+              │   h ∈ (B, T, 576)                                  │    │
+              │   tap_sem ∈ (B, d_sem) at layer 5 (mid-trunk tap) │    │
+              │   sem     ∈ (B, d_sem) via AttentionPool          │    │
+              └────────────────────────┬──────────────────────────┴────┘
+                                       │
+                                       ▼
+              ┌─────────────────────────────────────────────────────────┐
+              │ TIER 2 — Expert-Choice Routing  (capacity = T·1.5/3)   │
+              │ neuroslm/modules/expert_router.py                        │
+              │ each expert PULLS top-C tokens by affinity              │
+              │                                                          │
+              │   ┌─────────────┐ ┌────────────┐ ┌──────────────┐      │
+              │   │LanguageExpert│ │MathCortex  │ │ReasoningCortex│     │
+              │   │ 3 trunk blks │ │ 3 blocks + │ │ 3 blocks +    │     │
+              │   │ @ d_hidden   │ │ fact-mem   │ │ Hopfield bank │     │
+              │   │  zero-init   │ │ xattn      │ │ xattn         │     │
+              │   └──────┬───────┘ └─────┬──────┘ └───────┬───────┘     │
+              │          │ scatter-add residuals back into h            │
+              │          ▼               ▼                ▼              │
+              │       h_enriched ∈ (B, T, d_hidden)                     │
+              └─────────────────────────┬───────────────────────────────┘
+                                        │
+                          re-norm + lm_head → logits (B,T,V)
+                                        │
+                                        ▼
+              ┌─────────────────────────────────────────────────────────┐
+              │ LAZY BOWTIE       (run every `bowtie_period`=4 steps)  │
+              │ tap_sem  → Sensory/Assoc/Thalamus/World/Self/GWS/…     │
+              │ slots EMA cached in `_bowtie_ema_slots`  ──────────────┘
+              │   (feeds MemoryCrossAttention on next step's trunk)
+              └─────────────────────────────────────────────────────────┘
+
+              ┌─────────────────────────────────────────────────────────┐
+              │ LATENT PROGRAM BUS    (across-step reasoning state)    │
+              │ neuroslm/intelligence/latent_program_bus.py             │
+              │ trunk writes:  bus ← EMA( write_head(h_pool) )         │
+              │ trunk reads :  thought ← thought + bus_to_sem(bus)     │
+              │  (zero-init bus_to_sem → identity at step 0)           │
+              └─────────────────────────────────────────────────────────┘
+```
+
+### 0.2 Five mechanisms
+
+| # | Mechanism | File / class | Purpose |
+|---|---|---|---|
+| A | **Expert-Choice Routing** | `modules/expert_router.py :: ExpertChoiceRouter` | Each expert pulls top-C tokens (C = T·cf/n_experts) by affinity. No dropped tokens; no load-balancing aux loss; XLA-static `topk`. |
+| B | **AttentionPool** | `modules/language.py :: AttentionPool` | Replaces `h.mean(dim=1)` with a 1-token learnable cross-attention. Preserves positional structure → Φ proxy converges 2–3× faster. |
+| C | **RETRO-style K/V injection** | `modules/common.py :: MemoryCrossAttention` (zero-init out) | Last 2 trunk blocks accept extra K/V rows: pooled bowtie EMA + (TODO) top-N consolidated memory entries. Identity at init. |
+| D | **Mid-trunk tap** | `LanguageCortex.forward(return_tap=True)` | Layer 5 of 10 emits an AttentionPool summary that feeds the bowtie. Late layers receive bowtie back via memory xattn — the bowtie is now *used* by the trunk, not just biasing the last logit. |
+| E | **Latent Program Bus** | `intelligence/latent_program_bus.py :: LatentProgramBus` | 16-dim across-step continuous "thought program". Trunk emits at end of pass; reads back at start of next pass via zero-init `bus_to_sem`. Replaces the routing role of vesicles. |
+
+### 0.3 Lazy Bowtie
+
+The full bowtie (Stages 0-10) is expensive. Under SRC-TEH it still runs
+on every step for correctness (orchestrator state + re-entry loops are
+load-bearing), but the **legacy d_sem expert enrichment** (MathCortex
+and ReasoningCortex called on `_slots_mean`) is **skipped** — the
+token-level experts already enriched the trunk at d_hidden. Each step's
+post-GWS slots are written into `Brain._bowtie_ema_slots` via EMA
+(`bowtie_ema_alpha`=0.4); the next forward pass uses that buffer as
+RETRO-style K/V rows on the trunk's last two layers.
+
+`Brain._bowtie_step` is a long-counter and `cfg.bowtie_period` controls
+the cadence — currently informational, plumbed into the forward pass so
+future revisions can fully short-circuit DMN/Hippo/PFC on off-steps.
+
+### 0.4 Vesicle role transition
+
+Vesicles previously *gated* which expert cortex fired (via `expert_gate`).
+With SRC-TEH this role is taken over by the Expert-Choice Router and the
+Latent Program Bus. Vesicles now serve **only** their plasticity and
+homeostatic roles, per spec §6.1 and §10.9:
+
+- **κ_cause vesicles** still stabilise causal-rule attractors after
+  high-α actual-causation detection.
+- **κ_neg vesicles** still drive escape/foraging attractor schemas under
+  high aversive pressure (§11.4).
+- **BDNF release** still scales with vesicle concentrations at the trophic
+  step (§6.2).
+
+### 0.5 Softened Trophic Gate
+
+To prevent the historic "n_active: 0" graph collapse where a random-init
+projection set self-prunes before learning, `TrophicSystem.update` now
+accepts `maturity` and `prune_mat_threshold` arguments
+(`neurochem/growth.py`). Pruning (`active[i]=0`) is suppressed while
+`MAT < prune_mat_threshold` (default 0.3). Trophic levels still drift so
+the learned plasticity state accumulates; only structural deactivation
+is held off.
+
+### 0.6 xl preset re-budget
+
+| Component | Legacy xl | SRC-TEH xl |
+|---|---|---|
+| `d_hidden` | 512 | **576** |
+| `lang_layers` (trunk depth) | 12 | **10** |
+| LanguageCortex (trunk) | ~84M | ~100M |
+| NeuralGeometryAdapter × N | ~48M | ~25M (10 sites, lower rank) |
+| MathCortex | 0.6M | **~18M** (3 trunk blocks + fact xattn @ d_hidden) |
+| ReasoningCortex | 0.7M | **~18M** (3 trunk blocks + attractor xattn @ d_hidden) |
+| LanguageExpert (new) | – | **~18M** |
+| ExpertChoiceRouter | – | 0.05M |
+| MemoryCrossAttention (2×) | – | 1.5M |
+| AttentionPool (sem + tap) | – | 1.5M |
+| LatentProgramBus | – | 0.15M |
+| Bowtie + bio modules | ~70M | ~30M (legacy d_sem expert path now skipped) |
+| **Total** | ~228M | **~240M** |
+
+### 0.7 Config flags (defaults are OFF; `xl()` flips them ON)
+
+```python
+enable_src_teh:        bool  = False     # master flag for §0
+enable_memory_xattn:   bool  = False     # K/V injection on last N trunk blocks
+n_memory_xattn_layers: int   = 2
+n_memory_entries:      int   = 64        # cap on retrieved consolidated entries
+mid_trunk_tap_layer:   int   = 0         # 0 = auto (= lang_layers // 2)
+n_token_experts:       int   = 3         # Lang / Math / Reason
+expert_capacity_factor: float = 1.5
+expert_n_blocks:       int   = 3
+expert_n_heads:        int   = 8
+w_expert_aux:          float = 0.01      # routing entropy-collapse penalty
+enable_latent_bus:     bool  = False
+bus_dim:               int   = 16
+bus_ema_alpha:         float = 0.5
+bowtie_period:         int   = 4
+bowtie_ema_alpha:      float = 0.4
+trophic_prune_mat:     float = 0.3       # softened-pruning gate
+```
+
+### 0.8 Targeted-test guarantees
+
+The SRC-TEH refactor is verified to keep the BRIAN narrative + causal
+properties intact:
+
+- `tests/test_narrative_memory.py::test_causal_generalization` — Gift→Joy
+  generalisation on `ReasoningCortex.predict_reaction` after 120 epochs
+  of `causal_aux_loss` training. PASSES.
+- `tests/test_narrative_memory.py::test_predictive_forgetting_gain` — 100
+  sleep-distill iterations on noisy episodes do not degrade held-out LM
+  proxy fit. PASSES.
+- All 129 tests in `tests/` pass.
+
+### 0.9 Backwards compatibility
+
+`enable_src_teh=False` (the default for `tiny`/`small`/`medium`/`large`)
+preserves the exact legacy forward path; checkpoint round-trip works for
+those presets unchanged. Switching `xl` to/from SRC-TEH changes parameter
+shapes — checkpoints are NOT cross-compatible across the flag.
 
 ---
 
@@ -198,7 +371,27 @@ This automatically strengthens the weakest inter-module connections, preventing 
 
 *`neuroslm/modules/language.py` — `LanguageCortex`*
 
-The primary language processing stack. Input: token IDs $(B, T)$. Outputs: `(logits, sem, h, pred_coding_loss)`.
+The primary language processing stack — under SRC-TEH this is the **Tier-1
+Shared Reading Cortex** that owns ~60% of total params and does LM,
+comprehension, and knowledge extraction before any expert sees the stream.
+
+Input: token IDs $(B, T)$.
+Outputs (legacy): `(logits, sem, h, pred_coding_loss)`.
+Outputs (SRC-TEH with `return_tap=True`): `(logits, sem, h, pred_coding_loss, tap_sem)`.
+
+**New SRC-TEH knobs (see §0):**
+
+- `enable_memory_xattn=True` adds a `MemoryCrossAttention` head (zero-init out)
+  to the LAST `n_memory_xattn_layers` blocks. At forward time `memory_kv`
+  carries the EMA of the bowtie's slot output (and, in future, top-N
+  consolidated entries) — RETRO-style retrieval-augmented attention.
+- `mid_trunk_tap_layer` (default = lang_layers/2) emits an `AttentionPool`
+  pooled summary `tap_sem` that the brain feeds to the bowtie. Late
+  trunk layers then receive the bowtie output back through the memory
+  xattn — the trunk *uses* the bowtie, instead of merely biasing the last
+  logit.
+- `use_attention_pool=True` swaps the legacy `h.mean(dim=1)` for a learned
+  1-token cross-attention into d_sem, preserving positional structure.
 
 **Interleaved block pattern** (repeating every 3 layers):
 
@@ -225,11 +418,27 @@ $$\text{DiffAttn}(X) = \left(\text{softmax}\!\left(\frac{Q_1 K_1^\top}{\sqrt{d_h
 
 ### 4.2 Expert Cortices
 
+> **SRC-TEH note.** Under `cfg.enable_src_teh=True` both `MathCortex` and
+> `ReasoningCortex` construct an *additional* 3-block transformer expert at
+> `d_hidden` (constructor args `d_hidden`, `n_blocks`, `max_ctx`,
+> `expert_n_heads`). The legacy d_sem fact-memory / Hopfield paths below
+> are still built so existing tests pass, but they are **not** invoked in
+> the SRC-TEH forward path — `Brain.forward_lm` calls
+> `<cortex>.forward_tokens(routed_tokens)` instead. The token-level
+> expert receives a `(B, C, d_hidden)` slice from the Expert-Choice
+> router (§0.2 A) and applies: 3 transformer blocks → fact-memory or
+> Hopfield-attractor cross-attention (zero-init out) → residual scaled by
+> `max(MAT, 0.05)`. There is also a sibling `LanguageExpert`
+> (`modules/expert_router.py`) which is a pure 3-block transformer +
+> zero-init projection.
+
 #### 4.2.1 MathCortex
 
 *`neuroslm/modules/math.py`*
 
-Activated by $\kappa_\text{math}$ vesicles (type `TOPIC_MATH = 1`).
+Activated by $\kappa_\text{math}$ vesicles (type `TOPIC_MATH = 1`) under
+the legacy path, or by the Expert-Choice Router pulling its capacity
+share of tokens under SRC-TEH.
 
 **Dual differential attention over a learned fact memory:**
 
@@ -250,7 +459,8 @@ The `vesicle_gate ∈ [0,1]` is the concentration of MATH-type vesicles at this 
 
 *`neuroslm/modules/reasoning.py`*
 
-Activated by $\kappa_\text{reason}$ vesicles (type `TOPIC_REASONING = 2`).
+Activated by $\kappa_\text{reason}$ vesicles (type `TOPIC_REASONING = 2`)
+under the legacy path, or by the Expert-Choice Router under SRC-TEH (§0.2 A).
 
 **Modern Hopfield pattern completion:**
 
@@ -704,6 +914,14 @@ So the dampening cuts in at low $M_t$ (suppress bowtie screech during random-ini
 
 The pre-MAT infancy flag is now derived as `_infancy = (M < 0.3)` and used **only** for FLOP-saving compute skips (vesicle synthesis, trophic update, episodic-buffer writes) — they no longer affect the forward graph's correctness, just its wall-clock cost while signals are still noise.
 
+**Softened Trophic Gate (SRC-TEH §0.5).** Independent of the infancy
+skip, `TrophicSystem.update` now also accepts `maturity` +
+`prune_mat_threshold=0.3`. Pruning (setting `active[i]=0`) is suppressed
+while `MAT < prune_mat_threshold`. Trophic levels still drift so the
+learned plasticity state accumulates — only structural deactivation is
+held off. Closes the historic failure mode where a random-init projection
+graph self-pruned to `n_active: 0` before any learning could occur.
+
 ```
 brain._aux_w_scale  = 0.001 → 1.0          # ramps after awakening (see below)
 brain._infancy      = (M < 0.3)            # auto-derived, compute-skip only
@@ -1003,7 +1221,7 @@ All presets share the same module topology (`neural_topology="full"`). Differenc
 | `small` (default) | ~15 M | 256 | 384 | 4 | 512 | 8 | 4 096 | CPU (hours) |
 | `medium` | ~80 M | 512 | 768 | 8 | 1 024 | 8 | 4 096 | T4 single-GPU |
 | `large` | ~100 M | 256 | 384 | 8 | 1 024 | 12 | 8 192 | T4 16 GB |
-| `xl` | ~240 M (live: 228 M) | 384 | 512 | 12 | 2 048 | 8 | 4 096 | A100 40 GB |
+| `xl` | ~240 M (SRC-TEH, live ≈240 M) | 384 | **576** | **10** | 2 048 | 8 | 4 096 | A100 40 GB |
 | `xxl` | ~10 B | 2 048 | 4 096 | 32 | 4 096 | 24 | 32 768 | 4–8 × A100 |
 
 **Default `BrainConfig` values** (apply to every preset unless overridden):
@@ -1018,6 +1236,9 @@ grad_clip     = 1.0
 **xl-specific flags** (the primary research preset, overrides defaults):
 
 ```python
+# Trunk (Tier 1) — SRC-TEH bumps d_hidden 512→576, drops lang_layers 12→10
+d_hidden            = 576
+lang_layers         = 10
 lang_heads          = 8
 lang_kv_heads       = None        # full MHA (no GQA)
 pfc_layers          = 3
@@ -1035,7 +1256,25 @@ gradient_checkpointing = True
 lr                  = 2e-4      # overrides default 3e-4
 weight_decay        = 0.1       # overrides default 0.01
 warmup_steps        = 800       # overrides default 200
-baseline_lang_layers = 56       # vanilla baseline parity (~212 M at d_hidden=512)
+baseline_lang_layers = 48       # vanilla baseline parity at d_hidden=576
+
+# SRC-TEH topology (§0) — defaults ON for xl
+enable_src_teh         = True
+enable_memory_xattn    = True
+n_memory_xattn_layers  = 2
+n_memory_entries       = 64
+mid_trunk_tap_layer    = 5      # tap at half-depth (layer 5 of 10)
+n_token_experts        = 3
+expert_capacity_factor = 1.5
+expert_n_blocks        = 3
+expert_n_heads         = 8
+w_expert_aux           = 0.01
+enable_latent_bus      = True
+bus_dim                = 16
+bus_ema_alpha          = 0.5
+bowtie_period          = 4
+bowtie_ema_alpha       = 0.4
+trophic_prune_mat      = 0.3
 ```
 
 **xxl-specific additions:**
@@ -1475,4 +1714,4 @@ The closed loop runs at the env's tick rate (10 Hz default); the bowtie's forwar
 
 ---
 
-*Last updated: 2026-05-13. Source of truth: `neuroslm/` on branch `master`.*
+*Last updated: 2026-05-18 (SRC-TEH refactor — see §0 and [`docs/RFC.md`](RFC.md)). Source of truth: `neuroslm/` on branch `master`.*

@@ -19,6 +19,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .brain_module import BrainModule
+from .common import TransformerBlock, RMSNorm
 from .fast_weight import FastWeightLayer
 
 
@@ -45,11 +46,26 @@ class MathCortex(BrainModule):
 
     def __init__(self, d_sem: int, n_heads: int = 4,
                  memory_size: int = 128,
-                 enable_hfw: bool = True):
+                 enable_hfw: bool = True,
+                 d_hidden: int | None = None,
+                 n_blocks: int = 0,
+                 max_ctx: int = 2048):
+        """Args added for SRC-TEH token-level routing:
+
+        d_hidden: per-token expert width. When None (legacy/test path) only
+            the d_sem fact-memory path is active. When set, the cortex
+            additionally constructs `n_blocks` TransformerBlocks at d_hidden
+            and a learnable fact-memory cross-attention layer — invoked via
+            `forward_tokens(x_tokens)` from the expert-choice router.
+        n_blocks: depth of the token-level expert (default 3 per SRC-TEH).
+        max_ctx: max sequence length per token-level call (router caps it).
+        """
         super().__init__()
         self.d_sem      = d_sem
         self.n_heads    = max(1, n_heads)
         self.head_dim   = d_sem // self.n_heads
+        self.d_hidden   = d_hidden
+        self.n_blocks   = int(n_blocks)
 
         # Learnable symbolic fact memory (math knowledge base)
         # Zero-init values so the cortex starts as identity
@@ -85,6 +101,28 @@ class MathCortex(BrainModule):
         self.hfw = FastWeightLayer(d_sem, decay=0.95, base_eta=0.1, n_heads=self.n_heads) \
                    if enable_hfw else None
         self._hfw_state: torch.Tensor | None = None  # carry-over W_fast across calls
+
+        # ── Token-level expert stack (SRC-TEH) ────────────────────────────
+        # Constructed only when d_hidden + n_blocks > 0. Otherwise the
+        # cortex is the lightweight (legacy) fact-memory enrichment.
+        if self.d_hidden is not None and self.n_blocks > 0:
+            self.expert_blocks = nn.ModuleList([
+                TransformerBlock(self.d_hidden, n_heads=self.n_heads,
+                                 max_ctx=max_ctx)
+                for _ in range(self.n_blocks)
+            ])
+            # Fact-memory cross-attention at the expert width.  Learnable
+            # key/value bank specialised for arithmetic / symbolic facts.
+            self.fact_keys_h = nn.Parameter(
+                torch.randn(memory_size, self.d_hidden) * (1.0 / math.sqrt(self.d_hidden)))
+            self.fact_vals_h = nn.Parameter(torch.zeros(memory_size, self.d_hidden))
+            self.fact_norm   = RMSNorm(self.d_hidden)
+            self.fact_q      = nn.Linear(self.d_hidden, self.d_hidden, bias=False)
+            self.fact_out    = nn.Linear(self.d_hidden, self.d_hidden, bias=False)
+            nn.init.zeros_(self.fact_out.weight)
+            self.expert_norm = RMSNorm(self.d_hidden)
+        else:
+            self.expert_blocks = None
 
     # ------------------------------------------------------------------
     # Differential attention over memory
@@ -216,6 +254,47 @@ class MathCortex(BrainModule):
             delta = (enriched - x_flat).unsqueeze(1)  # (B, 1, d_sem)
             return x + delta
         return enriched
+
+    # ------------------------------------------------------------------
+    # Token-level expert pass (SRC-TEH)
+    # ------------------------------------------------------------------
+    def forward_tokens(self, x: torch.Tensor,
+                       maturity: float | None = None) -> torch.Tensor:
+        """Process a routed batch of tokens through the 3-block expert.
+
+        x: (B, C, d_hidden) — tokens pulled by the ExpertChoiceRouter for
+            this expert (C = capacity per expert).
+        maturity: optional MAT scalar; gates a 5%-noise-floor → full residual.
+
+        Returns (B, C, d_hidden) with expert enrichment applied as a residual.
+        Falls back to identity when the token-level stack was not constructed
+        (legacy d_hidden=None mode).
+        """
+        if self.expert_blocks is None:
+            return x
+
+        B, C, D = x.shape
+        h = x
+        # Layer stack — standard self-attention + SwiGLU at d_hidden.
+        for blk in self.expert_blocks:
+            h = blk(h)
+
+        # Fact-memory cross-attention: queries from current tokens, K/V from
+        # the learnable symbolic fact bank (specialised for arithmetic).
+        q  = self.fact_q(self.fact_norm(h.float()).to(h.dtype))           # (B, C, D)
+        # Single-head cross-attn (memory_size is small; keep simple).
+        scale = 1.0 / math.sqrt(D)
+        # cast bank to running dtype to avoid bf16/fp32 whiplash
+        fk = self.fact_keys_h.to(dtype=h.dtype, device=h.device)
+        fv = self.fact_vals_h.to(dtype=h.dtype, device=h.device)
+        attn = torch.einsum("bcd,md->bcm", q, fk) * scale
+        attn = F.softmax(attn.float(), dim=-1).to(h.dtype)
+        enrich = torch.einsum("bcm,md->bcd", attn, fv)
+        h = h + self.fact_out(enrich)
+        h = self.expert_norm(h.float()).to(h.dtype)
+
+        m_eff = 1.0 if maturity is None else max(float(maturity), 0.05)
+        return x + m_eff * (h - x)
 
     def _disabled_output(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return x

@@ -105,7 +105,9 @@ class TrophicSystem(nn.Module):
     def update_sdnr_gated(self, activities: dict[str, torch.Tensor],
                          signal_contrib: torch.Tensor | None = None,
                          noise_contrib: torch.Tensor | None = None,
-                         sdnr_threshold: float = 0.5):
+                         sdnr_threshold: float = 0.5,
+                         maturity: float | None = None,
+                         prune_mat_threshold: float = 0.3):
         """SDNR-gated structural pruning: prune projections with low signal-to-noise.
 
         If a re-entrant projection contributes more to global variance (noise)
@@ -116,6 +118,8 @@ class TrophicSystem(nn.Module):
             signal_contrib: (n_projections,) — contribution to predictive accuracy
             noise_contrib: (n_projections,) — contribution to global variance
             sdnr_threshold: SDNR below this triggers aggressive pruning
+            maturity / prune_mat_threshold: see `update()` — softens the gate
+                so a random-init graph cannot prune itself to n_active=0.
         """
         if signal_contrib is None or noise_contrib is None:
             return  # skip if signal/noise not available
@@ -129,13 +133,16 @@ class TrophicSystem(nn.Module):
         self.trophic[low_quality] = self.trophic[low_quality] * (1.0 - prune_rate)
         self.trophic.clamp_(0.0, 1.0)
 
-        # Deactivate if pruned below threshold
-        below_prune = self.trophic < self.prune_threshold
-        self.active[below_prune] = 0.0
+        # Deactivate if pruned below threshold — gated on MAT.
+        if (maturity is None) or (float(maturity) >= prune_mat_threshold):
+            below_prune = self.trophic < self.prune_threshold
+            self.active[below_prune] = 0.0
 
     @torch.no_grad()
     def update(self, activities: dict[str, torch.Tensor], bdnf: float, ngf: float,
-               phi: float = 0.0, fiedler: float = 1.0):
+               phi: float = 0.0, fiedler: float = 1.0,
+               maturity: float | None = None,
+               prune_mat_threshold: float = 0.3):
         """activities: {region: (B,) ∈ [0,1]}.
         bdnf, ngf:  scalar floats from Brain (driven by reward / novelty).
         phi:        Integrated information proxy ∈ [0, 1].
@@ -145,7 +152,17 @@ class TrophicSystem(nn.Module):
                     boost to strengthen weak cross-module connections and
                     prevent a collapse in global Φ (Cheeger's inequality).
                     Large → well-integrated → normal pruning dynamics.
+        maturity:   MAT scalar ∈ [0, 1]. When provided, pruning (active[i]=0)
+                    is suppressed while MAT < `prune_mat_threshold` — fixes
+                    the "n_active: 0" graph-collapse on bring-up where the
+                    random-init projections look low-quality and all get
+                    pruned before they can learn.
+        prune_mat_threshold: MAT level at and above which pruning re-engages.
         """
+        # Pruning gate: disable structural deactivation below MAT threshold.
+        # Trophic level itself still drifts so plasticity accumulates state;
+        # we just refuse to set active[i] = 0 until the network has stabilised.
+        _allow_prune = (maturity is None) or (float(maturity) >= prune_mat_threshold)
         # Φ-gated BDNF: high integration states release more trophic factor.
         # Fiedler-gated homeostasis: when spectral gap is small (graph close
         # to disconnected), release extra BDNF to rewire the fault line.
@@ -167,7 +184,7 @@ class TrophicSystem(nn.Module):
             decay  = ngf + self.ngf_decay + 0.001 * (1.0 - self.ema_coact[i])
             new = (self.trophic[i] + growth - decay).clamp(0.0, 1.0)
             self.trophic[i] = new
-            if new < self.prune_threshold:
+            if _allow_prune and new < self.prune_threshold:
                 self.active[i] = 0.0
             elif new > self.prune_threshold * 2.0 and self.active[i] == 0.0:
                 self.active[i] = 1.0

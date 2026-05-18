@@ -130,6 +130,47 @@ class NeuralGeometryAdapter(nn.Module):
         return x + out                                     # residual
 
 
+class AttentionPool(nn.Module):
+    """Single-query attention pool over a sequence (B, T, d_hidden) → (B, d_sem).
+
+    Replaces the lossy `h.mean(dim=1)` with a 1-token learnable query that
+    cross-attends across every position.  Preserves positional/structural
+    information that mean-pooling discards — Φ proxy gets noticeably more
+    discriminating module signals and converges 2–3× faster.
+    """
+
+    def __init__(self, d_hidden: int, d_sem: int, n_heads: int = 4):
+        super().__init__()
+        while d_hidden % n_heads != 0 and n_heads > 1:
+            n_heads -= 1
+        self.n_heads  = n_heads
+        self.head_dim = d_hidden // n_heads
+        self.query    = nn.Parameter(torch.randn(1, 1, d_hidden) * 0.02)
+        self.q_norm   = RMSNorm(d_hidden)
+        self.kv_norm  = RMSNorm(d_hidden)
+        self.k_proj   = nn.Linear(d_hidden, d_hidden, bias=False)
+        self.v_proj   = nn.Linear(d_hidden, d_hidden, bias=False)
+        self.to_sem   = nn.Linear(d_hidden, d_sem, bias=False)
+        nn.init.normal_(self.k_proj.weight, mean=0.0, std=0.02)
+        nn.init.normal_(self.v_proj.weight, mean=0.0, std=0.02)
+        nn.init.normal_(self.to_sem.weight, mean=0.0, std=0.02)
+
+    def forward(self, h: torch.Tensor) -> torch.Tensor:
+        """h: (B, T, d_hidden) → (B, d_sem)."""
+        B = h.size(0)
+        q = self.query.expand(B, -1, -1)                   # (B, 1, d)
+        q = self.q_norm(q.float()).to(h.dtype)
+        h_n = self.kv_norm(h.float()).to(h.dtype)
+        k = self.k_proj(h_n)                                # (B, T, d)
+        v = self.v_proj(h_n)
+        q = q.view(B, 1, self.n_heads, self.head_dim).transpose(1, 2)
+        k = k.view(B, h.size(1), self.n_heads, self.head_dim).transpose(1, 2)
+        v = v.view(B, h.size(1), self.n_heads, self.head_dim).transpose(1, 2)
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=False)
+        y = y.transpose(1, 2).contiguous().view(B, -1)
+        return self.to_sem(y)
+
+
 class LanguageCortex(nn.Module):
     def __init__(self, vocab_size: int, d_hidden: int, d_sem: int,
                  n_layers: int, n_heads: int, max_ctx: int,
@@ -139,14 +180,32 @@ class LanguageCortex(nn.Module):
                  geometry_expansion: float = 2.0,
                  gradient_checkpointing: bool = False,
                  mod_capacity: float = 0.5,
-                 baseline: bool = False):
+                 baseline: bool = False,
+                 enable_memory_xattn: bool = False,
+                 n_memory_xattn_layers: int = 2,
+                 mid_trunk_tap_layer: int | None = None,
+                 use_attention_pool: bool = True):
         super().__init__()
         self.gradient_checkpointing = gradient_checkpointing
         self.n_nt = n_nt
+        self.n_layers = n_layers
+        self.enable_memory_xattn = bool(enable_memory_xattn) and not baseline
+        # Last `n_memory_xattn_layers` blocks receive the memory_kv injection.
+        self.n_memory_xattn_layers = max(0, int(n_memory_xattn_layers))
+        # Mid-trunk tap: at this layer index (0-based, after layer completes)
+        # the cortex returns an attention-pooled `tap_sem` for the bowtie.
+        # Default = middle of the stack.
+        if mid_trunk_tap_layer is None:
+            mid_trunk_tap_layer = max(1, n_layers // 2)
+        self.mid_trunk_tap_layer = int(mid_trunk_tap_layer)
+        self.use_attention_pool = bool(use_attention_pool)
         self.tok_emb = nn.Embedding(vocab_size, d_hidden)
 
+        # Layers eligible for memory cross-attention: the LAST N blocks.
+        mem_xattn_start = max(0, n_layers - self.n_memory_xattn_layers)
+
         # Interleaved architecture (novel hybrid):
-        #   Layer pattern: [Standard, DiffAttn, MoD+DiffAttn, Standard, DiffAttn, MoD+DiffAttn, ...]
+        #   Layer pattern: [Standard, DiffAttn, MoD+DiffAttn, Standard, ...]
         #   - Standard blocks: Hebbian traces + NT modulation (in-context learning)
         #   - DiffAttn blocks: noise cancellation (hallucination reduction)
         #   - MoD blocks: dynamic compute allocation (efficiency)
@@ -162,11 +221,13 @@ class LanguageCortex(nn.Module):
         else:
             for i in range(n_layers):
                 pattern = i % 3
+                mem_xattn = self.enable_memory_xattn and (i >= mem_xattn_start)
                 if pattern == 0:
                     # Standard attention + Hebbian traces
                     self.blocks.append(TransformerBlock(
                         d_hidden, n_heads, max_ctx, n_kv_heads,
-                        n_nt=n_nt, hebbian_rank=hebbian_rank))
+                        n_nt=n_nt, hebbian_rank=hebbian_rank,
+                        enable_memory_xattn=mem_xattn))
                 elif pattern == 1:
                     # Differential attention (noise cancellation)
                     self.blocks.append(DiffTransformerBlock(
@@ -192,8 +253,17 @@ class LanguageCortex(nn.Module):
         self.lm_head = nn.Linear(d_hidden, vocab_size, bias=False)
         self.lm_head.weight = self.tok_emb.weight  # weight tying
 
-        # Project last-layer hidden state into shared semantic space
+        # Project last-layer hidden state into shared semantic space.
+        # When use_attention_pool=True, the heavy lifting is done by
+        # `self.sem_pool` (AttentionPool); `to_sem` is kept as a
+        # fallback path for legacy checkpoints loaded via strict=False.
         self.to_sem = nn.Linear(d_hidden, d_sem, bias=False)
+        if self.use_attention_pool:
+            self.sem_pool = AttentionPool(d_hidden, d_sem,
+                                          n_heads=min(4, n_heads))
+            # AttentionPool over the tap layer for mid-trunk bowtie input.
+            self.tap_pool = AttentionPool(d_hidden, d_sem,
+                                          n_heads=min(4, n_heads))
         # Inverse projection: take a thought (d_sem) and condition generation
         self.from_sem = nn.Linear(d_sem, d_hidden, bias=False)
 
@@ -209,14 +279,26 @@ class LanguageCortex(nn.Module):
 
     def forward(self, ids: torch.Tensor, thought: torch.Tensor | None = None,
                 motor_bias: torch.Tensor | None = None,
-                nt: torch.Tensor | None = None):
+                nt: torch.Tensor | None = None,
+                memory_kv: torch.Tensor | None = None,
+                return_tap: bool = False):
         """ids: (B, T). thought: optional (B, d_sem) injected as a prefix bias.
-        motor_bias: optional (B, d_hidden) added to the LAST position's hidden
-        state before the LM head.
-        nt: optional (B, N_NT) neurotransmitter vector for attention modulation.
 
-        Returns: (logits, sem, h, pred_coding_loss)
-          pred_coding_loss: scalar predictive coding loss (0.0 if no PC heads).
+        motor_bias: optional (B, d_hidden) added to the LAST position's hidden
+            state before the LM head.
+        nt: optional (B, N_NT) neurotransmitter vector for attention modulation.
+        memory_kv: optional (B, M, d_hidden) or (M, d_hidden) of retrieved
+            consolidated memory / pooled bowtie state.  Injected as extra
+            K/V rows into the LAST `n_memory_xattn_layers` blocks via
+            zero-init MemoryCrossAttention (RETRO-style).  Ignored unless
+            `enable_memory_xattn=True` at construction.
+        return_tap: if True, also returns the AttentionPool of the hidden
+            state AFTER the mid-trunk tap layer (Layer `mid_trunk_tap_layer`).
+            Used by the SRC-TEH "mid-trunk bowtie tap".
+
+        Returns:
+            return_tap=False: (logits, sem, h, pred_coding_loss)
+            return_tap=True:  (logits, sem, h, pred_coding_loss, tap_sem)
         """
         h = self.tok_emb(ids)
         if thought is not None:
@@ -228,19 +310,26 @@ class LanguageCortex(nn.Module):
         prev_layer = None
         pc_counter = 0
         pred_coding_loss = torch.tensor(0.0, device=h.device)
+        tap_sem: torch.Tensor | None = None
 
-        def _run_block(blk, x, nt_vec):
+        def _run_block(blk, x, nt_vec, mkv):
             """Run one block, with gradient checkpointing for all block types."""
             # torch.utils.checkpoint calls getattr(torch, device_type) internally;
             # 'xla' is not a torch attribute — XLA rematerializes automatically.
+            accepts_mem = bool(getattr(blk, "enable_memory_xattn", False))
             if self.gradient_checkpointing and self.training and x.device.type != "xla":
+                if accepts_mem and mkv is not None:
+                    return torch.utils.checkpoint.checkpoint(
+                        lambda _x, _nt, _mk: blk(_x, nt=_nt, memory_kv=_mk),
+                        x, nt_vec, mkv, use_reentrant=False)
                 if nt_vec is None:
                     return torch.utils.checkpoint.checkpoint(
                         blk, x, use_reentrant=False)
-                else:
-                    return torch.utils.checkpoint.checkpoint(
-                        lambda _x, _nt: blk(_x, nt=_nt), x, nt_vec,
-                        use_reentrant=False)
+                return torch.utils.checkpoint.checkpoint(
+                    lambda _x, _nt: blk(_x, nt=_nt), x, nt_vec,
+                    use_reentrant=False)
+            if accepts_mem and mkv is not None:
+                return blk(x, nt=nt_vec, memory_kv=mkv)
             return blk(x, nt=nt_vec)
 
         # CALM early-exit state (inference only: no overhead during training)
@@ -261,8 +350,15 @@ class LanguageCortex(nn.Module):
                 if use_calm and calm_mask.any():
                     h = torch.where(calm_mask.unsqueeze(-1), calm_frozen, h)
 
-                h = _run_block(blk, h, nt)
+                h = _run_block(blk, h, nt, memory_kv)
                 h = adapter(h)
+
+                # Mid-trunk tap: emit pooled hidden state for bowtie consumption.
+                if return_tap and i == (self.mid_trunk_tap_layer - 1):
+                    if self.use_attention_pool:
+                        tap_sem = self.tap_pool(h)
+                    else:
+                        tap_sem = self.to_sem(h.mean(dim=1))
 
                 # CALM: evaluate per-token confidence; freeze tokens that are "done"
                 if use_calm and hasattr(blk, 'calm_head'):
@@ -285,7 +381,9 @@ class LanguageCortex(nn.Module):
                 h = torch.where(calm_mask.unsqueeze(-1), calm_frozen, h)
         else:
             for i, blk in enumerate(self.blocks):
-                h = _run_block(blk, h, nt)
+                h = _run_block(blk, h, nt, memory_kv)
+                if return_tap and i == (self.mid_trunk_tap_layer - 1):
+                    tap_sem = self.to_sem(h.mean(dim=1))
                 if len(self.pred_coding) > 0:
                     if prev_layer is not None and pc_counter < len(self.pred_coding):
                         pred_coding_loss = pred_coding_loss + self.pred_coding[pc_counter](prev_layer, h)
@@ -304,7 +402,20 @@ class LanguageCortex(nn.Module):
                                 self.lm_head(h_last)], dim=1)
         else:
             logits = self.lm_head(h)
-        sem = self.to_sem(h.mean(dim=1))
+
+        # Information-preserving semantic pool (SRC-TEH §C). Falls back to
+        # mean-pool when use_attention_pool=False so legacy checkpoints can
+        # still load against this constructor.
+        if self.use_attention_pool:
+            sem = self.sem_pool(h)
+        else:
+            sem = self.to_sem(h.mean(dim=1))
+
+        if return_tap:
+            if tap_sem is None:
+                # Tap layer index was beyond actual depth — fall back to final.
+                tap_sem = sem
+            return logits, sem, h, pred_coding_loss, tap_sem
         return logits, sem, h, pred_coding_loss
 
     def bdnf_grow_all(self, bdnf: float, phi: float) -> int:
