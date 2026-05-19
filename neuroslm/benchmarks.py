@@ -43,8 +43,11 @@ def _tokenize_and_score(brain, tok, prefix: str, continuation: str,
         if isinstance(out, dict):
             logits = out.get("logits")
             if logits is None:
-                # forward_lm returns loss-based dict; re-run language cortex
-                logits, _, _ = brain.language(ids_t[:, :-1])
+                # Fallback: call the language cortex directly.  The return
+                # signature evolved (3 → 4 → optionally 5 values once
+                # return_tap was added for SRC-TEH), so unpack defensively.
+                lang_out = brain.language(ids_t[:, :-1])
+                logits = lang_out[0] if isinstance(lang_out, tuple) else lang_out
         else:
             logits = out[0] if isinstance(out, tuple) else out
 
@@ -239,28 +242,76 @@ def main():
     ap = argparse.ArgumentParser(description="Run NeuroSLM benchmarks")
     ap.add_argument("--ckpt", required=True,
                     help="Path to model checkpoint (.pt)")
-    ap.add_argument("--preset", default="xl", choices=["tiny", "small",
-                    "medium", "large", "xl", "xxl"])
+    ap.add_argument("--preset", default=None,
+                    choices=["tiny", "small", "medium", "large", "xl", "xxl"],
+                    help="Preset override.  By default the cfg stored INSIDE "
+                         "the checkpoint is used (correct for all post-2026-05 "
+                         "checkpoints).  Only override when loading a legacy "
+                         "checkpoint whose stored cfg is missing or stale.")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--max_samples", type=int, default=500)
     ap.add_argument("--output", default=None,
                     help="Path to save JSON results (default: <ckpt>_bench.json)")
+    ap.add_argument("--strict", action="store_true",
+                    help="Fail on any state-dict shape mismatch.  Default off "
+                         "so SRC-TEH/legacy cross-loads warn instead of crash.")
     args = ap.parse_args()
 
-    from .config import PRESETS
+    from .config import PRESETS, BrainConfig
     from .tokenizer import Tokenizer
     from .brain import Brain
 
     tok = Tokenizer()
-    cfg = PRESETS[args.preset]()
+
+    # ── Load checkpoint FIRST so we can read its stored cfg ──
+    # Old code constructed Brain from `args.preset` defaults, then tried to
+    # load_state_dict — which crashed whenever the checkpoint was trained at
+    # a different (preset, d_hidden, lang_layers, ...).  Now we reconstruct
+    # Brain from the cfg that was saved alongside the weights.
+    print(f"[bench] loading checkpoint {args.ckpt} ...", flush=True)
+    ckpt = torch.load(args.ckpt, map_location=args.device, weights_only=False)
+
+    if "cfg" in ckpt and isinstance(ckpt["cfg"], dict) and args.preset is None:
+        # Rebuild a BrainConfig from the saved dict so the architecture
+        # matches the weights exactly.  Unknown fields (e.g. older configs
+        # that didn't have SRC-TEH knobs) are dropped via getattr-style
+        # filtering rather than crashing.
+        cfg = BrainConfig()
+        valid_fields = set(cfg.__dict__.keys())
+        for k, v in ckpt["cfg"].items():
+            if k in valid_fields:
+                setattr(cfg, k, v)
+        # Backstop: if the saved cfg specified a preset, use it for the log line
+        saved_preset = ckpt.get("preset", "<saved-cfg>")
+        print(f"[bench] using cfg saved in checkpoint "
+              f"(preset={saved_preset}, d_sem={cfg.d_sem}, "
+              f"d_hidden={cfg.d_hidden}, lang_layers={cfg.lang_layers}, "
+              f"src_teh={getattr(cfg, 'enable_src_teh', False)})", flush=True)
+    else:
+        preset = args.preset or "xl"
+        cfg = PRESETS[preset]()
+        print(f"[bench] no saved cfg in checkpoint — using --preset={preset} "
+              f"defaults", flush=True)
+
     cfg.vocab_size = tok.vocab_size
     brain = Brain(cfg).to(args.device)
 
-    ckpt = torch.load(args.ckpt, map_location=args.device, weights_only=False)
-    brain.load_state_dict(ckpt["model"], strict=False)
+    missing, unexpected = brain.load_state_dict(ckpt["model"], strict=args.strict)
+    if missing or unexpected:
+        # Report instead of crash — common when bench-loading a checkpoint
+        # whose Brain assembled a different optional-module set than today's.
+        print(f"[bench] non-strict load: {len(missing)} missing, "
+              f"{len(unexpected)} unexpected keys", flush=True)
+        if len(missing) <= 5:
+            for k in missing:
+                print(f"        missing: {k}", flush=True)
+        if len(unexpected) <= 5:
+            for k in unexpected:
+                print(f"        unexpected: {k}", flush=True)
     step = ckpt.get("step", "?")
     n_params = sum(p.numel() for p in brain.parameters())
-    print(f"[bench] loaded {args.ckpt} (step {step}, {n_params/1e6:.1f}M params)")
+    print(f"[bench] loaded {args.ckpt} (step {step}, {n_params/1e6:.1f}M params)",
+          flush=True)
 
     results = eval_all(brain, tok, args.device, args.max_samples)
 
