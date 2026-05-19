@@ -271,18 +271,20 @@ def main():
     print(f"[bench] loading checkpoint {args.ckpt} ...", flush=True)
     ckpt = torch.load(args.ckpt, map_location=args.device, weights_only=False)
 
-    if "cfg" in ckpt and isinstance(ckpt["cfg"], dict) and args.preset is None:
-        # Rebuild a BrainConfig from the saved dict so the architecture
-        # matches the weights exactly.  Unknown fields (e.g. older configs
-        # that didn't have SRC-TEH knobs) are dropped via getattr-style
-        # filtering rather than crashing.
+    # Prefer the saved cfg ALWAYS when present.  `--preset` is a fallback
+    # only used if the checkpoint doesn't carry a `cfg` dict (which only
+    # happens for very old saves predating the cfg-round-trip fix).
+    if "cfg" in ckpt and isinstance(ckpt["cfg"], dict):
         cfg = BrainConfig()
         valid_fields = set(cfg.__dict__.keys())
         for k, v in ckpt["cfg"].items():
             if k in valid_fields:
                 setattr(cfg, k, v)
-        # Backstop: if the saved cfg specified a preset, use it for the log line
         saved_preset = ckpt.get("preset", "<saved-cfg>")
+        if args.preset is not None and args.preset != saved_preset:
+            print(f"[bench] note: --preset={args.preset} ignored "
+                  f"(checkpoint carries cfg from preset={saved_preset}; "
+                  f"the saved cfg is authoritative)", flush=True)
         print(f"[bench] using cfg saved in checkpoint "
               f"(preset={saved_preset}, d_sem={cfg.d_sem}, "
               f"d_hidden={cfg.d_hidden}, lang_layers={cfg.lang_layers}, "
@@ -291,7 +293,8 @@ def main():
         preset = args.preset or "xl"
         cfg = PRESETS[preset]()
         print(f"[bench] no saved cfg in checkpoint — using --preset={preset} "
-              f"defaults", flush=True)
+              f"defaults (this is the legacy path; the next save will "
+              f"include a cfg so future loads round-trip)", flush=True)
 
     cfg.vocab_size = tok.vocab_size
     brain = Brain(cfg).to(args.device)

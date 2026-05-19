@@ -105,10 +105,32 @@ class LearnedBackprop(nn.Module):
         comp = torch.tensor([comprehension_delta], device=device, dtype=grad.dtype)
         nm = neuromod.to(device).reshape(-1)
 
+        # Unify all feature tensors to the LSTM's weight dtype.  Some inputs
+        # arrive in fp32 (`nm` from the TransmitterSystem) while others are
+        # bf16 (`comp`, the grad-derived stats).  Without this cast the
+        # cat promotes everything to fp32 and the bf16 LSTMCell raises:
+        #   RuntimeError: expected mat1 and mat2 to have the same dtype,
+        #   but got: float != c10::BFloat16
+        # Same pattern as the LayerNorm/Linear bf16 patches in train.py.
+        w_dtype = self.lstm.weight_ih.dtype
+        log_g        = log_g.to(w_dtype)
+        log_p        = log_p.to(w_dtype)
+        cos_sim      = cos_sim.to(w_dtype)
+        signed_log_g = signed_log_g.to(w_dtype)
+        momentum     = momentum.to(w_dtype)
+        comp         = comp.to(w_dtype)
+        nm           = nm.to(w_dtype)
+
         features = torch.cat([log_g, log_p, cos_sim, signed_log_g,
                               momentum, comp, nm]).unsqueeze(0)
 
         h_prev, c_prev = self._get_state(param_name, device)
+        # Defence-in-depth: if the hidden state was initialised before the
+        # model was cast (e.g. via `to_bfloat16` after first forward), make
+        # sure h/c match the live weight dtype.
+        if h_prev.dtype != w_dtype:
+            h_prev = h_prev.to(w_dtype)
+            c_prev = c_prev.to(w_dtype)
         h_new, c_new = self.lstm(features, (h_prev, c_prev))
         # Store detached states — backward path goes through current call only.
         # This prevents in-place modification errors when learned_opt is called
