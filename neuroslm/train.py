@@ -194,6 +194,13 @@ def main():
                          "of accumulating step-numbered files. Keeps LFS storage constant. "
                          "If the saved architecture no longer matches, loading is skipped "
                          "automatically and training starts fresh.")
+    ap.add_argument("--keep_last_n_ckpt", type=int, default=3,
+                    help="After each checkpoint save, delete obsolete checkpoints "
+                         "from disk so only the N newest per stream remain. "
+                         "Pass 0 to disable rotation. Default: 3.")
+    ap.add_argument("--prune_git", action="store_true", default=True,
+                    help="When rotating, route deletions through `git rm` + "
+                         "commit (local only — caller pushes). Default ON.")
     ap.add_argument("--transfer", default=None,
                     help="Load only matching tensors from a previous checkpoint "
                          "(use when architecture changed).")
@@ -935,6 +942,33 @@ def main():
 
             # ── Auto-push every checkpoint to Git LFS ──
             push_checkpoint_to_lfs(str(path))
+
+            # ── Checkpoint rotation (keep last N per stream) ──────────────
+            # Without rotation the repo grows by ~430 MiB per save.  We
+            # delete obsolete .pt + .mem + .mem.json + .dna.json companions
+            # AFTER the new save has been pushed so we never sit in a state
+            # with fewer than (keep) good checkpoints on disk.  Rotation is
+            # best-effort; a failure here must not crash the training loop.
+            if (not args.overwrite_ckpt) and (args.keep_last_n_ckpt or 0) > 0:
+                try:
+                    from .tools.prune_ckpts import prune_old_checkpoints
+                    # Scan both the configured ckpt_dir AND the standard
+                    # lfs_checkpoints mirror so we catch wherever push_to_lfs
+                    # ended up writing the file.
+                    _lfs_dir = Path(os.path.dirname(os.path.dirname(
+                        os.path.abspath(__file__)))) / "lfs_checkpoints"
+                    _scan_dirs = [Path(os.path.abspath(args.ckpt_dir))]
+                    if _lfs_dir != _scan_dirs[0] and _lfs_dir.exists():
+                        _scan_dirs.append(_lfs_dir)
+                    prune_old_checkpoints(
+                        _scan_dirs,
+                        keep=int(args.keep_last_n_ckpt),
+                        use_git=bool(args.prune_git),
+                        verbose=True,
+                    )
+                except Exception as _prune_err:
+                    print(f"[train] checkpoint rotation skipped: {_prune_err}",
+                          flush=True)
 
     print("[train] done.", flush=True)
 
