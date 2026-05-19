@@ -378,6 +378,82 @@ to step (single-batch variance), while the `lm` column stayed smooth
 in the awakening logs. Both columns now average across the full GA
 window — the displayed loss matches what's actually being optimised.
 
+### 0.18 Benchmark Loader — Architecture from Checkpoint
+
+`neuroslm/benchmarks.py` previously built `Brain(PRESETS[args.preset]())`
+*then* called `load_state_dict`, which crashed on every cross-shape load
+(SRC-TEH bumps `d_hidden` 512 → 576, `lang_layers` 12 → 10, etc.). The
+loader now:
+
+  1. `torch.load`s the `.pt` first.
+  2. Reads its stored `cfg` dict (every save in `train.py` already
+     includes `cfg.__dict__`), filters to known `BrainConfig` fields,
+     and rebuilds the dataclass from those — unknown keys are dropped
+     so older checkpoints whose fields predate current edits still
+     resume cleanly.
+  3. Constructs `Brain(cfg)` so the state-dict shape matches the
+     weights exactly.
+  4. `--preset` becomes optional (only used when no cfg is stored).
+  5. `--strict` flag added; default off so residual key mismatches
+     warn instead of crash.
+  6. `_tokenize_and_score`'s fallback path was hardened — `brain.language`
+     now returns a 4- or 5-tuple depending on `return_tap`, so the
+     unpack is defensive (`logits = lang_out[0] if isinstance(...,
+     tuple) else lang_out`).
+
+Cfg → ckpt → Brain round-trip yields zero missing / zero unexpected
+keys (verified with a `BrainConfig()` smoke test).
+
+### 0.19 Checkpoint Rotation — Bounded Repo Growth
+
+Each `xl` checkpoint is ≈430 MiB on disk (`.pt` + `.mem` + `.mem.json`).
+Without rotation a typical training run grows the LFS store by ~6 GiB
+per 1 000 steps. To bound repo size, `train.py` now rotates
+checkpoints after every save via `neuroslm/tools/prune_ckpts.py`:
+
+```python
+from neuroslm.tools.prune_ckpts import prune_old_checkpoints
+prune_old_checkpoints(
+    [Path(args.ckpt_dir), Path("lfs_checkpoints")],
+    keep=args.keep_last_n_ckpt,      # default 3
+    use_git=args.prune_git,          # default True
+)
+```
+
+Properties:
+
+| Property | Behaviour |
+|---|---|
+| **Per-stream grouping** | `.pt` files are grouped by stream prefix (`preset`, param-tag, `optimizer`, `_baseline`-or-not, `mode`). Each stream is rotated independently — an Adafactor stream cannot prune an AdamW stream. |
+| **Companion handling** | Each pruned `.pt` takes its `.mem`, `.mem.json`, and `.dna.json` siblings along — they share the stem and only make sense together. |
+| **`_latest.pt` excluded** | Files matching `<stream>_latest.pt` are deliberately overwritten in place by training; rotation regex requires a numeric step suffix, so `_latest.pt` is never touched. |
+| **Git-aware deletion** | When `use_git=True` and the directory is inside a git work tree, deletions are routed through `git rm` followed by `git commit -m "chore: prune N old checkpoint(s) (keep last K)"`. The local index stays consistent. **Push is intentionally left to the caller** so a transient network failure during training never crashes the run. |
+| **Best-effort** | Every git call is wrapped in `try/except` — a broken `.git/index.lock`, missing remote, or pre-existing conflict only logs a single warning line and lets training continue. |
+| **Run-after-push** | Rotation runs *after* `push_checkpoint_to_lfs` so the disk never holds fewer than `keep` good checkpoints at any moment. |
+| **Bypassed under `--overwrite_ckpt`** | The single-`_latest.pt` mode has nothing to rotate. |
+
+CLI flags on `train.py`:
+
+```
+--keep_last_n_ckpt N    # default 3, pass 0 to disable
+--prune_git             # default ON (route via git rm + commit)
+```
+
+Standalone CLI for manual passes:
+
+```bash
+python -m neuroslm.tools.prune_ckpts \
+    --dirs lfs_checkpoints checkpoints \
+    --keep 3 \
+    --git
+```
+
+Smoke-test (synthetic 11-file directory across 4 streams) confirms:
+the 2 oldest checkpoints of the 5-element `mix` stream are deleted
+with all 6 companion files; the 3-element `baseline` stream is
+untouched (boundary); the 2-element `large_107M` stream is untouched
+(below threshold); `_latest.pt` is preserved.
+
 ---
 
 ## 1. Primary Representational Unit — The Φ-Structure
@@ -1900,4 +1976,4 @@ The closed loop runs at the env's tick rate (10 Hz default); the bowtie's forwar
 
 ---
 
-*Last updated: 2026-05-19 (SRC-TEH §0, Phased Maturation §§0.10-0.12, Adaptive GWS §0.13, MAT-gated memory §0.14, Expert floor removal §0.15, Trophic recovery §0.16, GA loss-display fix §0.17 — see [`docs/RFC.md`](RFC.md)). Source of truth: `neuroslm/` on branch `master`.*
+*Last updated: 2026-05-19 (SRC-TEH §0, Phased Maturation §§0.10-0.12, Adaptive GWS §0.13, MAT-gated memory §0.14, Expert floor removal §0.15, Trophic recovery §0.16, GA loss-display fix §0.17, Benchmark cfg-round-trip §0.18, Checkpoint rotation §0.19 — see [`docs/RFC.md`](RFC.md)). Source of truth: `neuroslm/` on branch `master`.*
