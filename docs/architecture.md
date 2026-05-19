@@ -297,6 +297,87 @@ At the symptom value Φ = 7, the new compression returns a gradient
 **13.6× stronger** than the old one — Φ becomes a useful objective
 again.
 
+### 0.13 Adaptive GWS Ignition
+
+The training run that surfaced §0.10-0.12 also exposed a second
+saturation pathology: the GWS ignition gate
+
+$$\alpha_s = 0.3 + 0.7 \cdot \tfrac{1}{2}\bigl(1 + \tanh\bigl(6 (\|S_s\| - \theta_s)\bigr)\bigr)$$
+
+was using a *static* per-slot threshold ($\theta_s \approx 0.8$). Under
+SRC-TEH the trunk delivers candidates with much higher magnitudes
+(post-Hopfield slot norms ≈ 2-8 vs. the original ≈ 0.8), so every slot
+sat above $\theta_s$, $\alpha_s \to 1$, and the GWS stopped functioning
+as a competitive bottleneck. With ignition saturated, Φ saturates
+degenerately at ~7 (all slots correlated through the same broadcast)
+and the bowtie's discriminative role vanishes — every module ends up
+reading the same noise.
+
+Fix: the threshold is now adaptive — it tracks the per-slot activity
+scale via EMA so the ignition fraction stabilises near 50% regardless
+of magnitude drift:
+
+$$\theta^{\text{eff}}_s = \mathrm{EMA}[\|S_s\|] + \mathrm{margin} \cdot \sqrt{\mathrm{EMA}[\mathrm{Var}(\|S_s\|)]} + 0.1 \cdot |\theta^{\text{learn}}_s|$$
+
+`workspace.py :: GlobalWorkspace.__init__` registers two persistent
+buffers (`_activity_ema`, `_activity_var_ema`) and a step counter. A
+two-phase EMA — α=0.5 for the first 20 steps (cold-start), α=0.05
+afterwards (smooth tracking) — converges to the activity scale in ~10
+steps. The learnable `slot_thresholds` is preserved as a small (×0.1)
+residual bias so explicit per-slot discrimination can still emerge.
+
+Empirically (random-init GWS, candidates from `randn(2,6,64)` with
+post-Hopfield norm ≈ 8): ignition crashes 0.999 → 0.633 → 0.510 → 0.495
+in 10 steps and stays at 0.495. The bottleneck is restored without any
+hard cap.
+
+### 0.14 MAT-Gated Memory-K/V Injection
+
+The RETRO-style memory injection (§0.2 C) reads from `_bowtie_ema_slots`
+and projects to d_hidden K/V rows on the trunk's last 2 blocks. At low
+MAT the EMA is mostly random-init noise; feeding it as authoritative
+retrieval pollutes the trunk. Mirroring the expert-residual policy,
+`memory_kv` is now scaled by `phase_gate(MAT, 0.55, 0.15)`: 4% strength
+at MAT 0.31, 50% at MAT 0.55, 97% at MAT 0.80. Below `1e-3` the entire
+attention head is skipped (no compute) so early-awakening trunk passes
+incur no memory-xattn cost.
+
+### 0.15 Expert Residual Floor Removed
+
+The legacy d_sem `MathCortex.forward` and `ReasoningCortex.forward`
+methods clamped `m_eff = max(MAT, 0.05)` so a 5% residual always flowed
+through. That 5% floor made sense for the d_sem path (small absolute
+magnitude). At d_hidden under SRC-TEH it pumps unconditional noise into
+the trunk's hidden state even when the inner phase gate (§0.10) says
+"experts not ready yet". `forward_tokens` (used only by SRC-TEH) now
+honours the caller's phase gate verbatim: below `m_eff < 1e-3` the
+expert is a hard passthrough — no scatter-add, no router writes, no
+gradient noise. Above 1e-3 it behaves as before.
+
+### 0.16 Trophic Auto-Recovery
+
+The softened prune gate (§0.5) prevents *new* deactivation while MAT <
+0.6 but does not heal projections that were already pruned (the
+checkpoint may carry an `active` mask from an earlier configuration, or
+the SDNR-gated path may have aggressively pruned during a noisy
+window). Observed symptom: `n_active: 5/16` stuck after the prune-mat
+fix. `TrophicSystem.update` now ends with an **auto-recovery** step:
+whenever the active fraction drops below `min_active_frac = 0.6`, the
+top-(deficit) most-trophic *inactive* projections are reactivated and
+their trophic level is lifted above `2.5·prune_threshold` so the next
+update doesn't immediately re-deactivate them. The connectome can no
+longer self-prune to a degenerate state.
+
+### 0.17 Gradient-Accumulation Loss Display Fix
+
+`train.py` was tracking the running LM loss across the full
+grad-accum window but reporting only the *first* micro-batch's total
+`loss`. This made the printed `loss` column oscillate ±0.5 nats step
+to step (single-batch variance), while the `lm` column stayed smooth
+(averaged variance ÷ √GA), creating a false "loss surging up" pattern
+in the awakening logs. Both columns now average across the full GA
+window — the displayed loss matches what's actually being optimised.
+
 ---
 
 ## 1. Primary Representational Unit — The Φ-Structure
@@ -1819,4 +1900,4 @@ The closed loop runs at the env's tick rate (10 Hz default); the bowtie's forwar
 
 ---
 
-*Last updated: 2026-05-18 (SRC-TEH refactor §0 + Phased Maturation Engine §§0.10-0.12 — see [`docs/RFC.md`](RFC.md)). Source of truth: `neuroslm/` on branch `master`.*
+*Last updated: 2026-05-19 (SRC-TEH §0, Phased Maturation §§0.10-0.12, Adaptive GWS §0.13, MAT-gated memory §0.14, Expert floor removal §0.15, Trophic recovery §0.16, GA loss-display fix §0.17 — see [`docs/RFC.md`](RFC.md)). Source of truth: `neuroslm/` on branch `master`.*

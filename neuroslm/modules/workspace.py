@@ -57,23 +57,32 @@ class GlobalWorkspace(nn.Module):
         # high-magnitude candidates (observed in 200-350 step log: slot
         # norms ≫ 0.8, so every slot ignites every step, GWS bottleneck
         # disappears, and Φ saturates degenerately).  We track an EMA of
-        # the per-slot activity median; the effective threshold = EMA +
-        # adaptive_margin*EMA_std, which keeps the ignition fraction
-        # centred near 50% (the right operating point for a competitive
-        # broadcast bus).  The learnable `slot_thresholds` is preserved
-        # as a residual bias on top of the EMA so explicit per-slot
-        # discrimination still learns.
-        self.adaptive_ignition: bool = True
-        self.adaptive_alpha:    float = 0.02      # EMA on the activity statistic
-        self.adaptive_margin:   float = 0.05      # margin above median (in std units)
+        # the per-slot activity scale; the effective threshold = EMA +
+        # adaptive_margin·std, which keeps the ignition fraction near 50%
+        # (the right operating point for a competitive broadcast bus).
+        # The learnable `slot_thresholds` is preserved as a small residual
+        # bias on top of the EMA so explicit per-slot discrimination still
+        # learns.
+        #
+        # Cold-start: a slow EMA (α=0.02) would take ≈ 200 steps to converge
+        # to real activity, during which ignition keeps saturating.  We use
+        # α=0.5 for the first `adaptive_warmup_steps` forward calls then
+        # decay to α=0.05 (smooth steady-state).  Convergence in ~10 steps.
+        self.adaptive_ignition:     bool  = True
+        self.adaptive_margin:       float = 0.10   # std units above EMA mean
+        self.adaptive_alpha_warm:   float = 0.5    # cold-start EMA rate
+        self.adaptive_alpha_steady: float = 0.05   # steady-state EMA rate
+        self.adaptive_warmup_steps: int   = 20
         # Per-slot EMA of activity (norm). Initialised to the static threshold
-        # so step-0 behaviour matches the legacy formula.
+        # so step-0 behaviour is sensible (low ignition for ~zero activity).
         self.register_buffer(
             "_activity_ema",
             torch.full((n_slots,), float(ignition_threshold)))
         self.register_buffer(
             "_activity_var_ema",
             torch.full((n_slots,), 0.04))   # var ≈ (0.2)² initial
+        self.register_buffer(
+            "_adaptive_step", torch.zeros(1, dtype=torch.long))
 
     # ------------------------------------------------------------------
     # Hopfield update step
@@ -152,12 +161,10 @@ class GlobalWorkspace(nn.Module):
             if self.adaptive_ignition:
                 # Adaptive threshold tracks current activity scale via EMA
                 # so the bottleneck stays competitive as candidate magnitudes
-                # drift over training. Formula:
-                #   θ_eff[s] = EMA_mean[s] + margin·sqrt(EMA_var[s])
-                #            + slot_thresholds[s]  (learnable residual bias)
-                # With margin=0.05 about half the slots exceed θ_eff each step
-                # → ignition fraction settles near 0.5, GWS stays a real
-                # bottleneck, Φ stops saturating degenerately.
+                # drift over training. θ_eff = EMA + margin·std + small
+                # learnable bias. With cold-start α=0.5 the threshold catches
+                # up with activity in ~10 steps; after warmup we drop to
+                # α=0.05 for smooth steady-state tracking.
                 with torch.no_grad():
                     a_now    = activity.detach().mean(0).to(
                         dtype=self._activity_ema.dtype,
@@ -165,9 +172,13 @@ class GlobalWorkspace(nn.Module):
                     a_var    = activity.detach().var(0, unbiased=False).to(
                         dtype=self._activity_var_ema.dtype,
                         device=self._activity_var_ema.device)
-                    a = self.adaptive_alpha
+                    if int(self._adaptive_step.item()) < self.adaptive_warmup_steps:
+                        a = self.adaptive_alpha_warm
+                    else:
+                        a = self.adaptive_alpha_steady
                     self._activity_ema.mul_(1.0 - a).add_(a_now, alpha=a)
                     self._activity_var_ema.mul_(1.0 - a).add_(a_var, alpha=a)
+                    self._adaptive_step += 1
                 ema   = self._activity_ema.to(dtype=activity.dtype,
                                               device=activity.device)
                 std   = self._activity_var_ema.clamp(min=1e-6).sqrt().to(

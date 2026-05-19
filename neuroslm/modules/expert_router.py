@@ -158,11 +158,15 @@ class LanguageExpert(nn.Module):
 
     def forward_tokens(self, x: torch.Tensor,
                        maturity: float | None = None) -> torch.Tensor:
+        # No 5% floor here either — at very low MAT-phase the early-fire
+        # noise dominates and the trunk can't learn around it.
+        m_eff = 1.0 if maturity is None else max(float(maturity), 0.0)
+        if m_eff < 1e-3:
+            return x
         h = x
         for blk in self.blocks:
             h = blk(h)
         h = self.out(self.norm(h.float()).to(h.dtype))
-        m_eff = 1.0 if maturity is None else max(float(maturity), 0.05)
         return x + m_eff * h
 
 

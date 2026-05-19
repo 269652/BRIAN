@@ -197,6 +197,35 @@ class TrophicSystem(nn.Module):
         if n_total > 0 and n_saturated / n_total >= 0.25:
             self._try_sprout(activities)
 
+        # ── Trophic auto-recovery ─────────────────────────────────────────
+        # When the active fraction collapses below `min_active_frac`,
+        # force-reactivate the top-N most-trophic projections so the
+        # connectome can recover from a noisy pre-awakening prune (logged
+        # symptom: `n_active=5/16` stuck after awakening even with the
+        # softened prune-mat gate).  We also bump their trophic level
+        # above the prune threshold so the next update doesn't immediately
+        # re-deactivate them.
+        min_active_frac = 0.6
+        if n_total > 0:
+            n_active = int(self.active.sum().item())
+            if n_active < int(min_active_frac * n_total):
+                n_target = int(min_active_frac * n_total)
+                # Pick projections currently inactive, ranked by trophic level
+                # — the ones with the highest learned plasticity state get
+                # reactivated first.
+                inactive_idx = (self.active < 0.5).nonzero(as_tuple=True)[0]
+                if inactive_idx.numel() > 0:
+                    troph_inactive = self.trophic[inactive_idx]
+                    k = min(int(inactive_idx.numel()), n_target - n_active)
+                    if k > 0:
+                        _, top_k = troph_inactive.topk(k)
+                        chosen = inactive_idx[top_k]
+                        self.active[chosen] = 1.0
+                        # Lift trophic above the prune threshold so the next
+                        # update tick doesn't immediately re-deactivate.
+                        self.trophic[chosen] = self.trophic[chosen].clamp(
+                            min=self.prune_threshold * 2.5)
+
     def gain(self, idx: int) -> float:
         """Multiplicative gain to apply to projection idx's signal map."""
         return float(self.active[idx] * (0.2 + 1.6 * self.trophic[idx]))

@@ -370,7 +370,12 @@ class ReasoningCortex(BrainModule):
         h = h + self.attr_out(retrieved)
         h = self.expert_norm(h.float()).to(h.dtype)
 
-        m_eff = 1.0 if maturity is None else max(float(maturity), 0.05)
+        # SRC-TEH path: caller passes an already phase-gated maturity. Drop
+        # the legacy 5% floor — it pumps unconditional noise into the trunk
+        # at d_hidden when the inner phase says "expert not ready yet".
+        m_eff = 1.0 if maturity is None else max(float(maturity), 0.0)
+        if m_eff < 1e-3:
+            return x
         return x + m_eff * (h - x)
 
     def _disabled_output(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
