@@ -154,24 +154,42 @@ def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
                             url.replace('https://', f'https://{token}@', 1)],
                            cwd=repo_root, capture_output=True)
 
+        # `git add` for a 430 MB LFS .pt routinely takes 60-120s — the old
+        # 30s timeout silently truncated the stage and left the index empty,
+        # while `--allow-empty` then produced a chkpt: commit with no content.
+        # Bumped to 600s (10 min) which is plenty even on slow disks.
         r_add = subprocess.run(["git", "add", "-f", "lfs_checkpoints/"],
-                               cwd=repo_root, capture_output=True, timeout=30, text=True)
+                               cwd=repo_root, capture_output=True, timeout=600, text=True)
         if r_add.returncode != 0:
-            print(f"[train] ⚠ git add failed: {r_add.stderr[:100]}", flush=True)
+            print(f"[train] ⚠ git add failed: {r_add.stderr[:200]}", flush=True)
             return
 
-        r_commit = subprocess.run(["git", "commit", "--allow-empty", "-m", f"chkpt: {basename}"],
-                                  cwd=repo_root, capture_output=True, text=True, timeout=30)
-        if r_commit.returncode != 0 and "nothing to commit" not in r_commit.stdout.lower():
-            print(f"[train] ⚠ git commit failed: {r_commit.stderr[:100]}", flush=True)
+        # No --allow-empty — if the add produced nothing we want the commit
+        # to fail loudly so the user knows the upload didn't actually happen.
+        r_commit = subprocess.run(["git", "commit", "-m", f"chkpt: {basename}"],
+                                  cwd=repo_root, capture_output=True, text=True, timeout=60)
+        if r_commit.returncode != 0:
+            stdout_low = r_commit.stdout.lower()
+            if ("nothing to commit" in stdout_low
+                    or "no changes added" in stdout_low):
+                print(f"[train] ⚠ nothing to commit for {basename} — file may "
+                      f"already be tracked, or git add timed out silently",
+                      flush=True)
+            else:
+                print(f"[train] ⚠ git commit failed: "
+                      f"{(r_commit.stderr or r_commit.stdout)[:200]}", flush=True)
             return
 
+        # `git push` of an LFS object is bandwidth-bound — bumped to 600s.
         r_push = subprocess.run(["git", "push", "origin", "HEAD"],
-                                cwd=repo_root, capture_output=True, text=True, timeout=120)
+                                cwd=repo_root, capture_output=True, text=True, timeout=600)
         if r_push.returncode == 0:
             print(f"[train] ✓ pushed {basename} to Git LFS", flush=True)
         else:
-            print(f"[train] ⚠ git push failed: {r_push.stderr.strip()[:200]}", flush=True)
+            print(f"[train] ⚠ git push failed: {r_push.stderr.strip()[:300]}", flush=True)
+    except subprocess.TimeoutExpired as e:
+        print(f"[train] ⚠ LFS push timed out at: {e.cmd[:3]}... "
+              f"(timeout={e.timeout}s)", flush=True)
     except Exception as e:
         print(f"[train] ⚠ LFS push failed: {e}", flush=True)
 
@@ -292,6 +310,13 @@ def main():
     mode_label = "BASELINE (vanilla transformer)" if cfg.baseline else "FULL (bio modules)"
     print(f"[train] {mode_label} | params: {n_params/1e6:.2f}M "
           f"(preset={args.preset}, dtype={next(brain.parameters()).dtype})", flush=True)
+    # One-time topology breakdown so you can verify the full bio stack is
+    # actually constructed (not silently degenerating into baseline).
+    try:
+        print("[train] " + brain.topology_summary().replace("\n", "\n[train] "),
+              flush=True)
+    except Exception as _e:
+        print(f"[train] topology_summary failed: {_e}", flush=True)
 
     # ── Optimizer ────────────────────────────────────────────────────────
     # Adafactor: factor-wise second moment — ~8× less optimizer memory than

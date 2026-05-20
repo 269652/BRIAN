@@ -796,6 +796,58 @@ class Brain(nn.Module):
         """Plain-Python float of the current MAT level (avoids autograd)."""
         return float(self.maturity.detach().item())
 
+    def topology_summary(self) -> str:
+        """One-line-per-module breakdown of the active brain topology.
+
+        Prints which top-level submodules exist (non-None), their parameter
+        count, and the LM-trunk / bio-modules split so the user can verify
+        a 'FULL' run isn't silently degenerating into a baseline-equivalent.
+        Pure introspection — no side effects.
+        """
+        if getattr(self, '_baseline', False):
+            return ("BASELINE: language cortex only "
+                    f"({sum(p.numel() for p in self.parameters())/1e6:.2f}M params)")
+
+        # Top-level nn.Modules that exist on this brain.
+        rows = []
+        bio_total = lm_total = other_total = 0
+        for name, mod in self.named_children():
+            if not hasattr(mod, 'parameters'):
+                continue
+            np = sum(p.numel() for p in mod.parameters())
+            if np == 0:
+                continue
+            rows.append((name, np))
+            if name == 'language':
+                lm_total += np
+            elif name in {'sensory', 'association', 'thalamus', 'world',
+                          'self_m', 'gws', 'hippo', 'dmn', 'pfc', 'bg',
+                          'forward_m', 'evaluator', 'motor', 'qualia',
+                          'thought_transformer', 'cerebellum',
+                          'entorhinal', 'claustrum', 'cortical_sheet',
+                          'amygdala', 'acc', 'insula', 'lhb',
+                          'math_cortex', 'reasoning_cortex',
+                          'language_expert', 'expert_router'}:
+                bio_total += np
+            else:
+                other_total += np
+
+        rows.sort(key=lambda x: -x[1])
+        lines = [
+            "Brain topology:",
+            f"  • LM trunk           : {lm_total/1e6:>6.2f}M",
+            f"  • bio + bowtie       : {bio_total/1e6:>6.2f}M",
+            f"  • neurochem + memory : {other_total/1e6:>6.2f}M",
+            f"  • TOTAL              : {(lm_total+bio_total+other_total)/1e6:>6.2f}M",
+            f"  • SRC-TEH            : {getattr(self, '_src_teh_enabled', False)}",
+            f"  • neural_topology    : {self.cfg.neural_topology}",
+            "  • top modules (>=0.5M params):",
+        ]
+        for name, np in rows:
+            if np >= 500_000:
+                lines.append(f"      - {name:24s} {np/1e6:>6.2f}M")
+        return "\n".join(lines)
+
     @staticmethod
     def _phase_gate(mat: float, center: float, width: float = 0.10) -> float:
         """Smooth sigmoid 0→1 across a maturity window [center−width, center+width].
@@ -1233,11 +1285,29 @@ class Brain(nn.Module):
         _mt, motor_lang_bias, action_idx, action_logits, action_probs = \
             self.motor(action, survival=survival)
 
-        # Motor-conditioned logits (one extra matmul, not a full second pass)
-        h_biased      = h_lang + motor_lang_bias.unsqueeze(1)
-        logits_motor  = self.language.lm_head(h_biased)
-        del logits  # free original (B,T,vocab) — replaced by logits_motor below
-        logits = logits_motor  # alias for output dict
+        # Motor-conditioned logits (one extra matmul, not a full second pass).
+        # CRITICAL: the bias is broadcast across ALL token positions via
+        # `unsqueeze(1)` — so every token's logits get perturbed, not just
+        # the last (sampling) position.  During infancy the motor cortex is
+        # at random init, so an unconditional broadcast pumps pure noise
+        # into the LM loss — observed cost: lm_loss stuck at the random
+        # ceiling (10.7) while the same-preset baseline reached 7.4 at
+        # step 210. We now MAT-phase-gate the bias (centre 0.45) so the
+        # motor cortex starts modulating the LM only after world/motor
+        # losses also engage.  Pre-awakening the model trains as a clean
+        # LM trunk, matching baseline throughput.
+        _mat_motor   = self.maturity_scalar() if hasattr(self, 'maturity_scalar') else 1.0
+        _motor_phase = self._phase_gate(_mat_motor, center=0.45, width=0.10)
+        if _motor_phase > 1e-3:
+            h_biased     = h_lang + _motor_phase * motor_lang_bias.unsqueeze(1)
+            logits_motor = self.language.lm_head(h_biased)
+            del logits
+            logits = logits_motor
+        else:
+            # Phase ≈ 0: skip the second matmul entirely.  The LM trains
+            # against the trunk's clean output (`logits` from
+            # `self.language(...)` further above).
+            logits_motor = logits
 
         # 9) NT release
         with torch.no_grad():
