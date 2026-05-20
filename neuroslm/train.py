@@ -110,6 +110,64 @@ def cosine_lr(step: int, warmup: int, total: int, peak: float) -> float:
     return peak * 0.5 * (1.0 + math.cos(math.pi * min(progress, 1.0)))
 
 
+def _resize_grown_adapters(brain, state: dict):
+    """Resize NeuralGeometryAdapter kern_a/kern_b to match a checkpoint.
+
+    BDNF structural growth increases the adapter's low-rank kernel during
+    training (rank 96 → 100 → … as Φ accumulates), so a checkpoint saved
+    after any growth has larger kern_a/kern_b than a freshly-built model.
+    `load_state_dict(strict=False)` ignores missing/unexpected keys but
+    STILL raises on a shape mismatch for keys present in both — so without
+    this pre-resize, resuming a grown checkpoint always crashes.
+
+    We re-create the model's kern Parameters at the checkpoint's shape
+    (zero-init; load_state_dict fills the real values next).
+    """
+    import torch.nn as nn
+    lang = getattr(brain, "language", None)
+    adapters = getattr(lang, "adapters", None)
+    if adapters is None:
+        return
+    for i, adapter in enumerate(adapters):
+        ka = f"language.adapters.{i}.kern_a"
+        if ka not in state or not hasattr(adapter, "kern_a"):
+            continue
+        ck_a = state[ka].shape          # (d_hyper, rank_ckpt)
+        if tuple(adapter.kern_a.shape) == tuple(ck_a):
+            continue
+        d_hyper, new_rank = int(ck_a[0]), int(ck_a[1])
+        dev = adapter.kern_a.device
+        dt  = adapter.kern_a.dtype
+        adapter.kern_a = nn.Parameter(torch.zeros(d_hyper, new_rank, device=dev, dtype=dt))
+        adapter.kern_b = nn.Parameter(torch.zeros(new_rank, d_hyper, device=dev, dtype=dt))
+        if hasattr(adapter, "rank"):
+            adapter.rank = new_rank
+
+
+def _load_compatible(brain, state: dict, label: str = "checkpoint"):
+    """Robustly load a checkpoint state-dict into `brain`.
+
+    1. Resize BDNF-grown adapters to the checkpoint's shapes.
+    2. Drop any *still* shape-mismatched tensors (genuine architecture
+       drift) so load_state_dict(strict=False) cannot raise.
+    Returns (missing, unexpected, dropped) for logging.
+    """
+    _resize_grown_adapters(brain, state)
+    model_sd = brain.state_dict()
+    filtered, dropped = {}, []
+    for k, v in state.items():
+        if k in model_sd and hasattr(v, "shape") \
+                and tuple(model_sd[k].shape) != tuple(v.shape):
+            dropped.append(k)
+            continue
+        filtered[k] = v
+    missing, unexpected = brain.load_state_dict(filtered, strict=False)
+    if dropped:
+        print(f"[train] ⚠ {len(dropped)} shape-mismatched tensor(s) skipped "
+              f"while loading {label} (e.g. {dropped[0]})", flush=True)
+    return missing, unexpected, dropped
+
+
 def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
     """Copy checkpoint + memory to lfs_checkpoints/ and push via Git LFS.
 
@@ -467,8 +525,18 @@ def main():
                 # → shape-incompatible). We flag this so the loader skips the
                 # optimizer state (likely a different optimizer) and keeps
                 # only the model weights + memory.
+                # Cross-stream is DISABLED for baseline runs: the vanilla
+                # baseline has a unique architecture (N stacked layers, no
+                # bio modules) and — since the param-parity fix made it the
+                # same param-count as the full model — the _<N>M tag can no
+                # longer distinguish them. A baseline run must only ever
+                # resume a `_baseline` checkpoint of its own stream, never a
+                # full-model checkpoint. So we only warm-start full runs,
+                # matching full (non-`_baseline`) checkpoints.
                 resume_cross_stream = False
-                if resume_path is None and getattr(args, 'cross_stream_resume', True):
+                if (resume_path is None
+                        and getattr(args, 'cross_stream_resume', True)
+                        and not args.baseline):
                     _ptag = f"_{round(n_params / 1e6)}M"
 
                     def _arch_match(path: str) -> bool:
@@ -505,10 +573,14 @@ def main():
         if resume_path and Path(resume_path).exists():
             try:
                 ckpt = torch.load(resume_path, map_location=device, weights_only=False)
-                missing, unexpected = brain.load_state_dict(ckpt["model"], strict=False)
+                # Adapter-rank-aware load: resizes BDNF-grown kernels and
+                # drops any genuinely incompatible tensors so a grown
+                # checkpoint resumes instead of crashing on shape mismatch.
+                missing, unexpected, _dropped = _load_compatible(
+                    brain, ckpt["model"], label=os.path.basename(str(resume_path)))
                 # With --overwrite_ckpt, treat large key-mismatch as architecture change
                 # and start fresh rather than loading a partly-matching checkpoint.
-                _mismatch = len(missing) + len(unexpected)
+                _mismatch = len(missing) + len(unexpected) + len(_dropped)
                 if args.overwrite_ckpt and _mismatch > 20:
                     print(f"[train] ⚠ architecture mismatch ({_mismatch} keys differ) "
                           f"— starting fresh (--overwrite_ckpt)", flush=True)
