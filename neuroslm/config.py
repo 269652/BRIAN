@@ -275,6 +275,10 @@ def large() -> BrainConfig:
     c.max_thinking_steps = 12
     c.warmup_steps = 500
     c.lr = 2.5e-4
+    # Baseline param parity: 47 vanilla layers ≈ 106.9M ≈ the full model's
+    # 107.5M, so the --baseline ablation is a fair same-size comparison
+    # (otherwise the 8-layer baseline is only ~35M).
+    c.baseline_lang_layers = 47
     return c
 
 

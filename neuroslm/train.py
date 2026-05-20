@@ -216,6 +216,18 @@ def main():
                     help="After each checkpoint save, delete obsolete checkpoints "
                          "from disk so only the N newest per stream remain. "
                          "Pass 0 to disable rotation. Default: 3.")
+    ap.add_argument("--cross_stream_resume", action="store_true", default=True,
+                    help="When `--resume latest` finds no checkpoint in the "
+                         "current run's own stream, warm-start from the most "
+                         "recent SAME-ARCHITECTURE checkpoint (same preset + "
+                         "param count, any optimizer/mode). Lets a --meta "
+                         "'full' run pick up the ablation run's checkpoints. "
+                         "Model weights + memory are loaded; optimizer state "
+                         "is skipped on a stream mismatch. Default ON.")
+    ap.add_argument("--no_cross_stream_resume", dest="cross_stream_resume",
+                    action="store_false",
+                    help="Disable cross-stream warm-start (strict same-stream "
+                         "resume only).")
     ap.add_argument("--prune_git", action="store_true", default=True,
                     help="When rotating, route deletions through `git rm` + "
                          "commit (local only — caller pushes). Default ON.")
@@ -372,6 +384,7 @@ def main():
               flush=True)
 
     start_step = 0
+    resume_cross_stream = False   # set True by the same-arch warm-start path
     if args.resume:
         resume_path = args.resume
         if resume_path == "latest":
@@ -432,19 +445,58 @@ def main():
                     step = int(m.group(1)) if m else 0
                     return (1, step)
 
+                _lfs = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "lfs_checkpoints")
                 candidates = [f for f in _glob.glob(
                                 os.path.join(args.ckpt_dir, "*.pt"))
                               if _matches_stream(f)]
                 candidates.sort(key=_step_of)
                 if not candidates:
-                    _lfs = os.path.join(
-                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "lfs_checkpoints")
                     candidates = [f for f in _glob.glob(os.path.join(_lfs, "*.pt"))
                                   if _matches_stream(f)]
                     candidates.sort(key=_step_of)
                 resume_path = candidates[-1] if candidates else None
-                if resume_path:
+
+                # ── Cross-stream warm-start fallback ──────────────────────
+                # No checkpoint in our OWN stream (e.g. a fresh --meta 'full'
+                # run while only the ablation stream has checkpoints). Fall
+                # back to the newest SAME-ARCHITECTURE checkpoint: same preset
+                # + same param-count tag, any optimizer/mode, but NOT a
+                # `_baseline` vanilla checkpoint (its lang-layer count differs
+                # → shape-incompatible). We flag this so the loader skips the
+                # optimizer state (likely a different optimizer) and keeps
+                # only the model weights + memory.
+                resume_cross_stream = False
+                if resume_path is None and getattr(args, 'cross_stream_resume', True):
+                    _ptag = f"_{round(n_params / 1e6)}M"
+
+                    def _arch_match(path: str) -> bool:
+                        name = os.path.basename(path)
+                        return (name.startswith(f"neuroslm_{args.preset}{_ptag}_")
+                                and "_baseline" not in name
+                                and not name.endswith("_latest.pt"))
+
+                    for _dir in (args.ckpt_dir, _lfs):
+                        arch_cands = [f for f in _glob.glob(os.path.join(_dir, "*.pt"))
+                                      if _arch_match(f)]
+                        # also allow _latest.pt of same arch as a last resort
+                        arch_latest = [f for f in _glob.glob(os.path.join(
+                            _dir, f"neuroslm_{args.preset}{_ptag}_*_latest.pt"))
+                            if "_baseline" not in os.path.basename(f)]
+                        arch_cands = arch_cands + arch_latest
+                        arch_cands.sort(key=_step_of)
+                        if arch_cands:
+                            resume_path = arch_cands[-1]
+                            resume_cross_stream = True
+                            break
+
+                if resume_path and resume_cross_stream:
+                    print(f"[train] no same-stream checkpoint — cross-stream "
+                          f"warm-start from {os.path.basename(resume_path)} "
+                          f"(model weights + memory only; optimizer state "
+                          f"skipped)", flush=True)
+                elif resume_path:
                     print(f"[train] auto-found latest checkpoint: {resume_path}", flush=True)
                 else:
                     print(f"[train] no checkpoint found for stream {_prefix_legacy}* "
@@ -462,7 +514,7 @@ def main():
                           f"— starting fresh (--overwrite_ckpt)", flush=True)
                     start_step = 0
                 else:
-                    if "optim" in ckpt:
+                    if "optim" in ckpt and not resume_cross_stream:
                         # Checkpoints are partitioned by optimizer in the
                         # filename (see save block + resume glob), so a class
                         # mismatch here only happens when --resume points at
@@ -472,6 +524,14 @@ def main():
                         except Exception as e:
                             print(f"[train] could not restore optimizer state: {e}",
                                   flush=True)
+                    elif resume_cross_stream:
+                        # Cross-stream warm-start: the source checkpoint likely
+                        # used a different optimizer (e.g. ablation=AdamW vs
+                        # full=Adafactor). Keep the freshly-built optimizer and
+                        # only inherit the model weights + maturity + memory.
+                        print("[train] cross-stream: optimizer state NOT loaded "
+                              "(fresh optimizer, inherited model weights)",
+                              flush=True)
                     start_step = ckpt.get("step", 0)
                     if not cfg.baseline:
                         mem_path = str(resume_path).replace(".pt", ".mem")
