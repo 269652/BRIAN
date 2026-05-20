@@ -359,13 +359,17 @@ def main():
               "disabling meta-training", flush=True)
         args.meta = False
     if args.meta and not cfg.baseline:
-        # meta optimizer updates the learned optimizer + geometry adapters
+        # meta optimizer trains ONLY the learned optimizer's own params.
+        # Geometry adapters are part of brain.language and are trained by the
+        # MAIN optimizer in the standard update path below — including them
+        # here too would double-step the same tensors with conflicting grads.
         meta_params = list(brain.learned_opt.parameters())
-        # Include geometry adapter parameters so the neural topology is meta-learned
-        for name, p in brain.language.named_parameters():
-            if 'adapter' in name:
-                meta_params.append(p)
         meta_opt = AdamW(meta_params, lr=args.meta_lr)
+        print("[train] --meta: the standard full-model update runs every "
+              "step (all params train normally); meta-training of the "
+              "learned optimizer is an additional non-destructive side "
+              "channel. Drop --meta for ~same quality at higher throughput.",
+              flush=True)
 
     start_step = 0
     if args.resume:
@@ -773,29 +777,25 @@ def main():
                 + smoothness_loss
             )
 
-            # Update meta-parameters (learned optimizer + geometry adapters)
+            # Update ONLY the learned optimizer (non-destructive side channel).
+            # The real model update happens in the standard full-model path
+            # below.  The meta path NO LONGER hijacks the model update — the
+            # old code applied learned-optimizer-transformed grads to
+            # brain.language ONLY and called optim.step() on just those
+            # params, so a --meta run trained 25.7M of 107M params on 1/16
+            # the data through a random-init optimizer.  That was the entire
+            # full-vs-ablation performance gap.
             meta_opt.zero_grad(set_to_none=True)
             meta_loss.backward()
             meta_opt.step()
-
-            # Reset learned optimizer hidden states after meta step
             brain.learned_opt.reset_state()
 
-            # Apply transformed gradients for real model update
-            optim.zero_grad(set_to_none=True)
-            for (name, p), g in zip(model_named, grads):
-                if g is None:
-                    g = torch.zeros_like(p)
-                mult = brain.learned_opt(g, p, nm,
-                                         comprehension_delta=comp_delta,
-                                         param_name=name)
-                transformed = (g * mult).detach()
-                p.grad = transformed
-            # gradient clip and step (only on language params we modified)
-            gnorm = torch.nn.utils.clip_grad_norm_(model_params, cfg.grad_clip)
-            optim.step()
-
-        if not args.meta:
+        # ── Standard full-model update — ALWAYS runs ──────────────────────
+        # Trains EVERY parameter (LM trunk + full bio/bowtie stack) through
+        # forward_lm with proper gradient accumulation and the real
+        # optimizer.  Previously gated behind `if not args.meta`, so a
+        # --meta run skipped it and only the language module trained.
+        if True:
             ga = max(args.grad_accum, 1)
             optim.zero_grad(set_to_none=True)
             # bfloat16 has fp32-equivalent exponent range → no loss scaling needed
