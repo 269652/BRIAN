@@ -225,7 +225,7 @@ class BrainConfig:
 
 # ----- Preset sizes -----
 def tiny() -> BrainConfig:
-    """~5M params. Sanity test."""
+    """~27M params (full bio stack). Sanity test."""
     c = BrainConfig()
     c.d_sem = 128
     c.d_hidden = 192
@@ -234,16 +234,21 @@ def tiny() -> BrainConfig:
     c.lang_ctx = 256
     c.dmn_layers = 1
     c.pfc_layers = 1
+    # Baseline param parity: 37 vanilla layers ≈ 26.9M ≈ full 26.8M.
+    c.baseline_lang_layers = 37
     return c
 
 
 def small() -> BrainConfig:
-    """~15M params. CPU-trainable in hours."""
-    return BrainConfig()
+    """~93M params (full bio stack). CPU-trainable in hours."""
+    c = BrainConfig()
+    # Baseline param parity: 40 vanilla layers ≈ 94.0M ≈ full 93.2M.
+    c.baseline_lang_layers = 40
+    return c
 
 
 def medium() -> BrainConfig:
-    """~80M params. GPU recommended."""
+    """~389M params (full bio stack). GPU recommended."""
     c = BrainConfig()
     c.d_sem = 512
     c.d_hidden = 768
@@ -252,6 +257,8 @@ def medium() -> BrainConfig:
     c.lang_ctx = 1024
     c.dmn_layers = 4
     c.pfc_layers = 4
+    # Baseline param parity: 47 vanilla layers ≈ 388.8M ≈ full 389.2M.
+    c.baseline_lang_layers = 47
     return c
 
 
@@ -330,8 +337,9 @@ def xl() -> BrainConfig:
     c.hebbian_rank = 4
     c.mod_capacity = 0.8
 
-    # Baseline param parity: trimmed for the bumped d_hidden=576.
-    c.baseline_lang_layers = 48
+    # Baseline param parity: 60 vanilla layers ≈ 279.9M ≈ full 280.3M
+    # (full SRC-TEH model at d_hidden=576).
+    c.baseline_lang_layers = 60
 
     # Novel modules: keep defaults conservative to limit params
     c.enable_rssm = False
