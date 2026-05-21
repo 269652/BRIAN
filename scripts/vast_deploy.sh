@@ -31,6 +31,11 @@ else
   exit 1
 fi
 
+# Accept common alias names so either convention in .env works:
+#   VAST_API_KEY | VAST_AI        GITHUB | GITHUB_PAT | GH_TOKEN
+VAST_API_KEY="${VAST_API_KEY:-${VAST_AI:-}}"
+GITHUB="${GITHUB:-${GITHUB_PAT:-${GH_TOKEN:-}}}"
+
 REPO_URL="${REPO_URL:-https://github.com/269652/BRIAN.git}"
 REPO_SLUG="${REPO_URL#https://github.com/}"; REPO_SLUG="${REPO_SLUG%.git}"
 PRESET="${PRESET:-large}"
