@@ -141,37 +141,51 @@ fi
 # it. So `bash scripts/vast_deploy.sh` can be run repeatedly to converge to
 # exactly one healthy instance per role.
 ROLES="full baseline"
-HEALTHY_STATES="running loading"   # treat these as OK; anything else = stuck
 
 _instances_json="$(vastai show instances --raw 2>/dev/null)"
 declare -A NEEDS   # role -> 1 if we must (re)deploy it
 
 for role in $ROLES; do
-  read -r iid istatus < <(printf '%s' "$_instances_json" | "$PYTHON" -c "
-import sys, json
-role = '$role'
+  # Emit "id<TAB>status" for this role's instance; status is trimmed +
+  # lowercased in python so no stray CR/whitespace can corrupt the match.
+  _info="$(printf '%s' "$_instances_json" | ROLE="$role" "$PYTHON" -c "
+import sys, json, os
+role = os.environ['ROLE']
 try: data = json.load(sys.stdin)
 except Exception: data = []
 for i in (data or []):
     if (i.get('label') or '') == 'neuroslm-'+role:
         st = i.get('actual_status') or i.get('cur_state') or i.get('intended_status') or 'unknown'
-        print(i.get('id',''), st); break
-")
-  if [ -n "${iid:-}" ]; then
-    if printf '%s ' $HEALTHY_STATES | grep -qw "${istatus:-unknown}"; then
-      echo "  neuroslm-$role: healthy (id $iid, status=$istatus) — keeping"
-      NEEDS[$role]=0
-    else
-      echo "  neuroslm-$role: STUCK (id $iid, status=$istatus) — destroying + redeploying"
-      # -y: skip the interactive confirmation prompt (would hang the script
-      # since stdin isn't a tty here).
-      vastai destroy instance "$iid" -y >/dev/null 2>&1 || true
-      NEEDS[$role]=1
-    fi
-  else
+        sys.stdout.write('%s\t%s' % (i.get('id',''), str(st).strip().lower()))
+        break
+" 2>/dev/null)"
+  iid=""; istatus=""
+  IFS=$'\t' read -r iid istatus <<< "$_info"
+
+  if [ -z "${iid:-}" ]; then
     echo "  neuroslm-$role: not present — deploying"
     NEEDS[$role]=1
+    continue
   fi
+
+  case "$istatus" in
+    running|loading|*running*)
+      # Hard guard: a running/loading instance is NEVER auto-destroyed.
+      echo "  neuroslm-$role: healthy (id $iid, status=$istatus) — keeping"
+      NEEDS[$role]=0
+      ;;
+    created|stopped|exited|offline|error|unknown|"")
+      echo "  neuroslm-$role: STUCK (id $iid, status='${istatus:-?}') — destroying + redeploying"
+      vastai destroy instance "$iid" -y >/dev/null 2>&1 || true
+      NEEDS[$role]=1
+      ;;
+    *)
+      # Unrecognised status — be SAFE: keep it, don't destroy. Report so we
+      # can extend the lists if a new healthy state shows up.
+      echo "  neuroslm-$role: status='$istatus' not recognised — keeping (safe default)"
+      NEEDS[$role]=0
+      ;;
+  esac
 done
 
 NEED_COUNT=0
