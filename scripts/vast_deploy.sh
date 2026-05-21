@@ -49,16 +49,35 @@ VAST_DISK="${VAST_DISK:-60}"
 VAST_GPU_NAME="${VAST_GPU_NAME:-A100}"
 
 # ── Resolve python + vastai CLI (cross-platform: Linux, Colab, Win git-bash)
-# `pip` / `python3` aren't always on PATH (e.g. Windows venv exposes only
-# `python`), and `python -m vastai` doesn't work (the package has no
-# __main__), so we find python, install via `python -m pip`, then locate
-# the `vastai` console-script that lands next to the python executable.
-PYTHON="$(command -v python3 || command -v python || true)"
+# Pitfalls handled:
+#   • git-bash ships /usr/bin/python3 WITHOUT pip — must skip it.
+#   • Windows venv exposes `python` (not `python3`) with pip.
+#   • `python -m vastai` doesn't work (package has no __main__) — so we
+#     locate the `vastai` console-script next to the chosen python binary.
+# Strategy: pick the FIRST interpreter that actually has pip, preferring the
+# active venv ($VIRTUAL_ENV), then `python`, then `python3`, then `py`.
+_pick_python() {
+  local c
+  if [ -n "${VIRTUAL_ENV:-}" ]; then
+    for c in "$VIRTUAL_ENV/Scripts/python.exe" "$VIRTUAL_ENV/Scripts/python" \
+             "$VIRTUAL_ENV/bin/python"; do
+      [ -x "$c" ] && "$c" -m pip --version >/dev/null 2>&1 && { echo "$c"; return; }
+    done
+  fi
+  for c in python python3 py; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    "$c" -m pip --version >/dev/null 2>&1 && { echo "$c"; return; }
+  done
+  echo ""
+}
+PYTHON="$(_pick_python)"
 if [ -z "$PYTHON" ]; then
-  echo "✗ no python/python3 on PATH. Activate your venv first." >&2
+  echo "✗ no python with pip found. Activate your venv (it has pip) and retry," >&2
+  echo "  or run from Colab/Linux. (git-bash's /usr/bin/python3 has no pip.)" >&2
   exit 1
 fi
-PYBIN="$(dirname "$PYTHON")"
+echo "  using python: $PYTHON"
+PYBIN="$("$PYTHON" -c 'import os,sys;print(os.path.dirname(sys.executable))')"
 
 _find_vastai() {
   if command -v vastai >/dev/null 2>&1; then echo "vastai"; return; fi
