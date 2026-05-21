@@ -20,11 +20,40 @@ evaluated. Missing files are reported, not fatal.
 """
 from __future__ import annotations
 import argparse
+import glob
 import math
 import os
+import re
 from pathlib import Path
 
 import torch
+
+_STEP_RE = re.compile(r"_(\d+)\.pt$")
+
+
+def _find_latest(directory: str, preset: str, baseline: bool) -> str | None:
+    """Newest (highest-step) checkpoint in `directory` for this preset.
+
+    baseline=True  → only `*_baseline_*` files (vanilla param-matched).
+    baseline=False → only NON-baseline files (full bio model).
+    `_latest.pt` files are considered only if no step-numbered file exists.
+    """
+    if not directory or not os.path.isdir(directory):
+        return None
+    cands = []
+    for p in glob.glob(os.path.join(directory, f"neuroslm_{preset}*.pt")):
+        name = os.path.basename(p)
+        is_baseline = "_baseline" in name
+        if is_baseline != baseline:
+            continue
+        m = _STEP_RE.search(name)
+        step = int(m.group(1)) if m else -1   # -1 → _latest.pt, lowest rank
+        cands.append((step, os.path.getmtime(p), p))
+    if not cands:
+        return None
+    # Highest step wins; mtime breaks ties (and ranks _latest.pt among itself).
+    cands.sort(key=lambda x: (x[0], x[1]))
+    return cands[-1][2]
 
 
 def _load_brain(ckpt_path: str, device: str, fallback_preset: str | None):
@@ -97,8 +126,14 @@ def _eval_loss(brain, tok, cfg, device: str, n_batches: int,
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--full", default=None, help="Path to full-model .pt")
-    ap.add_argument("--baseline", default=None, help="Path to baseline .pt")
+    ap.add_argument("--full", default=None, help="Explicit path to full-model .pt")
+    ap.add_argument("--baseline", default=None, help="Explicit path to baseline .pt")
+    ap.add_argument("--full_dir", default=None,
+                    help="Directory to auto-pick the NEWEST full checkpoint from "
+                         "(highest step). Overridden by --full if given.")
+    ap.add_argument("--baseline_dir", default=None,
+                    help="Directory to auto-pick the NEWEST baseline checkpoint "
+                         "from. Overridden by --baseline if given.")
     ap.add_argument("--eval_batches", type=int, default=20)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--mode", default="mix", choices=["text", "chat", "mix"])
@@ -106,11 +141,22 @@ def main():
     ap.add_argument("--seed", type=int, default=1234,
                     help="Fixed eval seed — identical data for both models.")
     ap.add_argument("--preset", default="large",
-                    help="Fallback preset if a checkpoint has no saved cfg.")
+                    help="Preset used for auto-discovery + cfg fallback.")
     args = ap.parse_args()
 
+    # Auto-discover newest checkpoints when explicit paths aren't given.
+    if not args.full and args.full_dir:
+        args.full = _find_latest(args.full_dir, args.preset, baseline=False)
+        if args.full:
+            print(f"[compare] auto-selected FULL: {args.full}", flush=True)
+    if not args.baseline and args.baseline_dir:
+        args.baseline = _find_latest(args.baseline_dir, args.preset, baseline=True)
+        if args.baseline:
+            print(f"[compare] auto-selected BASELINE: {args.baseline}", flush=True)
+
     if not args.full and not args.baseline:
-        ap.error("provide at least one of --full / --baseline")
+        ap.error("provide at least one of --full / --baseline / --full_dir / "
+                 "--baseline_dir (no matching checkpoint found)")
 
     results = {}
     for label, path in (("FULL", args.full), ("BASELINE", args.baseline)):
