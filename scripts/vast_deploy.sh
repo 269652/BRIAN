@@ -90,7 +90,9 @@ if [ -z "$PYTHON" ]; then
   exit 1
 fi
 echo "  using python: $PYTHON"
-PYBIN="$("$PYTHON" -c 'import os,sys;print(os.path.dirname(sys.executable))')"
+# sys.executable is a Windows path (C:\...\Scripts\python.exe) on Win venvs;
+# cygpath-normalize so the vastai-locating `-x` tests below work in bash.
+PYBIN="$(_norm_path "$("$PYTHON" -c 'import os,sys;print(os.path.dirname(sys.executable))')")"
 
 _find_vastai() {
   if command -v vastai >/dev/null 2>&1; then echo "vastai"; return; fi
