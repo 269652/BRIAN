@@ -88,12 +88,35 @@ def load_brain(ckpt_path: str, device: torch.device):
     cfg.vocab_size = tok.vocab_size
 
     brain = Brain(cfg).to(device)
+
+    # ── Patch per-batch neurotransmitter state ───────────────────────────
+    # transmitters.level / transmitters.vesicles are saved at the TRAIN batch
+    # size (e.g. [32, 7]) but a freshly-built eval Brain has [1, 7]. Without
+    # this, the rank-aware loader shape-skips them and the model runs on
+    # random-init NT state, which modulates attention temperature/gain and
+    # badly inflates perplexity. Collapse the batch dim by averaging so the
+    # eval model inherits the trained resting NT levels.
+    sd = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+    model_sd = brain.state_dict()
+    for key in ("transmitters.level", "transmitters.vesicles"):
+        if key in sd and key in model_sd and sd[key].shape != model_sd[key].shape:
+            ck_t, m_t = sd[key], model_sd[key]
+            if (ck_t.dim() == m_t.dim() and ck_t.dim() >= 1
+                    and m_t.shape[0] == 1 and ck_t.shape[0] > 1
+                    and ck_t.shape[1:] == m_t.shape[1:]):
+                sd[key] = ck_t.mean(dim=0, keepdim=True)
+                print(f"[patch] {key}: {tuple(ck_t.shape)} -> {tuple(sd[key].shape)} "
+                      f"(mean over batch dim)")
+            else:
+                print(f"[patch] {key}: shape {tuple(ck_t.shape)} vs model "
+                      f"{tuple(m_t.shape)} — left as-is (unexpected layout)")
+
     # Reuse the train-time adapter-rank-aware loader for BDNF-grown ckpts.
     try:
         from neuroslm.train import _load_compatible
-        _load_compatible(brain, ckpt["model"], label=os.path.basename(ckpt_path))
+        _load_compatible(brain, sd, label=os.path.basename(ckpt_path))
     except Exception:
-        brain.load_state_dict(ckpt["model"], strict=False)
+        brain.load_state_dict(sd, strict=False)
     brain.eval()
     return brain, tok, cfg, ckpt.get("step", "?") if isinstance(ckpt, dict) else "?"
 
