@@ -104,57 +104,76 @@ def load_brain(ckpt_path: str, device: torch.device):
 def compute_ppl_sliding(brain, tok, texts: List[str], ctx_len: int,
                         stride: int, batch_size: int,
                         max_windows: Optional[int] = None) -> Tuple[float, int]:
-    """Mean cross-entropy → PPL on a list of text strings via sliding windows.
+    """Mean cross-entropy → PPL over a list of texts via a strided sliding
+    window (the canonical HF fixed-length-model recipe).
 
-    Only the new tokens past the overlap (stride) are counted in each window,
-    so overlap doesn't double-count (standard HF perplexity recipe).
+    The corpus is encoded into one long token stream. Each window of up to
+    `ctx_len` tokens advances by `stride`. To avoid double-counting the
+    overlap, each window scores ONLY its genuinely-new tokens — those past
+    the previous window's end (`trg_len = end - prev_end`). The very first
+    window scores all of its predictable tokens.
+
+    Correctness details handled here:
+      • `trg_len` is tracked via `prev_end` (NOT a fixed `stride`), so the
+        first and last windows are accounted exactly.
+      • The scored region is placed relative to each row's REAL length, so
+        right-padding a short final window never leaks loss onto pad tokens.
+      • Targets are the next-token shift; the last `n_new` target positions
+        of the real sequence are the new tokens' predictions.
     """
     from tqdm.auto import tqdm
 
     device = next(brain.parameters()).device
-    # Build one long token stream
+    # Encode the whole corpus into one stream.
     all_ids: List[int] = []
     for t in texts:
         if not isinstance(t, str) or not t.strip():
             continue
         all_ids.extend(tok.encode(t))
-    if not all_ids:
+    if len(all_ids) < 2:
         return float("nan"), 0
 
-    # Window boundaries
-    windows: List[Tuple[int, int]] = []
-    i = 0
-    while i < len(all_ids):
-        end = min(i + ctx_len, len(all_ids))
-        windows.append((i, end))
-        if end == len(all_ids):
+    # Build (start, end, trg_len) windows. trg_len = new tokens vs prev window.
+    windows: List[Tuple[int, int, int]] = []
+    prev_end = 0
+    begin = 0
+    n = len(all_ids)
+    while begin < n:
+        end = min(begin + ctx_len, n)
+        trg_len = end - prev_end
+        windows.append((begin, end, trg_len))
+        prev_end = end
+        if end == n:
             break
-        i += stride
+        begin += stride
     if max_windows:
         windows = windows[:max_windows]
 
     total_loss, total_tokens = 0.0, 0
 
     for b_start in tqdm(range(0, len(windows), batch_size), desc="OOD PPL"):
-        batch_windows = windows[b_start:b_start + batch_size]
-        max_len = max(e - s for s, e in batch_windows)
-        ids_batch = torch.zeros(len(batch_windows), max_len, dtype=torch.long)
-        valid_mask = torch.zeros(len(batch_windows), max_len, dtype=torch.bool)
-        for i, (s, e) in enumerate(batch_windows):
+        batch = windows[b_start:b_start + batch_size]
+        max_len = max(e - s for s, e, _ in batch)
+        bsz = len(batch)
+        ids_batch = torch.zeros(bsz, max_len, dtype=torch.long)
+        # Target-valid mask aligned to the shifted targets (length max_len-1).
+        tgt_valid = torch.zeros(bsz, max_len - 1, dtype=torch.bool)
+        for i, (s, e, trg_len) in enumerate(batch):
             seq = all_ids[s:e]
-            ids_batch[i, :len(seq)] = torch.tensor(seq, dtype=torch.long)
-            # First-ever window scores all of its tokens; subsequent windows
-            # score only the last `stride` (the genuinely-new tokens).
-            global_idx = b_start + i
-            n_new = (e - s) if global_idx == 0 else min(stride, e - s)
-            valid_mask[i, -n_new:] = True
+            L = len(seq)                          # real (unpadded) length
+            ids_batch[i, :L] = torch.tensor(seq, dtype=torch.long)
+            # Predictable targets for this row: indices [0 .. L-2] (length L-1).
+            # Score only the last n_new of them — the new tokens. Clamp so the
+            # first window (trg_len == L) scores all L-1 predictions.
+            n_new = min(trg_len, L - 1)
+            if n_new > 0:
+                tgt_valid[i, (L - 1 - n_new):(L - 1)] = True
 
         ids_batch = ids_batch.to(device)
-        valid_mask = valid_mask.to(device)
+        tgt_valid = tgt_valid.to(device)
 
         ids_in = ids_batch[:, :-1]
         tgt    = ids_batch[:, 1:].contiguous()
-        tgt_m  = valid_mask[:, 1:]
 
         out = brain.forward_lm(ids_in, tgt)
         logits = out["logits"]
@@ -163,10 +182,8 @@ def compute_ppl_sliding(brain, tok, texts: List[str], ctx_len: int,
             tgt.reshape(-1),
             reduction="none",
         ).reshape(tgt.shape)
-        loss_sum = float((loss * tgt_m.to(loss.dtype)).sum().item())
-        n_valid  = int(tgt_m.sum().item())
-        total_loss   += loss_sum
-        total_tokens += n_valid
+        total_loss   += float((loss * tgt_valid.to(loss.dtype)).sum().item())
+        total_tokens += int(tgt_valid.sum().item())
 
         if device.type == "cuda":
             torch.cuda.empty_cache()
@@ -181,13 +198,21 @@ def compute_ppl_sliding(brain, tok, texts: List[str], ctx_len: int,
 
 @torch.inference_mode()
 def compute_train_ppl(brain, tok, cfg, batch_size: int, n_batches: int,
-                      mode: str = "text") -> Tuple[float, int]:
+                      mode: str = "mix", chat_ratio: float = 0.6) -> Tuple[float, int]:
+    """In-distribution PPL on a fresh sample of the TRAINING stream.
+
+    Defaults to mode='mix' / chat_ratio=0.6 to match how the model was
+    trained, so the gap vs OOD reflects true distribution shift rather than
+    a text-vs-chat mismatch. seed=12345 (≠ training seed 42) draws an
+    unseen sample from the same distribution.
+    """
     from neuroslm.data import batch_iterator
     from tqdm.auto import tqdm
 
     device = next(brain.parameters()).device
     ctx_len = cfg.lang_ctx
-    it = batch_iterator(tok, ctx_len, batch_size, seed=0, mode=mode)
+    it = batch_iterator(tok, ctx_len, batch_size, seed=12345,
+                        mode=mode, chat_ratio=chat_ratio)
 
     total_loss, total_tok = 0.0, 0
     for _ in tqdm(range(n_batches), desc="train PPL"):
@@ -223,6 +248,12 @@ def main() -> int:
     ap.add_argument("--max_train_batches", type=int, default=100)
     ap.add_argument("--batch_size", type=int, default=4)
     ap.add_argument("--stride", type=int, default=512)
+    ap.add_argument("--train_mode", default="mix", choices=["mix", "text", "chat"],
+                    help="Data mode for the in-distribution sample. Default "
+                         "'mix' to match training. Use 'text' for a lighter, "
+                         "download-free comparison.")
+    ap.add_argument("--chat_ratio", type=float, default=0.6,
+                    help="chat fraction when --train_mode mix (match training)")
     ap.add_argument("--output", default="ood_test_results.json")
     args = ap.parse_args()
 
@@ -275,10 +306,19 @@ def main() -> int:
     )
     print(f"[ood] OOD eval: {ood_tokens} tokens scored")
 
-    train_ppl, train_tokens = compute_train_ppl(
-        brain, tok, cfg, batch_size=args.batch_size,
-        n_batches=args.max_train_batches,
-    )
+    try:
+        train_ppl, train_tokens = compute_train_ppl(
+            brain, tok, cfg, batch_size=args.batch_size,
+            n_batches=args.max_train_batches,
+            mode=args.train_mode, chat_ratio=args.chat_ratio,
+        )
+    except Exception as e:
+        print(f"[ood] train-PPL ({args.train_mode}) failed ({e}); "
+              f"retrying with mode=text", file=sys.stderr)
+        train_ppl, train_tokens = compute_train_ppl(
+            brain, tok, cfg, batch_size=args.batch_size,
+            n_batches=args.max_train_batches, mode="text",
+        )
 
     # Step 5: report
     gap   = ood_ppl - train_ppl
@@ -313,6 +353,7 @@ def main() -> int:
         "ctx_len": int(cfg.lang_ctx),
         "ood_dataset": ds_name,
         "ood_tokens_evaluated": int(ood_tokens),
+        "train_mode": args.train_mode,
         "train_batches": int(args.max_train_batches),
         "train_tokens_evaluated": int(train_tokens),
         "train_ppl": float(train_ppl),
