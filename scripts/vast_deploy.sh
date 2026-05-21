@@ -144,6 +144,21 @@ vastai() {
   "$PYTHON" -c 'import sys; from vastai.cli.main import main; sys.exit(main())' "$@"
 }
 
+# Run a vastai command and emit ONLY its JSON payload. Recent vastai CLI
+# versions print a "DEPRECATED: ..." banner line BEFORE the JSON for
+# `show instances --raw`, which makes a naive json.load() fail (it then
+# silently treats the result as zero instances → the reconcile deploys
+# duplicates and never destroys the old ones). Strip anything before the
+# first JSON bracket so parsing is robust to such banners.
+_vast_json() {
+  vastai "$@" 2>/dev/null | "$PYTHON" -c '
+import sys
+buf = sys.stdin.read()
+starts = [i for i in (buf.find("["), buf.find("{")) if i != -1]
+sys.stdout.write(buf[min(starts):] if starts else "")
+'
+}
+
 if ! "$PYTHON" -c 'import vastai.cli.main' >/dev/null 2>&1; then
   echo "── installing vastai CLI (via $PYTHON -m pip) ──"
   "$PYTHON" -m pip install -q --upgrade vastai
@@ -173,7 +188,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --destroy)
       echo "── destroying instances labelled neuroslm-* ──"
-      vastai show instances --raw \
+      _vast_json show instances --raw \
         | "$PYTHON" -c "import sys,json;[print(i['id']) for i in json.load(sys.stdin) if 'neuroslm' in (i.get('label') or '')]" \
         | while read -r id; do echo "destroy $id"; vastai destroy instance "$id" -y; done
       exit 0
@@ -231,7 +246,7 @@ fi
 # (so a new git push is picked up).
 ROLES="full baseline"
 
-_instances_json="$(vastai show instances --raw 2>/dev/null)"
+_instances_json="$(_vast_json show instances --raw)"
 declare -A NEEDS   # role -> 1 if we must (re)deploy it
 
 for role in $ROLES; do
