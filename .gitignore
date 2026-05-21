@@ -50,3 +50,6 @@ tmp/
 temp/
 .cache/
 
+
+# Local secrets — never commit
+.env

@@ -239,12 +239,33 @@ def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
             return
 
         # `git push` of an LFS object is bandwidth-bound — bumped to 600s.
-        r_push = subprocess.run(["git", "push", "origin", "HEAD"],
-                                cwd=repo_root, capture_output=True, text=True, timeout=600)
-        if r_push.returncode == 0:
-            print(f"[train] ✓ pushed {basename} to Git LFS", flush=True)
-        else:
-            print(f"[train] ⚠ git push failed: {r_push.stderr.strip()[:300]}", flush=True)
+        # Concurrency: when several instances (e.g. a full run + a baseline
+        # run launched by scripts/vast_deploy.sh) push to the same branch,
+        # the non-first push is rejected (non-fast-forward). Because each run
+        # writes a DIFFERENT checkpoint stream (full vs *_baseline_*), a
+        # `git pull --rebase` always merges cleanly — so we retry with a
+        # rebase up to 5×.
+        _branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                                 cwd=repo_root, capture_output=True, text=True,
+                                 timeout=30).stdout.strip() or "HEAD"
+        pushed = False
+        for attempt in range(5):
+            r_push = subprocess.run(["git", "push", "origin", "HEAD"],
+                                    cwd=repo_root, capture_output=True,
+                                    text=True, timeout=600)
+            if r_push.returncode == 0:
+                print(f"[train] ✓ pushed {basename} to Git LFS", flush=True)
+                pushed = True
+                break
+            # Rejected (likely a concurrent push) — rebase onto remote & retry.
+            print(f"[train] push attempt {attempt+1} rejected; "
+                  f"rebasing on origin/{_branch} and retrying ...", flush=True)
+            subprocess.run(["git", "pull", "--rebase", "origin", _branch],
+                           cwd=repo_root, capture_output=True, text=True,
+                           timeout=300)
+        if not pushed:
+            print(f"[train] ⚠ git push failed after retries: "
+                  f"{r_push.stderr.strip()[:300]}", flush=True)
     except subprocess.TimeoutExpired as e:
         print(f"[train] ⚠ LFS push timed out at: {e.cmd[:3]}... "
               f"(timeout={e.timeout}s)", flush=True)
