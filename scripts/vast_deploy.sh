@@ -48,31 +48,57 @@ VAST_IMAGE="${VAST_IMAGE:-pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime}"
 VAST_DISK="${VAST_DISK:-60}"
 VAST_GPU_NAME="${VAST_GPU_NAME:-A100}"
 
-# ── vastai CLI ──────────────────────────────────────────────────────────
-if ! command -v vastai >/dev/null 2>&1; then
-  echo "── installing vastai CLI ──"
-  pip install -q --upgrade vastai
+# ── Resolve python + vastai CLI (cross-platform: Linux, Colab, Win git-bash)
+# `pip` / `python3` aren't always on PATH (e.g. Windows venv exposes only
+# `python`), and `python -m vastai` doesn't work (the package has no
+# __main__), so we find python, install via `python -m pip`, then locate
+# the `vastai` console-script that lands next to the python executable.
+PYTHON="$(command -v python3 || command -v python || true)"
+if [ -z "$PYTHON" ]; then
+  echo "✗ no python/python3 on PATH. Activate your venv first." >&2
+  exit 1
 fi
-: "${VAST_API_KEY:?set VAST_API_KEY in .env}"
-: "${GITHUB:?set GITHUB (PAT) in .env}"
-vastai set api-key "$VAST_API_KEY" >/dev/null
+PYBIN="$(dirname "$PYTHON")"
+
+_find_vastai() {
+  if command -v vastai >/dev/null 2>&1; then echo "vastai"; return; fi
+  for c in "$PYBIN/vastai" "$PYBIN/vastai.exe" "$PYBIN/Scripts/vastai.exe"; do
+    [ -x "$c" ] && { echo "$c"; return; }
+  done
+  echo ""
+}
+VASTAI="$(_find_vastai)"
+if [ -z "$VASTAI" ]; then
+  echo "── installing vastai CLI (via $PYTHON -m pip) ──"
+  "$PYTHON" -m pip install -q --upgrade vastai
+  VASTAI="$(_find_vastai)"
+fi
+if [ -z "$VASTAI" ]; then
+  echo "✗ vastai CLI not found after install. Try: $PYTHON -m pip install vastai" >&2
+  exit 1
+fi
+echo "  using vastai: $VASTAI"
+
+: "${VAST_API_KEY:?set VAST_API_KEY (or VAST_AI) in .env}"
+: "${GITHUB:?set GITHUB (or GITHUB_PAT) in .env}"
+"$VASTAI" set api-key "$VAST_API_KEY" >/dev/null
 
 # ── Optional: destroy mode ────────────────────────────────────────────────
 if [ "${1:-}" = "--destroy" ]; then
   echo "── destroying instances labelled neuroslm-* ──"
-  vastai show instances --raw \
-    | python3 -c "import sys,json;[print(i['id']) for i in json.load(sys.stdin) if 'neuroslm' in (i.get('label') or '')]" \
-    | while read -r id; do echo "destroy $id"; vastai destroy instance "$id"; done
+  "$VASTAI" show instances --raw \
+    | "$PYTHON" -c "import sys,json;[print(i['id']) for i in json.load(sys.stdin) if 'neuroslm' in (i.get('label') or '')]" \
+    | while read -r id; do echo "destroy $id"; "$VASTAI" destroy instance "$id"; done
   exit 0
 fi
 
 # ── Pick the 2 cheapest available on-demand A100 offers ───────────────────
 echo "── searching A100 offers ──"
-OFFERS=$(vastai search offers \
+OFFERS=$("$VASTAI" search offers \
   "gpu_name~${VAST_GPU_NAME} num_gpus=1 rentable=true disk_space>=${VAST_DISK} reliability>0.95" \
   -o 'dph+' --raw)
 
-read -r OFFER1 OFFER2 < <(printf '%s' "$OFFERS" | python3 -c "
+read -r OFFER1 OFFER2 < <(printf '%s' "$OFFERS" | "$PYTHON" -c "
 import sys, json
 offers = json.load(sys.stdin)
 # already sorted by dollars-per-hour ascending; take 2 distinct machines
@@ -119,7 +145,7 @@ ENV_ARG="-e GITHUB=${GITHUB} -e HF_TOKEN=${HF_TOKEN:-}"
 create_instance() {
   local offer="$1" role="$2" onstart="$3"
   echo "── creating ${role} instance on offer ${offer} ──"
-  vastai create instance "$offer" \
+  "$VASTAI" create instance "$offer" \
     --image "$VAST_IMAGE" \
     --disk "$VAST_DISK" \
     --label "neuroslm-${role}" \
