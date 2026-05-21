@@ -88,6 +88,10 @@ class TransmitterSystem(nn.Module):
         self._release_cost= torch.tensor([NT_DEFAULTS[n].release_cost for n in NT_NAMES])
         self.register_buffer("level",    torch.zeros(1, N_NT))
         self.register_buffer("vesicles", torch.ones(1, N_NT))
+        # Internal step counter, used by the early-training 5-HT hard cap
+        # (see step()).  Auto-increments on every `step()` call so the cap
+        # phases out naturally; can be set explicitly via `set_train_step()`.
+        self.register_buffer("_train_step", torch.zeros(1, dtype=torch.long))
 
     # -- state management -----------------------------------------------------
     def reset(self, batch_size: int, device):
@@ -117,6 +121,25 @@ class TransmitterSystem(nn.Module):
         self.vesicles = new_ves
         return actual
 
+    # 5-HT hard cap during early training. The slow τ_5HT=0.95 + tonic releases
+    # let 5HT climb toward the ceiling and over-inhibit plasticity, which has
+    # been linked to gradient spikes around the awakening window (gnorm
+    # excursions > 1.5 → loss regression). Capping 5HT well below ceiling
+    # during the first SHT_CAP_WARMUP_STEPS prevents that. Phases out after.
+    SHT_CAP_WARMUP_STEPS: int = 20_000
+    SHT_CAP_WARMUP_VALUE: float = 0.65
+    SHT_CAP_NORMAL_VALUE: float = 0.95
+
+    def set_train_step(self, step: int) -> None:
+        """Inform the NT system of the current global training step.
+
+        Optional — `step()` also auto-increments an internal counter, but
+        passing the real step from train.py keeps the cap aligned across
+        resumes / restarts.
+        """
+        with torch.no_grad():
+            self._train_step.fill_(int(step))
+
     def step(self):
         """Time step: decay levels toward baseline, replenish vesicles.
 
@@ -126,6 +149,11 @@ class TransmitterSystem(nn.Module):
         normal +0.5 max homeostasis bias) get aggressively returned to the
         operating band.  Mirrors physiological auto-receptor / fast-reuptake
         scavenging triggered by extracellular excess.
+
+        5-HT cap: during the first SHT_CAP_WARMUP_STEPS, clamp 5HT to at
+        most SHT_CAP_WARMUP_VALUE (=0.65). After warmup, cap at
+        SHT_CAP_NORMAL_VALUE (=0.95). Prevents the over-inhibition pattern
+        that's been correlated with gradient spikes at the awakening band.
         """
         device = self.level.device
         decay    = self._tau_decay.to(device)
@@ -137,9 +165,20 @@ class TransmitterSystem(nn.Module):
         # Saturation scavenge — fast reuptake when level > 0.9.
         sat_mask = (new_level > 0.9).to(new_level.dtype)
         new_level = new_level * (1.0 - 0.15 * sat_mask)
+        # 5-HT hard cap (early-training over-inhibition guard).
+        step_now = int(self._train_step.item())
+        sht_cap = (self.SHT_CAP_WARMUP_VALUE
+                   if step_now < self.SHT_CAP_WARMUP_STEPS
+                   else self.SHT_CAP_NORMAL_VALUE)
+        sht_idx = NT_INDEX["5HT"]
+        new_level[:, sht_idx] = new_level[:, sht_idx].clamp(max=sht_cap)
         new_ves   = (self.vesicles + repl).clamp(0.0, 1.0)
         self.level    = new_level
         self.vesicles = new_ves
+        # Advance internal counter (lets the cap auto-phase-out if the train
+        # loop never calls set_train_step explicitly).
+        with torch.no_grad():
+            self._train_step += 1
 
     # -- accessors ------------------------------------------------------------
     def get(self, name: str) -> torch.Tensor:

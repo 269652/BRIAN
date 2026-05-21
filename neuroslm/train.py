@@ -708,6 +708,11 @@ def main():
     print(f"[train] >>> training loop starting: steps {start_step}..{total_steps} <<<", flush=True)
 
     for step in range(start_step, total_steps):
+        # Keep the NT system's internal step aligned with the train loop so
+        # the 5-HT hard cap (warmup window < 20k steps) phases correctly
+        # across resumes / restarts. No-op for the baseline path.
+        if not cfg.baseline and hasattr(brain, "transmitters"):
+            brain.transmitters.set_train_step(step)
         try:
             batch = next(it)
         except StopIteration:
