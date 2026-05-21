@@ -46,7 +46,10 @@ SAVE_EVERY="${SAVE_EVERY:-1000}"
 LOG_EVERY="${LOG_EVERY:-20}"
 VAST_IMAGE="${VAST_IMAGE:-pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime}"
 VAST_DISK="${VAST_DISK:-60}"
-VAST_GPU_NAME="${VAST_GPU_NAME:-A100}"
+# Vast query fragment selecting the GPU. Use the `in [...]` operator (the
+# `~` "contains" operator is NOT supported) with underscore aliases — vast
+# matches them against the space-named GPUs (A100 SXM4 / A100 PCIE).
+VAST_GPU_QUERY="${VAST_GPU_QUERY:-gpu_name in [A100_SXM4,A100_PCIE,A100_SXM,A100X]}"
 
 # ── Resolve python + vastai CLI (cross-platform: Linux, Colab, Win git-bash)
 # Pitfalls handled:
@@ -123,18 +126,32 @@ if [ "${1:-}" = "--destroy" ]; then
   exit 0
 fi
 
-# ── Pick the 2 cheapest available on-demand A100 offers ───────────────────
+# ── Pick the 2 cheapest available A100 offers ─────────────────────────────
 echo "── searching A100 offers ──"
-OFFERS=$(vastai search offers \
-  "gpu_name~${VAST_GPU_NAME} num_gpus=1 rentable=true disk_space>=${VAST_DISK} reliability>0.95" \
-  -o 'dph+' --raw)
+OFFER_QUERY="${VAST_GPU_QUERY} num_gpus=1 rentable=true disk_space>=${VAST_DISK} reliability>0.95"
+echo "  query: $OFFER_QUERY"
+OFFERS="$(vastai search offers "$OFFER_QUERY" -o 'dph+' --raw 2>&1)"
+
+# Surface vastai errors clearly instead of feeding non-JSON to the parser.
+case "$OFFERS" in
+  \[*|\{*) : ;;                       # looks like JSON — proceed
+  *)
+    echo "✗ vastai search did not return JSON. Output was:" >&2
+    printf '%s\n' "$OFFERS" | head -5 >&2
+    echo "  Check the query, or list A100 names with:" >&2
+    echo "    vastai search offers 'num_gpus=1 rentable=true' --raw | python -c \"import sys,json;print(sorted({o.get('gpu_name','') for o in json.load(sys.stdin)}))\"" >&2
+    exit 1
+    ;;
+esac
 
 read -r OFFER1 OFFER2 < <(printf '%s' "$OFFERS" | "$PYTHON" -c "
 import sys, json
 offers = json.load(sys.stdin)
-# already sorted by dollars-per-hour ascending; take 2 distinct machines
+# sorted by \$/hr ascending; take 2 A100s on distinct machines
 seen, picked = set(), []
 for o in offers:
+    if 'A100' not in (o.get('gpu_name') or ''):
+        continue
     mid = o.get('machine_id')
     if mid in seen:
         continue
@@ -145,8 +162,9 @@ print(' '.join(picked))
 ")
 
 if [ -z "${OFFER1:-}" ] || [ -z "${OFFER2:-}" ]; then
-  echo "✗ could not find 2 available A100 offers. Try a different VAST_GPU_NAME" >&2
-  echo "  or check 'vastai search offers \"gpu_name~A100 num_gpus=1 rentable=true\"'." >&2
+  echo "✗ found fewer than 2 available A100 offers right now." >&2
+  echo "  Try again later, raise VAST_DISK budget, or set VAST_GPU_QUERY" >&2
+  echo "  (e.g. 'gpu_name=A100_SXM4 num_gpus=1 rentable=true')." >&2
   exit 1
 fi
 echo "  picked offers: FULL=$OFFER1  BASELINE=$OFFER2"
