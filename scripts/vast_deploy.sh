@@ -341,6 +341,12 @@ make_onstart() {
   local role="$1" extra="$2" ckpt_dir="$3"
   cat <<ONSTART
 set -e
+export DEBIAN_FRONTEND=noninteractive
+# The pytorch/pytorch image ships without an ssh client/server. Vast's
+# launcher (/.launch) and 'vastai execute' both want ssh; install it early
+# (best-effort) so debugging connections work. The real fix for the
+# /.launch 'ssh: command not found' loop is dropping --direct below.
+(command -v ssh >/dev/null 2>&1 || (apt-get update -y && apt-get install -y openssh-client openssh-server)) || true
 export GITHUB='${GITHUB}' HF_TOKEN='${HF_TOKEN:-}'
 cd /workspace
 git clone https://x-access-token:\${GITHUB}@github.com/${REPO_SLUG}.git brian || true
@@ -362,13 +368,18 @@ ENV_ARG="-e GITHUB=${GITHUB} -e HF_TOKEN=${HF_TOKEN:-}"
 create_instance() {
   local offer="$1" role="$2" onstart="$3"
   echo "── creating ${role} instance on offer ${offer} ──"
+  # NOTE: --ssh WITHOUT --direct. Direct mode makes Vast's /.launch invoke an
+  # in-container `ssh` client in a keepalive loop; the pytorch/pytorch image
+  # has no ssh, so it spins on "ssh: command not found" and the onstart-cmd
+  # never runs (instance idles, no training). Proxy ssh (plain --ssh) routes
+  # through Vast and doesn't need the in-container client, so onstart runs.
   vastai create instance "$offer" \
     --image "$VAST_IMAGE" \
     --disk "$VAST_DISK" \
     --label "neuroslm-${role}" \
     --env "$ENV_ARG" \
     --onstart-cmd "$onstart" \
-    --ssh --direct
+    --ssh
 }
 
 # Assign the freshly-picked offers to the roles that need (re)deploying.
