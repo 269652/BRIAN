@@ -35,18 +35,31 @@ _pick_python() {
       [ -x "$c" ] && "$c" -c 'import vastai.cli.main' >/dev/null 2>&1 && { printf '%s' "$c"; return; }
     done
   fi
-  # any python that can import vastai
+  # repo-local venvs that already have vastai
+  for ve in "$HERE"/.venv*; do
+    [ -d "$ve" ] || continue
+    for c in "$ve/Scripts/python.exe" "$ve/bin/python"; do
+      [ -x "$c" ] && "$c" -c 'import vastai.cli.main' >/dev/null 2>&1 && { printf '%s' "$c"; return; }
+    done
+  done
+  # any python on PATH that can import vastai
   for c in python python.exe python3 py; do
     command -v "$c" >/dev/null 2>&1 || continue
     "$c" -c 'import vastai.cli.main' >/dev/null 2>&1 && { printf '%s' "$c"; return; }
   done
-  # fall back to one with pip (so we can install)
+  # fall back to one with pip (so we can install): venv, repo-venv, PATH
   if [ -n "${VIRTUAL_ENV:-}" ]; then
     ve="$(_norm_path "$VIRTUAL_ENV")"
     for c in "$ve/Scripts/python.exe" "$ve/bin/python"; do
       [ -x "$c" ] && "$c" -m pip --version >/dev/null 2>&1 && { printf '%s' "$c"; return; }
     done
   fi
+  for ve in "$HERE"/.venv*; do
+    [ -d "$ve" ] || continue
+    for c in "$ve/Scripts/python.exe" "$ve/bin/python"; do
+      [ -x "$c" ] && "$c" -m pip --version >/dev/null 2>&1 && { printf '%s' "$c"; return; }
+    done
+  done
   for c in python python.exe python3 py; do
     command -v "$c" >/dev/null 2>&1 || continue
     "$c" -m pip --version >/dev/null 2>&1 && { printf '%s' "$c"; return; }

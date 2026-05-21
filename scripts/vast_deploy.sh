@@ -69,14 +69,22 @@ _norm_path() {
 }
 _pick_python() {
   local c ve
-  # Prefer the active venv. $VIRTUAL_ENV from a PowerShell venv is a Windows
-  # path with backslashes — cygpath-convert it so the -x test works in bash.
+  # 1. Active venv ($VIRTUAL_ENV may be a backslash Windows path → cygpath).
   if [ -n "${VIRTUAL_ENV:-}" ]; then
     ve="$(_norm_path "$VIRTUAL_ENV")"
     for c in "$ve/Scripts/python.exe" "$ve/Scripts/python" "$ve/bin/python"; do
       [ -x "$c" ] && "$c" -m pip --version >/dev/null 2>&1 && { printf '%s' "$c"; return; }
     done
   fi
+  # 2. Any repo-local venv (.venv, .venv-1, .venv-2, …) — robust even when
+  #    VIRTUAL_ENV isn't exported into bash and PATH python lacks pip.
+  for ve in "$HERE"/.venv*; do
+    [ -d "$ve" ] || continue
+    for c in "$ve/Scripts/python.exe" "$ve/bin/python"; do
+      [ -x "$c" ] && "$c" -m pip --version >/dev/null 2>&1 && { printf '%s' "$c"; return; }
+    done
+  done
+  # 3. PATH pythons that have pip.
   for c in python python.exe python3 py; do
     command -v "$c" >/dev/null 2>&1 || continue
     "$c" -m pip --version >/dev/null 2>&1 && { printf '%s' "$c"; return; }
@@ -225,11 +233,14 @@ cd /workspace
 git clone https://x-access-token:\${GITHUB}@github.com/${REPO_SLUG}.git brian || true
 cd brian
 bash scripts/vast_bootstrap.sh
+echo "── launching ${role} training (live below; also in /workspace/train_${role}.log) ──"
+# Foreground + tee so `vastai logs <id>` streams the actual training output
+# (step/loss lines), not just the bootstrap. The instance persists while
+# this runs; when it finishes (STEPS reached) the box idles until destroyed.
 PRESET='${PRESET}' STEPS='${STEPS}' BATCH='${BATCH}' GRAD_ACCUM='${GRAD_ACCUM}' \
   OPT=adamw SAVE_EVERY='${SAVE_EVERY}' LOG_EVERY='${LOG_EVERY}' \
   CKPT_DIR='${ckpt_dir}' EXTRA_ARGS='${extra}' \
-  nohup bash scripts/vast_train_loop.sh > /workspace/train_${role}.log 2>&1 &
-echo "launched ${role} training; tail -f /workspace/train_${role}.log"
+  bash scripts/vast_train_loop.sh 2>&1 | tee /workspace/train_${role}.log
 ONSTART
 }
 
