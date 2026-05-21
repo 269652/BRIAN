@@ -127,24 +127,60 @@ echo "  using vastai: $PYTHON -c '…vastai.cli.main:main' ($(vastai --version 2
 : "${GITHUB:?set GITHUB (or GITHUB_PAT) in .env}"
 vastai set api-key "$VAST_API_KEY" >/dev/null
 
-# ── Modes ─────────────────────────────────────────────────────────────────
-#   --destroy   tear everything down and exit
-#   --recreate  destroy EVEN healthy instances and redeploy both (use after
-#               pushing new source so the boxes pick up the latest code)
-RECREATE=0
-case "${1:-}" in
-  --destroy)
-    echo "── destroying instances labelled neuroslm-* ──"
-    vastai show instances --raw \
-      | "$PYTHON" -c "import sys,json;[print(i['id']) for i in json.load(sys.stdin) if 'neuroslm' in (i.get('label') or '')]" \
-      | while read -r id; do echo "destroy $id"; vastai destroy instance "$id" -y; done
-    exit 0
-    ;;
-  --recreate)
-    RECREATE=1
-    echo "── --recreate: will destroy healthy instances too and redeploy ──"
-    ;;
-esac
+# ── Modes (flag-style, order-independent) ───────────────────────────────
+#   --destroy            tear everything down and exit
+#   --recreate           destroy + redeploy BOTH roles (even if healthy)
+#   --recreate-full      destroy + redeploy ONLY the full role
+#   --recreate-baseline  destroy + redeploy ONLY the baseline role
+#   --best-step N        BEFORE recreating, delete checkpoints with step > N
+#                        from the role(s) being recreated (uses git rm +
+#                        commit + push so the new instance pulls the
+#                        cleaned LFS state). Optional.
+RECREATE_ROLES=""
+BEST_STEP=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --destroy)
+      echo "── destroying instances labelled neuroslm-* ──"
+      vastai show instances --raw \
+        | "$PYTHON" -c "import sys,json;[print(i['id']) for i in json.load(sys.stdin) if 'neuroslm' in (i.get('label') or '')]" \
+        | while read -r id; do echo "destroy $id"; vastai destroy instance "$id" -y; done
+      exit 0
+      ;;
+    --recreate)          RECREATE_ROLES="full baseline"; shift ;;
+    --recreate-full)     RECREATE_ROLES="${RECREATE_ROLES} full";     shift ;;
+    --recreate-baseline) RECREATE_ROLES="${RECREATE_ROLES} baseline"; shift ;;
+    --best-step)         BEST_STEP="${2:?--best-step requires a number}"; shift 2 ;;
+    --best-step=*)       BEST_STEP="${1#--best-step=}"; shift ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+# Dedupe RECREATE_ROLES tokens (allow `--recreate-full --recreate-baseline`)
+RECREATE_ROLES="$(printf '%s\n' $RECREATE_ROLES | awk '!seen[$0]++' | tr '\n' ' ')"
+RECREATE_ROLES="${RECREATE_ROLES% }"
+if [ -n "$RECREATE_ROLES" ]; then
+  echo "── recreate roles: ${RECREATE_ROLES} ──"
+fi
+
+# ── Optional: prune > best-step from the role(s) being recreated ────────
+# Does git rm + commit + push so the freshly-created Vast instance, when
+# it bootstraps and does `git lfs pull`, only sees checkpoints ≤ BEST_STEP
+# and `--resume latest` picks the right one.
+if [ -n "$BEST_STEP" ] && [ -n "$RECREATE_ROLES" ]; then
+  for role in $RECREATE_ROLES; do
+    echo "── prune ${role} checkpoints > step ${BEST_STEP} ──"
+    "$PYTHON" -m neuroslm.tools.prune_ckpts \
+      --dirs "$HERE/lfs_checkpoints" \
+      --max-step "$BEST_STEP" --only "$role" --git || true
+  done
+  # Push the deletion commits so the new instance sees the cleaned state.
+  echo "── pushing prune commits to origin ──"
+  ( cd "$HERE" && git push origin HEAD 2>&1 | tail -3 ) || true
+elif [ -n "$BEST_STEP" ] && [ -z "$RECREATE_ROLES" ]; then
+  echo "✗ --best-step given but no --recreate*; nothing to do. Pass " >&2
+  echo "  --recreate / --recreate-full / --recreate-baseline too." >&2
+  exit 2
+fi
 
 # ── Reconcile existing instances (idempotent re-runs) ─────────────────────
 # Normal run: keep healthy ('running'/'loading'), destroy STUCK ones
@@ -179,9 +215,11 @@ for i in (data or []):
     continue
   fi
 
-  # --recreate: destroy whatever exists (healthy or not) and redeploy.
-  if [ "$RECREATE" = "1" ]; then
-    echo "  neuroslm-$role: --recreate → destroying (id $iid, status=$istatus) + redeploying"
+  # --recreate-* flags: if THIS role is in the recreate set, destroy
+  # whatever exists (healthy or not) and redeploy. Roles NOT in the set
+  # fall through to the normal health-based reconcile below.
+  if printf ' %s ' $RECREATE_ROLES | grep -qw "$role"; then
+    echo "  neuroslm-$role: recreate → destroying (id $iid, status=$istatus) + redeploying"
     vastai destroy instance "$iid" -y >/dev/null 2>&1 || true
     NEEDS[$role]=1
     continue
