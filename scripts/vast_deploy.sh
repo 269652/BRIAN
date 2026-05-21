@@ -91,20 +91,41 @@ if [ -z "$PYTHON" ]; then
 fi
 echo "  using python: $PYTHON"
 
-# Invoke the vastai CLI via its module entry point (vastai.cli.main) rather
-# than locating the console-script .exe — the latter is a Windows-path
-# minefield. `python -m vastai.cli.main` works identically on all platforms.
-vastai() { "$PYTHON" -m vastai.cli.main "$@"; }
-
-if ! vastai --version >/dev/null 2>&1; then
+# Must use the vastai CONSOLE SCRIPT, not `python -m vastai.cli.main` — the
+# latter loads the module as __main__, which breaks vastai's subcommand
+# registration (only global flags parse; `set`/`search`/`create` error out).
+# Locate the console script via sysconfig (reliable, no PATH dependency),
+# then cygpath-normalize so the Windows path runs in bash.
+_find_vastai_exe() {
+  "$PYTHON" - <<'PY' 2>/dev/null
+import sysconfig, os, shutil
+p = shutil.which("vastai")
+if not p:
+    d = sysconfig.get_path("scripts")
+    for n in ("vastai.exe", "vastai"):
+        c = os.path.join(d, n)
+        if os.path.isfile(c):
+            p = c; break
+print(p or "")
+PY
+}
+_resolve_vastai() {
+  local raw; raw="$(_find_vastai_exe)"
+  [ -n "$raw" ] && _norm_path "$raw" || printf ''
+}
+VASTAI_EXE="$(_resolve_vastai)"
+if [ -z "$VASTAI_EXE" ] || [ ! -x "$VASTAI_EXE" ]; then
   echo "── installing vastai CLI (via $PYTHON -m pip) ──"
   "$PYTHON" -m pip install -q --upgrade vastai
+  VASTAI_EXE="$(_resolve_vastai)"
 fi
-if ! vastai --version >/dev/null 2>&1; then
-  echo "✗ vastai not importable after install. Try: $PYTHON -m pip install vastai" >&2
+if [ -z "$VASTAI_EXE" ] || [ ! -x "$VASTAI_EXE" ]; then
+  echo "✗ vastai console script not found after install." >&2
+  echo "  Try: $PYTHON -m pip install vastai   (then re-run)" >&2
   exit 1
 fi
-echo "  using vastai: $PYTHON -m vastai.cli.main ($(vastai --version 2>/dev/null))"
+vastai() { "$VASTAI_EXE" "$@"; }
+echo "  using vastai: $VASTAI_EXE ($(vastai --version 2>/dev/null))"
 
 : "${VAST_API_KEY:?set VAST_API_KEY (or VAST_AI) in .env}"
 : "${GITHUB:?set GITHUB (or GITHUB_PAT) in .env}"
