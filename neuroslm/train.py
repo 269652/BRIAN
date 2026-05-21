@@ -291,6 +291,14 @@ def main():
                          "of accumulating step-numbered files. Keeps LFS storage constant. "
                          "If the saved architecture no longer matches, loading is skipped "
                          "automatically and training starts fresh.")
+    ap.add_argument("--ckpt_backend", default="gitlfs",
+                    choices=["gitlfs", "drive", "local"],
+                    help="Where checkpoints live. 'gitlfs' (default) pushes "
+                         "each save to GitHub Git LFS. 'drive'/'local' just "
+                         "keep them in --ckpt_dir (point that at a mounted "
+                         "Google Drive folder, e.g. /content/drive/MyDrive/"
+                         "neuroslm_ckpts, for Drive-backed storage) and skip "
+                         "the GitHub push.")
     ap.add_argument("--keep_last_n_ckpt", type=int, default=3,
                     help="After each checkpoint save, delete obsolete checkpoints "
                          "from disk so only the N newest per stream remain. "
@@ -1118,8 +1126,16 @@ def main():
             else:
                 print(f"[train] saved {path} (baseline)", flush=True)
 
-            # ── Auto-push every checkpoint to Git LFS ──
-            push_checkpoint_to_lfs(str(path))
+            # ── Checkpoint upload ──
+            # Default: push to Git LFS. With --ckpt_backend drive/local the
+            # checkpoint just stays in --ckpt_dir (point that at a mounted
+            # Google Drive folder for Drive-backed storage) and we skip the
+            # GitHub push entirely.
+            if getattr(args, "ckpt_backend", "gitlfs") == "gitlfs":
+                push_checkpoint_to_lfs(str(path))
+            else:
+                print(f"[train] checkpoint kept in {path.parent} "
+                      f"(backend={args.ckpt_backend}, no GitHub push)", flush=True)
 
             # ── Checkpoint rotation (keep last N per stream) ──────────────
             # Without rotation the repo grows by ~430 MiB per save.  We
@@ -1130,18 +1146,22 @@ def main():
             if (not args.overwrite_ckpt) and (args.keep_last_n_ckpt or 0) > 0:
                 try:
                     from .tools.prune_ckpts import prune_old_checkpoints
-                    # Scan both the configured ckpt_dir AND the standard
-                    # lfs_checkpoints mirror so we catch wherever push_to_lfs
-                    # ended up writing the file.
-                    _lfs_dir = Path(os.path.dirname(os.path.dirname(
-                        os.path.abspath(__file__)))) / "lfs_checkpoints"
+                    _gitlfs = (getattr(args, "ckpt_backend", "gitlfs") == "gitlfs")
                     _scan_dirs = [Path(os.path.abspath(args.ckpt_dir))]
-                    if _lfs_dir != _scan_dirs[0] and _lfs_dir.exists():
-                        _scan_dirs.append(_lfs_dir)
+                    if _gitlfs:
+                        # Also scan the lfs_checkpoints mirror that the GitHub
+                        # push writes to; git rm the obsolete tracked blobs.
+                        _lfs_dir = Path(os.path.dirname(os.path.dirname(
+                            os.path.abspath(__file__)))) / "lfs_checkpoints"
+                        if _lfs_dir != _scan_dirs[0] and _lfs_dir.exists():
+                            _scan_dirs.append(_lfs_dir)
+                    # Drive/local backend: ckpt_dir isn't a git repo, so prune
+                    # via plain unlink (prune_old_checkpoints auto-detects the
+                    # absence of a git work tree and falls back to unlink).
                     prune_old_checkpoints(
                         _scan_dirs,
                         keep=int(args.keep_last_n_ckpt),
-                        use_git=bool(args.prune_git),
+                        use_git=bool(args.prune_git) and _gitlfs,
                         verbose=True,
                     )
                 except Exception as _prune_err:
