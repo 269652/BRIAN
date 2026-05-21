@@ -206,10 +206,18 @@ if [ -n "$BEST_STEP" ] && [ -n "$RECREATE_ROLES" ]; then
   done
   # Push the deletion commits so the new instance sees the cleaned state.
   # Use the PAT from .env so this never prompts on Windows credential manager.
-  echo "── pushing prune commits to origin ──"
-  PUSH_URL="https://x-access-token:${GITHUB}@github.com/${REPO_SLUG}.git"
-  ( cd "$HERE" && git -c credential.helper= push "$PUSH_URL" HEAD 2>&1 \
-      | sed "s#${GITHUB}#***#g" | tail -3 ) || true
+  # Skip if prune deleted nothing (no local commits ahead of origin) — avoids
+  # firing the git-lfs pre-push hook on a no-op push.
+  _branch="$(cd "$HERE" && git rev-parse --abbrev-ref HEAD)"
+  _ahead="$(cd "$HERE" && git rev-list "origin/${_branch}..HEAD" --count 2>/dev/null || echo 0)"
+  if [ "${_ahead:-0}" -eq 0 ]; then
+    echo "── nothing to push (no commits ahead of origin/${_branch}) ──"
+  else
+    echo "── pushing ${_ahead} prune commit(s) to origin/${_branch} ──"
+    PUSH_URL="https://x-access-token:${GITHUB}@github.com/${REPO_SLUG}.git"
+    ( cd "$HERE" && git -c credential.helper= push "$PUSH_URL" HEAD 2>&1 \
+        | sed "s#${GITHUB}#***#g" | tail -3 ) || true
+  fi
 elif [ -n "$BEST_STEP" ] && [ -z "$RECREATE_ROLES" ]; then
   echo "✗ --best-step given but no --recreate*; nothing to do. Pass " >&2
   echo "  --recreate / --recreate-full / --recreate-baseline too." >&2
@@ -339,7 +347,7 @@ git clone https://x-access-token:\${GITHUB}@github.com/${REPO_SLUG}.git brian ||
 cd brian
 bash scripts/vast_bootstrap.sh
 echo "── launching ${role} training (live below; also in /workspace/train_${role}.log) ──"
-# Foreground + tee so `vastai logs <id>` streams the actual training output
+# Foreground + tee so 'vastai logs ID' streams the actual training output
 # (step/loss lines), not just the bootstrap. The instance persists while
 # this runs; when it finishes (STEPS reached) the box idles until destroyed.
 PRESET='${PRESET}' STEPS='${STEPS}' BATCH='${BATCH}' GRAD_ACCUM='${GRAD_ACCUM}' \
