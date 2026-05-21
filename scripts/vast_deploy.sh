@@ -90,45 +90,38 @@ if [ -z "$PYTHON" ]; then
   exit 1
 fi
 echo "  using python: $PYTHON"
-# sys.executable is a Windows path (C:\...\Scripts\python.exe) on Win venvs;
-# cygpath-normalize so the vastai-locating `-x` tests below work in bash.
-PYBIN="$(_norm_path "$("$PYTHON" -c 'import os,sys;print(os.path.dirname(sys.executable))')")"
 
-_find_vastai() {
-  if command -v vastai >/dev/null 2>&1; then echo "vastai"; return; fi
-  for c in "$PYBIN/vastai" "$PYBIN/vastai.exe" "$PYBIN/Scripts/vastai.exe"; do
-    [ -x "$c" ] && { echo "$c"; return; }
-  done
-  echo ""
-}
-VASTAI="$(_find_vastai)"
-if [ -z "$VASTAI" ]; then
+# Invoke the vastai CLI via its module entry point (vastai.cli.main) rather
+# than locating the console-script .exe — the latter is a Windows-path
+# minefield. `python -m vastai.cli.main` works identically on all platforms.
+vastai() { "$PYTHON" -m vastai.cli.main "$@"; }
+
+if ! vastai --version >/dev/null 2>&1; then
   echo "── installing vastai CLI (via $PYTHON -m pip) ──"
   "$PYTHON" -m pip install -q --upgrade vastai
-  VASTAI="$(_find_vastai)"
 fi
-if [ -z "$VASTAI" ]; then
-  echo "✗ vastai CLI not found after install. Try: $PYTHON -m pip install vastai" >&2
+if ! vastai --version >/dev/null 2>&1; then
+  echo "✗ vastai not importable after install. Try: $PYTHON -m pip install vastai" >&2
   exit 1
 fi
-echo "  using vastai: $VASTAI"
+echo "  using vastai: $PYTHON -m vastai.cli.main ($(vastai --version 2>/dev/null))"
 
 : "${VAST_API_KEY:?set VAST_API_KEY (or VAST_AI) in .env}"
 : "${GITHUB:?set GITHUB (or GITHUB_PAT) in .env}"
-"$VASTAI" set api-key "$VAST_API_KEY" >/dev/null
+vastai set api-key "$VAST_API_KEY" >/dev/null
 
 # ── Optional: destroy mode ────────────────────────────────────────────────
 if [ "${1:-}" = "--destroy" ]; then
   echo "── destroying instances labelled neuroslm-* ──"
-  "$VASTAI" show instances --raw \
+  vastai show instances --raw \
     | "$PYTHON" -c "import sys,json;[print(i['id']) for i in json.load(sys.stdin) if 'neuroslm' in (i.get('label') or '')]" \
-    | while read -r id; do echo "destroy $id"; "$VASTAI" destroy instance "$id"; done
+    | while read -r id; do echo "destroy $id"; vastai destroy instance "$id"; done
   exit 0
 fi
 
 # ── Pick the 2 cheapest available on-demand A100 offers ───────────────────
 echo "── searching A100 offers ──"
-OFFERS=$("$VASTAI" search offers \
+OFFERS=$(vastai search offers \
   "gpu_name~${VAST_GPU_NAME} num_gpus=1 rentable=true disk_space>=${VAST_DISK} reliability>0.95" \
   -o 'dph+' --raw)
 
@@ -179,7 +172,7 @@ ENV_ARG="-e GITHUB=${GITHUB} -e HF_TOKEN=${HF_TOKEN:-}"
 create_instance() {
   local offer="$1" role="$2" onstart="$3"
   echo "── creating ${role} instance on offer ${offer} ──"
-  "$VASTAI" create instance "$offer" \
+  vastai create instance "$offer" \
     --image "$VAST_IMAGE" \
     --disk "$VAST_DISK" \
     --label "neuroslm-${role}" \
