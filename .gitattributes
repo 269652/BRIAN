@@ -5,3 +5,7 @@ lfs_checkpoints/*.mem filter=lfs diff=lfs merge=lfs -text
 *.mem.json filter=lfs diff=lfs merge=lfs -text
 *.dna.json filter=lfs diff=lfs merge=lfs -text
 *.pt filter=lfs diff=lfs merge=lfs -text
+
+# Shell scripts MUST keep LF endings — CRLF breaks bash on the Linux boxes
+# (Vast.ai / Colab) with `$'\r': command not found`.
+*.sh text eol=lf
