@@ -126,28 +126,70 @@ if [ "${1:-}" = "--destroy" ]; then
   exit 0
 fi
 
-# ── Pick the 2 cheapest available A100 offers ─────────────────────────────
-echo "── searching A100 offers ──"
+# ── Reconcile existing instances (idempotent re-runs) ─────────────────────
+# On re-run: keep a role's instance if it's healthy ('running'/'loading'),
+# destroy it if it's STUCK (status not in the healthy set — e.g. stuck in
+# 'created', 'offline', 'exited'), and (re)deploy only the roles that need
+# it. So `bash scripts/vast_deploy.sh` can be run repeatedly to converge to
+# exactly one healthy instance per role.
+ROLES="full baseline"
+HEALTHY_STATES="running loading"   # treat these as OK; anything else = stuck
+
+_instances_json="$(vastai show instances --raw 2>/dev/null)"
+declare -A NEEDS   # role -> 1 if we must (re)deploy it
+
+for role in $ROLES; do
+  read -r iid istatus < <(printf '%s' "$_instances_json" | "$PYTHON" -c "
+import sys, json
+role = '$role'
+try: data = json.load(sys.stdin)
+except Exception: data = []
+for i in (data or []):
+    if (i.get('label') or '') == 'neuroslm-'+role:
+        st = i.get('actual_status') or i.get('cur_state') or i.get('intended_status') or 'unknown'
+        print(i.get('id',''), st); break
+")
+  if [ -n "${iid:-}" ]; then
+    if printf '%s ' $HEALTHY_STATES | grep -qw "${istatus:-unknown}"; then
+      echo "  neuroslm-$role: healthy (id $iid, status=$istatus) — keeping"
+      NEEDS[$role]=0
+    else
+      echo "  neuroslm-$role: STUCK (id $iid, status=$istatus) — destroying + redeploying"
+      vastai destroy instance "$iid" >/dev/null 2>&1 || true
+      NEEDS[$role]=1
+    fi
+  else
+    echo "  neuroslm-$role: not present — deploying"
+    NEEDS[$role]=1
+  fi
+done
+
+NEED_COUNT=0
+for role in $ROLES; do [ "${NEEDS[$role]:-0}" = "1" ] && NEED_COUNT=$((NEED_COUNT+1)); done
+if [ "$NEED_COUNT" -eq 0 ]; then
+  echo "✓ all roles already healthy — nothing to deploy."
+  echo "  (use --destroy to tear everything down)"
+  exit 0
+fi
+
+# ── Pick $NEED_COUNT cheapest available A100 offers (distinct machines) ────
+echo "── searching A100 offers (need $NEED_COUNT) ──"
 OFFER_QUERY="${VAST_GPU_QUERY} num_gpus=1 rentable=true disk_space>=${VAST_DISK} reliability>0.95"
 echo "  query: $OFFER_QUERY"
 OFFERS="$(vastai search offers "$OFFER_QUERY" -o 'dph+' --raw 2>&1)"
-
-# Surface vastai errors clearly instead of feeding non-JSON to the parser.
 case "$OFFERS" in
-  \[*|\{*) : ;;                       # looks like JSON — proceed
+  \[*|\{*) : ;;
   *)
     echo "✗ vastai search did not return JSON. Output was:" >&2
     printf '%s\n' "$OFFERS" | head -5 >&2
-    echo "  Check the query, or list A100 names with:" >&2
-    echo "    vastai search offers 'num_gpus=1 rentable=true' --raw | python -c \"import sys,json;print(sorted({o.get('gpu_name','') for o in json.load(sys.stdin)}))\"" >&2
     exit 1
     ;;
 esac
 
-read -r OFFER1 OFFER2 < <(printf '%s' "$OFFERS" | "$PYTHON" -c "
+PICKED="$(printf '%s' "$OFFERS" | "$PYTHON" -c "
 import sys, json
+need = int('$NEED_COUNT')
 offers = json.load(sys.stdin)
-# sorted by \$/hr ascending; take 2 A100s on distinct machines
 seen, picked = set(), []
 for o in offers:
     if 'A100' not in (o.get('gpu_name') or ''):
@@ -156,18 +198,18 @@ for o in offers:
     if mid in seen:
         continue
     seen.add(mid); picked.append(str(o['id']))
-    if len(picked) == 2:
+    if len(picked) == need:
         break
 print(' '.join(picked))
-")
-
-if [ -z "${OFFER1:-}" ] || [ -z "${OFFER2:-}" ]; then
-  echo "✗ found fewer than 2 available A100 offers right now." >&2
-  echo "  Try again later, raise VAST_DISK budget, or set VAST_GPU_QUERY" >&2
-  echo "  (e.g. 'gpu_name=A100_SXM4 num_gpus=1 rentable=true')." >&2
+")"
+# shellcheck disable=SC2206
+OFFER_LIST=($PICKED)
+if [ "${#OFFER_LIST[@]}" -lt "$NEED_COUNT" ]; then
+  echo "✗ found ${#OFFER_LIST[@]} A100 offer(s), need $NEED_COUNT." >&2
+  echo "  Try again later, lower VAST_DISK, or set VAST_GPU_QUERY." >&2
   exit 1
 fi
-echo "  picked offers: FULL=$OFFER1  BASELINE=$OFFER2"
+echo "  picked offers: ${OFFER_LIST[*]}"
 
 # ── Build the per-role onstart command ────────────────────────────────────
 # Inline-clone (the scripts live in the repo), then bootstrap + train loop.
@@ -203,22 +245,31 @@ create_instance() {
     --ssh --direct
 }
 
-create_instance "$OFFER1" "full" \
-  "$(make_onstart full '' /workspace/brian/lfs_checkpoints)"
-create_instance "$OFFER2" "baseline" \
-  "$(make_onstart baseline '--baseline' /workspace/brian/checkpoints_baseline)"
+# Assign the freshly-picked offers to the roles that need (re)deploying.
+oi=0
+for role in $ROLES; do
+  [ "${NEEDS[$role]:-0}" = "1" ] || continue
+  offer="${OFFER_LIST[$oi]}"; oi=$((oi+1))
+  if [ "$role" = "baseline" ]; then
+    onstart="$(make_onstart baseline '--baseline' /workspace/brian/checkpoints_baseline)"
+  else
+    onstart="$(make_onstart full '' /workspace/brian/lfs_checkpoints)"
+  fi
+  create_instance "$offer" "$role" "$onstart"
+done
 
 echo ""
 echo "════════════════════════════════════════════════════════════════"
-echo "  Two A100 instances launched:"
-echo "    • neuroslm-full     → trains the full bio model ($PRESET, $STEPS steps)"
-echo "    • neuroslm-baseline → trains the param-matched vanilla baseline"
-echo "  Both push checkpoints to Git LFS (separate streams, concurrent-safe)."
+echo "  Deploy reconciled. Roles healthy/deployed:"
+echo "    • neuroslm-full     → full bio model ($PRESET, $STEPS steps)"
+echo "    • neuroslm-baseline → param-matched vanilla baseline"
+echo "  Checkpoints push to Git LFS (separate streams, concurrent-safe)."
 echo ""
-echo "  Watch:    vastai show instances        # get ids"
-echo "            vastai logs <id>             # stream onstart + training log"
+echo "  Watch:    bash scripts/vast.sh show instances"
+echo "            bash scripts/vast.sh logs <id>"
+echo "  Re-run:   bash scripts/vast_deploy.sh   # kills stuck, redeploys missing"
 echo "  Compare:  python -m neuroslm.tools.compare_ckpts \\"
-echo "              --full_dir lfs_checkpoints --baseline_dir checkpoints_baseline \\"
-echo "              --preset $PRESET --device cuda   (after pulling the pushed ckpts)"
+echo "              --full_dir lfs_checkpoints --baseline_dir lfs_checkpoints \\"
+echo "              --preset $PRESET --device cpu   (after git lfs pull)"
 echo "  STOP (avoid charges):  bash scripts/vast_deploy.sh --destroy"
 echo "════════════════════════════════════════════════════════════════"
