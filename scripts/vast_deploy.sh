@@ -86,19 +86,50 @@ _pick_python() {
       [ -x "$c" ] && "$c" -m pip --version >/dev/null 2>&1 && { printf '%s' "$c"; return; }
     done
   done
-  # 3. PATH pythons that have pip.
+  # 3. Windows per-user installs (typical when invoked from PowerShell — `py`
+  #    may default to a 2.7 install and `python` in PATH may be the Store stub
+  #    or Python 2.7). Probe these BEFORE the PATH fallback so we always grab
+  #    a working 3.x with pip.
+  local _home_u
+  _home_u="$(_norm_path "${USERPROFILE:-$HOME}")"
+  for c in "$_home_u"/AppData/Local/Programs/Python/Python3*/python.exe \
+           "/c/Program Files/Python3"*/python.exe \
+           "/c/Python3"*/python.exe; do
+    [ -x "$c" ] || continue
+    "$c" -m pip --version >/dev/null 2>&1 && { printf '%s' "$c"; return; }
+  done
+  # 4. PATH pythons that have pip.
   for c in python python.exe python3 py; do
     command -v "$c" >/dev/null 2>&1 || continue
     "$c" -m pip --version >/dev/null 2>&1 && { printf '%s' "$c"; return; }
   done
+  # 5. Last resort: ask the `py` launcher for a Python 3 by ABSOLUTE PATH
+  #    (some PowerShell setups have `py` defaulting to 2.7, so a bare `py`
+  #    test above returns 2.7-without-pip; but `py -3 -c "..."` still hits a
+  #    3.x install and gives us its real python.exe path).
+  if command -v py >/dev/null 2>&1; then
+    local _py3
+    _py3="$(py -3 -c 'import sys,os; print(os.path.normpath(sys.executable))' 2>/dev/null)"
+    if [ -n "$_py3" ]; then
+      _py3="$(_norm_path "$_py3")"
+      [ -x "$_py3" ] && "$_py3" -m pip --version >/dev/null 2>&1 && { printf '%s' "$_py3"; return; }
+    fi
+  fi
   printf ''
 }
 PYTHON="$(_pick_python)"
 if [ -z "$PYTHON" ]; then
   echo "✗ no python with pip found." >&2
   echo "  VIRTUAL_ENV=${VIRTUAL_ENV:-<unset>}" >&2
-  echo "  tried: \$VIRTUAL_ENV/Scripts/python.exe, python, python.exe, python3, py" >&2
-  echo "  Fix: activate a venv that has pip, or run from Colab/Linux." >&2
+  echo "  tried (in order):" >&2
+  echo "    1. \$VIRTUAL_ENV/Scripts/python.exe (and bin/python)" >&2
+  echo "    2. $HERE/.venv*/Scripts/python.exe" >&2
+  echo "    3. ~/AppData/Local/Programs/Python/Python3*/python.exe" >&2
+  echo "       /c/Program Files/Python3*/python.exe, /c/Python3*/python.exe" >&2
+  echo "    4. python, python.exe, python3, py in PATH" >&2
+  echo "    5. py -3 → resolved-absolute python.exe" >&2
+  echo "  Fix: activate a venv that has pip, or install Python 3 from python.org," >&2
+  echo "       or run from Colab/Linux." >&2
   echo "  (git-bash's /usr/bin/python3 has no pip and is intentionally skipped.)" >&2
   exit 1
 fi
