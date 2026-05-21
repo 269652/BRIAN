@@ -91,41 +91,24 @@ if [ -z "$PYTHON" ]; then
 fi
 echo "  using python: $PYTHON"
 
-# Must use the vastai CONSOLE SCRIPT, not `python -m vastai.cli.main` — the
-# latter loads the module as __main__, which breaks vastai's subcommand
-# registration (only global flags parse; `set`/`search`/`create` error out).
-# Locate the console script via sysconfig (reliable, no PATH dependency),
-# then cygpath-normalize so the Windows path runs in bash.
-_find_vastai_exe() {
-  "$PYTHON" - <<'PY' 2>/dev/null
-import sysconfig, os, shutil
-p = shutil.which("vastai")
-if not p:
-    d = sysconfig.get_path("scripts")
-    for n in ("vastai.exe", "vastai"):
-        c = os.path.join(d, n)
-        if os.path.isfile(c):
-            p = c; break
-print(p or "")
-PY
+# Invoke vastai by importing its entry point and calling main() — exactly
+# what the console script does. This is path-independent (no need to find a
+# vastai.exe, which pip may install to a user-scripts dir that sysconfig
+# doesn't report) AND keeps subcommand registration working (unlike
+# `python -m vastai.cli.main`, where __name__=='__main__' breaks it).
+vastai() {
+  "$PYTHON" -c 'import sys; from vastai.cli.main import main; sys.exit(main())' "$@"
 }
-_resolve_vastai() {
-  local raw; raw="$(_find_vastai_exe)"
-  [ -n "$raw" ] && _norm_path "$raw" || printf ''
-}
-VASTAI_EXE="$(_resolve_vastai)"
-if [ -z "$VASTAI_EXE" ] || [ ! -x "$VASTAI_EXE" ]; then
+
+if ! "$PYTHON" -c 'import vastai.cli.main' >/dev/null 2>&1; then
   echo "── installing vastai CLI (via $PYTHON -m pip) ──"
   "$PYTHON" -m pip install -q --upgrade vastai
-  VASTAI_EXE="$(_resolve_vastai)"
 fi
-if [ -z "$VASTAI_EXE" ] || [ ! -x "$VASTAI_EXE" ]; then
-  echo "✗ vastai console script not found after install." >&2
-  echo "  Try: $PYTHON -m pip install vastai   (then re-run)" >&2
+if ! "$PYTHON" -c 'import vastai.cli.main' >/dev/null 2>&1; then
+  echo "✗ vastai not importable after install. Try: $PYTHON -m pip install vastai" >&2
   exit 1
 fi
-vastai() { "$VASTAI_EXE" "$@"; }
-echo "  using vastai: $VASTAI_EXE ($(vastai --version 2>/dev/null))"
+echo "  using vastai: $PYTHON -c '…vastai.cli.main:main' ($(vastai --version 2>/dev/null))"
 
 : "${VAST_API_KEY:?set VAST_API_KEY (or VAST_AI) in .env}"
 : "${GITHUB:?set GITHUB (or GITHUB_PAT) in .env}"
