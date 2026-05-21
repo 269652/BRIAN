@@ -48,7 +48,13 @@ if [ ! -d "$REPO_DIR/.git" ]; then
   GIT_LFS_SKIP_SMUDGE=1 git clone "$REPO_URL" "$REPO_DIR"
 fi
 cd "$REPO_DIR"
-git config lfs.fetchexclude '*'     # never auto-download checkpoint blobs
+# NOTE: do NOT set `git config lfs.fetchexclude '*'` here. git-lfs combines
+# fetchexclude with any `--include` as (include AND NOT exclude), so a global
+# '*' exclude silently wins and `git lfs pull --include=...` fetches NOTHING —
+# the resume checkpoint then stays an unfetched pointer and training restarts
+# from scratch. `git lfs install --skip-smudge` (above) + GIT_LFS_SKIP_SMUDGE=1
+# on clone already prevent auto-downloading every blob, so the explicit pull
+# below is the only fetch.
 
 echo "── 4. Python dependencies ────────────────────────────────────────"
 # torch should already be in the Vast PyTorch image; only install if missing.
@@ -73,8 +79,20 @@ fi
 echo "── 6. Pull the checkpoint we resume from (if any) ────────────────"
 mkdir -p "$REPO_DIR/lfs_checkpoints"
 # Materialise ONLY the large adamw checkpoints we resume from (not all blobs).
-git lfs pull --include="lfs_checkpoints/neuroslm_large_*adamw*" 2>/dev/null \
+# --exclude="" explicitly clears any inherited fetchexclude so --include wins.
+git lfs pull --include="lfs_checkpoints/neuroslm_large_*adamw*" --exclude="" \
   || echo "  (no matching LFS objects yet — will train from scratch)"
+# Verify the resume target is a real binary, not a leftover pointer.
+for _pt in "$REPO_DIR"/lfs_checkpoints/neuroslm_large_*adamw*.pt; do
+  [ -e "$_pt" ] || continue
+  if head -c 48 "$_pt" 2>/dev/null | grep -q "version https://git-lfs"; then
+    echo "  ⚠ still a pointer: $(basename "$_pt") — retrying targeted pull"
+    git lfs pull --include="lfs_checkpoints/$(basename "$_pt")" --exclude="" || true
+  fi
+done
+echo "  resume checkpoints present:"
+ls -la "$REPO_DIR"/lfs_checkpoints/neuroslm_large_*adamw*.pt 2>/dev/null \
+  | awk '{print "    " $5, $NF}' || echo "    (none)"
 
 echo ""
 echo "✓ Bootstrap complete. Repo at: $REPO_DIR"
