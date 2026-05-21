@@ -174,8 +174,11 @@ if [ -n "$BEST_STEP" ] && [ -n "$RECREATE_ROLES" ]; then
       --max-step "$BEST_STEP" --only "$role" --git || true
   done
   # Push the deletion commits so the new instance sees the cleaned state.
+  # Use the PAT from .env so this never prompts on Windows credential manager.
   echo "── pushing prune commits to origin ──"
-  ( cd "$HERE" && git push origin HEAD 2>&1 | tail -3 ) || true
+  PUSH_URL="https://x-access-token:${GITHUB}@github.com/${REPO_SLUG}.git"
+  ( cd "$HERE" && git -c credential.helper= push "$PUSH_URL" HEAD 2>&1 \
+      | sed "s#${GITHUB}#***#g" | tail -3 ) || true
 elif [ -n "$BEST_STEP" ] && [ -z "$RECREATE_ROLES" ]; then
   echo "✗ --best-step given but no --recreate*; nothing to do. Pass " >&2
   echo "  --recreate / --recreate-full / --recreate-baseline too." >&2
