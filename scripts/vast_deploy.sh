@@ -56,24 +56,37 @@ VAST_GPU_NAME="${VAST_GPU_NAME:-A100}"
 #     locate the `vastai` console-script next to the chosen python binary.
 # Strategy: pick the FIRST interpreter that actually has pip, preferring the
 # active venv ($VIRTUAL_ENV), then `python`, then `python3`, then `py`.
+# Normalise a possibly-Windows path (C:\...) to a git-bash path (/c/...).
+_norm_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -u "$1" 2>/dev/null || printf '%s' "${1//\\//}"
+  else
+    printf '%s' "${1//\\//}"
+  fi
+}
 _pick_python() {
-  local c
+  local c ve
+  # Prefer the active venv. $VIRTUAL_ENV from a PowerShell venv is a Windows
+  # path with backslashes — cygpath-convert it so the -x test works in bash.
   if [ -n "${VIRTUAL_ENV:-}" ]; then
-    for c in "$VIRTUAL_ENV/Scripts/python.exe" "$VIRTUAL_ENV/Scripts/python" \
-             "$VIRTUAL_ENV/bin/python"; do
-      [ -x "$c" ] && "$c" -m pip --version >/dev/null 2>&1 && { echo "$c"; return; }
+    ve="$(_norm_path "$VIRTUAL_ENV")"
+    for c in "$ve/Scripts/python.exe" "$ve/Scripts/python" "$ve/bin/python"; do
+      [ -x "$c" ] && "$c" -m pip --version >/dev/null 2>&1 && { printf '%s' "$c"; return; }
     done
   fi
-  for c in python python3 py; do
+  for c in python python.exe python3 py; do
     command -v "$c" >/dev/null 2>&1 || continue
-    "$c" -m pip --version >/dev/null 2>&1 && { echo "$c"; return; }
+    "$c" -m pip --version >/dev/null 2>&1 && { printf '%s' "$c"; return; }
   done
-  echo ""
+  printf ''
 }
 PYTHON="$(_pick_python)"
 if [ -z "$PYTHON" ]; then
-  echo "✗ no python with pip found. Activate your venv (it has pip) and retry," >&2
-  echo "  or run from Colab/Linux. (git-bash's /usr/bin/python3 has no pip.)" >&2
+  echo "✗ no python with pip found." >&2
+  echo "  VIRTUAL_ENV=${VIRTUAL_ENV:-<unset>}" >&2
+  echo "  tried: \$VIRTUAL_ENV/Scripts/python.exe, python, python.exe, python3, py" >&2
+  echo "  Fix: activate a venv that has pip, or run from Colab/Linux." >&2
+  echo "  (git-bash's /usr/bin/python3 has no pip and is intentionally skipped.)" >&2
   exit 1
 fi
 echo "  using python: $PYTHON"
