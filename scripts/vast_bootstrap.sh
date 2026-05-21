@@ -55,7 +55,10 @@ echo "── 4. Python dependencies ──────────────�
 python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())" \
   || pip install torch --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
-pip install "transformers>=4.40"    # for Adafactor; harmless if --optimizer adamw
+# transformers ONLY provides Adafactor (lazy import; not needed for adamw).
+# Pin <5 so pip doesn't pull transformers 5.x, which requires torch>=2.4 and
+# disables itself on the image's torch 2.3 (noisy + breaks Adafactor runs).
+pip install "transformers>=4.40,<5"
 
 echo "── 5. HuggingFace token (optional) ───────────────────────────────"
 if [ -n "${HF_TOKEN:-}" ]; then

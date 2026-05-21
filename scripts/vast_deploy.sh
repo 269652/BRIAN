@@ -15,8 +15,10 @@
 #   cp .env.example .env && edit .env       # add VAST_API_KEY + GITHUB
 #   bash scripts/vast_deploy.sh
 #
-# To watch:  vastai logs <instance_id>      (or open the instance's Jupyter)
-# To stop:   vastai destroy instance <id>   (or `bash scripts/vast_deploy.sh --destroy`)
+# Re-run:    bash scripts/vast_deploy.sh             # keep healthy, replace stuck
+#            bash scripts/vast_deploy.sh --recreate  # destroy ALL + redeploy
+#                                                      (picks up a new git push)
+# To stop:   bash scripts/vast_deploy.sh --destroy   # tear everything down
 # ─────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
@@ -125,21 +127,30 @@ echo "  using vastai: $PYTHON -c '…vastai.cli.main:main' ($(vastai --version 2
 : "${GITHUB:?set GITHUB (or GITHUB_PAT) in .env}"
 vastai set api-key "$VAST_API_KEY" >/dev/null
 
-# ── Optional: destroy mode ────────────────────────────────────────────────
-if [ "${1:-}" = "--destroy" ]; then
-  echo "── destroying instances labelled neuroslm-* ──"
-  vastai show instances --raw \
-    | "$PYTHON" -c "import sys,json;[print(i['id']) for i in json.load(sys.stdin) if 'neuroslm' in (i.get('label') or '')]" \
-    | while read -r id; do echo "destroy $id"; vastai destroy instance "$id" -y; done
-  exit 0
-fi
+# ── Modes ─────────────────────────────────────────────────────────────────
+#   --destroy   tear everything down and exit
+#   --recreate  destroy EVEN healthy instances and redeploy both (use after
+#               pushing new source so the boxes pick up the latest code)
+RECREATE=0
+case "${1:-}" in
+  --destroy)
+    echo "── destroying instances labelled neuroslm-* ──"
+    vastai show instances --raw \
+      | "$PYTHON" -c "import sys,json;[print(i['id']) for i in json.load(sys.stdin) if 'neuroslm' in (i.get('label') or '')]" \
+      | while read -r id; do echo "destroy $id"; vastai destroy instance "$id" -y; done
+    exit 0
+    ;;
+  --recreate)
+    RECREATE=1
+    echo "── --recreate: will destroy healthy instances too and redeploy ──"
+    ;;
+esac
 
 # ── Reconcile existing instances (idempotent re-runs) ─────────────────────
-# On re-run: keep a role's instance if it's healthy ('running'/'loading'),
-# destroy it if it's STUCK (status not in the healthy set — e.g. stuck in
-# 'created', 'offline', 'exited'), and (re)deploy only the roles that need
-# it. So `bash scripts/vast_deploy.sh` can be run repeatedly to converge to
-# exactly one healthy instance per role.
+# Normal run: keep healthy ('running'/'loading'), destroy STUCK ones
+# (created/stopped/exited/…), (re)deploy only what's needed.
+# --recreate: destroy ALL neuroslm-<role> instances and redeploy fresh
+# (so a new git push is picked up).
 ROLES="full baseline"
 
 _instances_json="$(vastai show instances --raw 2>/dev/null)"
@@ -164,6 +175,14 @@ for i in (data or []):
 
   if [ -z "${iid:-}" ]; then
     echo "  neuroslm-$role: not present — deploying"
+    NEEDS[$role]=1
+    continue
+  fi
+
+  # --recreate: destroy whatever exists (healthy or not) and redeploy.
+  if [ "$RECREATE" = "1" ]; then
+    echo "  neuroslm-$role: --recreate → destroying (id $iid, status=$istatus) + redeploying"
+    vastai destroy instance "$iid" -y >/dev/null 2>&1 || true
     NEEDS[$role]=1
     continue
   fi

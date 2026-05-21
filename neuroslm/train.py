@@ -599,6 +599,23 @@ def main():
                     print(f"[train] no checkpoint found for stream {_prefix_legacy}* "
                           f"— training from scratch", flush=True)
 
+        # A Git LFS pointer (when `git lfs pull` didn't materialise the blob)
+        # is a tiny text file starting with "version https://git-lfs…".
+        # torch.load on it crashes with "invalid load key, 'v'" and, under
+        # the restart loop, burns money crash-looping. Detect + skip it.
+        def _is_lfs_pointer(p):
+            try:
+                with open(p, "rb") as fh:
+                    return fh.read(48).startswith(b"version https://git-lfs")
+            except Exception:
+                return False
+
+        if resume_path and Path(resume_path).exists() and _is_lfs_pointer(resume_path):
+            print(f"[train] ⚠ {os.path.basename(str(resume_path))} is an unfetched "
+                  f"Git LFS pointer (run `git lfs pull`). Training from scratch.",
+                  flush=True)
+            resume_path = None
+
         if resume_path and Path(resume_path).exists():
             try:
                 ckpt = torch.load(resume_path, map_location=device, weights_only=False)
@@ -644,12 +661,12 @@ def main():
                                 print(f"[train] could not restore memory: {e}", flush=True)
                     print(f"[train] resumed from {resume_path} @ step {start_step}", flush=True)
             except Exception as _load_err:
-                if args.overwrite_ckpt:
-                    print(f"[train] ⚠ could not load checkpoint ({_load_err}) "
-                          f"— starting fresh (--overwrite_ckpt)", flush=True)
-                    start_step = 0
-                else:
-                    raise
+                # NEVER hard-fail on a bad/corrupt/partial checkpoint — under
+                # the vast restart loop that's an infinite crash-loop burning
+                # GPU time. Warn loudly and train from scratch instead.
+                print(f"[train] ⚠ could not load checkpoint ({_load_err}) "
+                      f"— training from scratch", flush=True)
+                start_step = 0
     elif args.transfer and Path(args.transfer).exists():
         ckpt = torch.load(args.transfer, map_location=device, weights_only=False)
         brain.load_partial(ckpt["model"])
