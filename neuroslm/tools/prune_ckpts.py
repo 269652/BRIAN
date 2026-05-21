@@ -40,11 +40,25 @@ from typing import Iterable, List, Optional, Tuple
 
 # Regex captures the step number from a checkpoint filename, e.g.
 #   neuroslm_xl_240M_adamw_mix_1000.pt → step=1000
-# `_latest.pt` files explicitly do not match (no trailing digits).
+# `_latest.pt` and `_best.pt` files explicitly do not match (no trailing
+# digits) and are therefore NEVER selected for rotation.
 _STEP_RE = re.compile(r"^(?P<stream>.+)_(?P<step>\d+)\.pt$")
 
 # Companion suffixes that share the .pt stem and must be deleted with it.
 _COMPANION_SUFFIXES: Tuple[str, ...] = (".pt", ".mem", ".mem.json", ".dna.json")
+
+# ── Milestone checkpoints that are NEVER pruned, even when keep=N rotation
+# would otherwise delete them. These are kept permanently so a long run
+# always has anchor points to roll back to (and so the early-training
+# trajectory is never lost). Any step in this set survives rotation; the
+# special `_best.pt` / `_latest.pt` files survive automatically (they have
+# no trailing-digit step so they never match _STEP_RE).
+#
+# Override per-call via the `protect_steps` argument, or on the CLI with
+# `--protect-steps 10000 25000 ...` (an empty list disables protection).
+PROTECTED_STEPS: Tuple[int, ...] = (
+    1000, 5000, 10000, 25000, 50000, 75000, 100000,
+)
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -67,14 +81,18 @@ def _group_checkpoints(pt_paths: Iterable[Path]) -> dict[str, List[Tuple[int, Pa
 
 
 def _select_obsolete(groups: dict[str, List[Tuple[int, Path]]],
-                     keep: int) -> List[Path]:
+                     keep: int,
+                     protect_steps: Optional[Iterable[int]] = None) -> List[Path]:
     """Return the .pt paths that should be deleted (all but the newest `keep`
-    per stream)."""
+    per stream), EXCLUDING any step in `protect_steps` (kept permanently)."""
+    protected = set(PROTECTED_STEPS if protect_steps is None else protect_steps)
     obsolete: List[Path] = []
     for stream, entries in groups.items():
         if len(entries) <= keep:
             continue
-        for _step, pt in entries[:-keep]:
+        for step, pt in entries[:-keep]:
+            if step in protected:
+                continue                     # milestone — never prune
             obsolete.append(pt)
     return obsolete
 
@@ -178,15 +196,19 @@ def _git_rm_and_commit(repo: Path, files: List[Path], message: str) -> bool:
 
 def prune_old_checkpoints(directories: List[Path], keep: int = 3,
                           use_git: bool = False,
-                          verbose: bool = True) -> dict:
+                          verbose: bool = True,
+                          protect_steps: Optional[Iterable[int]] = None) -> dict:
     """Delete obsolete checkpoints, keeping only the newest `keep` per stream.
 
-    directories: list of directories to scan for .pt files (non-recursive).
-                 Typically `Path(args.ckpt_dir)` and `lfs_checkpoints/`.
-    keep:        retain the newest N checkpoints per stream.
-    use_git:     when True, run `git rm` + `git commit` for tracked files.
-                 No push — that's the caller's responsibility.
-    verbose:     log to stderr.
+    directories:   list of directories to scan for .pt files (non-recursive).
+                   Typically `Path(args.ckpt_dir)` and `lfs_checkpoints/`.
+    keep:          retain the newest N checkpoints per stream.
+    use_git:       when True, run `git rm` + `git commit` for tracked files.
+                   No push — that's the caller's responsibility.
+    verbose:       log to stderr.
+    protect_steps: steps that are NEVER pruned (milestones). Defaults to
+                   PROTECTED_STEPS; pass an explicit (possibly empty) iterable
+                   to override. `_best.pt` / `_latest.pt` survive regardless.
 
     Returns a small summary dict.
     """
@@ -207,7 +229,7 @@ def prune_old_checkpoints(directories: List[Path], keep: int = 3,
         return summary
 
     groups = _group_checkpoints(all_pt)
-    obsolete_pt = _select_obsolete(groups, keep)
+    obsolete_pt = _select_obsolete(groups, keep, protect_steps=protect_steps)
     if not obsolete_pt:
         if verbose:
             n_groups = len(groups)
@@ -379,6 +401,11 @@ def _cli() -> int:
                     help="(step-cutoff mode) restrict to a role. Default all.")
     ap.add_argument("--git", action="store_true",
                     help="Stage deletions via `git rm` + commit locally")
+    ap.add_argument("--protect-steps", type=int, nargs="*", default=None,
+                    help="(rotation mode) step numbers NEVER pruned even when "
+                         "older than keep-N. Default: the built-in milestone "
+                         f"list {list(PROTECTED_STEPS)}. Pass with no values to "
+                         "disable protection entirely.")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
     if args.max_step is not None:
@@ -391,6 +418,7 @@ def _cli() -> int:
         s = prune_old_checkpoints(
             [Path(d) for d in args.dirs],
             keep=args.keep, use_git=args.git, verbose=not args.quiet,
+            protect_steps=args.protect_steps,
         )
     return 0 if s["deleted_files"] >= 0 else 1
 

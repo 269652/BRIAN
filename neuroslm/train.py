@@ -8,11 +8,13 @@ Usage:
 """
 from __future__ import annotations
 import argparse
+import json
 import math
 import os
 import time
 from contextlib import nullcontext
 from pathlib import Path
+from typing import Optional
 import torch
 from torch.optim import AdamW
 
@@ -701,6 +703,42 @@ def main():
     n_obs = 0
     gnorm = 0.0  # last optimizer step's grad norm (set in non-meta branch)
 
+    # ── Best-checkpoint tracking ─────────────────────────────────────────
+    # Maintain a single `*_best.pt` holding the lowest-loss weights seen so
+    # far. It is overwritten ONLY when a strictly lower smoothed LM loss is
+    # reached, and is never pruned (the `_best` stem has no trailing-digit
+    # step, so prune_old_checkpoints' regex skips it). We compare on an EMA
+    # of the LM loss so one noisy step can't trigger a spurious "best".
+    # The best loss is persisted in a tiny `*_best.json` sidecar so we can
+    # read it across restarts without loading the 400+ MB checkpoint.
+    best_lm_ema: Optional[float] = None
+    _best_tag   = "" if args.mode == "text" else f"_{args.mode}"
+    _best_bflag = "_baseline" if cfg.baseline else ""
+    _best_otag  = f"_{args.optimizer}"
+    _best_ptag  = f"_{round(n_params / 1e6)}M"
+    best_fname  = (f"neuroslm_{args.preset}{_best_ptag}{_best_otag}"
+                   f"{_best_bflag}{_best_tag}_best.pt")
+    best_loss = float("inf")
+    try:
+        import glob as _bglob
+        _meta_candidates = [os.path.join(os.path.abspath(args.ckpt_dir),
+                                          best_fname.replace(".pt", ".json"))]
+        _lfs_best = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "lfs_checkpoints", best_fname.replace(".pt", ".json"))
+        _meta_candidates.append(_lfs_best)
+        for _bm in _meta_candidates:
+            if os.path.exists(_bm):
+                with open(_bm) as _bf:
+                    _bj = json.load(_bf)
+                best_loss = float(_bj.get("best_loss", float("inf")))
+                print(f"[train] best-ckpt: prior best_loss={best_loss:.4f} "
+                      f"(step {_bj.get('step','?')}) from {os.path.basename(_bm)}",
+                      flush=True)
+                break
+    except Exception as _be:
+        print(f"[train] best-ckpt: could not read prior best ({_be})", flush=True)
+
     total_steps = args.steps
     if start_step >= total_steps:
         print(f"[train] already at step {start_step} >= {total_steps}; nothing to do.", flush=True)
@@ -1035,9 +1073,15 @@ def main():
                                       float(out["lm_loss"].item()), float(gnorm))
 
         running_loss += float(loss.item())
-        running_lm += float(out["lm_loss"].item())
+        _lm_now = float(out["lm_loss"].item())
+        running_lm += _lm_now
         running_gnorm += float(gnorm)
         n_obs += 1
+
+        # EMA of LM loss for the best-checkpoint comparison (noise-robust).
+        if math.isfinite(_lm_now):
+            best_lm_ema = (_lm_now if best_lm_ema is None
+                           else 0.98 * best_lm_ema + 0.02 * _lm_now)
 
         if (step + 1) % args.log_every == 0:
             dt = time.time() - t0
@@ -1158,6 +1202,40 @@ def main():
             else:
                 print(f"[train] checkpoint kept in {path.parent} "
                       f"(backend={args.ckpt_backend}, no GitHub push)", flush=True)
+
+            # ── Best checkpoint (lowest smoothed LM loss; never pruned) ───
+            # Overwrite `*_best.pt` only when the EMA LM loss improves. The
+            # best loss lives in a tiny `*_best.json` sidecar so resume can
+            # read it without loading the full checkpoint. The `_best` stem
+            # has no trailing-digit step, so rotation never deletes it.
+            if (not args.overwrite_ckpt) and best_lm_ema is not None \
+                    and best_lm_ema < best_loss:
+                prev_best = best_loss
+                best_loss = float(best_lm_ema)
+                best_path = path.parent / best_fname
+                try:
+                    best_dict = dict(save_dict)
+                    best_dict["best_loss"] = best_loss
+                    torch.save(best_dict, best_path)
+                    with open(str(best_path).replace(".pt", ".json"), "w") as _bjf:
+                        json.dump({"best_loss": best_loss, "step": step + 1,
+                                   "lm_ema": best_lm_ema}, _bjf)
+                    if not cfg.baseline:
+                        try:
+                            brain.save_memory_checkpoint(best_path.with_suffix(".mem"))
+                        except Exception as _bme:
+                            print(f"[train] best-ckpt memory save failed: {_bme}",
+                                  flush=True)
+                    _prev_str = (f"{prev_best:.4f}" if math.isfinite(prev_best)
+                                 else "inf")
+                    print(f"[train] ★ new BEST checkpoint @ step {step+1}: "
+                          f"lm_ema {best_loss:.4f} (prev {_prev_str}) "
+                          f"→ {best_path.name}", flush=True)
+                    if getattr(args, "ckpt_backend", "gitlfs") == "gitlfs":
+                        push_checkpoint_to_lfs(str(best_path))
+                except Exception as _bse:
+                    print(f"[train] best-ckpt save failed: {_bse}", flush=True)
+                    best_loss = prev_best   # don't lose the prior best on error
 
             # ── Checkpoint rotation (keep last N per stream) ──────────────
             # Without rotation the repo grows by ~430 MiB per save.  We
