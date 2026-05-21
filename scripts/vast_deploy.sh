@@ -122,7 +122,7 @@ if [ "${1:-}" = "--destroy" ]; then
   echo "── destroying instances labelled neuroslm-* ──"
   vastai show instances --raw \
     | "$PYTHON" -c "import sys,json;[print(i['id']) for i in json.load(sys.stdin) if 'neuroslm' in (i.get('label') or '')]" \
-    | while read -r id; do echo "destroy $id"; vastai destroy instance "$id"; done
+    | while read -r id; do echo "destroy $id"; vastai destroy instance "$id" -y; done
   exit 0
 fi
 
@@ -155,7 +155,9 @@ for i in (data or []):
       NEEDS[$role]=0
     else
       echo "  neuroslm-$role: STUCK (id $iid, status=$istatus) — destroying + redeploying"
-      vastai destroy instance "$iid" >/dev/null 2>&1 || true
+      # -y: skip the interactive confirmation prompt (would hang the script
+      # since stdin isn't a tty here).
+      vastai destroy instance "$iid" -y >/dev/null 2>&1 || true
       NEEDS[$role]=1
     fi
   else
