@@ -439,6 +439,12 @@ for role in $ROLES; do
   offer="${OFFER_LIST[$oi]}"; oi=$((oi+1))
   if [ "$role" = "baseline" ]; then
     onstart="$(make_onstart baseline '--baseline' /workspace/brian/checkpoints_baseline)"
+  elif [ "$role" = "recursive" ]; then
+    # Parallel-experiment role: same full-bio model as 'full' but on its own
+    # label and checkpoint stream so it can run ALONGSIDE neuroslm-full
+    # without conflict. Used to A/B-compare an experiment branch (e.g.
+    # stabilize/recursive-reasoning) against the current 'full' branch.
+    onstart="$(make_onstart recursive '' /workspace/brian/lfs_checkpoints_recursive)"
   else
     onstart="$(make_onstart full '' /workspace/brian/lfs_checkpoints)"
   fi
