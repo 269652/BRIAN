@@ -45,6 +45,9 @@ REPO_URL="${REPO_URL:-https://github.com/269652/BRIAN.git}"
 REPO_SLUG="${REPO_URL#https://github.com/}"; REPO_SLUG="${REPO_SLUG%.git}"
 PRESET="${PRESET:-large}"
 STEPS="${STEPS:-100000}"
+# Optional git branch for the instance to train (default: repo default branch).
+# Set BRANCH=<name> to deploy an experiment branch instead of master.
+BRANCH="${BRANCH:-}"
 BATCH="${BATCH:-32}"
 GRAD_ACCUM="${GRAD_ACCUM:-1}"
 SAVE_EVERY="${SAVE_EVERY:-1000}"
@@ -389,6 +392,10 @@ export GITHUB='${GITHUB}' HF_TOKEN='${HF_TOKEN:-}'
 cd /workspace
 git clone https://x-access-token:\${GITHUB}@github.com/${REPO_SLUG}.git brian || true
 cd brian
+if [ -n "${BRANCH}" ]; then
+  echo "── checking out branch ${BRANCH} ──"
+  git fetch origin "${BRANCH}" && git checkout "${BRANCH}" || echo "⚠ branch ${BRANCH} checkout failed; staying on default"
+fi
 bash scripts/vast_bootstrap.sh
 echo "── launching ${role} training (live below; also in /workspace/train_${role}.log) ──"
 # Foreground + tee so 'vastai logs ID' streams the actual training output
