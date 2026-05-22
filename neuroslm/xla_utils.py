@@ -72,16 +72,29 @@ def mark_step() -> None:
 
 
 def optimizer_step(optimizer: torch.optim.Optimizer,
-                   parameters=None, max_norm: float | None = None) -> float:
+                   parameters=None, max_norm: float | None = None,
+                   skip_threshold: float | None = None) -> float:
     """Perform a gradient-clipped optimizer step, XLA-aware.
 
-    Returns the gradient norm (0.0 on XLA where clipping is done by xm).
+    Returns the (pre-clip) gradient norm (0.0 on XLA where clipping is done
+    by xm).
+
+    `skip_threshold`: gradient-spike rejection. When set and the pre-clip
+    grad norm exceeds it, the optimizer step is SKIPPED (weights unchanged)
+    while still returning the measured gnorm so the caller can detect/log the
+    skip. Clipping bounds magnitude but not direction, so a single spiked
+    batch can still steer the model into divergence — skipping it entirely is
+    the robust guard. Grads are left in place (the caller zeroes them next
+    iteration).
     """
     if max_norm is not None:
         gnorm = torch.nn.utils.clip_grad_norm_(
             parameters or [], max_norm).item()
     else:
         gnorm = 0.0
+
+    if skip_threshold is not None and gnorm > skip_threshold:
+        return gnorm   # spike rejected — do not step
 
     if _XLA_AVAILABLE and xm is not None:
         xm.optimizer_step(optimizer, barrier=False)

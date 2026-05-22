@@ -123,6 +123,23 @@ def cosine_lr(step: int, warmup: int, total: int, peak: float,
     return peak * (min_ratio + (1.0 - min_ratio) * cos)
 
 
+def aux_ramp_fraction(step: int, ramp_start_step: int, ramp_steps: int) -> float:
+    """Auxiliary-loss ramp fraction in [0, 1] (fix A).
+
+    A fixed-length linear ramp over `ramp_steps` measured from
+    `ramp_start_step` — deliberately independent of the training horizon.
+
+    Replaces the old `steps_ramped / (total_steps - step)` form, whose
+    denominator shrank toward 0 as the run approached `total_steps`, slamming
+    every auxiliary loss to full weight in the final ~10% of training and
+    triggering the observed post-awakening divergence. Here, doubling the
+    horizon does not change the ramp.
+    """
+    if ramp_start_step is None or ramp_steps <= 0:
+        return 0.0
+    return min(1.0, max(0.0, (step - ramp_start_step) / ramp_steps))
+
+
 def build_param_groups(named_params, weight_decay: float, decoupled: bool):
     """Split named params into optimizer groups for (decoupled) weight decay.
 
@@ -493,6 +510,7 @@ def main():
     _loss_below_threshold_count = 0
     _lm_ema = None   # exponential moving average of LM loss (for gating)
     _ramp_started = False  # flag tracking if we've passed the threshold
+    _ramp_start_step = None  # step at which the aux-loss ramp began (fix A)
 
     # ── Build model and cast to native precision ────────────────────────
     # TPU native format: bfloat16 (same dynamic range as fp32, half memory).
@@ -817,6 +835,11 @@ def main():
     running_gnorm = 0.0
     n_obs = 0
     gnorm = 0.0  # last optimizer step's grad norm (set in non-meta branch)
+    # Gradient-spike rejection state (fix D): EMA of gnorm + skip counter.
+    _gnorm_ema = None
+    _n_spikes_skipped = 0
+    _spike_factor = float(getattr(cfg, 'grad_spike_factor', 0.0))
+    _spike_warmup = int(getattr(cfg, 'grad_spike_warmup', 100))
 
     # ── Best-checkpoint tracking ─────────────────────────────────────────
     # Maintain a single `*_best.pt` holding the lowest-loss weights seen so
@@ -983,13 +1006,19 @@ def main():
 
             # Once sustained below threshold, ramp auxiliary weights linearly
             if _loss_below_threshold_count >= _loss_ramp_window:
-                _ramp_started = True
+                if not _ramp_started:
+                    _ramp_started = True
+                    _ramp_start_step = step   # anchor the fixed-length ramp
 
             if _ramp_started:
-                # Linear ramp from 0.001 to target over remaining training
-                steps_ramped = _loss_below_threshold_count - _loss_ramp_window
-                max_ramp_steps = args.steps - step
-                _aux_ramp = min(1.0, steps_ramped / max(1, max_ramp_steps))
+                # (fix A) Fixed-length ramp 0.001 → target over a constant
+                # `aux_ramp_steps` window from the ramp start (horizon-
+                # independent). See aux_ramp_fraction for why the old
+                # shrinking-denominator form caused the post-awakening
+                # divergence.
+                _aux_ramp = aux_ramp_fraction(
+                    step, _ramp_start_step,
+                    max(1, int(getattr(cfg, 'aux_ramp_steps', 2000))))
             else:
                 _aux_ramp = 0.0
         else:
@@ -1162,7 +1191,29 @@ def main():
                 (ga_loss / ga).backward()
                 total_lm_loss += float(ga_out["lm_loss"].item())
                 total_loss    += float(ga_loss.item())     # ← bug fix
-            gnorm = optimizer_step(optim, brain.parameters(), cfg.grad_clip)
+            # (fix D) Gradient-spike rejection: skip the step when the pre-clip
+            # grad norm blows past `_spike_factor × EMA(gnorm)`. Active only
+            # after warmup so the EMA is established. Prevents a single spiked
+            # batch from kicking the model into the post-awakening divergence.
+            _spike_thr = None
+            if (_spike_factor > 0 and _gnorm_ema is not None
+                    and step >= _spike_warmup):
+                _spike_thr = _spike_factor * _gnorm_ema
+            gnorm = optimizer_step(optim, brain.parameters(), cfg.grad_clip,
+                                   skip_threshold=_spike_thr)
+            _spiked = _spike_thr is not None and gnorm > _spike_thr
+            if _spiked:
+                _n_spikes_skipped += 1
+                if _n_spikes_skipped <= 20 or _n_spikes_skipped % 50 == 0:
+                    print(f"[train] ⚡ grad spike at step {step+1}: gnorm "
+                          f"{gnorm:.2f} > {_spike_thr:.2f} "
+                          f"({_spike_factor}×EMA) — step skipped "
+                          f"(#{_n_spikes_skipped})", flush=True)
+            else:
+                # Update the EMA only from accepted (non-spike) steps so the
+                # threshold tracks the normal gradient regime, not the spikes.
+                _gnorm_ema = (gnorm if _gnorm_ema is None
+                              else 0.9 * _gnorm_ema + 0.1 * gnorm)
             mark_step()   # XLA: flush graph; no-op on CUDA/CPU
             # Display values must reflect the FULL grad-accum window — the old
             # code averaged lm_loss across micro-batches but used only the

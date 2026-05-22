@@ -909,6 +909,61 @@ See §6.4 for the full gating list and the awakening transition criteria.
 
 ---
 
+### 5.1 Training-Time Control Loop & Post-Awakening Stabilization
+
+The forward LM path is a clean stack and trains well on its own:
+
+```
+ids → tok_emb(+drop) → [ TransformerBlock → NeuralGeometryAdapter ] × L
+        (Standard / DiffAttn / MoD interleave; NT-modulated attn; Hebbian)
+     → norm_f(+drop) → lm_head → logits → CE = lm_loss
+```
+
+What wraps it at **training time** is a maturation controller. In a healthy
+run it gates auxiliary objectives in, awakens the bio stack, and the model
+converges. But the original controller formed a **positive-feedback loop**
+that, once perturbed, drove the model to *diverge* after awakening:
+
+```
+                 ┌───────────────────────────────────────────────┐
+                 │                                                │
+  lm_loss ─► MAT = 1 − lm_loss/L_random  (EMA — COULD FALL) ─┐    │
+                 │                                            │    │
+                 ▼                                            ▼    │
+   phase-gates centered at MAT∈{.35,.45,.55,.60}        trophic prune
+   scale world / motor / Φ / kl / cpc aux losses        (fires at MAT≥0.6,
+                 │                                        removes capacity)
+                 ▼                                            │
+   aux_w ramp = steps_ramped / (total_steps − step)  ◄─ DENOMINATOR → 0
+                 │            → aux_w slams to 1.0 in the final ~10%
+                 ▼                                            │
+   total = lm_loss + aux_w·Σ(aux) ─► grads ─► gnorm spike ────┘
+                 │                          (clip caps size, not direction)
+                 └──────────────► lm_loss RISES ◄──────────────
+```
+
+Observed failure (107M `large`, fresh run to 10k): clean descent to **PPL ~60
+at step ~7k** (below the param-matched baseline), then a gnorm spike at ~9.3k
+→ lm_loss 4.1 → 6.0, maturity 0.62 → 0.31, PPL → ~250. The collapse is a
+control-dynamics bug, **not** an LM-architecture flaw.
+
+**Four stabilization fixes** (all config-gated; none touch the LM trunk):
+
+| # | Fix | Config | Mechanism broken |
+|---|-----|--------|------------------|
+| **A** | Fixed-length aux-loss ramp (`aux_ramp_fraction`, horizon-independent) | `aux_ramp_steps=2000` | End-of-run aux blow-up (shrinking denominator) |
+| **B** | Maturity **ratchet** — monotonic non-decreasing once the high-water mark crosses the awaken floor | `maturity_ratchet=True`, `maturity_awaken_floor=0.3` | loss↑ → MAT↓ → gate-shift feedback |
+| **C** | Freeze structural pruning post-maturation (latched off once MAT-hwm ≥ threshold) | `freeze_pruning_after_maturation=True`, `prune_freeze_mat=0.6` | Capacity removed at peak performance |
+| **D** | Gradient-spike rejection — skip the step when gnorm > k·EMA(gnorm) | `grad_spike_factor=3.0`, `grad_spike_warmup=100` | A single spiked batch kicking off divergence |
+
+A is in `train.py :: aux_ramp_fraction` (used in the main loop); B in
+`Brain.update_maturity` (`brain.py`); C in the `trophic.update` gate in
+`Brain.forward_lm`; D in `xla_utils.optimizer_step(skip_threshold=…)`, wired
+through the train loop's gnorm EMA. Together they target every arrow in the
+loop above so the model **converges after awakening instead of diverging**.
+
+---
+
 ## 6. Dynamical Biological Mechanics
 
 ### 6.1 Neuro-Vesicle Pool

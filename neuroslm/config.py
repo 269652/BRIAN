@@ -103,6 +103,38 @@ class BrainConfig:
     # smoothing can inflate raw perplexity). Available for calibration runs.
     label_smoothing: float = 0.0
 
+    # ---- Post-awakening convergence / stabilization ----
+    # Fixes the second-half divergence where a gnorm spike triggered a
+    # self-amplifying collapse (lm_loss↑ → maturity↓ → aux-gate/pruning shift
+    # → bigger perturbation → lm_loss↑). See docs/architecture.md §5.1.
+    #
+    # (A) Auxiliary-loss ramp length, in steps, measured FROM the awakening
+    #     ramp start — a fixed horizon-independent schedule. Replaces the old
+    #     `steps_ramped / (total_steps - step)` ramp whose denominator shrank
+    #     to ~0 near the end, slamming all aux losses to full weight in the
+    #     final ~10% of training (the proximate cause of the collapse).
+    aux_ramp_steps: int = 2000
+    # (B) Maturity ratchet: once maturity's high-water mark crosses
+    #     `maturity_awaken_floor`, the smoothed MAT is monotonic
+    #     non-decreasing, so a transient loss spike can no longer unwind the
+    #     control state (aux gates + pruning thresholds) and amplify itself.
+    maturity_ratchet: bool = True
+    maturity_awaken_floor: float = 0.3
+    # (C) Freeze structural pruning once the model has matured. Mid/late-run
+    #     pruning removes projection capacity right when the model is doing
+    #     its best work (observed: 6/16 projections pruned at peak maturity).
+    #     Once the maturity high-water mark reaches `prune_freeze_mat`, pruning
+    #     is latched off for the rest of the run (growth/BDNF still allowed).
+    freeze_pruning_after_maturation: bool = True
+    prune_freeze_mat: float = 0.6
+    # (D) Gradient-spike rejection: skip the optimizer step when the pre-clip
+    #     grad norm exceeds `grad_spike_factor × EMA(gnorm)`. A single bad
+    #     batch (clipping caps magnitude, not direction) can no longer kick
+    #     the model into divergence. 0 disables. Active only after
+    #     `grad_spike_warmup` steps (so the EMA is established).
+    grad_spike_factor: float = 3.0
+    grad_spike_warmup: int = 100
+
     # ---- Loss weights ----
     w_lm: float = 1.0
     w_world: float = 0.3

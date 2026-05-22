@@ -793,6 +793,20 @@ class Brain(nn.Module):
         alpha = self._maturity_ema_alpha
         cur = float(self.maturity.item())
         m_ema = (1.0 - alpha) * cur + alpha * m_now
+
+        # ── Maturity ratchet (fix B) ─────────────────────────────────────
+        # Once the high-water mark crosses the awakening floor, MAT is
+        # monotonic non-decreasing. This breaks the self-amplifying collapse:
+        # a transient lm_loss spike no longer unwinds maturity (and with it
+        # the MAT-gated aux weights + pruning thresholds), which previously
+        # turned a single bad batch into a sustained divergence.
+        if getattr(self.cfg, 'maturity_ratchet', True):
+            hwm = getattr(self, '_maturity_hwm', 0.0)
+            floor = float(getattr(self.cfg, 'maturity_awaken_floor', 0.3))
+            if hwm >= floor:
+                m_ema = max(m_ema, hwm)
+            self._maturity_hwm = max(hwm, m_ema)
+
         self.maturity.fill_(m_ema)
         self._infancy = bool(m_ema < 0.3)
         return m_ema
@@ -1410,14 +1424,27 @@ class Brain(nn.Module):
             # Suppressed during infancy: trophic signals are meaningless when
             # phi/fiedler/novelty all come from a random-init network.
             if not getattr(self, '_infancy', False):
+                # ── Freeze structural pruning post-maturation (fix C) ──────
+                # Pruning fires when MAT ≥ trophic_prune_mat, i.e. exactly when
+                # the model has matured and is doing its best work — removing
+                # projection capacity there destabilizes it. Once the maturity
+                # high-water mark reaches `prune_freeze_mat`, latch pruning off
+                # for the rest of the run by passing an unreachable threshold
+                # (BDNF growth below is unaffected).
+                _prune_mat = float(getattr(cfg, 'trophic_prune_mat', 0.3))
+                if getattr(cfg, 'freeze_pruning_after_maturation', True):
+                    _hwm = getattr(self, '_maturity_hwm', self.maturity_scalar())
+                    if _hwm >= float(getattr(cfg, 'prune_freeze_mat', 0.6)):
+                        self._pruning_frozen = True
+                    if getattr(self, '_pruning_frozen', False):
+                        _prune_mat = 2.0   # MAT can never exceed → no pruning
                 self.trophic.update(activities,
                                     bdnf=_bdnf_val,
                                     ngf=novelty.detach().mean().item(),
                                     phi=_phi_val,
                                     fiedler=_fiedler_val,
                                     maturity=self.maturity_scalar(),
-                                    prune_mat_threshold=float(getattr(
-                                        cfg, 'trophic_prune_mat', 0.3)))
+                                    prune_mat_threshold=_prune_mat)
 
                 # BDNF structural growth: Φ-triggered rank increase in NeuralGeometryAdapters
                 if hasattr(self, 'language') and hasattr(self.language, 'bdnf_grow_all'):
