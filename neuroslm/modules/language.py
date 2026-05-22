@@ -17,6 +17,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint  # not auto-imported on all torch versions
 from .common import TransformerBlock, RMSNorm
 from .neuro_attention import PredictiveCodingHead
 from .differential_attention import DiffTransformerBlock
