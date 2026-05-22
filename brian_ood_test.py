@@ -118,6 +118,24 @@ def load_brain(ckpt_path: str, device: torch.device):
     except Exception:
         brain.load_state_dict(sd, strict=False)
     brain.eval()
+
+    # ── Disable CALM early-exit during eval ──────────────────────────────
+    # LanguageCortex.forward enables Confidence-based Adaptive Language Model
+    # token-level early-exit ONLY in eval mode (`use_calm = not self.training
+    # and hasattr(self, 'adapters') ...`). The per-block `calm_head` modules
+    # are never trained during normal training (model is in .train() mode the
+    # whole time), so on first eval they fire essentially at random — tokens
+    # exit transformer blocks at uncalibrated depths → garbage logits → PPL
+    # inflated by ~50× (observed: PPL 67 train-time → PPL 2964 in the OOD
+    # harness on the same data). Removing the `calm_head` attribute makes the
+    # per-block exit check `hasattr(blk, 'calm_head')` False, so the forward
+    # runs full depth like training.
+    n_disabled = 0
+    for _blk in getattr(brain, 'language', brain).blocks if hasattr(brain, 'language') else []:
+        if hasattr(_blk, 'calm_head'):
+            delattr(_blk, 'calm_head'); n_disabled += 1
+    if n_disabled:
+        print(f"[ood] disabled CALM early-exit on {n_disabled} blocks (uncalibrated calm_heads inflate eval PPL)")
     return brain, tok, cfg, ckpt.get("step", "?") if isinstance(ckpt, dict) else "?"
 
 
