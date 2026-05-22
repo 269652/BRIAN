@@ -190,7 +190,9 @@ vastai set api-key "$VAST_API_KEY" >/dev/null
 #                        cleaned LFS state). Optional.
 RECREATE_ROLES=""
 BEST_STEP=""
-FRESH=0
+# Respect FRESH env (e.g. `FRESH=1 ... bash scripts/vast_deploy.sh` for a
+# step-0 start without the --fresh flag's role-recreate side effects).
+FRESH="${FRESH:-0}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --destroy)
