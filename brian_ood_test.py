@@ -117,7 +117,21 @@ def load_brain(ckpt_path: str, device: torch.device):
         _load_compatible(brain, sd, label=os.path.basename(ckpt_path))
     except Exception:
         brain.load_state_dict(sd, strict=False)
-    brain.eval()
+    # ── DON'T set brain.eval() — keep train mode for forward consistency ───
+    # eval() flips many bio-module forward paths (CALM, gradient-checkpointing
+    # bypass, some homeostasis branches, plus possibly subtle interactions
+    # under torch.inference_mode) that were never exercised during training.
+    # Observed: PPL inflated ~17× even after disabling CALM (PPL 65 train →
+    # PPL 1171 on the same training distribution in pure eval mode). Instead,
+    # keep the model in train mode (matches what every weight was tuned on)
+    # and selectively turn OFF only Dropout (which would otherwise add noise
+    # and make eval non-deterministic).
+    brain.train()
+    n_drop = 0
+    for _m in brain.modules():
+        if isinstance(_m, torch.nn.Dropout):
+            _m.eval(); n_drop += 1
+    print(f"[ood] forced {n_drop} Dropout module(s) into eval mode; model stays in train() for forward consistency with training")
 
     # ── Disable CALM early-exit during eval ──────────────────────────────
     # LanguageCortex.forward enables Confidence-based Adaptive Language Model
@@ -141,7 +155,7 @@ def load_brain(ckpt_path: str, device: torch.device):
 
 # ── Step 4: sliding-window OOD PPL ─────────────────────────────────────────
 
-@torch.inference_mode()
+@torch.no_grad()
 def compute_ppl_sliding(brain, tok, texts: List[str], ctx_len: int,
                         stride: int, batch_size: int,
                         max_windows: Optional[int] = None) -> Tuple[float, int]:
@@ -237,7 +251,7 @@ def compute_ppl_sliding(brain, tok, texts: List[str], ctx_len: int,
 
 # ── In-distribution sample PPL (training stream) ───────────────────────────
 
-@torch.inference_mode()
+@torch.no_grad()
 def compute_train_ppl(brain, tok, cfg, batch_size: int, n_batches: int,
                       mode: str = "mix", chat_ratio: float = 0.6) -> Tuple[float, int]:
     """In-distribution PPL on a fresh sample of the TRAINING stream.
