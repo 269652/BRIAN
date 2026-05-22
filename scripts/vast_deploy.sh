@@ -270,7 +270,12 @@ fi
 # (created/stopped/exited/…), (re)deploy only what's needed.
 # --recreate: destroy ALL neuroslm-<role> instances and redeploy fresh
 # (so a new git push is picked up).
-ROLES="full baseline"
+#
+# Roles the deploy maintains. Default = both (back-compat). Set ROLES=full to
+# only manage the full instance (skips the param-matched baseline entirely —
+# useful once a reference baseline checkpoint already exists). Set
+# ROLES=baseline to only manage the baseline.
+ROLES="${ROLES:-full baseline}"
 
 _instances_json="$(_vast_json show instances --raw)"
 declare -A NEEDS   # role -> 1 if we must (re)deploy it
