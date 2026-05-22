@@ -1024,6 +1024,63 @@ objective still changes the loss but no longer touches the trunk
 
 ---
 
+### 5.3 ReZero-Style Gated Module → LM Forward Injections
+
+§5.2 cuts the *backward* path from aux losses into the trunk. There remains a
+*forward* path: bio modules inject into the LM forward computation
+(`motor_lang_bias` added to `h_lang` before re-emit, RETRO `memory_kv` into
+the last trunk blocks, `from_sem(lang_thought)` conditioning prefix). The old
+design gated these by **maturity phase-gates** (`_motor_phase`, `_mem_phase`)
+that opened sharply as MAT crossed a center. The result was a *discontinuity*
+at awakening — the LM head, previously scored on `h_lang`, was suddenly
+scored on `h_lang + half_trained_module_bias`, a different function, and PPL
+jumped (observed: ~PPL 90 → ~370 across step 2.3–2.4k on the isolation run).
+
+**Fix (`cfg.use_rezero_injection_gates`, default ON).** Replace each maturity
+phase-gate on a forward injection with a **zero-init learnable scalar λ**
+(ReZero — Bachlechner 2020; LayerScale — Touvron 2021):
+
+```
+h_biased = h_lang + λ_motor   · motor_lang_bias              # was: _motor_phase · …
+memory_kv = λ_mem            · memory_kv_proj(mem)            # was: _mem_phase · …
+lang_thought = λ_thought     · lang_thought                   # gates from_sem path
+```
+
+Each λ is a single `nn.Parameter(zeros(1))` (per-injection). Properties:
+
+- **Identity at t=0.** Every λ=0 ⇒ no module contribution ⇒ the LM behaves
+  exactly like the §5.2 pure-trunk model. No awakening discontinuity exists
+  to wobble around.
+- **LM gradient self-discovers the blend.** `∂L_lm/∂λ` is real (λ sits in the
+  LM forward path). If the injection helps at this point in training, λ
+  grows; if it doesn't, λ stays at 0. No schedule, no maturity center to
+  tune.
+- **Bootstrap.** While the module's output is itself near-zero (e.g. the
+  motor cortex's output projection is zero-init), `∂L_lm/∂λ = injection ·
+  ∂L_lm/∂h_biased ≈ 0` and λ stays put — correct: nothing to gate yet. Once
+  the module's own auxiliary loss (allowed by §5.2) trains it to produce a
+  useful signal, `∂L_lm/∂λ` becomes systematic and λ rises.
+- **Subsumes the maturity phase-gates on forward paths.** `_motor_phase`,
+  `_mem_phase`, and the from_sem-feeding maturity logic become unused when
+  rezero is on. The maturity-phase gates inside the loss-assembly block
+  (`ph_world`, `ph_motor`, etc., §1.6) only weight *auxiliary losses* — those
+  are already trunk-isolated, so the simpler λ design isn't needed there.
+- **Composable with §5.2.** Trunk isolation cuts the backward aux→trunk
+  path; ReZero λ controls the forward module→trunk path. Together: trunk
+  shaped by LM only, modules trained by their own losses, contributions to
+  LM blended in by single scalars LM itself trains.
+
+This is also more biologically faithful — projections from association cortex
+start *weak* (sparse synapses, low myelination) and *strengthen as they prove
+useful* (Hebbian + reward-modulated plasticity). The λ scalars are a
+one-parameter caricature of exactly that mechanism.
+
+Verified in `tests/test_stabilization.py`: λ initialized to zero, λ in the LM
+forward graph (setting λ≠0 changes the output when module output is
+non-trivial), default ON for the `large` preset.
+
+---
+
 ## 6. Dynamical Biological Mechanics
 
 ### 6.1 Neuro-Vesicle Pool

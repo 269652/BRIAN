@@ -110,6 +110,16 @@ class Brain(nn.Module):
             use_attention_pool=_src_teh,
             dropout=getattr(cfg, 'dropout', 0.0))
 
+        # ── ReZero-style zero-init gates on module → LM forward injections ──
+        # Each scalar λ starts at 0, so at init the LM behaves identically to
+        # the pure isolated-trunk model (no module contribution, no awakening
+        # discontinuity). LM gradient then grows each λ only as far as that
+        # specific injection actually improves next-token prediction. See §5.3.
+        import torch as _t
+        self.lambda_motor   = nn.Parameter(_t.zeros(1))  # gates motor_lang_bias
+        self.lambda_mem     = nn.Parameter(_t.zeros(1))  # gates memory_kv injection
+        self.lambda_thought = nn.Parameter(_t.zeros(1))  # gates from_sem thought conditioning
+
         # ---- Sensory + association ----
         self.sensory     = TextSensoryCortex(cfg.d_sem)
         self.association = AssociationCortex(cfg.d_sem)
@@ -962,6 +972,13 @@ class Brain(nn.Module):
             bus_bias_s = self.latent_program_bus.read_sem(B, device, dtype)
             if bus_bias_s.size(-1) == cfg.d_sem:
                 lang_thought = lang_thought + bus_bias_s
+        # ReZero gate (λ_thought) on the from_sem thought-conditioning path.
+        # `from_sem.weight` is already zero-init (so identity at t=0), but this
+        # adds an explicit scalar that LM gradient can grow independently of
+        # the projection weights — same self-discovering blend as the other
+        # forward injections.
+        if getattr(cfg, 'use_rezero_injection_gates', False):
+            lang_thought = self.lambda_thought * lang_thought
         # Build memory_kv for RETRO-style injection: EMA of recent bowtie
         # output plus optional top-N consolidated entries (cheap path: just
         # use the EMA slots for now; full retrieval is a TODO with no
@@ -978,8 +995,16 @@ class Brain(nn.Module):
                 and self.memory_kv_proj is not None
                 and bool(self._bowtie_step.item() > 0)):
             _mat_now    = self.maturity_scalar() if hasattr(self, 'maturity_scalar') else 1.0
-            _mem_phase  = self._phase_gate(_mat_now, center=0.55, width=0.15)
-            if _mem_phase > 1e-3:
+            # ReZero gate (λ_mem) supersedes the maturity-phase scheduler on
+            # this forward injection when enabled; scalar starts at 0 and is
+            # grown by LM gradient only as far as memory retrieval helps.
+            if getattr(cfg, 'use_rezero_injection_gates', False):
+                _mem_phase = self.lambda_mem
+                _mem_active = True   # let the matmul run; λ controls magnitude
+            else:
+                _mem_phase = self._phase_gate(_mat_now, center=0.55, width=0.15)
+                _mem_active = float(_mem_phase) > 1e-3
+            if _mem_active:
                 # Clone the buffer view so the EMA in-place update at the end
                 # of this forward does not version-bump a tensor that the
                 # backward graph still references through `memory_kv_proj`.
@@ -1338,8 +1363,16 @@ class Brain(nn.Module):
         # losses also engage.  Pre-awakening the model trains as a clean
         # LM trunk, matching baseline throughput.
         _mat_motor   = self.maturity_scalar() if hasattr(self, 'maturity_scalar') else 1.0
-        _motor_phase = self._phase_gate(_mat_motor, center=0.45, width=0.10)
-        if _motor_phase > 1e-3:
+        # ReZero gate (λ_motor) on the motor → LM forward injection. Starts at
+        # zero (no contribution → no awakening discontinuity); LM gradient
+        # grows it only as far as the motor bias actually helps prediction.
+        if getattr(cfg, 'use_rezero_injection_gates', False):
+            _motor_phase = self.lambda_motor
+            _motor_active = True
+        else:
+            _motor_phase = self._phase_gate(_mat_motor, center=0.45, width=0.10)
+            _motor_active = float(_motor_phase) > 1e-3
+        if _motor_active:
             h_biased     = h_lang + _motor_phase * motor_lang_bias.unsqueeze(1)
             logits_motor = self.language.lm_head(h_biased)
             del logits

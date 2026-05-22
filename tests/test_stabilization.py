@@ -31,6 +31,58 @@ def _tiny() -> BrainConfig:
     return c
 
 
+# ── ReZero-style forward-injection gates ────────────────────────────────────
+
+def test_rezero_lambdas_initialized_to_zero():
+    """Every module → LM forward-injection gate starts at exactly zero, so
+    the model behaves identically to the pure isolated-trunk LM at t=0 (no
+    awakening discontinuity)."""
+    c = _tiny(); c.use_rezero_injection_gates = True
+    torch.manual_seed(0); b = Brain(c)
+    assert float(b.lambda_motor.item()) == 0.0
+    assert float(b.lambda_mem.item()) == 0.0
+    assert float(b.lambda_thought.item()) == 0.0
+    assert b.lambda_motor.requires_grad
+    assert b.lambda_mem.requires_grad
+    assert b.lambda_thought.requires_grad
+
+
+def test_rezero_lambda_is_in_lm_forward_graph():
+    """When a module output is non-zero, setting λ != 0 must change the LM
+    logits — proving the gate is actually in the computation graph."""
+    c = _tiny(); c.use_rezero_injection_gates = True
+    torch.manual_seed(0); b = Brain(c); b.eval()
+    # Force motor cortex output to be non-trivial so the gate has something
+    # to scale — replace motor_lang_bias generation with a constant ones bias
+    # via a hook on `self.motor`.
+    orig = b.motor.forward
+    def _hook(action, survival=None):
+        out = orig(action, survival=survival)
+        # out = (_mt, motor_lang_bias, action_idx, action_logits, action_probs)
+        ones = torch.ones_like(out[1])
+        return (out[0], ones, out[2], out[3], out[4])
+    b.motor.forward = _hook  # type: ignore[assignment]
+
+    ids = torch.randint(0, 256, (1, 16))
+    torch.manual_seed(1)
+    with torch.no_grad():
+        b.lambda_motor.fill_(0.0)
+        L0 = b.forward_lm(ids)["logits"].detach().clone()
+        b.lambda_motor.fill_(1.0)
+        L1 = b.forward_lm(ids)["logits"].detach().clone()
+    assert not torch.allclose(L0, L1, atol=1e-5), (
+        "λ_motor must scale the motor injection in the LM forward path")
+
+
+def test_rezero_default_on():
+    c = BrainConfig()
+    assert c.use_rezero_injection_gates is True
+
+
+def test_large_preset_has_rezero_on():
+    assert large().use_rezero_injection_gates is True
+
+
 # ── PRIMARY: trunk gradient isolation ───────────────────────────────────────
 
 def _trunk_grad(detach: bool, w_world: float):

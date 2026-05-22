@@ -103,6 +103,19 @@ class BrainConfig:
     # smoothing can inflate raw perplexity). Available for calibration runs.
     label_smoothing: float = 0.0
 
+    # ---- ReZero-style gated module → LM forward injections ----
+    # Replace the maturity-phase gates on the FORWARD paths from bio modules
+    # into the LM trunk (`_motor_phase` on motor_lang_bias, `_mem_phase` on
+    # the memory_kv injection, conditioning of `lang_thought` via from_sem)
+    # with zero-init learnable scalars (one per injection). The model behaves
+    # identically to the pure isolated-trunk LM at t=0 (every λ=0 → no module
+    # contribution → no discontinuity at awakening), and each λ then grows
+    # under LM gradient ONLY as far as that injection actually helps next-
+    # token prediction. Eliminates the forward-side awakening wobble that
+    # `detach_trunk_from_aux` alone can't address. Reference: ReZero
+    # (Bachlechner 2020) / LayerScale (Touvron 2021). See §5.3.
+    use_rezero_injection_gates: bool = True
+
     # ---- Trunk gradient isolation (architectural convergence fix) ----
     # Feed the bio/cognitive modules a STOP-GRADIENT copy of the trunk's
     # semantic output `sem`. The LM trunk (language cortex) is then shaped
