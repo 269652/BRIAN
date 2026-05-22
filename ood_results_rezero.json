@@ -1,8 +1,8 @@
 {
   "checkpoint_path": "lfs_checkpoints/neuroslm_large_107M_adamw_mix_best.pt",
   "step": 7000,
-  "timestamp": "2026-05-22T21:04:10",
-  "n_params": 107830034,
+  "timestamp": "2026-05-22T22:14:46",
+  "n_params": 107811504,
   "tokenizer": "neuroslm.Tokenizer (gpt2 BPE, vocab=50257)",
   "ctx_len": 1024,
   "ood_dataset": "wikitext-103-v1",
@@ -10,9 +10,9 @@
   "train_mode": "mix",
   "train_batches": 100,
   "train_tokens_evaluated": 409600,
-  "train_ppl": 2964.9481680583576,
-  "ood_ppl": 8414.472039103459,
-  "gap": 5449.523871045101,
-  "gap_ratio": 2.8379828456204703,
+  "train_ppl": 1170.9504749134683,
+  "ood_ppl": 5246.590029759192,
+  "gap": 4075.639554845723,
+  "gap_ratio": 4.4806250496178395,
   "verdict": "STRONG OVERFITTING"
 }
