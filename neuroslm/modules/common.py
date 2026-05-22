@@ -60,7 +60,8 @@ class CausalSelfAttention(nn.Module):
     """
     def __init__(self, dim: int, n_heads: int, max_ctx: int,
                  n_kv_heads: int | None = None,
-                 n_nt: int = 0, hebbian_rank: int = 0):
+                 n_nt: int = 0, hebbian_rank: int = 0,
+                 dropout: float = 0.0):
         super().__init__()
         assert dim % n_heads == 0
         self.n_heads = n_heads
@@ -68,6 +69,8 @@ class CausalSelfAttention(nn.Module):
         assert n_heads % self.n_kv_heads == 0
         self.n_groups = n_heads // self.n_kv_heads
         self.head_dim = dim // n_heads
+        self.dropout = float(dropout)
+        self.resid_drop = nn.Dropout(self.dropout) if self.dropout > 0 else nn.Identity()
 
         # Separate Q and KV projections for GQA
         self.q_proj = nn.Linear(dim, n_heads * self.head_dim, bias=False)
@@ -123,12 +126,16 @@ class CausalSelfAttention(nn.Module):
                 torch.ones(T, T, device=x.device, dtype=torch.bool), diagonal=1)
             attn = attn.masked_fill(causal_mask, float('-inf'))
             attn = F.softmax(attn, dim=-1)
+            if self.dropout > 0 and self.training:
+                attn = F.dropout(attn, p=self.dropout)
             y = attn @ v
         else:
-            y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+            y = F.scaled_dot_product_attention(
+                q, k, v, is_causal=True,
+                dropout_p=self.dropout if self.training else 0.0)
 
         y = y.transpose(1, 2).contiguous().view(B, T, C)
-        return self.out(y)
+        return self.resid_drop(self.out(y))
 
 
 class MemoryCrossAttention(nn.Module):
@@ -187,13 +194,16 @@ class TransformerBlock(nn.Module):
     def __init__(self, dim: int, n_heads: int, max_ctx: int,
                  n_kv_heads: int | None = None,
                  n_nt: int = 0, hebbian_rank: int = 0,
-                 enable_memory_xattn: bool = False):
+                 enable_memory_xattn: bool = False,
+                 dropout: float = 0.0):
         super().__init__()
         self.n1 = RMSNorm(dim)
         self.attn = CausalSelfAttention(dim, n_heads, max_ctx, n_kv_heads,
-                                        n_nt=n_nt, hebbian_rank=hebbian_rank)
+                                        n_nt=n_nt, hebbian_rank=hebbian_rank,
+                                        dropout=dropout)
         self.n2 = RMSNorm(dim)
         self.mlp = SwiGLU(dim)
+        self.mlp_drop = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.enable_memory_xattn = bool(enable_memory_xattn)
         if self.enable_memory_xattn:
             self.mem_xattn = MemoryCrossAttention(dim, n_heads)
@@ -202,7 +212,7 @@ class TransformerBlock(nn.Module):
                 nt: torch.Tensor | None = None,
                 memory_kv: torch.Tensor | None = None) -> torch.Tensor:
         x = x + self.attn(self.n1(x), nt=nt)
-        x = x + self.mlp(self.n2(x))
+        x = x + self.mlp_drop(self.mlp(self.n2(x)))
         if self.enable_memory_xattn and memory_kv is not None:
             x = x + self.mem_xattn(x, memory_kv)
         return x

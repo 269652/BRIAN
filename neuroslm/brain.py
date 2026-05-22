@@ -85,6 +85,7 @@ class Brain(nn.Module):
                 _bl_layers, cfg.lang_heads, cfg.lang_ctx,
                 n_kv_heads=cfg.lang_kv_heads,
                 gradient_checkpointing=cfg.gradient_checkpointing,
+                dropout=getattr(cfg, 'dropout', 0.0),
                 baseline=True)
             self._baseline = True
             return
@@ -106,7 +107,8 @@ class Brain(nn.Module):
             enable_memory_xattn=bool(getattr(cfg, 'enable_memory_xattn', False)),
             n_memory_xattn_layers=int(getattr(cfg, 'n_memory_xattn_layers', 2)),
             mid_trunk_tap_layer=int(_mid_tap),
-            use_attention_pool=_src_teh)
+            use_attention_pool=_src_teh,
+            dropout=getattr(cfg, 'dropout', 0.0))
 
         # ---- Sensory + association ----
         self.sensory     = TextSensoryCortex(cfg.d_sem)
@@ -737,7 +739,8 @@ class Brain(nn.Module):
 
     @staticmethod
     def _chunked_ce(logits: torch.Tensor, targets: torch.Tensor,
-                    chunk: int = 128, ignore_index: int = -100) -> torch.Tensor:
+                    chunk: int = 128, ignore_index: int = -100,
+                    label_smoothing: float = 0.0) -> torch.Tensor:
         """Cross-entropy in T-dimension chunks to avoid a huge (B*T, V) allocation."""
         B, T, V = logits.shape
         acc = torch.zeros(B, T, dtype=torch.float32, device=logits.device)
@@ -745,7 +748,9 @@ class Brain(nn.Module):
             t1 = min(t0 + chunk, T)
             lg = logits[:, t0:t1, :].reshape(-1, V)
             tg = targets[:, t0:t1].reshape(-1)
-            losses = F.cross_entropy(lg, tg, ignore_index=ignore_index, reduction="none")
+            losses = F.cross_entropy(lg, tg, ignore_index=ignore_index,
+                                     reduction="none",
+                                     label_smoothing=label_smoothing)
             acc[:, t0:t1] = losses.reshape(B, t1 - t0).float()
         return acc.mean(dim=1)
 
@@ -1434,7 +1439,9 @@ class Brain(nn.Module):
         }
 
         if targets is not None:
-            lm_loss_per = self._chunked_ce(logits_motor, targets)
+            lm_loss_per = self._chunked_ce(
+                logits_motor, targets,
+                label_smoothing=float(getattr(cfg, 'label_smoothing', 0.0)))
             # Mesolimbic CE gain: clamped OFF (=1.0) until MAT > 0.55 because
             # `learning_gain` comes from a randomly-initialised LearningLayer
             # whose output is uncorrelated with reward early on — gating it

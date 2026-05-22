@@ -184,9 +184,11 @@ class LanguageCortex(nn.Module):
                  enable_memory_xattn: bool = False,
                  n_memory_xattn_layers: int = 2,
                  mid_trunk_tap_layer: int | None = None,
-                 use_attention_pool: bool = True):
+                 use_attention_pool: bool = True,
+                 dropout: float = 0.0):
         super().__init__()
         self.gradient_checkpointing = gradient_checkpointing
+        self.dropout = float(dropout)
         self.n_nt = n_nt
         self.n_layers = n_layers
         self.enable_memory_xattn = bool(enable_memory_xattn) and not baseline
@@ -200,6 +202,12 @@ class LanguageCortex(nn.Module):
         self.mid_trunk_tap_layer = int(mid_trunk_tap_layer)
         self.use_attention_pool = bool(use_attention_pool)
         self.tok_emb = nn.Embedding(vocab_size, d_hidden)
+        # Dropout: embedding (post-tok_emb) + pre-LM-head. Per-block attention
+        # and residual dropout is threaded into the standard TransformerBlocks
+        # below. nn.Identity when dropout==0 keeps the legacy path exact and
+        # adds no parameters (so old checkpoints load unchanged).
+        self.emb_drop = nn.Dropout(self.dropout) if self.dropout > 0 else nn.Identity()
+        self.head_drop = nn.Dropout(self.dropout) if self.dropout > 0 else nn.Identity()
 
         # Layers eligible for memory cross-attention: the LAST N blocks.
         mem_xattn_start = max(0, n_layers - self.n_memory_xattn_layers)
@@ -217,7 +225,8 @@ class LanguageCortex(nn.Module):
             for i in range(n_layers):
                 self.blocks.append(TransformerBlock(
                     d_hidden, n_heads, max_ctx, n_kv_heads,
-                    n_nt=n_nt, hebbian_rank=hebbian_rank))
+                    n_nt=n_nt, hebbian_rank=hebbian_rank,
+                    dropout=self.dropout))
         else:
             for i in range(n_layers):
                 pattern = i % 3
@@ -227,7 +236,8 @@ class LanguageCortex(nn.Module):
                     self.blocks.append(TransformerBlock(
                         d_hidden, n_heads, max_ctx, n_kv_heads,
                         n_nt=n_nt, hebbian_rank=hebbian_rank,
-                        enable_memory_xattn=mem_xattn))
+                        enable_memory_xattn=mem_xattn,
+                        dropout=self.dropout))
                 elif pattern == 1:
                     # Differential attention (noise cancellation)
                     self.blocks.append(DiffTransformerBlock(
@@ -300,7 +310,7 @@ class LanguageCortex(nn.Module):
             return_tap=False: (logits, sem, h, pred_coding_loss)
             return_tap=True:  (logits, sem, h, pred_coding_loss, tap_sem)
         """
-        h = self.tok_emb(ids)
+        h = self.emb_drop(self.tok_emb(ids))
         if thought is not None:
             bias = self.from_sem(thought.to(h.dtype)).unsqueeze(1)  # (B, 1, d_hidden)
             h = h + bias
@@ -394,7 +404,7 @@ class LanguageCortex(nn.Module):
         if len(self.pred_coding) > 0 and pc_counter > 0:
             pred_coding_loss = pred_coding_loss / len(self.pred_coding)
 
-        h = self.norm_f(h)
+        h = self.head_drop(self.norm_f(h))
         if motor_bias is not None:
             # Add bias only to the last position (the one that will be sampled).
             h_last = h[:, -1:, :] + motor_bias.unsqueeze(1)

@@ -105,11 +105,51 @@ torch.nn.Linear.forward = _bf16_safe_linear_fwd
 # ---------------------------------------------------------------------------
 
 
-def cosine_lr(step: int, warmup: int, total: int, peak: float) -> float:
+def cosine_lr(step: int, warmup: int, total: int, peak: float,
+              min_ratio: float = 0.0) -> float:
+    """Linear warmup → cosine decay to `peak * min_ratio` by step `total`.
+
+    `total` is the DECAY HORIZON, not necessarily the run length. If you train
+    a model you intend to stop and evaluate at 10k, pass total=10000 so the LR
+    actually anneals by then — the single biggest lever on final (and OOD)
+    perplexity. With the old behavior (total = --steps = 100000) the LR is
+    still ~98% of peak at step 10k, so an early-stopped model never sees the
+    annealing phase.
+    """
     if step < warmup:
         return peak * step / max(1, warmup)
     progress = (step - warmup) / max(1, total - warmup)
-    return peak * 0.5 * (1.0 + math.cos(math.pi * min(progress, 1.0)))
+    cos = 0.5 * (1.0 + math.cos(math.pi * min(progress, 1.0)))
+    return peak * (min_ratio + (1.0 - min_ratio) * cos)
+
+
+def build_param_groups(named_params, weight_decay: float, decoupled: bool):
+    """Split named params into optimizer groups for (decoupled) weight decay.
+
+    `named_params`: iterable of (name, Parameter) — typically
+        brain.named_parameters(); params under 'learned_opt.' are excluded
+        (they belong to the meta-optimizer).
+
+    decoupled=True  → two groups: 2-D matrices (Linear/embedding weights) get
+                      `weight_decay`; 1-D params (RMSNorm gains, biases, NT
+                      levels/vesicles) get 0.0. Decaying norms/biases is a
+                      known generalization regression.
+    decoupled=False → a single flat list of params (legacy behavior; the
+                      optimizer applies its own uniform weight_decay).
+
+    Returns either a list of param-group dicts (decoupled) or a flat list of
+    Parameters (legacy).
+    """
+    params = [(n, p) for n, p in named_params
+              if not n.startswith('learned_opt.') and p.requires_grad]
+    if not decoupled:
+        return [p for _, p in params]
+    decay   = [p for _, p in params if p.dim() >= 2]
+    nodecay = [p for _, p in params if p.dim() < 2]
+    return [
+        {"params": decay,   "weight_decay": weight_decay},
+        {"params": nodecay, "weight_decay": 0.0},
+    ]
 
 
 def _resize_grown_adapters(brain, state: dict):
@@ -343,6 +383,39 @@ def main():
     ap.add_argument("--optimizer", default="adafactor",
                     choices=["adafactor", "adamw"],
                     help="adafactor (default, TPU-optimal) or adamw (CUDA/debug)")
+
+    # ── Generalization / OOD knobs (override preset defaults) ────────────
+    ap.add_argument("--dropout", type=float, default=None,
+                    help="Override cfg.dropout (embedding + standard-block + "
+                         "pre-head dropout). 0.1 narrows the train-vs-OOD gap; "
+                         "0 restores legacy no-dropout. Default: preset value.")
+    ap.add_argument("--weight_decay", type=float, default=None,
+                    help="Override cfg.weight_decay (applied to 2-D matrices "
+                         "only when decoupled WD is on). Default: preset value.")
+    ap.add_argument("--lr_decay_steps", type=int, default=None,
+                    help="Cosine LR-decay horizon (AdamW). The LR anneals to "
+                         "lr*min_lr_ratio by this step. Set to the step you "
+                         "plan to STOP at (e.g. 10000) so an early-stopped run "
+                         "actually gets the annealing phase. Default: --steps.")
+    ap.add_argument("--min_lr_ratio", type=float, default=None,
+                    help="Cosine floor as a fraction of peak LR (e.g. 0.1). "
+                         "Default: preset value (0.1).")
+    ap.add_argument("--label_smoothing", type=float, default=None,
+                    help="LM cross-entropy label smoothing. Default 0.0 (off; "
+                         "can inflate raw perplexity).")
+    ap.add_argument("--no_decoupled_wd", dest="decoupled_wd",
+                    action="store_false", default=None,
+                    help="Disable decoupled weight decay (decay ALL params, "
+                         "legacy behavior).")
+
+    # ── Fresh start ──────────────────────────────────────────────────────
+    ap.add_argument("--fresh", action="store_true",
+                    help="Start training from step 0 with a freshly-initialized "
+                         "model: ignore any --resume / 'latest' checkpoint and "
+                         "do NOT warm-start. Use after changing regularization / "
+                         "LR schedule so the new, more efficient config trains "
+                         "from scratch rather than inheriting the old run's "
+                         "weights and optimizer state.")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -365,6 +438,35 @@ def main():
     cfg.vocab_size = tok.vocab_size
     if args.baseline:
         cfg.baseline = True
+
+    # ── Apply generalization-knob overrides onto the preset cfg ──────────
+    if args.dropout is not None:
+        cfg.dropout = args.dropout
+    if args.weight_decay is not None:
+        cfg.weight_decay = args.weight_decay
+    if args.lr_decay_steps is not None:
+        cfg.lr_decay_steps = args.lr_decay_steps
+    if args.min_lr_ratio is not None:
+        cfg.min_lr_ratio = args.min_lr_ratio
+    if args.label_smoothing is not None:
+        cfg.label_smoothing = args.label_smoothing
+    if args.decoupled_wd is not None:   # only set when --no_decoupled_wd passed
+        cfg.decoupled_wd = args.decoupled_wd
+    print(f"[train] regularization: dropout={cfg.dropout} "
+          f"weight_decay={cfg.weight_decay} decoupled_wd={cfg.decoupled_wd} "
+          f"lr_decay_steps={cfg.lr_decay_steps or args.steps} "
+          f"min_lr_ratio={cfg.min_lr_ratio} "
+          f"label_smoothing={cfg.label_smoothing}", flush=True)
+
+    # ── Fresh start: ignore any resume so the new config trains from 0 ───
+    if args.fresh:
+        if args.resume:
+            print(f"[train] --fresh: ignoring --resume {args.resume!r}; "
+                  f"starting from step 0 with freshly-initialized weights.",
+                  flush=True)
+        args.resume = None
+        args.transfer = None
+        args.cross_stream_resume = False
     # Gradient checkpointing is beneficial on both XLA and CUDA
     if should_use_gradient_checkpointing():
         cfg.gradient_checkpointing = True
@@ -425,6 +527,19 @@ def main():
     # when --optimizer=adamw is passed (useful for debugging).
     named = list(brain.named_parameters())
     model_params = [p for n, p in named if not n.startswith('learned_opt.')]
+
+    # ── Decoupled weight decay ───────────────────────────────────────────
+    # Apply weight decay only to 2-D weight matrices (Linear / embedding) and
+    # exempt 1-D params (RMSNorm gains, biases, NT levels/vesicles). Decaying
+    # those is a known generalization regression. Falls back to a single
+    # undifferentiated group when cfg.decoupled_wd is False (legacy behavior).
+    _decoupled = bool(getattr(cfg, "decoupled_wd", False))
+    param_groups = build_param_groups(named, cfg.weight_decay, _decoupled)
+    if _decoupled:
+        print(f"[train] decoupled WD: {len(param_groups[0]['params'])} decayed "
+              f"matrices, {len(param_groups[1]['params'])} exempt 1-D params "
+              f"(wd={cfg.weight_decay})", flush=True)
+
     if args.optimizer == "adafactor":
         _Adafactor = None
         try:
@@ -438,7 +553,7 @@ def main():
                 pass
         if _Adafactor is not None:
             optim = _Adafactor(
-                model_params,
+                param_groups,
                 lr=None,
                 scale_parameter=True,
                 relative_step=True,
@@ -451,7 +566,7 @@ def main():
                   "Install transformers: pip install transformers", flush=True)
             args.optimizer = "adamw"
     if args.optimizer == "adamw":
-        optim = AdamW(model_params, lr=cfg.lr,
+        optim = AdamW(param_groups, lr=cfg.lr,
                       weight_decay=cfg.weight_decay, betas=(0.9, 0.95))
 
     meta_opt = None
@@ -771,8 +886,14 @@ def main():
         # LR schedule — Adafactor manages its own LR when relative_step=True;
         # only apply the cosine schedule when using AdamW.
         if args.optimizer != "adafactor":
+            _decay_total = getattr(cfg, "lr_decay_steps", 0) or total_steps
+            _min_ratio = getattr(cfg, "min_lr_ratio", 0.0)
+            _lr_now = cosine_lr(step, cfg.warmup_steps, _decay_total, cfg.lr,
+                                min_ratio=_min_ratio)
             for pg in optim.param_groups:
-                pg["lr"] = cosine_lr(step, cfg.warmup_steps, total_steps, cfg.lr)
+                # Per-group LR scaling preserved (e.g. a no-decay group can
+                # carry its own base via pg.get("lr_scale", 1.0)).
+                pg["lr"] = _lr_now * pg.get("lr_scale", 1.0)
 
         # --- Memory system integration ---
         # 1. Record episodic memory for this batch (deferred to CPU; non-blocking).

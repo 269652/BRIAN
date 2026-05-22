@@ -37,6 +37,13 @@ CHAT_RATIO="${CHAT_RATIO:-0.6}"
 CKPT_DIR="${CKPT_DIR:-$REPO_DIR/lfs_checkpoints}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 MAX_RESTARTS="${MAX_RESTARTS:-1000}"
+# FRESH=1 → the FIRST launch starts from step 0 with a freshly-initialized
+# model (passes --fresh, NOT --resume latest). Crash-restarts after that DO
+# `--resume latest` so they pick up the new step-0+ checkpoints. Use after a
+# config change (regularization / LR schedule) so the more-efficient setup
+# trains from scratch. Pair with `vast_deploy.sh --fresh`, which also wipes
+# the old checkpoints so `--resume latest` can't grab a stale high-step file.
+FRESH="${FRESH:-0}"
 
 mkdir -p "$CKPT_DIR"
 
@@ -51,6 +58,15 @@ restart=0
 while [ "$restart" -lt "$MAX_RESTARTS" ]; do
   echo ""
   echo "▶ launch attempt $((restart+1)) @ $(date -u +%H:%M:%SZ)"
+  # First attempt with FRESH=1: start from step 0 (no resume). Every other
+  # attempt resumes the most-recent checkpoint (which, after a fresh start,
+  # is the new run's own low-step checkpoint).
+  if [ "$FRESH" = "1" ] && [ "$restart" -eq 0 ]; then
+    RESUME_ARGS="--fresh"
+    echo "  FRESH=1: starting from step 0 (no resume)."
+  else
+    RESUME_ARGS="--resume latest"
+  fi
   python -u -m neuroslm.train \
     --preset "$PRESET" --steps "$STEPS" \
     --batch_size "$BATCH" --grad_accum "$GRAD_ACCUM" \
@@ -58,7 +74,7 @@ while [ "$restart" -lt "$MAX_RESTARTS" ]; do
     --ckpt_dir "$CKPT_DIR" --device cuda \
     --mode "$MODE" --chat_ratio "$CHAT_RATIO" \
     --save_every "$SAVE_EVERY" --log_every "$LOG_EVERY" \
-    --resume latest $EXTRA_ARGS
+    $RESUME_ARGS $EXTRA_ARGS
   rc=$?
 
   if [ "$rc" -eq 0 ]; then

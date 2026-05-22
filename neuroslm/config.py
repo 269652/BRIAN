@@ -77,6 +77,32 @@ class BrainConfig:
     warmup_steps: int = 200
     grad_clip: float = 1.0
 
+    # ---- Regularization / generalization (OOD) ----
+    # Dropout applied at the token embedding, inside the standard transformer
+    # blocks (attention + residual), and just before the LM head. 0.0 keeps
+    # the legacy no-dropout behavior; 0.1 is the GPT-2-scale default that
+    # markedly narrows the train→OOD perplexity gap for a 100M model on a
+    # limited data mix.
+    dropout: float = 0.1
+    # Decoupled weight decay: when True, AdamW/Adafactor decay only the 2-D
+    # weight matrices (Linear/embedding) and exempt 1-D params (RMSNorm gains,
+    # biases, NT levels). Applying decay to norms/biases is a known
+    # generalization regression.
+    decoupled_wd: bool = True
+    # Cosine LR-decay horizon. The schedule fully anneals the LR to
+    # `lr * min_lr_ratio` by this step. 0 → use the run's total --steps. For a
+    # run you intend to STOP and evaluate at 10k, set this to 10000 (or pass
+    # --lr_decay_steps 10000): otherwise, with the default --steps 100000, the
+    # LR is still ~98% of peak at step 10k and the model never sees the
+    # annealing phase that produces the biggest perplexity drop.
+    lr_decay_steps: int = 0
+    # Floor of the cosine schedule as a fraction of peak LR (e.g. 0.1 → LR
+    # bottoms out at 10% of peak rather than 0).
+    min_lr_ratio: float = 0.1
+    # Label smoothing for the LM cross-entropy. 0.0 = off (default; label
+    # smoothing can inflate raw perplexity). Available for calibration runs.
+    label_smoothing: float = 0.0
+
     # ---- Loss weights ----
     w_lm: float = 1.0
     w_world: float = 0.3
@@ -282,6 +308,11 @@ def large() -> BrainConfig:
     c.max_thinking_steps = 12
     c.warmup_steps = 500
     c.lr = 2.5e-4
+    # OOD generalization: decoupled weight decay bumped 0.01 → 0.05 (applies
+    # only to 2-D matrices now) and GPT-scale dropout. Both narrow the
+    # train→WikiText gap without hurting in-distribution loss at 100M params.
+    c.weight_decay = 0.05
+    c.dropout = 0.1
     # Baseline param parity: 47 vanilla layers ≈ 106.9M ≈ the full model's
     # 107.5M, so the --baseline ablation is a fair same-size comparison
     # (otherwise the 8-layer baseline is only ~35M).

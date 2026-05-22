@@ -653,6 +653,14 @@ $$\text{DiffAttn}(X) = \left(\text{softmax}\!\left(\frac{Q_1 K_1^\top}{\sqrt{d_h
 
 **Predictive coding loss** (deep supervision): layer $l$ predicts layer $l+1$'s hidden state via a small MLP head. Loss is averaged across layers and added to $\mathcal{L}$ with weight $w_\text{pred\_coding} = 0.1$.
 
+**Dropout regularization** (`cfg.dropout`, default `0.1`; `0.0` = legacy no-dropout): GPT-2-scale dropout applied at three points to narrow the train→OOD (WikiText) perplexity gap for the 100M-param model on a limited data mix —
+
+- **Embedding dropout** after `tok_emb` (`LanguageCortex.emb_drop`),
+- **Per-block dropout** in the standard `TransformerBlock` — attention via SDPA `dropout_p` (and on the manual Hebbian path), plus residual dropout on the attention-output and MLP-output projections (`CausalSelfAttention.resid_drop`, `TransformerBlock.mlp_drop`),
+- **Pre-head dropout** after `norm_f` and before the LM head (`LanguageCortex.head_drop`).
+
+All are `nn.Identity` when `dropout == 0`, so they add **no** `state_dict` keys — existing dropout-free checkpoints load unchanged. The DiffAttn/MoD blocks (2/3 of full-model layers) are covered by the embedding + pre-head dropout; the `--baseline` ablation uses only `TransformerBlock`s, so it gets full GPT-style per-block dropout. Disabled automatically in `eval()`, so inference and the OOD perplexity harness are deterministic.
+
 ### 4.2 Expert Cortices
 
 > **SRC-TEH note.** Under `cfg.enable_src_teh=True` both `MathCortex` and
@@ -1370,10 +1378,12 @@ All patches are no-ops in pure-fp32 training and add only a single conditional d
 
 Two optimizer paths are wired via `--optimizer {adafactor,adamw}`:
 
+Both paths receive **decoupled weight-decay param groups** built by `train.py :: build_param_groups` when `cfg.decoupled_wd=True` (default): weight decay applies only to 2-D matrices (Linear / embedding weights); 1-D params (RMSNorm gains, biases, NT levels/vesicles) are exempt with `weight_decay=0.0`. Decaying norms/biases pulls normalizer scales toward zero and is a known generalization regression. Pass `--no_decoupled_wd` for the legacy single-group behavior.
+
 **Adafactor** (default, TPU-native, `transformers.optimization.Adafactor`):
 
 ```python
-Adafactor(model_params,
+Adafactor(param_groups,                 # build_param_groups(named, wd, decoupled)
           lr=None,
           scale_parameter=True,
           relative_step=True,
@@ -1386,14 +1396,18 @@ Factor-wise second moment estimation — ~4–8× less optimizer memory than Ada
 **AdamW** (`--optimizer adamw`, recommended for short ablations and CUDA debugging):
 
 ```python
-AdamW(model_params, lr=cfg.lr, weight_decay=cfg.weight_decay, betas=(0.9, 0.95))
+AdamW(param_groups, lr=cfg.lr, weight_decay=cfg.weight_decay, betas=(0.9, 0.95))
 ```
 
-with cosine warmup+decay schedule from `train.py :: cosine_lr` over `cfg.warmup_steps` (default 200) → `total_steps`.
+with cosine warmup+decay schedule from `train.py :: cosine_lr`.
 
 **Choose AdamW for any run shorter than ~10K steps.** Adafactor's `warmup_init` schedule keeps the effective LR near $10^{-4}$ for the first ~1000 steps; a 1000-step xl ablation never reaches a learning LR under Adafactor.
 
-The cosine LR override (`pg["lr"] = cosine_lr(...)`) only runs when `args.optimizer != "adafactor"`. With Adafactor, the optimizer manages its own LR internally and the train-loop override is bypassed.
+The cosine LR override (`pg["lr"] = cosine_lr(...) * pg.get("lr_scale", 1.0)`) only runs when `args.optimizer != "adafactor"`. With Adafactor, the optimizer manages its own LR internally and the train-loop override is bypassed.
+
+**LR-decay horizon (OOD-critical):** `cosine_lr(step, warmup, total, peak, min_ratio)` linearly warms up over `cfg.warmup_steps`, then cosine-decays to `peak · min_ratio` by step `total`. Crucially `total` is the **decay horizon** — `cfg.lr_decay_steps or args.steps` — not necessarily the run length. With the old behavior (`total = --steps = 100000`) a run stopped at step 10k still has its LR at **~98% of peak**: the model never sees the annealing phase that produces the largest perplexity (and OOD) drop. For a run you intend to stop and evaluate at 10k, set `--lr_decay_steps 10000` (or `--steps 10000`) so the LR actually anneals to the floor `peak · cfg.min_lr_ratio` (default `min_lr_ratio=0.1`).
+
+**Label smoothing:** `cfg.label_smoothing` (default `0.0` = off) feeds `F.cross_entropy(label_smoothing=…)` inside `Brain._chunked_ce`. Available for calibration runs; left off by default because it inflates raw perplexity (the headline metric).
 
 **Per-step gradient norm** is computed by `clip_grad_norm_(parameters, cfg.grad_clip)` (default `grad_clip=1.0`) and logged as the running average `gnorm` in every step line. Healthy range during learning is roughly 0.5–5.0; a sustained value pinned at 1.0 means the clip is dominating.
 
@@ -1489,10 +1503,25 @@ All presets share the same module topology (`neural_topology="full"`). Differenc
 **Default `BrainConfig` values** (apply to every preset unless overridden):
 
 ```python
-lr            = 3e-4
-weight_decay  = 0.01
-warmup_steps  = 200
-grad_clip     = 1.0
+lr             = 3e-4
+weight_decay   = 0.01
+warmup_steps   = 200
+grad_clip      = 1.0
+# Generalization / OOD knobs (see §7.4)
+dropout        = 0.1     # embedding + standard-block + pre-head dropout
+decoupled_wd   = True    # decay 2-D matrices only; exempt norms/biases/NT
+lr_decay_steps = 0       # 0 → cosine horizon = --steps; set to your stop step
+min_lr_ratio   = 0.1     # cosine floor as a fraction of peak LR
+label_smoothing = 0.0    # off (inflates raw perplexity)
+```
+
+**`large`-specific overrides** (the 100M T4 preset — the OOD checkpoint stream):
+
+```python
+lr            = 2.5e-4   # overrides default 3e-4
+warmup_steps  = 500      # overrides default 200
+weight_decay  = 0.05     # overrides default 0.01 (decoupled → 2-D matrices only)
+dropout       = 0.1      # GPT-scale regularization (narrows train→WikiText gap)
 ```
 
 **xl-specific flags** (the primary research preset, overrides defaults):

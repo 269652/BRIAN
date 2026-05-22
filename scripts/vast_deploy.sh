@@ -18,6 +18,9 @@
 # Re-run:    bash scripts/vast_deploy.sh             # keep healthy, replace stuck
 #            bash scripts/vast_deploy.sh --recreate  # destroy ALL + redeploy
 #                                                      (picks up a new git push)
+#            bash scripts/vast_deploy.sh --fresh     # wipe ALL checkpoints +
+#                                                      redeploy from step 0
+#                                                      (use after a config change)
 # To stop:   bash scripts/vast_deploy.sh --destroy   # tear everything down
 # ─────────────────────────────────────────────────────────────────────────
 set -uo pipefail
@@ -184,6 +187,7 @@ vastai set api-key "$VAST_API_KEY" >/dev/null
 #                        cleaned LFS state). Optional.
 RECREATE_ROLES=""
 BEST_STEP=""
+FRESH=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --destroy)
@@ -198,14 +202,33 @@ while [ $# -gt 0 ]; do
     --recreate-baseline) RECREATE_ROLES="${RECREATE_ROLES} baseline"; shift ;;
     --best-step)         BEST_STEP="${2:?--best-step requires a number}"; shift 2 ;;
     --best-step=*)       BEST_STEP="${1#--best-step=}"; shift ;;
+    # --fresh: wipe checkpoints + redeploy from step 0 (train from scratch
+    # with a new config instead of inheriting old weights + optimizer state).
+    # Targets whichever roles are selected by --recreate* flags; if none are
+    # given it defaults to BOTH roles (see the post-parse block below). So
+    # `--fresh --recreate-full` does a fresh start of ONLY the full role.
+    --fresh)             FRESH=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
 # Dedupe RECREATE_ROLES tokens (allow `--recreate-full --recreate-baseline`)
 RECREATE_ROLES="$(printf '%s\n' $RECREATE_ROLES | awk '!seen[$0]++' | tr '\n' ' ')"
 RECREATE_ROLES="${RECREATE_ROLES% }"
+# --fresh with no explicit role flag → both roles (back-compat default).
+if [ "$FRESH" = "1" ] && [ -z "$RECREATE_ROLES" ]; then
+  RECREATE_ROLES="full baseline"
+fi
 if [ -n "$RECREATE_ROLES" ]; then
   echo "── recreate roles: ${RECREATE_ROLES} ──"
+fi
+
+# --fresh wipes EVERY step-numbered checkpoint for the recreated roles so a
+# crash-restart's `--resume latest` can't pick up a stale high-step file.
+# Implemented by reusing the prune+push path with max-step -1 (deletes all
+# step > -1). The instances then bootstrap with FRESH=1 → train from step 0.
+if [ "$FRESH" = "1" ] && [ -z "$BEST_STEP" ]; then
+  echo "── --fresh: wiping ALL checkpoints for roles: ${RECREATE_ROLES} ──"
+  BEST_STEP=-1
 fi
 
 # ── Optional: prune > best-step from the role(s) being recreated ────────
@@ -373,7 +396,7 @@ echo "── launching ${role} training (live below; also in /workspace/train_${
 # this runs; when it finishes (STEPS reached) the box idles until destroyed.
 PRESET='${PRESET}' STEPS='${STEPS}' BATCH='${BATCH}' GRAD_ACCUM='${GRAD_ACCUM}' \
   OPT=adamw SAVE_EVERY='${SAVE_EVERY}' LOG_EVERY='${LOG_EVERY}' \
-  CKPT_DIR='${ckpt_dir}' EXTRA_ARGS='${extra}' \
+  CKPT_DIR='${ckpt_dir}' EXTRA_ARGS='${extra}' FRESH='${FRESH}' \
   bash scripts/vast_train_loop.sh 2>&1 | tee /workspace/train_${role}.log
 ONSTART
 }
