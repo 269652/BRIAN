@@ -790,22 +790,31 @@ class Brain(nn.Module):
         from .neurochem.transmitters import compute_mat, L_RANDOM_DEFAULT
         l_random = l_random if l_random is not None else L_RANDOM_DEFAULT
         m_now = compute_mat(lm_loss, l_random)
-        alpha = self._maturity_ema_alpha
         cur = float(self.maturity.item())
+
+        # ── Asymmetric maturity EMA (fix B, revised) ─────────────────────
+        # Rise quickly, fall slowly. A transient lm_loss spike barely dents
+        # MAT (so the MAT-gated aux weight + pruning thresholds don't whipsaw
+        # and amplify a single bad batch), yet a SUSTAINED regression still
+        # lowers MAT — preserving the maturity-fall "recovery valve" that lets
+        # the aux objectives disengage so the model can refocus on the LM.
+        # (A hard monotonic ratchet removed that valve and made a collapse
+        #  unrecoverable, so it is opt-in only.)
+        alpha_up = float(getattr(self.cfg, 'maturity_ema_alpha',
+                                 self._maturity_ema_alpha))
+        alpha_dn = float(getattr(self.cfg, 'maturity_fall_alpha', alpha_up))
+        alpha = alpha_up if m_now >= cur else alpha_dn
         m_ema = (1.0 - alpha) * cur + alpha * m_now
 
-        # ── Maturity ratchet (fix B) ─────────────────────────────────────
-        # Once the high-water mark crosses the awakening floor, MAT is
-        # monotonic non-decreasing. This breaks the self-amplifying collapse:
-        # a transient lm_loss spike no longer unwinds maturity (and with it
-        # the MAT-gated aux weights + pruning thresholds), which previously
-        # turned a single bad batch into a sustained divergence.
-        if getattr(self.cfg, 'maturity_ratchet', True):
+        if getattr(self.cfg, 'maturity_ratchet', False):
             hwm = getattr(self, '_maturity_hwm', 0.0)
             floor = float(getattr(self.cfg, 'maturity_awaken_floor', 0.3))
             if hwm >= floor:
                 m_ema = max(m_ema, hwm)
             self._maturity_hwm = max(hwm, m_ema)
+        else:
+            # Keep the high-water mark current (used by the pruning freeze, C).
+            self._maturity_hwm = max(getattr(self, '_maturity_hwm', 0.0), m_ema)
 
         self.maturity.fill_(m_ema)
         self._infancy = bool(m_ema < 0.3)
@@ -1043,6 +1052,19 @@ class Brain(nn.Module):
             if self.latent_program_bus is not None:
                 _summary = h_post.mean(dim=1)                  # (B, d_hidden)
                 self.latent_program_bus.write(_summary.detach())
+
+        # ── Trunk gradient isolation (architectural stabilization) ──────────
+        # Hand the bio/cognitive pipeline a STOP-GRADIENT copy of the trunk's
+        # semantic output. From here on, every module (phase_attn, htm,
+        # sensory, association, GWS, world, self, pfc, motor, Φ, cpc, …) and
+        # its auxiliary loss reads a FIXED representation: gradients train the
+        # modules but cannot flow back into the language trunk. The trunk is
+        # left to converge under the LM loss alone (logits come from `h_post`,
+        # not `sem`), exactly like the stable infancy phase — eliminating the
+        # backward path by which random-init aux heads corrupt the trunk and
+        # drive the post-awakening divergence. Forward couplings are intact.
+        if getattr(cfg, 'detach_trunk_from_aux', False):
+            sem = sem.detach()
 
         # Novel: phase-coded attention + HTM temporal structure on language output
         novel_aux_loss = torch.tensor(0.0, device=device)

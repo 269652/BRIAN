@@ -1,22 +1,25 @@
-"""Tests for the post-awakening convergence / stabilization fixes (A–D).
+"""Tests for the convergence / stabilization mechanics.
 
-Background: a fresh full run reached PPL ~60 (below the baseline) around step
-7k, then DIVERGED in the second half — a gnorm spike triggered a
-self-amplifying collapse (lm_loss↑ → maturity↓ → aux-gate/pruning shift →
-bigger perturbation → lm_loss↑), ending at PPL ~154. These four fixes target
-the control loop, not the LM architecture:
+A fresh full run reached PPL ~60 (below baseline) at step ~7k then DIVERGED to
+PPL ~154 (run 1); engaging the aux losses harder/earlier diverged at ~step 2k
+with gnorm pinned ~14 (run 2). Root cause: the auxiliary-loss gradients flow
+back into the SHARED LM trunk and corrupt the representation the LM head
+depends on. Fixes, in order of importance:
 
-  A. aux_ramp_fraction — fixed-length, horizon-independent aux-loss ramp
-     (the old `steps_ramped/(total-step)` form blew up in the final ~10%).
-  B. maturity ratchet — MAT is monotonic non-decreasing post-awakening, so a
-     loss spike can't unwind the control state.
-  C. freeze pruning after maturation — no projection pruning once mature.
-  D. grad-spike rejection — skip the optimizer step on a gnorm spike.
+  PRIMARY — trunk gradient isolation: the bio/cognitive modules read a
+    stop-gradient copy of the trunk's `sem`, so aux losses train their own
+    modules but cannot reshape the LM trunk. (detach_trunk_from_aux)
+  A. maturity-gated aux weight (maturity_aux_gate): aux strengthens only as
+     the LM matures, and backs off if it regresses. Secondary guard.
+  B. asymmetric maturity EMA: rise fast, fall slow (damped) — no whipsaw but
+     keeps the maturity-fall recovery valve. Hard ratchet is opt-in.
+  C. freeze structural pruning post-maturation.
+  D. gradient-spike rejection.
 """
 from __future__ import annotations
 import torch
 
-from neuroslm.train import aux_ramp_fraction
+from neuroslm.train import maturity_aux_gate
 from neuroslm.xla_utils import optimizer_step
 from neuroslm.config import tiny, large, BrainConfig
 from neuroslm.brain import Brain
@@ -28,63 +31,95 @@ def _tiny() -> BrainConfig:
     return c
 
 
-# ── A. Auxiliary-loss ramp ──────────────────────────────────────────────────
+# ── PRIMARY: trunk gradient isolation ───────────────────────────────────────
 
-def test_aux_ramp_is_linear_over_window():
-    assert aux_ramp_fraction(1000, 1000, 2000) == 0.0      # at start
-    assert aux_ramp_fraction(2000, 1000, 2000) == 0.5      # halfway
-    assert aux_ramp_fraction(3000, 1000, 2000) == 1.0      # full
-    assert aux_ramp_fraction(9999, 1000, 2000) == 1.0      # clamped past window
-
-
-def test_aux_ramp_is_horizon_independent():
-    """The core fix: the ramp depends only on (step - start) and window length,
-    NOT on the training horizon — so it can't blow up near total_steps."""
-    # Same step/start/window must give the same fraction regardless of how
-    # long the run is. (The old form divided by (total_steps - step).)
-    f = aux_ramp_fraction(2500, 1000, 2000)
-    assert f == aux_ramp_fraction(2500, 1000, 2000)
-    assert 0.0 < f < 1.0
-    # Never exceeds 1.0 even deep into a long run.
-    assert aux_ramp_fraction(95000, 1000, 2000) == 1.0
+def _trunk_grad(detach: bool, w_world: float):
+    c = _tiny()
+    c.detach_trunk_from_aux = detach
+    c.w_world = w_world
+    torch.manual_seed(0); b = Brain(c); b.train()
+    ids = torch.randint(0, 256, (2, 16))
+    tgt = torch.randint(0, 256, (2, 16))
+    torch.manual_seed(1)
+    b.zero_grad()
+    b.forward_lm(ids, tgt)["loss"].backward()
+    g = b.language.tok_emb.weight.grad
+    return None if g is None else g.detach().clone()
 
 
-def test_aux_ramp_safe_before_start():
-    assert aux_ramp_fraction(500, None, 2000) == 0.0
-    assert aux_ramp_fraction(500, 1000, 2000) == 0.0       # step < start
-    assert aux_ramp_fraction(5000, 1000, 0) == 0.0         # degenerate window
+def test_trunk_isolation_makes_trunk_grad_invariant_to_aux_weight():
+    """With isolation ON, scaling an auxiliary loss must NOT change the LM
+    trunk's gradient — proof that aux gradients can't reshape the trunk."""
+    g_lo = _trunk_grad(detach=True, w_world=0.3)
+    g_hi = _trunk_grad(detach=True, w_world=50.0)
+    assert g_lo is not None and torch.isfinite(g_lo).all()
+    assert torch.allclose(g_lo, g_hi, atol=1e-6)
 
 
-# ── B. Maturity ratchet ─────────────────────────────────────────────────────
-
-def test_maturity_ratchet_holds_through_loss_spike():
-    c = _tiny(); c.maturity_ratchet = True
-    torch.manual_seed(0); b = Brain(c)
-    b._maturity_ema_alpha = 1.0   # disable smoothing to isolate the ratchet
-    m_good = b.update_maturity(2.0)    # low loss → high MAT (awakened)
-    m_spike = b.update_maturity(9.5)   # loss spike → would normally drop MAT
-    assert m_good > c.maturity_awaken_floor
-    assert m_spike >= m_good, "ratchet must prevent MAT from falling post-awakening"
+def test_without_isolation_aux_weight_reshapes_trunk():
+    """With isolation OFF (legacy), the aux weight DOES change the trunk
+    gradient — the backward path that drove the divergence."""
+    g_lo = _trunk_grad(detach=False, w_world=0.3)
+    g_hi = _trunk_grad(detach=False, w_world=50.0)
+    assert not torch.allclose(g_lo, g_hi, atol=1e-6)
 
 
-def test_maturity_can_fall_when_ratchet_disabled():
+def test_trunk_still_trains_under_lm_loss_with_isolation():
+    """Isolation must not starve the trunk — the LM loss still trains it."""
+    g = _trunk_grad(detach=True, w_world=0.3)
+    assert g is not None and g.abs().sum() > 0
+
+
+# ── A. Maturity-gated aux weight ────────────────────────────────────────────
+
+def test_maturity_aux_gate_ramps_between_lo_and_hi():
+    assert maturity_aux_gate(0.40, 0.50, 0.65) == 0.0      # below lo
+    assert maturity_aux_gate(0.50, 0.50, 0.65) == 0.0      # at lo
+    assert abs(maturity_aux_gate(0.575, 0.50, 0.65) - 0.5) < 1e-6  # midpoint
+    assert maturity_aux_gate(0.65, 0.50, 0.65) == 1.0      # at hi
+    assert maturity_aux_gate(0.90, 0.50, 0.65) == 1.0      # above hi
+
+
+def test_maturity_aux_gate_is_self_correcting():
+    """If the LM regresses (MAT drops back below lo) the gate closes again."""
+    hi = maturity_aux_gate(0.64, 0.50, 0.65)
+    regressed = maturity_aux_gate(0.45, 0.50, 0.65)
+    assert hi > 0 and regressed == 0.0
+
+
+def test_maturity_aux_gate_degenerate_window():
+    assert maturity_aux_gate(0.7, 0.6, 0.6) == 1.0
+    assert maturity_aux_gate(0.5, 0.6, 0.6) == 0.0
+
+
+# ── B. Asymmetric maturity EMA ──────────────────────────────────────────────
+
+def test_maturity_falls_slower_than_it_rises():
+    """For SYMMETRIC moves around a mid MAT, the downward step must be more
+    damped than the upward one — so a loss spike barely dents MAT (no
+    whipsaw) while the maturity-fall recovery valve is still present."""
+    from neuroslm.neurochem.transmitters import L_RANDOM_DEFAULT as L
     c = _tiny(); c.maturity_ratchet = False
+    c.maturity_ema_alpha = 0.5; c.maturity_fall_alpha = 0.02
     torch.manual_seed(0); b = Brain(c)
-    b._maturity_ema_alpha = 1.0
+    loss_up = (1.0 - 0.70) * L   # → m_now ≈ 0.70 (gap +0.20 from 0.5)
+    loss_dn = (1.0 - 0.30) * L   # → m_now ≈ 0.30 (gap −0.20 from 0.5)
+    b.maturity.fill_(0.5); rise = b.update_maturity(loss_up) - 0.5
+    b.maturity.fill_(0.5); fall = 0.5 - b.update_maturity(loss_dn)
+    assert rise > 0 and fall > 0
+    assert fall < rise, "equal-magnitude fall must be more damped than the rise"
+
+
+def test_maturity_ratchet_opt_in_holds_through_spike():
+    c = _tiny(); c.maturity_ratchet = True; c.maturity_ema_alpha = 1.0
+    torch.manual_seed(0); b = Brain(c)
     m_good = b.update_maturity(2.0)
     m_spike = b.update_maturity(9.5)
-    assert m_spike < m_good, "without ratchet, a loss spike unwinds MAT (the bug)"
+    assert m_spike >= m_good
 
 
-def test_maturity_ratchet_inactive_below_awaken_floor():
-    """Before the high-water mark crosses the floor, MAT tracks freely (so a
-    bad-init early model isn't locked at a spuriously high value)."""
-    c = _tiny(); c.maturity_ratchet = True; c.maturity_awaken_floor = 0.9
-    torch.manual_seed(0); b = Brain(c)
-    b._maturity_ema_alpha = 1.0
-    m1 = b.update_maturity(7.0)   # MAT ~0.35, below the 0.9 floor
-    m2 = b.update_maturity(9.5)   # can still fall (floor not reached)
-    assert m2 < m1
+def test_maturity_ratchet_off_by_default():
+    assert BrainConfig().maturity_ratchet is False
 
 
 # ── C. Freeze pruning after maturation ──────────────────────────────────────
@@ -93,12 +128,10 @@ def test_pruning_latches_off_after_maturation():
     c = _tiny()
     c.freeze_pruning_after_maturation = True
     c.prune_freeze_mat = 0.6
+    c.maturity_ema_alpha = 1.0
     torch.manual_seed(0); b = Brain(c)
-    b._maturity_ema_alpha = 1.0
-    # Push maturity high-water mark above the freeze threshold.
-    b.update_maturity(2.0)   # MAT ~0.81 ≥ 0.6
+    b.update_maturity(2.0)   # MAT ~0.81 ≥ 0.6 → hwm crosses freeze threshold
     assert getattr(b, "_maturity_hwm", 0.0) >= c.prune_freeze_mat
-    # A forward pass with targets runs the trophic block, which should latch.
     ids = torch.randint(0, 256, (1, 16))
     tgt = torch.randint(0, 256, (1, 16))
     b.eval()
@@ -111,26 +144,23 @@ def test_pruning_latches_off_after_maturation():
 
 def _one_param_opt():
     lin = torch.nn.Linear(4, 4)
-    opt = torch.optim.SGD(lin.parameters(), lr=1.0)
-    return lin, opt
+    return lin, torch.optim.SGD(lin.parameters(), lr=1.0)
 
 
 def test_grad_spike_is_skipped():
     lin, opt = _one_param_opt()
     w0 = lin.weight.detach().clone()
-    lin.weight.grad = torch.ones_like(lin.weight) * 100.0  # spike
+    lin.weight.grad = torch.ones_like(lin.weight) * 100.0
     gnorm = optimizer_step(opt, lin.parameters(), max_norm=1.0, skip_threshold=5.0)
-    assert gnorm > 5.0
-    assert torch.allclose(lin.weight.detach(), w0), "spiked step must be skipped"
+    assert gnorm > 5.0 and torch.allclose(lin.weight.detach(), w0)
 
 
 def test_normal_grad_steps_through():
     lin, opt = _one_param_opt()
     w0 = lin.weight.detach().clone()
     lin.weight.grad = torch.ones_like(lin.weight) * 0.1
-    gnorm = optimizer_step(opt, lin.parameters(), max_norm=1.0, skip_threshold=5.0)
-    assert gnorm <= 5.0
-    assert not torch.allclose(lin.weight.detach(), w0), "normal step must apply"
+    optimizer_step(opt, lin.parameters(), max_norm=1.0, skip_threshold=5.0)
+    assert not torch.allclose(lin.weight.detach(), w0)
 
 
 def test_skip_threshold_none_always_steps():
@@ -138,24 +168,22 @@ def test_skip_threshold_none_always_steps():
     w0 = lin.weight.detach().clone()
     lin.weight.grad = torch.ones_like(lin.weight) * 100.0
     optimizer_step(opt, lin.parameters(), max_norm=1.0, skip_threshold=None)
-    assert not torch.allclose(lin.weight.detach(), w0), "no threshold → always steps"
+    assert not torch.allclose(lin.weight.detach(), w0)
 
 
 # ── Config defaults ─────────────────────────────────────────────────────────
 
-def test_stabilization_defaults():
+def test_convergence_defaults():
     c = BrainConfig()
-    assert c.aux_ramp_steps == 2000
-    assert c.maturity_ratchet is True
-    assert c.maturity_awaken_floor == 0.3
+    assert c.detach_trunk_from_aux is True
+    assert c.aux_gate_mat_lo == 0.50 and c.aux_gate_mat_hi == 0.65
+    assert c.maturity_ratchet is False
+    assert c.maturity_fall_alpha == 0.01
     assert c.freeze_pruning_after_maturation is True
-    assert c.prune_freeze_mat == 0.6
     assert c.grad_spike_factor == 3.0
-    assert c.grad_spike_warmup == 100
 
 
-def test_large_preset_inherits_stabilization_defaults():
+def test_large_preset_inherits_convergence_defaults():
     c = large()
-    assert c.maturity_ratchet is True
+    assert c.detach_trunk_from_aux is True
     assert c.freeze_pruning_after_maturation is True
-    assert c.grad_spike_factor == 3.0

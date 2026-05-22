@@ -123,21 +123,22 @@ def cosine_lr(step: int, warmup: int, total: int, peak: float,
     return peak * (min_ratio + (1.0 - min_ratio) * cos)
 
 
-def aux_ramp_fraction(step: int, ramp_start_step: int, ramp_steps: int) -> float:
-    """Auxiliary-loss ramp fraction in [0, 1] (fix A).
+def maturity_aux_gate(maturity: float, lo: float, hi: float) -> float:
+    """Maturity-gated auxiliary-loss weight in [0, 1] (fix A, revised).
 
-    A fixed-length linear ramp over `ramp_steps` measured from
-    `ramp_start_step` — deliberately independent of the training horizon.
+    aux scale = 0 below `lo`, ramps linearly to 1 at `hi`. Ties auxiliary-
+    objective strength to the LM maturity index (MAT = 1 − lm_loss/L_random),
+    so aux losses only gain weight once the LM is genuinely good (e.g. MAT
+    0.50≈PPL220 → 0.65≈PPL50). This is self-correcting: if the LM regresses,
+    MAT falls and the gate closes, letting the model refocus on LM.
 
-    Replaces the old `steps_ramped / (total_steps - step)` form, whose
-    denominator shrank toward 0 as the run approached `total_steps`, slamming
-    every auxiliary loss to full weight in the final ~10% of training and
-    triggering the observed post-awakening divergence. Here, doubling the
-    horizon does not change the ramp.
+    Replaces step-schedule ramps, which either blew up late (denominator → 0)
+    or, when fixed-length, slammed aux to full by ~step 2.5k and overwhelmed
+    the still-immature LM (observed early divergence).
     """
-    if ramp_start_step is None or ramp_steps <= 0:
-        return 0.0
-    return min(1.0, max(0.0, (step - ramp_start_step) / ramp_steps))
+    if hi <= lo:
+        return 1.0 if maturity >= hi else 0.0
+    return min(1.0, max(0.0, (maturity - lo) / (hi - lo)))
 
 
 def build_param_groups(named_params, weight_decay: float, decoupled: bool):
@@ -1004,23 +1005,17 @@ def main():
             else:
                 _loss_below_threshold_count = 0
 
-            # Once sustained below threshold, ramp auxiliary weights linearly
-            if _loss_below_threshold_count >= _loss_ramp_window:
-                if not _ramp_started:
-                    _ramp_started = True
-                    _ramp_start_step = step   # anchor the fixed-length ramp
-
-            if _ramp_started:
-                # (fix A) Fixed-length ramp 0.001 → target over a constant
-                # `aux_ramp_steps` window from the ramp start (horizon-
-                # independent). See aux_ramp_fraction for why the old
-                # shrinking-denominator form caused the post-awakening
-                # divergence.
-                _aux_ramp = aux_ramp_fraction(
-                    step, _ramp_start_step,
-                    max(1, int(getattr(cfg, 'aux_ramp_steps', 2000))))
-            else:
-                _aux_ramp = 0.0
+            # (fix A, revised) Maturity-GATED aux weight: aux strengthens only
+            # as the LM genuinely matures (MAT lo→hi), and backs off
+            # automatically if the LM regresses (MAT falls). Self-correcting,
+            # so it can't slam aux to full on an immature LM the way a step
+            # schedule did.
+            _mat_now = (brain.maturity_scalar()
+                        if hasattr(brain, 'maturity_scalar') else 0.0)
+            _aux_ramp = maturity_aux_gate(
+                _mat_now,
+                float(getattr(cfg, 'aux_gate_mat_lo', 0.50)),
+                float(getattr(cfg, 'aux_gate_mat_hi', 0.65)))
         else:
             # Pre-awakening: auxiliary weights pinned at 0.001
             _aux_ramp = 0.0

@@ -956,11 +956,71 @@ control-dynamics bug, **not** an LM-architecture flaw.
 | **C** | Freeze structural pruning post-maturation (latched off once MAT-hwm ≥ threshold) | `freeze_pruning_after_maturation=True`, `prune_freeze_mat=0.6` | Capacity removed at peak performance |
 | **D** | Gradient-spike rejection — skip the step when gnorm > k·EMA(gnorm) | `grad_spike_factor=3.0`, `grad_spike_warmup=100` | A single spiked batch kicking off divergence |
 
-A is in `train.py :: aux_ramp_fraction` (used in the main loop); B in
-`Brain.update_maturity` (`brain.py`); C in the `trophic.update` gate in
-`Brain.forward_lm`; D in `xla_utils.optimizer_step(skip_threshold=…)`, wired
-through the train loop's gnorm EMA. Together they target every arrow in the
-loop above so the model **converges after awakening instead of diverging**.
+> **Update — these control-loop fixes were a partial / wrong diagnosis.**
+> Deployed, they made things *worse*: front-loading the aux ramp (A, fixed-
+> length) drove every aux loss to full strength by ~step 2.5k and the model
+> diverged at gnorm ~14; the hard maturity ratchet (B) removed the recovery
+> path. A revised, milder form is retained as defense-in-depth — A is now a
+> **maturity-gated** aux weight (`train.py :: maturity_aux_gate`: aux scales
+> with MAT, self-correcting), B is an **asymmetric maturity EMA** (rise fast,
+> fall slow; hard ratchet opt-in). C (`trophic.update` gate) and D
+> (`xla_utils.optimizer_step(skip_threshold=…)`) are kept as-is. But the
+> actual root cause and fix are in **§5.2** — these are now secondary.
+
+---
+
+### 5.2 Trunk Gradient Isolation — the root convergence fix
+
+The control-loop view above asked *when* to let auxiliary gradients into the
+shared trunk. The deeper realization: **they should not flow into the trunk at
+all.** Watch the gradient norm, not the loss — LM-only it is ~1.5; the instant
+the aux losses engage it jumps to ~14, and engaging them harder/earlier
+diverges *faster*. The auxiliary gradient *is* the destabilizer.
+
+**Why.** Forward, the trunk feeds many bio modules; backward, every module's
+loss dumps gradient into the *same* `sem`/`h`:
+
+```
+   ∂L_lm/∂h  ─┐
+ ∂L_world/∂h ─┤
+ ∂L_motor/∂h ─┼──►  Σ  reshapes the SHARED trunk
+   ∂L_phi/∂h ─┤
+   ∂L_aux/∂h ─┘
+```
+
+The aux heads are randomly initialized, so reading a meaningful `sem` they
+emit large, ~random gradients — *"reshape the trunk to suit me"* — ~10× the LM
+gradient and uncorrelated with language. They corrupt the representation the
+LM head depends on → L_lm rises → the (still-random) aux heads keep pushing →
+divergence. The infancy phase is stable *precisely because* aux gradients are
+pinned near zero.
+
+**Fix (`cfg.detach_trunk_from_aux`, default ON).** One stop-gradient: the bio
+pipeline reads `sem.detach()`. Gradient flow becomes a strict hierarchy:
+
+```
+        ┌──────────────► lm_head ─► L_lm ──► ∂/∂trunk   (the ONLY thing
+trunk h ┤                                                 shaping the trunk)
+        └──[ detach ]──► sem* ─► world/motor/GWS/Φ/… ─► L_aux ─► ∂/∂modules only
+```
+
+- **Trunk** ← LM loss only (+ its own deep-supervision `pred_coding`) →
+  converges like the stable infancy phase, indefinitely. Divergence via the
+  aux path is now structurally impossible.
+- **Bio modules** ← their own losses, *reading* a fixed representation instead
+  of vandalizing it. Integration (the Φ objective) is achieved in **module
+  space** — Φ shapes how modules transform the trunk features, not the trunk —
+  which is also more biologically faithful (sensory cortex is shaped by
+  sensory statistics; association/PFC read it).
+
+Only the aux-loss *gradient* into the trunk is cut; forward couplings (motor
+bias, RETRO memory-xattn, `from_sem` thought conditioning) are unchanged. The
+expert/MoD path stays trunk-coupled because it *produces the logits* (LM-
+driven, stable). Implemented as a single `sem = sem.detach()` in
+`Brain.forward_lm`. Verified: with isolation on, the trunk's gradient is
+invariant to the auxiliary loss weights (`tests/test_stabilization.py`); the Φ
+objective still changes the loss but no longer touches the trunk
+(`tests/test_brain_forward.py`).
 
 ---
 

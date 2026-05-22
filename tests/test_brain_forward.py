@@ -78,29 +78,35 @@ def test_backward_succeeds():
     assert math.isfinite(g)
 
 
-def test_phi_objective_increases_total_gradient():
-    """Enabling Φ objective must inject extra gradient into the language
-    cortex (proves the loss term participates in backward)."""
+def test_phi_objective_trains_modules_not_trunk():
+    """Φ objective must participate in backward — but with trunk gradient
+    isolation (cfg.detach_trunk_from_aux, default ON) it injects that extra
+    gradient into the BIO modules (shaping how they integrate), NOT into the
+    language trunk. The trunk is shaped by the LM loss alone. This is the
+    architectural fix for the post-awakening divergence: aux objectives no
+    longer reshape the representation the LM depends on."""
     ids = torch.randint(0, 256, (1, 16))
     tgt = torch.randint(0, 256, (1, 16))
 
-    cfg_on = tiny(); cfg_on.vocab_size = 256
-    cfg_on.enable_phi_objective = True
-    cfg_on.w_phi = 1.0
-    torch.manual_seed(0); b1 = Brain(cfg_on); b1.eval()
-    out1 = b1.forward_lm(ids, tgt); out1["loss"].backward()
-    g1 = sum(p.grad.abs().sum().item() for p in b1.language.parameters()
-             if p.grad is not None)
+    def run(w_phi: float):
+        c = tiny(); c.vocab_size = 256
+        c.enable_phi_objective = w_phi > 0; c.w_phi = w_phi
+        torch.manual_seed(0); b = Brain(c); b.eval()
+        loss = b.forward_lm(ids, tgt)["loss"]
+        loss.backward()
+        lang = sum(p.grad.abs().sum().item() for p in b.language.parameters()
+                   if p.grad is not None)
+        return float(loss.item()), lang
 
-    cfg_off = tiny(); cfg_off.vocab_size = 256
-    cfg_off.enable_phi_objective = False
-    cfg_off.w_phi = 0.0
-    torch.manual_seed(0); b2 = Brain(cfg_off); b2.eval()
-    out2 = b2.forward_lm(ids, tgt); out2["loss"].backward()
-    g2 = sum(p.grad.abs().sum().item() for p in b2.language.parameters()
-             if p.grad is not None)
-
-    assert g1 > g2, f"phi must add gradient: with={g1} without={g2}"
+    loss_on, lang_on = run(1.0)
+    loss_off, lang_off = run(0.0)
+    # Φ participates in the objective (changes the total loss value)…
+    assert abs(loss_on - loss_off) > 1e-4, (
+        f"phi must affect the loss: {loss_on} vs {loss_off}")
+    # …but with trunk isolation it does NOT reach the language trunk: the
+    # trunk gradient is identical with and without Φ.
+    assert abs(lang_on - lang_off) < 1e-3, (
+        f"phi must NOT reshape the isolated trunk: {lang_on} vs {lang_off}")
 
 
 def test_consciousness_metrics_populated(brain):

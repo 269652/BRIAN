@@ -103,22 +103,48 @@ class BrainConfig:
     # smoothing can inflate raw perplexity). Available for calibration runs.
     label_smoothing: float = 0.0
 
+    # ---- Trunk gradient isolation (architectural convergence fix) ----
+    # Feed the bio/cognitive modules a STOP-GRADIENT copy of the trunk's
+    # semantic output `sem`. The LM trunk (language cortex) is then shaped
+    # ONLY by the LM loss (+ its own deep-supervision pred_coding) — the same
+    # clean regime as the stable infancy phase — while every auxiliary loss
+    # (world / self / motor / Φ / cpc / htm / ...) trains its own module
+    # reading a fixed representation, instead of pushing a large, random-init
+    # gradient back into the representation the LM depends on. That backward
+    # path is the root cause of the post-awakening divergence (gnorm jumped
+    # from ~1.5 LM-only to ~14 once aux engaged; engaging it harder/earlier
+    # diverged faster). Forward couplings (motor bias, memory-xattn, thought
+    # conditioning) are unchanged — only the aux-loss gradient into the trunk
+    # is cut. See docs/architecture.md §5.2.
+    detach_trunk_from_aux: bool = True
+
     # ---- Post-awakening convergence / stabilization ----
     # Fixes the second-half divergence where a gnorm spike triggered a
     # self-amplifying collapse (lm_loss↑ → maturity↓ → aux-gate/pruning shift
     # → bigger perturbation → lm_loss↑). See docs/architecture.md §5.1.
     #
-    # (A) Auxiliary-loss ramp length, in steps, measured FROM the awakening
-    #     ramp start — a fixed horizon-independent schedule. Replaces the old
-    #     `steps_ramped / (total_steps - step)` ramp whose denominator shrank
-    #     to ~0 near the end, slamming all aux losses to full weight in the
-    #     final ~10% of training (the proximate cause of the collapse).
-    aux_ramp_steps: int = 2000
-    # (B) Maturity ratchet: once maturity's high-water mark crosses
-    #     `maturity_awaken_floor`, the smoothed MAT is monotonic
-    #     non-decreasing, so a transient loss spike can no longer unwind the
-    #     control state (aux gates + pruning thresholds) and amplify itself.
-    maturity_ratchet: bool = True
+    # (A) Maturity-GATED auxiliary-loss weight. The master aux scale ramps
+    #     from ~0 → 1 as the maturity index climbs from `aux_gate_mat_lo` to
+    #     `aux_gate_mat_hi`, i.e. aux objectives only gain strength once the LM
+    #     is genuinely good (MAT 0.5≈PPL220, 0.65≈PPL50). This replaces a
+    #     step-schedule ramp: a step ramp either blew up late (denominator →0)
+    #     or, if made fixed-length, slammed aux to full by ~step 2.5k and
+    #     overwhelmed the still-immature LM (observed early divergence). Tying
+    #     aux strength to maturity is self-correcting — if the LM regresses,
+    #     MAT falls and aux automatically backs off.
+    aux_gate_mat_lo: float = 0.50
+    aux_gate_mat_hi: float = 0.65
+    # (B) Maturity dynamics. The smoothed MAT now uses an ASYMMETRIC EMA: it
+    #     rises at `maturity_ema_alpha` but falls at the slower
+    #     `maturity_fall_alpha`, so a transient loss spike barely dents it
+    #     (no whipsaw) while a SUSTAINED regression still lowers it — keeping
+    #     the maturity-fall "recovery valve" that lets aux disengage so the
+    #     model can refocus on LM. A hard ratchet (monotonic non-decreasing)
+    #     is available but OFF by default: it removed that recovery path and
+    #     made a collapse unrecoverable.
+    maturity_ema_alpha: float = 0.05
+    maturity_fall_alpha: float = 0.01
+    maturity_ratchet: bool = False
     maturity_awaken_floor: float = 0.3
     # (C) Freeze structural pruning once the model has matured. Mid/late-run
     #     pruning removes projection capacity right when the model is doing
