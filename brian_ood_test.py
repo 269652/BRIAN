@@ -117,6 +117,15 @@ def load_brain(ckpt_path: str, device: torch.device):
         _load_compatible(brain, sd, label=os.path.basename(ckpt_path))
     except Exception:
         brain.load_state_dict(sd, strict=False)
+    # ── Disable gradient checkpointing for eval (we're in no_grad anyway) ──
+    # Re-enabling the gradient_checkpointing path in train mode triggers
+    # `torch.utils.checkpoint.checkpoint(...)` which fails with AttributeError
+    # on some torch installs where the `checkpoint` submodule isn't auto-
+    # imported. Disabling it here is safe: we're in no_grad, so checkpointing
+    # gains nothing.
+    if hasattr(brain, 'language') and hasattr(brain.language, 'gradient_checkpointing'):
+        brain.language.gradient_checkpointing = False
+
     # ── DON'T set brain.eval() — keep train mode for forward consistency ───
     # eval() flips many bio-module forward paths (CALM, gradient-checkpointing
     # bypass, some homeostasis branches, plus possibly subtle interactions
