@@ -104,10 +104,14 @@ export DEBIAN_FRONTEND=noninteractive
 git lfs install || true
 export GITHUB='${GITHUB}' HF_TOKEN='${HF_TOKEN:-}'
 cd /workspace
-git clone https://x-access-token:\${GITHUB}@github.com/${REPO_SLUG}.git brian
+# Skip LFS smudge on clone — otherwise git auto-pulls EVERY tracked LFS file
+# (gigabytes of checkpoints) over a slow link before we even reach our
+# specific eval target. GIT_LFS_SKIP_SMUDGE leaves them as pointer files
+# until we explicitly pull only what we need.
+GIT_LFS_SKIP_SMUDGE=1 git clone https://x-access-token:\${GITHUB}@github.com/${REPO_SLUG}.git brian
 cd brian
-git checkout ${BRANCH}
-echo "── pulling LFS object: ${CKPT} ──"
+GIT_LFS_SKIP_SMUDGE=1 git checkout ${BRANCH}
+echo "── pulling ONLY LFS object: ${CKPT} ──"
 git lfs pull --include="${CKPT}"
 echo "── bootstrap (pip deps) ──"
 bash scripts/vast_bootstrap.sh
