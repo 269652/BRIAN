@@ -1081,6 +1081,59 @@ non-trivial), default ON for the `large` preset.
 
 ---
 
+### 5.4 Recursive Reasoning Cortex (depth-multiplied at constant params)
+
+The default `ReasoningCortex.forward_tokens` runs the token-level expert
+stack (`n_blocks` `TransformerBlock`s, e.g. 3) exactly once over a routed
+batch, then applies a Hopfield attractor cross-attention. For benchmarks
+that hinge on iterative inference (HellaSwag, ARC, multi-step LM continuation),
+adding *width* helps less than adding *depth-of-thought*. We add the latter
+without any new parameters:
+
+**Mechanism (`cfg.recursive_reasoning`, `cfg.recursive_iters`, default 4).**
+The expert ladder is looped `N` times **with weight-sharing** before the
+attractor stage, a Universal-Transformer-style refinement:
+
+```
+x_0 = routed_tokens                              # (B, C, d_hidden)
+for n in 1..N:
+    h = x_{n-1}
+    for blk in expert_blocks:                    # SAME blocks every iter
+        h = blk(h)
+    x_n = h
+y = AttractorBank(x_N)                           # then Hopfield retrieval
+```
+
+Effective reasoning depth becomes `N × n_blocks` (e.g. 4 × 3 = 12 layers of
+"thought" per token routed to this expert), with **zero added parameters**.
+Forward FLOPs scale linearly with `N`; throughput drops accordingly.
+
+**Composability.** The recursion lives entirely *inside* the routed expert
+path and feeds the bowtie / `thought_transformer` / `from_sem` chain. Under
+§5.2 (trunk gradient isolation) the modules' losses can't reshape the trunk,
+and under §5.3 (ReZero gates) the recursive output's influence on the LM
+forward is gated by the zero-init `λ_thought` — so LM gradient self-discovers
+whether the deepened reasoning actually helps next-token prediction. If it
+does, λ_thought rises; if not, the contribution stays small. Divergence
+through this path is structurally impossible.
+
+**Bootstrap.** Same as ReZero — at init the contribution is near zero
+(through `λ_thought=0` and zero-init projections), so the model behaves like
+the pure trunk + ReZero baseline. Recursion only starts paying off once the
+expert blocks have learned something through their own forward path under
+LM gradient.
+
+**Future work.** ACT-style adaptive halting (per-token early exit with a
+ponder cost) is a natural next addition — most tokens probably don't need
+the full N iterations. Held back from this branch to keep one variable at a
+time.
+
+Verified in `tests/test_recursive_reasoning.py`: recursion changes the
+forward_tokens output, parameter count is invariant to `recursive_iters`
+(true weight-sharing), full Brain forward+backward succeeds.
+
+---
+
 ## 6. Dynamical Biological Mechanics
 
 ### 6.1 Neuro-Vesicle Pool

@@ -63,7 +63,8 @@ class ReasoningCortex(BrainModule):
                  d_hidden: int | None = None,
                  n_blocks: int = 0,
                  max_ctx: int = 2048,
-                 expert_n_heads: int = 4):
+                 expert_n_heads: int = 4,
+                 recursive_iters: int = 1):
         """SRC-TEH extension args:
 
         d_hidden: per-token expert width.  When None (legacy/test path) only
@@ -83,6 +84,10 @@ class ReasoningCortex(BrainModule):
         self.n_iters = min(n_iters, 4)
         self.d_hidden = d_hidden
         self.n_blocks = int(n_blocks)
+        # Recursive reasoning: apply expert_blocks `recursive_iters` times with
+        # weight-sharing (Universal-Transformer style depth multiplier). 1 =
+        # legacy single-pass behaviour.
+        self.recursive_iters = max(1, int(recursive_iters))
 
         # Learnable attractor library (reasoning schema bank)
         self.attractors = nn.Parameter(
@@ -355,8 +360,17 @@ class ReasoningCortex(BrainModule):
 
         B, C, D = x.shape
         h = x
-        for blk in self.expert_blocks:
-            h = blk(h)
+        # Recursive reasoning: loop the expert blocks `recursive_iters` times
+        # with weight-sharing. Effectively multiplies depth at constant
+        # parameter count — the cortex iteratively refines its representation
+        # via fixed-point-style updates. recursive_iters=1 reproduces the
+        # legacy single-pass behaviour. Each iter is one ladder of the
+        # n_blocks expert stack, so total reasoning depth is
+        # `recursive_iters × n_blocks` per token.
+        n_iters = max(1, int(getattr(self, 'recursive_iters', 1)))
+        for _it in range(n_iters):
+            for blk in self.expert_blocks:
+                h = blk(h)
 
         # Hopfield attractor cross-attention at d_hidden — each token
         # softly retrieves the best-matching reasoning schema.

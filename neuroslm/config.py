@@ -103,6 +103,18 @@ class BrainConfig:
     # smoothing can inflate raw perplexity). Available for calibration runs.
     label_smoothing: float = 0.0
 
+    # ---- Recursive Reasoning Cortex (Universal-Transformer-style) ----
+    # When True, ReasoningCortex.forward_tokens loops its expert_blocks
+    # `recursive_iters` times with weight-sharing — depth-multiplying the
+    # reasoning expert at constant parameter count. The deepened output flows
+    # through the existing bowtie / thought / from_sem path, ReZero-gated by
+    # λ_thought (§5.3), so it cannot destabilize the LM trunk. Targets
+    # reasoning benchmarks (HellaSwag/ARC) where iterative refinement helps
+    # more than width. Forward FLOPs scale linearly with `recursive_iters`.
+    # See §5.4.
+    recursive_reasoning: bool = True
+    recursive_iters: int = 4
+
     # ---- ReZero-style gated module → LM forward injections ----
     # Replace the maturity-phase gates on the FORWARD paths from bio modules
     # into the LM trunk (`_motor_phase` on motor_lang_bias, `_mem_phase` on

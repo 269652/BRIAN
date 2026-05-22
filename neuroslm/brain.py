@@ -573,6 +573,8 @@ class Brain(nn.Module):
             n_blocks=_expert_blocks,
             max_ctx=cfg.lang_ctx,
             expert_n_heads=_expert_heads,
+            recursive_iters=(int(getattr(cfg, 'recursive_iters', 1))
+                             if getattr(cfg, 'recursive_reasoning', False) else 1),
         )
         self.topic_classifier = TopicClassifier(cfg.d_sem)
 
