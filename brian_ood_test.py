@@ -78,11 +78,30 @@ def load_brain(ckpt_path: str, device: torch.device):
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
 
     cfg = BrainConfig()
-    if isinstance(ckpt, dict) and "cfg" in ckpt and isinstance(ckpt["cfg"], dict):
+    saved_cfg = (ckpt["cfg"] if isinstance(ckpt, dict)
+                 and "cfg" in ckpt and isinstance(ckpt["cfg"], dict)
+                 else None)
+    if saved_cfg is not None:
         valid = set(cfg.__dict__.keys())
-        for k, v in ckpt["cfg"].items():
+        for k, v in saved_cfg.items():
             if k in valid:
                 setattr(cfg, k, v)
+        # Backwards-compat: if a feature flag is missing from saved cfg, the
+        # trained model never exercised it. Force the legacy default (False)
+        # so eval forward matches training (otherwise current True defaults
+        # build a Brain with zero-init lambdas etc. that zero out injections
+        # the trained model relied on -> PPL inflated 10-50x).
+        for flag, legacy in (
+                ("use_rezero_injection_gates", False),
+                ("recursive_reasoning", False),
+                ("use_smooth_gated_bus", False),
+                ("detach_trunk_from_aux", False),
+                ("freeze_pruning_after_maturation", False),
+                ("maturity_ratchet", False),
+        ):
+            if flag not in saved_cfg and hasattr(cfg, flag):
+                print(f"[diag] saved cfg missing '{flag}' -> legacy {legacy}")
+                setattr(cfg, flag, legacy)
     else:
         cfg = PRESETS.get("large", lambda: cfg)()
     cfg.vocab_size = tok.vocab_size
