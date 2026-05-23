@@ -1132,6 +1132,123 @@ Verified in `tests/test_recursive_reasoning.py`: recursion changes the
 forward_tokens output, parameter count is invariant to `recursive_iters`
 (true weight-sharing), full Brain forward+backward succeeds.
 
+### 5.5 Predictive Coding Trunk (PCT) — top-down generative trunk update
+
+**Motivation.** §5.1-5.4 tame the training dynamics of a model trained
+on next-token loss, but the gradient signal itself is unchanged: every
+parameter in every trunk layer is pulled toward whatever minimizes the
+single global next-token loss, including spurious surface correlations
+and frequency artifacts. ERM on a fixed mix structurally rewards
+shortcuts when they exist — adding modules, data, or regularization
+narrows the shortcut without removing it. The observed train→OOD gap
+ratio (4–6× on `large`) is a symptom of the gradient signal being
+wrong, not just of insufficient regularization on top.
+
+PCT changes *what gradients flow about*. It is the only proposal in
+this document that targets the gradient-flow mechanism itself rather
+than the module / loss / schedule layered on top of it.
+
+**Mechanism (`cfg.use_predictive_coding_trunk`, default off).** For
+each adjacent layer pair `(h_n, h_{n+1})` in the language trunk we
+attach a small **top-down predictor** `g_n` (a 2-layer zero-init
+residual MLP). The predictor is forced to reconstruct the shallower
+layer's representation from the deeper one:
+
+```
+p_n = g_n(h_{n+1})                # top-down prediction
+e_n = h_n.detach() − p_n           # prediction error (target detached)
+L_FE = Σ_n  precision_n · ||e_n||² / norm
+```
+
+`L_FE` is added to the existing `pred_coding_loss` slot (same return
+path, so `train.py`'s aux-loss machinery picks it up unchanged) with
+weight `cfg.pct_lambda_fe` (default 0.1).
+
+**The direction flip is the crux.** The existing
+`PredictiveCodingHead` is BOTTOM-UP: `layer n predicts layer n+1`, a
+deep-supervision regularizer that gives every layer a local gradient
+signal. PCT is TOP-DOWN: `layer n+1 must predict layer n`. The deeper
+layer is forced to be a **generative inverse** of the shallower one.
+This direction has properties the bottom-up direction does not:
+
+  * **Causal/invariant features.** Surface statistics (token-level
+    frequencies, positional artifacts, decoy tokens) can't be predicted
+    from semantic context, so they get pushed into a single high-entropy
+    "noise" channel that doesn't propagate deeper. Causal features get
+    amplified because they *are* predictable from above.
+  * **Free-energy = generalization objective.** `L_FE` is an upper
+    bound on the negative log model evidence (Friston 2010). Minimizing
+    it is maximizing model evidence, which is *not* a training-set
+    objective.
+  * **Sparse coding by construction.** Well-predicted features carry
+    near-zero error → no signal propagates → no representational
+    capacity is "spent" on them.
+  * **Flatter loss landscapes.** Salvatori et al. (2023, NeurIPS) show
+    PC-trained networks empirically converge to flatter minima than
+    BP-trained networks on matched architectures — SAM-style
+    generalization without SAM's 2× backward cost.
+
+**Two modes.**
+
+  * `pct_mode="loss_only"` (default) — forward path is unchanged; only
+    `L_FE` is added. ~+10 % FLOPs (one small predictor MLP per layer
+    pair). Recommended starting point.
+  * `pct_mode="feedback"` — the previous-layer error `e_{n-1}` is
+    projected back into the next block's input through a *zero-init*
+    `error_proj` linear:
+    ```
+    h_{n} ← h_{n} + α · error_proj(e_{n-1}.detach())
+    ```
+    Closer to true iterated PC (Rao & Ballard 1999), ~+30 % FLOPs.
+    Zero-init means step-0 behavior is bit-identical to standard
+    residual flow; the projection only contributes once trained up.
+
+**Composability.** PCT lives entirely inside `LanguageCortex` (no
+changes to module injections, the bowtie tap, or memory cross-attn).
+It is **orthogonal** to:
+
+  * §5.2 trunk gradient isolation (PCT shapes the *trunk's* gradient;
+    §5.2 controls what *aux losses* can push into the trunk).
+  * §5.3 ReZero gates (those control module → trunk forward
+    injections; PCT controls within-trunk gradient flow).
+  * §5.4 recursive reasoning (a routed expert path; PCT operates on
+    the main trunk before routing).
+
+All four can coexist without modification.
+
+**Bootstrap.** Predictors are `init_identity=True` (the MLP is
+zero-init, with an identity skip), so `g_n(h_{n+1}) ≈ h_{n+1}` at
+step 0. The initial free-energy is the genuine inter-layer difference
+(the "natural surprise" of one block of computation), not random
+predictor noise — predictors then learn to absorb the predictable
+structure, leaving only the un-generalizable residue. `L_FE` is small
+at step 0 (~10⁻³ scale on the smoke test), so it does not dominate the
+LM cross-entropy during the critical early-training window.
+
+**Backwards compatibility.** `use_predictive_coding_trunk` defaults to
+`False` and is added to the saved-cfg legacy-default-fallback list in
+`brian_ood_test.py`, so checkpoints saved before this branch load
+cleanly with PCT off.
+
+**Falsifiable hypothesis.** At matched train PPL, a PCT-trunk model
+will have **≥ 2× lower OOD gap_ratio** than the current ReZero /
+recursive baselines. The 30M `pct_30m` preset is the cheapest valid
+ablation to falsify this before committing 107M training budget.
+
+**References.** Rao & Ballard (1999, *Nature Neuroscience*) —
+predictive coding in V1. Friston (2010, *Nature Reviews
+Neuroscience*) — free-energy principle. Whittington & Bogacz (2017,
+*Neural Computation*) — PC approximates BP. Millidge, Tschantz &
+Buckley (2020, arXiv:2006.04182) — PC on arbitrary computation
+graphs. Salvatori et al. (2023, NeurIPS) — flatter minima via PC.
+Song et al. (2024, ICLR) — invariant representations via prospective
+configuration.
+
+Verified in `tests/test_pct_smoke.py`: non-PCT path bit-unchanged,
+loss_only mode FE non-zero with predictor gradients flowing, feedback
+mode `error_proj` receives gradient through the LM path, eval mode
+works, BrainConfig defaults are legacy-compatible.
+
 ---
 
 ## 6. Dynamical Biological Mechanics
