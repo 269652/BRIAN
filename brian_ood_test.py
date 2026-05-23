@@ -111,12 +111,40 @@ def load_brain(ckpt_path: str, device: torch.device):
                 print(f"[patch] {key}: shape {tuple(ck_t.shape)} vs model "
                       f"{tuple(m_t.shape)} — left as-is (unexpected layout)")
 
+    # ── DIAGNOSTIC: dump checkpoint structure BEFORE load ─────────────────
+    print("[diag] ckpt top-level keys:", sorted(list(ckpt.keys())) if isinstance(ckpt, dict) else "(not dict)")
+    if isinstance(ckpt, dict):
+        for k in ("step", "best_loss", "lm_ema"):
+            if k in ckpt: print(f"[diag] ckpt['{k}']:", ckpt[k])
+        if "cfg" in ckpt and isinstance(ckpt["cfg"], dict):
+            _cfg = ckpt["cfg"]
+            for k in ("use_rezero_injection_gates", "detach_trunk_from_aux",
+                     "freeze_pruning_after_maturation", "maturity_ratchet",
+                     "recursive_reasoning", "recursive_iters",
+                     "enable_src_teh", "dropout", "use_smooth_gated_bus"):
+                if k in _cfg: print(f"[diag] ckpt.cfg['{k}']: {_cfg[k]}")
+    # Lambda values from the state dict (if present)
+    for k in ("lambda_motor", "lambda_mem", "lambda_thought"):
+        if k in sd:
+            v = sd[k].flatten()[:3].tolist() if hasattr(sd[k], 'flatten') else sd[k]
+            print(f"[diag] sd['{k}']: {v}")
+        else:
+            print(f"[diag] sd['{k}']: MISSING")
+
     # Reuse the train-time adapter-rank-aware loader for BDNF-grown ckpts.
     try:
         from neuroslm.train import _load_compatible
         _load_compatible(brain, sd, label=os.path.basename(ckpt_path))
     except Exception:
-        brain.load_state_dict(sd, strict=False)
+        result = brain.load_state_dict(sd, strict=False)
+        # _load_compatible may not print missing/unexpected keys; do it here
+        print(f"[diag] missing keys: {len(result.missing_keys)} (first 8: {result.missing_keys[:8]})")
+        print(f"[diag] unexpected keys: {len(result.unexpected_keys)} (first 8: {result.unexpected_keys[:8]})")
+    # Lambda values AFTER load (should match the sd values if load worked)
+    for name in ("lambda_motor", "lambda_mem", "lambda_thought"):
+        if hasattr(brain, name):
+            p = getattr(brain, name)
+            print(f"[diag] brain.{name} after load: {p.detach().flatten()[:3].tolist()}")
     # ── Disable gradient checkpointing for eval (we're in no_grad anyway) ──
     # Re-enabling the gradient_checkpointing path in train mode triggers
     # `torch.utils.checkpoint.checkpoint(...)` which fails with AttributeError
