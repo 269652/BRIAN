@@ -108,7 +108,14 @@ class Brain(nn.Module):
             n_memory_xattn_layers=int(getattr(cfg, 'n_memory_xattn_layers', 2)),
             mid_trunk_tap_layer=int(_mid_tap),
             use_attention_pool=_src_teh,
-            dropout=getattr(cfg, 'dropout', 0.0))
+            dropout=getattr(cfg, 'dropout', 0.0),
+            use_predictive_coding_trunk=bool(getattr(cfg, 'use_predictive_coding_trunk', False)),
+            pct_mode=str(getattr(cfg, 'pct_mode', 'loss_only')),
+            pct_feedback_alpha=float(getattr(cfg, 'pct_feedback_alpha', 0.05)),
+            pct_hidden_mult=float(getattr(cfg, 'pct_hidden_mult', 0.5)),
+            pct_lambda_fe=float(getattr(cfg, 'pct_lambda_fe', 0.1)),
+            pct_include_embedding_predictor=bool(getattr(cfg, 'pct_include_embedding_predictor', True)),
+            )
 
         # ── ReZero-style zero-init gates on module → LM forward injections ──
         # Each scalar λ starts at 0, so at init the LM behaves identically to

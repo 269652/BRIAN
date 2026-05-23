@@ -103,6 +103,33 @@ class BrainConfig:
     # smoothing can inflate raw perplexity). Available for calibration runs.
     label_smoothing: float = 0.0
 
+    # ---- Predictive Coding Trunk (PCT) — top-down generative trunk ----
+    # Architectural mechanism change: each adjacent layer pair gets a
+    # top-down predictor g_n that must predict h_n from h_{n+1}. The
+    # prediction error e_n = h_n - g_n(h_{n+1}) is summed across all layer
+    # pairs into a free-energy loss term added to the LM total. This
+    # changes what the trunk's gradients optimize: features become
+    # generative inverses of the layer above, not whatever-minimizes-
+    # next-token-loss. See neuroslm/modules/predictive_coding_trunk.py
+    # for the full theory note. Off by default (legacy compatible).
+    use_predictive_coding_trunk: bool = False
+    # "loss_only"  — forward unchanged, only the FE loss is added (cheap)
+    # "feedback"   — previous-layer error projects into next block's input
+    pct_mode: str = "loss_only"
+    # Weight of the free-energy term in the total loss. 0.1 is a reasonable
+    # starting point — strong enough to shape representations, small enough
+    # not to swamp the LM cross-entropy in early training.
+    pct_lambda_fe: float = 0.1
+    # Hidden-dim multiplier for the top-down predictor MLP (small = cheap).
+    pct_hidden_mult: float = 0.5
+    # Forward error-feedback scale when pct_mode == "feedback". Zero-init
+    # projection means start is bit-identical to standard trunk; this scales
+    # the learned correction once the projection has trained up.
+    pct_feedback_alpha: float = 0.05
+    # Add an extra predictor for the embedding from the first block's
+    # output. Slight extra cost, gives embeddings direct generative pressure.
+    pct_include_embedding_predictor: bool = True
+
     # ---- Recursive Reasoning Cortex (Universal-Transformer-style) ----
     # When True, ReasoningCortex.forward_tokens loops its expert_blocks
     # `recursive_iters` times with weight-sharing — depth-multiplying the
@@ -528,7 +555,48 @@ def xxl() -> BrainConfig:
     return c
 
 
+def pct_30m() -> BrainConfig:
+    """~30M params, PCT enabled. Ablation preset for arch/predictive-coding-trunk.
+
+    Goal: cheapest valid run to falsify the PCT hypothesis (≥2× lower OOD
+    gap_ratio at matched train PPL) before scaling to 107M. Matches
+    `large()`'s regularization regime so the only architectural difference
+    on a parity comparison is the PCT trunk update vs standard residual.
+    """
+    c = BrainConfig()
+    c.d_sem = 192
+    c.d_hidden = 384
+    c.lang_layers = 4
+    c.lang_heads = 6
+    c.lang_ctx = 1024
+    c.dmn_layers = 2
+    c.pfc_layers = 2
+    c.pfc_heads = 4
+    c.gws_slots = 8
+    c.gws_heads = 4
+    c.world_layers = 1
+    c.forward_layers = 1
+    c.hippo_capacity = 2048
+    c.hippo_topk = 4
+    c.max_thinking_steps = 6
+    c.warmup_steps = 300
+    c.lr = 3e-4
+    # Same OOD regularization regime as `large()` so the comparison is fair.
+    c.weight_decay = 0.05
+    c.dropout = 0.1
+    # PCT enabled — the point of this preset.
+    c.use_predictive_coding_trunk = True
+    c.pct_mode = "loss_only"
+    c.pct_lambda_fe = 0.1
+    c.pct_hidden_mult = 0.5
+    c.pct_include_embedding_predictor = True
+    # Baseline param parity: ~32M @ 12 vanilla layers (no novel modules)
+    c.baseline_lang_layers = 12
+    return c
+
+
 PRESETS = {
     "tiny": tiny, "small": small, "medium": medium,
     "large": large, "xl": xl, "xxl": xxl,
+    "pct_30m": pct_30m,
 }

@@ -22,6 +22,7 @@ from .common import TransformerBlock, RMSNorm
 from .neuro_attention import PredictiveCodingHead
 from .differential_attention import DiffTransformerBlock
 from .mixture_of_depths import MoDBlock
+from .predictive_coding_trunk import PredictiveCodingTrunk
 
 
 # ---------------------------------------------------------------------------
@@ -186,13 +187,27 @@ class LanguageCortex(nn.Module):
                  n_memory_xattn_layers: int = 2,
                  mid_trunk_tap_layer: int | None = None,
                  use_attention_pool: bool = True,
-                 dropout: float = 0.0):
+                 dropout: float = 0.0,
+                 # ---- Predictive Coding Trunk (PCT) — see
+                 # neuroslm/modules/predictive_coding_trunk.py ----
+                 use_predictive_coding_trunk: bool = False,
+                 pct_mode: str = "loss_only",
+                 pct_feedback_alpha: float = 0.05,
+                 pct_hidden_mult: float = 0.5,
+                 pct_lambda_fe: float = 0.1,
+                 pct_include_embedding_predictor: bool = True):
         super().__init__()
         self.gradient_checkpointing = gradient_checkpointing
         self.dropout = float(dropout)
         self.n_nt = n_nt
         self.n_layers = n_layers
         self.enable_memory_xattn = bool(enable_memory_xattn) and not baseline
+        # PCT flags
+        self.use_predictive_coding_trunk = bool(use_predictive_coding_trunk)
+        self.pct_lambda_fe = float(pct_lambda_fe)
+        self.pct_mode = str(pct_mode)
+        self._last_fe_loss = None
+        self._last_fe_breakdown = None
         # Last `n_memory_xattn_layers` blocks receive the memory_kv injection.
         self.n_memory_xattn_layers = max(0, int(n_memory_xattn_layers))
         # Mid-trunk tap: at this layer index (0-based, after layer completes)
@@ -259,6 +274,20 @@ class LanguageCortex(nn.Module):
             PredictiveCodingHead(d_hidden) for _ in range(n_layers - 1)
         ]) if n_layers > 1 else nn.ModuleList()
 
+        # PCT: top-down generative predictors. Built only when enabled so
+        # baseline checkpoints don't see new parameters.
+        if self.use_predictive_coding_trunk:
+            self.pct = PredictiveCodingTrunk(
+                dim=d_hidden,
+                n_layers=n_layers,
+                mode=pct_mode,
+                feedback_alpha=pct_feedback_alpha,
+                hidden_mult=pct_hidden_mult,
+                include_embedding_predictor=pct_include_embedding_predictor,
+            )
+        else:
+            self.pct = None
+
         self.norm_f = RMSNorm(d_hidden)
         # Tied output head
         self.lm_head = nn.Linear(d_hidden, vocab_size, bias=False)
@@ -323,6 +352,22 @@ class LanguageCortex(nn.Module):
         pred_coding_loss = torch.tensor(0.0, device=h.device)
         tap_sem: torch.Tensor | None = None
 
+        # PCT: collect layer states for the top-down free-energy loss. The
+        # list stays empty unless PCT is enabled, so baseline memory is
+        # unchanged. Format:
+        #   include_embedding_predictor=True  ->  [h_emb, h_after_block_0, ...]
+        #   include_embedding_predictor=False ->  [h_after_block_0, h_after_1, ...]
+        pct_states: list[torch.Tensor] = []
+        if self.pct is not None:
+            if self.pct.include_embedding_predictor:
+                pct_states.append(h)
+            # Buffer of the previous-layer error, used by `feedback` mode to
+            # inject a small correction into the NEXT block's input. None
+            # until the first block has run.
+            pct_prev_error: torch.Tensor | None = None
+        else:
+            pct_prev_error = None
+
         def _run_block(blk, x, nt_vec, mkv):
             """Run one block, with gradient checkpointing for all block types."""
             # torch.utils.checkpoint calls getattr(torch, device_type) internally;
@@ -361,6 +406,13 @@ class LanguageCortex(nn.Module):
                 if use_calm and calm_mask.any():
                     h = torch.where(calm_mask.unsqueeze(-1), calm_frozen, h)
 
+                # PCT feedback mode: inject the previous-layer error into the
+                # next block's input. Zero-init projection means the model
+                # starts identical to standard residual flow.
+                if (self.pct is not None and self.pct.mode == "feedback"
+                        and pct_prev_error is not None):
+                    h = h + self.pct.feedforward_correction(pct_prev_error)
+
                 h = _run_block(blk, h, nt, memory_kv)
                 h = adapter(h)
 
@@ -387,11 +439,32 @@ class LanguageCortex(nn.Module):
                         pc_counter += 1  # only advance when a head is consumed
                     prev_layer = h
 
+                # PCT: record this layer's post-adapter state for the
+                # top-down free-energy loss computed after the loop.
+                if self.pct is not None:
+                    pct_states.append(h)
+                    if self.pct.mode == "feedback":
+                        # Compute the previous-pair error (lower=pct_states[-2],
+                        # upper=pct_states[-1]) using a DETACHED lower target so
+                        # the feedback path doesn't create a backward gradient
+                        # cycle back into the previous block.
+                        if len(pct_states) >= 2:
+                            n_pred = len(pct_states) - 2  # predictor index
+                            if 0 <= n_pred < len(self.pct.predictors):
+                                pct_prev_error = self.pct.make_error_for_layer(
+                                    pct_states[-2].detach(),
+                                    pct_states[-1],
+                                    n_pred,
+                                )
+
             # Apply any remaining frozen states after the final layer
             if use_calm and calm_mask.any():
                 h = torch.where(calm_mask.unsqueeze(-1), calm_frozen, h)
         else:
             for i, blk in enumerate(self.blocks):
+                if (self.pct is not None and self.pct.mode == "feedback"
+                        and pct_prev_error is not None):
+                    h = h + self.pct.feedforward_correction(pct_prev_error)
                 h = _run_block(blk, h, nt, memory_kv)
                 if return_tap and i == (self.mid_trunk_tap_layer - 1):
                     tap_sem = self.to_sem(h.mean(dim=1))
@@ -400,10 +473,33 @@ class LanguageCortex(nn.Module):
                         pred_coding_loss = pred_coding_loss + self.pred_coding[pc_counter](prev_layer, h)
                         pc_counter += 1
                     prev_layer = h
+                if self.pct is not None:
+                    pct_states.append(h)
+                    if self.pct.mode == "feedback" and len(pct_states) >= 2:
+                        n_pred = len(pct_states) - 2
+                        if 0 <= n_pred < len(self.pct.predictors):
+                            pct_prev_error = self.pct.make_error_for_layer(
+                                pct_states[-2].detach(),
+                                pct_states[-1],
+                                n_pred,
+                            )
 
         # Normalize predictive coding loss by number of heads if present
         if len(self.pred_coding) > 0 and pc_counter > 0:
             pred_coding_loss = pred_coding_loss / len(self.pred_coding)
+
+        # PCT: top-down free-energy loss across collected layer states.
+        # Folded into pred_coding_loss so existing callers (brain.forward_lm,
+        # train.py) automatically pick it up via the same return slot.
+        # Detached breakdown stashed on self for logging.
+        if self.pct is not None and len(pct_states) >= 2:
+            fe_loss, fe_breakdown = self.pct.compute_loss(pct_states)
+            self._last_fe_loss = fe_loss.detach()
+            self._last_fe_breakdown = fe_breakdown
+            pred_coding_loss = pred_coding_loss + self.pct_lambda_fe * fe_loss
+        else:
+            self._last_fe_loss = None
+            self._last_fe_breakdown = None
 
         h = self.head_drop(self.norm_f(h))
         if motor_bias is not None:
