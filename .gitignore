@@ -40,8 +40,17 @@ Thumbs.db
 *.log
 training.err
 training.log
-logs/
-!logs/*.log
+# Specific logs/ subdirs that are noise; logs/vast and logs/analyzed
+# are intentionally NOT in the blacklist — see whitelist below.
+logs/live/
+logs/tmp/
+logs/runs/
+logs/cache/
+# Whitelist raw vast.ai stdout captures and their LLM-produced analyses.
+# These are committed evidence and override the *.log catch-all above.
+!logs/vast/*.log
+!logs/analyzed/*.md
+!logs/analyzed/INSTRUCTIONS.md
 
 # Testing and packaging
 pip-wheel-metadata/
