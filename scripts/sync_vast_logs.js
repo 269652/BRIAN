@@ -75,11 +75,19 @@ function fetchLogsOnce(instanceId, destPath) {
   // Run vastai logs <id> and write to destPath
   const p = spawnSync('vastai', ['logs', String(instanceId)], { encoding: 'utf8' });
   if (p.error) {
-    console.error('Error running vastai for', instanceId, p.error);
+    console.error('Error running vastai for', instanceId, p.error && p.error.message);
     return;
   }
-  fs.writeFileSync(destPath, p.stdout || p.stderr || '', { encoding: 'utf8' });
-  console.log('Fetched', instanceId, '->', destPath);
+  // Only write stdout to the file if the command exited successfully (status 0)
+  if (p.status === 0) {
+    const outtxt = p.stdout || '';
+    fs.writeFileSync(destPath, outtxt, { encoding: 'utf8' });
+    console.log('Fetched', instanceId, '->', destPath, `(${Buffer.byteLength(outtxt, 'utf8')} bytes)`);
+  } else {
+    console.error('vastai logs', instanceId, 'exited with code', p.status, '; stderr excerpts:');
+    const stderr = (p.stderr || '').trim();
+    console.error(stderr.split(/\r?\n/).slice(0,5).join('\n'));
+  }
 }
 
 function syncAll() {

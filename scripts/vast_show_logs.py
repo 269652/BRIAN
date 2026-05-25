@@ -97,9 +97,19 @@ def run_cli(instance_id: str, follow: bool, dest: str | None):
         with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as p, open(dest, 'a', encoding='utf-8') as f:
             try:
                 for line in p.stdout:
+                    # always write UTF-8 to the file
                     f.write(line)
                     f.flush()
-                    sys.stdout.write(line)
+                    # safe print to console: some Windows consoles cannot encode all unicode
+                    try:
+                        sys.stdout.write(line)
+                    except UnicodeEncodeError:
+                        safe = line.encode('utf-8', errors='replace').decode('utf-8')
+                        try:
+                            sys.stdout.write(safe)
+                        except Exception:
+                            # give up quietly
+                            pass
             except KeyboardInterrupt:
                 p.terminate()
                 raise
