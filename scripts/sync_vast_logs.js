@@ -11,22 +11,59 @@ function ensureDir(dir) {
 }
 
 function listInstancesCLI() {
-  // run `vastai show instances` and parse the ID and Label
-  const out = spawnSync('vastai', ['show', 'instances'], { encoding: 'utf8' });
-  if (out.error) throw out.error;
-  const txt = (out.stdout || '') + '\n' + (out.stderr || '');
-  const lines = txt.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const instances = [];
-  const re = /^\d+\s+(\d+)\s+\S+\s+\S+\s+(.*?)\s+ssh/;
-  for (const l of lines) {
-    const m = l.match(/^\s*#?\s*(\d+)\s+(\d+)\s+/);
-    if (m) {
-      const id = m[2];
-      // try to extract label in following lines
-      instances.push({ id, label: '' });
+  // Try to get JSON output first (preferred). Some vastai versions support
+  // `vastai show instances-v1 --json` or `vastai show instances --json`.
+  const tryCmds = [
+    ['show', 'instances-v1', '--json'],
+    ['show', 'instances-v1', '--json', '--raw'],
+    ['show', 'instances', '--json'],
+    ['show', 'instances', '--raw', '--json'],
+  ];
+
+  for (const args of tryCmds) {
+    try {
+      const out = spawnSync('vastai', args, { encoding: 'utf8' });
+      if (out.error) continue;
+      const txt = (out.stdout || '') + '\n' + (out.stderr || '');
+      try {
+        const j = JSON.parse(txt);
+        const items = Array.isArray(j) ? j : (j.binstances || j.results || j.instances || j);
+        const results = [];
+        if (Array.isArray(items)) {
+          for (const it of items) {
+            const iid = it.id || it.instance_id || it.binstance_id || it.bnode_id || it.bnode || it.bnode_id;
+            const lbl = it.label || it.title || it.name || it.job_label || '';
+            if (iid) results.push({ id: String(iid), label: String(lbl || '') });
+          }
+          if (results.length) return results;
+        }
+      } catch (e) {
+        // not JSON, fall through to next method
+      }
+    } catch (e) {
+      // ignore and try next
     }
   }
-  return instances;
+
+  // Fallback: parse the tabular output from `vastai show instances` for IDs only.
+  try {
+    const out = spawnSync('vastai', ['show', 'instances'], { encoding: 'utf8' });
+    if (out.error) throw out.error;
+    const txt = (out.stdout || '') + '\n' + (out.stderr || '');
+    const lines = txt.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const results = [];
+    // Look for lines starting with an index and an ID column
+    for (const l of lines) {
+      const m = l.match(/^\s*#?\s*(\d+)\s+(\d+)\s+/);
+      if (m) {
+        const id = m[2];
+        results.push({ id: id, label: '' });
+      }
+    }
+    return results;
+  } catch (e) {
+    return [];
+  }
 }
 
 function fetchLogsOnce(instanceId, destPath) {
