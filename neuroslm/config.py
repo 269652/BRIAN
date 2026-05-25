@@ -177,6 +177,25 @@ class BrainConfig:
     bema_best_ema_alpha: float = 0.1
     bema_collapse_ratio: float = 3.0
 
+    # ---- RCC Bowtie: Read, Copy, Commit (closed-loop write-back cut) ----
+    # Diagnosis (after synth-v1/v2 + BEMA failures): the trunk is being
+    # vandalized by closed-loop write-backs from cognitive modules. Each
+    # of motor_lang_bias, memory_kv injection, from_sem(thought),
+    # latent-bus bias, and scatter-add expert residual is a path along
+    # which an immature module's random-init noise can push the language
+    # manifold into a worse basin -- BEMA-style late-divergence + spike
+    # patterns we kept seeing.
+    #
+    # Phase-1 RCC: disable all five write-back paths. Bio modules still
+    # run (for Phi, aux losses, world/self/forward predictions) but their
+    # outputs do NOT enter the trunk's forward pass. Equivalent to a pure
+    # LM trunk + full bio stack running in observation-only mode.
+    #
+    # Phases 2-4 will re-introduce a bounded, low-rank, gated commit path
+    # from a sidecar sandbox state z_cog into the final 1-2 trunk blocks.
+    # See docs/architecture.md (TBD section) and tests/test_rcc_bowtie.py.
+    use_rcc_bowtie: bool = False
+
     # ---- Recursive Reasoning Cortex (Universal-Transformer-style) ----
     # When True, ReasoningCortex.forward_tokens loops its expert_blocks
     # `recursive_iters` times with weight-sharing — depth-multiplying the
@@ -740,10 +759,48 @@ def synth_30m_bema() -> BrainConfig:
     return c
 
 
+def rcc_bowtie_30m_p1() -> BrainConfig:
+    """RCC Bowtie Phase 1 — all cognitive-to-trunk write-back paths CUT.
+
+    Diagnosis: synth-v1 hit ppl 59 at step 3800 then diverged to ppl 200+.
+    BEMA caught the spikes but hammer-looped (881 collapses, no progress).
+    Root cause: the trunk is being vandalized by closed-loop write-backs
+    from random-init bio modules.
+
+    Phase 1 disables ALL five write-back paths:
+      1. motor_lang_bias  (motor cortex -> h_lang final block)
+      2. memory_kv        (bowtie EMA -> language memory cross-attn)
+      3. from_sem(thought)+ bus_bias (latent program bus -> trunk prefix)
+      4. scatter_add expert residual (token experts -> h_enriched)
+      5. (No 5th — covered by the above set.)
+
+    Bio modules still run — Phi proxy, world/self/forward predictions,
+    aux losses all train normally. They just don't write back into the
+    language manifold. Phase 2+ will re-introduce a low-rank, gated,
+    norm-capped commit path through a CommitGate.
+
+    Hypothesis: stable training run, no awakening collapse, no late
+    divergence. Final train_ppl should at least match the pure-baseline
+    LM (47-layer vanilla transformer at same param count).
+
+    Built on synth_30m_bema for two reasons:
+      a) PCT (top-down free-energy) targets the trunk's gradient
+         mechanics directly and is consistent with RCC (operates within
+         the trunk, not via cognitive write-back).
+      b) BEMA stays as a safety net but should fire ~0 collapses now
+         that the closed loop is cut (the synth-v1 spike pattern was
+         driven by aux-noise injection that no longer happens).
+    """
+    c = synth_30m_bema()
+    c.use_rcc_bowtie = True
+    return c
+
+
 PRESETS = {
     "tiny": tiny, "small": small, "medium": medium,
     "large": large, "xl": xl, "xxl": xxl,
     "pct_30m": pct_30m,
     "synth_30m": synth_30m,
     "synth_30m_bema": synth_30m_bema,
+    "rcc_bowtie_30m_p1": rcc_bowtie_30m_p1,
 }

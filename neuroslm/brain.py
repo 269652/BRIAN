@@ -1059,15 +1059,25 @@ class Brain(nn.Module):
                 mem = self._bowtie_ema_slots.detach().clone().to(
                     device=device, dtype=dtype)                           # (S, d_sem)
                 memory_kv = _mem_phase * self.memory_kv_proj(mem)         # (S, d_hidden)
+        # RCC Bowtie phase 1: cut ALL cognitive→trunk write-back paths.
+        # The bio modules' outputs (lang_thought via from_sem, bus_bias_s
+        # already folded into lang_thought above, memory_kv from bowtie
+        # EMA) all get masked to None so the language trunk runs in
+        # pure-LM mode. Phase 2+ will route these into a sandbox z_cog
+        # and a CommitGate-controlled adapter. For now: language fwd is
+        # bit-identical to a clean baseline + nothing else.
+        _rcc_on = bool(getattr(cfg, 'use_rcc_bowtie', False))
+        _trunk_thought = None if _rcc_on else lang_thought
+        _trunk_memkv   = None if _rcc_on else memory_kv
         _want_tap = bool(getattr(self, '_src_teh_enabled', False))
         if _want_tap:
             logits, sem, h_lang, pred_coding_loss, tap_sem = self.language(
-                ids, thought=lang_thought, nt=nt,
-                memory_kv=memory_kv, return_tap=True)
+                ids, thought=_trunk_thought, nt=nt,
+                memory_kv=_trunk_memkv, return_tap=True)
         else:
             tap_sem = None
             logits, sem, h_lang, pred_coding_loss = self.language(
-                ids, thought=lang_thought, nt=nt)
+                ids, thought=_trunk_thought, nt=nt)
 
         # Restore CALM thresholds after language forward
         for _ch, _orig_thresh in _calm_heads:
@@ -1082,8 +1092,12 @@ class Brain(nn.Module):
         # MAT 0.7) so un-trained experts can't pump noise into the trunk
         # immediately after awakening at MAT 0.3.
         expert_aux_loss = torch.tensor(0.0, device=device)
+        # RCC Bowtie: token-expert scatter-add is a closed-loop write-back
+        # (experts read h_lang, scatter their delta back into h_enriched
+        # which becomes h_lang downstream). Skipped entirely in phase 1.
         if (getattr(self, '_src_teh_enabled', False)
-                and self.expert_router is not None):
+                and self.expert_router is not None
+                and not getattr(cfg, 'use_rcc_bowtie', False)):
             _mat = self.maturity_scalar() if hasattr(self, "maturity_scalar") else 1.0
             _expert_phase = self._phase_gate(_mat, center=0.55, width=0.15)
             # Internal expert MAT — pass to inner residual so token-level
@@ -1420,7 +1434,11 @@ class Brain(nn.Module):
         else:
             _motor_phase = self._phase_gate(_mat_motor, center=0.45, width=0.10)
             _motor_active = float(_motor_phase) > 1e-3
-        if _motor_active:
+        # RCC Bowtie: motor cortex writes only to z_cog sandbox in P2+;
+        # for now (P1) simply skip the write-back. Motor module still
+        # runs above (we keep `motor_lang_bias` available as a tensor for
+        # the orchestrator/oscillation logging path below).
+        if _motor_active and not getattr(cfg, 'use_rcc_bowtie', False):
             h_biased     = h_lang + _motor_phase * motor_lang_bias.unsqueeze(1)
             logits_motor = self.language.lm_head(h_biased)
             del logits
