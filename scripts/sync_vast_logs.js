@@ -207,23 +207,71 @@ function fetchLogsOnce(instanceId, destPath) {
   }
 }
 
-function syncAll() {
+function listInstancesAPIAsync() {
+  return new Promise((resolve, reject) => {
+    listInstancesAPI((err, res) => {
+      if (err) return reject(err);
+      resolve(res);
+    });
+  });
+}
+
+function fetchLogsAPIAsync(instanceId, destPath) {
+  return new Promise((resolve, reject) => {
+    fetchLogsAPI(instanceId, destPath, (err, written) => {
+      if (err) return reject(err);
+      resolve(written);
+    });
+  });
+}
+
+async function syncAll() {
   ensureDir(DEST_DIR);
-  let instances = [];
+  loadDotEnv();
+
+  // detect if vastai CLI is available
+  let hasCLI = true;
   try {
-    instances = listInstancesCLI();
+    const r = spawnSync('vastai', ['--version'], { encoding: 'utf8', env: SAFE_ENV, input: '' });
+    if (r.error) hasCLI = false;
   } catch (e) {
-    console.error('Failed to list instances', e);
-    return;
+    hasCLI = false;
   }
+
+  let instances = [];
+  if (hasCLI) {
+    try {
+      instances = listInstancesCLI();
+      console.log(`Found ${instances.length} instances via CLI`);
+    } catch (e) {
+      console.error('CLI listing failed, falling back to API:', e && e.message);
+      hasCLI = false;
+    }
+  }
+
+  if (!hasCLI) {
+    try {
+      instances = await listInstancesAPIAsync();
+      console.log(`Found ${instances.length} instances via API`);
+    } catch (e) {
+      console.error('API listing failed:', e && e.message);
+      return;
+    }
+  }
+
   for (const it of instances) {
     const id = it.id;
     const fname = `${id}.log`;
     const dest = path.join(DEST_DIR, fname);
     try {
-      fetchLogsOnce(id, dest);
+      if (hasCLI) {
+        fetchLogsOnce(id, dest);
+      } else {
+        const bytes = await fetchLogsAPIAsync(id, dest);
+        console.log(`Fetched ${id} -> ${dest} (${bytes} bytes)`);
+      }
     } catch (e) {
-      console.error('Failed to fetch logs for', id, e);
+      console.error('Failed to fetch logs for', id, e && e.message);
     }
   }
 }
