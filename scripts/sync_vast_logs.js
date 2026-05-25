@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { spawnSync, spawn } = require('child_process');
+const { spawnSync, spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
@@ -14,57 +14,15 @@ function ensureDir(dir) {
 }
 
 function listInstancesCLI() {
-  // Try JSON output first (preferred): instances-v1 is paginated and newer.
-  const tryCmds = [
-    ['show', 'instances-v1', '--json'],
-    ['show', 'instances', '--json'],
-  ];
-
-  // Build a safe env for non-interactive runs (avoid pagers and prompts)
-  const safeEnv = Object.assign({}, process.env, { PAGER: 'cat', TERM: 'dumb', VAST_NO_PROMPT: '1' });
-
-  for (const args of tryCmds) {
-    try {
-      const out = spawnSync('vastai', args, { encoding: 'utf8', env: safeEnv, input: '' });
-      if (out.error) continue;
-      const txt = (out.stdout || '') + '\n' + (out.stderr || '');
-      try {
-        const j = JSON.parse(txt);
-        const items = Array.isArray(j) ? j : (j.binstances || j.results || j.instances || j);
-        const results = [];
-        if (Array.isArray(items)) {
-          for (const it of items) {
-            const iid = it.id || it.instance_id || it.binstance_id || it.bnode_id || it.bnode || it.bnode_id;
-            const lbl = it.label || it.title || it.name || it.job_label || '';
-            if (iid) results.push({ id: String(iid), label: String(lbl || '') });
-          }
-          if (results.length) return results;
-        }
-      } catch (e) {
-        // not JSON, try next
-      }
-    } catch (e) {
-      // ignore and try next
-    }
-  }
-
-  // Fallback: parse the tabular output from `vastai show instances`.
   try {
-  const out = spawnSync('vastai', ['show', 'instances'], { encoding: 'utf8', env: safeEnv, input: '' });
-  if (out.error) throw out.error;
-  const txt = (out.stdout || '') + '\n' + (out.stderr || '');
+    const txt = execSync('vastai show instances', { encoding: 'utf8', env: SAFE_ENV, shell: true });
     const lines = txt.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const results = [];
-    // Look for lines that contain an ID in the second column
     for (const l of lines) {
       const m = l.match(/^\s*#?\s*(\d+)\s+(\d+)\s+/);
-      if (m) {
-        const id = m[2];
-        results.push({ id: id, label: '' });
-      }
+      if (m) results.push({ id: m[2], label: '' });
     }
     if (results.length) return results;
-    // if parsing failed, print raw output for debugging
     console.log('Debug: raw `vastai show instances` output:\n' + txt);
     return [];
   } catch (e) {
@@ -163,22 +121,8 @@ function fetchLogsAPI(instanceId, destPath, cb) {
 
 function fetchLogsOnce(instanceId, destPath) {
   ensureDir(path.dirname(destPath));
-  // Run vastai logs <id> and write to destPath
-  const p = spawnSync('vastai', ['logs', String(instanceId)], { encoding: 'utf8', env: SAFE_ENV, input: '' });
-  if (p.error) {
-    console.error('Error running vastai for', instanceId, p.error && p.error.message);
-    return;
-  }
-
-  const exitCode = Number.isFinite(p.status) ? p.status : 0;
-  if (exitCode !== 0) {
-    console.error(`vastai logs ${instanceId} exited with code ${exitCode}. stderr (trimmed):`);
-    const stderr = (p.stderr || '').trim();
-    console.error(stderr.split(/\r?\n/).slice(0, 10).join('\n'));
-    return;
-  }
-
-  const outtxt = p.stdout || '';
+  try {
+    const outtxt = execSync(`vastai logs ${instanceId}`, { encoding: 'utf8', env: SAFE_ENV, shell: true });
   // Write/append logic: if file exists and its content is a prefix of new output, append only the tail
   let appended = 0;
   try {
@@ -204,6 +148,9 @@ function fetchLogsOnce(instanceId, destPath) {
     console.log(`Fetched ${instanceId} -> ${destPath} (appended ${appended} bytes, total ${total} bytes)`);
   } catch (e) {
     console.error('Failed to write log for', instanceId, e && e.message);
+  }
+  } catch (e) {
+    console.error('vastai logs', instanceId, 'failed:', e && e.message);
   }
 }
 
@@ -253,13 +200,8 @@ async function syncAll() {
   }
 
   if (!hasCLI) {
-    try {
-      instances = await listInstancesAPIAsync();
-      console.log(`Found ${instances.length} instances via API`);
-    } catch (e) {
-      console.error('API listing failed:', e && e.message);
-      return;
-    }
+    console.error('vastai CLI not found in PATH; please install/configure the vastai CLI. Skipping this sync run.');
+    return;
   }
 
   for (const it of instances) {
@@ -282,8 +224,33 @@ async function syncAll() {
 function main() {
   ensureDir(DEST_DIR);
   console.log('Starting sync: logs ->', DEST_DIR, 'interval', INTERVAL_SECONDS, 's');
-  syncAll();
-  setInterval(syncAll, INTERVAL_SECONDS * 1000);
+  // Run first sync and schedule subsequent runs, handling errors so we don't crash.
+  // Install the periodic timer first so the process remains alive even if the
+  // first sync encounters network/CLI/API errors.
+  const runOnce = async () => {
+    try {
+      await syncAll();
+    } catch (e) {
+      console.error('syncAll failed:', e && e.message);
+    }
+  };
+
+  setInterval(() => {
+    runOnce().catch((e) => console.error('Periodic syncAll failed:', e && e.message));
+  }, INTERVAL_SECONDS * 1000);
+
+  // Kick off the first run but don't let its errors crash the process.
+  runOnce().catch((e) => console.error('Initial syncAll failed:', e && e.message));
 }
+
+// Catch unhandled promise rejections so the process doesn't exit unexpectedly.
+process.on('unhandledRejection', (reason, p) => {
+  console.error('Unhandled Rejection at:', p, 'reason:', reason && reason.stack ? reason.stack : reason);
+});
+
+// Catch uncaught exceptions as a last resort and log them (process will still exit).
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err && err.stack ? err.stack : err);
+});
 
 main();

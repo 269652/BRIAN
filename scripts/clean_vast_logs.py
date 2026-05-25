@@ -19,7 +19,7 @@ PATTERNS = [
 ]
 
 
-def clean_file(p: Path):
+def clean_file(p):
     text = p.read_text(encoding='utf-8', errors='replace')
     lines = text.splitlines()
     new_lines = []
