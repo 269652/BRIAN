@@ -17,9 +17,12 @@ function listInstancesCLI() {
     ['show', 'instances', '--json'],
   ];
 
+  // Build a safe env for non-interactive runs (avoid pagers and prompts)
+  const safeEnv = Object.assign({}, process.env, { PAGER: 'cat', TERM: 'dumb', VAST_NO_PROMPT: '1' });
+
   for (const args of tryCmds) {
     try {
-      const out = spawnSync('vastai', args, { encoding: 'utf8' });
+      const out = spawnSync('vastai', args, { encoding: 'utf8', env: safeEnv, input: '' });
       if (out.error) continue;
       const txt = (out.stdout || '') + '\n' + (out.stderr || '');
       try {
@@ -44,9 +47,9 @@ function listInstancesCLI() {
 
   // Fallback: parse the tabular output from `vastai show instances`.
   try {
-    const out = spawnSync('vastai', ['show', 'instances'], { encoding: 'utf8' });
-    if (out.error) throw out.error;
-    const txt = (out.stdout || '') + '\n' + (out.stderr || '');
+  const out = spawnSync('vastai', ['show', 'instances'], { encoding: 'utf8', env: safeEnv, input: '' });
+  if (out.error) throw out.error;
+  const txt = (out.stdout || '') + '\n' + (out.stderr || '');
     const lines = txt.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const results = [];
     // Look for lines that contain an ID in the second column
@@ -70,7 +73,7 @@ function listInstancesCLI() {
 function fetchLogsOnce(instanceId, destPath) {
   ensureDir(path.dirname(destPath));
   // Run vastai logs <id> and write to destPath
-  const p = spawnSync('vastai', ['logs', String(instanceId)], { encoding: 'utf8' });
+  const p = spawnSync('vastai', ['logs', String(instanceId)], { encoding: 'utf8', env: safeEnv, input: '' });
   if (p.error) {
     console.error('Error running vastai for', instanceId, p.error && p.error.message);
     return;
