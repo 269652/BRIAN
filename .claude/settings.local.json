@@ -34,7 +34,16 @@
       "Bash(./.venv/Scripts/python.exe -m pytest tests/test_consciousness.py tests/test_orchestrator.py tests/test_phi.py -x --tb=short -q)",
       "Bash(./.venv-2/Scripts/python.exe -c \"import pytest, torch; print\\('pytest', pytest.__version__, 'torch', torch.__version__\\)\")",
       "Bash(./.venv/Scripts/python.exe -m pip install pytest -q)",
-      "Bash(./.venv/Scripts/python.exe -c ' *)"
+      "Bash(./.venv/Scripts/python.exe -c ' *)",
+      "Bash(python -c \"import neuroslm.dsl; print\\(neuroslm.dsl.__file__\\)\")",
+      "Bash(python -c \"from neuroslm.dsl import compiler; print\\(dir\\(compiler\\)\\)\")",
+      "Bash(python -c \"import sys; sys.path.insert\\(0, '.'\\); from neuroslm.dsl import compiler; print\\(dir\\(compiler\\)\\)\")",
+      "Bash(.venv/Scripts/python -c \"import sys; sys.path.insert\\(0, '.'\\); from neuroslm.dsl import compiler; print\\(dir\\(compiler\\)\\)\")",
+      "Bash(.venv/Scripts/python -c \"import sys; sys.path.insert\\(0, '.'\\); import neuroslm.dsl as d; print\\(d.__file__\\); print\\(dir\\(d\\)\\)\")",
+      "Bash(.venv/Scripts/python -c ' *)",
+      "Bash(ROLES=full BRANCH=arch/synthesis-v1 PRESET=synth_30m STEPS=10000 BATCH=4 GRAD_ACCUM=4 SAVE_EVERY=1000 LOG_EVERY=20 FRESH=1 VAST_GPU_QUERY='gpu_name in [A100_SXM4,A100_PCIE,A100_SXM,A100X,RTX_4090] num_gpus=1 rentable=true verified=true reliability>0.99 machine_id!=111452' bash scripts/vast_deploy.sh)",
+      "Bash(PYTHONIOENCODING=utf-8 bash scripts/vast.sh show instances)",
+      "Bash(BRANCH=arch/synthesis-v1 CKPT=lfs_checkpoints/neuroslm_synth_30m_68M_adamw_mix_best.pt ROLE_TAG=synth-30m VAST_GPU_QUERY='gpu_name in [A100_SXM4,A100_PCIE,A100_SXM,A100X] num_gpus=1 rentable=true verified=true reliability>0.99' bash scripts/vast_ood_eval.sh)"
     ]
   }
 }

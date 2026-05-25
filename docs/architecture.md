@@ -1755,6 +1755,76 @@ The cosine LR override (`pg["lr"] = cosine_lr(...) * pg.get("lr_scale", 1.0)`) o
 
 **Query-Key Normalisation:** RMSNorm applied to Q and K projections in attention layers (`common.py :: TransformerBlock`) stabilises training at bfloat16 precision by preventing attention logit overflow.
 
+### 7.5 Surprise-Gated Branching EMA — late-divergence protection
+
+**Pathology observed** (synth-v1 10k log, 2026-05-25):
+
+```
+step  2600: ppl  85    ← model approaching a good basin
+step  3800: ppl  59    ← BEST point reached (the actual minimum)
+step  4000: ppl 111    ← spike (best.pt saved here on lm_ema lag)
+step  4800: ppl 257    ← major spike
+step  5600: ppl 426    ← catastrophic spike
+step  5800-10000: stuck at ppl 200-270, NEVER recovers to step 3800's 59
+```
+
+Standard EMA-of-lm best-tracking SAVES at step 4000 (lm_ema 4.748 = ppl 115) — but that's not the actual lowest moment of training, which was step 3800 at raw ppl 59. The model touched the low-loss basin, was pushed out by aux-loss gradient noise / awakening dynamics, and never returned. Three failures stack:
+
+1. **Best-tracker lag** — lm_ema took too long to track the dip, so the saved best.pt isn't even at the lowest point.
+2. **No reversion mechanism** — when training drifts into a worse basin, nothing pulls it back.
+3. **All updates absorbed equally** — divergent gradient updates get baked into the trunk just like good updates.
+
+**Mechanism** (`neuroslm/intelligence/branching_ema.py` :: `BranchingEMA`):
+
+Two shadow parameter sets are maintained per parameter:
+
+- `params_stable` — slow EMA of recent stable weights, mixed in with rate `α_eff`
+- `params_best` — snapshot at the historical lowest mean-of-recent-window PPL
+
+The mixing rate is gated by **log-PPL velocity**:
+
+```
+v(t) = (mean log_ppl over last n/2 steps) − (mean log_ppl over first n/2 steps)
+α_eff(t) = (1 / avg_ppl(t)) · exp(−γ · max(0, v(t)))
+α_eff(t) = min(α_eff(t), base_alpha_cap)
+```
+
+`max(0, v)` is the key asymmetry: descent (negative velocity) does NOT freeze the EMA — we *want* to absorb the good weights. Only rising-PPL spikes attenuate the gate. With default γ=5.0 (log-PPL units):
+
+| Rise per step | velocity ≈ | gate |
+|---|---|---|
+| flat / descent | ≤ 0 | 1.000 |
+| 1.2× | 0.18 | 0.40 |
+| 1.5× | 0.40 | 0.13 |
+| 2.0× | 0.69 | 0.03 |
+| 5.0× | 1.61 | 3e-4 |
+
+**Free-Energy Collapse** — when `current_ppl > bema_collapse_ratio × best_window_ppl` (default 3.0) and history has at least 5 samples, the model's parameters are unconditionally reverted to `params_best`. This is the structural fix for the synth-v1 pattern: a spike to ppl 426 against a best basin of ~80 triggers `426 > 3×80 = 240` → collapse → trunk reverts to the step-3800 weights → training resumes from the good basin.
+
+**Best-tracking** uses a **windowed-mean** over the last `history_len/2` samples rather than EMA or raw min. Raw min was too noisy (single lucky batch); EMA was too slow (lagged the descent by 20+ steps); window-mean is robust and tracks legitimate basins within a few steps.
+
+**Scale invariance** — velocity in log-PPL units means γ does not need re-tuning across PPL regimes. A 1.6× per-step rise produces velocity ≈ 0.5 whether the trace is 50→80 or 5000→8000.
+
+**How this differs from SWA / LookAhead / SAM**:
+
+- **SWA (Izmailov 2018)** — uniform averaging over all checkpoints. We exponentially weight by current PPL and gate by velocity.
+- **LookAhead (Zhang 2019)** — fast/slow weights with FIXED interpolation rate. We make the rate PPL-velocity-dependent (asymmetric: easy to absorb, hard to freeze).
+- **SAM (Foret 2020)** — flat-minima search via gradient ascent on the loss landscape. We don't find flat minima; we protect EXISTING good minima from being vandalized by later bad updates.
+
+**Config**: `cfg.use_branching_ema=True` to enable. Defaults in `synth_30m_bema` preset: `bema_history_len=10`, `bema_gamma=5.0`, `bema_alpha_cap=0.01`, `bema_collapse_ratio=3.0`.
+
+**Tests** (`tests/test_branching_ema.py`, 9 passing):
+
+- velocity direction (rising > 0, falling < 0)
+- alpha gating: flat-PPL window has 10× higher α than rising-PPL window at matched 1/avg_ppl base
+- best tracker captures dip to 49.8 after 5000→45 descent
+- collapse triggers on `current_ppl > 3 × best_window_ppl` and undoes a 2.9-magnitude param perturbation back to the snapshot
+- no spurious collapse during normal descent
+- stable shadow accumulates drift > 1e-4 over 14 descent steps
+- end-to-end synth-v1 trace produces ≥1 collapse on the post-step-13 spikes
+- state_dict roundtrip preserves both shadows
+- scale-invariance: 50→500 and 500→5000 produce identical velocity (0.502)
+
 ---
 
 ## 8. Intelligence & Integration Metrics

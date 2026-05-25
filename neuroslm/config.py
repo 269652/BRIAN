@@ -159,6 +159,24 @@ class BrainConfig:
     fe_gate_center: float = 1000.0
     fe_gate_width: float = 300.0
 
+    # ---- Surprise-Gated Branching EMA (synth-v2 late-divergence fix) ----
+    # Meta-optimizer maintaining a slow stable EMA of weights and a
+    # snapshot at the historical lowest EMA-smoothed PPL. EMA mixing
+    # rate alpha_eff = (1/avg_ppl) * exp(-gamma * |d(ppl)/dt|), so when
+    # PPL is rising fast the stable shadow freezes. On catastrophic
+    # spike (current_ppl > bema_collapse_ratio * best_ema_ppl) the
+    # trunk is reverted to params_best. Fixes the synth-v1 pathology
+    # where training hit ppl 59 at step 3800, spiked to 257/426 from
+    # step 4800, and never recovered. See §7.5 in docs/architecture.md
+    # and neuroslm/intelligence/branching_ema.py.
+    use_branching_ema: bool = False
+    bema_history_len: int = 10
+    bema_gamma: float = 5.0   # see branching_ema.py for the regime table
+    bema_alpha_cap: float = 0.01
+    bema_update_every: int = 1
+    bema_best_ema_alpha: float = 0.1
+    bema_collapse_ratio: float = 3.0
+
     # ---- Recursive Reasoning Cortex (Universal-Transformer-style) ----
     # When True, ReasoningCortex.forward_tokens loops its expert_blocks
     # `recursive_iters` times with weight-sharing — depth-multiplying the
@@ -695,9 +713,37 @@ def synth_30m() -> BrainConfig:
     return c
 
 
+def synth_30m_bema() -> BrainConfig:
+    """synth_30m + Surprise-Gated Branching EMA.
+
+    Direct fix for the synth-v1 late-divergence pathology observed in
+    the 2026-05-25 10k log:
+        step 3800: ppl  59  (BEST seen)
+        step 4800: ppl 257  (spike)
+        step 5600: ppl 426  (catastrophic spike)
+        step 5800-10000: stuck at ppl 200-270, never recovers.
+
+    Adds the Branching-EMA meta-optimizer on top of synth_30m's stack
+    (PCT + SGB + FE-ramp + top-down-only). Hypothesis: BEMA collapse-on-
+    spike + stable-shadow EMA will keep the trunk anchored to the best
+    basin seen during training, letting the final best.pt actually
+    reflect the lowest-PPL trajectory rather than an early save point.
+    """
+    c = synth_30m()
+    c.use_branching_ema = True
+    c.bema_history_len = 10
+    c.bema_gamma = 5.0
+    c.bema_alpha_cap = 0.01
+    c.bema_update_every = 1
+    c.bema_best_ema_alpha = 0.1
+    c.bema_collapse_ratio = 3.0
+    return c
+
+
 PRESETS = {
     "tiny": tiny, "small": small, "medium": medium,
     "large": large, "xl": xl, "xxl": xxl,
     "pct_30m": pct_30m,
     "synth_30m": synth_30m,
+    "synth_30m_bema": synth_30m_bema,
 }

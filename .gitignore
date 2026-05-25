@@ -40,6 +40,8 @@ Thumbs.db
 *.log
 training.err
 training.log
+logs/
+!logs/vast/*.log
 
 # Testing and packaging
 pip-wheel-metadata/

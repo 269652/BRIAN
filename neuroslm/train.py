@@ -588,6 +588,25 @@ def main():
         optim = AdamW(param_groups, lr=cfg.lr,
                       weight_decay=cfg.weight_decay, betas=(0.9, 0.95))
 
+    # Surprise-Gated Branching EMA — meta-optimizer that protects the
+    # trunk from late-training divergence. See §7.5 in
+    # docs/architecture.md and neuroslm/intelligence/branching_ema.py.
+    branching_ema = None
+    if getattr(cfg, 'use_branching_ema', False):
+        from .intelligence.branching_ema import BranchingEMA
+        branching_ema = BranchingEMA(
+            brain,
+            history_len=int(getattr(cfg, 'bema_history_len', 10)),
+            gamma=float(getattr(cfg, 'bema_gamma', 0.5)),
+            base_alpha_cap=float(getattr(cfg, 'bema_alpha_cap', 0.01)),
+            update_every=int(getattr(cfg, 'bema_update_every', 1)),
+            best_ema_alpha=float(getattr(cfg, 'bema_best_ema_alpha', 0.1)),
+        )
+        print(f"[train] Branching EMA enabled "
+              f"(history={branching_ema.history.maxlen}, "
+              f"gamma={branching_ema.gamma}, "
+              f"alpha_cap={branching_ema.base_alpha_cap})", flush=True)
+
     meta_opt = None
     if args.meta and functional_call is None:
         print("[train] WARNING: torch.func.functional_call unavailable; "
@@ -1254,6 +1273,27 @@ def main():
         if math.isfinite(_lm_now):
             best_lm_ema = (_lm_now if best_lm_ema is None
                            else 0.98 * best_lm_ema + 0.02 * _lm_now)
+
+        # ── Branching EMA per-step hook ──────────────────────────────
+        # Track current PPL, gate-update the stable shadow, collapse to
+        # params_best on catastrophic spike. Fixes the synth-v1 pathology
+        # where training hit ppl 59 at step 3800 then drifted to ppl
+        # 200-400 from step 4800 onwards and never recovered the basin.
+        # No-op when cfg.use_branching_ema=False. See docs §7.5.
+        if branching_ema is not None and math.isfinite(_lm_now):
+            _bema_ppl_now = math.exp(min(20.0, _lm_now))
+            branching_ema.maybe_update(brain, ppl=_bema_ppl_now, step=step)
+            _did_collapse = branching_ema.maybe_collapse_to_best(
+                brain, current_ppl=_bema_ppl_now,
+                trigger_ratio=float(getattr(cfg, 'bema_collapse_ratio', 3.0)),
+            )
+            if _did_collapse:
+                print(f"[train] BEMA COLLAPSE at step {step+1}: "
+                      f"ppl {_bema_ppl_now:.1f} > "
+                      f"{getattr(cfg, 'bema_collapse_ratio', 3.0)}x "
+                      f"best_ema_ppl {branching_ema._best_ema_ppl:.1f}; "
+                      f"trunk reverted to best snapshot "
+                      f"(#{branching_ema._n_collapses})", flush=True)
 
         if (step + 1) % args.log_every == 0:
             dt = time.time() - t0
