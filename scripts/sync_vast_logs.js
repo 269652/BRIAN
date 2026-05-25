@@ -3,8 +3,10 @@ const { spawnSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const INTERVAL_SECONDS = process.env.SYNC_LOGS_INTERVAL || 30; // default poll interval
+const INTERVAL_SECONDS = Number(process.env.SYNC_LOGS_INTERVAL || 30); // default poll interval
 const DEST_DIR = process.env.SYNC_LOGS_DEST || path.join('logs', 'vast');
+
+const SAFE_ENV = Object.assign({}, process.env, { PAGER: 'cat', TERM: 'dumb', VAST_NO_PROMPT: '1' });
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -73,20 +75,46 @@ function listInstancesCLI() {
 function fetchLogsOnce(instanceId, destPath) {
   ensureDir(path.dirname(destPath));
   // Run vastai logs <id> and write to destPath
-  const p = spawnSync('vastai', ['logs', String(instanceId)], { encoding: 'utf8', env: safeEnv, input: '' });
+  const p = spawnSync('vastai', ['logs', String(instanceId)], { encoding: 'utf8', env: SAFE_ENV, input: '' });
   if (p.error) {
     console.error('Error running vastai for', instanceId, p.error && p.error.message);
     return;
   }
-  // Only write stdout to the file if the command exited successfully (status 0)
-  if (p.status === 0) {
-    const outtxt = p.stdout || '';
-    fs.writeFileSync(destPath, outtxt, { encoding: 'utf8' });
-    console.log('Fetched', instanceId, '->', destPath, `(${Buffer.byteLength(outtxt, 'utf8')} bytes)`);
-  } else {
-    console.error('vastai logs', instanceId, 'exited with code', p.status, '; stderr excerpts:');
+
+  const exitCode = Number.isFinite(p.status) ? p.status : 0;
+  if (exitCode !== 0) {
+    console.error(`vastai logs ${instanceId} exited with code ${exitCode}. stderr (trimmed):`);
     const stderr = (p.stderr || '').trim();
-    console.error(stderr.split(/\r?\n/).slice(0,5).join('\n'));
+    console.error(stderr.split(/\r?\n/).slice(0, 10).join('\n'));
+    return;
+  }
+
+  const outtxt = p.stdout || '';
+  // Write/append logic: if file exists and its content is a prefix of new output, append only the tail
+  let appended = 0;
+  try {
+    if (fs.existsSync(destPath)) {
+      const existing = fs.readFileSync(destPath, { encoding: 'utf8' });
+      if (outtxt.startsWith(existing)) {
+        const tail = outtxt.slice(existing.length);
+        if (tail.length > 0) {
+          fs.appendFileSync(destPath, tail, { encoding: 'utf8' });
+          appended = Buffer.byteLength(tail, 'utf8');
+        }
+      } else {
+        // If existing content isn't a prefix, overwrite (avoids duplicating or corrupting files)
+        fs.writeFileSync(destPath, outtxt, { encoding: 'utf8' });
+        appended = Buffer.byteLength(outtxt, 'utf8');
+      }
+    } else {
+      ensureDir(path.dirname(destPath));
+      fs.writeFileSync(destPath, outtxt, { encoding: 'utf8' });
+      appended = Buffer.byteLength(outtxt, 'utf8');
+    }
+    const total = fs.existsSync(destPath) ? fs.statSync(destPath).size : appended;
+    console.log(`Fetched ${instanceId} -> ${destPath} (appended ${appended} bytes, total ${total} bytes)`);
+  } catch (e) {
+    console.error('Failed to write log for', instanceId, e && e.message);
   }
 }
 
