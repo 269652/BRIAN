@@ -67,6 +67,22 @@ def run_cli(instance_id: str, follow: bool, dest: str | None):
         working_prefix = ['logs']
 
     cmd = ['vastai'] + working_prefix + [str(instance_id)]
+
+    # Some versions of the vastai CLI don't support a `--follow` flag on the logs subcommand.
+    # Probe the chosen subcommand's help text to see if --follow is supported; if not, omit it.
+    supports_follow = False
+    try:
+        help_p = subprocess.run(['vastai'] + working_prefix + ['--help'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        help_text = (help_p.stdout or '') + (help_p.stderr or '')
+        supports_follow = '--follow' in help_text
+    except Exception:
+        # If probing fails, conservatively assume follow is not supported
+        supports_follow = False
+
+    if follow and not supports_follow:
+        print('Note: the vastai CLI on this system does not support --follow for this command; fetching once without follow.')
+        follow = False
+
     if follow:
         cmd.append('--follow')
 
