@@ -38,3 +38,21 @@ Create a branch `docs/logs` (this repository includes a utilities commit on that
 branch). The branch is intended to store fetched logs and small utilities only.
 When an architecture is selected, rebase or merge the relevant docs into `master`
 and keep `docs/logs` as an archival branch.
+
+Streaming live logs
+-------------------
+
+If you prefer a live stream instead of periodic fetches, use `scripts/stream_vast_logs.py`.
+
+Examples:
+
+1) Stream a single remote log to a local file (direct SSH):
+
+   python scripts/stream_vast_logs.py --host 34.12.34.56 --user root --key ~/.ssh/id_rsa --remote /root/train_logs/run.log --local logs/live/run.log
+
+2) Stream logs from an instance defined in your config:
+
+   python scripts/stream_vast_logs.py --config docs/logs/config.json --label instance-1 --remote /root/train_logs/run.log
+
+The streamer uses `tail -F` on the remote side and will reconnect automatically on transient failures. Press Ctrl+C to stop.
+
