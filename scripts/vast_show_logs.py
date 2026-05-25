@@ -39,6 +39,10 @@ def run_cli(instance_id: str, follow: bool, dest: str | None):
         cmd.append('--follow')
     print('Running CLI:', ' '.join(cmd))
     if dest:
+        # ensure parent directory exists so open() doesn't fail
+        parent = os.path.dirname(dest)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         # stream into file and stdout
         with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as p, open(dest, 'a', encoding='utf-8') as f:
             try:
