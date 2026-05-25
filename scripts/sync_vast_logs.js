@@ -2,6 +2,7 @@
 const { spawnSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 const INTERVAL_SECONDS = Number(process.env.SYNC_LOGS_INTERVAL || 30); // default poll interval
 const DEST_DIR = process.env.SYNC_LOGS_DEST || path.join('logs', 'vast');
@@ -70,6 +71,94 @@ function listInstancesCLI() {
     console.log('Debug: failed to run `vastai show instances`: ', e && e.message);
     return [];
   }
+}
+
+
+function loadDotEnv() {
+  const envPath = path.join(process.cwd(), '.env');
+  if (!fs.existsSync(envPath)) return;
+  const txt = fs.readFileSync(envPath, { encoding: 'utf8' });
+  for (const line of txt.split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z0-9_]+)=(.*)$/);
+    if (!m) continue;
+    const k = m[1];
+    let v = m[2] || '';
+    // strip quotes
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1);
+    }
+    if (!process.env[k]) process.env[k] = v;
+  }
+}
+
+
+function listInstancesAPI(callback) {
+  const key = process.env.VAST_API_KEY || process.env.VAST_AI;
+  if (!key) return callback(new Error('VAST_API_KEY or VAST_AI not set'), null);
+  const opts = {
+    hostname: 'api.vast.ai',
+    path: '/v0/binstances',
+    method: 'GET',
+    headers: { 'Authorization': 'Bearer ' + key }
+  };
+  const req = https.request(opts, (res) => {
+    let body = '';
+    res.setEncoding('utf8');
+    res.on('data', (d) => body += d);
+    res.on('end', () => {
+      try {
+        const j = JSON.parse(body);
+        const items = Array.isArray(j) ? j : (j.binstances || j.results || j.instances || []);
+        const results = [];
+        if (Array.isArray(items)) {
+          for (const it of items) {
+            const iid = it.id || it.instance_id || it.binstance_id || it.bnode_id || it.bnode || it.bnode_id;
+            const lbl = it.label || it.title || it.name || it.job_label || '';
+            if (iid) results.push({ id: String(iid), label: String(lbl || '') });
+          }
+        }
+        callback(null, results);
+      } catch (e) {
+        callback(e, null);
+      }
+    });
+  });
+  req.on('error', (err) => callback(err, null));
+  req.end();
+}
+
+
+function fetchLogsAPI(instanceId, destPath, cb) {
+  const key = process.env.VAST_API_KEY || process.env.VAST_AI;
+  if (!key) return cb(new Error('VAST_API_KEY or VAST_AI not set'));
+  const opts = {
+    hostname: 'api.vast.ai',
+    path: `/v0/instances/${instanceId}/logs`,
+    method: 'GET',
+    headers: { 'Authorization': 'Bearer ' + key }
+  };
+  const req = https.request(opts, (res) => {
+    if (res.statusCode !== 200) {
+      let errBody = '';
+      res.setEncoding('utf8');
+      res.on('data', d => errBody += d);
+      res.on('end', () => cb(new Error(`status ${res.statusCode}: ${errBody}`)));
+      return;
+    }
+    ensureDir(path.dirname(destPath));
+    const ws = fs.createWriteStream(destPath, { encoding: 'utf8' });
+    let written = 0;
+    res.on('data', (chunk) => {
+      ws.write(chunk);
+      written += Buffer.byteLength(chunk, 'utf8');
+    });
+    res.on('end', () => {
+      ws.end();
+      cb(null, written);
+    });
+  });
+  req.on('error', (err) => cb(err));
+  req.end();
 }
 
 function fetchLogsOnce(instanceId, destPath) {
