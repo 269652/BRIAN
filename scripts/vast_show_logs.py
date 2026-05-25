@@ -142,6 +142,60 @@ def list_instances_by_label(label: str) -> List[Dict[str, Any]]:
     except Exception:
         print('requests not installed. Install with: pip install requests')
         return []
+
+
+def list_all_instances() -> List[Dict[str, Any]]:
+    """Return a list of instance dicts. Prefer API; if that fails, try CLI parsing as a fallback."""
+    try:
+        items = []
+        try:
+            # Try API first
+            import requests
+            key = os.environ.get('VAST_API_KEY') or os.environ.get('VAST_AI')
+            if key:
+                url = 'https://api.vast.ai/v0/binstances'
+                r = requests.get(url, headers={'Authorization': 'Bearer ' + key}, timeout=30)
+                r.raise_for_status()
+                j = r.json()
+                if isinstance(j, dict):
+                    items = j.get('binstances') or j.get('results') or []
+                else:
+                    items = j
+                return items
+        except Exception:
+            # API path failed; fall back to parsing CLI output
+            pass
+
+        # CLI fallback: parse `vastai show instances` table output
+        if shutil.which('vastai'):
+            out = subprocess.run(['vastai', 'show', 'instances'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            txt = out.stdout + '\n' + out.stderr
+            lines = [l.strip() for l in txt.splitlines() if l.strip()]
+            results: List[Dict[str, Any]] = []
+            # heuristic: look for lines that start with a numeric index and have ID in the second column
+            import re
+            for l in lines:
+                m = re.match(r'^\d+\s+(\d+)\s+\S+\s+\S+\s+.*', l)
+                if m:
+                    inst_id = m.group(1)
+                    # try to find a label line later in the output (simple heuristic)
+                    # search for 'Label' table at the bottom
+                    # fallback: set label to empty
+                    results.append({'id': inst_id, 'label': ''})
+            return results
+    except Exception:
+        return []
+
+
+def sanitize_label(lbl: str) -> str:
+    if not lbl:
+        return ''
+    # replace whitespace with -, remove problematic chars
+    import re
+    s = lbl.strip().lower()
+    s = re.sub(r'\s+', '-', s)
+    s = re.sub(r'[^a-z0-9\-._]', '', s)
+    return s
     key = os.environ.get('VAST_API_KEY') or os.environ.get('VAST_AI')
     if not key:
         print('VAST API key not found in env (.env). Set VAST_API_KEY or VAST_AI.')
@@ -183,8 +237,9 @@ def main():
     p.add_argument('--label', help='Label substring to match against instances')
     p.add_argument('--follow', action='store_true', help='Stream/follow logs (CLI only)')
     p.add_argument('--dest', help='Local file to write logs to')
+    p.add_argument('--all', action='store_true', help='Fetch logs for all instances (API preferred)')
+    p.add_argument('--workers', type=int, default=4, help='Number of parallel workers when fetching multiple instances')
     args = p.parse_args()
-
     inst_id = args.instance_id
     if not inst_id and args.label:
         matches = list_instances_by_label(args.label)
@@ -194,6 +249,48 @@ def main():
         it = matches[0]
         inst_id = pick_instance_id_from_item(it)
         print('Selected instance id', inst_id, 'label', it.get('label'))
+
+    if args.all:
+        instances = list_all_instances()
+        if not instances:
+            print('No instances found (API/CLI failed).')
+            return
+        # Build a list of (instance_id, label)
+        tasks: List[tuple[str, str]] = []
+        for it in instances:
+            iid = pick_instance_id_from_item(it) or str(it.get('id') or it.get('instance_id') or '')
+            lbl = it.get('label') or it.get('title') or it.get('job_label') or it.get('name') or ''
+            tasks.append((iid, lbl))
+
+        # fetch in parallel
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def fetch_task(item):
+            iid, lbl = item
+            if not iid:
+                return
+            safe = sanitize_label(lbl)
+            if safe:
+                dest = args.dest or os.path.join('logs', 'vast', f"{iid}__{safe}.log")
+            else:
+                dest = args.dest or os.path.join('logs', 'vast', f"{iid}.log")
+            try:
+                if has_cli():
+                    run_cli(iid, args.follow, dest)
+                else:
+                    api_fetch(iid, dest)
+            except Exception as e:
+                print('Failed to fetch for', iid, e)
+
+        workers = max(1, args.workers or 4)
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = [ex.submit(fetch_task, t) for t in tasks]
+            for f in as_completed(futures):
+                try:
+                    f.result()
+                except Exception as e:
+                    print('task failed:', e)
+        return
 
     if not inst_id:
         print('Instance id is required (--instance-id or --label to auto-resolve)')
