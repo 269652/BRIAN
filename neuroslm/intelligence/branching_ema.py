@@ -235,7 +235,14 @@ class BranchingEMA:
                 with torch.no_grad():
                     for name, p in model.named_parameters():
                         if name in self._best:
-                            self._best[name].copy_(p.detach())
+                            # Param may have grown (NeuralGeometryAdapter BDNF
+                            # grow_kern_rank); just resnapshot with the new
+                            # shape. Falls through to .copy_ for unchanged
+                            # shapes (no-op overhead).
+                            if self._best[name].shape != p.shape:
+                                self._best[name] = p.detach().clone()
+                            else:
+                                self._best[name].copy_(p.detach())
 
         # EMA update of stable shadow — gated by surprise
         if step % self.update_every != 0:
@@ -251,6 +258,20 @@ class BranchingEMA:
         with torch.no_grad():
             for name, p in model.named_parameters():
                 if name not in self._stable:
+                    # Newly-registered param mid-training (e.g. BDNF grew a
+                    # new adapter rank). Snapshot it once and skip mixing
+                    # this step — there's nothing meaningful to EMA against.
+                    self._stable[name] = p.detach().clone()
+                    continue
+                # Shape may have changed via BDNF growth (kern_a/kern_b
+                # grow along their rank dim). When that happens, reset
+                # the stable shadow to the current param state — losing
+                # the EMA history for this param is fine because the
+                # grown dims are zero-init anyway (the model itself is
+                # mostly unchanged on the OLD dims, but the new dims
+                # would have undefined-shape mixing arithmetic).
+                if self._stable[name].shape != p.shape:
+                    self._stable[name] = p.detach().clone()
                     continue
                 self._stable[name].mul_(1.0 - alpha).add_(p.detach(), alpha=alpha)
 
@@ -288,8 +309,12 @@ class BranchingEMA:
 
         with torch.no_grad():
             for name, p in model.named_parameters():
-                if name in self._best:
+                if name in self._best and self._best[name].shape == p.shape:
                     p.data.copy_(self._best[name])
+                # else: shape diverged (BDNF growth between snapshot and
+                # now). Leave that param alone — partial collapse on the
+                # majority of params still recovers the trunk's good
+                # state; the grown adapter rank stays at its current value.
         self._n_collapses += 1
         return True
 

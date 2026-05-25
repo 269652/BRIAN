@@ -275,6 +275,54 @@ def test_invariance_to_ppl_magnitude():
     print(f"[9] scale-invariance: v_low={v_low:.3f} =~ v_high={v_high:.3f}  PASS")
 
 
+def test_handles_param_shape_growth():
+    """BDNF growth resizes parameters mid-training (kern_a/kern_b grow
+    along the rank dim). BEMA must NOT crash on the shape mismatch and
+    must keep training going."""
+    # Model with a tensor we'll grow
+    class GrowingModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = nn.Linear(4, 4)
+            # Initial low-rank kernel: (8, 4) shaped like NeuralGeometryAdapter
+            self.kern_a = nn.Parameter(torch.randn(8, 4) * 0.01)
+        def forward(self, x):
+            return self.fc(x)
+
+    m = GrowingModel()
+    bema = BranchingEMA(m, history_len=10, gamma=5.0, base_alpha_cap=0.05)
+
+    # Normal pre-growth updates
+    for step in range(5):
+        _mutate(m, scale=0.01)
+        bema.maybe_update(m, ppl=100.0, step=step)
+
+    # BDNF growth: kern_a goes from (8, 4) -> (8, 8)
+    with torch.no_grad():
+        new_block = torch.zeros(8, 4)
+        m.kern_a = nn.Parameter(torch.cat([m.kern_a.data, new_block], dim=1))
+
+    # This MUST NOT crash now — BEMA should handle the shape mismatch
+    diag = bema.maybe_update(m, ppl=95.0, step=5)
+    assert "alpha_eff" in diag, f"maybe_update should still return diagnostics after growth: {diag}"
+
+    # After update, stable shadow shape should match the new param
+    assert bema._stable["kern_a"].shape == m.kern_a.shape, (
+        f"stable shadow should be reshaped to {m.kern_a.shape}, "
+        f"got {bema._stable['kern_a'].shape}")
+
+    # Continue training, more updates should work normally
+    for step in range(6, 12):
+        _mutate(m, scale=0.01)
+        d = bema.maybe_update(m, ppl=90.0 - step, step=step)
+        assert "alpha_eff" in d
+
+    # And collapse should not crash either (even if best snapshot was at old shape)
+    triggered = bema.maybe_collapse_to_best(m, current_ppl=500.0, require_history=5)
+    # Whether it triggers depends on best_ema_ppl; the point is NO crash
+    print(f"[10] handles BDNF param shape growth (kern_a: (8,4) -> (8,8))  PASS")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("Branching EMA tests")
@@ -288,5 +336,6 @@ if __name__ == "__main__":
     test_synth_v1_real_trace()
     test_state_dict_roundtrip()
     test_invariance_to_ppl_magnitude()
+    test_handles_param_shape_growth()
     print("=" * 60)
     print("ALL TESTS PASSED")
