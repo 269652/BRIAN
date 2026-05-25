@@ -40,10 +40,6 @@ Thumbs.db
 *.log
 training.err
 training.log
-<<<<<<< HEAD
-logs/
-!logs/vast/*.log
-=======
 # Specific logs/ subdirs that are noise; logs/vast and logs/analyzed
 # are intentionally NOT in the blacklist — see whitelist below.
 logs/live/
@@ -55,7 +51,6 @@ logs/cache/
 !logs/vast/*.log
 !logs/analyzed/*.md
 !logs/analyzed/INSTRUCTIONS.md
->>>>>>> master
 
 # Testing and packaging
 pip-wheel-metadata/
