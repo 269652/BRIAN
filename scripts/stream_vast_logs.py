@@ -23,6 +23,13 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 try:
+    # load .env if present so users can keep keys in a local file (NOT committed)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
+
     import paramiko
 except Exception:
     print("Missing dependency: paramiko. Install with: pip install paramiko")

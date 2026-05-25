@@ -30,6 +30,14 @@ from datetime import datetime
 from typing import Dict, List, Any
 
 try:
+    # load .env if present so users can keep keys in a local file (NOT committed)
+    from dotenv import load_dotenv
+    load_dotenv()  # no-op if no .env
+except Exception:
+    # python-dotenv is optional; env vars may be provided by the environment
+    pass
+
+try:
     import paramiko
 except Exception:
     print("Missing dependency: paramiko. Install with: pip install paramiko")
@@ -150,7 +158,8 @@ def main():
 
     # Optionally query Vast.ai API to get instances (requires API key)
     if use_vast:
-        vast_key = cfg.get('vast_api_key') or os.environ.get('VAST_API_KEY')
+        # support both VAST_API_KEY and legacy VAST_AI env var used in .env
+        vast_key = cfg.get('vast_api_key') or os.environ.get('VAST_API_KEY') or os.environ.get('VAST_AI')
         if not vast_key:
             print('Vast.ai API key not found in config or VAST_API_KEY env var. Falling back to configured instances.')
         else:
