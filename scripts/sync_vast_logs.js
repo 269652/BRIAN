@@ -11,13 +11,10 @@ function ensureDir(dir) {
 }
 
 function listInstancesCLI() {
-  // Try to get JSON output first (preferred). Some vastai versions support
-  // `vastai show instances-v1 --json` or `vastai show instances --json`.
+  // Try JSON output first (preferred): instances-v1 is paginated and newer.
   const tryCmds = [
     ['show', 'instances-v1', '--json'],
-    ['show', 'instances-v1', '--json', '--raw'],
     ['show', 'instances', '--json'],
-    ['show', 'instances', '--raw', '--json'],
   ];
 
   for (const args of tryCmds) {
@@ -38,21 +35,21 @@ function listInstancesCLI() {
           if (results.length) return results;
         }
       } catch (e) {
-        // not JSON, fall through to next method
+        // not JSON, try next
       }
     } catch (e) {
       // ignore and try next
     }
   }
 
-  // Fallback: parse the tabular output from `vastai show instances` for IDs only.
+  // Fallback: parse the tabular output from `vastai show instances`.
   try {
     const out = spawnSync('vastai', ['show', 'instances'], { encoding: 'utf8' });
     if (out.error) throw out.error;
     const txt = (out.stdout || '') + '\n' + (out.stderr || '');
     const lines = txt.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const results = [];
-    // Look for lines starting with an index and an ID column
+    // Look for lines that contain an ID in the second column
     for (const l of lines) {
       const m = l.match(/^\s*#?\s*(\d+)\s+(\d+)\s+/);
       if (m) {
