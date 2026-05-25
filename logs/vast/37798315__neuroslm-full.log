@@ -1,0 +1,412 @@
+Mon May 25 17:55:07 UTC 2026
+Hit:1 http://archive.ubuntu.com/ubuntu jammy InRelease
+Hit:2 http://security.ubuntu.com/ubuntu jammy-security InRelease
+Hit:3 http://archive.ubuntu.com/ubuntu jammy-updates InRelease
+Hit:4 http://archive.ubuntu.com/ubuntu jammy-backports InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+curl is already the newest version (7.81.0-1ubuntu1.24).
+less is already the newest version (590-1ubuntu0.22.04.3).
+locales is already the newest version (2.35-0ubuntu3.13).
+openssh-server is already the newest version (1:8.9p1-3ubuntu0.15).
+software-properties-common is already the newest version (0.99.22.9).
+sudo is already the newest version (1.9.9-1ubuntu2.6).
+tmux is already the newest version (3.2a-4ubuntu0.2).
+wget is already the newest version (1.21.2-2ubuntu1.1).
+0 upgraded, 0 newly installed, 0 to remove and 45 not upgraded.
+Reading package lists...
+Building dependency tree...
+Reading state information...
+git is already the newest version (1:2.34.1-1ubuntu1.17).
+rsync is already the newest version (3.2.7-0ubuntu0.22.04.6).
+0 upgraded, 0 newly installed, 0 to remove and 45 not upgraded.
+rm: cannot remove '/etc/forward_port2': No such file or directory
+Cloning into 'brian'...
+Server listening on 0.0.0.0 port 22.
+Server listening on :: port 22.
+Mon May 25 17:55:11 UTC 2026
+Warning: Permanently added 'ssh1.vast.ai' (ED25519) to the list of known hosts.
+── checking out branch arch/rcc-bowtie ──
+From https://github.com/269652/BRIAN
+ * branch            arch/rcc-bowtie -> FETCH_HEAD
+Switched to a new branch 'arch/rcc-bowtie'
+Branch 'arch/rcc-bowtie' set up to track remote branch 'arch/rcc-bowtie' from 'origin'.
+── 1. System packages (git, git-lfs) ─────────────────────────────
+Hit:1 http://archive.ubuntu.com/ubuntu jammy InRelease
+Hit:2 http://security.ubuntu.com/ubuntu jammy-security InRelease
+Hit:3 http://archive.ubuntu.com/ubuntu jammy-updates InRelease
+Hit:4 http://archive.ubuntu.com/ubuntu jammy-backports InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+git is already the newest version (1:2.34.1-1ubuntu1.17).
+The following NEW packages will be installed:
+  git-lfs
+0 upgraded, 1 newly installed, 0 to remove and 45 not upgraded.
+Need to get 3544 kB of archives.
+After this operation, 10.5 MB of additional disk space will be used.
+Get:1 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 git-lfs amd64 3.0.2-1ubuntu0.3 [3544 kB]
+debconf: delaying package configuration, since apt-utils is not installed
+Fetched 3544 kB in 0s (25.1 MB/s)
+Selecting previously unselected package git-lfs.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading d
+Preparing to unpack .../git-lfs_3.0.2-1ubuntu0.3_amd64.deb ...
+Unpacking git-lfs (3.0.2-1ubuntu0.3) ...
+Setting up git-lfs (3.0.2-1ubuntu0.3) ...
+Updated git hooks.
+Git LFS initialized.
+── 2. GitHub credentials ─────────────────────────────────────────
+── 3. Clone repo (LFS pointers only) ─────────────────────────────
+── 4. Python dependencies ────────────────────────────────────────
+torch 2.3.0 cuda True
+Requirement already satisfied: numpy>=1.26 in /opt/conda/lib/python3.10/site-packages (from -r requirements.txt (line 4)) (1.26.4)
+Collecting tiktoken>=0.6 (from -r requirements.txt (line 5))
+  Downloading tiktoken-0.13.0-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (6.7 kB)
+Collecting datasets>=2.18 (from -r requirements.txt (line 6))
+  Downloading datasets-4.8.5-py3-none-any.whl.metadata (19 kB)
+Collecting tqdm>=4.66 (from -r requirements.txt (line 7))
+  Downloading tqdm-4.67.3-py3-none-any.whl.metadata (57 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 57.7/57.7 kB 4.6 MB/s eta 0:00:00
+Collecting einops>=0.7 (from -r requirements.txt (line 8))
+  Downloading einops-0.8.2-py3-none-any.whl.metadata (13 kB)
+Requirement already satisfied: networkx>=3.0 in /opt/conda/lib/python3.10/site-packages (from -r requirements.txt (line 9)) (3.1)
+Collecting accelerate>=0.27 (from -r requirements.txt (line 10))
+  Downloading accelerate-1.13.0-py3-none-any.whl.metadata (19 kB)
+Collecting regex (from tiktoken>=0.6->-r requirements.txt (line 5))
+  Downloading regex-2026.5.9-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 40.4/40.4 kB 3.9 MB/s eta 0:00:00
+Requirement already satisfied: requests in /opt/conda/lib/python3.10/site-packages (from tiktoken>=0.6->-r requirements.txt (line 5)) (2.31.0)
+Requirement already satisfied: filelock in /opt/conda/lib/python3.10/site-packages (from datasets>=2.18->-r requirements.txt (line 6)) (3.13.1)
+Collecting pyarrow>=21.0.0 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading pyarrow-24.0.0-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (3.0 kB)
+Collecting dill<0.4.2,>=0.3.0 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading dill-0.4.1-py3-none-any.whl.metadata (10 kB)
+Collecting pandas (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading pandas-2.3.3-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (91 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 91.2/91.2 kB 9.3 MB/s eta 0:00:00
+Collecting requests (from tiktoken>=0.6->-r requirements.txt (line 5))
+  Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+Collecting httpx<1.0.0 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting xxhash (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading xxhash-3.7.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (13 kB)
+Collecting multiprocess<0.70.20 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading multiprocess-0.70.19-py310-none-any.whl.metadata (7.5 kB)
+Requirement already satisfied: fsspec<=2026.2.0,>=2023.1.0 in /opt/conda/lib/python3.10/site-packages (from fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6)) (2024.3.1)
+Collecting huggingface-hub<2.0,>=0.25.0 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading huggingface_hub-1.16.1-py3-none-any.whl.metadata (14 kB)
+Requirement already satisfied: packaging in /opt/conda/lib/python3.10/site-packages (from datasets>=2.18->-r requirements.txt (line 6)) (23.2)
+Requirement already satisfied: pyyaml>=5.1 in /opt/conda/lib/python3.10/site-packages (from datasets>=2.18->-r requirements.txt (line 6)) (6.0.1)
+Requirement already satisfied: psutil in /opt/conda/lib/python3.10/site-packages (from accelerate>=0.27->-r requirements.txt (line 10)) (5.9.0)
+Requirement already satisfied: torch>=2.0.0 in /opt/conda/lib/python3.10/site-packages (from accelerate>=0.27->-r requirements.txt (line 10)) (2.3.0)
+Collecting safetensors>=0.4.3 (from accelerate>=0.27->-r requirements.txt (line 10))
+  Downloading safetensors-0.7.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.1 kB)
+Collecting aiohttp!=4.0.0a0,!=4.0.0a1 (from fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading aiohttp-3.13.5-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.1 kB)
+Collecting anyio (from httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading anyio-4.13.0-py3-none-any.whl.metadata (4.5 kB)
+Requirement already satisfied: certifi in /opt/conda/lib/python3.10/site-packages (from httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6)) (2024.2.2)
+Collecting httpcore==1.* (from httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Requirement already satisfied: idna in /opt/conda/lib/python3.10/site-packages (from httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6)) (3.4)
+Collecting h11>=0.16 (from httpcore==1.*->httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Collecting hf-xet<2.0.0,>=1.4.3 (from huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading hf_xet-1.5.0-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (4.9 kB)
+Collecting typer>=0.20.0 (from huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading typer-0.25.1-py3-none-any.whl.metadata (15 kB)
+Requirement already satisfied: typing-extensions>=4.1.0 in /opt/conda/lib/python3.10/site-packages (from huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6)) (4.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in /opt/conda/lib/python3.10/site-packages (from requests->tiktoken>=0.6->-r requirements.txt (line 5)) (2.0.4)
+Requirement already satisfied: urllib3<3,>=1.26 in /opt/conda/lib/python3.10/site-packages (from requests->tiktoken>=0.6->-r requirements.txt (line 5)) (2.1.0)
+Requirement already satisfied: sympy in /opt/conda/lib/python3.10/site-packages (from torch>=2.0.0->accelerate>=0.27->-r requirements.txt (line 10)) (1.12)
+Requirement already satisfied: jinja2 in /opt/conda/lib/python3.10/site-packages (from torch>=2.0.0->accelerate>=0.27->-r requirements.txt (line 10)) (3.1.3)
+Collecting python-dateutil>=2.8.2 (from pandas->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+Requirement already satisfied: pytz>=2020.1 in /opt/conda/lib/python3.10/site-packages (from pandas->datasets>=2.18->-r requirements.txt (line 6)) (2023.3.post1)
+Collecting tzdata>=2022.7 (from pandas->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading tzdata-2026.2-py2.py3-none-any.whl.metadata (1.4 kB)
+Collecting aiohappyeyeballs>=2.5.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading aiohappyeyeballs-2.6.2-py3-none-any.whl.metadata (5.9 kB)
+Collecting aiosignal>=1.4.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+Collecting async-timeout<6.0,>=4.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading async_timeout-5.0.1-py3-none-any.whl.metadata (5.1 kB)
+Requirement already satisfied: attrs>=17.3.0 in /opt/conda/lib/python3.10/site-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6)) (23.1.0)
+Collecting frozenlist>=1.1.1 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading frozenlist-1.8.0-cp310-cp310-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+Collecting multidict<7.0,>=4.5 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading multidict-6.7.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+Collecting propcache>=0.2.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading propcache-0.5.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (16 kB)
+Collecting yarl<2.0,>=1.17.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading yarl-1.24.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (94 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 94.2/94.2 kB 10.1 MB/s eta 0:00:00
+Requirement already satisfied: six>=1.5 in /opt/conda/lib/python3.10/site-packages (from python-dateutil>=2.8.2->pandas->datasets>=2.18->-r requirements.txt (line 6)) (1.16.0)
+Collecting click>=8.2.1 (from typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading click-8.4.1-py3-none-any.whl.metadata (2.6 kB)
+Collecting shellingham>=1.3.0 (from typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+Collecting rich>=13.8.0 (from typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+Collecting annotated-doc>=0.0.2 (from typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading annotated_doc-0.0.4-py3-none-any.whl.metadata (6.6 kB)
+Requirement already satisfied: exceptiongroup>=1.0.2 in /opt/conda/lib/python3.10/site-packages (from anyio->httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6)) (1.2.0)
+Requirement already satisfied: MarkupSafe>=2.0 in /opt/conda/lib/python3.10/site-packages (from jinja2->torch>=2.0.0->accelerate>=0.27->-r requirements.txt (line 10)) (2.1.3)
+Requirement already satisfied: mpmath>=0.19 in /opt/conda/lib/python3.10/site-packages (from sympy->torch>=2.0.0->accelerate>=0.27->-r requirements.txt (line 10)) (1.3.0)
+Collecting markdown-it-py>=2.2.0 (from rich>=13.8.0->typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading markdown_it_py-4.2.0-py3-none-any.whl.metadata (7.4 kB)
+Requirement already satisfied: pygments<3.0.0,>=2.13.0 in /opt/conda/lib/python3.10/site-packages (from rich>=13.8.0->typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6)) (2.15.1)
+Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=13.8.0->typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+Downloading tiktoken-0.13.0-cp310-cp310-manylinux_2_28_x86_64.whl (1.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 43.0 MB/s eta 0:00:00
+Downloading datasets-4.8.5-py3-none-any.whl (528 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 529.0/529.0 kB 53.7 MB/s eta 0:00:00
+Downloading tqdm-4.67.3-py3-none-any.whl (78 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.4/78.4 kB 13.8 MB/s eta 0:00:00
+Downloading einops-0.8.2-py3-none-any.whl (65 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 65.6/65.6 kB 12.4 MB/s eta 0:00:00
+Downloading accelerate-1.13.0-py3-none-any.whl (383 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 383.7/383.7 kB 46.2 MB/s eta 0:00:00
+Downloading dill-0.4.1-py3-none-any.whl (120 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 120.0/120.0 kB 20.4 MB/s eta 0:00:00
+Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.5/73.5 kB 13.2 MB/s eta 0:00:00
+Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.8/78.8 kB 13.9 MB/s eta 0:00:00
+Downloading huggingface_hub-1.16.1-py3-none-any.whl (668 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 668.2/668.2 kB 59.8 MB/s eta 0:00:00
+Downloading multiprocess-0.70.19-py310-none-any.whl (134 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 134.9/134.9 kB 23.0 MB/s eta 0:00:00
+Downloading pyarrow-24.0.0-cp310-cp310-manylinux_2_28_x86_64.whl (48.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.8/48.8 MB 32.5 MB/s eta 0:00:00
+Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.1/73.1 kB 20.4 MB/s eta 0:00:00
+Downloading safetensors-0.7.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (507 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 507.2/507.2 kB 98.2 MB/s eta 0:00:00
+Downloading pandas-2.3.3-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 111.6 MB/s eta 0:00:00
+Downloading regex-2026.5.9-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (794 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 794.1/794.1 kB 113.6 MB/s eta 0:00:00
+Downloading xxhash-3.7.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (193 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 193.3/193.3 kB 53.6 MB/s eta 0:00:00
+Downloading aiohttp-3.13.5-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.7/1.7 MB 108.1 MB/s eta 0:00:00
+Downloading hf_xet-1.5.0-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (4.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 158.1 MB/s eta 0:00:00
+Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 60.6 MB/s eta 0:00:00
+Downloading typer-0.25.1-py3-none-any.whl (58 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 58.4/58.4 kB 19.0 MB/s eta 0:00:00
+Downloading tzdata-2026.2-py2.py3-none-any.whl (349 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 349.3/349.3 kB 80.1 MB/s eta 0:00:00
+Downloading anyio-4.13.0-py3-none-any.whl (114 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 114.4/114.4 kB 37.4 MB/s eta 0:00:00
+Downloading aiohappyeyeballs-2.6.2-py3-none-any.whl (15 kB)
+Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+Downloading async_timeout-5.0.1-py3-none-any.whl (6.2 kB)
+Downloading click-8.4.1-py3-none-any.whl (116 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 116.6/116.6 kB 20.2 MB/s eta 0:00:00
+Downloading frozenlist-1.8.0-cp310-cp310-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (219 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 219.5/219.5 kB 30.7 MB/s eta 0:00:00
+Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Downloading multidict-6.7.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (243 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 243.3/243.3 kB 34.8 MB/s eta 0:00:00
+Downloading propcache-0.5.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (60 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 60.1/60.1 kB 9.4 MB/s eta 0:00:00
+Downloading rich-15.0.0-py3-none-any.whl (310 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 310.7/310.7 kB 39.8 MB/s eta 0:00:00
+Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+Downloading yarl-1.24.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (106 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 106.7/106.7 kB 17.9 MB/s eta 0:00:00
+Downloading markdown_it_py-4.2.0-py3-none-any.whl (91 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 91.7/91.7 kB 15.4 MB/s eta 0:00:00
+Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+Installing collected packages: xxhash, tzdata, tqdm, shellingham, safetensors, requests, regex, python-dateutil, pyarrow, propcache, multidict, mdurl, hf-xet, h11, frozenlist, einops, dill, click, async-timeout, anyio, annotated-doc, aiohappyeyeballs, yarl, tiktoken, pandas, multiprocess, markdown-it-py, httpcore, aiosignal, rich, httpx, aiohttp, typer, huggingface-hub, datasets, accelerate
+  Attempting uninstall: tqdm
+    Found existing installation: tqdm 4.65.0
+    Uninstalling tqdm-4.65.0:
+      Successfully uninstalled tqdm-4.65.0
+  Attempting uninstall: requests
+    Found existing installation: requests 2.31.0
+    Uninstalling requests-2.31.0:
+      Successfully uninstalled requests-2.31.0
+  Attempting uninstall: click
+    Found existing installation: click 8.1.7
+    Uninstalling click-8.1.7:
+      Successfully uninstalled click-8.1.7
+Successfully installed accelerate-1.13.0 aiohappyeyeballs-2.6.2 aiohttp-3.13.5 aiosignal-1.4.0 annotated-doc-0.0.4 anyio-4.13.0 async-timeout-5.0.1 click-8.4.1 datasets-4.8.5 dill-0.4.1 einops-0.8.2 frozenlist-1.8.0 h11-0.16.0 hf-xet-1.5.0 httpcore-1.0.9 httpx-0.28.1 huggingface-hub-1.16.1 markdown-it-py-4.2.0 mdurl-0.1.2 multidict-6.7.1 multiprocess-0.70.19 pandas-2.3.3 propcache-0.5.2 pyarrow-24.0.0 python-dateutil-2.9.0.post0 regex-2026.5.9 requests-2.34.2 rich-15.0.0 safetensors-0.7.0 shelli
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+Collecting transformers<5,>=4.40
+  Downloading transformers-4.57.6-py3-none-any.whl.metadata (43 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.0/44.0 kB 2.3 MB/s eta 0:00:00
+Requirement already satisfied: filelock in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (3.13.1)
+Collecting huggingface-hub<1.0,>=0.34.0 (from transformers<5,>=4.40)
+  Downloading huggingface_hub-0.36.2-py3-none-any.whl.metadata (15 kB)
+Requirement already satisfied: numpy>=1.17 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (1.26.4)
+Requirement already satisfied: packaging>=20.0 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (23.2)
+Requirement already satisfied: pyyaml>=5.1 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (6.0.1)
+Requirement already satisfied: regex!=2019.12.17 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (2026.5.9)
+Requirement already satisfied: requests in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (2.34.2)
+Collecting tokenizers<=0.23.0,>=0.22.0 (from transformers<5,>=4.40)
+  Downloading tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+Requirement already satisfied: safetensors>=0.4.3 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (0.7.0)
+Requirement already satisfied: tqdm>=4.27 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (4.67.3)
+Requirement already satisfied: fsspec>=2023.5.0 in /opt/conda/lib/python3.10/site-packages (from huggingface-hub<1.0,>=0.34.0->transformers<5,>=4.40) (2024.3.1)
+Requirement already satisfied: hf-xet<2.0.0,>=1.1.3 in /opt/conda/lib/python3.10/site-packages (from huggingface-hub<1.0,>=0.34.0->transformers<5,>=4.40) (1.5.0)
+Requirement already satisfied: typing-extensions>=3.7.4.3 in /opt/conda/lib/python3.10/site-packages (from huggingface-hub<1.0,>=0.34.0->transformers<5,>=4.40) (4.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in /opt/conda/lib/python3.10/site-packages (from requests->transformers<5,>=4.40) (2.0.4)
+Requirement already satisfied: idna<4,>=2.5 in /opt/conda/lib/python3.10/site-packages (from requests->transformers<5,>=4.40) (3.4)
+Requirement already satisfied: urllib3<3,>=1.26 in /opt/conda/lib/python3.10/site-packages (from requests->transformers<5,>=4.40) (2.1.0)
+Requirement already satisfied: certifi>=2023.5.7 in /opt/conda/lib/python3.10/site-packages (from requests->transformers<5,>=4.40) (2024.2.2)
+Downloading transformers-4.57.6-py3-none-any.whl (12.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.0/12.0 MB 83.1 MB/s eta 0:00:00
+Downloading huggingface_hub-0.36.2-py3-none-any.whl (566 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 566.4/566.4 kB 103.9 MB/s eta 0:00:00
+Downloading tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 159.8 MB/s eta 0:00:00
+Installing collected packages: huggingface-hub, tokenizers, transformers
+  Attempting uninstall: huggingface-hub
+    Found existing installation: huggingface_hub 1.16.1
+    Uninstalling huggingface_hub-1.16.1:
+      Successfully uninstalled huggingface_hub-1.16.1
+Successfully installed huggingface-hub-0.36.2 tokenizers-0.22.2 transformers-4.57.6
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+── 5. HuggingFace token (optional) ───────────────────────────────
+  (no HF_TOKEN — dataset downloads are unauthenticated/slower)
+── 6. Pull the checkpoint we resume from (if any) ────────────────
+  resume checkpoints present:
+    446213644 /workspace/brian/lfs_checkpoints/neuroslm_large_107M_adamw_mix_best.pt
+✓ Bootstrap complete. Repo at: /workspace/brian
+  Next: bash scripts/vast_train_loop.sh
+── launching full training (live below; also in /workspace/train_full.log) ──
+════════════════════════════════════════════════════════════════
+  NeuroSLM training loop
+  preset=rcc_bowtie_30m_p1 steps=10000 batch=4 grad_accum=4
+  optimizer=adamw  ckpt_dir=/workspace/brian/lfs_checkpoints
+  effective tokens/step ≈ batch*grad_accum*ctx
+════════════════════════════════════════════════════════════════
+▶ launch attempt 1 @ 17:57:08Z
+  FRESH=1: starting from step 0 (no resume).
+[train] device=cuda  backend=CUDA
+[train] regularization: dropout=0.1 weight_decay=0.05 decoupled_wd=True lr_decay_steps=10000 min_lr_ratio=0.1 label_smoothing=0.0
+[train] building Brain...
+/opt/conda/lib/python3.10/site-packages/torch/nn/modules/transformer.py:306: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}")
+[train] FULL (bio modules) | params: 67.99M (preset=rcc_bowtie_30m_p1, dtype=torch.bfloat16)
+[train] Brain topology:
+[train]   • LM trunk           :  32.68M
+[train]   • bio + bowtie       :  13.74M
+[train]   • neurochem + memory :  22.16M
+[train]   • TOTAL              :  68.58M
+[train]   • SRC-TEH            : False
+[train]   • neural_topology    : full
+[train]   • top modules (>=0.5M params):
+[train]       - language                  32.68M
+[train]       - orchestrator              17.06M
+[train]       - world                      1.95M
+[train]       - neural_geometry            1.85M
+[train]       - thought_transformer        1.47M
+[train]       - cerebellum                 1.40M
+[train]       - claustrum                  1.28M
+[train]       - pfc                        0.93M
+[train]       - dmn                        0.92M
+[train]       - self_m                     0.83M
+[train]       - narrative_system           0.81M
+[train]       - thalamus                   0.74M
+[train]       - projections                0.59M
+[train]       - trophic                    0.59M
+[train]       - cortical_sheet             0.56M
+[train]       - hippo                      0.56M
+[train] decoupled WD: 790 decayed matrices, 1133 exempt 1-D params (wd=0.05)
+[train] Branching EMA enabled (history=10, gamma=5.0, alpha_cap=0.01)
+[train] starting; ctx=1024, batch=4, steps=10000, mode=mix (chat_ratio=0.6)
+[train] >>> training loop starting: steps 0..10000 <<<
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[data:chat] using OpenHermes-2.5 (teknium/OpenHermes-2.5)
+step    20 | loss 10.8812 | lm 10.8806 | ppl 53137.7 | gnorm 4.252 | lr 1.90e-05 | 5891 tok/s | Φ 0.000 | λ₁ 1.000 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step    40 | loss 10.6008 | lm 10.5973 | ppl 40028.2 | gnorm 3.815 | lr 3.90e-05 | 32594 tok/s | Φ 0.000 | λ₁ 1.000 | ign 0.98 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step    60 | loss 10.1289 | lm 10.1269 | ppl 25007.1 | gnorm 2.461 | lr 5.90e-05 | 32208 tok/s | Φ 0.000 | λ₁ 1.000 | ign 0.99 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step    80 | loss 9.6094 | lm 9.6080 | ppl 14883.4 | gnorm 2.156 | lr 7.90e-05 | 33990 tok/s | Φ 0.000 | λ₁ 1.000 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step   100 | loss 9.1160 | lm 9.1130 | ppl 9072.9 | gnorm 2.090 | lr 9.90e-05 | 32825 tok/s | Φ 0.000 | λ₁ 1.000 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step   120 | loss 8.4242 | lm 8.4211 | ppl 4541.8 | gnorm 2.205 | lr 1.19e-04 | 34250 tok/s | Φ 0.000 | λ₁ 1.000 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step   140 | loss 7.9508 | lm 7.9521 | ppl 2841.5 | gnorm 1.970 | lr 1.39e-04 | 31221 tok/s | Φ 0.000 | λ₁ 1.000 | ign 0.67 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step   160 | loss 7.3617 | lm 7.3595 | ppl 1571.1 | gnorm 1.218 | lr 1.59e-04 | 30352 tok/s | Φ 0.000 | λ₁ 1.000 | ign 0.67 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+[train] 🧠 Neural awakening at step 163: maturity=0.302, lm_loss=6.8786, entering growth phase
+step   180 | loss 7.2320 | lm 7.2260 | ppl 1374.7 | gnorm 1.180 | lr 1.79e-04 | 20948 tok/s | Φ 4.985 | λ₁ 0.103 | ign 1.00 | mesoLG 0.56 | troph 16/16 μ0.13 | NT[DA=0.45 NE=0.39 5HT=0.72 ACh=0.49 eCB=0.24 Glu=0.55 GABA=0.78] | osc[δ=0.808 θ=0.130 γ=0.012]
+step   200 | loss 7.0684 | lm 7.0566 | ppl 1160.5 | gnorm 0.980 | lr 1.99e-04 | 21777 tok/s | Φ 5.336 | λ₁ 0.065 | ign 1.00 | mesoLG 0.56 | troph 16/16 μ0.05 | NT[DA=0.47 NE=0.41 5HT=0.72 ACh=0.50 eCB=0.26 Glu=0.56 GABA=0.78] | osc[δ=0.811 θ=0.099 γ=0.018]
+[train] ⚡ grad spike at step 216: gnorm 3.89 > 2.75 (3.0×EMA) — step skipped (#1)
+[train] ⚡ grad spike at step 217: gnorm 4.31 > 2.75 (3.0×EMA) — step skipped (#2)
+step   220 | loss 7.0656 | lm 7.0515 | ppl 1154.6 | gnorm 1.388 | lr 2.19e-04 | 21139 tok/s | Φ 5.333 | λ₁ 0.089 | ign 0.98 | mesoLG 0.55 | troph 16/16 μ0.05 | NT[DA=0.47 NE=0.42 5HT=0.72 ACh=0.50 eCB=0.28 Glu=0.56 GABA=0.77] | osc[δ=0.720 θ=0.118 γ=0.029]
+step   240 | loss 6.9313 | lm 6.9145 | ppl 1006.7 | gnorm 1.192 | lr 2.39e-04 | 19923 tok/s | Φ 5.461 | λ₁ 0.122 | ign 0.99 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.47 NE=0.42 5HT=0.72 ACh=0.50 eCB=0.30 Glu=0.56 GABA=0.75] | osc[δ=0.833 θ=0.076 γ=0.022]
+step   260 | loss 6.6879 | lm 6.6630 | ppl 782.9 | gnorm 1.653 | lr 2.59e-04 | 19863 tok/s | Φ 5.299 | λ₁ 0.082 | ign 0.99 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.47 NE=0.42 5HT=0.72 ACh=0.50 eCB=0.31 Glu=0.55 GABA=0.72] | osc[δ=0.686 θ=0.115 γ=0.039]
+step   280 | loss 6.6934 | lm 6.6627 | ppl 782.6 | gnorm 1.394 | lr 2.79e-04 | 20813 tok/s | Φ 5.407 | λ₁ 0.108 | ign 0.88 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.47 NE=0.42 5HT=0.72 ACh=0.49 eCB=0.32 Glu=0.53 GABA=0.72] | osc[δ=0.692 θ=0.118 γ=0.049]
+step   300 | loss 6.6824 | lm 6.6376 | ppl 763.2 | gnorm 1.122 | lr 2.99e-04 | 19398 tok/s | Φ 5.416 | λ₁ 0.095 | ign 0.40 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.46 NE=0.42 5HT=0.72 ACh=0.48 eCB=0.33 Glu=0.52 GABA=0.72] | osc[δ=0.658 θ=0.126 γ=0.062]
+step   320 | loss 6.5359 | lm 6.4797 | ppl 651.8 | gnorm 1.459 | lr 3.00e-04 | 21284 tok/s | Φ 5.536 | λ₁ 0.104 | ign 0.50 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.45 NE=0.42 5HT=0.72 ACh=0.47 eCB=0.34 Glu=0.50 GABA=0.72] | osc[δ=0.482 θ=0.221 γ=0.101]
+step   340 | loss 6.4559 | lm 6.3911 | ppl 596.5 | gnorm 0.991 | lr 3.00e-04 | 19649 tok/s | Φ 5.418 | λ₁ 0.168 | ign 0.33 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.44 NE=0.41 5HT=0.72 ACh=0.46 eCB=0.34 Glu=0.49 GABA=0.72] | osc[δ=0.545 θ=0.278 γ=0.041]
+step   360 | loss 6.4648 | lm 6.3909 | ppl 596.4 | gnorm 1.191 | lr 3.00e-04 | 20477 tok/s | Φ 4.534 | λ₁ 0.283 | ign 0.46 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.44 NE=0.41 5HT=0.72 ACh=0.45 eCB=0.34 Glu=0.47 GABA=0.72] | osc[δ=0.877 θ=0.053 γ=0.007]
+step   380 | loss 6.2934 | lm 6.2208 | ppl 503.1 | gnorm 1.058 | lr 3.00e-04 | 19776 tok/s | Φ 4.806 | λ₁ 0.184 | ign 0.45 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.43 NE=0.40 5HT=0.72 ACh=0.44 eCB=0.34 Glu=0.46 GABA=0.72] | osc[δ=0.778 θ=0.086 γ=0.043]
+step   400 | loss 6.2867 | lm 6.2064 | ppl 495.9 | gnorm 1.258 | lr 3.00e-04 | 19567 tok/s | Φ 5.778 | λ₁ 0.172 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.42 NE=0.40 5HT=0.72 ACh=0.43 eCB=0.34 Glu=0.45 GABA=0.72] | osc[δ=0.899 θ=0.045 γ=0.014]
+step   420 | loss 6.2793 | lm 6.1951 | ppl 490.3 | gnorm 1.055 | lr 3.00e-04 | 20723 tok/s | Φ 5.158 | λ₁ 0.201 | ign 0.43 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.41 NE=0.39 5HT=0.72 ACh=0.42 eCB=0.34 Glu=0.44 GABA=0.72] | osc[δ=0.453 θ=0.287 γ=0.069]
+step   440 | loss 6.1758 | lm 6.0842 | ppl 438.9 | gnorm 0.959 | lr 3.00e-04 | 20509 tok/s | Φ 5.056 | λ₁ 0.213 | ign 0.31 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.41 NE=0.39 5HT=0.72 ACh=0.41 eCB=0.34 Glu=0.43 GABA=0.72] | osc[δ=0.855 θ=0.077 γ=0.022]
+step   460 | loss 6.0670 | lm 5.9623 | ppl 388.5 | gnorm 0.993 | lr 3.00e-04 | 20118 tok/s | Φ 5.642 | λ₁ 0.316 | ign 0.46 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.40 NE=0.39 5HT=0.72 ACh=0.41 eCB=0.34 Glu=0.42 GABA=0.72] | osc[δ=0.793 θ=0.104 γ=0.038]
+step   480 | loss 6.1937 | lm 6.0741 | ppl 434.5 | gnorm 1.174 | lr 3.00e-04 | 21015 tok/s | Φ 6.059 | λ₁ 0.297 | ign 0.99 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.40 NE=0.39 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.741 θ=0.087 γ=0.035]
+step   500 | loss 5.9988 | lm 5.8902 | ppl 361.5 | gnorm 1.115 | lr 3.00e-04 | 19710 tok/s | Φ 6.018 | λ₁ 0.375 | ign 0.46 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.39 NE=0.38 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.885 θ=0.047 γ=0.014]
+step   520 | loss 6.0539 | lm 5.9385 | ppl 379.4 | gnorm 1.271 | lr 3.00e-04 | 19611 tok/s | Φ 6.014 | λ₁ 0.395 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.39 NE=0.38 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.918 θ=0.036 γ=0.023]
+step   540 | loss 6.0311 | lm 5.9066 | ppl 367.5 | gnorm 0.934 | lr 3.00e-04 | 19877 tok/s | Φ 5.911 | λ₁ 0.443 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.38 NE=0.38 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.936 θ=0.011 γ=0.012]
+step   560 | loss 5.8891 | lm 5.7628 | ppl 318.2 | gnorm 1.015 | lr 3.00e-04 | 20343 tok/s | Φ 5.846 | λ₁ 0.412 | ign 0.33 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.38 NE=0.38 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.318 θ=0.371 γ=0.097]
+step   580 | loss 5.9391 | lm 5.8172 | ppl 336.0 | gnorm 1.002 | lr 2.99e-04 | 20704 tok/s | Φ 6.035 | λ₁ 0.457 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.38 NE=0.38 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.444 θ=0.295 γ=0.082]
+step   600 | loss 5.9766 | lm 5.8473 | ppl 346.3 | gnorm 1.043 | lr 2.99e-04 | 20519 tok/s | Φ 5.718 | λ₁ 0.461 | ign 0.94 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.725 θ=0.135 γ=0.050]
+step   620 | loss 5.9922 | lm 5.8514 | ppl 347.7 | gnorm 0.936 | lr 2.99e-04 | 21094 tok/s | Φ 6.009 | λ₁ 0.486 | ign 0.66 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.586 θ=0.155 γ=0.093]
+step   640 | loss 5.9906 | lm 5.8237 | ppl 338.2 | gnorm 1.098 | lr 2.99e-04 | 20325 tok/s | Φ 6.000 | λ₁ 0.354 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.891 θ=0.033 γ=0.020]
+step   660 | loss 5.8992 | lm 5.7214 | ppl 305.3 | gnorm 1.095 | lr 2.99e-04 | 19842 tok/s | Φ 6.246 | λ₁ 0.477 | ign 0.69 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.842 θ=0.040 γ=0.013]
+step   680 | loss 5.9406 | lm 5.7371 | ppl 310.2 | gnorm 1.029 | lr 2.99e-04 | 19908 tok/s | Φ 6.275 | λ₁ 0.477 | ign 0.91 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.895 θ=0.028 γ=0.015]
+step   700 | loss 6.0555 | lm 5.8468 | ppl 346.1 | gnorm 0.935 | lr 2.99e-04 | 20093 tok/s | Φ 5.855 | λ₁ 0.336 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.274 θ=0.181 γ=0.205]
+step   720 | loss 5.7926 | lm 5.5876 | ppl 267.1 | gnorm 0.977 | lr 2.99e-04 | 19646 tok/s | Φ 6.065 | λ₁ 0.523 | ign 0.82 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.566 θ=0.164 γ=0.057]
+step   740 | loss 5.8473 | lm 5.6301 | ppl 278.7 | gnorm 0.989 | lr 2.99e-04 | 20461 tok/s | Φ 5.937 | λ₁ 0.551 | ign 0.42 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.715 θ=0.098 γ=0.093]
+step   760 | loss 5.9121 | lm 5.6808 | ppl 293.2 | gnorm 0.914 | lr 2.99e-04 | 18939 tok/s | Φ 5.877 | λ₁ 0.455 | ign 0.31 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.785 θ=0.053 γ=0.036]
+step   780 | loss 5.8877 | lm 5.6353 | ppl 280.1 | gnorm 1.046 | lr 2.98e-04 | 20080 tok/s | Φ 5.906 | λ₁ 0.348 | ign 0.82 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.651 θ=0.049 γ=0.068]
+step   800 | loss 5.9562 | lm 5.6778 | ppl 292.3 | gnorm 0.915 | lr 2.98e-04 | 20654 tok/s | Φ 5.789 | λ₁ 0.494 | ign 0.57 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.511 θ=0.164 γ=0.123]
+step   820 | loss 5.8719 | lm 5.5934 | ppl 268.7 | gnorm 1.133 | lr 2.98e-04 | 19419 tok/s | Φ 5.806 | λ₁ 0.527 | ign 0.31 | mesoLG 0.55 | troph 16/16 μ0.08 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.732 θ=0.108 γ=0.044]
+step   840 | loss 5.8691 | lm 5.5916 | ppl 268.2 | gnorm 1.069 | lr 2.98e-04 | 21331 tok/s | Φ 6.245 | λ₁ 0.480 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.08 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.822 θ=0.049 γ=0.030]
+step   860 | loss 5.7633 | lm 5.4804 | ppl 239.9 | gnorm 0.979 | lr 2.98e-04 | 20487 tok/s | Φ 5.967 | λ₁ 0.418 | ign 0.40 | mesoLG 0.55 | troph 16/16 μ0.10 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.505 θ=0.091 γ=0.099]
+step   880 | loss 5.8928 | lm 5.5929 | ppl 268.5 | gnorm 0.985 | lr 2.98e-04 | 20187 tok/s | Φ 5.774 | λ₁ 0.527 | ign 0.81 | mesoLG 0.55 | troph 16/16 μ0.10 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.929 θ=0.005 γ=0.010]
+step   900 | loss 5.9152 | lm 5.6080 | ppl 272.6 | gnorm 0.921 | lr 2.97e-04 | 19891 tok/s | Φ 5.551 | λ₁ 0.590 | ign 0.34 | mesoLG 0.55 | troph 16/16 μ0.11 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.739 θ=0.053 γ=0.031]
+step   920 | loss 5.7971 | lm 5.4889 | ppl 242.0 | gnorm 0.997 | lr 2.97e-04 | 20147 tok/s | Φ 6.018 | λ₁ 0.461 | ign 0.49 | mesoLG 0.55 | troph 16/16 μ0.12 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.470 θ=0.173 γ=0.123]
+step   940 | loss 5.9590 | lm 5.6385 | ppl 281.0 | gnorm 1.036 | lr 2.97e-04 | 19999 tok/s | Φ 5.209 | λ₁ 0.445 | ign 0.54 | mesoLG 0.55 | troph 16/16 μ0.12 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.558 θ=0.054 γ=0.149]
+step   960 | loss 5.8656 | lm 5.5427 | ppl 255.4 | gnorm 1.113 | lr 2.97e-04 | 20235 tok/s | Φ 5.469 | λ₁ 0.473 | ign 0.54 | mesoLG 0.55 | troph 16/16 μ0.14 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.090 θ=0.507 γ=0.239]
+step   980 | loss 5.9662 | lm 5.6366 | ppl 280.5 | gnorm 0.896 | lr 2.97e-04 | 19861 tok/s | Φ 5.920 | λ₁ 0.469 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.14 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.735 θ=0.073 γ=0.039]
+step  1000 | loss 5.8082 | lm 5.4806 | ppl 240.0 | gnorm 0.951 | lr 2.97e-04 | 19513 tok/s | Φ 5.077 | λ₁ 0.451 | ign 0.40 | mesoLG 0.55 | troph 16/16 μ0.16 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.812 θ=0.081 γ=0.036]
+[train] saved memory checkpoint neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_1000.mem | {'n_nodes': 0, 'n_edges': 0, 'n_causal_rules': 0, 'n_entities': 0}
+[train] intelligence: Φ=0.000 drift=0.000 coh=1.000 rules=0 cmp=837.0 selfref=0.00 ToM=0.00 ponder=1.00 reasΔ=+0.000
+[train] saved /workspace/brian/lfs_checkpoints/neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_1000.pt | trophic={'n_projections': 16, 'n_active': 16, 'n_pruned': 0, 'trophic_mean': 0.16015625, 'trophic_max': 1.0, 'trophic_min': 0.0, 'saturated': 1}
+[train] ✓ pushed neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_1000.pt to Git LFS
+[train] ★ new BEST checkpoint @ step 1000: lm_ema 5.5562 (prev inf) → neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_best.pt
+[train] ✓ pushed neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_best.pt to Git LFS
+[prune_ckpts] 1 stream(s), nothing to prune (keep=3)
+step  1020 | loss 5.7457 | lm 5.4062 | ppl 222.8 | gnorm 0.893 | lr 2.96e-04 | 6053 tok/s | Φ 6.061 | λ₁ 0.346 | ign 0.45 | mesoLG 0.55 | troph 16/16 μ0.18 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.735 θ=0.126 γ=0.050]
+step  1040 | loss 5.6924 | lm 5.3355 | ppl 207.6 | gnorm 0.972 | lr 2.96e-04 | 19874 tok/s | Φ 6.220 | λ₁ 0.322 | ign 0.58 | mesoLG 0.55 | troph 16/16 μ0.20 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.649 θ=0.039 γ=0.089]
+step  1060 | loss 5.7090 | lm 5.3705 | ppl 215.0 | gnorm 0.997 | lr 2.96e-04 | 20764 tok/s | Φ 6.519 | λ₁ 0.330 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.854 θ=0.081 γ=0.025]
+[train] BEMA COLLAPSE at step 1074: ppl 454.0 > 3.0x best_ema_ppl 149.4; trunk reverted to best snapshot (#1)
+step  1080 | loss 5.7191 | lm 5.3882 | ppl 218.8 | gnorm 1.071 | lr 2.96e-04 | 20491 tok/s | Φ 6.057 | λ₁ 0.344 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.353 θ=0.351 γ=0.109]
+step  1100 | loss 5.7631 | lm 5.4265 | ppl 227.3 | gnorm 0.932 | lr 2.96e-04 | 20198 tok/s | Φ 6.275 | λ₁ 0.379 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.178 θ=0.184 γ=0.110]
+[train] BEMA COLLAPSE at step 1105: ppl 512.3 > 3.0x best_ema_ppl 149.4; trunk reverted to best snapshot (#2)
+[train] BEMA COLLAPSE at step 1108: ppl 470.9 > 3.0x best_ema_ppl 149.4; trunk reverted to best snapshot (#3)
+[train] BEMA COLLAPSE at step 1114: ppl 456.2 > 3.0x best_ema_ppl 149.4; trunk reverted to best snapshot (#4)
+[train] BEMA COLLAPSE at step 1117: ppl 596.3 > 3.0x best_ema_ppl 149.4; trunk reverted to best snapshot (#5)
+step  1120 | loss 5.9242 | lm 5.5800 | ppl 265.1 | gnorm 0.940 | lr 2.95e-04 | 19011 tok/s | Φ 5.749 | λ₁ 0.400 | ign 0.37 | mesoLG 0.55 | troph 16/16 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.398 θ=0.315 γ=0.104]
+step  1140 | loss 5.6865 | lm 5.3530 | ppl 211.2 | gnorm 0.979 | lr 2.95e-04 | 19454 tok/s | Φ 6.112 | λ₁ 0.391 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.22 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.772 θ=0.058 γ=0.047]
+[train] BEMA COLLAPSE at step 1148: ppl 451.9 > 3.0x best_ema_ppl 149.4; trunk reverted to best snapshot (#6)
+step  1160 | loss 5.7848 | lm 5.4386 | ppl 230.1 | gnorm 1.055 | lr 2.95e-04 | 19581 tok/s | Φ 5.905 | λ₁ 0.441 | ign 0.69 | mesoLG 0.55 | troph 16/16 μ0.22 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.332 θ=0.300 γ=0.066]
+step  1180 | loss 5.9078 | lm 5.5529 | ppl 258.0 | gnorm 0.993 | lr 2.95e-04 | 20575 tok/s | Φ 6.582 | λ₁ 0.434 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.621 θ=0.097 γ=0.099]
+step  1200 | loss 5.7805 | lm 5.4361 | ppl 229.5 | gnorm 1.037 | lr 2.94e-04 | 20578 tok/s | Φ 6.032 | λ₁ 0.428 | ign 0.95 | mesoLG 0.55 | troph 16/16 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.380 θ=0.109 γ=0.096]
+step  1220 | loss 5.8252 | lm 5.4766 | ppl 239.0 | gnorm 0.896 | lr 2.94e-04 | 19537 tok/s | Φ 6.407 | λ₁ 0.453 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.809 θ=0.029 γ=0.047]
+[train] BEMA COLLAPSE at step 1238: ppl 737.1 > 3.0x best_ema_ppl 149.4; trunk reverted to best snapshot (#7)
+step  1240 | loss 5.7857 | lm 5.4400 | ppl 230.4 | gnorm 0.961 | lr 2.94e-04 | 21189 tok/s | Φ 6.147 | λ₁ 0.508 | ign 0.70 | mesoLG 0.55 | troph 9/16 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.417 θ=0.207 γ=0.135]
+step  1260 | loss 5.6695 | lm 5.3268 | ppl 205.8 | gnorm 1.025 | lr 2.94e-04 | 19690 tok/s | Φ 6.069 | λ₁ 0.352 | ign 0.55 | mesoLG 0.55 | troph 9/16 μ0.24 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.098 θ=0.217 γ=0.216]
+step  1280 | loss 5.7926 | lm 5.4433 | ppl 231.2 | gnorm 0.997 | lr 2.93e-04 | 20392 tok/s | Φ 5.243 | λ₁ 0.334 | ign 0.66 | mesoLG 0.55 | troph 9/16 μ0.24 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.836 θ=0.056 γ=0.040]
+
