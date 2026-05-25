@@ -34,10 +34,44 @@ def has_cli() -> bool:
 
 
 def run_cli(instance_id: str, follow: bool, dest: str | None):
-    cmd = ['vastai', 'show', 'logs', str(instance_id)]
+    # Candidate CLI subcommands to try. We'll probe each with --help to see which is accepted.
+    candidates = [
+        ['logs'],
+        ['show', 'logs'],
+        ['logs', 'get'],
+        ['get', 'logs'],
+        ['show', 'instance', 'logs'],
+    ]
+
+    def probe(prefix: List[str]) -> bool:
+        probe_cmd = ['vastai'] + prefix + ['--help']
+        try:
+            p = subprocess.run(probe_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            return p.returncode == 0
+        except FileNotFoundError:
+            raise
+        except Exception:
+            return False
+
+    working_prefix = None
+    for pref in candidates:
+        try:
+            if probe(pref):
+                working_prefix = pref
+                break
+        except FileNotFoundError:
+            raise
+
+    if working_prefix is None:
+        # fall back to a simple attempt; let the CLI produce its own error
+        working_prefix = ['logs']
+
+    cmd = ['vastai'] + working_prefix + [str(instance_id)]
     if follow:
         cmd.append('--follow')
+
     print('Running CLI:', ' '.join(cmd))
+
     if dest:
         # ensure parent directory exists so open() doesn't fail
         parent = os.path.dirname(dest)
