@@ -130,6 +130,26 @@ class BrainConfig:
     # output. Slight extra cost, gives embeddings direct generative pressure.
     pct_include_embedding_predictor: bool = True
 
+    # ---- Synthesis-v1: Predictive-Dropout + Smooth-Gated-Bus ----
+    # Predictive-Dropout: channel-mask whose per-channel keep probability
+    # comes from PCT's per-channel prediction error. Drops well-predicted
+    # (low-info) channels and keeps surprising ones. Requires PCT on.
+    # See neuroslm/modules/predictive_dropout.py.
+    use_predictive_dropout: bool = False
+    pdrop_base_keep: float = 0.5
+    pdrop_beta: float = 4.0
+    pdrop_per_token: bool = False
+
+    # Smooth-Gated-Bus: temporally-smooth replacement for the ReZero
+    # zero-init scalars (lambda_motor/mem/thought). gate(t) =
+    # max·sigmoid((t−center)/width) per gate. Drives module-injection
+    # contribution to be non-zero from step 0 while remaining
+    # smoothly-growing through training. See
+    # neuroslm/modules/smooth_gated_bus.py.
+    use_smooth_gated_bus: bool = False
+    sgb_default_center: float = 2000.0
+    sgb_default_width: float = 500.0
+
     # ---- Recursive Reasoning Cortex (Universal-Transformer-style) ----
     # When True, ReasoningCortex.forward_tokens loops its expert_blocks
     # `recursive_iters` times with weight-sharing — depth-multiplying the
@@ -595,8 +615,71 @@ def pct_30m() -> BrainConfig:
     return c
 
 
+def synth_30m() -> BrainConfig:
+    """~30M (actual ~68M w/ bio stack) — synthesis-v1: PCT + Smooth-Gated-Bus
+    + Predictive-Dropout, bottom-up PC heads disabled (top-down only),
+    stronger free-energy weighting. The cumulative test of whether
+    topology-only changes can push gap_ratio down from ~5x at our scale.
+
+    Combines:
+      • PCT (top-down free-energy on trunk) with lambda_fe BUMPED 0.1 -> 2.0
+        — the v1 result showed lambda_fe=0.1 was too weak; FE was acting as
+        a soft regularizer not a dominant objective.
+      • PredictiveDropout — channel-mask driven by PCT per-channel error.
+        Drops well-predicted (low-info) channels (Information-Bottleneck
+        regularization mechanically coupled to the PCT mechanism).
+      • SmoothGatedBus — replaces ReZero zero-init step scalars with
+        temporally-smooth sigmoid ramps so module injections are non-zero
+        from step 0 (no "trunk-only" early phase).
+      • Bottom-up PredictiveCodingHeads OFF (set automatically inside
+        LanguageCortex when PCT is on) so top-down doesn't fight bottom-up.
+
+    Falsifiable hypothesis: gap_ratio drops from ~5x (PCT-only) to 2-3x.
+    """
+    c = BrainConfig()
+    c.d_sem = 192
+    c.d_hidden = 384
+    c.lang_layers = 4
+    c.lang_heads = 6
+    c.lang_ctx = 1024
+    c.dmn_layers = 2
+    c.pfc_layers = 2
+    c.pfc_heads = 4
+    c.gws_slots = 8
+    c.gws_heads = 4
+    c.world_layers = 1
+    c.forward_layers = 1
+    c.hippo_capacity = 2048
+    c.hippo_topk = 4
+    c.max_thinking_steps = 6
+    c.warmup_steps = 300
+    c.lr = 3e-4
+    c.weight_decay = 0.05
+    c.dropout = 0.1   # baseline dropout; predictive-dropout adds on top
+    # PCT — stronger weighting than the v1 preset
+    c.use_predictive_coding_trunk = True
+    c.pct_mode = "loss_only"
+    c.pct_lambda_fe = 2.0    # v1 used 0.1, too weak per root-cause analysis
+    c.pct_hidden_mult = 0.5
+    c.pct_include_embedding_predictor = True
+    # Predictive-Dropout
+    c.use_predictive_dropout = True
+    c.pdrop_base_keep = 0.5
+    c.pdrop_beta = 4.0
+    c.pdrop_per_token = False
+    # Smooth-Gated-Bus
+    c.use_smooth_gated_bus = True
+    c.use_rezero_injection_gates = True   # required: SGB is the gate vehicle
+    c.sgb_default_center = 2000.0
+    c.sgb_default_width = 500.0
+    # Match large() OOD regimen
+    c.baseline_lang_layers = 12
+    return c
+
+
 PRESETS = {
     "tiny": tiny, "small": small, "medium": medium,
     "large": large, "xl": xl, "xxl": xxl,
     "pct_30m": pct_30m,
+    "synth_30m": synth_30m,
 }

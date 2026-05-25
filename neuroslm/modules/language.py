@@ -23,6 +23,7 @@ from .neuro_attention import PredictiveCodingHead
 from .differential_attention import DiffTransformerBlock
 from .mixture_of_depths import MoDBlock
 from .predictive_coding_trunk import PredictiveCodingTrunk
+from .predictive_dropout import PredictiveDropout
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +196,15 @@ class LanguageCortex(nn.Module):
                  pct_feedback_alpha: float = 0.05,
                  pct_hidden_mult: float = 0.5,
                  pct_lambda_fe: float = 0.1,
-                 pct_include_embedding_predictor: bool = True):
+                 pct_include_embedding_predictor: bool = True,
+                 # ---- Predictive-Dropout (synthesis-v1) ----
+                 # Channel-mask driven by PCT prediction errors. Requires
+                 # use_predictive_coding_trunk=True. See
+                 # neuroslm/modules/predictive_dropout.py.
+                 use_predictive_dropout: bool = False,
+                 pdrop_base_keep: float = 0.5,
+                 pdrop_beta: float = 4.0,
+                 pdrop_per_token: bool = False):
         super().__init__()
         self.gradient_checkpointing = gradient_checkpointing
         self.dropout = float(dropout)
@@ -287,6 +296,18 @@ class LanguageCortex(nn.Module):
             )
         else:
             self.pct = None
+
+        # Predictive-Dropout: parameter-free, uses PCT errors at runtime.
+        # Only useful when PCT is on (we need the errors).
+        self.use_predictive_dropout = bool(use_predictive_dropout) and self.use_predictive_coding_trunk
+        if self.use_predictive_dropout:
+            self.pred_dropout = PredictiveDropout(
+                base_keep=pdrop_base_keep,
+                beta=pdrop_beta,
+                per_token=pdrop_per_token,
+            )
+        else:
+            self.pred_dropout = None
 
         self.norm_f = RMSNorm(d_hidden)
         # Tied output head
@@ -413,6 +434,13 @@ class LanguageCortex(nn.Module):
                         and pct_prev_error is not None):
                     h = h + self.pct.feedforward_correction(pct_prev_error)
 
+                # Predictive-Dropout: channel-mask driven by the previous
+                # layer's PCT error. Drops well-predicted (low-info) channels;
+                # keeps the surprising ones.
+                if (self.pred_dropout is not None
+                        and pct_prev_error is not None):
+                    h = self.pred_dropout(h, pct_prev_error)
+
                 h = _run_block(blk, h, nt, memory_kv)
                 h = adapter(h)
 
@@ -433,7 +461,12 @@ class LanguageCortex(nn.Module):
                         calm_frozen = torch.where(new_exits.unsqueeze(-1), h, calm_frozen)
                         calm_mask   = calm_mask | new_exits
 
-                if len(self.pred_coding) > 0:
+                # Bottom-up PC (layer n predicts n+1) is OFF when PCT is on,
+                # because the directions conflict: bottom-up forces n to look
+                # like n+1 (compression), top-down forces n+1 to look like n
+                # (generative inversion). Cancelling each other is what made
+                # PCT v1 underperform — see synthesis-v1 root-cause analysis.
+                if len(self.pred_coding) > 0 and not self.use_predictive_coding_trunk:
                     if prev_layer is not None and pc_counter < len(self.pred_coding):
                         pred_coding_loss = pred_coding_loss + self.pred_coding[pc_counter](prev_layer, h)
                         pc_counter += 1  # only advance when a head is consumed
@@ -443,11 +476,10 @@ class LanguageCortex(nn.Module):
                 # top-down free-energy loss computed after the loop.
                 if self.pct is not None:
                     pct_states.append(h)
-                    if self.pct.mode == "feedback":
-                        # Compute the previous-pair error (lower=pct_states[-2],
-                        # upper=pct_states[-1]) using a DETACHED lower target so
-                        # the feedback path doesn't create a backward gradient
-                        # cycle back into the previous block.
+                    # Compute per-layer error inline when EITHER feedback
+                    # mode is active OR predictive-dropout needs it.
+                    if (self.pct.mode == "feedback"
+                            or self.use_predictive_dropout):
                         if len(pct_states) >= 2:
                             n_pred = len(pct_states) - 2  # predictor index
                             if 0 <= n_pred < len(self.pct.predictors):
@@ -465,10 +497,14 @@ class LanguageCortex(nn.Module):
                 if (self.pct is not None and self.pct.mode == "feedback"
                         and pct_prev_error is not None):
                     h = h + self.pct.feedforward_correction(pct_prev_error)
+                if (self.pred_dropout is not None
+                        and pct_prev_error is not None):
+                    h = self.pred_dropout(h, pct_prev_error)
                 h = _run_block(blk, h, nt, memory_kv)
                 if return_tap and i == (self.mid_trunk_tap_layer - 1):
                     tap_sem = self.to_sem(h.mean(dim=1))
-                if len(self.pred_coding) > 0:
+                # Same direction-conflict gate as the with-adapter path above.
+                if len(self.pred_coding) > 0 and not self.use_predictive_coding_trunk:
                     if prev_layer is not None and pc_counter < len(self.pred_coding):
                         pred_coding_loss = pred_coding_loss + self.pred_coding[pc_counter](prev_layer, h)
                         pc_counter += 1

@@ -115,17 +115,35 @@ class Brain(nn.Module):
             pct_hidden_mult=float(getattr(cfg, 'pct_hidden_mult', 0.5)),
             pct_lambda_fe=float(getattr(cfg, 'pct_lambda_fe', 0.1)),
             pct_include_embedding_predictor=bool(getattr(cfg, 'pct_include_embedding_predictor', True)),
+            use_predictive_dropout=bool(getattr(cfg, 'use_predictive_dropout', False)),
+            pdrop_base_keep=float(getattr(cfg, 'pdrop_base_keep', 0.5)),
+            pdrop_beta=float(getattr(cfg, 'pdrop_beta', 4.0)),
+            pdrop_per_token=bool(getattr(cfg, 'pdrop_per_token', False)),
             )
 
-        # ── ReZero-style zero-init gates on module → LM forward injections ──
-        # Each scalar λ starts at 0, so at init the LM behaves identically to
-        # the pure isolated-trunk model (no module contribution, no awakening
-        # discontinuity). LM gradient then grows each λ only as far as that
-        # specific injection actually improves next-token prediction. See §5.3.
+        # ── ReZero / Smooth-Gated-Bus on module → LM forward injections ──
+        # Default (ReZero): zero-init scalar λ per gate; grows under LM
+        # gradient. Pathologies observed up to 10k:
+        #   - first ~2-4k steps λ≈0 → model fits LM with trunk alone →
+        #     no gradient pressure to grow λ further.
+        #   - sharp 0×→Nx transitions at the kink.
+        # Smooth-Gated-Bus replaces each scalar with a temporally-smooth
+        # sigmoid ramp: gate(t) = max·sigmoid((t−center)/width). Module
+        # contribution is non-zero from step 0 and the trunk can never
+        # solve the LM loss in isolation. See §5.3 / smooth_gated_bus.py.
         import torch as _t
-        self.lambda_motor   = nn.Parameter(_t.zeros(1))  # gates motor_lang_bias
-        self.lambda_mem     = nn.Parameter(_t.zeros(1))  # gates memory_kv injection
-        self.lambda_thought = nn.Parameter(_t.zeros(1))  # gates from_sem thought conditioning
+        self._use_sgb = bool(getattr(cfg, 'use_smooth_gated_bus', False))
+        if self._use_sgb:
+            from .modules.smooth_gated_bus import SmoothGatedBus
+            self.sgb = SmoothGatedBus(
+                default_center=float(getattr(cfg, 'sgb_default_center', 2000.0)),
+                default_width=float(getattr(cfg, 'sgb_default_width', 500.0)),
+            )
+        else:
+            self.sgb = None
+            self.lambda_motor   = nn.Parameter(_t.zeros(1))  # gates motor_lang_bias
+            self.lambda_mem     = nn.Parameter(_t.zeros(1))  # gates memory_kv injection
+            self.lambda_thought = nn.Parameter(_t.zeros(1))  # gates from_sem thought conditioning
 
         # ---- Sensory + association ----
         self.sensory     = TextSensoryCortex(cfg.d_sem)
@@ -792,6 +810,19 @@ class Brain(nn.Module):
         }
 
     # ------------------------------------------------------------------
+    # Training-step setter (drives Smooth-Gated-Bus temporal schedule)
+    # ------------------------------------------------------------------
+    @torch.no_grad()
+    def set_training_step(self, step: int | float) -> None:
+        """Inform the model of the current training step. Used by the
+        Smooth-Gated-Bus to compute its temporal sigmoid ramp; a no-op
+        when SGB is not enabled. Call ONCE per training step BEFORE
+        forward_lm(). At eval, pass float('inf') so SGB gates are fully
+        open."""
+        if self.sgb is not None:
+            self.sgb.set_step(step)
+
+    # ------------------------------------------------------------------
     # Maturity Index (MAT virtual protein)
     # ------------------------------------------------------------------
     @torch.no_grad()
@@ -987,7 +1018,8 @@ class Brain(nn.Module):
         # the projection weights — same self-discovering blend as the other
         # forward injections.
         if getattr(cfg, 'use_rezero_injection_gates', False):
-            lang_thought = self.lambda_thought * lang_thought
+            _lam_th = self.sgb.gate('thought') if self._use_sgb else self.lambda_thought
+            lang_thought = _lam_th * lang_thought
         # Build memory_kv for RETRO-style injection: EMA of recent bowtie
         # output plus optional top-N consolidated entries (cheap path: just
         # use the EMA slots for now; full retrieval is a TODO with no
@@ -1008,7 +1040,7 @@ class Brain(nn.Module):
             # this forward injection when enabled; scalar starts at 0 and is
             # grown by LM gradient only as far as memory retrieval helps.
             if getattr(cfg, 'use_rezero_injection_gates', False):
-                _mem_phase = self.lambda_mem
+                _mem_phase = self.sgb.gate('mem') if self._use_sgb else self.lambda_mem
                 _mem_active = True   # let the matmul run; λ controls magnitude
             else:
                 _mem_phase = self._phase_gate(_mat_now, center=0.55, width=0.15)
@@ -1376,7 +1408,7 @@ class Brain(nn.Module):
         # zero (no contribution → no awakening discontinuity); LM gradient
         # grows it only as far as the motor bias actually helps prediction.
         if getattr(cfg, 'use_rezero_injection_gates', False):
-            _motor_phase = self.lambda_motor
+            _motor_phase = self.sgb.gate('motor') if self._use_sgb else self.lambda_motor
             _motor_active = True
         else:
             _motor_phase = self._phase_gate(_mat_motor, center=0.45, width=0.10)

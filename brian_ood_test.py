@@ -95,6 +95,8 @@ def load_brain(ckpt_path: str, device: torch.device):
                 ("use_rezero_injection_gates", False),
                 ("recursive_reasoning", False),
                 ("use_smooth_gated_bus", False),
+                ("use_predictive_coding_trunk", False),
+                ("use_predictive_dropout", False),
                 ("detach_trunk_from_aux", False),
                 ("freeze_pruning_after_maturation", False),
                 ("maturity_ratchet", False),
