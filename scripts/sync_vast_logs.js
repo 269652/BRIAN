@@ -60,8 +60,12 @@ function listInstancesCLI() {
         results.push({ id: id, label: '' });
       }
     }
-    return results;
+    if (results.length) return results;
+    // if parsing failed, print raw output for debugging
+    console.log('Debug: raw `vastai show instances` output:\n' + txt);
+    return [];
   } catch (e) {
+    console.log('Debug: failed to run `vastai show instances`: ', e && e.message);
     return [];
   }
 }
