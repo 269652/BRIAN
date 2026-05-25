@@ -413,6 +413,19 @@ raw logs into structured findings:
   `logs/analyzed/*.md`. The convergence claims in **H7** are
   reconstructible from the raw log captures of the corresponding
   training runs.
+- **synth-v1 training trajectory (logged 2026-05-25)** — analysis at
+  [logs/analyzed/train_synth-v1_mix-10000_20260525.md](../logs/analyzed/train_synth-v1_mix-10000_20260525.md).
+  The `arch/synthesis-v1` variant (SGB + PCT-stronger +
+  PredictiveDropout-dropped + top-down-only) trains to step 10k on
+  the small preset (68M), best lm_ema 4.7482 at step 4000.
+  **Reproduces the "best at step ~4000 then degrade" plateau pattern
+  previously seen for PCT-30M (B3)** — two independent trunk
+  variants of the same preset size hit the same ceiling, suggesting
+  the cap is preset-driven, not trunk-architecture-driven, at this
+  parameter count. Grad-skip safety net (gnorm > 3×EMA → skip) fired
+  20 times across steps 3762–8591 (max gnorm 22.62) and kept the
+  run from diverging — that mechanism is doing real work and is not
+  yet documented as such elsewhere in the spec.
 
 ---
 
@@ -427,6 +440,12 @@ raw logs into structured findings:
 4. **Run the LLM analysis pipeline** on every existing raw log
    under `logs/vast/` so each row in the reference table has a
    linked analysis md file. See `logs/analyzed/INSTRUCTIONS.md`.
+   First analysis landed 2026-05-25: synth-v1 training log
+   (`train_synth-v1_mix-10000_20260525.md`).
+4b. **OOD-eval `neuroslm_synth_30m_68M_adamw_mix_best.pt`** —
+   the missing artifact for a B4 (synth-v1) row in the reference
+   table. Same recipe as B3 (PCT). Without this, synth-v1's only
+   evidence is in-distribution training PPL from a single log.
 5. **Dump baseline checkpoint sidecar JSONs** that the baseline
    training run was missing — needed to back baseline training-PPL
    claims without re-running eval.
