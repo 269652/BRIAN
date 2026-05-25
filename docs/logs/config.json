@@ -1,0 +1,18 @@
+{
+  "local_logs_dir": "logs/live",
+  "use_vast_api": false,
+  "vast_api_key": "",
+  "ssh_username": "root",
+  "ssh_key_path": "~/.ssh/id_rsa",
+  "remote_paths": ["/root/train_logs/pct_10k_run.log"],
+  "instances": [
+    {
+      "label": "neuroslm-full",
+      "host": "ssh3.vast.ai",
+      "port": 10128,
+      "username": "root",
+      "key_path": "~/.ssh/id_rsa",
+      "remote_paths": ["/root/train_logs/pct_10k_run.log"]
+    }
+  ]
+}
