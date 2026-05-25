@@ -113,8 +113,11 @@ cd brian
 GIT_LFS_SKIP_SMUDGE=1 git checkout ${BRANCH}
 echo "── pulling ONLY LFS object: ${CKPT} ──"
 git lfs pull --include="${CKPT}"
-echo "── bootstrap (pip deps) ──"
-bash scripts/vast_bootstrap.sh
+echo "── bootstrap (pip deps, SKIP_LFS_RESUME=1) ──"
+# We already pulled the exact ckpt we need above. Tell bootstrap not to
+# pull every neuroslm_large_*adamw* blob (3-7 unneeded files, ~3-7 GB,
+# 5-15 min wasted on a slow link).
+SKIP_LFS_RESUME=1 bash scripts/vast_bootstrap.sh
 echo "── running OOD eval (max_windows=${MAX_OOD_WINDOWS}, batch=${BATCH_SIZE}) ──"
 python -u brian_ood_test.py \\
   --checkpoint "${CKPT}" \\

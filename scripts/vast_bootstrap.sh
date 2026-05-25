@@ -78,21 +78,29 @@ fi
 
 echo "── 6. Pull the checkpoint we resume from (if any) ────────────────"
 mkdir -p "$REPO_DIR/lfs_checkpoints"
-# Materialise ONLY the large adamw checkpoints we resume from (not all blobs).
-# --exclude="" explicitly clears any inherited fetchexclude so --include wins.
-git lfs pull --include="lfs_checkpoints/neuroslm_large_*adamw*" --exclude="" \
-  || echo "  (no matching LFS objects yet — will train from scratch)"
-# Verify the resume target is a real binary, not a leftover pointer.
-for _pt in "$REPO_DIR"/lfs_checkpoints/neuroslm_large_*adamw*.pt; do
-  [ -e "$_pt" ] || continue
-  if head -c 48 "$_pt" 2>/dev/null | grep -q "version https://git-lfs"; then
-    echo "  ⚠ still a pointer: $(basename "$_pt") — retrying targeted pull"
-    git lfs pull --include="lfs_checkpoints/$(basename "$_pt")" --exclude="" || true
-  fi
-done
-echo "  resume checkpoints present:"
-ls -la "$REPO_DIR"/lfs_checkpoints/neuroslm_large_*adamw*.pt 2>/dev/null \
-  | awk '{print "    " $5, $NF}' || echo "    (none)"
+if [ "${SKIP_LFS_RESUME:-0}" = "1" ]; then
+  # OOD eval callers (vast_ood_eval.sh) already pulled exactly the one
+  # checkpoint they need before invoking bootstrap. Skip this step so we
+  # don't waste 5-10 minutes pulling 3-7 unneeded baseline/adamw ckpts.
+  echo "  SKIP_LFS_RESUME=1: skipping wholesale adamw ckpt pull "
+  echo "    (caller handled the specific ckpt it needs)"
+else
+  # Materialise ONLY the large adamw checkpoints we resume from (not all blobs).
+  # --exclude="" explicitly clears any inherited fetchexclude so --include wins.
+  git lfs pull --include="lfs_checkpoints/neuroslm_large_*adamw*" --exclude="" \
+    || echo "  (no matching LFS objects yet — will train from scratch)"
+  # Verify the resume target is a real binary, not a leftover pointer.
+  for _pt in "$REPO_DIR"/lfs_checkpoints/neuroslm_large_*adamw*.pt; do
+    [ -e "$_pt" ] || continue
+    if head -c 48 "$_pt" 2>/dev/null | grep -q "version https://git-lfs"; then
+      echo "  ⚠ still a pointer: $(basename "$_pt") — retrying targeted pull"
+      git lfs pull --include="lfs_checkpoints/$(basename "$_pt")" --exclude="" || true
+    fi
+  done
+  echo "  resume checkpoints present:"
+  ls -la "$REPO_DIR"/lfs_checkpoints/neuroslm_large_*adamw*.pt 2>/dev/null \
+    | awk '{print "    " $5, $NF}' || echo "    (none)"
+fi
 
 echo ""
 echo "✓ Bootstrap complete. Repo at: $REPO_DIR"
