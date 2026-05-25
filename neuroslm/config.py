@@ -792,6 +792,7 @@ def rcc_bowtie_30m_p1() -> BrainConfig:
          driven by aux-noise injection that no longer happens).
     """
     c = synth_30m_bema()
+    c.use_branching_ema = False  # Disable BEMA, RCC is the correct fix
     c.use_rcc_bowtie = True
     return c
 
