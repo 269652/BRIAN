@@ -119,6 +119,9 @@ class Brain(nn.Module):
             pdrop_base_keep=float(getattr(cfg, 'pdrop_base_keep', 0.5)),
             pdrop_beta=float(getattr(cfg, 'pdrop_beta', 4.0)),
             pdrop_per_token=bool(getattr(cfg, 'pdrop_per_token', False)),
+            fe_gate_enable=bool(getattr(cfg, 'fe_gate_enable', False)),
+            fe_gate_center=float(getattr(cfg, 'fe_gate_center', 1000.0)),
+            fe_gate_width=float(getattr(cfg, 'fe_gate_width', 300.0)),
             )
 
         # ── ReZero / Smooth-Gated-Bus on module → LM forward injections ──
@@ -814,13 +817,17 @@ class Brain(nn.Module):
     # ------------------------------------------------------------------
     @torch.no_grad()
     def set_training_step(self, step: int | float) -> None:
-        """Inform the model of the current training step. Used by the
-        Smooth-Gated-Bus to compute its temporal sigmoid ramp; a no-op
-        when SGB is not enabled. Call ONCE per training step BEFORE
-        forward_lm(). At eval, pass float('inf') so SGB gates are fully
-        open."""
+        """Inform the model of the current training step. Drives the
+        Smooth-Gated-Bus module-injection gates AND the LanguageCortex
+        free-energy temporal-ramp gate. No-op for parts that aren't
+        enabled. Call once per training step BEFORE forward_lm(). At eval,
+        pass float('inf') so all temporal gates are fully open."""
         if self.sgb is not None:
             self.sgb.set_step(step)
+        # Propagate into LanguageCortex so its FE-loss temporal-ramp gate
+        # (synthesis-v1 stability fix) sees the current step too.
+        if hasattr(self.language, "set_training_step"):
+            self.language.set_training_step(step)
 
     # ------------------------------------------------------------------
     # Maturity Index (MAT virtual protein)

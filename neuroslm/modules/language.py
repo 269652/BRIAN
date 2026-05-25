@@ -204,7 +204,16 @@ class LanguageCortex(nn.Module):
                  use_predictive_dropout: bool = False,
                  pdrop_base_keep: float = 0.5,
                  pdrop_beta: float = 4.0,
-                 pdrop_per_token: bool = False):
+                 pdrop_per_token: bool = False,
+                 # ---- λ_FE temporal ramp (synthesis-v1 stability fix) ----
+                 # When fe_gate_enable=True, the free-energy loss weight
+                 # is multiplied by a smooth sigmoid ramp gate(step), so
+                 # PCT goes from no-op at step 0 to full lambda_fe at
+                 # step >> fe_gate_center. Prevents the chronic high-gnorm
+                 # regime the first synth-v1 run hit at step ~500.
+                 fe_gate_enable: bool = False,
+                 fe_gate_center: float = 1000.0,
+                 fe_gate_width: float = 300.0):
         super().__init__()
         self.gradient_checkpointing = gradient_checkpointing
         self.dropout = float(dropout)
@@ -217,6 +226,18 @@ class LanguageCortex(nn.Module):
         self.pct_mode = str(pct_mode)
         self._last_fe_loss = None
         self._last_fe_breakdown = None
+        # FE temporal-ramp state. The gate itself is constructed lazily
+        # below alongside the PCT trunk, so it shares the lifetime of PCT.
+        self.fe_gate_enable = bool(fe_gate_enable)
+        self.fe_gate_center = float(fe_gate_center)
+        self.fe_gate_width = float(fe_gate_width)
+        # _current_step buffer used by the FE ramp (and propagated from
+        # Brain.set_training_step()). Float so we can use float('inf') at
+        # eval to fully open the gate.
+        self.register_buffer(
+            "_current_step",
+            torch.tensor(0.0, dtype=torch.float32),
+        )
         # Last `n_memory_xattn_layers` blocks receive the memory_kv injection.
         self.n_memory_xattn_layers = max(0, int(n_memory_xattn_layers))
         # Mid-trunk tap: at this layer index (0-based, after layer completes)
@@ -294,8 +315,22 @@ class LanguageCortex(nn.Module):
                 hidden_mult=pct_hidden_mult,
                 include_embedding_predictor=pct_include_embedding_predictor,
             )
+            # FE temporal-ramp gate. Re-uses the SmoothTemporalGate primitive
+            # from SmoothGatedBus — one mechanism applied wherever a soft
+            # onset is appropriate. init_max=1.0 so at full opening the
+            # multiplier is 1.0 (i.e. lambda_fe takes its configured value).
+            if self.fe_gate_enable:
+                from .smooth_gated_bus import SmoothTemporalGate
+                self.fe_gate = SmoothTemporalGate(
+                    default_center=self.fe_gate_center,
+                    default_width=self.fe_gate_width,
+                    init_max=1.0,
+                )
+            else:
+                self.fe_gate = None
         else:
             self.pct = None
+            self.fe_gate = None
 
         # Predictive-Dropout: parameter-free, uses PCT errors at runtime.
         # Only useful when PCT is on (we need the errors).
@@ -530,9 +565,19 @@ class LanguageCortex(nn.Module):
         # Detached breakdown stashed on self for logging.
         if self.pct is not None and len(pct_states) >= 2:
             fe_loss, fe_breakdown = self.pct.compute_loss(pct_states)
+            # Temporal ramp on lambda_fe: at step 0 the gate is ~0
+            # (FE objective contributes essentially nothing), ramping to
+            # 1.0 by step >> fe_gate_center. Keeps the trunk's gradient
+            # signal clean during early training while the predictors
+            # are still learning the inter-layer structure.
+            if self.fe_gate is not None:
+                fe_gate_val = self.fe_gate(self._current_step)
+                effective_lambda = self.pct_lambda_fe * fe_gate_val
+            else:
+                effective_lambda = self.pct_lambda_fe
             self._last_fe_loss = fe_loss.detach()
             self._last_fe_breakdown = fe_breakdown
-            pred_coding_loss = pred_coding_loss + self.pct_lambda_fe * fe_loss
+            pred_coding_loss = pred_coding_loss + effective_lambda * fe_loss
         else:
             self._last_fe_loss = None
             self._last_fe_breakdown = None
@@ -560,6 +605,18 @@ class LanguageCortex(nn.Module):
                 tap_sem = sem
             return logits, sem, h, pred_coding_loss, tap_sem
         return logits, sem, h, pred_coding_loss
+
+    @torch.no_grad()
+    def set_training_step(self, step) -> None:
+        """Update the internal step counter that drives the FE temporal-ramp
+        gate. Called by Brain.set_training_step once per train step; safe to
+        pass float('inf') at eval for fully-open gates."""
+        if torch.is_tensor(step):
+            self._current_step = step.detach().to(self._current_step.dtype).reshape(())
+        else:
+            self._current_step = torch.tensor(float(step),
+                                              dtype=self._current_step.dtype,
+                                              device=self._current_step.device)
 
     def bdnf_grow_all(self, bdnf: float, phi: float) -> int:
         """Trigger BDNF-driven structural growth on all NeuralGeometryAdapters.

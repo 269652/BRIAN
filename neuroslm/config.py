@@ -150,6 +150,15 @@ class BrainConfig:
     sgb_default_center: float = 2000.0
     sgb_default_width: float = 500.0
 
+    # ---- Free-energy temporal ramp (synthesis-v1 stability fix) ----
+    # When True, the PCT free-energy loss is multiplied by a smooth
+    # sigmoid gate(step). At step 0 PCT contributes ~0; at step >>
+    # fe_gate_center it contributes the full pct_lambda_fe weight. Same
+    # SmoothTemporalGate primitive as SGB, just applied to the loss weight.
+    fe_gate_enable: bool = False
+    fe_gate_center: float = 1000.0
+    fe_gate_width: float = 300.0
+
     # ---- Recursive Reasoning Cortex (Universal-Transformer-style) ----
     # When True, ReasoningCortex.forward_tokens loops its expert_blocks
     # `recursive_iters` times with weight-sharing — depth-multiplying the
@@ -655,19 +664,28 @@ def synth_30m() -> BrainConfig:
     c.warmup_steps = 300
     c.lr = 3e-4
     c.weight_decay = 0.05
-    c.dropout = 0.1   # baseline dropout; predictive-dropout adds on top
-    # PCT — stronger weighting than the v1 preset
+    c.dropout = 0.1   # baseline dropout
+    # PCT — stronger weighting, throttled by temporal ramp (below)
     c.use_predictive_coding_trunk = True
     c.pct_mode = "loss_only"
-    c.pct_lambda_fe = 2.0    # v1 used 0.1, too weak per root-cause analysis
+    c.pct_lambda_fe = 2.0    # full strength once the FE-gate has opened
     c.pct_hidden_mult = 0.5
     c.pct_include_embedding_predictor = True
-    # Predictive-Dropout
-    c.use_predictive_dropout = True
-    c.pdrop_base_keep = 0.5
-    c.pdrop_beta = 4.0
-    c.pdrop_per_token = False
-    # Smooth-Gated-Bus
+    # FE temporal-ramp — fixes the chronic high-gnorm regime of synth-v1 try-1
+    # where pct_lambda_fe=2 from step 0 dominated the gradient with
+    # structureless noise (predictors weren't yet meaningful). Ramp opens
+    # around step 1000 so the trunk has time to learn basic next-token
+    # before PCT shapes its representations.
+    c.fe_gate_enable = True
+    c.fe_gate_center = 1000.0
+    c.fe_gate_width = 300.0
+    # Predictive-Dropout DISABLED in v1-attempt-2: most speculative of the
+    # three additions, and the destabilization profile (loss stuck high
+    # post step 500, gnorm 5+ chronically) is consistent with PCT lambda=2
+    # alone driving the gradient noise. We'll add PD back as synth-v2 if
+    # PCT-with-ramp + SGB lands a clean gap_ratio improvement.
+    c.use_predictive_dropout = False
+    # Smooth-Gated-Bus (unchanged from try-1)
     c.use_smooth_gated_bus = True
     c.use_rezero_injection_gates = True   # required: SGB is the gate vehicle
     c.sgb_default_center = 2000.0
