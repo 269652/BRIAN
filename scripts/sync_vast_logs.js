@@ -3,14 +3,16 @@
  * sync_vast_logs.js — fetch vast.ai instance stdout logs into logs/vast/.
  *
  * Usage:
- *   npm run sync:logs              # daemon: poll every SYNC_LOGS_INTERVAL seconds (default 30)
- *   npm run sync:logs -- --once    # one-shot: fetch once and exit
- *   npm run sync:logs -- --instance 12345  # one-shot for a single id
+ *   npm run sync:logs                       # daemon: poll every SYNC_LOGS_INTERVAL seconds
+ *   npm run sync:logs -- --once             # one-shot: fetch once and exit
+ *   npm run sync:logs -- --instance 12345   # one-shot for a single id
+ *   npm run sync:logs -- --no-analyze       # suppress claude-code auto-analysis
  *
  * Env:
  *   VAST_API_KEY or VAST_AI    (read from .env if present)
  *   SYNC_LOGS_INTERVAL         poll interval seconds (default 30)
  *   SYNC_LOGS_DEST             output directory (default logs/vast)
+ *   SYNC_LOGS_NO_ANALYZE=1     same as --no-analyze
  *
  * Naming:
  *   logs/vast/<id>__<label>.log   when an instance has a label
@@ -21,10 +23,13 @@
  *   2. `vastai show instances`           (text, fragile parsing — fallback)
  *   3. https://api.vast.ai/v0/binstances (API, requires key — last resort)
  *
- * Fetching is always via `vastai logs <id>` (no API fallback for log content
- * because the public API surface for log streaming is undocumented). The
- * fetched output is appended to the destination file if the existing content
- * is a prefix of the new output; otherwise the file is rewritten.
+ * Auto-analysis (default ON when `claude` CLI is on PATH):
+ *   After each successful fetch, if the log contains a training/eval
+ *   end-marker AND no analysis md under logs/analyzed/ cites this
+ *   instance id, the script invokes `claude --dangerously-skip-permissions
+ *   -p "..."` to apply logs/analyzed/INSTRUCTIONS.md headlessly — rename
+ *   the log, write the analysis md, update FINDINGS.md per SOP rules,
+ *   commit + push docs/logs.
  */
 
 'use strict';
@@ -41,6 +46,8 @@ const SINGLE_INSTANCE = (() => {
   const i = argv.indexOf('--instance');
   return i >= 0 && argv[i + 1] ? argv[i + 1] : null;
 })();
+const NO_ANALYZE = argv.includes('--no-analyze') ||
+                   process.env.SYNC_LOGS_NO_ANALYZE === '1';
 
 // ── env / paths ─────────────────────────────────────────────────────────
 const INTERVAL_SECONDS = Number(process.env.SYNC_LOGS_INTERVAL || 30);
@@ -49,6 +56,12 @@ const SAFE_ENV = Object.assign({}, process.env, {
   PAGER: 'cat',
   TERM: 'dumb',
   VAST_NO_PROMPT: '1',
+  // BRIAN training logs contain unicode (⚡ Φ λ ★ ✓) that crashes the
+  // vastai CLI on Windows with the default cp1252 codepage:
+  //   'charmap' codec can't encode characters in position N-M
+  // Force UTF-8 on both Python I/O streams to keep the subprocess alive.
+  PYTHONIOENCODING: 'utf-8',
+  PYTHONUTF8: '1',
 });
 
 function ensureDir(dir) {
@@ -100,12 +113,10 @@ function sanitizeLabel(lbl) {
 }
 
 function listInstancesRawJSON() {
-  // Preferred: `vastai show instances --raw` returns JSON with labels.
   try {
     const txt = execSync(`${VAST_BIN} show instances --raw`, {
       encoding: 'utf8', env: SAFE_ENV, shell: true,
     });
-    // Strip any leading non-JSON noise (some CLI versions prefix banners).
     const starts = [txt.indexOf('['), txt.indexOf('{')].filter(i => i >= 0);
     if (!starts.length) return null;
     const jsonText = txt.slice(Math.min(...starts));
@@ -126,11 +137,6 @@ function listInstancesRawJSON() {
 }
 
 function listInstancesTextCLI() {
-  // Fallback: parse the human-readable table. Schema:
-  //   ID    Machine  Status   ...   Label
-  // Take the FIRST integer column as the instance id; take the trailing
-  // non-empty whitespace-separated token as the label (best-effort — the
-  // CLI's column count drifts across versions, so we keep this minimal).
   try {
     const txt = execSync(`${VAST_BIN} show instances`, {
       encoding: 'utf8', env: SAFE_ENV, shell: true,
@@ -138,19 +144,17 @@ function listInstancesTextCLI() {
     const lines = txt.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const out = [];
     for (const l of lines) {
-      // Skip header line (starts with "ID" or contains "Machine")
       if (/^ID\s/i.test(l) || /Machine/i.test(l) && !/^\d/.test(l)) continue;
       const m = l.match(/^(\d+)\s+/);
       if (!m) continue;
       const id = m[1];
-      // Heuristic: label is the last whitespace-token if it's not a pure number/timestamp
       const tokens = l.split(/\s+/);
       let label = '';
       for (let i = tokens.length - 1; i >= 1; i--) {
         const t = tokens[i];
         if (!t) continue;
-        if (/^[0-9.:T-]+$/.test(t)) continue;          // skip timestamps/sizes
-        if (/^[0-9.]+$/.test(t)) continue;             // skip pure numbers
+        if (/^[0-9.:T-]+$/.test(t)) continue;
+        if (/^[0-9.]+$/.test(t)) continue;
         if (/^(running|stopped|loading|exited|offline)$/i.test(t)) continue;
         label = t;
         break;
@@ -227,7 +231,6 @@ function fetchAndWrite(inst) {
       maxBuffer: 64 * 1024 * 1024,  // 64 MB cap
     });
   } catch (e) {
-    // vastai logs returns non-zero for stopped instances; treat as soft error.
     console.error(`  ✗ ${inst.id}: vastai logs failed (${e.message.split('\n')[0]})`);
     return { id: inst.id, status: 'fetch-failed' };
   }
@@ -263,7 +266,87 @@ function fetchAndWrite(inst) {
   }
   const label = inst.label ? ` [${sanitizeLabel(inst.label)}]` : '';
   console.log(`  ✓ ${inst.id}${label}: +${appended} B (total ${totalAfter} B) → ${dest}`);
-  return { id: inst.id, dest, appended, totalAfter };
+  return { id: inst.id, dest, appended, totalAfter, txt };
+}
+
+// ── end-of-run detection + claude code auto-analysis ────────────────────
+
+const END_MARKERS = [
+  '[train] done.',
+  '✓ training reached target',
+  '── OOD eval done ──',
+  '[ood] results saved to',
+];
+
+function hasEndMarker(text) {
+  return END_MARKERS.some(m => text.includes(m));
+}
+
+function hasClaudeCLI() {
+  const r = spawnSync('claude', ['--version'], { encoding: 'utf8', shell: true });
+  return !r.error && (r.status === 0 || r.status === null);
+}
+
+function alreadyAnalyzed(inst, dest) {
+  // Two ways a log can be "already analyzed":
+  //   1. The file was renamed off its raw id form (rename is part of the SOP).
+  //   2. An analysis md under logs/analyzed/ cites this instance id in its
+  //      frontmatter ("**Instance id:** <id>").
+  const base = path.basename(dest, '.log');
+  if (!/^\d+(__|$)/.test(base)) return true;
+
+  const analyzedDir = path.join('logs', 'analyzed');
+  if (!fs.existsSync(analyzedDir)) return false;
+  const idStr = String(inst.id);
+  for (const f of fs.readdirSync(analyzedDir)) {
+    if (!f.endsWith('.md')) continue;
+    let content;
+    try {
+      content = fs.readFileSync(path.join(analyzedDir, f), 'utf8');
+    } catch (_) { continue; }
+    if (content.includes(`**Instance id:** ${idStr}`)) return true;
+  }
+  return false;
+}
+
+function triggerClaudeAnalysis(inst, dest) {
+  if (NO_ANALYZE) return;
+  if (!hasClaudeCLI()) {
+    console.log(`  · ${inst.id}: end marker detected but claude CLI not on PATH; ` +
+                `install claude code (https://docs.anthropic.com/en/docs/claude-code) ` +
+                `to enable auto-analysis, or run with --no-analyze to silence`);
+    return;
+  }
+  const logBasename = path.basename(dest);
+  const prompt =
+    `Apply logs/analyzed/INSTRUCTIONS.md end-to-end to logs/vast/${logBasename}. ` +
+    `Read INSTRUCTIONS.md first for the full SOP, then execute every step (1 ` +
+    `through 9) without asking for confirmation: classify the role, extract ` +
+    `evidence with line citations, pick the descriptive name per §4, git mv the ` +
+    `raw log, write logs/analyzed/<descriptive-name>.md from the template in §6, ` +
+    `update docs/FINDINGS.md only if there is a real insight per §7 rules, then ` +
+    `git add the analyzed pair (and FINDINGS.md if changed) and commit + push ` +
+    `origin docs/logs per §9. Do not touch unrelated files; do not edit ` +
+    `results/*.json; do not edit docs/architecture.md.`;
+  console.log(`  → ${inst.id}: end marker found, launching claude code analysis…`);
+  const r = spawnSync('claude', ['--dangerously-skip-permissions', '-p', prompt], {
+    stdio: 'inherit', shell: true, env: process.env,
+  });
+  if (r.status !== 0) {
+    console.error(`  ✗ ${inst.id}: claude exited ${r.status}`);
+  } else {
+    console.log(`  ✓ ${inst.id}: analysis dispatched`);
+  }
+}
+
+function maybeAnalyze(inst, fetchResult) {
+  if (!fetchResult || fetchResult.status === 'fetch-failed' ||
+      fetchResult.status === 'empty' || fetchResult.status === 'write-failed') {
+    return;
+  }
+  if (!hasEndMarker(fetchResult.txt)) return;
+  if (alreadyAnalyzed(inst, fetchResult.dest)) return;
+  triggerClaudeAnalysis(inst, fetchResult.dest);
 }
 
 // ── orchestration ───────────────────────────────────────────────────────
@@ -283,7 +366,10 @@ async function syncAll() {
   }
 
   console.log(`[${new Date().toISOString()}] syncing ${instances.length} instance(s):`);
-  for (const inst of instances) fetchAndWrite(inst);
+  for (const inst of instances) {
+    const r = fetchAndWrite(inst);
+    maybeAnalyze(inst, r);
+  }
 }
 
 function main() {
@@ -298,7 +384,7 @@ function main() {
   }
 
   console.log(`sync:logs daemon → ${DEST_DIR} every ${INTERVAL_SECONDS}s ` +
-              `(Ctrl-C to stop; --once for one-shot)`);
+              `(Ctrl-C to stop; --once for one-shot; --no-analyze to skip auto-analysis)`);
 
   const runOnce = async () => {
     try { await syncAll(); }
