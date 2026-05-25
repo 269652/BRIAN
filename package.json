@@ -1,0 +1,8 @@
+{
+  "name": "brian-logs-sync",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "sync:logs": "node scripts/sync_vast_logs.js"
+  }
+}
