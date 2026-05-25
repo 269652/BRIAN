@@ -233,7 +233,10 @@ async function syncAll() {
   let hasCLI = true;
   try {
     const r = spawnSync('vastai', ['--version'], { encoding: 'utf8', env: SAFE_ENV, input: '' });
-    if (r.error) hasCLI = false;
+    if (r.error) {
+      // if binary is missing, r.error.code will be 'ENOENT'
+      hasCLI = false;
+    }
   } catch (e) {
     hasCLI = false;
   }
