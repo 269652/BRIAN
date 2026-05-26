@@ -816,6 +816,55 @@ class Brain(nn.Module):
     # Training-step setter (drives Smooth-Gated-Bus temporal schedule)
     # ------------------------------------------------------------------
     @torch.no_grad()
+    # ------------------------------------------------------------------
+    # Parameter Closure Isolation (RCC Bowtie Phase 3)
+    # ------------------------------------------------------------------
+    #
+    # P1 cut forward write-back (motor/mem/thought → h_lang).
+    # P2 cut NT modulation (trophic → trunk attention temp).
+    # P3 cuts PARAMETER MUTATION: bio-side ops (consolidator, trophic,
+    # sleep_cycle, causal.prune) mutate nn.Parameter.data in-place
+    # under torch.no_grad(). If those params are tracked by AdamW, the
+    # optimizer's momentum/variance state was computed against the
+    # PRE-mutation weights → next update applies wrong-state momentum to
+    # post-mutation weights → catastrophic step → observed PPL spike at
+    # exactly step 1500 (the third consolidation cycle, just after the
+    # trunk settled into a basin).
+    #
+    # Fix: AdamW only tracks TRUNK params. Bio params either get their
+    # own SGD-like updater (not yet wired) or stay un-trained by Adam
+    # (they only move via bio-side machinery — consistent with the
+    # cognitive sidecar being a separate optimization closure).
+    #
+    # Trunk = language cortex + the gates connecting modules to it
+    # (SGB / lambda_* injection gates). Everything else = bio.
+    @torch.no_grad()
+    def partition_trunk_bio_params(self) -> tuple[list, list]:
+        """Return (trunk_params, bio_params) — the two disjoint sets that
+        define which parameters Adam sees vs which bio-side machinery
+        can mutate freely. Used by train.py when cfg.rcc_isolate_optimizer
+        is True. Membership rules (name-prefix based):
+
+            trunk:   language.*, sgb.*, lambda_motor, lambda_mem, lambda_thought
+            bio:     everything else
+
+        Both lists contain (name, param) tuples for traceability.
+        """
+        TRUNK_PREFIXES = (
+            'language.',
+            'sgb.',
+            'lambda_motor',
+            'lambda_mem',
+            'lambda_thought',
+        )
+        trunk, bio = [], []
+        for name, p in self.named_parameters():
+            if any(name.startswith(pref) or name == pref for pref in TRUNK_PREFIXES):
+                trunk.append((name, p))
+            else:
+                bio.append((name, p))
+        return trunk, bio
+
     def set_training_step(self, step: int | float) -> None:
         """Inform the model of the current training step. Drives the
         Smooth-Gated-Bus module-injection gates AND the LanguageCortex

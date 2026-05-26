@@ -208,6 +208,20 @@ class BrainConfig:
     # write path that P1 (forward-only cut) left open.
     rcc_freeze_nt_modulation: bool = False
 
+    # RCC Bowtie Phase 3: PARAMETER CLOSURE ISOLATION.
+    # P1 cut forward write-back. P2 cut NT modulation. P3 cuts the third
+    # leak: bio-side ops (consolidator at every consolidate_every steps,
+    # trophic grow/prune events, sleep cycle, causal.prune) mutate
+    # nn.Parameter.data in-place under torch.no_grad(). Adam's momentum
+    # state for those params goes stale → next step applies wrong-state
+    # momentum to mutated weights → PPL spike at the same step every run.
+    #
+    # When True, train.py builds AdamW ONLY over trunk params (language.*
+    # + sgb.* + lambda_motor/mem/thought). Bio params are not tracked by
+    # Adam; bio-side machinery is free to mutate them without causing
+    # optimizer-state inconsistency.
+    rcc_isolate_optimizer: bool = False
+
     # ---- Recursive Reasoning Cortex (Universal-Transformer-style) ----
     # When True, ReasoningCortex.forward_tokens loops its expert_blocks
     # `recursive_iters` times with weight-sharing — depth-multiplying the
@@ -838,6 +852,31 @@ def rcc_bowtie_30m_p2() -> BrainConfig:
     return c
 
 
+def rcc_bowtie_30m_p3() -> BrainConfig:
+    """RCC Bowtie Phase 3: PARAMETER CLOSURE ISOLATION.
+
+    P1 cut forward write-back. P2 cut NT modulation. P3 fixes the third
+    deterministic leak observed in both P1 and P2 runs: at exactly
+    step 1500 (the third firing of consolidate_every=500), PPL spikes
+    from ~125 to ~493. Root cause: the consolidator + causal.prune +
+    trophic grow/prune mutate nn.Parameter.data in-place; Adam's
+    momentum/variance state for those params is computed against
+    pre-mutation weights and applied post-mutation, producing
+    catastrophic gradient steps.
+
+    P3 fix: AdamW only trains TRUNK params (language.*, sgb.*,
+    lambda_motor/mem/thought). Bio params are untracked by Adam, so
+    bio-side machinery can mutate them freely without causing
+    optimizer-state inconsistency. The trunk and the cognitive sidecar
+    are now two separate optimization closures.
+
+    Hypothesis: deterministic step-1500/2000/2500/... spikes vanish.
+    """
+    c = rcc_bowtie_30m_p2()
+    c.rcc_isolate_optimizer = True
+    return c
+
+
 PRESETS = {
     "tiny": tiny, "small": small, "medium": medium,
     "large": large, "xl": xl, "xxl": xxl,
@@ -846,4 +885,5 @@ PRESETS = {
     "synth_30m_bema": synth_30m_bema,
     "rcc_bowtie_30m_p1": rcc_bowtie_30m_p1,
     "rcc_bowtie_30m_p2": rcc_bowtie_30m_p2,
+    "rcc_bowtie_30m_p3": rcc_bowtie_30m_p3,
 }

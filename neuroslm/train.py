@@ -547,6 +547,32 @@ def main():
     named = list(brain.named_parameters())
     model_params = [p for n, p in named if not n.startswith('learned_opt.')]
 
+    # RCC Bowtie Phase 3: parameter closure isolation.
+    # When cfg.rcc_isolate_optimizer is True, partition params into trunk
+    # (Adam-tracked) and bio (not Adam-tracked). Bio modules can then
+    # mutate their own params in-place without poisoning Adam's momentum
+    # state for trunk params. See brain.partition_trunk_bio_params() and
+    # docs/architecture.md §5.6 (P3).
+    if bool(getattr(cfg, 'rcc_isolate_optimizer', False)):
+        _trunk_named, _bio_named = brain.partition_trunk_bio_params()
+        _trunk_param_set = {id(p) for _, p in _trunk_named}
+        # Restrict `named` to trunk-only BEFORE build_param_groups runs.
+        _filtered = [(n, p) for n, p in named if id(p) in _trunk_param_set]
+        _n_dropped = len(named) - len(_filtered)
+        named = _filtered
+        model_params = [p for n, p in named if not n.startswith('learned_opt.')]
+        # Freeze the bio params so PyTorch doesn't waste memory tracking
+        # their grads either (we never call backward on them via the LM
+        # loss path, but explicit freeze prevents accidental grad
+        # accumulation if some aux path leaks).
+        for n, p in _bio_named:
+            p.requires_grad_(False)
+        print(f"[train] RCC P3 — parameter closure isolation ON: "
+              f"trunk={len(_trunk_named)} params Adam-tracked, "
+              f"bio={len(_bio_named)} params frozen (bio-side machinery "
+              f"can still mutate them in-place via no_grad ops). "
+              f"Dropped {_n_dropped} from Adam.", flush=True)
+
     # ── Decoupled weight decay ───────────────────────────────────────────
     # Apply weight decay only to 2-D weight matrices (Linear / embedding) and
     # exempt 1-D params (RMSNorm gains, biases, NT levels/vesicles). Decaying
