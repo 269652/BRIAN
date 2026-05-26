@@ -168,7 +168,13 @@ GIT_LFS_SKIP_SMUDGE=1 git clone --branch '${BRANCH}' --single-branch \\
 cd brian
 
 echo "── bootstrap (pip deps + targeted LFS pull) ──"
-bash scripts/vast_bootstrap.sh
+# When FRESH=1 we are not resuming, so skip the wholesale adamw-ckpt LFS
+# pull in bootstrap step 6 (saves 5-10 min and 3-5 GB transfer).
+if [ "${FRESH}" = "1" ]; then
+  SKIP_LFS_RESUME=1 bash scripts/vast_bootstrap.sh
+else
+  bash scripts/vast_bootstrap.sh
+fi
 
 echo "── starting training ──"
 echo "    preset=${PRESET} steps=${STEPS} batch=${BATCH} grad_accum=${GRAD_ACCUM}"
