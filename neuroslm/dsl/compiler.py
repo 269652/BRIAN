@@ -150,6 +150,23 @@ class CircuitIR(NodeIR):
 
 
 @dataclass
+class ConfigIR(NodeIR):
+    """A `config { ... }` block — captures BrainConfig fields by name.
+
+    All values are stored as raw strings; type coercion happens when
+    materialized into a `BrainConfig` instance via `to_brain_config()`.
+    This preserves DSL → IR isolation: the IR is JSON-serializable and
+    knows nothing about the Python BrainConfig class.
+    """
+    id: str = "config"
+    fields: Dict = None    # name -> raw string value
+
+    def __post_init__(self):
+        if self.fields is None:
+            self.fields = {}
+
+
+@dataclass
 class ProgramIR(NodeIR):
     id: str = ""
     populations: List[PopulationIR] = None
@@ -159,6 +176,7 @@ class ProgramIR(NodeIR):
     circuits: List[CircuitIR] = None
     formal_specs: List[FormalSpecIR] = None
     sheaf_specs: List[SheetIR] = None
+    config: ConfigIR = None    # Phase 1: the BrainConfig block
 
     def __post_init__(self):
         if self.populations is None:
@@ -315,6 +333,25 @@ class NeuroMLCompiler:
                 properties=props_dict
             ))
 
+        # Extract the `config { ... }` block (Phase 1 of DSL refactor).
+        # Single block at the top level holds all BrainConfig field assignments.
+        # Multi-line tolerant: the `{ ... }` content may span many lines and
+        # use either `field: value` or `field = value` style.
+        config_ir = ConfigIR(id="config", fields={})
+        cfg_match = re.search(r'config\s*\{([^}]*)\}', source, re.DOTALL)
+        if cfg_match:
+            body = cfg_match.group(1)
+            # Strip line comments (# ...) so they don't get parsed as values
+            body = re.sub(r'#[^\n]*', '', body)
+            # Accept both `name: value` and `name = value`
+            for line in body.split('\n'):
+                m = re.match(r'\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*[:=]\s*(.+?)\s*,?\s*$', line)
+                if m:
+                    name, val = m.group(1), m.group(2).strip()
+                    # Strip a trailing comma if any (already handled by regex but be safe)
+                    val = val.rstrip(',').strip()
+                    config_ir.fields[name] = val
+
         return ProgramIR(
             id="circuit",
             populations=pops,
@@ -323,6 +360,7 @@ class NeuroMLCompiler:
             modulations=mods,
             formal_specs=formal_specs,
             sheaf_specs=sheaves,
+            config=config_ir,
         )
 
     @staticmethod
@@ -331,3 +369,156 @@ class NeuroMLCompiler:
         with open(filepath, 'r') as f:
             source = f.read()
         return NeuroMLCompiler.compile(source)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Phase 1: DSL → BrainConfig materialization
+# ─────────────────────────────────────────────────────────────────────────
+
+def _coerce_value(raw: str, target_type):
+    """Convert a DSL string value to the type expected by the BrainConfig
+    dataclass field. Handles bool, int, float, str, Optional[int].
+
+    Recognizes bare `true`/`false`/`True`/`False` for bool, `null`/`None` for
+    None, numeric literals for int/float, and quoted strings for str.
+    """
+    raw = raw.strip()
+
+    # None / null
+    if raw in ('None', 'null', 'NULL'):
+        return None
+
+    # Strip outer quotes for string-style values
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
+        raw_unquoted = raw[1:-1]
+    else:
+        raw_unquoted = raw
+
+    # bool first — narrowest type
+    if target_type is bool:
+        if raw.lower() in ('true', '1', 'yes', 'on'):
+            return True
+        if raw.lower() in ('false', '0', 'no', 'off'):
+            return False
+        raise ValueError(f"can't coerce {raw!r} to bool")
+
+    # numeric types
+    if target_type in (int, float):
+        # If the value has 'e' or '.' parse as float, else int
+        if 'e' in raw.lower() or '.' in raw:
+            return target_type(float(raw))
+        return target_type(int(raw, 0))   # base=0 handles 0x, 0o, 0b too
+
+    # str — strip quotes if present
+    if target_type is str:
+        return raw_unquoted
+
+    # Fallback: try the type constructor directly
+    try:
+        return target_type(raw_unquoted)
+    except Exception:
+        return raw_unquoted
+
+
+def to_brain_config(program: ProgramIR):
+    """Materialize a `BrainConfig` instance from the DSL's `config { ... }` block.
+
+    Reads `program.config.fields` (a dict[str, str] of raw DSL values),
+    looks up each field's declared type on the BrainConfig dataclass, and
+    coerces the value. Fields not present in the DSL keep their dataclass
+    default. Fields present in the DSL but not on BrainConfig raise an
+    error (catches typos in the DSL).
+
+    Returns a fully-populated `BrainConfig`. Round-trip equivalent to any
+    preset that was written in the DSL — see tests/dsl/test_config_compile.py.
+    """
+    # Import here to avoid circular dep at module load time.
+    from neuroslm.config import BrainConfig
+    import dataclasses
+
+    if program.config is None or not program.config.fields:
+        # Empty `config` block (or none) → just return defaults.
+        return BrainConfig()
+
+    # Build a type map from the dataclass fields
+    type_map = {f.name: f.type for f in dataclasses.fields(BrainConfig)}
+
+    # Unknown field names are typos in the DSL — fail loudly
+    unknown = sorted(set(program.config.fields) - set(type_map))
+    if unknown:
+        raise NeuroMLError(
+            f"DSL config has fields not present in BrainConfig: {unknown}. "
+            f"Either remove them from the .neuro file or add them to "
+            f"neuroslm/config.py:BrainConfig.")
+
+    # Coerce each field. The dataclass `type` annotation can be a string
+    # (PEP 563 / `from __future__ import annotations`) so we resolve via
+    # the actual class attribute default's type as a fallback when the
+    # annotation isn't directly callable.
+    cfg = BrainConfig()
+    for name, raw in program.config.fields.items():
+        ann = type_map[name]
+        # Resolve string annotations (e.g. 'int | None')
+        if isinstance(ann, str):
+            # Heuristic: split on '|', try each; coerce to first that works
+            options = [t.strip() for t in ann.replace(' ', '').split('|')]
+            value = None
+            errors = []
+            for opt in options:
+                if opt in ('None', 'NoneType'):
+                    if raw.strip() in ('None', 'null', 'NULL'):
+                        value = None
+                        break
+                    continue
+                target = {'int': int, 'float': float, 'bool': bool, 'str': str}.get(opt)
+                if target is None:
+                    continue
+                try:
+                    value = _coerce_value(raw, target)
+                    break
+                except Exception as e:
+                    errors.append((target, str(e)))
+            else:
+                # No type matched cleanly
+                raise NeuroMLError(
+                    f"can't coerce field {name!r}={raw!r} to any of {options}: {errors}")
+        else:
+            value = _coerce_value(raw, ann)
+        setattr(cfg, name, value)
+    return cfg
+
+
+def compile_to_brain_config(filepath: str):
+    """One-shot: filepath -> BrainConfig. The intended entry point for
+    `train.py --neuro <file>` once Phase 4 lands."""
+    program = NeuroMLCompiler.compile_file(filepath)
+    return to_brain_config(program)
+
+
+def compile_to_brain(filepath: str, scale_overrides: Dict = None):
+    """One-shot: filepath -> instantiated `neuroslm.brain.Brain`.
+
+    Phase 1 implementation: the Python `Brain` class is the "interpreter"
+    that consumes the DSL-compiled config. The Brain CLASS itself is still
+    defined in Python (neuroslm/brain.py); Phase 2 of the refactor (see
+    docs/DSL_REFACTOR.md) will introduce a codegen pass that emits a
+    Python module from the DSL's `module { ... }` blocks, at which point
+    this function will switch transparently to using the generated class.
+
+    The contract is stable now: `compile_to_brain(path)` is the canonical
+    way to materialize a model from a .neuro file. Future phases change
+    the implementation, not the API.
+
+    Parameters
+    ----------
+    filepath : path to a .neuro file containing a `config { ... }` block
+    scale_overrides : optional dict of BrainConfig fields to override
+        (e.g. for fast tests: `{'d_hidden': 64, 'lang_layers': 2}`).
+        Applied AFTER the DSL config; the DSL stays read-only.
+    """
+    from neuroslm.brain import Brain
+    cfg = compile_to_brain_config(filepath)
+    if scale_overrides:
+        for k, v in scale_overrides.items():
+            setattr(cfg, k, v)
+    return Brain(cfg)

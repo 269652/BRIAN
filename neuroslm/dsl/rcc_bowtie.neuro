@@ -404,3 +404,46 @@ formal_spec bowtie_topology {
     rule: "narrowing_widening",
     metric: "structural_constraint"
 }
+
+
+# =============================================================================
+# CONFIG — BrainConfig fields (Phase 1 of DSL refactor; see docs/DSL_REFACTOR.md)
+# =============================================================================
+# This block is the source of truth for the trained-architecture BrainConfig.
+# Fields not listed here keep their dataclass defaults from neuroslm/config.py.
+# Currently mirrors the `rcc_bowtie_30m_p2` Python preset 1:1.
+#
+# Phase 2-5 of the refactor will move increasingly large parts of brain.py
+# under this DSL umbrella so that architecture changes become single-file
+# edits in this .neuro file.
+
+config {
+    # Layer dimensions — small RCC ablation preset (~68M params with bio stack)
+    d_sem: 192
+    lang_ctx: 1024
+    world_layers: 1
+    forward_layers: 1
+    hippo_capacity: 2048
+
+    # Training regularization
+    weight_decay: 0.05
+    warmup_steps: 300
+
+    # Predictive Coding Trunk (top-down generative pressure on trunk)
+    use_predictive_coding_trunk: true
+    pct_lambda_fe: 2.0
+    fe_gate_enable: true   # temporal ramp on lambda_fe to avoid early shock
+
+    # Smooth-Gated-Bus (replaces ReZero zero-init scalars)
+    use_smooth_gated_bus: true
+
+    # RCC Bowtie — cuts the closed-loop write-back from cognitive modules
+    # into the language trunk forward pass. Phase 1: forward-only cut.
+    # Phase 2: also gate the NT-modulation path so trophic plasticity
+    # can't perturb the trunk's attention temperature.
+    use_rcc_bowtie: true
+    rcc_freeze_nt_modulation: true
+
+    # Param parity for the --baseline ablation (12 vanilla layers ≈ same params)
+    baseline_lang_layers: 12
+}
