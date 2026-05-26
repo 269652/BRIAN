@@ -222,6 +222,18 @@ class BrainConfig:
     # optimizer-state inconsistency.
     rcc_isolate_optimizer: bool = False
 
+    # Per-sample loss clipping (data-robust training).
+    # Three independent RCC runs (P1/P2/P3) spiked from ppl 125 to 493 at
+    # EXACTLY step 1500 with the SAME seed. With seed=0 the data iterator
+    # is deterministic — same hard batch lands at same step every time.
+    # When True, in brain._chunked_ce path each sequence's loss is clipped
+    # at `loss_clip_factor x median(batch)` BEFORE averaging, so a single
+    # pathological sequence can't yank the batch gradient. See
+    # docs/STEP1500_INVESTIGATION.md.
+    # Off by default (legacy bit-identical when False).
+    loss_clip_robust: bool = False
+    loss_clip_factor: float = 3.0
+
     # ---- Recursive Reasoning Cortex (Universal-Transformer-style) ----
     # When True, ReasoningCortex.forward_tokens loops its expert_blocks
     # `recursive_iters` times with weight-sharing — depth-multiplying the
@@ -877,6 +889,26 @@ def rcc_bowtie_30m_p3() -> BrainConfig:
     return c
 
 
+def rcc_bowtie_30m_p4() -> BrainConfig:
+    """RCC P3 + per-sample loss clipping (data-robust training).
+
+    P1/P2/P3 all spiked from ppl 125 to 493 at EXACTLY step 1500 — same
+    deterministic data ordering puts the same pathological batch there
+    every run. Architectural fixes don't address it because the bug is
+    in the data, not the model.
+
+    P4 adds adaptive per-sequence loss clipping (Huber-style at the
+    sequence level): clip each sequence's loss at 3 * batch median
+    before averaging. A single outlier sequence can no longer dominate
+    the batch gradient. See docs/STEP1500_INVESTIGATION.md Option 2.
+    Used in production at Phi / GPT-3 / Cerebras.
+    """
+    c = rcc_bowtie_30m_p3()
+    c.loss_clip_robust = True
+    c.loss_clip_factor = 3.0
+    return c
+
+
 PRESETS = {
     "tiny": tiny, "small": small, "medium": medium,
     "large": large, "xl": xl, "xxl": xxl,
@@ -886,4 +918,5 @@ PRESETS = {
     "rcc_bowtie_30m_p1": rcc_bowtie_30m_p1,
     "rcc_bowtie_30m_p2": rcc_bowtie_30m_p2,
     "rcc_bowtie_30m_p3": rcc_bowtie_30m_p3,
+    "rcc_bowtie_30m_p4": rcc_bowtie_30m_p4,
 }

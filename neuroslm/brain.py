@@ -1656,7 +1656,26 @@ class Brain(nn.Module):
             _meso_phase = self._phase_gate(_mat_now, center=0.55, width=0.10)
             meso_gain   = (1.0 + 0.5 * _meso_phase * learning_gain.detach() *
                            self.transmitters.get("DA").detach()).clamp(min=1.0)
-            lm_loss     = (lm_loss_per * meso_gain).mean()
+            # Per-sample loss clipping (Option 2 of docs/STEP1500_INVESTIGATION.md).
+            # Three independent RCC runs all spiked at exactly step 1500 because
+            # the same data ordering puts the same pathological batch there.
+            # Clip each sequence's loss at `loss_clip_factor x median` before
+            # averaging so a single outlier sequence cannot dominate the batch.
+            # Adaptive threshold — auto-tunes per batch, no hyper-parameter to
+            # set per dataset. Off by default (legacy behavior). Used in
+            # production LM training (Phi, GPT-3 robust variants, Cerebras).
+            _weighted = lm_loss_per * meso_gain
+            if bool(getattr(cfg, 'loss_clip_robust', False)):
+                _med = _weighted.detach().median()
+                _factor = float(getattr(cfg, 'loss_clip_factor', 3.0))
+                _max_allowed = _factor * _med
+                # Track how often clipping fires (logged from train.py)
+                self._last_n_clipped = int(
+                    (_weighted.detach() > _max_allowed).sum().item())
+                _weighted = torch.clamp(_weighted, max=_max_allowed)
+            else:
+                self._last_n_clipped = 0
+            lm_loss = _weighted.mean()
             world_loss = F.mse_loss(world_pred, z_world.detach())
             fwd_reg    = (wp.pow(2).mean() + sp.pow(2).mean()) * 0.5
 
