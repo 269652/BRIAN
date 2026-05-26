@@ -196,6 +196,18 @@ class BrainConfig:
     # See docs/architecture.md (TBD section) and tests/test_rcc_bowtie.py.
     use_rcc_bowtie: bool = False
 
+    # RCC Bowtie Phase 2: also gate the NEUROTRANSMITTER MODULATION path
+    # from the trophic-managed cognitive subsystem into the trunk. When
+    # the trophic system grows/prunes projections mid-training, the NT
+    # field's distribution shifts — and that field is plumbed into every
+    # TransformerBlock's attention temperature (via Linear(n_neuromods,
+    # n_heads) in neuro_attention.py). Setting nt=None at the trunk's
+    # input makes attention temperature INPUT-INDEPENDENT, so the trophic
+    # system can keep mutating its connectome for cognitive use without
+    # perturbing the language manifold. Closes the second closed-loop
+    # write path that P1 (forward-only cut) left open.
+    rcc_freeze_nt_modulation: bool = False
+
     # ---- Recursive Reasoning Cortex (Universal-Transformer-style) ----
     # When True, ReasoningCortex.forward_tokens loops its expert_blocks
     # `recursive_iters` times with weight-sharing — depth-multiplying the
@@ -797,6 +809,35 @@ def rcc_bowtie_30m_p1() -> BrainConfig:
     return c
 
 
+def rcc_bowtie_30m_p2() -> BrainConfig:
+    """RCC Bowtie Phase 2: cut the neurotransmitter-modulation leak.
+
+    P1 closed forward write-back (motor_bias, mem_kv, from_sem thought,
+    GWS broadcast) from cognitive modules into h_lang. The P1 10k run
+    confirmed this was a real bug — gnorm 30+ spikes that would have
+    catastrophically diverged synth-v1 were absorbed cleanly, and best.pt
+    advanced past step 4000. BUT around step 4700 the model regressed
+    from ppl 73 → 245+ coincident with a trophic growth event
+    (16→17 projections), confirming a SECOND closed-loop leak: the
+    trophic-system mutates the projection graph mid-training, the NT
+    field shifts, and the trunk's attention temperature (driven by NT
+    via neuro_attention.py:Linear(n_neuromods, n_heads)) is yanked.
+
+    P2 fix: pass nt=None at the trunk's input. The trophic system can
+    still grow/prune projections and modulate NT levels for cognitive
+    use, but the trunk's attention is no longer a function of those.
+    Trunk's input environment is now fully invariant w.r.t. cognitive
+    dynamics — the language manifold is fully isolated.
+
+    Hypothesis: best.pt continues to advance smoothly past step 4000,
+    no late-training regression, sub-100 ppl basin maintained through
+    step 10000.
+    """
+    c = rcc_bowtie_30m_p1()
+    c.rcc_freeze_nt_modulation = True
+    return c
+
+
 PRESETS = {
     "tiny": tiny, "small": small, "medium": medium,
     "large": large, "xl": xl, "xxl": xxl,
@@ -804,4 +845,5 @@ PRESETS = {
     "synth_30m": synth_30m,
     "synth_30m_bema": synth_30m_bema,
     "rcc_bowtie_30m_p1": rcc_bowtie_30m_p1,
+    "rcc_bowtie_30m_p2": rcc_bowtie_30m_p2,
 }

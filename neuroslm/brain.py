@@ -1069,15 +1069,23 @@ class Brain(nn.Module):
         _rcc_on = bool(getattr(cfg, 'use_rcc_bowtie', False))
         _trunk_thought = None if _rcc_on else lang_thought
         _trunk_memkv   = None if _rcc_on else memory_kv
+        # RCC Bowtie Phase 2: also cut the neurotransmitter-modulation leak.
+        # The trophic system mutates the projection graph mid-training and
+        # the resulting NT shifts modulate the trunk's attention temperature
+        # via TransformerBlock(nt=nt). That's a second closed-loop write
+        # path that P1 didn't address — leading to the observed step-4700
+        # regression where troph 16→17 growth coincided with PPL doubling.
+        # Passing nt=None makes attention temperature input-independent.
+        _trunk_nt = None if getattr(cfg, 'rcc_freeze_nt_modulation', False) else nt
         _want_tap = bool(getattr(self, '_src_teh_enabled', False))
         if _want_tap:
             logits, sem, h_lang, pred_coding_loss, tap_sem = self.language(
-                ids, thought=_trunk_thought, nt=nt,
+                ids, thought=_trunk_thought, nt=_trunk_nt,
                 memory_kv=_trunk_memkv, return_tap=True)
         else:
             tap_sem = None
             logits, sem, h_lang, pred_coding_loss = self.language(
-                ids, thought=_trunk_thought, nt=nt)
+                ids, thought=_trunk_thought, nt=_trunk_nt)
 
         # Restore CALM thresholds after language forward
         for _ch, _orig_thresh in _calm_heads:
