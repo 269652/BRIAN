@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 import argparse
 import json
+import dataclasses
 import math
 import os
 import time
@@ -336,6 +337,11 @@ def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--preset", default="xl", choices=list(PRESETS.keys()))
+    # DSL Phase 4 — `--neuro <path>` makes a .neuro file the source of truth
+    # for the architecture (config + modules). When provided, the Python
+    # preset is ignored. See docs/DSL_REFACTOR.md.
+    ap.add_argument("--neuro", default=None,
+                    help="Path to a .neuro DSL file. Overrides --preset when given.")
     ap.add_argument("--steps", type=int, default=100000)
     ap.add_argument("--batch_size", type=int, default=4)
     ap.add_argument("--ctx", type=int, default=None,
@@ -451,7 +457,22 @@ def main():
         print("[train] WARNING: meta-training on CPU is slow. Consider --device cuda or TPU.",
               flush=True)
 
-    cfg = PRESETS[args.preset]()
+    # Architecture source resolution (DSL Phase 4):
+    # - --neuro <path>: compile config from the .neuro file (DSL is source of truth)
+    # - else:           legacy --preset path via the Python PRESETS dict
+    if args.neuro:
+        from neuroslm.dsl.compiler import compile_to_brain_config
+        cfg = compile_to_brain_config(args.neuro)
+        print(f"[train] DSL: loaded config from {args.neuro} "
+              f"({sum(1 for _ in dataclasses.fields(type(cfg)))} BrainConfig fields)",
+              flush=True)
+        # Tag a synthetic preset name from the DSL filename so existing
+        # downstream code (checkpoint naming, log prefixes) keeps working
+        # without needing to thread `args.neuro` through every callsite.
+        import os as _os
+        args.preset = _os.path.splitext(_os.path.basename(args.neuro))[0]
+    else:
+        cfg = PRESETS[args.preset]()
     tok = Tokenizer()
     cfg.vocab_size = tok.vocab_size
     if args.baseline:

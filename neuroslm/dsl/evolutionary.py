@@ -253,3 +253,59 @@ class EvolutionaryEngine:
 
         log.end_time = time.time()
         return log
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# DSL Phase 5 — close the loop: any CircuitGenotype produced by the
+# evolutionary engine can be materialized into a trainable Brain.
+# This is the integration point that turns the search loop into a real
+# architecture-discovery system rather than a graph-validation toy.
+# ─────────────────────────────────────────────────────────────────────────
+
+def materialize_genotype_to_brain(genotype: CircuitGenotype,
+                                  scale_overrides: Optional[Dict] = None):
+    """Take an evolutionary-loop CircuitGenotype (DSL source) and build
+    the corresponding `neuroslm.brain.Brain` instance via the DSL
+    compiler. Returns the Brain; raise NeuroMLError on invalid genotype.
+
+    This is the bridge between Part-A (evolutionary search) and the
+    actual model: feed a genotype.source into the same compile pipeline
+    used by `train.py --neuro`. If the genotype compiles cleanly to a
+    runnable Brain, it's a candidate for the training-based fitness
+    signals planned in docs/STATIC_ANALYSIS_PLAN.md Part B.
+    """
+    import tempfile
+    import os as _os
+    from .compiler import compile_to_brain
+
+    # Write the genotype source to a temp .neuro file and compile.
+    # (compile_to_brain takes a filepath; cheaper than refactoring its
+    # signature.)
+    with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.neuro', delete=False, encoding='utf-8') as f:
+        f.write(genotype.source)
+        tmpf = f.name
+    try:
+        return compile_to_brain(tmpf, scale_overrides=scale_overrides)
+    finally:
+        try:
+            _os.unlink(tmpf)
+        except Exception:
+            pass
+
+
+def neuro_file_to_genotype(filepath: str) -> CircuitGenotype:
+    """Bootstrap helper: load a .neuro file as the seed CircuitGenotype
+    for evolutionary search. Validates that the file compiles before
+    returning."""
+    with open(filepath, 'r', encoding='utf-8') as f:
+        source = f.read()
+    # Compile-validate (raises if invalid)
+    NeuroMLCompiler.compile(source)
+    return CircuitGenotype(
+        id=f"seed-{_os.path.basename(filepath)}",
+        source=source,
+        generation=0,
+    )
+
+import os as _os
