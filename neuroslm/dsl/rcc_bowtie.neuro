@@ -447,3 +447,33 @@ config {
     # Param parity for the --baseline ablation (12 vanilla layers ≈ same params)
     baseline_lang_layers: 12
 }
+
+
+# =============================================================================
+# MODULES — Phase 2 of DSL refactor. Each `module {}` block declares one
+# submodule of Brain to be instantiated by compile_to_modules(program, cfg).
+# Args may reference cfg.<field> (resolved at materialize time) or be literal.
+# Phase 2 starts with the LM trunk; Phase 2c expands to the rest of
+# Brain.__init__'s ~30 modules.
+# =============================================================================
+
+module language {
+    class: "LanguageCortex"
+    args: {
+        vocab_size: cfg.vocab_size
+        d_hidden: cfg.d_hidden
+        d_sem: cfg.d_sem
+        n_layers: cfg.lang_layers
+        n_heads: cfg.lang_heads
+        max_ctx: cfg.lang_ctx
+        n_kv_heads: cfg.lang_kv_heads
+        dropout: cfg.dropout
+        use_predictive_coding_trunk: cfg.use_predictive_coding_trunk
+        pct_mode: cfg.pct_mode
+        pct_lambda_fe: cfg.pct_lambda_fe
+        pct_hidden_mult: cfg.pct_hidden_mult
+        fe_gate_enable: cfg.fe_gate_enable
+        fe_gate_center: cfg.fe_gate_center
+        fe_gate_width: cfg.fe_gate_width
+    }
+}

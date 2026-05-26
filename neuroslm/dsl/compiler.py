@@ -384,6 +384,51 @@ class NeuroMLCompiler:
                     val = val.rstrip(',').strip()
                     config_ir.fields[name] = val
 
+        # Extract `module <name> { class: "X", args: { ... }, when: "..." }`
+        # blocks (Phase 2 of DSL refactor). Each block describes one
+        # submodule of Brain to be instantiated. The args dict supports
+        # literal values AND `cfg.<field>` references (resolved at
+        # materialize time). The optional `when` field is a small
+        # condition string evaluated against cfg to decide whether to
+        # build the module.
+        modules = []
+        # Match `module <name> { ... }` allowing nested braces (one
+        # level deep — enough for `args: { ... }`).
+        mod_pattern = r'module\s+(\w+)\s*\{((?:[^{}]|\{[^{}]*\})*)\}'
+        for match in re.finditer(mod_pattern, source):
+            mod_name = match.group(1)
+            body = match.group(2)
+            # Strip line comments
+            body = re.sub(r'#[^\n]*', '', body)
+
+            # Extract class: "ClassName"
+            cls_match = re.search(r'class\s*:\s*["\']([^"\']+)["\']', body)
+            class_name = cls_match.group(1) if cls_match else ""
+
+            # Extract when: "..." (or when = "...")
+            when_match = re.search(r'when\s*[:=]\s*["\']([^"\']*)["\']', body)
+            when_expr = when_match.group(1).strip() if when_match else ""
+
+            # Extract args: { ... } — nested block of key: value pairs.
+            # Captures the inner content between the args braces.
+            args = {}
+            args_match = re.search(r'args\s*:\s*\{([^}]*)\}', body, re.DOTALL)
+            if args_match:
+                args_body = args_match.group(1)
+                args_body = re.sub(r'#[^\n]*', '', args_body)
+                for line in args_body.split('\n'):
+                    m = re.match(r'\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*[:=]\s*(.+?)\s*,?\s*$', line)
+                    if m:
+                        k, v = m.group(1), m.group(2).strip().rstrip(',').strip()
+                        args[k] = v
+
+            modules.append(ModuleIR(
+                name=mod_name,
+                class_name=class_name,
+                args=args,
+                when_expr=when_expr,
+            ))
+
         return ProgramIR(
             id="circuit",
             populations=pops,
@@ -393,6 +438,7 @@ class NeuroMLCompiler:
             formal_specs=formal_specs,
             sheaf_specs=sheaves,
             config=config_ir,
+            modules=modules,
         )
 
     @staticmethod
@@ -554,3 +600,136 @@ def compile_to_brain(filepath: str, scale_overrides: Dict = None):
         for k, v in scale_overrides.items():
             setattr(cfg, k, v)
     return Brain(cfg)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Phase 2: DSL module → instantiated nn.Module
+# ─────────────────────────────────────────────────────────────────────────
+
+# Class registry — only classes here can be instantiated from DSL `module`
+# blocks. Centralized to keep the DSL → Python boundary safe (no arbitrary
+# eval). Phase 2 starts with a small registry; expands incrementally as the
+# DSL takes over more of Brain.__init__.
+_DSL_CLASS_REGISTRY = None   # built lazily to avoid circular imports
+
+def _ensure_class_registry():
+    global _DSL_CLASS_REGISTRY
+    if _DSL_CLASS_REGISTRY is not None:
+        return _DSL_CLASS_REGISTRY
+    from neuroslm.modules.language import LanguageCortex
+    from neuroslm.modules.smooth_gated_bus import SmoothGatedBus
+    from neuroslm.modules.predictive_coding_trunk import PredictiveCodingTrunk
+    # Phase 2 expansion: add the remaining bio modules here as the DSL
+    # takes them over. Each addition is gated by an explicit test in
+    # tests/dsl/.
+    _DSL_CLASS_REGISTRY = {
+        "LanguageCortex": LanguageCortex,
+        "SmoothGatedBus": SmoothGatedBus,
+        "PredictiveCodingTrunk": PredictiveCodingTrunk,
+    }
+    return _DSL_CLASS_REGISTRY
+
+
+def _eval_arg(raw: str, cfg):
+    """Resolve a DSL module-arg value against a BrainConfig instance.
+
+    Supports:
+    - `cfg.<field>`   -> getattr(cfg, field)
+    - literal int / float / bool / quoted str (via _coerce_value)
+    - bare `None` / `null`
+
+    Anything else raises NeuroMLError. The DSL deliberately doesn't allow
+    arbitrary Python expressions in args; that's a static-analysis
+    surface area we want to keep small.
+    """
+    raw = raw.strip()
+    if raw.startswith("cfg."):
+        attr = raw[4:].strip().rstrip(',').strip()
+        if not hasattr(cfg, attr):
+            raise NeuroMLError(f"DSL arg references cfg.{attr} but BrainConfig has no such field")
+        return getattr(cfg, attr)
+    # bool
+    if raw.lower() in ("true", "false"):
+        return raw.lower() == "true"
+    # None / null
+    if raw in ("None", "null", "NULL"):
+        return None
+    # quoted string
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
+        return raw[1:-1]
+    # numeric
+    try:
+        if "." in raw or "e" in raw.lower():
+            return float(raw)
+        return int(raw, 0)
+    except Exception:
+        # Fall through to raw string
+        return raw
+
+
+def _eval_when(expr: str, cfg) -> bool:
+    """Evaluate a small `when:` expression against cfg.
+
+    Supported forms (kept deliberately tiny to stay analyzable):
+        ""                  -> always True
+        "cfg.X"             -> bool(cfg.X)
+        "not cfg.X"         -> not bool(cfg.X)
+        "cfg.X and cfg.Y"   -> bool(cfg.X) and bool(cfg.Y)
+        "cfg.X or cfg.Y"    -> bool(cfg.X) or bool(cfg.Y)
+    """
+    e = expr.strip()
+    if not e:
+        return True
+    # `not cfg.X`
+    if e.startswith("not "):
+        return not _eval_when(e[4:], cfg)
+    if " and " in e:
+        lhs, rhs = e.split(" and ", 1)
+        return _eval_when(lhs.strip(), cfg) and _eval_when(rhs.strip(), cfg)
+    if " or " in e:
+        lhs, rhs = e.split(" or ", 1)
+        return _eval_when(lhs.strip(), cfg) or _eval_when(rhs.strip(), cfg)
+    # `cfg.X`
+    if e.startswith("cfg."):
+        return bool(_eval_arg(e, cfg))
+    # bare bool literal
+    if e.lower() in ("true", "false"):
+        return e.lower() == "true"
+    raise NeuroMLError(f"unsupported `when` expression: {expr!r}")
+
+
+def compile_to_modules(program: ProgramIR, cfg):
+    """Phase 2: materialize the DSL's `module {}` blocks into a dict of
+    instantiated nn.Module objects.
+
+    For each ModuleIR in program.modules:
+      1. Look up class_name in the registry (raises if unknown).
+      2. Evaluate the `when:` expression against cfg (skip if False).
+      3. Resolve each arg value (literal or cfg.X reference).
+      4. Instantiate the class with the resolved kwargs.
+
+    Returns: dict[name -> nn.Module] suitable for installing as
+    submodules of a Brain instance. Phase 2c (codegen of full
+    Brain class) will use this to replace Brain.__init__'s manual
+    module construction.
+    """
+    registry = _ensure_class_registry()
+    result = {}
+    for m in program.modules:
+        if not m.class_name:
+            raise NeuroMLError(f"module {m.name!r} has no `class:` field")
+        if m.class_name not in registry:
+            raise NeuroMLError(
+                f"module {m.name!r}: class {m.class_name!r} not in DSL registry. "
+                f"Known: {sorted(registry)}")
+        if not _eval_when(m.when_expr, cfg):
+            continue
+        cls = registry[m.class_name]
+        kwargs = {k: _eval_arg(v, cfg) for k, v in m.args.items()}
+        try:
+            result[m.name] = cls(**kwargs)
+        except TypeError as e:
+            raise NeuroMLError(
+                f"module {m.name!r}: {m.class_name}(**kwargs) failed: {e}\n"
+                f"  kwargs={kwargs}") from e
+    return result
