@@ -167,6 +167,35 @@ class ConfigIR(NodeIR):
 
 
 @dataclass
+class ModuleIR(NodeIR):
+    """A `module <name> { class: "X", args: {...}, when: "expr" }` block.
+
+    Phase 2 of DSL refactor — describes which Python class to instantiate
+    and with what arguments to produce a Brain submodule. Argument values
+    may reference cfg fields via `cfg.<field>` (resolved at materialize
+    time) or be literals (int, float, str, bool).
+
+    The optional `when` field is a small expression evaluated against the
+    materialized BrainConfig to decide whether to construct the module —
+    e.g. `when: "not cfg.baseline"` means the module is only built when
+    cfg.baseline is False. Falsy when expression -> module is skipped.
+
+    Materialization happens in `compile_to_modules()` (below).
+    """
+    name: str = ""
+    class_name: str = ""             # e.g. "LanguageCortex"
+    args: Dict = None                # name -> raw string value
+    when_expr: str = ""              # "" or "true" => always construct
+    id: str = ""
+
+    def __post_init__(self):
+        if self.args is None:
+            self.args = {}
+        if self.id == "":
+            self.id = self.name
+
+
+@dataclass
 class ProgramIR(NodeIR):
     id: str = ""
     populations: List[PopulationIR] = None
@@ -176,9 +205,12 @@ class ProgramIR(NodeIR):
     circuits: List[CircuitIR] = None
     formal_specs: List[FormalSpecIR] = None
     sheaf_specs: List[SheetIR] = None
-    config: ConfigIR = None    # Phase 1: the BrainConfig block
+    config: ConfigIR = None       # Phase 1: the BrainConfig block
+    modules: List = None          # Phase 2: list[ModuleIR]
 
     def __post_init__(self):
+        if self.modules is None:
+            self.modules = []
         if self.populations is None:
             self.populations = []
         if self.neurotransmitter_systems is None:
