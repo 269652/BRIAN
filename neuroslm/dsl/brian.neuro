@@ -1,0 +1,475 @@
+"""BRIAN: Biologically-Realistic Integrated Adaptive Network
+
+Complete architecture formalized in NeuroML DSL.
+Maps 23 cortical/subcortical modules, 7 neurotransmitter systems, 16 anatomical projections,
+and formal constraint systems (sheaf H¹ cohomology, Φ integration) into machine-readable spec.
+
+Organization:
+- Neurotransmitter Systems (7): dopamine, norepinephrine, serotonin, acetylcholine,
+  endocannabinoid, glutamate, GABA with biological kinetics
+- Core Populations (23): cortical (language, sensory, association, PFC, ACC, DMN),
+  subcortical (thalamus, hippocampus, striatum), executive (basal ganglia, motor, cerebellum)
+- NT Nuclei (6): VTA, NAcc, LC, Raphe, NBM, SNc as source populations
+- Anatomical Projections (16): hardcoded inter-regional connections with NT modulation
+- Receptor Banks: Modulation of target populations by NT systems
+- Formal Specs: Sheaf consistency (H¹ contradiction threshold), Φ-IIT integration
+"""
+
+# ============================================================================
+# NEUROTRANSMITTER SYSTEMS (Neuromodulatory basis)
+# ============================================================================
+
+neurotransmitter dopamine {
+    base_concentration: 0.10,
+    release_rate: 0.20,
+    reuptake_rate: 0.80,
+    diffusion_rate: 0.02
+}
+
+neurotransmitter norepinephrine {
+    base_concentration: 0.15,
+    release_rate: 0.30,
+    reuptake_rate: 0.70,
+    diffusion_rate: 0.015
+}
+
+neurotransmitter serotonin {
+    base_concentration: 0.30,
+    release_rate: 0.05,
+    reuptake_rate: 0.95,
+    diffusion_rate: 0.01
+}
+
+neurotransmitter acetylcholine {
+    base_concentration: 0.20,
+    release_rate: 0.25,
+    reuptake_rate: 0.75,
+    diffusion_rate: 0.025
+}
+
+neurotransmitter endocannabinoid {
+    base_concentration: 0.05,
+    release_rate: 0.40,
+    reuptake_rate: 0.60,
+    diffusion_rate: 0.03
+}
+
+neurotransmitter glutamate {
+    base_concentration: 0.40,
+    release_rate: 0.50,
+    reuptake_rate: 0.50,
+    diffusion_rate: 0.02
+}
+
+neurotransmitter gaba {
+    base_concentration: 0.10,
+    release_rate: 0.10,
+    reuptake_rate: 0.90,
+    diffusion_rate: 0.01
+}
+
+# ============================================================================
+# CORE BRAIN POPULATIONS (23 modules + 6 NT nuclei = 29 populations)
+# ============================================================================
+
+# Cortical primary processing layers
+population language_cortex {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.01,
+    capacity: 1.0
+}
+
+population sensory_cortex {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.005,
+    capacity: 1.0
+}
+
+population association_cortex {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.01,
+    capacity: 1.0
+}
+
+# Global workspace (conscious access)
+population global_workspace {
+    count: 256,
+    dynamics: "winner_take_all",
+    timescale: 0.02,
+    capacity: 8.0
+}
+
+# Thalamic relay
+population thalamus {
+    count: 256,
+    dynamics: "gated",
+    timescale: 0.01,
+    capacity: 1.0
+}
+
+# Predictive models
+population world_model {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.05,
+    capacity: 1.0
+}
+
+population self_model {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.05,
+    capacity: 1.0
+}
+
+# Episodic memory (sparse distributed)
+population hippocampus {
+    count: 4096,
+    dynamics: "attractor_network",
+    timescale: 0.1,
+    capacity: 1.0
+}
+
+# Default mode network (self-referential)
+population default_mode_network {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.1,
+    capacity: 1.0
+}
+
+# Executive control
+population prefrontal_cortex {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.02,
+    capacity: 1.0
+}
+
+# Action selection (striatum equivalent)
+population basal_ganglia {
+    count: 256,
+    dynamics: "winner_take_all",
+    timescale: 0.01,
+    capacity: 4.0
+}
+
+# Forward model (state prediction)
+population forward_model {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.02,
+    capacity: 1.0
+}
+
+# Value function
+population evaluator {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.01,
+    capacity: 1.0
+}
+
+# Motor output
+population motor_cortex {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.005,
+    capacity: 1.0
+}
+
+# Primary sensory mapping
+population cortical_sheet {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.01,
+    capacity: 1.0
+}
+
+# Contextual memory routing
+population entorhinal_cortex {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.05,
+    capacity: 1.0
+}
+
+# Information integration hub
+population claustrum {
+    count: 256,
+    dynamics: "gated",
+    timescale: 0.01,
+    capacity: 2.0
+}
+
+# Cerebellar learning
+population cerebellum {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.005,
+    capacity: 1.0
+}
+
+# Geometric coordinate frame
+population neural_geometry {
+    count: 256,
+    dynamics: "static",
+    timescale: 0.001,
+    capacity: 1.0
+}
+
+# Phenomenal consciousness representation
+population qualia_state {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.02,
+    capacity: 1.0
+}
+
+# Attention and composition
+population thought_transformer {
+    count: 256,
+    dynamics: "attention_pool",
+    timescale: 0.02,
+    capacity: 4.0
+}
+
+# Fear/arousal response
+population amygdala {
+    count: 32,
+    dynamics: "integrate_and_fire",
+    timescale: 0.005,
+    capacity: 0.5
+}
+
+# Error monitoring
+population anterior_cingulate {
+    count: 256,
+    dynamics: "rate_code",
+    timescale: 0.02,
+    capacity: 1.0
+}
+
+# ============================================================================
+# NEUROMODULATORY NUCLEI (NT source populations)
+# ============================================================================
+
+population vta {
+    count: 64,
+    dynamics: "rate_code",
+    timescale: 0.02,
+    capacity: 1.0
+}
+
+population nucleus_accumbens {
+    count: 64,
+    dynamics: "rate_code",
+    timescale: 0.01,
+    capacity: 1.0
+}
+
+population locus_coeruleus {
+    count: 32,
+    dynamics: "rate_code",
+    timescale: 0.02,
+    capacity: 1.0
+}
+
+population raphe_nuclei {
+    count: 48,
+    dynamics: "rate_code",
+    timescale: 0.05,
+    capacity: 1.0
+}
+
+population nucleus_basalis {
+    count: 32,
+    dynamics: "rate_code",
+    timescale: 0.02,
+    capacity: 1.0
+}
+
+population substantia_nigra {
+    count: 64,
+    dynamics: "rate_code",
+    timescale: 0.01,
+    capacity: 1.0
+}
+
+# ============================================================================
+# ANATOMICAL PROJECTIONS (16 hardcoded inter-regional connections)
+# ============================================================================
+
+# Dopaminergic pathways (VTA, SNc → targets)
+synapse vta -> nucleus_accumbens {
+    weight: 1.0,
+    neurotransmitter: "dopamine"
+}
+
+synapse vta -> prefrontal_cortex {
+    weight: 0.8,
+    neurotransmitter: "dopamine"
+}
+
+synapse vta -> hippocampus {
+    weight: 0.5,
+    neurotransmitter: "dopamine"
+}
+
+synapse substantia_nigra -> basal_ganglia {
+    weight: 1.0,
+    neurotransmitter: "dopamine"
+}
+
+# Noradrenergic pathways (LC → targets)
+synapse locus_coeruleus -> prefrontal_cortex {
+    weight: 0.7,
+    neurotransmitter: "norepinephrine"
+}
+
+synapse locus_coeruleus -> thalamus {
+    weight: 0.6,
+    neurotransmitter: "norepinephrine"
+}
+
+synapse locus_coeruleus -> hippocampus {
+    weight: 0.4,
+    neurotransmitter: "norepinephrine"
+}
+
+# Serotonergic pathways (Raphe → targets)
+synapse raphe_nuclei -> prefrontal_cortex {
+    weight: 0.5,
+    neurotransmitter: "serotonin"
+}
+
+synapse raphe_nuclei -> default_mode_network {
+    weight: 0.6,
+    neurotransmitter: "serotonin"
+}
+
+synapse raphe_nuclei -> hippocampus {
+    weight: 0.4,
+    neurotransmitter: "serotonin"
+}
+
+# Cholinergic pathways (NBM → targets)
+synapse nucleus_basalis -> prefrontal_cortex {
+    weight: 0.6,
+    neurotransmitter: "acetylcholine"
+}
+
+synapse nucleus_basalis -> hippocampus {
+    weight: 0.7,
+    neurotransmitter: "acetylcholine"
+}
+
+synapse nucleus_basalis -> language_cortex {
+    weight: 0.4,
+    neurotransmitter: "acetylcholine"
+}
+
+# Feedback and glutamatergic pathways
+synapse nucleus_accumbens -> vta {
+    weight: 0.3,
+    neurotransmitter: "dopamine"
+}
+
+synapse prefrontal_cortex -> basal_ganglia {
+    weight: 0.6,
+    neurotransmitter: "glutamate"
+}
+
+synapse basal_ganglia -> thalamus {
+    weight: 0.7,
+    neurotransmitter: "gaba"
+}
+
+# ============================================================================
+# NEUROMODULATION: RECEPTOR BANKS (NT modulation of target regions)
+# ============================================================================
+
+# Dopaminergic modulations
+modulation dopamine -> prefrontal_cortex {
+    effect: "multiplicative",
+    gain: 0.6
+}
+
+modulation dopamine -> anterior_cingulate {
+    effect: "multiplicative",
+    gain: 0.5
+}
+
+modulation dopamine -> nucleus_accumbens {
+    effect: "multiplicative",
+    gain: 0.8
+}
+
+# Noradrenergic modulations
+modulation norepinephrine -> thalamus {
+    effect: "multiplicative",
+    gain: 0.5
+}
+
+modulation norepinephrine -> global_workspace {
+    effect: "multiplicative",
+    gain: 0.4
+}
+
+# Serotonergic modulations
+modulation serotonin -> prefrontal_cortex {
+    effect: "additive",
+    gain: 0.3
+}
+
+modulation serotonin -> default_mode_network {
+    effect: "multiplicative",
+    gain: 0.6
+}
+
+modulation serotonin -> amygdala {
+    effect: "multiplicative",
+    gain: 0.7
+}
+
+# Cholinergic modulations
+modulation acetylcholine -> hippocampus {
+    effect: "multiplicative",
+    gain: 0.5
+}
+
+modulation acetylcholine -> language_cortex {
+    effect: "multiplicative",
+    gain: 0.6
+}
+
+# GABAergic inhibition
+modulation gaba -> basal_ganglia {
+    effect: "multiplicative",
+    gain: 0.4
+}
+
+# Glutamatergic excitation
+modulation glutamate -> global_workspace {
+    effect: "additive",
+    gain: 0.5
+}
+
+# ============================================================================
+# FORMAL CONSTRAINT SYSTEMS
+# ============================================================================
+
+# Sheaf consistency: H¹ cohomology contradiction detection
+sheaf narrative_consistency {
+    contradiction_threshold: 0.7,
+    mechanism: "h1_cohomology_proxy"
+}
+
+# Integrated information (Φ) formal specification
+formal_spec phi_integration {
+    rule: "integrated_information",
+    metric: "phi"
+}
