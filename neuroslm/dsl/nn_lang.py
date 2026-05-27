@@ -50,30 +50,54 @@ _OP_NAMES = {
 def _alloc(init: str, shape) -> torch.Tensor:
     """Allocate a parameter tensor. Init only needs the right *shape* for
     exact-match tests (weights get synced); the distributions are sensible
-    defaults for real training."""
+    defaults for real training.
+
+    Supports parameterized inits: `normal(σ)`, `constant(v)`, `uniform(a,b)`.
+    """
     if not isinstance(shape, tuple):
         shape = (shape,)
-    if init == "ones":
+
+    name, args = _parse_init_spec(init)
+
+    if name == "ones":
         return torch.ones(*shape)
-    if init == "zeros":
+    if name == "zeros":
         return torch.zeros(*shape)
-    if init == "xavier":
+    if name == "xavier":
         t = torch.empty(*shape)
         if t.dim() >= 2:
             nn.init.xavier_uniform_(t)
         else:
             nn.init.normal_(t, std=0.02)
         return t
-    if init == "kaiming":
+    if name == "kaiming":
         t = torch.empty(*shape)
         if t.dim() >= 2:
             nn.init.kaiming_uniform_(t, a=5 ** 0.5)
         else:
             nn.init.normal_(t, std=0.02)
         return t
-    if init == "normal":
-        return torch.randn(*shape) * 0.02
+    if name == "normal":
+        std = args[0] if args else 0.02
+        return torch.randn(*shape) * float(std)
+    if name == "constant":
+        val = args[0] if args else 0.0
+        return torch.full(shape, float(val))
+    if name == "uniform":
+        a, b = (args + [0.0, 1.0])[:2]
+        return torch.empty(*shape).uniform_(float(a), float(b))
     raise ValueError(f"unknown init spec {init!r}")
+
+
+def _parse_init_spec(spec: str):
+    """`normal(0.01)` → ('normal', [0.01]); `zeros` → ('zeros', [])."""
+    spec = spec.strip()
+    if "(" not in spec:
+        return spec, []
+    name, rest = spec.split("(", 1)
+    rest = rest.rstrip(")")
+    args = [a.strip() for a in rest.split(",") if a.strip()]
+    return name.strip(), args
 
 
 # ── AST ────────────────────────────────────────────────────────────────
@@ -202,7 +226,8 @@ def _parse_expr(s: str) -> Expr:
 # ── Layer parser ───────────────────────────────────────────────────────
 
 _LAYER_RE = re.compile(r"\b(?:layer|model)\s+(\w+)\s*\(([^)]*)\)\s*\{", re.S)
-_PARAM_RE = re.compile(r"\bparam\s+(\w+)\s*:\s*(\([^)]*\))\s+init=(\w+)")
+# init=name or init=name(args)
+_PARAM_RE = re.compile(r"\bparam\s+(\w+)\s*:\s*(\([^)]*\))\s+init=(\w+(?:\([^)]*\))?)")
 _SUBLAYER_RE = re.compile(r"\bsublayer\s+(\w+)\s*:\s*(\w+)")
 _FORWARD_RE = re.compile(r"\bforward\s*\(([^)]*)\)\s*\{", re.S)
 

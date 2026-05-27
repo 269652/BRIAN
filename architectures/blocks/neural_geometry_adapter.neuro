@@ -1,0 +1,29 @@
+# NeuralGeometryAdapter — meta-learnable wiring between transformer blocks.
+#
+# Projects d_hidden → d_hyper, applies a low-rank "connectivity kernel"
+# with a sigmoid gate (which hyper-dimensions are active for this input),
+# projects back, residual. Down-projection zero-init + gate bias -2.0 mean
+# the adapter starts as identity (gates mostly closed).
+#
+# Bit-identical to neuroslm.modules.language.NeuralGeometryAdapter
+# (verified by tests/dsl/test_dsl_blocks_equivalence.py).
+
+export layer NeuralGeometryAdapter(D, Dhyper, R) {
+    param gamma:   (D,)                init=ones
+    param Wup:     (Dhyper, D)         init=xavier
+    param kern_a:  (Dhyper, R)         init=normal(0.01)
+    param kern_b:  (R, Dhyper)         init=normal(0.01)
+    param Wgate:   (Dhyper, Dhyper)    init=xavier
+    param bgate:   (Dhyper,)           init=constant(-2.0)
+    param Wdown:   (D, Dhyper)         init=zeros
+
+    forward(x) {
+        h     = rmsnorm(x, gamma)
+        z     = linear(h, Wup)
+        k     = matmul(matmul(z, kern_a), kern_b)
+        g     = sigmoid(linear(z, Wgate, bgate))
+        z_new = silu(k) * g
+        out   = linear(z_new, Wdown)
+        return x + out
+    }
+}

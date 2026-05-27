@@ -12,18 +12,29 @@ so the same op works for both eager reference comparison and generated
 code. Parameter *allocation* + init lives in the codegen layer (Phase N3).
 """
 from __future__ import annotations
+from typing import Optional
+
 import torch
 import torch.nn.functional as F
 
 
 # ── Linear / embedding ─────────────────────────────────────────────────
 
-def linear(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-    """y = x @ weight.T — matches nn.Linear(bias=False).
+def linear(x: torch.Tensor, weight: torch.Tensor,
+           bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """y = x @ weight.T (+ bias) — matches nn.Linear.
 
     weight is stored (out, in) like nn.Linear, so we use F.linear.
+    Optional bias supports DSL layers like NeuralGeometryAdapter.
     """
-    return F.linear(x, weight)
+    return F.linear(x, weight, bias)
+
+
+def matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Batched matrix multiply — torch.matmul's broadcasting semantics.
+    Used in DSL blocks (e.g. NeuralGeometryAdapter's low-rank kernel
+    chain `z @ kern_a @ kern_b`)."""
+    return torch.matmul(a, b)
 
 
 def embedding(ids: torch.Tensor, table: torch.Tensor) -> torch.Tensor:
@@ -83,6 +94,14 @@ def gelu(x: torch.Tensor) -> torch.Tensor:
 
 def relu(x: torch.Tensor) -> torch.Tensor:
     return F.relu(x)
+
+
+def sigmoid(x: torch.Tensor) -> torch.Tensor:
+    return torch.sigmoid(x)
+
+
+def tanh(x: torch.Tensor) -> torch.Tensor:
+    return torch.tanh(x)
 
 
 def softmax(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
