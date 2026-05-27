@@ -54,12 +54,8 @@ def _load_tokenizer():
 # ── Data — synthetic random batches for Phase A smoke ───────────────
 
 class SyntheticBatchSource:
-    """Generates random (ids, targets) batches.
-
-    Phase A ships synthetic data so we can prove the harness trains end-
-    to-end without dragging in the real data pipeline. Phase E plugs in
-    `neuroslm.data` properly.
-    """
+    """Generates random (ids, targets) batches — fallback when the real
+    data pipeline is unavailable (no network / no `datasets`)."""
     def __init__(self, vocab_size: int, batch: int, seq_len: int,
                  device: str = "cpu", seed: int = 0):
         self.vocab_size = vocab_size
@@ -77,7 +73,75 @@ class SyntheticBatchSource:
         return ids, targets
 
 
+class RealDataSource:
+    """Streams real tokenized batches via neuroslm.data.batch_iterator.
+
+    Yields next-token-prediction (ids, targets) from a `(B, ctx_len+1)`
+    window: ids = window[:, :-1], targets = window[:, 1:]. Falls back to
+    SyntheticBatchSource if the data pipeline can't initialise (e.g. no
+    network in a local run).
+    """
+    def __init__(self, tokenizer, batch: int, seq_len: int,
+                 device: str = "cpu", mode: str = "mix",
+                 chat_ratio: float = 0.6, seed: int = 0):
+        self.device = device
+        self._fallback = None
+        try:
+            from neuroslm.data import batch_iterator
+            self._it = batch_iterator(
+                tokenizer, ctx_len=seq_len, batch_size=batch,
+                seed=seed, mode=mode, chat_ratio=chat_ratio,
+            )
+            # Prime one batch to surface failures early
+            self._primed = next(self._it)
+        except Exception as e:
+            print(f"[train_dsl] real data unavailable ({e!r}); using synthetic")
+            self._fallback = SyntheticBatchSource(
+                tokenizer.vocab_size, batch, seq_len, device, seed)
+            self._primed = None
+
+    def next(self):
+        if self._fallback is not None:
+            return self._fallback.next()
+        if self._primed is not None:
+            window, self._primed = self._primed, None
+        else:
+            window = next(self._it)
+        window = window.to(self.device)
+        return window[:, :-1].contiguous(), window[:, 1:].contiguous()
+
+
 # ── Build the harness ────────────────────────────────────────────────
+
+def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
+                         depth: int, n_heads: int, max_ctx: int,
+                         device: str = "cpu") -> BRIANHarness:
+    """Build a harness wrapping the exact-match DSL transformer LM (N4/N5).
+
+    This is the real language-model path: embedding → DSL TransformerBlocks
+    → final norm → lm_head, each component bit-identical to the PyTorch
+    reference. Loss clipping / optimizer / schedule come from arch.neuro's
+    training block via the harness.
+    """
+    from neuroslm.dsl.nn_lang import build_language_model
+
+    cfg = load_training_config_from_arch(arch_root)
+    print(f"[train_dsl] DSL-LM: vocab={vocab_size} d_model={d_model} "
+          f"depth={depth} heads={n_heads} ctx={max_ctx}")
+    print(f"[train_dsl] training config: "
+          f"loss_clip={cfg.loss_clipping.enabled}(f={cfg.loss_clipping.factor}), "
+          f"opt={cfg.optimizer}, lr={cfg.learning_rate}, "
+          f"grad_accum={cfg.grad_accum}, label_smooth={cfg.label_smoothing}")
+
+    lm = build_language_model(vocab=vocab_size, d_model=d_model, depth=depth,
+                              n_heads=n_heads, max_ctx=max_ctx).to(device)
+    harness = BRIANHarness.from_language_model(
+        lm, vocab_size=vocab_size, d_sem=d_model, training_config=cfg,
+    ).to(device)
+    n_params = sum(p.numel() for p in harness.parameters())
+    print(f"[train_dsl] DSL-LM parameters: {n_params/1e6:.1f}M")
+    return harness
+
 
 def build_harness(arch_root: Path, vocab_size: int, d_sem: int,
                   device: str = "cpu",
@@ -189,6 +253,19 @@ def main():
                         help="mixed-precision dtype (cuda only)")
     parser.add_argument("--resume", action="store_true",
                         help="resume from the latest dsl_arch_step*.pt in ckpt_dir")
+    parser.add_argument("--model", default="dsl_lm",
+                        choices=["dsl_lm", "circuit"],
+                        help="dsl_lm: exact-match transformer LM (N4/N5); "
+                             "circuit: legacy per-token cognitive overlay")
+    parser.add_argument("--depth", type=int, default=6,
+                        help="transformer depth (dsl_lm only)")
+    parser.add_argument("--n_heads", type=int, default=8,
+                        help="attention heads (dsl_lm only)")
+    parser.add_argument("--data", default="real", choices=["real", "synthetic"],
+                        help="real: stream tokenized corpus; synthetic: random")
+    parser.add_argument("--mode", default="mix",
+                        help="data mode for real loader (text/chat/mix)")
+    parser.add_argument("--chat_ratio", type=float, default=0.6)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -197,12 +274,20 @@ def main():
     if not (arch_root / "arch.neuro").is_file():
         parser.error(f"missing {arch_root}/arch.neuro")
 
-    vocab_size = args.vocab_size or _load_tokenizer().vocab_size
+    tok = _load_tokenizer()
+    vocab_size = args.vocab_size or tok.vocab_size
 
-    harness = build_harness(
-        arch_root=arch_root, vocab_size=vocab_size, d_sem=args.d_sem,
-        device=args.device, sink_population=args.sink,
-    )
+    if args.model == "dsl_lm":
+        harness = build_dsl_lm_harness(
+            arch_root=arch_root, vocab_size=vocab_size, d_model=args.d_sem,
+            depth=args.depth, n_heads=args.n_heads, max_ctx=args.seq_len,
+            device=args.device,
+        )
+    else:
+        harness = build_harness(
+            arch_root=arch_root, vocab_size=vocab_size, d_sem=args.d_sem,
+            device=args.device, sink_population=args.sink,
+        )
 
     # LR schedule over the full step budget (10% warmup) and mixed precision.
     warmup = max(1, args.steps // 10)
@@ -220,10 +305,16 @@ def main():
         start_step = _maybe_resume(harness, ckpt_dir)
         harness._global_step = start_step
 
-    source = SyntheticBatchSource(
-        vocab_size=vocab_size, batch=args.batch, seq_len=args.seq_len,
-        device=args.device, seed=args.seed,
-    )
+    if args.data == "real":
+        source = RealDataSource(
+            tok, batch=args.batch, seq_len=args.seq_len, device=args.device,
+            mode=args.mode, chat_ratio=args.chat_ratio, seed=args.seed,
+        )
+    else:
+        source = SyntheticBatchSource(
+            vocab_size=vocab_size, batch=args.batch, seq_len=args.seq_len,
+            device=args.device, seed=args.seed,
+        )
 
     train(
         harness=harness, source=source,

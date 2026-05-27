@@ -85,6 +85,11 @@ class BRIANHarness(nn.Module):
         self.training_config = training_config or TrainingConfig()
         self.sink_population = sink_population
 
+        # If a full ids→logits language model is supplied, the harness
+        # delegates its forward to it (no separate embedding/head). This is
+        # the N5 path: train the exact-match DSL transformer LM directly.
+        self.language_model = None
+
         # Token embedding: (vocab_size, d_sem)
         self.embedding = nn.Embedding(vocab_size, d_sem)
         # LM head: (d_sem, vocab_size). Linear stores weight as (out=vocab, in=d_sem)
@@ -106,6 +111,37 @@ class BRIANHarness(nn.Module):
         # Mixed precision (set via enable_mixed_precision)
         self._amp_dtype: Optional[torch.dtype] = None
         self._grad_scaler: Optional[torch.cuda.amp.GradScaler] = None
+
+    @classmethod
+    def from_language_model(cls, language_model: nn.Module,
+                            vocab_size: int, d_sem: int,
+                            training_config: Optional[TrainingConfig] = None):
+        """Build a harness that trains a full ids→logits LM directly.
+
+        Used for the DSL transformer LM (build_language_model), which
+        already contains its own embedding + blocks + lm_head. The harness
+        contributes only the loss (with optional clipping), schedule, AMP,
+        grad-accum, and checkpointing — no extra embedding/head.
+        """
+        h = cls.__new__(cls)
+        nn.Module.__init__(h)
+        h.circuit = nn.Identity()
+        h.vocab_size = vocab_size
+        h.d_sem = d_sem
+        h.training_config = training_config or TrainingConfig()
+        h.sink_population = ""
+        h.language_model = language_model
+        h.embedding = None
+        h.lm_head = None
+        h._optimizer = None
+        h._accum_step = 0
+        h._global_step = 0
+        h._sched_warmup = None
+        h._sched_total = None
+        h._sched_min_ratio = 0.1
+        h._amp_dtype = None
+        h._grad_scaler = None
+        return h
 
     # ── Schedule + mixed-precision configuration ─────────────────────
 
@@ -151,16 +187,19 @@ class BRIANHarness(nn.Module):
         propagation across tokens via the back-edge buffers, attention
         over time, etc.).
         """
-        batch, seq_len = ids.shape
         with self._autocast_ctx():
-            # (batch, seq_len, d_sem)
-            x = self.embedding(ids)
-            # Flatten time into batch for the circuit's per-token forward
-            x_flat = x.reshape(batch * seq_len, self.d_sem)
-            outputs = self.circuit(x_flat, nt_levels=nt_levels)
-            sink = self._pick_sink_output(outputs)        # (batch*seq, d_sem)
-            sink = sink.reshape(batch, seq_len, self.d_sem)
-            logits = self.lm_head(sink)                   # (batch, seq, vocab)
+            if self.language_model is not None:
+                # N5 path: full DSL transformer LM owns embedding→blocks→head.
+                logits = self.language_model(ids)
+            else:
+                # Legacy per-token circuit path (cognitive overlay).
+                batch, seq_len = ids.shape
+                x = self.embedding(ids)
+                x_flat = x.reshape(batch * seq_len, self.d_sem)
+                outputs = self.circuit(x_flat, nt_levels=nt_levels)
+                sink = self._pick_sink_output(outputs)
+                sink = sink.reshape(batch, seq_len, self.d_sem)
+                logits = self.lm_head(sink)
         # Return float32 logits regardless of autocast dtype, so loss math
         # downstream is numerically stable.
         return logits.float()
