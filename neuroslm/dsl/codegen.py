@@ -309,6 +309,64 @@ class CodeGenerator:
         return "\n".join([f"class {cls_name}(nn.Module):", doc, ""]
                          + init + [""] + fwd)
 
+    # ── Synapse / modulation equation resolution ────────────────────
+
+    # Canonical legacy form for a synapse with `weight: w`: every legacy
+    # synapse becomes `y = weight * (x_pre @ W)` where W is the
+    # randomly-initialised weight buffer. Explicit `equation:` overrides.
+    _SYNAPSE_CANONICAL = "y = weight * (x_pre @ W)"
+
+    # Canonical legacy forms for modulations:
+    #   multiplicative: y = output * (c * gain)    — preserves Phase-5 behavior
+    #   additive:       y = output + (c * gain)
+    _MOD_CANONICAL = {
+        "multiplicative": "y = output * (c * gain)",
+        "additive":       "y = output + (c * gain)",
+    }
+
+    def _synapse_contribution_expr(self, i: int,
+                                   syn: SynapseIR,
+                                   src_expr: str) -> str:
+        """Lower a synapse to the Python expression evaluating its contribution.
+
+        Resolves the synapse's equation (explicit or canonical legacy),
+        binds runtime symbols to the right Python expressions, and returns
+        a single inline expression suitable for use as part of the target
+        population's input sum.
+        """
+        eq_str = syn.equation or self._SYNAPSE_CANONICAL
+        eq = parse_equation(eq_str)
+        weight = syn.weight if syn.weight is not None else 1.0
+        name_map = {
+            "x_pre":  src_expr,
+            "W":      f"self.syn_{i}_w",
+            "weight": repr(float(weight)),
+        }
+        return lower_to_torch(eq, name_map=name_map)
+
+    def _modulation_expr(self, mod: ModulationIR) -> str:
+        """Lower a modulation to the Python expression for the new target output."""
+        if mod.equation:
+            eq_str = mod.equation
+        else:
+            effect = mod.effect or "multiplicative"
+            if effect not in self._MOD_CANONICAL:
+                raise ValueError(
+                    f"unsupported modulation effect {effect!r}; "
+                    f"either use equation: or set effect to one of "
+                    f"{list(self._MOD_CANONICAL)}"
+                )
+            eq_str = self._MOD_CANONICAL[effect]
+
+        eq = parse_equation(eq_str)
+        gain = mod.gain if mod.gain is not None else 1.0
+        name_map = {
+            "output": f"outputs[{mod.target_population!r}]",
+            "c":      f"nt_levels[{mod.source_nt!r}]",
+            "gain":   repr(float(gain)),
+        }
+        return lower_to_torch(eq, name_map=name_map)
+
     def _gen_passthrough_class(self, pop: PopulationIR) -> str:
         """Stub class for dynamics that Stage 1 doesn't lower yet.
 
@@ -380,15 +438,15 @@ class CodeGenerator:
                 if s.target == pop.name
             ]
             if not incoming:
-                # Input population: sensory_input goes straight in.
                 fwd.append(
                     f"        outputs[{pop.name!r}] = "
                     f"self.{pop.name}(sensory_input)"
                 )
                 continue
 
-            # Aggregate incoming synapse contributions. Forward edges read
-            # the current step's output; back edges read self.last_{src}.
+            # Each incoming synapse: resolve its equation (explicit or the
+            # canonical legacy form `y = weight * (x_pre @ W)`), lower it,
+            # binding free symbols to runtime expressions.
             terms = []
             for i, syn in incoming:
                 src_idx = order_index.get(syn.source, -1)
@@ -396,10 +454,9 @@ class CodeGenerator:
                 if src_idx < tgt_idx:
                     src_expr = f"outputs[{syn.source!r}]"
                 else:
-                    # back-edge: read stored (1, d_sem) last-step output and
-                    # broadcast it to the current batch size before linear
                     src_expr = f"self.last_{syn.source}.expand(batch, -1)"
-                terms.append(f"F.linear({src_expr}, self.syn_{i}_w)")
+
+                terms.append(self._synapse_contribution_expr(i, syn, src_expr))
 
             input_expr = " + ".join(terms)
             fwd.append(
@@ -407,18 +464,18 @@ class CodeGenerator:
                 f"self.{pop.name}({input_expr})"
             )
 
-        # Apply NT modulations
+        # NT modulations — equation-driven
         if self.ir.modulations:
             fwd.append("        if nt_levels is not None:")
             for mod in self.ir.modulations:
-                fwd.append(f"            if {mod.source_nt!r} in nt_levels:")
                 target = mod.target_population
-                if target in order_index:
-                    fwd.append(
-                        f"                outputs[{target!r}] = "
-                        f"outputs[{target!r}] * nt_levels[{mod.source_nt!r}] "
-                        f"* {mod.gain}"
-                    )
+                if target not in order_index:
+                    continue
+                fwd.append(f"            if {mod.source_nt!r} in nt_levels:")
+                fwd.append(
+                    f"                outputs[{target!r}] = "
+                    + self._modulation_expr(mod)
+                )
 
         # Update last-step buffers (detached, in-place to preserve buffer
         # identity for the next call).

@@ -837,3 +837,106 @@ def _strip_quotes(text: str) -> str:
     if len(text) >= 2 and text[0] in ('"', "'") and text[-1] == text[0]:
         return text[1:-1]
     return text
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Stage 6 — multi-file compiler entry point
+# ════════════════════════════════════════════════════════════════════════
+#
+# `compile_folder(arch_root)` walks an architecture folder, runs the
+# resolver to validate imports, then concatenates every declaration body
+# into one synthetic source string and pipes it through the existing
+# single-file `NeuroMLCompiler`. This keeps all the IR construction logic
+# in one place and lets the same `CodeGenerator` consume the result.
+#
+# Trade-off: bare names are used throughout — no module prefixing — so an
+# architecture must not have name collisions across its modules. For
+# rcc_bowtie this holds (every region name is unique). A future stage can
+# introduce automatic module-prefix qualification if collisions ever
+# become a real problem.
+
+
+def compile_folder(arch_root):
+    """Compile a multi-file architecture folder into a single ProgramIR.
+
+    The concatenation order is deliberate — it matters for codegen because
+    synapse routing classifies edges as forward (current-step) vs back
+    (last-step) based on population declaration order.
+
+    Emission order:
+      1. NT systems + globals from arch.neuro (declared first)
+      2. Populations, in the order their modules appear in arch.neuro's
+         `import` list — this is the user's canonical region order
+      3. Synapses + modulations from arch.neuro (declared last so every
+         endpoint they reference is already in scope)
+      4. Formal specs + sheaves (any remaining global decls)
+
+    Args:
+        arch_root: path to the folder containing arch.neuro
+
+    Returns:
+        ProgramIR ready for CodeGenerator
+    """
+    from .compiler import NeuroMLCompiler
+
+    program = Resolver(Path(arch_root)).resolve()
+    arch_path = (Path(arch_root).resolve() / "arch.neuro")
+    arch_ast = program.modules.get(arch_path)
+    if arch_ast is None:
+        raise ValueError(f"missing arch.neuro at {arch_path}")
+
+    parts: List[str] = []
+
+    def _emit(decls: Dict[str, str], kinds: tuple) -> None:
+        for _, decl_text in decls.items():
+            kind, _, _ = _decl_kind_and_body(decl_text)
+            if kind in kinds:
+                parts.append(decl_text)
+
+    # 1. Globals from arch.neuro — NT systems first
+    _emit(arch_ast.private, ("neurotransmitter",))
+    _emit(arch_ast.exports, ("neurotransmitter",))
+
+    # 2. Populations in import order
+    for imp in arch_ast.imports:
+        try:
+            target_file = PathResolver(program.arch_root).resolve(
+                imp.specifier, from_file=arch_path
+            ).resolve()
+        except (FileNotFoundError, ValueError):
+            continue
+        target_ast = program.modules.get(target_file)
+        if target_ast is None:
+            continue
+        for imported_name in imp.names:
+            if imported_name in target_ast.exports:
+                parts.append(target_ast.exports[imported_name])
+
+    # 3. Synapses + modulations from arch.neuro
+    _emit(arch_ast.private, ("synapse", "modulation"))
+    _emit(arch_ast.exports, ("synapse", "modulation"))
+
+    # 4. Formal specs + sheaves
+    _emit(arch_ast.private, ("formal_spec", "sheaf"))
+    _emit(arch_ast.exports, ("formal_spec", "sheaf"))
+
+    # 5. Anything from non-arch files that wasn't already imported (private
+    #    decls that don't appear in arch.neuro's import list). Rare in
+    #    well-structured architectures but we don't want to silently drop.
+    emitted: set = set()
+    for imp in arch_ast.imports:
+        try:
+            tf = PathResolver(program.arch_root).resolve(
+                imp.specifier, from_file=arch_path
+            ).resolve()
+            emitted.add(tf)
+        except (FileNotFoundError, ValueError):
+            pass
+    for file_path, ast in program.modules.items():
+        if file_path == arch_path or file_path in emitted:
+            continue
+        for _, decl_text in ast.private.items():
+            parts.append(decl_text)
+
+    combined = "\n".join(parts)
+    return NeuroMLCompiler.compile(combined)

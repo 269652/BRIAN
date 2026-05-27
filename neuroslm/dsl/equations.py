@@ -321,7 +321,8 @@ def equation_for_population(dynamics: Optional[str],
 # ── Lowering to PyTorch source ─────────────────────────────────────────
 
 def lower_to_torch(expr: EquationExpr,
-                   tensor_vars: Optional[Set[str]] = None) -> str:
+                   tensor_vars: Optional[Set[str]] = None,
+                   name_map: Optional[Dict[str, str]] = None) -> str:
     """Render the equation's RHS as a Python expression using torch ops.
 
     Args:
@@ -329,20 +330,26 @@ def lower_to_torch(expr: EquationExpr,
         tensor_vars: names of free symbols that are runtime tensors (the
             rest are treated as scalars or parameters). When None, all
             free symbols are assumed to be tensors.
+        name_map: optional `{symbol_name: replacement_expression}`. When a
+            symbol's name is a key, the *replacement string* is emitted
+            verbatim instead of the symbol name. Useful for codegen of
+            synapses/modulations where free symbols like `W`, `x_pre`,
+            `output`, `c` need to be bound to attribute paths or dict
+            lookups (`self.syn_i_w`, `outputs['src']`, etc.).
 
     Returns:
-        A Python expression string that, evaluated in a scope where the
-        free symbols are bound to torch tensors / scalars, produces the
-        equation's output.
+        A Python expression string evaluable in a scope where un-mapped
+        free symbols are bound to torch tensors / scalars.
     """
-    return _lower_node(expr.rhs, tensor_vars)
+    return _lower_node(expr.rhs, tensor_vars, name_map or {})
 
 
-def _lower_node(node: sp.Expr, tensor_vars: Optional[Set[str]]) -> str:
+def _lower_node(node: sp.Expr, tensor_vars: Optional[Set[str]],
+                name_map: Dict[str, str]) -> str:
     """Recursively lower a SymPy expression to a torch-op Python string."""
-    # Symbols → plain identifier
+    # Symbols → mapped expression (if any) or plain identifier
     if isinstance(node, sp.Symbol):
-        return node.name
+        return name_map.get(node.name, node.name)
 
     # Numbers → literal
     if node.is_Number:
@@ -354,17 +361,21 @@ def _lower_node(node: sp.Expr, tensor_vars: Optional[Set[str]]) -> str:
     # Named functions
     if isinstance(node, sp.Function):
         fn = node.func.__name__
-        args = [_lower_node(a, tensor_vars) for a in node.args]
+        args = [_lower_node(a, tensor_vars, name_map) for a in node.args]
         return _emit_function(fn, args)
 
     # Arithmetic
     if isinstance(node, sp.Add):
-        return "(" + " + ".join(_lower_node(a, tensor_vars) for a in node.args) + ")"
+        return "(" + " + ".join(
+            _lower_node(a, tensor_vars, name_map) for a in node.args
+        ) + ")"
     if isinstance(node, sp.Mul):
-        return "(" + " * ".join(_lower_node(a, tensor_vars) for a in node.args) + ")"
+        return "(" + " * ".join(
+            _lower_node(a, tensor_vars, name_map) for a in node.args
+        ) + ")"
     if isinstance(node, sp.Pow):
-        base = _lower_node(node.base, tensor_vars)
-        expn = _lower_node(node.exp, tensor_vars)
+        base = _lower_node(node.base, tensor_vars, name_map)
+        expn = _lower_node(node.exp, tensor_vars, name_map)
         return f"({base} ** {expn})"
 
     raise NotImplementedError(f"can't lower SymPy node {type(node).__name__}: {node}")

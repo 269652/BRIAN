@@ -1,0 +1,288 @@
+# -*- coding: utf-8 -*-
+# RCC Bowtie — package config + global wiring
+#
+# This `arch.neuro` is the architecture's entry point. It sets runtime
+# defaults, declares the 7 classical neurotransmitter systems globally,
+# pulls in every brain-region module via `import`, then defines the
+# cross-module synaptic wiring + neuromodulator routing.
+#
+# Per-region module files live under modules/; they declare populations
+# and (optionally) their local internal wiring. Shared mechanics live
+# under lib/.
+#
+# Topology: bowtie with re-entry (sensory → thalamus → GWS → PFC → ...
+# → thalamus). IIT 4.0 compliant (every part has both causes and effects
+# in the system → Φ > 0).
+#
+# References — Dehaene (2011), Baars (2005), Doya (1999), Tononi (2016),
+# Mashour (2020).
+
+architecture rcc_bowtie {
+    d_sem: 256,
+    dt: 0.01
+}
+
+# =============================================================================
+# NEUROTRANSMITTER SYSTEMS (7 classical) — globally visible
+# =============================================================================
+
+neurotransmitter dopamine {
+    base_concentration: 0.10,
+    release_rate: 0.20,
+    reuptake_rate: 0.80,
+    diffusion_rate: 0.02
+}
+
+neurotransmitter norepinephrine {
+    base_concentration: 0.15,
+    release_rate: 0.30,
+    reuptake_rate: 0.70,
+    diffusion_rate: 0.015
+}
+
+neurotransmitter serotonin {
+    base_concentration: 0.30,
+    release_rate: 0.05,
+    reuptake_rate: 0.95,
+    diffusion_rate: 0.01
+}
+
+neurotransmitter acetylcholine {
+    base_concentration: 0.20,
+    release_rate: 0.25,
+    reuptake_rate: 0.75,
+    diffusion_rate: 0.025
+}
+
+neurotransmitter endocannabinoid {
+    base_concentration: 0.05,
+    release_rate: 0.40,
+    reuptake_rate: 0.60,
+    diffusion_rate: 0.03
+}
+
+neurotransmitter glutamate {
+    base_concentration: 0.40,
+    release_rate: 0.50,
+    reuptake_rate: 0.50,
+    diffusion_rate: 0.02
+}
+
+neurotransmitter gaba {
+    base_concentration: 0.10,
+    release_rate: 0.10,
+    reuptake_rate: 0.90,
+    diffusion_rate: 0.01
+}
+
+# =============================================================================
+# MODULE IMPORTS — every brain region this architecture comprises
+# =============================================================================
+
+import { sensory, association }                          from "@/modules/sensory"
+import { thalamus }                                       from "@/modules/thalamus"
+import { world, self_m }                                  from "@/modules/world"
+import { amygdala, insula }                               from "@/modules/amygdala"
+import { qualia }                                         from "@/modules/qualia"
+import { gws, neural_geometry }                           from "@/modules/gws"
+import { hippo, entorhinal, cerebellum }                  from "@/modules/hippocampus"
+import { pfc, acc }                                       from "@/modules/pfc"
+import { bg, forward_m, evaluator }                       from "@/modules/bg"
+import { dmn, thought_transformer, claustrum }            from "@/modules/dmn"
+import { motor }                                          from "@/modules/motor"
+import { vta, nucleus_accumbens, locus_coeruleus, raphe_nuclei, nucleus_basalis, substantia_nigra } from "@/modules/nuclei"
+
+# =============================================================================
+# ANATOMICAL PROJECTIONS (cross-module synaptic wiring)
+# Equation: y = weight * (x_pre @ W) — PyTorch-batched linear projection.
+# =============================================================================
+
+# Thalamic gating (sensory bottleneck control)
+synapse thalamus -> gws {
+    weight: 0.8, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# State models → workspace
+synapse world -> gws {
+    weight: 0.6, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+synapse self_m -> gws {
+    weight: 0.6, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# GWS → memory (every conscious access broadcasts to hippocampus)
+synapse gws -> hippo {
+    weight: 0.7, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# GWS → cognitive control (top-down planning)
+synapse gws -> pfc {
+    weight: 0.8, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+synapse gws -> acc {
+    weight: 0.7, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# PFC → basal ganglia (action selection)
+synapse pfc -> bg {
+    weight: 0.6, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# Basal ganglia → motor (action execution; GABAergic disinhibition)
+synapse bg -> motor {
+    weight: 0.8, neurotransmitter: "gaba",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# Forward model + evaluator feedback
+synapse forward_m -> evaluator {
+    weight: 0.7, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# Memory feedback → PFC (recall-guided planning)
+synapse hippo -> pfc {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+synapse entorhinal -> pfc {
+    weight: 0.4, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# Re-entry loop: PFC back to thalamus (bowtie closure → Φ > 0)
+synapse pfc -> thalamus {
+    weight: 0.3, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# DMN → GWS (narrative broadcasts to conscious access)
+synapse dmn -> gws {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# Cerebellum → forward model (classical conditioning, motor learning)
+synapse cerebellum -> forward_m {
+    weight: 0.6, neurotransmitter: "gaba",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# =============================================================================
+# NEUROMODULATION (receptor banks — fast NT modulation of regions)
+# Equation: y = output * (c * gain)        for multiplicative effects
+# Equation: y = output + (c * gain)        for additive effects
+# c = NT concentration in nt_levels dict   gain = receptor sensitivity
+# =============================================================================
+
+# PFC — DA (motivation), 5HT (impulse control), ACh (attention), GABA (inhibition)
+modulation dopamine -> pfc {
+    effect: "multiplicative", gain: 0.6,
+    equation: "y = output * (c * gain)"
+}
+modulation serotonin -> pfc {
+    effect: "additive", gain: 0.3,
+    equation: "y = output + (c * gain)"
+}
+modulation acetylcholine -> pfc {
+    effect: "multiplicative", gain: 0.4,
+    equation: "y = output * (c * gain)"
+}
+modulation gaba -> pfc {
+    effect: "multiplicative", gain: 0.4,
+    equation: "y = output * (c * gain)"
+}
+
+# Hippocampus — ACh (encoding), Glu (binding)
+modulation acetylcholine -> hippo {
+    effect: "multiplicative", gain: 0.5,
+    equation: "y = output * (c * gain)"
+}
+modulation glutamate -> hippo {
+    effect: "additive", gain: 0.4,
+    equation: "y = output + (c * gain)"
+}
+
+# Basal ganglia — DA (motivation), GABA (competition)
+modulation dopamine -> bg {
+    effect: "multiplicative", gain: 0.7,
+    equation: "y = output * (c * gain)"
+}
+modulation gaba -> bg {
+    effect: "multiplicative", gain: 0.5,
+    equation: "y = output * (c * gain)"
+}
+
+# Thalamus — NE (arousal), GABA (relay control)
+modulation norepinephrine -> thalamus {
+    effect: "multiplicative", gain: 0.5,
+    equation: "y = output * (c * gain)"
+}
+modulation gaba -> thalamus {
+    effect: "multiplicative", gain: 0.3,
+    equation: "y = output * (c * gain)"
+}
+
+# Sensory — ACh (attention), eCB (inhibition)
+modulation acetylcholine -> sensory {
+    effect: "multiplicative", gain: 0.3,
+    equation: "y = output * (c * gain)"
+}
+modulation endocannabinoid -> sensory {
+    effect: "multiplicative", gain: 0.3,
+    equation: "y = output * (c * gain)"
+}
+
+# DMN — 5HT (introspection dampening), ACh (attention)
+modulation serotonin -> dmn {
+    effect: "multiplicative", gain: 0.6,
+    equation: "y = output * (c * gain)"
+}
+modulation acetylcholine -> dmn {
+    effect: "multiplicative", gain: 0.2,
+    equation: "y = output * (c * gain)"
+}
+
+# GWS — DA (salience boost)
+modulation dopamine -> gws {
+    effect: "additive", gain: 0.5,
+    equation: "y = output + (c * gain)"
+}
+
+# Amygdala — 5HT (fear suppression via raphe)
+modulation serotonin -> amygdala {
+    effect: "multiplicative", gain: 0.7,
+    equation: "y = output * (c * gain)"
+}
+
+# ACC — DA (motivation)
+modulation dopamine -> acc {
+    effect: "multiplicative", gain: 0.5,
+    equation: "y = output * (c * gain)"
+}
+
+# =============================================================================
+# FORMAL CONSTRAINT SYSTEMS
+# =============================================================================
+
+sheaf narrative_consistency {
+    contradiction_threshold: 0.7,
+    mechanism: "h1_cohomology_proxy"
+}
+
+formal_spec phi_integration {
+    rule: "integrated_information",
+    metric: "phi"
+}
+
+formal_spec bowtie_topology {
+    rule: "narrowing_widening",
+    metric: "structural_constraint"
+}

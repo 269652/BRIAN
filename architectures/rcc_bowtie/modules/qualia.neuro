@@ -1,0 +1,13 @@
+# Stage 4 — Qualia state (subjective experience encoding)
+#
+# Rate-coded subjective state. Receives binding from multiple upstream
+# regions (qualia warp depends on insula's interoceptive signal, etc.);
+# the wiring lives in arch.neuro.
+
+export population qualia {
+    count: 256,
+    dynamics: "rate_code",
+    equation: "y = ReLU(x)",
+    timescale: 0.02,
+    capacity: 1.0
+}
