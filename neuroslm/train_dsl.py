@@ -28,6 +28,7 @@ import torch
 from neuroslm.dsl.codegen import CodeGenerator
 from neuroslm.dsl.multifile import compile_folder
 from neuroslm.dsl.training_config import load_training_config_from_arch
+from neuroslm.dsl.param_scopes import load_param_scopes_from_arch
 from neuroslm.harness import BRIANHarness
 
 
@@ -100,6 +101,16 @@ def build_harness(arch_root: Path, vocab_size: int, d_sem: int,
         circuit=circuit, vocab_size=vocab_size, d_sem=d_sem,
         training_config=cfg, sink_population=sink_population,
     ).to(device)
+
+    # Apply declarative gradient isolation (p3 fix) from param_scope blocks.
+    scopes = load_param_scopes_from_arch(arch_root)
+    if scopes:
+        harness.apply_param_scopes(scopes)
+        detached = [s.name for s in scopes
+                    if s.gradient == "detached_from_main_loss"]
+        print(f"[train_dsl] param_scopes: {len(scopes)} declared, "
+              f"detached-from-main-loss: {detached}")
+
     return harness
 
 

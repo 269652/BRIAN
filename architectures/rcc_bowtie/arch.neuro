@@ -40,6 +40,22 @@ training {
 }
 
 # =============================================================================
+# PARAMETER SCOPES — declarative gradient isolation (the p3 architectural
+# fix). Bio-side populations are detached from the main LM loss; they're
+# driven by their own auxiliary objectives (Phase D), not by token CE.
+# The trunk carries the language-modeling gradient.
+# =============================================================================
+
+param_scope trunk {
+    populations: [sensory, association, thalamus, world, self_m, qualia, gws, neural_geometry, entorhinal, pfc, acc, forward_m, evaluator, dmn, thought_transformer, claustrum, motor]
+}
+
+param_scope bio {
+    populations: [amygdala, insula, hippo, cerebellum, bg, vta, nucleus_accumbens, locus_coeruleus, raphe_nuclei, nucleus_basalis, substantia_nigra],
+    gradient: "detached_from_main_loss"
+}
+
+# =============================================================================
 # NEUROTRANSMITTER SYSTEMS (7 classical) — globally visible
 # =============================================================================
 

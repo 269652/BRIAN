@@ -312,6 +312,31 @@ class BRIANHarness(nn.Module):
             raise ValueError(f"unsupported optimizer {opt_name!r}")
         return self._optimizer
 
+    # ── Parameter scopes (p3 gradient isolation) ────────────────────
+
+    def apply_param_scopes(self, scopes) -> None:
+        """Apply declarative gradient isolation from `param_scope` blocks.
+
+        For every scope with `gradient == "detached_from_main_loss"`, the
+        parameters of its populations are frozen (`requires_grad=False`),
+        so the main LM loss can't update them — exactly the p3 fix. A
+        population in a `normal` scope keeps its params trainable.
+
+        `scopes` is a list of `ParamScope` (from param_scopes.parse_*).
+        Populations not named in any scope are left untouched.
+        """
+        for scope in scopes:
+            freeze = (scope.gradient == "detached_from_main_loss")
+            for pop_name in scope.populations:
+                submodule = getattr(self.circuit, pop_name, None)
+                if submodule is None:
+                    # Population named in a scope but not in this circuit —
+                    # skip silently (architectures can declare scopes that
+                    # reference optional populations).
+                    continue
+                for p in submodule.parameters():
+                    p.requires_grad = not freeze
+
     # ── Checkpoint ───────────────────────────────────────────────────
 
     def save_checkpoint(self, path: str, step: int = 0,
