@@ -132,5 +132,84 @@ class TestDiffTransformerBlockDSL:
         assert diff < 1e-5, f"DSL DiffTransformerBlock diverged (max diff {diff})"
 
 
+MOD_BLOCK_DSL = '''
+layer ModBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv, head_dim, R_hidden, capacity) {
+    param router_w1:   (R_hidden, D)   init=zeros
+    param router_b1:   (R_hidden,)     init=zeros
+    param router_w2:   (1, R_hidden)   init=zeros
+    param router_b2:   (1,)            init=zeros
+
+    param gamma1:      (D,)            init=ones
+    param Wq:          (D, D)          init=xavier
+    param Wkv:         (Dkv, D)        init=xavier
+    param Wo:          (D, D)          init=xavier
+    param lambda_init: (n_heads,)      init=zeros
+    param sub_norm:    (head_dim,)     init=ones
+
+    param gamma2:      (D,)            init=ones
+    param w1:          (H, D)          init=xavier
+    param w2:          (H, D)          init=xavier
+    param w3:          (D, H)          init=xavier
+
+    forward(x) {
+        return mod_block(x, router_w1, router_b1, router_w2, router_b2,
+                          gamma1, Wq, Wkv, Wo, lambda_init, sub_norm,
+                          gamma2, w1, w2, w3,
+                          n_heads, n_kv_heads, max_ctx, capacity)
+    }
+}
+'''
+
+
+class TestMoDBlockDSL:
+    def test_dsl_matches_reference(self):
+        from neuroslm.modules.mixture_of_depths import MoDBlock as RefBlock
+        D, n_heads, max_ctx = 64, 8, 64
+        head_dim = D // n_heads
+        H = swiglu_hidden_dim(D)
+        Dkv = 2 * D
+        R_hidden = max(32, D // 8)
+
+        ref = RefBlock(D, n_heads, max_ctx, n_nt=0, capacity_ratio=0.5,
+                       use_diff_attn=True)
+        ref.eval()
+        # Make router non-zero so top-k tie-breaking is deterministic and the
+        # routing genuinely exercises the gather/scatter path.
+        with torch.no_grad():
+            torch.manual_seed(0)
+            ref.router.router[0].weight.copy_(torch.randn_like(ref.router.router[0].weight) * 0.1)
+            ref.router.router[2].weight.copy_(torch.randn_like(ref.router.router[2].weight) * 0.1)
+
+        Cls = compile_layer(MOD_BLOCK_DSL)
+        dsl = Cls(D=D, n_heads=n_heads, n_kv_heads=n_heads, max_ctx=max_ctx,
+                  H=H, Dkv=Dkv, head_dim=head_dim, R_hidden=R_hidden,
+                  capacity=0.5)
+        dsl.eval()
+
+        with torch.no_grad():
+            dsl.router_w1.copy_(ref.router.router[0].weight)
+            dsl.router_b1.copy_(ref.router.router[0].bias)
+            dsl.router_w2.copy_(ref.router.router[2].weight)
+            dsl.router_b2.copy_(ref.router.router[2].bias)
+            dsl.gamma1.copy_(ref.n1.weight)
+            dsl.Wq.copy_(ref.attn.q_proj.weight)
+            dsl.Wkv.copy_(ref.attn.kv_proj.weight)
+            dsl.Wo.copy_(ref.attn.out.weight)
+            dsl.lambda_init.copy_(ref.attn.lambda_init)
+            dsl.sub_norm.copy_(ref.attn.sub_norm.weight)
+            dsl.gamma2.copy_(ref.n2.weight)
+            dsl.w1.copy_(ref.mlp.w1.weight)
+            dsl.w2.copy_(ref.mlp.w2.weight)
+            dsl.w3.copy_(ref.mlp.w3.weight)
+
+        torch.manual_seed(1)
+        x = torch.randn(2, 16, D)
+        with torch.no_grad():
+            ref_out = ref(x)
+            dsl_out = dsl(x)
+        diff = (ref_out - dsl_out).abs().max().item()
+        assert diff < 1e-5, f"DSL MoDBlock diverged (max diff {diff})"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

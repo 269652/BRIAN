@@ -268,10 +268,32 @@ def parse_layer(source: str) -> LayerDef:
 
 
 def _parse_forward_body(text: str) -> List[Stmt]:
-    stmts = []
-    # Statements separated by newlines; ignore blanks/braces.
-    for raw in text.split("\n"):
+    """Parse the forward body into Stmts. Lines may continue across
+    newlines as long as parentheses are open (enables multi-line calls)."""
+    # Coalesce continuation lines by paren depth, then split on real ends.
+    raw_lines = text.split("\n")
+    logical: List[str] = []
+    buf, depth = "", 0
+    for raw in raw_lines:
         line = raw.strip().rstrip(";")
+        if not line:
+            if depth == 0 and buf:
+                logical.append(buf); buf = ""
+            continue
+        buf = (buf + " " + line) if buf else line
+        for ch in line:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth = max(0, depth - 1)
+        if depth == 0:
+            logical.append(buf); buf = ""
+    if buf:
+        logical.append(buf)
+
+    stmts = []
+    for line in logical:
+        line = line.strip()
         if not line:
             continue
         if line.startswith("return "):
@@ -427,3 +449,175 @@ def build_language_model(vocab: int, d_model: int, depth: int,
     """Construct a DSL-composed language model (embedding + stacked blocks
     + final norm + head)."""
     return DSLLanguageModel(vocab, d_model, depth, n_heads, max_ctx, n_kv_heads)
+
+
+# ─── N8: full DSL LanguageCortex (interleaved pattern + adapters) ──────
+
+# The Brain LanguageCortex (non-baseline) interleaves three block types:
+#   Layer i%3 == 0  →  Standard (causal_self_attention)
+#   Layer i%3 == 1  →  Differential attention
+#   Layer i%3 == 2  →  MoD with differential attention
+# A NeuralGeometryAdapter follows every block. Each block type is the
+# DSL form proven bit-identical in test_dsl_blocks_equivalence.py.
+
+_STD_BLOCK_DSL = '''
+layer StandardBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv) {
+    param gamma1: (D,) init=ones
+    param Wq:     (D, D) init=xavier
+    param Wkv:    (Dkv, D) init=xavier
+    param Wo:     (D, D) init=xavier
+    param gamma2: (D,) init=ones
+    param w1:     (H, D) init=xavier
+    param w2:     (H, D) init=xavier
+    param w3:     (D, H) init=xavier
+    forward(x) {
+        a = causal_self_attention(rmsnorm(x, gamma1), Wq, Wkv, Wo, n_heads, n_kv_heads, max_ctx)
+        x = x + a
+        m = swiglu(rmsnorm(x, gamma2), w1, w2, w3)
+        return x + m
+    }
+}
+'''
+
+_DIFF_BLOCK_DSL = '''
+layer DiffBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv, head_dim) {
+    param gamma1:      (D,) init=ones
+    param Wq:          (D, D) init=xavier
+    param Wkv:         (Dkv, D) init=xavier
+    param Wo:          (D, D) init=xavier
+    param lambda_init: (n_heads,) init=zeros
+    param sub_norm:    (head_dim,) init=ones
+    param gamma2:      (D,) init=ones
+    param w1:          (H, D) init=xavier
+    param w2:          (H, D) init=xavier
+    param w3:          (D, H) init=xavier
+    forward(x) {
+        a = differential_attention(rmsnorm(x, gamma1), Wq, Wkv, Wo, lambda_init, sub_norm, n_heads, n_kv_heads, max_ctx)
+        x = x + a
+        m = swiglu(rmsnorm(x, gamma2), w1, w2, w3)
+        return x + m
+    }
+}
+'''
+
+_MOD_BLOCK_DSL = '''
+layer ModBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv, head_dim, R_hidden, capacity) {
+    param router_w1:   (R_hidden, D)   init=zeros
+    param router_b1:   (R_hidden,)     init=zeros
+    param router_w2:   (1, R_hidden)   init=zeros
+    param router_b2:   (1,)            init=zeros
+    param gamma1:      (D,)            init=ones
+    param Wq:          (D, D)          init=xavier
+    param Wkv:         (Dkv, D)        init=xavier
+    param Wo:          (D, D)          init=xavier
+    param lambda_init: (n_heads,)      init=zeros
+    param sub_norm:    (head_dim,)     init=ones
+    param gamma2:      (D,)            init=ones
+    param w1:          (H, D)          init=xavier
+    param w2:          (H, D)          init=xavier
+    param w3:          (D, H)          init=xavier
+    forward(x) {
+        return mod_block(x, router_w1, router_b1, router_w2, router_b2,
+                          gamma1, Wq, Wkv, Wo, lambda_init, sub_norm,
+                          gamma2, w1, w2, w3,
+                          n_heads, n_kv_heads, max_ctx, capacity)
+    }
+}
+'''
+
+_ADAPTER_DSL = '''
+layer NeuralGeometryAdapter(D, Dhyper, R) {
+    param gamma:   (D,) init=ones
+    param Wup:     (Dhyper, D) init=xavier
+    param kern_a:  (Dhyper, R) init=normal(0.01)
+    param kern_b:  (R, Dhyper) init=normal(0.01)
+    param Wgate:   (Dhyper, Dhyper) init=xavier
+    param bgate:   (Dhyper,) init=constant(-2.0)
+    param Wdown:   (D, Dhyper) init=zeros
+    forward(x) {
+        h     = rmsnorm(x, gamma)
+        z     = linear(h, Wup)
+        k     = matmul(matmul(z, kern_a), kern_b)
+        g     = sigmoid(linear(z, Wgate, bgate))
+        z_new = silu(k) * g
+        out   = linear(z_new, Wdown)
+        return x + out
+    }
+}
+'''
+
+
+class DSLLanguageCortex(nn.Module):
+    """Full LanguageCortex assembled from pure-DSL blocks (N8 keystone).
+
+    Matches neuroslm.modules.language.LanguageCortex(baseline=False) on the
+    LM-logits path: token embedding → for each layer (Standard/Diff/MoD
+    interleaved by i%3) followed by a NeuralGeometryAdapter →
+    final RMSNorm → lm_head. PCT / PredictiveDropout / CALM / attention
+    pool / mid-trunk tap / motor_bias / NT / memory_kv all OFF (the
+    baseline LM-logits path).
+
+    All four block types are bit-identical to their Brain references
+    (test_dsl_blocks_equivalence.py + test_nn_attention_equivalence.py).
+    """
+    def __init__(self, vocab: int, d_model: int, depth: int,
+                 n_heads: int, max_ctx: int,
+                 n_kv_heads: Optional[int] = None,
+                 geometry_expansion: float = 2.0,
+                 mod_capacity: float = 0.5):
+        super().__init__()
+        n_kv_heads = n_kv_heads or n_heads
+        head_dim = d_model // n_heads
+        H = nn_ops.swiglu_hidden_dim(d_model)
+        Dkv = 2 * n_kv_heads * head_dim
+        Dhyper = int(d_model * geometry_expansion)
+        R = max(8, Dhyper // 8)
+        R_hidden = max(32, d_model // 8)
+
+        Std = compile_layer(_STD_BLOCK_DSL)
+        Diff = compile_layer(_DIFF_BLOCK_DSL)
+        Mod = compile_layer(_MOD_BLOCK_DSL)
+        Adp = compile_layer(_ADAPTER_DSL)
+
+        self.embed = nn.Parameter(_alloc("normal", (vocab, d_model)))
+        self.blocks = nn.ModuleList()
+        self.adapters = nn.ModuleList()
+        for i in range(depth):
+            pattern = i % 3
+            if pattern == 0:
+                self.blocks.append(Std(D=d_model, n_heads=n_heads,
+                                       n_kv_heads=n_kv_heads, max_ctx=max_ctx,
+                                       H=H, Dkv=Dkv))
+            elif pattern == 1:
+                self.blocks.append(Diff(D=d_model, n_heads=n_heads,
+                                        n_kv_heads=n_kv_heads, max_ctx=max_ctx,
+                                        H=H, Dkv=Dkv, head_dim=head_dim))
+            else:
+                self.blocks.append(Mod(D=d_model, n_heads=n_heads,
+                                       n_kv_heads=n_kv_heads, max_ctx=max_ctx,
+                                       H=H, Dkv=Dkv, head_dim=head_dim,
+                                       R_hidden=R_hidden, capacity=mod_capacity))
+            self.adapters.append(Adp(D=d_model, Dhyper=Dhyper, R=R))
+
+        self.gamma_f = nn.Parameter(torch.ones(d_model))
+        self.lm_head = nn.Parameter(_alloc("xavier", (vocab, d_model)))
+
+    def forward(self, ids: torch.Tensor) -> torch.Tensor:
+        h = nn_ops.embedding(ids, self.embed)
+        self._layer_acts = []
+        for blk, adapter in zip(self.blocks, self.adapters):
+            h = blk(h)
+            h = adapter(h)
+            self._layer_acts.append(h.detach())
+        h = nn_ops.rmsnorm(h, self.gamma_f)
+        return nn_ops.linear(h, self.lm_head)
+
+
+def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
+                               n_heads: int, max_ctx: int,
+                               n_kv_heads: Optional[int] = None,
+                               geometry_expansion: float = 2.0,
+                               mod_capacity: float = 0.5) -> DSLLanguageCortex:
+    """Assemble Brain's full LanguageCortex from pure-DSL blocks."""
+    return DSLLanguageCortex(vocab, d_model, depth, n_heads, max_ctx,
+                              n_kv_heads, geometry_expansion, mod_capacity)

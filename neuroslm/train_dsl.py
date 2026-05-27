@@ -123,18 +123,22 @@ def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
     reference. Loss clipping / optimizer / schedule come from arch.neuro's
     training block via the harness.
     """
-    from neuroslm.dsl.nn_lang import build_language_model
+    from neuroslm.dsl.nn_lang import build_dsl_language_cortex
 
     cfg = load_training_config_from_arch(arch_root)
-    print(f"[train_dsl] DSL-LM: vocab={vocab_size} d_model={d_model} "
-          f"depth={depth} heads={n_heads} ctx={max_ctx}")
+    print(f"[train_dsl] DSL-LM (full N8 cortex): vocab={vocab_size} "
+          f"d_model={d_model} depth={depth} heads={n_heads} ctx={max_ctx}")
     print(f"[train_dsl] training config: "
           f"loss_clip={cfg.loss_clipping.enabled}(f={cfg.loss_clipping.factor}), "
           f"opt={cfg.optimizer}, lr={cfg.learning_rate}, "
           f"grad_accum={cfg.grad_accum}, label_smooth={cfg.label_smoothing}")
 
-    lm = build_language_model(vocab=vocab_size, d_model=d_model, depth=depth,
-                              n_heads=n_heads, max_ctx=max_ctx).to(device)
+    # Full DSL LanguageCortex: interleaved Standard/Diff/MoD blocks +
+    # NeuralGeometryAdapter after each, bit-identical to Brain's
+    # LanguageCortex(baseline=False) on the LM-logits path (N8 passes).
+    lm = build_dsl_language_cortex(
+        vocab=vocab_size, d_model=d_model, depth=depth,
+        n_heads=n_heads, max_ctx=max_ctx).to(device)
     harness = BRIANHarness.from_language_model(
         lm, vocab_size=vocab_size, d_sem=d_model, training_config=cfg,
     ).to(device)

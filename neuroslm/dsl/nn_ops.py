@@ -183,6 +183,60 @@ def causal_self_attention(x: torch.Tensor,
     return F.linear(y, out_weight)
 
 
+def mod_block(x: torch.Tensor,
+              # router MLP (2-layer with SiLU)
+              router_w1: torch.Tensor, router_b1: torch.Tensor,
+              router_w2: torch.Tensor, router_b2: torch.Tensor,
+              # differential attention block
+              gamma1: torch.Tensor,
+              q_weight: torch.Tensor, kv_weight: torch.Tensor,
+              out_weight: torch.Tensor,
+              lambda_init: torch.Tensor, sub_norm_weight: torch.Tensor,
+              # post-attn norm + SwiGLU
+              gamma2: torch.Tensor,
+              w1: torch.Tensor, w2: torch.Tensor, w3: torch.Tensor,
+              # config
+              n_heads: int, n_kv_heads: int, max_ctx: int,
+              capacity_ratio: float = 0.5) -> torch.Tensor:
+    """Mixture-of-Depths block (use_diff_attn=True, maturity=1.0, no NT) —
+    bit-identical to modules.mixture_of_depths.MoDBlock.
+
+    Routes only the top-C tokens (per a 2-layer MLP score) through diff-
+    attn + SwiGLU; unrouted tokens get the identity residual. Scatters
+    the processed outputs back into the original positions.
+    """
+    B, T, D = x.shape
+
+    # 2-layer SiLU MLP router → per-token score
+    h = F.linear(x, router_w1, router_b1)
+    h = F.silu(h)
+    router_logits = F.linear(h, router_w2, router_b2)        # (B, T, 1)
+
+    C = max(1, int(T * capacity_ratio))
+    if C == T:
+        a = differential_attention(rmsnorm(x, gamma1), q_weight, kv_weight,
+                                    out_weight, lambda_init, sub_norm_weight,
+                                    n_heads, n_kv_heads, max_ctx)
+        x = x + a
+        m = swiglu(rmsnorm(x, gamma2), w1, w2, w3)
+        return x + m
+
+    scores = router_logits.squeeze(-1)                       # (B, T)
+    _, topk_idx = scores.topk(C, dim=-1, sorted=False)
+    topk_idx, _ = topk_idx.sort(dim=-1)                      # causal order
+    selected_x = x.gather(1, topk_idx.unsqueeze(-1).expand(-1, -1, D))
+
+    h = differential_attention(rmsnorm(selected_x, gamma1),
+                               q_weight, kv_weight, out_weight,
+                               lambda_init, sub_norm_weight,
+                               n_heads, n_kv_heads, max_ctx)
+    h = h + swiglu(rmsnorm(selected_x + h, gamma2), w1, w2, w3)
+
+    out = x.clone()
+    out.scatter_(1, topk_idx.unsqueeze(-1).expand(-1, -1, D), selected_x + h)
+    return out
+
+
 def differential_attention(x: torch.Tensor,
                            q_weight: torch.Tensor,
                            kv_weight: torch.Tensor,

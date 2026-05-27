@@ -1,0 +1,40 @@
+# MoDBlock — Mixture-of-Depths transformer block (with differential attention).
+#
+# A learned 2-layer SiLU router scores each token's hardness; only the
+# top-C tokens (capacity_ratio fraction) flow through diff-attention +
+# SwiGLU. The rest get an identity residual. Selected outputs are
+# scattered back into their original positions. Per-token compute
+# allocation (Raposo et al. 2024).
+#
+# Bit-identical to neuroslm.modules.mixture_of_depths.MoDBlock
+# (use_diff_attn=True, n_nt=0, maturity_gate=1.0; verified by
+# tests/dsl/test_dsl_blocks_equivalence.py).
+
+export layer MoDBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv, head_dim, R_hidden, capacity) {
+    # Router (2-layer SiLU MLP → token score)
+    param router_w1:   (R_hidden, D)   init=zeros
+    param router_b1:   (R_hidden,)     init=zeros
+    param router_w2:   (1, R_hidden)   init=zeros
+    param router_b2:   (1,)            init=zeros
+
+    # Differential attention
+    param gamma1:      (D,)            init=ones
+    param Wq:          (D, D)          init=xavier
+    param Wkv:         (Dkv, D)        init=xavier
+    param Wo:          (D, D)          init=xavier
+    param lambda_init: (n_heads,)      init=zeros
+    param sub_norm:    (head_dim,)     init=ones
+
+    # SwiGLU MLP + norm
+    param gamma2:      (D,)            init=ones
+    param w1:          (H, D)          init=xavier
+    param w2:          (H, D)          init=xavier
+    param w3:          (D, H)          init=xavier
+
+    forward(x) {
+        return mod_block(x, router_w1, router_b1, router_w2, router_b2,
+                          gamma1, Wq, Wkv, Wo, lambda_init, sub_norm,
+                          gamma2, w1, w2, w3,
+                          n_heads, n_kv_heads, max_ctx, capacity)
+    }
+}
