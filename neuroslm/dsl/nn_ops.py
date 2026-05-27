@@ -162,3 +162,52 @@ def causal_self_attention(x: torch.Tensor,
     y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=0.0)
     y = y.transpose(1, 2).contiguous().view(B, T, C)
     return F.linear(y, out_weight)
+
+
+# ── N7: cognitive attention subsystems ─────────────────────────────────
+
+def neuromod_scale(nt: torch.Tensor, proj_weight: torch.Tensor,
+                   proj_bias: torch.Tensor) -> torch.Tensor:
+    """NT vector → per-head attention temperature scale.
+
+    Matches neuro_attention.NeuromodulatedScale exactly:
+        scale = softplus(proj(nt) + 0.5413)   # softplus(0.5413) ≈ 1.0
+        → (B, n_heads, 1, 1)
+    DA sharpens (higher scale), NE broadens (lower). Zero-init proj gives
+    scale ≈ 1.0 (attention unmodified).
+    """
+    raw = F.linear(nt, proj_weight, proj_bias)      # (B, n_heads)
+    scale = F.softplus(raw + 0.5413)
+    return scale.unsqueeze(-1).unsqueeze(-1)         # (B, H, 1, 1)
+
+
+def hebbian_trace(q: torch.Tensor, k: torch.Tensor,
+                  query_proj_w: torch.Tensor, key_proj_w: torch.Tensor,
+                  log_decay: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    """Low-rank Hebbian fast-weight trace bias for attention logits.
+
+    Matches neuro_attention.HebbianTrace exactly: project q,k to rank-R,
+    build a causal exponential-moving-average of the key projections, then
+    bias[i,j] = q_r[i] · ema[j] (causal-masked), scaled.
+
+    q, k: (B, H, T, D) → (B, H, T, T) additive bias.
+    """
+    B, H, T, D = q.shape
+    decay = torch.sigmoid(log_decay)
+
+    q_r = F.linear(q, query_proj_w)   # (B, H, T, R)
+    k_r = F.linear(k, key_proj_w)     # (B, H, T, R)
+
+    # Causal decayed EMA of k_r: ema[t] = decay*ema[t-1] + k_r[t]
+    ema = torch.zeros_like(k_r[:, :, :1, :])
+    ema_list = []
+    for t in range(T):
+        ema = decay * ema + k_r[:, :, t:t + 1, :]
+        ema_list.append(ema)
+    ema_all = torch.cat(ema_list, dim=2)   # (B, H, T, R)
+
+    trace_bias = torch.einsum('bhir,bhjr->bhij', q_r, ema_all)
+    causal_mask = torch.triu(
+        torch.ones(T, T, device=q.device, dtype=torch.bool), diagonal=1)
+    trace_bias = trace_bias.masked_fill(causal_mask, 0.0)
+    return trace_bias * scale
