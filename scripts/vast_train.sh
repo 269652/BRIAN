@@ -65,6 +65,13 @@ FRESH="${FRESH:-1}"
 # Push the running training log to git every N seconds. Defaults to 300s
 # which works out to roughly every ~200 train steps at typical pace.
 LOG_PUSH_INTERVAL="${LOG_PUSH_INTERVAL:-300}"
+# USE_DSL=1 → train the architecture compiled from architectures/<ARCH>/
+# via train_dsl.py + BRIANHarness instead of the hand-written Brain. Loss
+# clipping etc. is configured in arch.neuro's `training { ... }` block.
+USE_DSL="${USE_DSL:-0}"
+ARCH="${ARCH:-rcc_bowtie}"
+SEQ_LEN="${SEQ_LEN:-256}"
+D_SEM="${D_SEM:-256}"
 
 REPO_URL="${REPO_URL:-https://github.com/269652/BRIAN.git}"
 REPO_SLUG="${REPO_URL#https://github.com/}"; REPO_SLUG="${REPO_SLUG%.git}"
@@ -190,11 +197,19 @@ LOG_PUSHER_PID=\$!
 echo "    log_pusher pid=\$LOG_PUSHER_PID"
 
 echo "── starting training ──"
-echo "    preset=${PRESET} steps=${STEPS} batch=${BATCH} grad_accum=${GRAD_ACCUM}"
-PRESET='${PRESET}' STEPS='${STEPS}' BATCH='${BATCH}' GRAD_ACCUM='${GRAD_ACCUM}' \\
-    OPT=adamw SAVE_EVERY='${SAVE_EVERY}' LOG_EVERY='${LOG_EVERY}' \\
-    FRESH='${FRESH}' \\
-    bash scripts/vast_train_loop.sh 2>&1 | tee /workspace/train.log
+if [ "${USE_DSL}" = "1" ]; then
+    echo "    DSL mode: arch=${ARCH} steps=${STEPS} batch=${BATCH} seq_len=${SEQ_LEN} d_sem=${D_SEM}"
+    ARCH='${ARCH}' STEPS='${STEPS}' BATCH='${BATCH}' \\
+        SEQ_LEN='${SEQ_LEN}' D_SEM='${D_SEM}' \\
+        SAVE_EVERY='${SAVE_EVERY}' LOG_EVERY='${LOG_EVERY}' \\
+        bash scripts/vast_train_dsl_loop.sh 2>&1 | tee /workspace/train.log
+else
+    echo "    Brain mode: preset=${PRESET} steps=${STEPS} batch=${BATCH} grad_accum=${GRAD_ACCUM}"
+    PRESET='${PRESET}' STEPS='${STEPS}' BATCH='${BATCH}' GRAD_ACCUM='${GRAD_ACCUM}' \\
+        OPT=adamw SAVE_EVERY='${SAVE_EVERY}' LOG_EVERY='${LOG_EVERY}' \\
+        FRESH='${FRESH}' \\
+        bash scripts/vast_train_loop.sh 2>&1 | tee /workspace/train.log
+fi
 
 echo "── stopping log-pusher ──"
 kill \$LOG_PUSHER_PID 2>/dev/null || true
