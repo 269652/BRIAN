@@ -27,13 +27,14 @@ class TestPerSampleLossClipping:
         brain = Brain(cfg)
         brain.eval()
 
-        # Synthetic pathological batch: seq 2 has extreme loss
+        # Deterministic synthetic pathological batch: seq 2 has extreme loss.
+        torch.manual_seed(0)
         B, T, V = 4, 16, cfg.vocab_size
         logits = torch.randn(B, T, V, dtype=torch.float32)
-        logits[2] *= 15  # Sequence 2: 15x amplified logits → high loss
+        logits[2] *= 40  # Sequence 2: heavily amplified → confidently wrong
 
         targets = torch.randint(0, V, (B, T))
-        # Make seq 2 even harder by shifting targets
+        # Make seq 2 even harder by shifting targets (confidently wrong)
         targets[2] = (targets[2] + V // 2) % V
 
         with torch.no_grad():
@@ -219,15 +220,19 @@ class TestPerSampleLossClipping:
         brain.eval()
 
         # Simulate 4 chat sequences, 1 pathological (typical batch at step 1500)
+        torch.manual_seed(0)
         B, T, V = 4, 1024, cfg.vocab_size
         logits = torch.randn(B, T, V, dtype=torch.float32)
 
-        # Sequences 0-2: normal dialogue (baseline loss ~2.8)
-        # Sequence 3: pathological chunk from OpenHermes (loss ~50+)
-        logits[3] *= 5.0  # Extreme amplification
+        # Sequences 0-2: normal dialogue (baseline loss ~ln V)
+        # Sequence 3: pathological chunk — strongly amplified + all-wrong
+        # targets so it is a clear >3×median outlier the clip must cap.
+        # ×20 puts the unclipped seq3 loss well above the 3×median cap, so
+        # capping it reduces the batch mean by >20%.
+        logits[3] *= 20.0
 
         targets = torch.randint(0, V, (B, T))
-        targets[3, ::3] = (targets[3, ::3] + V // 2) % V  # Make seq3 harder
+        targets[3] = (targets[3] + V // 2) % V  # entire seq3 confidently wrong
 
         with torch.no_grad():
             # Without clipping
