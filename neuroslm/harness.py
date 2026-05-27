@@ -1,0 +1,270 @@
+# -*- coding: utf-8 -*-
+"""BRIANHarness — language-model training harness for DSL-compiled circuits.
+
+The DSL gives you a bare `nn.Module` whose forward maps a per-population
+input tensor to a dict of per-population outputs. To *train* this as a
+language model you also need:
+
+  * a vocabulary embedding (token IDs → d_sem vectors)
+  * an LM head (d_sem → vocab logits)
+  * sequence-aware forward (process a (batch, seq_len) of token IDs,
+    return (batch, seq_len, vocab) logits)
+  * a loss function (cross-entropy, optionally per-sample clipped)
+  * optimizer + grad-accumulation + grad-clip plumbing
+  * checkpoint save/load
+
+`BRIANHarness` provides all of that, configured from a `TrainingConfig`
+(read from arch.neuro's `training { ... }` block).
+
+This is Phase A of the DSL→training port — the harness is feature-
+complete for what's needed to train an SLM end-to-end with DSL-defined
+architecture. Later phases (B–F per docs/dsl.md roadmap) port the
+remaining Brain subsystems (vesicle pools, trophic system, sleep cycle,
+maturity machinery, etc.) into both DSL constructs and harness hooks.
+"""
+from __future__ import annotations
+from typing import Optional, Dict, Any
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from neuroslm.dsl.training_config import TrainingConfig
+
+
+class BRIANHarness(nn.Module):
+    """Wrap a DSL-compiled circuit for end-to-end LM training.
+
+    Args:
+        circuit: an `nn.Module` produced by `CodeGenerator.compile_to_module()`
+                 — its forward must accept `(sensory_input, nt_levels=None)`
+                 and return a dict of population outputs (must include a
+                 sink population whose output gets routed to the LM head;
+                 by default we pick `motor` if present, else the last
+                 population's output).
+        vocab_size: tokenizer vocab size
+        d_sem: semantic dimension (must match circuit's d_sem)
+        training_config: optional TrainingConfig; defaults to vanilla
+        sink_population: name of the population whose output goes to the
+                         LM head. Default 'motor' (rcc_bowtie convention).
+    """
+
+    def __init__(self,
+                 circuit: nn.Module,
+                 vocab_size: int,
+                 d_sem: int,
+                 training_config: Optional[TrainingConfig] = None,
+                 sink_population: str = "motor"):
+        super().__init__()
+        self.circuit = circuit
+        self.vocab_size = vocab_size
+        self.d_sem = d_sem
+        self.training_config = training_config or TrainingConfig()
+        self.sink_population = sink_population
+
+        # Token embedding: (vocab_size, d_sem)
+        self.embedding = nn.Embedding(vocab_size, d_sem)
+        # LM head: (d_sem, vocab_size). Linear stores weight as (out=vocab, in=d_sem)
+        self.lm_head = nn.Linear(d_sem, vocab_size, bias=False)
+
+        # Optimizer is lazy-built on first train_step (so users can pass
+        # parameters through to schedulers etc. before training).
+        self._optimizer: Optional[torch.optim.Optimizer] = None
+        # Grad accumulation counter
+        self._accum_step = 0
+
+    # ── Forward ──────────────────────────────────────────────────────
+
+    def forward(self, ids: torch.Tensor,
+                nt_levels: Optional[Dict[str, float]] = None) -> torch.Tensor:
+        """`ids` is `(batch, seq_len)`; returns logits `(batch, seq_len, vocab)`.
+
+        The DSL circuit operates on `(batch * seq_len, d_sem)` — we
+        flatten the time dimension into the batch dim, run the circuit
+        per-token, then reshape logits back. This treats each token as an
+        independent forward pass through the brain — a deliberately simple
+        starting model. Later phases add proper sequence dynamics (state
+        propagation across tokens via the back-edge buffers, attention
+        over time, etc.).
+        """
+        batch, seq_len = ids.shape
+        # (batch, seq_len, d_sem)
+        x = self.embedding(ids)
+        # Flatten time into batch for the circuit's per-token forward
+        x_flat = x.reshape(batch * seq_len, self.d_sem)
+        outputs = self.circuit(x_flat, nt_levels=nt_levels)
+        sink = self._pick_sink_output(outputs)        # (batch*seq, d_sem)
+        sink = sink.reshape(batch, seq_len, self.d_sem)
+        logits = self.lm_head(sink)                   # (batch, seq, vocab)
+        return logits
+
+    def _pick_sink_output(self, outputs: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """Return the tensor that goes to the LM head.
+
+        Default: `outputs[sink_population]`. Fallback: the last
+        population's output if the named sink isn't present (useful for
+        ad-hoc circuits in tests).
+        """
+        if self.sink_population in outputs:
+            return outputs[self.sink_population]
+        # Fallback — last key inserted (Python 3.7+ dicts are ordered)
+        return next(reversed(outputs.values())) if outputs else \
+            torch.zeros(1, self.d_sem)
+
+    # ── Loss ─────────────────────────────────────────────────────────
+
+    def compute_loss(self, ids: torch.Tensor, targets: torch.Tensor,
+                     nt_levels: Optional[Dict[str, float]] = None) -> torch.Tensor:
+        """Cross-entropy loss with optional per-sample clipping.
+
+        Per-sample clipping (p4 fix): compute per-sequence mean loss,
+        clip each at `factor * batch_median`, then average. Suppresses
+        outlier-sequence dominance of the gradient.
+        """
+        logits = self(ids, nt_levels=nt_levels)
+        loss = self._compute_loss_from_logits(logits, targets)
+        return loss
+
+    def _compute_loss_from_logits(self, logits: torch.Tensor,
+                                  targets: torch.Tensor) -> torch.Tensor:
+        batch, seq_len, vocab = logits.shape
+        ls = self.training_config.label_smoothing
+        clip = self.training_config.loss_clipping
+
+        if not clip.enabled:
+            # Standard cross-entropy with optional label smoothing
+            return F.cross_entropy(
+                logits.reshape(-1, vocab),
+                targets.reshape(-1),
+                label_smoothing=ls,
+            )
+
+        # Per-sample clipping: compute per-token CE, average to per-sequence,
+        # clip each sequence at `factor * batch_median`, then average.
+        per_token = F.cross_entropy(
+            logits.reshape(-1, vocab),
+            targets.reshape(-1),
+            reduction="none",
+            label_smoothing=ls,
+        )
+        per_token = per_token.reshape(batch, seq_len)
+        per_seq = per_token.mean(dim=1)             # (batch,)
+
+        # Median-based clip threshold; detached so the threshold itself
+        # isn't a gradient target (otherwise the clip dampens its own
+        # learning signal).
+        threshold = (per_seq.detach().median() * clip.factor).clamp(min=1e-8)
+        clipped = torch.minimum(per_seq, threshold)
+        return clipped.mean()
+
+    # ── Train step ───────────────────────────────────────────────────
+
+    def train_step(self, ids: torch.Tensor, targets: torch.Tensor,
+                   nt_levels: Optional[Dict[str, float]] = None) -> float:
+        """One training step. Handles grad accumulation + clipping + optimizer.
+
+        Returns the (un-scaled) per-call loss as a Python float, so the
+        training loop can log it.
+        """
+        optimizer = self._ensure_optimizer()
+        self.train()
+
+        loss = self.compute_loss(ids, targets, nt_levels=nt_levels)
+        # Scale by 1/accum so multiple accumulated grads sum to the same
+        # magnitude as a single full-batch step.
+        accum = max(1, self.training_config.grad_accum)
+        (loss / accum).backward()
+
+        self._accum_step += 1
+        if self._accum_step >= accum:
+            if self.training_config.grad_clip is not None and self.training_config.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(
+                    self.parameters(), self.training_config.grad_clip
+                )
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            self._accum_step = 0
+
+        return float(loss.detach().item())
+
+    def eval_step(self, ids: torch.Tensor, targets: torch.Tensor,
+                  nt_levels: Optional[Dict[str, float]] = None) -> float:
+        """Forward + loss with no grad, for validation."""
+        self.eval()
+        with torch.no_grad():
+            return float(self.compute_loss(ids, targets, nt_levels=nt_levels).item())
+
+    def _ensure_optimizer(self) -> torch.optim.Optimizer:
+        if self._optimizer is not None:
+            return self._optimizer
+        opt_name = self.training_config.optimizer
+        lr = self.training_config.learning_rate
+        wd = self.training_config.weight_decay
+        if opt_name == "adamw":
+            self._optimizer = torch.optim.AdamW(
+                self.parameters(), lr=lr, weight_decay=wd
+            )
+        elif opt_name == "adafactor":
+            # Lazy import — Adafactor isn't always installed
+            try:
+                from transformers.optimization import Adafactor
+                self._optimizer = Adafactor(
+                    self.parameters(),
+                    lr=lr, scale_parameter=False, relative_step=False,
+                )
+            except ImportError:
+                # Fallback to AdamW with a warning printed once
+                print("[harness] adafactor not available; falling back to AdamW")
+                self._optimizer = torch.optim.AdamW(
+                    self.parameters(), lr=lr, weight_decay=wd
+                )
+        else:
+            raise ValueError(f"unsupported optimizer {opt_name!r}")
+        return self._optimizer
+
+    # ── Checkpoint ───────────────────────────────────────────────────
+
+    def save_checkpoint(self, path: str, step: int = 0,
+                        extra: Optional[Dict[str, Any]] = None) -> None:
+        """Persist model + optimizer state + step. Mirrors Brain's format
+        loosely enough that a future merger can interoperate."""
+        payload = {
+            "step": step,
+            "model": self.state_dict(),
+            "vocab_size": self.vocab_size,
+            "d_sem": self.d_sem,
+            "sink_population": self.sink_population,
+        }
+        if self._optimizer is not None:
+            payload["optimizer"] = self._optimizer.state_dict()
+        if extra:
+            payload["extra"] = extra
+        torch.save(payload, path)
+
+    def load_checkpoint(self, path: str, device: str = "cpu") -> int:
+        """Load model + optimizer state. Returns the saved step."""
+        payload = torch.load(path, map_location=device, weights_only=False)
+        self.load_state_dict(payload["model"])
+        if "optimizer" in payload and self._optimizer is not None:
+            self._optimizer.load_state_dict(payload["optimizer"])
+        return int(payload.get("step", 0))
+
+    # ── Introspection (for train.py compatibility) ──────────────────
+
+    def topology_summary(self) -> str:
+        """Human-readable topology string. Mirrors Brain.topology_summary().
+        """
+        n_params = sum(p.numel() for p in self.parameters())
+        n_pops = sum(1 for _ in self.circuit.children())
+        return (
+            f"BRIANHarness:\n"
+            f"  vocab_size = {self.vocab_size}\n"
+            f"  d_sem      = {self.d_sem}\n"
+            f"  parameters = {n_params:,}\n"
+            f"  circuit populations = {n_pops}\n"
+            f"  sink population = {self.sink_population}\n"
+            f"  loss clipping = {self.training_config.loss_clipping.enabled} "
+            f"(factor={self.training_config.loss_clipping.factor})\n"
+            f"  optimizer = {self.training_config.optimizer} "
+            f"(lr={self.training_config.learning_rate})"
+        )

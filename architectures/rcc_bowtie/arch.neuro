@@ -23,6 +23,23 @@ architecture rcc_bowtie {
 }
 
 # =============================================================================
+# TRAINING — pipeline behavior the BRIAN harness applies on top of the
+# compiled DSL circuit. Loss clipping here is the declarative form of the
+# p4 architectural fix (was: cfg.loss_clip_robust=True, factor=3.0).
+# =============================================================================
+
+training {
+    loss_clipping: { enabled: true, method: "per_sample", factor: 3.0 }
+    quantization:  { enabled: false, bits: 8 }
+    optimizer:     "adamw"
+    learning_rate: 0.0003
+    weight_decay:  0.01
+    grad_accum:    4
+    grad_clip:     1.0
+    label_smoothing: 0.05
+}
+
+# =============================================================================
 # NEUROTRANSMITTER SYSTEMS (7 classical) — globally visible
 # =============================================================================
 
