@@ -257,6 +257,10 @@ def main():
                         choices=["dsl_lm", "circuit"],
                         help="dsl_lm: exact-match transformer LM (N4/N5); "
                              "circuit: legacy per-token cognitive overlay")
+    parser.add_argument("--preset", default=None,
+                        help="size the DSL LM from a BrainConfig preset's "
+                             "trunk dims (e.g. rcc_bowtie_30m_p4); overrides "
+                             "--d_sem/--depth/--n_heads")
     parser.add_argument("--depth", type=int, default=6,
                         help="transformer depth (dsl_lm only)")
     parser.add_argument("--n_heads", type=int, default=8,
@@ -277,10 +281,21 @@ def main():
     tok = _load_tokenizer()
     vocab_size = args.vocab_size or tok.vocab_size
 
+    # A --preset sizes the DSL LM to that preset's trunk (matches P4 etc.)
+    d_model, depth, n_heads = args.d_sem, args.depth, args.n_heads
+    if args.preset:
+        from neuroslm.dsl.preset_bridge import dsl_lm_config_from_preset
+        pc = dsl_lm_config_from_preset(args.preset)
+        d_model, depth, n_heads = pc["d_model"], pc["depth"], pc["n_heads"]
+        if not args.vocab_size:
+            vocab_size = pc["vocab"]
+        print(f"[train_dsl] preset {args.preset}: d_model={d_model} "
+              f"depth={depth} heads={n_heads} vocab={vocab_size}")
+
     if args.model == "dsl_lm":
         harness = build_dsl_lm_harness(
-            arch_root=arch_root, vocab_size=vocab_size, d_model=args.d_sem,
-            depth=args.depth, n_heads=args.n_heads, max_ctx=args.seq_len,
+            arch_root=arch_root, vocab_size=vocab_size, d_model=d_model,
+            depth=depth, n_heads=n_heads, max_ctx=args.seq_len,
             device=args.device,
         )
     else:

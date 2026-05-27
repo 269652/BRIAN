@@ -25,10 +25,14 @@ REPO_DIR="${REPO_DIR:-$(pwd)}"
 cd "$REPO_DIR"
 
 ARCH="${ARCH:-rcc_bowtie}"
+PRESET="${PRESET:-rcc_bowtie_30m_p4}"   # sizes the DSL LM trunk to match P4
 STEPS="${STEPS:-10000}"
 BATCH="${BATCH:-4}"
-SEQ_LEN="${SEQ_LEN:-256}"
-D_SEM="${D_SEM:-256}"
+SEQ_LEN="${SEQ_LEN:-1024}"              # P4 lang_ctx
+D_SEM="${D_SEM:-384}"                   # P4 d_hidden (overridden by PRESET)
+DATA="${DATA:-real}"
+MODE="${MODE:-mix}"
+CHAT_RATIO="${CHAT_RATIO:-0.6}"
 LOG_EVERY="${LOG_EVERY:-20}"
 SAVE_EVERY="${SAVE_EVERY:-1000}"
 CKPT_DIR="${CKPT_DIR:-$REPO_DIR/lfs_checkpoints}"
@@ -56,6 +60,11 @@ while [ "$restart" -lt "$MAX_RESTARTS" ]; do
 
     python -u -m neuroslm.train_dsl \
         --arch "$ARCH_PATH" \
+        --model dsl_lm \
+        --preset "$PRESET" \
+        --data "$DATA" \
+        --mode "$MODE" \
+        --chat_ratio "$CHAT_RATIO" \
         --steps "$STEPS" \
         --batch "$BATCH" \
         --seq_len "$SEQ_LEN" \
@@ -63,7 +72,8 @@ while [ "$restart" -lt "$MAX_RESTARTS" ]; do
         --device cuda \
         --log_every "$LOG_EVERY" \
         --save_every "$SAVE_EVERY" \
-        --ckpt_dir "$CKPT_DIR"
+        --ckpt_dir "$CKPT_DIR" \
+        --resume
     rc=$?
 
     if [ "$rc" -eq 0 ]; then
