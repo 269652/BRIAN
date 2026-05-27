@@ -73,6 +73,35 @@ Result: an architecture that *acts to survive* in a latent manifold, sustains no
 
 Every arrow is implemented. Every box is documented in `docs/architecture.md` with shapes, math, and call-site references.
 
+The same architecture is *also* specified declaratively as math-first equations under [`architectures/rcc_bowtie/`](architectures/rcc_bowtie/), compiled at runtime to PyTorch via the `.neuro` DSL. See **The `.neuro` DSL** below.
+
+---
+
+## The `.neuro` Architecture DSL
+
+Alongside the hand-written PyTorch model, BRIAN's brain architectures are also specified declaratively in `.neuro` files. Every population, synapse, and modulator carries an *explicit mathematical equation* — algebraic, ODE, or a reference to a reusable macro — that gets lowered to torch ops at runtime via a SymPy-backed equation IR.
+
+```neuro
+# architectures/rcc_bowtie/modules/amygdala.neuro
+export population amygdala {
+    count: 32,
+    ode: "dV/dt = (-V + x) / tau",       # leaky integrator, tau resolved from macro
+    timescale: 0.005
+}
+
+# architectures/rcc_bowtie/arch.neuro
+modulation dopamine -> pfc {
+    effect: "multiplicative", gain: 0.6,
+    equation: "y = output * (c * gain)"
+}
+```
+
+Each architecture lives in its own folder: `arch.neuro` is the package config (NT systems, cross-module wiring), `modules/` holds per-region files (`pfc.neuro`, `hippocampus.neuro`, `insula.neuro`, …), and `lib/` exposes shared mechanics. Imports follow mjs-style path resolution: `@/` is absolute (from architecture root), `./` and `../` are relative.
+
+The codegen produces an `nn.Module` whose forward pass is byte-equivalent to a hand-written reference (pinned by 215 DSL tests). The symbolic IR also supports fixed-point and stability analysis — `ode_fixed_point(ode, params={"I": 1.5})` returns the steady-state V*, `ode_stable_at(ode, point=fp)` tells you whether the linearised system contracts.
+
+Full reference: [`docs/dsl.md`](docs/dsl.md). High-level architecture context (how it relates to the PyTorch model): [`docs/architecture.md` §12](docs/architecture.md#12-the-neuro-architecture-dsl).
+
 ---
 
 ## Status

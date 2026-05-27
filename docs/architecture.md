@@ -46,6 +46,13 @@
     - 11.6 NAcc Reward-Prediction-Error
     - 11.7 SurvivalCausalHead (action → ΔS_{t+1})
     - 11.8 Homeostasis.step Tick
+12. [The `.neuro` Architecture DSL](#12-the-neuro-architecture-dsl)
+    - 12.1 Why a DSL exists alongside the PyTorch model
+    - 12.2 Folder layout — one architecture per directory
+    - 12.3 rcc_bowtie expressed as `.neuro`
+    - 12.4 Compilation pipeline (DSL → `nn.Module`)
+    - 12.5 Symbolic analysis (fixed points, stability)
+    - 12.6 Where this fits in the codebase
 
 ---
 
@@ -2417,4 +2424,208 @@ The closed loop runs at the env's tick rate (10 Hz default); the bowtie's forwar
 
 ---
 
-*Last updated: 2026-05-19 (SRC-TEH §0, Phased Maturation §§0.10-0.12, Adaptive GWS §0.13, MAT-gated memory §0.14, Expert floor removal §0.15, Trophic recovery §0.16, GA loss-display fix §0.17, Benchmark cfg-round-trip §0.18, Checkpoint rotation §0.19 — see [`docs/RFC.md`](RFC.md)). Source of truth: `neuroslm/` on branch `master`.*
+## 12. The `.neuro` Architecture DSL
+
+Sections 0–11 describe the live PyTorch implementation in `neuroslm/`.
+Section 12 describes the **declarative specification layer** that sits
+alongside it: brain architectures expressed as `.neuro` files, with
+every population/synapse/modulator carrying an explicit mathematical
+equation, compiled to PyTorch `nn.Module`s at runtime.
+
+The full DSL reference — every keyword, every variable convention,
+worked examples, error semantics — is in **[`docs/dsl.md`](dsl.md)**.
+This section is the architecture-level view: why the DSL exists, how
+it maps onto the existing brain topology, and how an engineer should
+think about the two layers (Python vs DSL) coexisting.
+
+### 12.1 Why a DSL exists alongside the PyTorch model
+
+Sections 0–11 describe an architecture by *enumerating its Python*: 28
+sub-modules in `neuroslm.brain.Brain`, hand-wired in `forward()`, with
+neurotransmitter modulation hard-coded as scalar multiplies on per-region
+output. That representation is precise but opaque to anything other than a
+running PyTorch process. You can't:
+
+* ask "what's the fixed point of GWS under steady sensory input?" without
+  re-deriving the math from `Brain.forward()`,
+* mutate an architecture programmatically (the evolutionary engine has to
+  edit text, not Python),
+* swap in an alternative topology without rebuilding `Brain` end-to-end,
+* prove a Lyapunov bound for the cognitive control loop.
+
+The `.neuro` DSL adds a *symbolic-but-executable* representation of the
+same architecture. Each population has an equation; the equation is
+*both* what gets lowered to torch ops at runtime *and* the
+SymPy expression the analyzer reasons over for fixed points, Jacobians,
+and stability. The semantic-equivalence guarantee — pinned by 30+
+`torch.allclose` tests — is that the codegen output matches what
+hand-written PyTorch would compute, byte-for-byte under the same random
+seed.
+
+### 12.2 Folder layout — one architecture per directory
+
+```
+architectures/
+  rcc_bowtie/
+    arch.neuro                 ← package config (entry point)
+    modules/                   ← one file per brain region
+      sensory.neuro
+      thalamus.neuro
+      pfc.neuro
+      hippocampus.neuro
+      ...
+    lib/                       ← shared mechanics
+      dynamics.neuro
+```
+
+`arch.neuro` is the architecture's package configuration: it declares
+metadata (`d_sem`, `dt`), the 7 neurotransmitter systems, every module
+import, and all cross-module wiring (synapses, modulations, formal
+specs). It doesn't define populations itself.
+
+Each `modules/*.neuro` file owns one brain region (or a tightly
+related cluster — e.g. `dmn.neuro` exports `dmn`, `thought_transformer`,
+`claustrum` because they're all consciousness/narrative). Files
+mark public declarations with `export`.
+
+Path imports use mjs-style specifiers:
+
+```neuro
+import { hebbian }   from "@/lib/plasticity"     ← @/ is the architecture root
+import { core }      from "./layers"              ← ./ relative to current file
+import { thalamus }  from "../thalamus"           ← ../ up one level
+```
+
+A folder containing `index.neuro` is itself a module, so
+`import "@/lib/plasticity"` first looks for
+`@/lib/plasticity.neuro`, then `@/lib/plasticity/index.neuro`.
+
+### 12.3 rcc_bowtie expressed as `.neuro`
+
+Every region from §§4–5 of this document now lives as one
+`.neuro` file under `architectures/rcc_bowtie/modules/`. The mapping is
+direct:
+
+| §4–§5 region              | `.neuro` file                          | Dynamics form                                  |
+|---------------------------|----------------------------------------|------------------------------------------------|
+| Sensory + Association     | `modules/sensory.neuro`                | `y = ReLU(x)`                                  |
+| Thalamus (gated relay)    | `modules/thalamus.neuro`               | `y = ReLU(x) * sigmoid(gate)`                  |
+| World + Self models       | `modules/world.neuro`                  | `y = ReLU(x)`                                  |
+| Amygdala (LIF) + Insula   | `modules/amygdala.neuro`               | ODE: `dV/dt = (-V + x) / tau`                  |
+| Qualia                    | `modules/qualia.neuro`                 | `y = ReLU(x)`                                  |
+| GWS (winner-take-all)     | `modules/gws.neuro`                    | `y = softmax(x / 0.1) * d_sem`                 |
+| Hippo (attractor) + ...   | `modules/hippocampus.neuro`            | `y = (1-alpha) * s + alpha * ReLU(x)`          |
+| PFC + ACC                 | `modules/pfc.neuro`                    | `y = ReLU(x)`                                  |
+| BG (WTA) + forward/eval   | `modules/bg.neuro`                     | `y = softmax(x / 0.1) * d_sem` (BG)            |
+| DMN + Transformer + Claus | `modules/dmn.neuro`                    | rate / `softmax(x) * ReLU(x)` / gated          |
+| Motor                     | `modules/motor.neuro`                  | `y = ReLU(x)`                                  |
+| 6 neuromodulatory nuclei  | `modules/nuclei.neuro`                 | `y = ReLU(x)`                                  |
+
+The 7 NT systems and all cross-module wiring (15 synapses, 17
+modulations, the narrative-consistency sheaf, and the Φ + bowtie formal
+specs) live in `arch.neuro`. The classical synapse form
+`y = weight * (x_pre @ W)` is written explicitly on every projection;
+NT modulations carry their explicit equation
+`y = output * (c * gain)` (multiplicative) or
+`y = output + (c * gain)` (additive).
+
+The bowtie re-entry loop — PFC output projected back to thalamus — is a
+single line:
+
+```neuro
+synapse pfc -> thalamus {
+    weight: 0.3, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+```
+
+The compiler detects that `pfc` comes after `thalamus` in declaration
+order, so this back-edge reads `self.last_pfc` (the previous step's
+mean output) — giving deterministic one-step-delayed feedback. That
+matches the legacy `forward()` semantics in `Brain` while making the
+delay visible as a property of the wiring rather than a Python
+implementation detail.
+
+### 12.4 Compilation pipeline (DSL → `nn.Module`)
+
+```
+architectures/rcc_bowtie/
+        │
+        ▼  multifile.Resolver
+        │    walks folder, parses each .neuro into ModuleAST,
+        │    links imports, validates exports
+        ▼
+   ResolvedProgram   {modules, import_map, user_dynamics, user_functions}
+        │
+        ▼  multifile.compile_folder
+        │    emits declarations in canonical order:
+        │      NT systems → populations (per arch.neuro import order)
+        │      → synapses → modulations → formal_specs/sheaves
+        │    pipes synthetic source through:
+        ▼
+   compiler.NeuroMLCompiler  →  ProgramIR
+        │
+        ▼  codegen.CodeGenerator
+        │    per population: resolve DynamicsDecl, lower equation to
+        │    torch ops, emit nested nn.Module class
+        │    per circuit: instantiate, wire synapses, apply modulations
+        │    ast.parse generated source, exec into namespace
+        ▼
+   Compiled `nn.Module` class
+        │
+        ▼
+   circuit = Cls(d_sem=128)
+   outputs = circuit(sensory_input, nt_levels={"dopamine": 0.7, ...})
+```
+
+The codegen output is a hand-readable Python module. Use
+`CodeGenerator(ir).save_to_file("generated.py")` to inspect it.
+
+### 12.5 Symbolic analysis (fixed points, stability)
+
+Because each equation is a SymPy expression, the same IR that drives
+codegen supports static analysis. Examples that go beyond what
+`torch.no_grad()` rollouts can offer:
+
+```python
+from neuroslm.dsl.equations import parse_ode, ode_fixed_point, ode_stable_at
+
+# Leaky integrator (amygdala-style)
+ode = parse_ode("dV/dt = (-V + I) / tau")
+fp = ode_fixed_point(ode, param_bindings={"I": 1.5, "tau": 0.05})
+# fp == 1.5    (V* = I)
+
+ode_stable_at(ode, point=fp, param_bindings={"tau": 0.05})
+# True    (slope is -1/tau = -20, locally contracting)
+```
+
+For sub-circuits that fit into 1-D analysis (e.g. asking whether a
+GWS-PFC feedback loop has a stable fixed point under steady sensory
+drive), this gives an answer in milliseconds without running the full
+network. Multi-D analysis is on the roadmap (Jacobian eigenspectra
+over coupled populations).
+
+### 12.6 Where this fits in the codebase
+
+| Layer | Code | Role |
+|---|---|---|
+| **Architecture spec** | `architectures/rcc_bowtie/*.neuro` | Symbolic, math-first description |
+| **DSL infrastructure** | `neuroslm/dsl/` | Parser, IR, codegen, symbolic analysis |
+| **PyTorch SLM model** | `neuroslm/brain.py`, `neuroslm/intelligence/` | Hand-written `Brain` — the live training/inference path |
+| **Training pipeline** | `neuroslm/train.py`, `scripts/vast_train.sh` | Consumes Brain, runs the actual gradient updates |
+
+Today the DSL and the hand-written `Brain` coexist: DSL-compiled
+modules are independently exercisable (and used by the evolutionary
+search loop), while `Brain` is what the training pipeline runs.
+Bringing them together — generating `Brain` from `architectures/
+rcc_bowtie/` — is the next architectural step, gated on completing the
+plasticity / threshold-event constructs needed to express every Brain
+mechanism in DSL.
+
+The math-first DSL is therefore both an **alternative specification**
+(symbolic, analyzable) and an **eventual replacement** (once feature-
+complete) for the hand-written architecture code.
+
+---
+
+*Last updated: 2026-05-19 (SRC-TEH §0, Phased Maturation §§0.10-0.12, Adaptive GWS §0.13, MAT-gated memory §0.14, Expert floor removal §0.15, Trophic recovery §0.16, GA loss-display fix §0.17, Benchmark cfg-round-trip §0.18, Checkpoint rotation §0.19 — see [`docs/RFC.md`](RFC.md)). §12 (`.neuro` DSL) added 2026-05-27 — full reference in [`docs/dsl.md`](dsl.md). Source of truth: `neuroslm/` and `architectures/` on branch `master`.*
