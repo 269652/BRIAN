@@ -221,14 +221,22 @@ class BRIANHarness(nn.Module):
 
     def compute_loss(self, ids: torch.Tensor, targets: torch.Tensor,
                      nt_levels: Optional[Dict[str, float]] = None) -> torch.Tensor:
-        """Cross-entropy loss with optional per-sample clipping.
+        """Cross-entropy loss with optional per-sample clipping + aux losses.
 
         Per-sample clipping (p4 fix): compute per-sequence mean loss,
         clip each at `factor * batch_median`, then average. Suppresses
         outlier-sequence dominance of the gradient.
+
+        Aux loss: if the wrapped LM stashed a `_last_pred_coding_loss`
+        (Brain's per-layer-pair predictive-coding loss), it's added with
+        weight 1.0 — matching Brain's forward_lm aggregation.
         """
         logits = self(ids, nt_levels=nt_levels)
         loss = self._compute_loss_from_logits(logits, targets)
+        if self.language_model is not None:
+            aux = getattr(self.language_model, "_last_pred_coding_loss", None)
+            if aux is not None and aux.numel() > 0:
+                loss = loss + aux
         return loss
 
     def _compute_loss_from_logits(self, logits: torch.Tensor,

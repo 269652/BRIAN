@@ -602,13 +602,42 @@ class DSLLanguageCortex(nn.Module):
         self.gamma_f = nn.Parameter(torch.ones(d_model))
         self.lm_head = nn.Parameter(_alloc("xavier", (vocab, d_model)))
 
+        # Predictive-coding heads — Brain's per-layer-pair aux loss. Each
+        # head: pred = Linear(d_model, hidden) → SiLU → Linear(hidden, d_model)
+        # with both weights zero-init (residual identity start), bias on
+        # first linear only. n_layers-1 heads total.
+        pch_hidden = max(d_model // 4, 32)
+        n_pch = max(0, depth - 1)
+        self.pch_w1 = nn.ParameterList(
+            [nn.Parameter(torch.zeros(pch_hidden, d_model)) for _ in range(n_pch)])
+        self.pch_b1 = nn.ParameterList(
+            [nn.Parameter(torch.zeros(pch_hidden)) for _ in range(n_pch)])
+        self.pch_w2 = nn.ParameterList(
+            [nn.Parameter(torch.zeros(d_model, pch_hidden)) for _ in range(n_pch)])
+        self._last_pred_coding_loss = None
+
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         h = nn_ops.embedding(ids, self.embed)
         self._layer_acts = []
+        prev_layer = None
+        pc_counter = 0
+        pred_coding_loss = torch.zeros((), device=h.device, dtype=h.dtype)
         for blk, adapter in zip(self.blocks, self.adapters):
             h = blk(h)
             h = adapter(h)
             self._layer_acts.append(h.detach())
+            if prev_layer is not None and pc_counter < len(self.pch_w1):
+                pred_coding_loss = pred_coding_loss + nn_ops.predictive_coding_head(
+                    prev_layer, h,
+                    self.pch_w1[pc_counter], self.pch_b1[pc_counter],
+                    self.pch_w2[pc_counter])
+                pc_counter += 1
+            prev_layer = h
+        if pc_counter > 0:
+            pred_coding_loss = pred_coding_loss / len(self.pch_w1)
+        # Stash aux loss so the harness can aggregate it into total loss
+        # without changing the forward signature (still returns logits).
+        self._last_pred_coding_loss = pred_coding_loss
         h = nn_ops.rmsnorm(h, self.gamma_f)
         return nn_ops.linear(h, self.lm_head)
 
