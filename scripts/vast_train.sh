@@ -62,6 +62,9 @@ GRAD_ACCUM="${GRAD_ACCUM:-4}"
 SAVE_EVERY="${SAVE_EVERY:-1000}"
 LOG_EVERY="${LOG_EVERY:-20}"
 FRESH="${FRESH:-1}"
+# Push the running training log to git every N seconds. Defaults to 300s
+# which works out to roughly every ~200 train steps at typical pace.
+LOG_PUSH_INTERVAL="${LOG_PUSH_INTERVAL:-300}"
 
 REPO_URL="${REPO_URL:-https://github.com/269652/BRIAN.git}"
 REPO_SLUG="${REPO_URL#https://github.com/}"; REPO_SLUG="${REPO_SLUG%.git}"
@@ -176,12 +179,29 @@ else
   bash scripts/vast_bootstrap.sh
 fi
 
+echo "── starting log-pusher (background) ──"
+# Push the current training log to git every PUSH_INTERVAL seconds so
+# progress is visible from any clone without SSH-ing into the instance.
+# Default 300s ≈ every ~200 train steps at typical ~1.5s/step.
+INSTANCE_ID="\$(hostname)" PUSH_INTERVAL='${LOG_PUSH_INTERVAL}' \\
+    BRANCH='${BRANCH}' REPO_SLUG='${REPO_SLUG}' \\
+    nohup bash scripts/log_pusher.sh > /workspace/log_pusher.log 2>&1 &
+LOG_PUSHER_PID=\$!
+echo "    log_pusher pid=\$LOG_PUSHER_PID"
+
 echo "── starting training ──"
 echo "    preset=${PRESET} steps=${STEPS} batch=${BATCH} grad_accum=${GRAD_ACCUM}"
 PRESET='${PRESET}' STEPS='${STEPS}' BATCH='${BATCH}' GRAD_ACCUM='${GRAD_ACCUM}' \\
     OPT=adamw SAVE_EVERY='${SAVE_EVERY}' LOG_EVERY='${LOG_EVERY}' \\
     FRESH='${FRESH}' \\
     bash scripts/vast_train_loop.sh 2>&1 | tee /workspace/train.log
+
+echo "── stopping log-pusher ──"
+kill \$LOG_PUSHER_PID 2>/dev/null || true
+# Final push of the complete log
+SOURCE_LOG=/workspace/train.log INSTANCE_ID="\$(hostname)" \\
+    PUSH_INTERVAL=1 BRANCH='${BRANCH}' REPO_SLUG='${REPO_SLUG}' \\
+    timeout 60 bash scripts/log_pusher.sh || echo "final log push timed out"
 
 echo "── training exited; instance idle. Destroy with: vastai destroy instance \$(hostname) ──"
 ONSTART
