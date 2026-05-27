@@ -780,8 +780,16 @@ class Brain(nn.Module):
     @staticmethod
     def _chunked_ce(logits: torch.Tensor, targets: torch.Tensor,
                     chunk: int = 128, ignore_index: int = -100,
-                    label_smoothing: float = 0.0) -> torch.Tensor:
-        """Cross-entropy in T-dimension chunks to avoid a huge (B*T, V) allocation."""
+                    label_smoothing: float = 0.0,
+                    loss_clip_robust: bool = False,
+                    loss_clip_factor: float = 3.0) -> torch.Tensor:
+        """Cross-entropy in T-dimension chunks with optional per-sample loss clipping.
+
+        Per-sample loss clipping (Phi-3 style) prevents a single pathological sequence
+        from dominating the batch gradient: each sequence's loss is clipped at
+        C * median(batch) before averaging. Used to handle data outliers like step-1500
+        pathological batches without filtering.
+        """
         B, T, V = logits.shape
         acc = torch.zeros(B, T, dtype=torch.float32, device=logits.device)
         for t0 in range(0, T, chunk):
@@ -792,7 +800,17 @@ class Brain(nn.Module):
                                      reduction="none",
                                      label_smoothing=label_smoothing)
             acc[:, t0:t1] = losses.reshape(B, t1 - t0).float()
-        return acc.mean(dim=1)
+
+        # Per-sequence loss (averaged over T for each batch element)
+        loss_per_seq = acc.mean(dim=1)  # (B,)
+
+        if loss_clip_robust:
+            # Clip each sequence's loss at C * median to prevent outliers
+            median_loss = loss_per_seq.median()
+            max_loss = loss_clip_factor * median_loss
+            loss_per_seq = torch.clamp(loss_per_seq, max=max_loss)
+
+        return loss_per_seq
 
     def init_latents(self, batch_size: int, device, dtype=None):
         cfg = self.cfg
@@ -1004,7 +1022,12 @@ class Brain(nn.Module):
             out = {"logits": logits}
             if targets is not None:
                 B, T = ids.shape
-                loss = self._chunked_ce(logits, targets).mean()
+                loss_per_seq = self._chunked_ce(
+                    logits, targets,
+                    label_smoothing=float(getattr(self.cfg, 'label_smoothing', 0.0)),
+                    loss_clip_robust=bool(getattr(self.cfg, 'loss_clip_robust', False)),
+                    loss_clip_factor=float(getattr(self.cfg, 'loss_clip_factor', 3.0)))
+                loss = loss_per_seq.mean()
                 out["loss"]    = loss
                 out["lm_loss"] = loss.detach()
             return out
@@ -1224,7 +1247,12 @@ class Brain(nn.Module):
         if cfg.neural_topology == "baseline":
             out = {"logits": logits}
             if targets is not None:
-                loss = self._chunked_ce(logits, targets).mean()
+                loss_per_seq = self._chunked_ce(
+                    logits, targets,
+                    label_smoothing=float(getattr(cfg, 'label_smoothing', 0.0)),
+                    loss_clip_robust=bool(getattr(cfg, 'loss_clip_robust', False)),
+                    loss_clip_factor=float(getattr(cfg, 'loss_clip_factor', 3.0)))
+                loss = loss_per_seq.mean()
                 out.update({"loss": loss, "lm_loss": loss.detach()})
             return out
 
@@ -1646,7 +1674,9 @@ class Brain(nn.Module):
         if targets is not None:
             lm_loss_per = self._chunked_ce(
                 logits_motor, targets,
-                label_smoothing=float(getattr(cfg, 'label_smoothing', 0.0)))
+                label_smoothing=float(getattr(cfg, 'label_smoothing', 0.0)),
+                loss_clip_robust=bool(getattr(cfg, 'loss_clip_robust', False)),
+                loss_clip_factor=float(getattr(cfg, 'loss_clip_factor', 3.0)))
             # Mesolimbic CE gain: clamped OFF (=1.0) until MAT > 0.55 because
             # `learning_gain` comes from a randomly-initialised LearningLayer
             # whose output is uncorrelated with reward early on — gating it
@@ -1656,23 +1686,17 @@ class Brain(nn.Module):
             _meso_phase = self._phase_gate(_mat_now, center=0.55, width=0.10)
             meso_gain   = (1.0 + 0.5 * _meso_phase * learning_gain.detach() *
                            self.transmitters.get("DA").detach()).clamp(min=1.0)
-            # Per-sample loss clipping (Option 2 of docs/STEP1500_INVESTIGATION.md).
-            # Three independent RCC runs all spiked at exactly step 1500 because
-            # the same data ordering puts the same pathological batch there.
-            # Clip each sequence's loss at `loss_clip_factor x median` before
-            # averaging so a single outlier sequence cannot dominate the batch.
-            # Adaptive threshold — auto-tunes per batch, no hyper-parameter to
-            # set per dataset. Off by default (legacy behavior). Used in
-            # production LM training (Phi, GPT-3 robust variants, Cerebras).
+            # Mesolimbic gain: modulate loss by dopamine-scaled learning signal.
+            # Note: per-sample loss clipping is already applied in _chunked_ce()
+            # based on loss_clip_robust config, so we don't re-clip here.
             _weighted = lm_loss_per * meso_gain
+            # Track how many sequences would have been clipped (for diagnostics)
             if bool(getattr(cfg, 'loss_clip_robust', False)):
-                _med = _weighted.detach().median()
+                _med = lm_loss_per.detach().median()
                 _factor = float(getattr(cfg, 'loss_clip_factor', 3.0))
                 _max_allowed = _factor * _med
-                # Track how often clipping fires (logged from train.py)
                 self._last_n_clipped = int(
-                    (_weighted.detach() > _max_allowed).sum().item())
-                _weighted = torch.clamp(_weighted, max=_max_allowed)
+                    (lm_loss_per.detach() > _max_allowed).sum().item())
             else:
                 self._last_n_clipped = 0
             lm_loss = _weighted.mean()
