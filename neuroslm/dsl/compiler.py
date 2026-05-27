@@ -27,6 +27,14 @@ class PopulationIR(NodeIR):
     resting: float = 0.0
     output_dim: int = None
     properties: Dict = None
+    # Phase 7 Stage 1 — algebraic equation override. When present, this
+    # takes precedence over the `dynamics` enum during codegen. The string
+    # is parsed lazily by codegen/equations.py.
+    equation: str = None
+    # Phase 7 Stage 2 — ODE override. `dV/dt = ...` or `coef * dV/dt = ...`.
+    # Mutually exclusive with `equation`; if both set, ODE wins (more
+    # specific). Like `equation:`, this is parsed lazily.
+    ode: str = None
 
     def __post_init__(self):
         if self.properties is None:
@@ -48,6 +56,9 @@ class SynapseIR(NodeIR):
     plasticity_rule: str = None
     learning_rate: float = None
     properties: Dict = None
+    # Phase 7 Stage 1 — algebraic transmission equation, e.g.
+    # `y = g * sigmoid(W @ x_pre)`. None → fall back to linear default.
+    equation: str = None
 
     def __post_init__(self):
         if self.properties is None:
@@ -83,6 +94,10 @@ class ModulationIR(NodeIR):
     receptor_type: str = None
     desensitization_tau: float = None
     properties: Dict = None
+    # Phase 7 Stage 1 — explicit modulation equation, e.g.
+    # `gain = 1 + k * c` (c = NT concentration). None → fall back to
+    # the legacy `effect` + `gain` form.
+    equation: str = None
 
     def __post_init__(self):
         if self.properties is None:
@@ -187,20 +202,57 @@ class NeuroMLError(Exception):
     pass
 
 
+def _split_top_level(s: str) -> List[str]:
+    """Split on `,` or newline, but only at depth 0 (outside strings/parens).
+
+    Lets equation values like `"y = max(0, x)"` survive the split intact.
+    """
+    out, buf = [], []
+    depth = 0
+    in_str = None  # None, '"', or "'"
+    for ch in s:
+        if in_str:
+            buf.append(ch)
+            if ch == in_str:
+                in_str = None
+            continue
+        if ch in ('"', "'"):
+            in_str = ch
+            buf.append(ch)
+        elif ch in "([{":
+            depth += 1
+            buf.append(ch)
+        elif ch in ")]}":
+            depth = max(0, depth - 1)
+            buf.append(ch)
+        elif (ch == "," or ch == "\n") and depth == 0:
+            piece = "".join(buf).strip()
+            if piece:
+                out.append(piece)
+            buf = []
+        else:
+            buf.append(ch)
+    tail = "".join(buf).strip()
+    if tail:
+        out.append(tail)
+    return out
+
+
 def _parse_properties(props_str: str) -> Dict:
-    """Parse key: value, key: value style property strings (handles multi-line)."""
+    """Parse key: value, key: value style property strings (handles multi-line).
+
+    Quote- and paren-aware: equation values with commas/colons survive.
+    """
     if not props_str:
         return {}
     result = {}
-    # Split on commas but be careful about line continuations
-    pairs = re.split(r'[,\n]', props_str.strip())
-    for pair in pairs:
+    for pair in _split_top_level(props_str):
         if ':' not in pair:
             continue
         key, value = pair.split(':', 1)
         key = key.strip()
         value = value.strip()
-        if key and value:  # Only add non-empty key-value pairs
+        if key and value:
             result[key] = value
     return result
 
@@ -234,9 +286,16 @@ class NeuroMLCompiler:
             dynamics = props_dict.get('dynamics', 'rate_code').strip('"\'')
             timescale = float(props_dict.get('timescale', 0.01))
             capacity = float(props_dict.get('capacity', 1.0))
+            equation = props_dict.get('equation')
+            if equation is not None:
+                equation = equation.strip().strip('"\'')
+            ode = props_dict.get('ode')
+            if ode is not None:
+                ode = ode.strip().strip('"\'')
             pops.append(PopulationIR(
                 name=name, count=count, id=name,
-                dynamics=dynamics, timescale=timescale, capacity=capacity
+                dynamics=dynamics, timescale=timescale, capacity=capacity,
+                equation=equation, ode=ode,
             ))
 
         # Extract synapse mentions with weight and neurotransmitter
@@ -252,9 +311,13 @@ class NeuroMLCompiler:
                 except (ValueError, TypeError):
                     weight = None  # Could be 'learnable' or other non-numeric string
             nt = props_dict.get('neurotransmitter', '').strip('"\'') if 'neurotransmitter' in props_dict else None
+            equation = props_dict.get('equation')
+            if equation is not None:
+                equation = equation.strip().strip('"\'')
             synapses.append(SynapseIR(
                 source=src, target=tgt, id=f"{src}_{tgt}",
-                weight=weight, neurotransmitter=nt
+                weight=weight, neurotransmitter=nt,
+                equation=equation,
             ))
 
         # Extract neurotransmitters with kinetics: base_concentration, release_rate, reuptake_rate, diffusion_rate
@@ -283,9 +346,13 @@ class NeuroMLCompiler:
             props_dict = _parse_properties(props_str) if props_str else {}
             effect = props_dict.get('effect', 'multiplicative').strip('"\'')
             gain = float(props_dict.get('gain', 1.0))
+            equation = props_dict.get('equation')
+            if equation is not None:
+                equation = equation.strip().strip('"\'')
             mods.append(ModulationIR(
                 source_nt=nt, target_population=pop, id=f"{nt}_{pop}",
-                effect=effect, gain=gain
+                effect=effect, gain=gain,
+                equation=equation,
             ))
 
         # Extract sheaf specs with contradiction_threshold and mechanism
