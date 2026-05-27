@@ -16,6 +16,44 @@ write `TransformerBlock`, `LanguageCortex`, the bowtie modules — anything
 — and the compiler lowers it to PyTorch that is **bit-identical** to the
 hand-written reference.
 
+## Guiding design principle — everything is a formal mathematical object
+
+The long-term goal (see Phase N10–N11 below) is to compile a complete SLM
+— every ML op, every BRIAN subsystem, every gradient path, the memory and
+neurotransmitter systems — into a **single multidimensional mathematical
+representation** (a "hypershape") that can be inspected geometrically and
+analyzed with graph-theory algorithms, to optimize the model's
+*intelligence density*, reasoning capability, integrated information (Φ /
+IIT) and effective information (EI).
+
+That goal constrains the language design **now**, not later. Concretely
+the IR is built so it is, by construction:
+
+1. **A typed directed graph.** Every statement is a node; every tensor
+   dependency is an edge typed by its shape. Forward computation is the
+   graph; the **gradient flow is its transpose (adjoint) graph** —
+   reverse-mode AD is a well-defined dual, so gradient paths are
+   first-class and inspectable, not hidden in autograd.
+2. **Formally-semantic ops.** Each built-in op has a closed-form
+   mathematical definition (the lowering table is the spec), so the whole
+   model is a composition of known functions — differentiable, and
+   amenable to symbolic analysis (Jacobians, fixed points, spectral
+   properties) the way the Phase-7 equation layer already does for scalar
+   dynamics.
+3. **No opaque control flow in the hot path.** Loops over layers unroll to
+   explicit subgraphs; conditionals (maturation gating, MoD routing) are
+   represented as typed gates with both branches present in the graph, so
+   the structure is statically analyzable.
+4. **Subsystems are subgraphs with declared boundaries.** Each BRIAN
+   subsystem (memory, NT system, vesicle pool, trophic) is a named region
+   of the graph with explicit input/output ports — so the hypershape can
+   be decomposed, and metrics like Φ (which require a bipartition over
+   well-defined parts) are computable directly from the IR.
+
+Every later design decision defers to this: if a feature can't be
+expressed as a typed node in a differentiable graph with formal op
+semantics, it doesn't go in the language.
+
 ## Core model
 
 A program is a **computation graph** over **shape-typed tensors**, not a
@@ -141,6 +179,29 @@ run before any vast spend.
 | **N7** | NT-modulation, Hebbian, vesicle, trophic subsystems | each `allclose` vs Brain subsystem |
 | **N8** | full Brain(rcc_bowtie_30m_p4) equivalence | end-to-end training-curve parity |
 | **N9** | vast 10k run on DSL — matches p4 | benchmark parity |
+| **N10** | **hypershape compiler** — lower the typed IR (forward graph + adjoint gradient graph + subsystem regions) to a multidimensional geometric representation | graph round-trips; node/edge/shape metadata preserved |
+| **N11** | **geometric / graph-theoretic analysis toolkit** — inspect the hypershape: Φ/IIT bipartition search, EI estimation, intelligence-density metrics, spectral + centrality analysis of the computation/gradient graphs, visual rendering | metrics computable from IR; visualization renders; optimization hooks surface candidate edits |
+
+### Future feature (N10–N11) — the mathematical "hypershape"
+
+The end state: compile the complete RCC-bowtie-P4 SLM into one
+multidimensional mathematical object and *reason about it*:
+
+- **What it is.** A typed multigraph: nodes = ops/parameters/state,
+  edges = shaped tensor flows, with a parallel adjoint graph for
+  gradients and labeled subgraph regions per BRIAN subsystem (memory,
+  NT, vesicle, trophic, bowtie stages).
+- **What we do with it.** Run graph-theory + spectral algorithms to
+  measure and optimize intelligence density, reasoning capacity, Φ (IIT
+  integrated information), and EI (effective information) — by exploring
+  the mathematical model of every mechanism the SLM implements, finding
+  bottlenecks/cut-vertices, redundant paths, low-Φ partitions, and
+  proposing structural edits that raise integration.
+- **Why the design supports it already.** Per the guiding principle
+  above, the IR is born as a differentiable typed graph with formal op
+  semantics and explicit subsystem boundaries — exactly the structure
+  these analyses require. N10 is a *lowering* of that IR to a geometric
+  form, not a re-derivation.
 
 Starting with **N1** now — the op atoms with exact-match tests against
 `neuroslm.modules.common`.
