@@ -29,7 +29,7 @@ control flow.
 from __future__ import annotations
 import ast
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 import torch
@@ -327,3 +327,73 @@ def compile_layer(source: str) -> type:
           "_alloc": _alloc, "_evalshape": _evalshape}
     exec(compile(src, f"<nn_lang:{ld.name}>", "exec"), ns)
     return ns[ld.name]
+
+
+# ── N4: stacked language model from DSL blocks ─────────────────────────
+
+# The canonical transformer block, in DSL text. The whole LM is composed
+# from this — stacking it, plus embedding + final-norm + lm_head — into a
+# model whose forward is exact-match to a reference built from the same
+# common.py primitives.
+TRANSFORMER_BLOCK_DSL = '''
+layer TransformerBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv) {
+    param gamma1: (D,) init=ones
+    param Wq: (D, D) init=xavier
+    param Wkv: (Dkv, D) init=xavier
+    param Wo: (D, D) init=xavier
+    param gamma2: (D,) init=ones
+    param w1: (H, D) init=xavier
+    param w2: (H, D) init=xavier
+    param w3: (D, H) init=xavier
+
+    forward(x) {
+        a = causal_self_attention(rmsnorm(x, gamma1), Wq, Wkv, Wo, n_heads, n_kv_heads, max_ctx)
+        x = x + a
+        m = swiglu(rmsnorm(x, gamma2), w1, w2, w3)
+        return x + m
+    }
+}
+'''
+
+
+class DSLLanguageModel(nn.Module):
+    """Embedding → N DSL TransformerBlocks → final RMSNorm → lm_head.
+
+    The blocks are compiled from `TRANSFORMER_BLOCK_DSL` (the N3 path, so
+    each block is provably exact-match to common.TransformerBlock). This
+    class supplies only the composition: token embedding, the block stack,
+    the final norm, and the output projection — all using the same N1 op
+    atoms, so the whole model is bit-identical to a reference assembled
+    from common.py.
+    """
+    def __init__(self, vocab: int, d_model: int, depth: int,
+                 n_heads: int, max_ctx: int, n_kv_heads: Optional[int] = None):
+        super().__init__()
+        n_kv_heads = n_kv_heads or n_heads
+        H = nn_ops.swiglu_hidden_dim(d_model)
+        Dkv = 2 * n_kv_heads * (d_model // n_heads)
+
+        BlockCls = compile_layer(TRANSFORMER_BLOCK_DSL)
+        self.embed = nn.Parameter(_alloc("normal", (vocab, d_model)))
+        self.blocks = nn.ModuleList([
+            BlockCls(D=d_model, n_heads=n_heads, n_kv_heads=n_kv_heads,
+                     max_ctx=max_ctx, H=H, Dkv=Dkv)
+            for _ in range(depth)
+        ])
+        self.gamma_f = nn.Parameter(torch.ones(d_model))
+        self.lm_head = nn.Parameter(_alloc("xavier", (vocab, d_model)))
+
+    def forward(self, ids: torch.Tensor) -> torch.Tensor:
+        h = nn_ops.embedding(ids, self.embed)
+        for blk in self.blocks:
+            h = blk(h)
+        h = nn_ops.rmsnorm(h, self.gamma_f)
+        return nn_ops.linear(h, self.lm_head)
+
+
+def build_language_model(vocab: int, d_model: int, depth: int,
+                         n_heads: int, max_ctx: int,
+                         n_kv_heads: Optional[int] = None) -> DSLLanguageModel:
+    """Construct a DSL-composed language model (embedding + stacked blocks
+    + final norm + head)."""
+    return DSLLanguageModel(vocab, d_model, depth, n_heads, max_ctx, n_kv_heads)
