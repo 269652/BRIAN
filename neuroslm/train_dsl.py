@@ -360,14 +360,18 @@ def main():
 
     # A --preset sizes the DSL LM to that preset's trunk (matches P4 etc.)
     d_model, depth, n_heads = args.d_sem, args.depth, args.n_heads
+    preset_sched = None
     if args.preset:
         from neuroslm.dsl.preset_bridge import dsl_lm_config_from_preset
         pc = dsl_lm_config_from_preset(args.preset)
         d_model, depth, n_heads = pc["d_model"], pc["depth"], pc["n_heads"]
         if not args.vocab_size:
             vocab_size = pc["vocab"]
+        preset_sched = pc   # carries lr / warmup_steps / min_lr_ratio / wd
         print(f"[train_dsl] preset {args.preset}: d_model={d_model} "
-              f"depth={depth} heads={n_heads} vocab={vocab_size}")
+              f"depth={depth} heads={n_heads} vocab={vocab_size} "
+              f"lr={pc['lr']} warmup={pc['warmup_steps']} "
+              f"min_ratio={pc['min_lr_ratio']} wd={pc['weight_decay']}")
 
     if args.model == "dsl_lm":
         harness = build_dsl_lm_harness(
@@ -381,9 +385,18 @@ def main():
             device=args.device, sink_population=args.sink,
         )
 
-    # LR schedule over the full step budget (10% warmup) and mixed precision.
-    warmup = max(1, args.steps // 10)
-    harness.set_schedule(warmup=warmup, total=args.steps, min_lr_ratio=0.1)
+    # LR schedule — use the preset's exact warmup/peak/min_ratio so the
+    # DSL run's learning-rate curve matches Brain's cosine_lr step-for-step
+    # (validated in tests/dsl/test_lr_parity.py). Fall back to 10% warmup.
+    if preset_sched is not None:
+        harness.training_config.learning_rate = preset_sched["lr"]
+        harness.training_config.weight_decay = preset_sched["weight_decay"]
+        warmup = preset_sched["warmup_steps"]
+        min_ratio = preset_sched["min_lr_ratio"]
+    else:
+        warmup = max(1, args.steps // 10)
+        min_ratio = 0.1
+    harness.set_schedule(warmup=warmup, total=args.steps, min_lr_ratio=min_ratio)
     if args.device == "cuda":
         harness.enable_mixed_precision(dtype=args.amp)
         print(f"[train_dsl] mixed precision: {args.amp}")

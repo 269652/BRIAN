@@ -37,6 +37,11 @@ def dsl_lm_config_from_preset(preset_name: str) -> Dict:
         "n_kv_heads": kv if kv else n_heads,
         "max_ctx": c.lang_ctx,
         "vocab": c.vocab_size,
+        # LR-schedule params so the DSL run matches Brain's schedule exactly
+        "lr": c.lr,
+        "warmup_steps": getattr(c, "warmup_steps", 300),
+        "min_lr_ratio": getattr(c, "min_lr_ratio", 0.1),
+        "weight_decay": getattr(c, "weight_decay", 0.01),
     }
 
 
