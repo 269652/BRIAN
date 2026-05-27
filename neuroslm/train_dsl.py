@@ -138,9 +138,36 @@ def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
     harness = BRIANHarness.from_language_model(
         lm, vocab_size=vocab_size, d_sem=d_model, training_config=cfg,
     ).to(device)
+
+    # Attach the metric observer (Φ, λ₁, ignition, oscillations, NT,
+    # trophic, mesoLG), seeded with the architecture's NT baselines.
+    from neuroslm.dsl.metrics import MetricObserver
+    nt_baselines = _nt_baselines_from_arch(arch_root)
+    harness._observer = MetricObserver(n_layers=depth, nt_baselines=nt_baselines)
+    harness.last_metrics = None
+
     n_params = sum(p.numel() for p in harness.parameters())
     print(f"[train_dsl] DSL-LM parameters: {n_params/1e6:.1f}M")
     return harness
+
+
+def _nt_baselines_from_arch(arch_root: Path) -> Optional[dict]:
+    """Read neurotransmitter base_concentrations from arch.neuro so the NT
+    metric column starts at the architecture's declared baselines."""
+    try:
+        from neuroslm.dsl.multifile import compile_folder
+        ir = compile_folder(arch_root)
+        name_map = {"dopamine": "DA", "norepinephrine": "NE", "serotonin": "5HT",
+                    "acetylcholine": "ACh", "endocannabinoid": "eCB",
+                    "glutamate": "Glu", "gaba": "GABA"}
+        out = {}
+        for nt in ir.neurotransmitter_systems:
+            key = name_map.get(nt.name)
+            if key:
+                out[key] = float(nt.base_concentration)
+        return out or None
+    except Exception:
+        return None
 
 
 def build_harness(arch_root: Path, vocab_size: int, d_sem: int,
@@ -245,12 +272,22 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
     last_log = t0
     log_buf = []
 
+    observer = getattr(harness, "_observer", None)
+
     for step in range(start_step + 1, steps + 1):
         ids, targets = source.next()
         if not tokens_per_step:
             tokens_per_step = ids.numel()
         loss = harness.train_step(ids, targets)
         log_buf.append(loss)
+
+        # Update the metric observers from the live model's activations
+        # (Φ, λ₁, ignition, oscillations, NT, trophic, mesoLG).
+        if observer is not None:
+            lm = getattr(harness, "language_model", None)
+            acts = getattr(lm, "_layer_acts", None) if lm is not None else None
+            if acts:
+                harness.last_metrics = observer.observe(acts, loss)
 
         if step % log_every == 0:
             now = time.time()
@@ -259,8 +296,6 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
             tok_per_s = tokens_per_step * log_every / max(now - last_log, 1e-6)
             gnorm = float(getattr(harness, "_last_gnorm", 0.0))
             lr = float(getattr(harness, "_last_lr", 0.0))
-            # Pull any subsystem metrics the harness/LM expose (N7-N8 fill
-            # these; trunk-only run leaves them at placeholders).
             metrics = getattr(harness, "last_metrics", None)
             # avg_lm == avg total loss until auxiliary losses are added.
             print(_format_metrics_line(step, avg, avg, gnorm, lr,

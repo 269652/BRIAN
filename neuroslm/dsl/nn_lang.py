@@ -385,8 +385,13 @@ class DSLLanguageModel(nn.Module):
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         h = nn_ops.embedding(ids, self.embed)
+        # Capture per-block activations for the metric observers (Φ, λ₁,
+        # ignition, oscillations, trophic). Detached so metrics never
+        # perturb the training graph.
+        self._layer_acts = []
         for blk in self.blocks:
             h = blk(h)
+            self._layer_acts.append(h.detach())
         h = nn_ops.rmsnorm(h, self.gamma_f)
         return nn_ops.linear(h, self.lm_head)
 
