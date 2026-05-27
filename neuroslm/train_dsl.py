@@ -103,12 +103,31 @@ def build_harness(arch_root: Path, vocab_size: int, d_sem: int,
     return harness
 
 
+def _maybe_resume(harness: BRIANHarness, ckpt_dir: Path) -> int:
+    """Load the most recent dsl_arch_step*.pt from ckpt_dir if present.
+
+    Returns the resumed step (0 if no checkpoint found).
+    """
+    if not ckpt_dir.is_dir():
+        return 0
+    ckpts = sorted(
+        ckpt_dir.glob("dsl_arch_step*.pt"),
+        key=lambda p: int(p.stem.replace("dsl_arch_step", "")),
+    )
+    if not ckpts:
+        return 0
+    latest = ckpts[-1]
+    step = harness.load_checkpoint(str(latest))
+    print(f"[train_dsl] resumed from {latest} @ step {step}")
+    return step
+
+
 # ── Train loop ───────────────────────────────────────────────────────
 
 def train(harness: BRIANHarness, source: SyntheticBatchSource,
           steps: int, log_every: int = 20, save_every: int = 1000,
-          ckpt_dir: Optional[Path] = None) -> None:
-    """Run `steps` train_steps. Logs loss + step rate; saves checkpoints."""
+          ckpt_dir: Optional[Path] = None, start_step: int = 0) -> None:
+    """Run train_steps from `start_step+1` to `steps`. Logs + checkpoints."""
     if ckpt_dir is not None:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -116,7 +135,7 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
     last_log = t0
     log_buf = []
 
-    for step in range(1, steps + 1):
+    for step in range(start_step + 1, steps + 1):
         ids, targets = source.next()
         loss = harness.train_step(ids, targets)
         log_buf.append(loss)
@@ -155,6 +174,10 @@ def main():
                         help="population whose output feeds the LM head")
     parser.add_argument("--vocab_size", type=int, default=0,
                         help="0 → take from tokenizer")
+    parser.add_argument("--amp", default="bf16", choices=["bf16", "fp16"],
+                        help="mixed-precision dtype (cuda only)")
+    parser.add_argument("--resume", action="store_true",
+                        help="resume from the latest dsl_arch_step*.pt in ckpt_dir")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -169,8 +192,22 @@ def main():
         arch_root=arch_root, vocab_size=vocab_size, d_sem=args.d_sem,
         device=args.device, sink_population=args.sink,
     )
+
+    # LR schedule over the full step budget (10% warmup) and mixed precision.
+    warmup = max(1, args.steps // 10)
+    harness.set_schedule(warmup=warmup, total=args.steps, min_lr_ratio=0.1)
+    if args.device == "cuda":
+        harness.enable_mixed_precision(dtype=args.amp)
+        print(f"[train_dsl] mixed precision: {args.amp}")
+
     print(harness.topology_summary())
-    print(f"[train_dsl] device={args.device}")
+    print(f"[train_dsl] device={args.device}, warmup={warmup}/{args.steps}")
+
+    ckpt_dir = Path(args.ckpt_dir) if args.ckpt_dir else None
+    start_step = 0
+    if args.resume and ckpt_dir is not None:
+        start_step = _maybe_resume(harness, ckpt_dir)
+        harness._global_step = start_step
 
     source = SyntheticBatchSource(
         vocab_size=vocab_size, batch=args.batch, seq_len=args.seq_len,
@@ -180,8 +217,8 @@ def main():
     train(
         harness=harness, source=source,
         steps=args.steps, log_every=args.log_every,
-        save_every=args.save_every,
-        ckpt_dir=Path(args.ckpt_dir) if args.ckpt_dir else None,
+        save_every=args.save_every, ckpt_dir=ckpt_dir,
+        start_step=start_step,
     )
 
     print("[train_dsl] done.")

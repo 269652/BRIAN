@@ -23,6 +23,8 @@ remaining Brain subsystems (vesicle pools, trophic system, sleep cycle,
 maturity machinery, etc.) into both DSL constructs and harness hooks.
 """
 from __future__ import annotations
+import math
+from contextlib import nullcontext
 from typing import Optional, Dict, Any
 
 import torch
@@ -30,6 +32,27 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from neuroslm.dsl.training_config import TrainingConfig
+
+
+# ── LR schedule (warmup + cosine) ──────────────────────────────────────
+#
+# Brain's training uses linear warmup over `warmup` steps to base_lr,
+# then cosine decay to `min_lr_ratio * base_lr` over the remaining
+# (total - warmup) steps. After `total`, clamps to min_lr (so crash-
+# restarts past the budget don't oscillate).
+
+def cosine_warmup_lr(step: int, base_lr: float, warmup: int, total: int,
+                     min_lr_ratio: float = 0.1) -> float:
+    """Standard warmup-then-cosine schedule used by Brain training."""
+    if warmup > 0 and step < warmup:
+        # Linear ramp from 0 → base_lr
+        return base_lr * (step / warmup)
+    # Cosine decay from base_lr → min_lr over [warmup, total]
+    progress = (step - warmup) / max(1, total - warmup)
+    progress = min(1.0, max(0.0, progress))  # clamp past total
+    min_lr = base_lr * min_lr_ratio
+    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return min_lr + (base_lr - min_lr) * cosine
 
 
 class BRIANHarness(nn.Module):
@@ -72,6 +95,47 @@ class BRIANHarness(nn.Module):
         self._optimizer: Optional[torch.optim.Optimizer] = None
         # Grad accumulation counter
         self._accum_step = 0
+        # Global step counter (drives the LR schedule)
+        self._global_step = 0
+
+        # LR schedule (set via set_schedule; None → constant LR)
+        self._sched_warmup: Optional[int] = None
+        self._sched_total: Optional[int] = None
+        self._sched_min_ratio: float = 0.1
+
+        # Mixed precision (set via enable_mixed_precision)
+        self._amp_dtype: Optional[torch.dtype] = None
+        self._grad_scaler: Optional[torch.cuda.amp.GradScaler] = None
+
+    # ── Schedule + mixed-precision configuration ─────────────────────
+
+    def set_schedule(self, warmup: int, total: int,
+                     min_lr_ratio: float = 0.1) -> None:
+        """Enable warmup+cosine LR scheduling over `total` steps."""
+        self._sched_warmup = warmup
+        self._sched_total = total
+        self._sched_min_ratio = min_lr_ratio
+
+    def enable_mixed_precision(self, dtype: str = "bf16") -> None:
+        """Enable autocast. dtype ∈ {bf16, fp16}. bf16 needs no GradScaler;
+        fp16 gets one. CPU-only runs silently keep fp32."""
+        if dtype == "bf16":
+            self._amp_dtype = torch.bfloat16
+            self._grad_scaler = None
+        elif dtype == "fp16":
+            self._amp_dtype = torch.float16
+            # GradScaler only meaningful on CUDA
+            if torch.cuda.is_available():
+                self._grad_scaler = torch.cuda.amp.GradScaler()
+        else:
+            raise ValueError(f"unsupported amp dtype {dtype!r}; use bf16 or fp16")
+
+    def _autocast_ctx(self):
+        """Return an autocast context manager (or nullcontext if AMP off)."""
+        if self._amp_dtype is None:
+            return nullcontext()
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        return torch.autocast(device_type=device_type, dtype=self._amp_dtype)
 
     # ── Forward ──────────────────────────────────────────────────────
 
@@ -88,15 +152,18 @@ class BRIANHarness(nn.Module):
         over time, etc.).
         """
         batch, seq_len = ids.shape
-        # (batch, seq_len, d_sem)
-        x = self.embedding(ids)
-        # Flatten time into batch for the circuit's per-token forward
-        x_flat = x.reshape(batch * seq_len, self.d_sem)
-        outputs = self.circuit(x_flat, nt_levels=nt_levels)
-        sink = self._pick_sink_output(outputs)        # (batch*seq, d_sem)
-        sink = sink.reshape(batch, seq_len, self.d_sem)
-        logits = self.lm_head(sink)                   # (batch, seq, vocab)
-        return logits
+        with self._autocast_ctx():
+            # (batch, seq_len, d_sem)
+            x = self.embedding(ids)
+            # Flatten time into batch for the circuit's per-token forward
+            x_flat = x.reshape(batch * seq_len, self.d_sem)
+            outputs = self.circuit(x_flat, nt_levels=nt_levels)
+            sink = self._pick_sink_output(outputs)        # (batch*seq, d_sem)
+            sink = sink.reshape(batch, seq_len, self.d_sem)
+            logits = self.lm_head(sink)                   # (batch, seq, vocab)
+        # Return float32 logits regardless of autocast dtype, so loss math
+        # downstream is numerically stable.
+        return logits.float()
 
     def _pick_sink_output(self, outputs: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Return the tensor that goes to the LM head.
@@ -169,19 +236,42 @@ class BRIANHarness(nn.Module):
         optimizer = self._ensure_optimizer()
         self.train()
 
+        # Apply the LR schedule for the current global step (if configured)
+        self._global_step += 1
+        if self._sched_total is not None:
+            lr = cosine_warmup_lr(
+                step=self._global_step,
+                base_lr=self.training_config.learning_rate,
+                warmup=self._sched_warmup or 0,
+                total=self._sched_total,
+                min_lr_ratio=self._sched_min_ratio,
+            )
+            for group in optimizer.param_groups:
+                group["lr"] = lr
+
         loss = self.compute_loss(ids, targets, nt_levels=nt_levels)
-        # Scale by 1/accum so multiple accumulated grads sum to the same
-        # magnitude as a single full-batch step.
         accum = max(1, self.training_config.grad_accum)
-        (loss / accum).backward()
+        scaled = loss / accum
+
+        # fp16 needs gradient scaling; bf16 and fp32 don't.
+        if self._grad_scaler is not None:
+            self._grad_scaler.scale(scaled).backward()
+        else:
+            scaled.backward()
 
         self._accum_step += 1
         if self._accum_step >= accum:
-            if self.training_config.grad_clip is not None and self.training_config.grad_clip > 0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.parameters(), self.training_config.grad_clip
-                )
-            optimizer.step()
+            clip = self.training_config.grad_clip
+            if self._grad_scaler is not None:
+                if clip is not None and clip > 0:
+                    self._grad_scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(self.parameters(), clip)
+                self._grad_scaler.step(optimizer)
+                self._grad_scaler.update()
+            else:
+                if clip is not None and clip > 0:
+                    torch.nn.utils.clip_grad_norm_(self.parameters(), clip)
+                optimizer.step()
             optimizer.zero_grad(set_to_none=True)
             self._accum_step = 0
 
