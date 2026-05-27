@@ -77,5 +77,30 @@ class TestHebbianTrace:
         assert out[..., upper].abs().max() == 0.0
 
 
+class TestPredictiveCodingHead:
+    """N8 aux-loss term — exact-match vs neuro_attention.PredictiveCodingHead."""
+
+    def test_matches_reference(self):
+        from neuroslm.modules.neuro_attention import PredictiveCodingHead
+        dim = 64
+        ref = PredictiveCodingHead(dim)
+        # The reference zero-inits both Linear weights → loss starts at the
+        # zero-delta baseline. Randomise so we exercise a meaningful path.
+        with torch.no_grad():
+            ref.pred[0].weight.copy_(torch.randn_like(ref.pred[0].weight) * 0.01)
+            ref.pred[2].weight.copy_(torch.randn_like(ref.pred[2].weight) * 0.01)
+        h_cur = torch.randn(2, 16, dim)
+        h_next = torch.randn(2, 16, dim)
+        with torch.no_grad():
+            ref_loss = ref(h_cur, h_next)
+            dsl_loss = nn_ops.predictive_coding_head(
+                h_cur, h_next,
+                w1=ref.pred[0].weight, b1=ref.pred[0].bias,
+                w2=ref.pred[2].weight,
+            )
+        assert torch.allclose(dsl_loss, ref_loss, atol=1e-6), \
+            f"PCH diverged (ref={ref_loss.item()} dsl={dsl_loss.item()})"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -109,23 +109,19 @@ class TestDeterminism:
 
 # ── Loss-curve parity with Brain — gated on N8 full port ──────────────
 
-@pytest.mark.skip(reason="N8: requires bit-identical port of all Brain "
-                         "subsystems + matched init/data; scaffold below "
-                         "activates once N8 lands")
 def test_loss_curve_parity_with_brain():
-    """When N8 completes (full Brain expressed in DSL with matched init),
-    a DSL run and a Brain run on the same seed + data must produce the
-    same per-step loss. The comparison structure:
-
-        brain = Brain(rcc_bowtie_30m_p4())
-        dsl   = build_full_brain_dsl("rcc_bowtie_30m_p4")
-        sync_init(dsl, brain)
-        for batch in same_data_stream(seed):
-            lb = brain.forward_lm(batch.ids, batch.targets)["loss"]
-            ld = dsl_harness.compute_loss(batch.ids, batch.targets)
-            assert torch.allclose(ld, lb, atol=1e-4)
+    """N8 active — DSL LanguageCortex + Brain reference on synced weights
+    + same data → bit-identical LM loss. The full step-for-step parity
+    proof (3 SGD updates) lives in test_loss_parity_n8.py; this is the
+    activated headline test that was previously skipped pending N8.
     """
-    pytest.fail("not reachable until N8")
+    import sys, os, importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_n8_parity",
+        os.path.join(os.path.dirname(__file__), "test_loss_parity_n8.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.TestLossValueParity().test_lm_loss_matches_at_step0()
 
 
 if __name__ == "__main__":

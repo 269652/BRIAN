@@ -183,6 +183,24 @@ def causal_self_attention(x: torch.Tensor,
     return F.linear(y, out_weight)
 
 
+def predictive_coding_head(h_current: torch.Tensor, h_next: torch.Tensor,
+                            w1: torch.Tensor, b1: torch.Tensor,
+                            w2: torch.Tensor) -> torch.Tensor:
+    """Scalar predictive-coding loss between consecutive layer states.
+
+    Bit-identical to neuro_attention.PredictiveCodingHead: residual
+    predictor (linear → SiLU → linear), prediction = layer_norm(h + δ),
+    target = layer_norm(h_next.detach()); loss = cos_err + 0.1 · l2_err.
+    """
+    with torch.no_grad():
+        target = F.layer_norm(h_next.detach(), [h_next.size(-1)])
+    delta = F.linear(F.silu(F.linear(h_current, w1, b1)), w2)
+    pred = F.layer_norm(h_current + delta, [h_current.size(-1)])
+    cosine_err = 1.0 - F.cosine_similarity(pred, target, dim=-1).mean()
+    l2_err = (pred - target).pow(2).mean()
+    return cosine_err + 0.1 * l2_err
+
+
 def mod_block(x: torch.Tensor,
               # router MLP (2-layer with SiLU)
               router_w1: torch.Tensor, router_b1: torch.Tensor,
