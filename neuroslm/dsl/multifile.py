@@ -427,3 +427,149 @@ def _record(ast: ModuleAST, name: str, decl_text: str,
     if name in bucket or name in other:
         raise ValueError(f"{path}: duplicate declaration {name!r}")
     bucket[name] = decl_text
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Stage 3 — Resolver: discover + parse + link cross-file imports
+# ════════════════════════════════════════════════════════════════════════
+#
+# After Stage 1 (file discovery) and Stage 2 (per-file parsing), the
+# Resolver glues everything together: it walks the architecture root,
+# parses every file into a ModuleAST, resolves each import specifier to
+# its target file, and validates that every imported name is actually
+# exported by that target.
+#
+# The result is a `ResolvedProgram` — the input shape Stage 4 (lib-defined
+# dynamics/function lookup) and Stage 5 (synapse/modulation equation
+# codegen) consume to walk the architecture as a single coherent unit.
+
+
+class ResolverError(Exception):
+    """Raised when the multi-file program is structurally invalid:
+    missing arch.neuro, unresolvable import path, or imported name
+    not actually exported by its target file.
+    """
+    pass
+
+
+@dataclass
+class ResolvedProgram:
+    """A fully-linked multi-file architecture program.
+
+    Attributes:
+        arch_root: absolute path to the architecture root
+        modules:   {absolute_file_path: ModuleAST}
+        import_map: {file_path: {local_alias: (target_file, source_name)}}
+                    — what each name refers to within each file's scope
+        architecture: the `architecture { name, properties }` block from
+                      arch.neuro, or {} if none
+    """
+    arch_root: Path
+    modules: Dict[Path, ModuleAST] = field(default_factory=dict)
+    import_map: Dict[Path, Dict[str, tuple]] = field(default_factory=dict)
+    architecture: Dict = field(default_factory=dict)
+
+    def lookup(self, from_file: Path, name: str) -> str:
+        """Return the raw declaration text for `name` in `from_file`'s scope.
+
+        Search order:
+          1. local exports + private declarations in `from_file`
+          2. imported aliases — resolved to (target_file, source_name)
+             and then looked up in the target's exports
+
+        Raises ResolverError if the name resolves to nothing.
+        """
+        from_file = Path(from_file).resolve()
+        ast = self.modules.get(from_file)
+        if ast is None:
+            raise ResolverError(f"unknown file {from_file}")
+
+        if name in ast.exports:
+            return ast.exports[name]
+        if name in ast.private:
+            return ast.private[name]
+
+        imports = self.import_map.get(from_file, {})
+        if name in imports:
+            target_file, src_name = imports[name]
+            target_ast = self.modules.get(target_file)
+            if target_ast is None or src_name not in target_ast.exports:
+                raise ResolverError(
+                    f"{from_file}: import {name!r} → "
+                    f"{target_file}::{src_name!r} not found"
+                )
+            return target_ast.exports[src_name]
+
+        raise ResolverError(f"{from_file}: symbol {name!r} not found")
+
+
+class Resolver:
+    """Walk an architecture folder and produce a `ResolvedProgram`.
+
+    Use:
+        program = Resolver(arch_root).resolve()
+        decl = program.lookup(file_path, "some_name")
+    """
+
+    def __init__(self, arch_root: Path):
+        self.arch_root = Path(arch_root).resolve()
+        self.loader = FolderLoader(self.arch_root)
+        self.path_resolver = PathResolver(self.arch_root)
+
+    def resolve(self) -> ResolvedProgram:
+        if not self.loader.has_arch_root():
+            raise ResolverError(
+                f"missing arch.neuro at architecture root {self.arch_root}"
+            )
+
+        program = ResolvedProgram(arch_root=self.arch_root)
+
+        # Pass 1: parse every file into a ModuleAST
+        for path, src in self.loader.discover().items():
+            try:
+                program.modules[path] = parse_module(src, path=path)
+            except ValueError as e:
+                raise ResolverError(f"{path}: parse error: {e}") from e
+
+        # Pull the `architecture { ... }` block out of arch.neuro
+        arch_path = (self.arch_root / "arch.neuro").resolve()
+        arch_ast = program.modules.get(arch_path)
+        if arch_ast and arch_ast.architecture:
+            program.architecture = arch_ast.architecture
+
+        # Pass 2: resolve every import to a target file + validate exports
+        for file_path, ast in program.modules.items():
+            file_imports: Dict[str, tuple] = {}
+            for imp in ast.imports:
+                try:
+                    target_file = self.path_resolver.resolve(
+                        imp.specifier, from_file=file_path
+                    )
+                except (FileNotFoundError, ValueError) as e:
+                    raise ResolverError(
+                        f"{file_path}: cannot resolve import {imp.specifier!r}: {e}"
+                    ) from e
+                target_file = target_file.resolve()
+
+                target_ast = program.modules.get(target_file)
+                if target_ast is None:
+                    raise ResolverError(
+                        f"{file_path}: import target {target_file} not loaded"
+                    )
+
+                for name in imp.names:
+                    if name not in target_ast.exports:
+                        raise ResolverError(
+                            f"{file_path}: imported name {name!r} not "
+                            f"exported by {target_file}"
+                        )
+                    local_alias = imp.aliases.get(name, name)
+                    if local_alias in file_imports:
+                        raise ResolverError(
+                            f"{file_path}: duplicate import alias {local_alias!r}"
+                        )
+                    file_imports[local_alias] = (target_file, name)
+
+            program.import_map[file_path] = file_imports
+
+        return program
