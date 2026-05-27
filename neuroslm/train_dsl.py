@@ -199,10 +199,45 @@ def _maybe_resume(harness: BRIANHarness, ckpt_dir: Path) -> int:
 
 # ── Train loop ───────────────────────────────────────────────────────
 
+def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
+                         gnorm: float, lr: float, tok_per_s: float,
+                         metrics: Optional[Dict] = None) -> str:
+    """Emit the native train.py per-step format so DSL and Brain logs are
+    directly comparable. LM metrics are real; bowtie metrics (Φ, λ₁, ign,
+    mesoLG, troph, NT, osc) come from `metrics` if the subsystems are
+    present, else honest placeholders until N7-N8 ports them.
+    """
+    import math as _m
+    ppl = _m.exp(min(avg_lm, 20.0))   # cap to avoid overflow on early steps
+    m = metrics or {}
+    phi = m.get("phi", 0.0)
+    fid = m.get("fiedler", 0.0)
+    ign = m.get("ignition", 0.0)
+    lg = m.get("meso_lg", 0.0)
+    t_act = m.get("troph_active", 0)
+    t_tot = m.get("troph_total", 0)
+    t_mu = m.get("troph_mean", 0.0)
+    nt = m.get("nt", {})
+    nt_str = " ".join(f"{k}={v:.2f}" for k, v in nt.items())
+    osc = m.get("osc", {})
+    osc_str = ""
+    if osc:
+        osc_str = " | osc[" + " ".join(f"{k}={v:.3f}" for k, v in osc.items()) + "]"
+    return (f"step {step:5d} | loss {avg_loss:.4f} | lm {avg_lm:.4f} "
+            f"| ppl {ppl:.1f} | gnorm {gnorm:.3f} | lr {lr:.2e} "
+            f"| {tok_per_s:.0f} tok/s "
+            f"| Φ {phi:.3f} | λ₁ {fid:.3f} | ign {ign:.2f} "
+            f"| mesoLG {lg:.2f} "
+            f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
+            f"| NT[{nt_str}]{osc_str}")
+
+
 def train(harness: BRIANHarness, source: SyntheticBatchSource,
           steps: int, log_every: int = 20, save_every: int = 1000,
-          ckpt_dir: Optional[Path] = None, start_step: int = 0) -> None:
-    """Run train_steps from `start_step+1` to `steps`. Logs + checkpoints."""
+          ckpt_dir: Optional[Path] = None, start_step: int = 0,
+          tokens_per_step: int = 0) -> None:
+    """Run train_steps from `start_step+1` to `steps`. Emits the native
+    train.py metric format; saves checkpoints."""
     if ckpt_dir is not None:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -212,6 +247,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
 
     for step in range(start_step + 1, steps + 1):
         ids, targets = source.next()
+        if not tokens_per_step:
+            tokens_per_step = ids.numel()
         loss = harness.train_step(ids, targets)
         log_buf.append(loss)
 
@@ -219,10 +256,15 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
             now = time.time()
             avg = sum(log_buf) / len(log_buf)
             log_buf.clear()
-            steps_per_sec = log_every / max(now - last_log, 1e-6)
-            print(f"[train_dsl] step={step:>6d} loss={avg:.4f} "
-                  f"steps/s={steps_per_sec:.2f} "
-                  f"elapsed={int(now - t0)}s", flush=True)
+            tok_per_s = tokens_per_step * log_every / max(now - last_log, 1e-6)
+            gnorm = float(getattr(harness, "_last_gnorm", 0.0))
+            lr = float(getattr(harness, "_last_lr", 0.0))
+            # Pull any subsystem metrics the harness/LM expose (N7-N8 fill
+            # these; trunk-only run leaves them at placeholders).
+            metrics = getattr(harness, "last_metrics", None)
+            # avg_lm == avg total loss until auxiliary losses are added.
+            print(_format_metrics_line(step, avg, avg, gnorm, lr,
+                                        tok_per_s, metrics), flush=True)
             last_log = now
 
         if ckpt_dir is not None and step % save_every == 0:

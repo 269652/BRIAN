@@ -301,19 +301,23 @@ class BRIANHarness(nn.Module):
         self._accum_step += 1
         if self._accum_step >= accum:
             clip = self.training_config.grad_clip
+            # clip_grad_norm_ returns the total norm *before* clipping —
+            # capture it for native-format logging (gnorm).
             if self._grad_scaler is not None:
-                if clip is not None and clip > 0:
-                    self._grad_scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.parameters(), clip)
+                self._grad_scaler.unscale_(optimizer)
+                gnorm = torch.nn.utils.clip_grad_norm_(
+                    self.parameters(), clip if (clip and clip > 0) else 1e9)
                 self._grad_scaler.step(optimizer)
                 self._grad_scaler.update()
             else:
-                if clip is not None and clip > 0:
-                    torch.nn.utils.clip_grad_norm_(self.parameters(), clip)
+                gnorm = torch.nn.utils.clip_grad_norm_(
+                    self.parameters(), clip if (clip and clip > 0) else 1e9)
                 optimizer.step()
+            self._last_gnorm = float(gnorm)
             optimizer.zero_grad(set_to_none=True)
             self._accum_step = 0
 
+        self._last_lr = float(optimizer.param_groups[0]["lr"])
         return float(loss.detach().item())
 
     def eval_step(self, ids: torch.Tensor, targets: torch.Tensor,
