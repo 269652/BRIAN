@@ -183,6 +183,67 @@ def causal_self_attention(x: torch.Tensor,
     return F.linear(y, out_weight)
 
 
+def differential_attention(x: torch.Tensor,
+                           q_weight: torch.Tensor,
+                           kv_weight: torch.Tensor,
+                           out_weight: torch.Tensor,
+                           lambda_init: torch.Tensor,
+                           sub_norm_weight: torch.Tensor,
+                           n_heads: int,
+                           n_kv_heads: int,
+                           max_ctx: int,
+                           rope_base: float = 10000.0) -> torch.Tensor:
+    """Differential attention — matches modules.differential_attention.
+    DifferentialAttention(n_nt=0) base path bit-for-bit.
+
+    Each head splits Q/K into halves; output is
+        (softmax(Q1 K1ᵀ) − λ·softmax(Q2 K2ᵀ)) @ V
+    with a head-wise λ = sigmoid(lambda_init) for noise cancellation,
+    plus per-half F.normalize, RoPE on half_dim, GQA expansion, manual
+    causal mask, and a head-dim RMSNorm before the output projection.
+    """
+    B, T, C = x.shape
+    head_dim = C // n_heads
+    half_dim = head_dim // 2
+    n_groups = n_heads // n_kv_heads
+
+    q = F.linear(x, q_weight).view(B, T, n_heads, head_dim).transpose(1, 2)
+    q1, q2 = q[..., :half_dim], q[..., half_dim:]
+    kv = F.linear(x, kv_weight).view(B, T, 2, n_kv_heads, head_dim).permute(2, 0, 3, 1, 4)
+    k, v = kv[0], kv[1]
+    k1, k2 = k[..., :half_dim], k[..., half_dim:]
+
+    q1, q2 = F.normalize(q1, dim=-1), F.normalize(q2, dim=-1)
+    k1, k2 = F.normalize(k1, dim=-1), F.normalize(k2, dim=-1)
+
+    cos, sin = rope_cache(max_ctx, half_dim, base=rope_base,
+                          device=x.device, dtype=x.dtype)
+    q1 = rope(q1, cos.to(q1.dtype), sin.to(q1.dtype))
+    q2 = rope(q2, cos.to(q2.dtype), sin.to(q2.dtype))
+    k1 = rope(k1, cos.to(k1.dtype), sin.to(k1.dtype))
+    k2 = rope(k2, cos.to(k2.dtype), sin.to(k2.dtype))
+
+    if n_groups > 1:
+        k1 = k1[:, :, None].expand(-1, -1, n_groups, -1, -1).reshape(B, n_heads, T, half_dim)
+        k2 = k2[:, :, None].expand(-1, -1, n_groups, -1, -1).reshape(B, n_heads, T, half_dim)
+        v = v[:, :, None].expand(-1, -1, n_groups, -1, -1).reshape(B, n_heads, T, head_dim)
+
+    lam = torch.sigmoid(lambda_init).unsqueeze(0).expand(B, -1).unsqueeze(-1).unsqueeze(-1)
+
+    scale = half_dim ** -0.5
+    causal_mask = torch.triu(torch.ones(T, T, device=x.device, dtype=torch.bool), diagonal=1)
+    attn1 = (q1 @ k1.transpose(-2, -1)) * scale
+    attn2 = (q2 @ k2.transpose(-2, -1)) * scale
+    attn1 = F.softmax(attn1.masked_fill(causal_mask, float("-inf")), dim=-1)
+    attn2 = F.softmax(attn2.masked_fill(causal_mask, float("-inf")), dim=-1)
+    diff_attn = attn1 - lam * attn2
+
+    y = diff_attn @ v                                  # (B, H, T, head_dim)
+    y = rmsnorm(y, sub_norm_weight)                    # per-head-dim RMSNorm
+    y = y.transpose(1, 2).contiguous().view(B, T, C)
+    return F.linear(y, out_weight)
+
+
 # ── N7: cognitive attention subsystems ─────────────────────────────────
 
 def neuromod_scale(nt: torch.Tensor, proj_weight: torch.Tensor,

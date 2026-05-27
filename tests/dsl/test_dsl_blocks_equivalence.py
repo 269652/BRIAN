@@ -72,5 +72,65 @@ class TestNeuralGeometryAdapterDSL:
         assert diff < 1e-5, f"DSL adapter diverged from reference (max diff {diff})"
 
 
+DIFF_TRANSFORMER_BLOCK_DSL = '''
+layer DiffTransformerBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv, head_dim) {
+    param gamma1:      (D,)            init=ones
+    param Wq:          (D, D)          init=xavier
+    param Wkv:         (Dkv, D)        init=xavier
+    param Wo:          (D, D)          init=xavier
+    param lambda_init: (n_heads,)      init=zeros
+    param sub_norm:    (head_dim,)     init=ones
+    param gamma2:      (D,)            init=ones
+    param w1:          (H, D)          init=xavier
+    param w2:          (H, D)          init=xavier
+    param w3:          (D, H)          init=xavier
+
+    forward(x) {
+        a = differential_attention(rmsnorm(x, gamma1), Wq, Wkv, Wo, lambda_init, sub_norm, n_heads, n_kv_heads, max_ctx)
+        x = x + a
+        m = swiglu(rmsnorm(x, gamma2), w1, w2, w3)
+        return x + m
+    }
+}
+'''
+
+
+class TestDiffTransformerBlockDSL:
+    def test_dsl_matches_reference(self):
+        from neuroslm.modules.differential_attention import DiffTransformerBlock as RefBlock
+        D, n_heads, max_ctx = 64, 8, 64
+        head_dim = D // n_heads
+        H = swiglu_hidden_dim(D)
+        Dkv = 2 * D   # n_kv_heads == n_heads
+
+        ref = RefBlock(D, n_heads, max_ctx, n_nt=0)
+        ref.eval()
+
+        Cls = compile_layer(DIFF_TRANSFORMER_BLOCK_DSL)
+        dsl = Cls(D=D, n_heads=n_heads, n_kv_heads=n_heads, max_ctx=max_ctx,
+                  H=H, Dkv=Dkv, head_dim=head_dim)
+        dsl.eval()
+
+        # Sync DSL params from reference
+        with torch.no_grad():
+            dsl.gamma1.copy_(ref.n1.weight)
+            dsl.Wq.copy_(ref.attn.q_proj.weight)
+            dsl.Wkv.copy_(ref.attn.kv_proj.weight)
+            dsl.Wo.copy_(ref.attn.out.weight)
+            dsl.lambda_init.copy_(ref.attn.lambda_init)
+            dsl.sub_norm.copy_(ref.attn.sub_norm.weight)
+            dsl.gamma2.copy_(ref.n2.weight)
+            dsl.w1.copy_(ref.mlp.w1.weight)
+            dsl.w2.copy_(ref.mlp.w2.weight)
+            dsl.w3.copy_(ref.mlp.w3.weight)
+
+        x = torch.randn(2, 16, D)
+        with torch.no_grad():
+            ref_out = ref(x)
+            dsl_out = dsl(x)
+        diff = (ref_out - dsl_out).abs().max().item()
+        assert diff < 1e-5, f"DSL DiffTransformerBlock diverged (max diff {diff})"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

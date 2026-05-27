@@ -77,6 +77,33 @@ class TestCausalSelfAttentionGQA:
             f"max diff {(dsl_out - ref_out).abs().max().item()}"
 
 
+class TestDifferentialAttention:
+    """N8 keystone — bit-identical to DiffTransformerBlock's attention."""
+
+    def test_matches_reference_no_nt(self):
+        from neuroslm.modules.differential_attention import DifferentialAttention
+        dim, n_heads, max_ctx = 64, 8, 64
+        ref = DifferentialAttention(dim, n_heads, max_ctx, n_nt=0)
+        ref.eval()
+
+        x = torch.randn(2, 16, dim)
+        with torch.no_grad():
+            ref_out = ref(x)
+            dsl_out = nn_ops.differential_attention(
+                x,
+                q_weight=ref.q_proj.weight,
+                kv_weight=ref.kv_proj.weight,
+                out_weight=ref.out.weight,
+                lambda_init=ref.lambda_init,
+                sub_norm_weight=ref.sub_norm.weight,
+                n_heads=n_heads,
+                n_kv_heads=n_heads,
+                max_ctx=max_ctx,
+            )
+        diff = (dsl_out - ref_out).abs().max().item()
+        assert diff < 1e-5, f"diff-attn diverged (max diff {diff})"
+
+
 class TestCausality:
     """A future token must not influence an earlier one's output."""
 

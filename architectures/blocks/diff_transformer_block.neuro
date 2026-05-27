@@ -1,0 +1,29 @@
+# DiffTransformerBlock — differential-attention transformer block.
+#
+# Each head splits Q,K into halves; output is
+#   (softmax(Q1·K1ᵀ) − λ·softmax(Q2·K2ᵀ)) · V
+# where λ = sigmoid(lambda_init) is a learned per-head noise-cancellation
+# strength. Followed by SwiGLU + residuals + final RMSNorm.
+#
+# Bit-identical to neuroslm.modules.differential_attention.DiffTransformerBlock
+# (verified by tests/dsl/test_dsl_blocks_equivalence.py).
+
+export layer DiffTransformerBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv, head_dim) {
+    param gamma1:      (D,)            init=ones
+    param Wq:          (D, D)          init=xavier
+    param Wkv:         (Dkv, D)        init=xavier
+    param Wo:          (D, D)          init=xavier
+    param lambda_init: (n_heads,)      init=zeros
+    param sub_norm:    (head_dim,)     init=ones
+    param gamma2:      (D,)            init=ones
+    param w1:          (H, D)          init=xavier
+    param w2:          (H, D)          init=xavier
+    param w3:          (D, H)          init=xavier
+
+    forward(x) {
+        a = differential_attention(rmsnorm(x, gamma1), Wq, Wkv, Wo, lambda_init, sub_norm, n_heads, n_kv_heads, max_ctx)
+        x = x + a
+        m = swiglu(rmsnorm(x, gamma2), w1, w2, w3)
+        return x + m
+    }
+}
