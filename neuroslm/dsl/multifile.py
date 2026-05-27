@@ -22,7 +22,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+from .equations import DynamicsDecl
 
 
 class PathResolver:
@@ -337,18 +339,34 @@ def _parse_import(line: str) -> ImportDecl:
 
 
 def _slice_named_block(body: str, start: int, keyword: str):
-    """Slice `<keyword> <name> { ... }`; return (name, body_inside, end_pos)."""
-    # Advance past keyword
+    """Slice `<keyword> <name> [(args)] { ... }`; return (name, body_inside, end_pos).
+
+    The optional `(args)` between name and brace is for `function` declarations
+    (e.g. `function decay(x, alpha) { ... }`); other keywords have nothing
+    between name and `{`. The parens are silently skipped here — Stage 4's
+    `_decl_kind_and_body` re-extracts them from the full decl text.
+    """
     pos = start + len(keyword)
     while pos < len(body) and body[pos].isspace():
         pos += 1
-    # Name
     name_start = pos
     while pos < len(body) and (body[pos].isalnum() or body[pos] == "_"):
         pos += 1
     name = body[name_start:pos]
     while pos < len(body) and body[pos].isspace():
         pos += 1
+    # Skip past `(args)` if present (function declarations)
+    if pos < len(body) and body[pos] == "(":
+        depth = 1
+        pos += 1
+        while pos < len(body) and depth > 0:
+            if body[pos] == "(":
+                depth += 1
+            elif body[pos] == ")":
+                depth -= 1
+            pos += 1
+        while pos < len(body) and body[pos].isspace():
+            pos += 1
     if pos >= len(body) or body[pos] != "{":
         raise ValueError(f"expected `{{` after `{keyword} {name}`")
     inner, end = _slice_braced(body, pos)
@@ -453,6 +471,20 @@ class ResolverError(Exception):
 
 
 @dataclass
+class FunctionDecl:
+    """A user-defined `function` from a lib file.
+
+    Function calls in equation strings get inlined: a call `decay(x, 0.1)`
+    in a population's `equation:` field is rewritten as `(1 - 0.1) * x`
+    before SymPy parsing. (Inlining lives in Stage 5; Stage 4 only parses
+    and collects.)
+    """
+    name: str
+    args: List[str]
+    equation: str
+
+
+@dataclass
 class ResolvedProgram:
     """A fully-linked multi-file architecture program.
 
@@ -463,11 +495,60 @@ class ResolvedProgram:
                     — what each name refers to within each file's scope
         architecture: the `architecture { name, properties }` block from
                       arch.neuro, or {} if none
+        user_dynamics: {(file, name): DynamicsDecl} — `dynamics` blocks
+                       parsed from lib files (typically exported)
+        user_functions: {(file, name): FunctionDecl} — same for `function`
+                        blocks
     """
     arch_root: Path
     modules: Dict[Path, ModuleAST] = field(default_factory=dict)
     import_map: Dict[Path, Dict[str, tuple]] = field(default_factory=dict)
     architecture: Dict = field(default_factory=dict)
+    user_dynamics: Dict[Tuple[Path, str], DynamicsDecl] = field(default_factory=dict)
+    user_functions: Dict[Tuple[Path, str], FunctionDecl] = field(default_factory=dict)
+
+    def lookup_dynamics(self, from_file: Path, name: str) -> Optional[DynamicsDecl]:
+        """Look up a user-defined dynamics by the name visible in `from_file`.
+
+        Search order:
+          1. names this file imported (resolves alias → original name in
+             target file)
+          2. dynamics declared inside this file
+          3. None (codegen will fall back to its built-in DYNAMICS_DECLS)
+        """
+        from_file = Path(from_file).resolve()
+
+        # Imported dynamics?
+        imports = self.import_map.get(from_file, {})
+        if name in imports:
+            target_file, src_name = imports[name]
+            key = (target_file, src_name)
+            if key in self.user_dynamics:
+                return self.user_dynamics[key]
+
+        # Locally defined dynamics?
+        local_key = (from_file, name)
+        if local_key in self.user_dynamics:
+            return self.user_dynamics[local_key]
+
+        return None
+
+    def lookup_function(self, from_file: Path, name: str) -> Optional[FunctionDecl]:
+        """Mirror of `lookup_dynamics` for `function` decls."""
+        from_file = Path(from_file).resolve()
+
+        imports = self.import_map.get(from_file, {})
+        if name in imports:
+            target_file, src_name = imports[name]
+            key = (target_file, src_name)
+            if key in self.user_functions:
+                return self.user_functions[key]
+
+        local_key = (from_file, name)
+        if local_key in self.user_functions:
+            return self.user_functions[local_key]
+
+        return None
 
     def lookup(self, from_file: Path, name: str) -> str:
         """Return the raw declaration text for `name` in `from_file`'s scope.
@@ -572,4 +653,187 @@ class Resolver:
 
             program.import_map[file_path] = file_imports
 
+        # Pass 3: parse every `dynamics` / `function` declaration body into
+        # structured form and register it on the program.
+        for file_path, ast in program.modules.items():
+            for name, decl_text in list(ast.exports.items()) + list(ast.private.items()):
+                kind, header, body = _decl_kind_and_body(decl_text)
+                if kind == "dynamics":
+                    try:
+                        decl = parse_dynamics_block(body)
+                    except ValueError as e:
+                        raise ResolverError(
+                            f"{file_path}: malformed dynamics {name!r}: {e}"
+                        ) from e
+                    program.user_dynamics[(file_path, name)] = decl
+                elif kind == "function":
+                    try:
+                        fn = parse_function_block(name, header, body)
+                    except ValueError as e:
+                        raise ResolverError(
+                            f"{file_path}: malformed function {name!r}: {e}"
+                        ) from e
+                    program.user_functions[(file_path, name)] = fn
+
         return program
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Stage 4 — `dynamics` / `function` block parsers
+# ════════════════════════════════════════════════════════════════════════
+
+# Recognise the head of a stored declaration text and pull out its body.
+_DECL_HEAD_RE = re.compile(
+    r'^\s*(?P<kind>population|synapse|neurotransmitter|modulation|'
+    r'dynamics|function|formal_spec|sheaf)\s+'
+    r'(?P<header>[^{]*)\{'
+)
+
+
+def _decl_kind_and_body(decl_text: str) -> Tuple[str, str, str]:
+    """Return (kind, header, body) from a stored declaration string.
+
+    `header` is whatever sits between the keyword and the opening brace
+    (the name, plus `(args)` for functions, plus `src -> tgt` for
+    synapse/modulation). `body` is the brace contents.
+    """
+    m = _DECL_HEAD_RE.match(decl_text)
+    if not m:
+        return ("", "", "")
+    kind = m.group("kind")
+    header = m.group("header").strip()
+    # Body is the text between matching braces — reuse Stage-2 brace slicer.
+    open_brace = decl_text.index("{", m.end() - 1)
+    body, _ = _slice_braced(decl_text, open_brace)
+    return kind, header, body
+
+
+def parse_dynamics_block(body: str) -> DynamicsDecl:
+    """Parse the body of a `dynamics name { ... }` block into a DynamicsDecl.
+
+    Recognised fields (all optional, but exactly one of equation/ode):
+        equation:  "y = ..."           algebraic form
+        ode:       "dV/dt = ..."       differential form
+        params:    { name: "init", ... }
+        state:     { name: "init", ... }
+        constants: { name: value, ... }
+    """
+    props = _split_top_level_kv(body)
+
+    equation = props.get("equation")
+    ode = props.get("ode")
+    if equation is not None:
+        equation = _strip_quotes(equation)
+    if ode is not None:
+        ode = _strip_quotes(ode)
+
+    params = _parse_subdict(props.get("params", ""))
+    state = _parse_subdict(props.get("state", ""))
+    constants_raw = _parse_subdict(props.get("constants", ""))
+
+    # Constants are numeric — convert from string
+    constants: Dict[str, Any] = {}
+    for k, v in constants_raw.items():
+        try:
+            constants[k] = float(v)
+            if constants[k].is_integer() and "." not in v:
+                constants[k] = int(constants[k])
+        except (ValueError, AttributeError):
+            constants[k] = v  # leave as-is (will fail loudly downstream)
+
+    return DynamicsDecl(
+        equation=equation,
+        ode=ode,
+        params=params,
+        state=state,
+        constants=constants,
+    )
+
+
+def parse_function_block(name: str, header: str, body: str) -> FunctionDecl:
+    """Parse `function name(<args>) { equation: "..." }`.
+
+    `header` may be either form, depending on caller context:
+      - `name(args)`  — used when Stage-4's `_decl_kind_and_body` calls in
+      - `(args)`      — used when the outer parser has already extracted
+                        the name and just passes the arg list
+    """
+    header_stripped = header.strip()
+    # Allow optional leading `name` in the header; ignore it (we use the
+    # explicit `name` argument).
+    header_stripped = re.sub(r'^\s*\w+\s*', '', header_stripped)
+    m = re.match(r'^\((?P<args>[^)]*)\)\s*$', header_stripped)
+    if not m:
+        raise ValueError(
+            f"function {name!r}: header must be `(args)` or `name(args)`, "
+            f"got {header!r}"
+        )
+
+    args = [a.strip() for a in m.group("args").split(",") if a.strip()]
+
+    props = _split_top_level_kv(body)
+    equation = props.get("equation")
+    if equation is None:
+        raise ValueError(f"function {name!r}: missing `equation:` field")
+    equation = _strip_quotes(equation)
+
+    return FunctionDecl(name=name, args=args, equation=equation)
+
+
+# ── Property-parsing helpers (shared with parse_dynamics_block) ────────
+
+def _split_top_level_kv(body: str) -> Dict[str, str]:
+    """Split `key: value, key: { ... }, ...` at depth 0 of braces/strings."""
+    out: Dict[str, str] = {}
+    buf: List[str] = []
+    depth = 0
+    in_str: Optional[str] = None
+
+    def flush(parts: List[str]) -> None:
+        piece = "".join(parts).strip()
+        if not piece:
+            return
+        if ":" not in piece:
+            return
+        k, v = piece.split(":", 1)
+        out[k.strip()] = v.strip()
+
+    for ch in body:
+        if in_str:
+            buf.append(ch)
+            if ch == in_str:
+                in_str = None
+            continue
+        if ch in ('"', "'"):
+            in_str = ch
+            buf.append(ch)
+        elif ch in "([{":
+            depth += 1
+            buf.append(ch)
+        elif ch in ")]}":
+            depth = max(0, depth - 1)
+            buf.append(ch)
+        elif (ch == "," or ch == "\n") and depth == 0:
+            flush(buf)
+            buf = []
+        else:
+            buf.append(ch)
+    flush(buf)
+    return out
+
+
+def _parse_subdict(text: str) -> Dict[str, str]:
+    """Parse `{ key: value, key: value }` into a flat string→string dict."""
+    if not text:
+        return {}
+    text = text.strip()
+    if text.startswith("{") and text.endswith("}"):
+        text = text[1:-1]
+    return {k: _strip_quotes(v) for k, v in _split_top_level_kv(text).items()}
+
+
+def _strip_quotes(text: str) -> str:
+    text = text.strip()
+    if len(text) >= 2 and text[0] in ('"', "'") and text[-1] == text[0]:
+        return text[1:-1]
+    return text
