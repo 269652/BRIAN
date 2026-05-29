@@ -262,6 +262,97 @@ def test_loss_clipping_disabled():
     print(f"\n[test_loss_clipping_disabled] P3 legacy compatibility: ✓")
 
 
+# ── Brain ↔ DSL gradient parity ───────────────────────────────────────
+# These tests guard the Brain↔DSL clipping equivalence at the *gradient*
+# level, not just the forward value. Forward values are trivially equal
+# because detach() doesn't change a scalar; the divergence only shows up
+# in autograd. Until this test was added, every parity test compared the
+# forward output only — so the median-not-detached bug in Brain went
+# unnoticed and accumulated over thousands of training steps.
+
+def test_brain_clipping_gradient_matches_detached_median():
+    """Brain's _chunked_ce must detach the median for clip-threshold.
+
+    If the median is on the autograd graph, outlier sequences leak
+    gradient through the threshold → clipping dampens its own learning
+    signal. This is the bug found 2026-05-28 by inspecting why DSL ↔
+    Brain trajectories diverge after step ~1500 (first clipping engage).
+    """
+    import torch.nn.functional as F
+
+    torch.manual_seed(0)
+    B, T, V = 4, 16, 64
+    logits = torch.randn(B, T, V, requires_grad=True)
+    targets = torch.randint(0, V, (B, T))
+    # Force seq 3 to be a clear >3×median outlier so clipping fires
+    targets[3] = (targets[3] + V // 2) % V
+
+    # Brain path
+    from neuroslm.brain import Brain as _Brain
+    brain_loss_per_seq = _Brain._chunked_ce(
+        logits, targets, loss_clip_robust=True, loss_clip_factor=3.0)
+    brain_loss = brain_loss_per_seq.mean()
+
+    # Manual reference: detached median, matching DSL formulation
+    per_token = F.cross_entropy(
+        logits.reshape(-1, V), targets.reshape(-1), reduction="none")
+    per_seq_ref = per_token.reshape(B, T).mean(dim=1)
+    thresh_ref = (per_seq_ref.detach().median() * 3.0).clamp(min=1e-8)
+    ref_loss = torch.minimum(per_seq_ref, thresh_ref).mean()
+
+    # Forward values must already match (and did, even with the bug)
+    assert torch.allclose(brain_loss, ref_loss, atol=1e-6), \
+        f"forward differs: brain={brain_loss.item()} ref={ref_loss.item()}"
+
+    # Gradient must also match — this is what would have caught the bug
+    brain_grad = torch.autograd.grad(brain_loss, logits, retain_graph=True)[0]
+    ref_grad = torch.autograd.grad(ref_loss, logits)[0]
+    max_diff = (brain_grad - ref_grad).abs().max().item()
+    assert max_diff < 1e-6, (
+        f"Brain clipping gradient diverges from DSL/Phi-3 formulation "
+        f"(max diff {max_diff:.3e}). The median in _chunked_ce must be "
+        f"computed on loss_per_seq.detach(), not on the live graph.")
+
+
+def test_brain_clipping_matches_dsl_harness_gradient():
+    """Direct Brain ↔ DSL harness gradient parity on the same inputs."""
+    import torch.nn.functional as F
+    from neuroslm.brain import Brain as _Brain
+    from neuroslm.harness import BRIANHarness
+    from neuroslm.dsl.training_config import TrainingConfig, LossClippingConfig
+
+    torch.manual_seed(0)
+    B, T, V = 4, 16, 64
+    logits = torch.randn(B, T, V, requires_grad=True)
+    targets = torch.randint(0, V, (B, T))
+    targets[3] = (targets[3] + V // 2) % V  # outlier seq
+
+    # Brain path
+    brain_loss = _Brain._chunked_ce(
+        logits, targets, loss_clip_robust=True, loss_clip_factor=3.0).mean()
+
+    # DSL harness path — use _compute_loss_from_logits directly so we
+    # don't need a wrapped language model for this gradient comparison
+    cfg = TrainingConfig()
+    cfg.label_smoothing = 0.0
+    cfg.loss_clipping = LossClippingConfig(enabled=True, factor=3.0)
+    # Bypass __init__ since we only need _compute_loss_from_logits
+    h = BRIANHarness.__new__(BRIANHarness)
+    h.training_config = cfg
+    dsl_loss = h._compute_loss_from_logits(logits, targets)
+
+    assert torch.allclose(brain_loss, dsl_loss, atol=1e-6), \
+        f"forward: brain={brain_loss.item()} dsl={dsl_loss.item()}"
+
+    brain_grad = torch.autograd.grad(brain_loss, logits, retain_graph=True)[0]
+    dsl_grad = torch.autograd.grad(dsl_loss, logits)[0]
+    max_diff = (brain_grad - dsl_grad).abs().max().item()
+    assert max_diff < 1e-6, (
+        f"Brain ↔ DSL clipping gradient diverged (max diff {max_diff:.3e}). "
+        f"Both implementations must detach the median when computing the "
+        f"clip threshold; otherwise outliers leak gradient through it.")
+
+
 if __name__ == "__main__":
     print("\n" + "="*70)
     print("Per-Sample Loss Clipping Unit Tests")

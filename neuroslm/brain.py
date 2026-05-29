@@ -805,8 +805,13 @@ class Brain(nn.Module):
         loss_per_seq = acc.mean(dim=1)  # (B,)
 
         if loss_clip_robust:
-            # Clip each sequence's loss at C * median to prevent outliers
-            median_loss = loss_per_seq.median()
+            # Clip each sequence's loss at C * median to prevent outliers.
+            # Detach the median so the threshold itself is not a grad target
+            # — otherwise outliers leak gradient through the median element
+            # and clipping dampens its own learning signal. Matches the DSL
+            # harness (Phi-3 / Cerebras formulation) and is what the DSL
+            # parity tests assume.
+            median_loss = loss_per_seq.detach().median()
             max_loss = loss_clip_factor * median_loss
             loss_per_seq = torch.clamp(loss_per_seq, max=max_loss)
 
