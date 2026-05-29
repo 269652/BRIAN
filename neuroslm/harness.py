@@ -32,6 +32,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from neuroslm.dsl.training_config import TrainingConfig
+from neuroslm.dsl.maturity import (
+    MaturityTracker, AuxWeights, TotalLossConfig,
+)
 
 
 # ── LR schedule (warmup + cosine) ──────────────────────────────────────
@@ -112,6 +115,13 @@ class BRIANHarness(nn.Module):
         self._amp_dtype: Optional[torch.dtype] = None
         self._grad_scaler: Optional[torch.cuda.amp.GradScaler] = None
 
+        # Maturity + total-loss formula (matches Brain bit-for-bit).
+        # `total_loss_config` carries the aux weight table; `maturity`
+        # holds the rise-fast/fall-slow EMA fed by every train_step.
+        self.total_loss_config: TotalLossConfig = TotalLossConfig()
+        self.maturity: MaturityTracker = MaturityTracker()
+        self._last_lm_loss_value: float = self.maturity.l_random
+
     @classmethod
     def from_language_model(cls, language_model: nn.Module,
                             vocab_size: int, d_sem: int,
@@ -141,6 +151,9 @@ class BRIANHarness(nn.Module):
         h._sched_min_ratio = 0.1
         h._amp_dtype = None
         h._grad_scaler = None
+        h.total_loss_config = TotalLossConfig()
+        h.maturity = MaturityTracker()
+        h._last_lm_loss_value = h.maturity.l_random
         return h
 
     # ── Schedule + mixed-precision configuration ─────────────────────
@@ -227,17 +240,50 @@ class BRIANHarness(nn.Module):
         clip each at `factor * batch_median`, then average. Suppresses
         outlier-sequence dominance of the gradient.
 
-        Aux loss: if the wrapped LM stashed a `_last_pred_coding_loss`
-        (Brain's per-layer-pair predictive-coding loss), it's added with
-        weight 1.0 — matching Brain's forward_lm aggregation.
+        Aux losses: every loss stashed via the `_last_*_loss` convention on
+        the wrapped LM is aggregated using Brain's exact phase-gated weight
+        formula —  `aux_w * phase_gate(mat, center, width) * w_aux * loss_aux`
+        — so the trunk-affecting gradient matches Brain bit-for-bit. The
+        PCH aux is the only one routed to the LM trunk via the language
+        model's per-layer outputs; the rest (world/forward/motor/orchestrator)
+        come from sidecar modules and are detached from the trunk in Brain,
+        so they only affect the `loss` column, not the LM trajectory.
+
+        Recognised stash keys (set by the DSL Brain aggregator or wrappers):
+          * `_last_pred_coding_loss` → aux key 'pred_coding'  (trunk-affecting)
+          * `_last_world_loss`       → 'world'
+          * `_last_forward_loss`     → 'forward'
+          * `_last_motor_loss`       → 'motor'
+          * `_last_kl_world_loss`    → 'kl_world'
+          * `_last_novel_aux_loss`   → 'novel'
+          * `_last_cpc_loss`         → 'cpc'
+          * `_last_phi_loss`         → 'phi'
         """
         logits = self(ids, nt_levels=nt_levels)
-        loss = self._compute_loss_from_logits(logits, targets)
+        loss_lm = self._compute_loss_from_logits(logits, targets)
+        total = self.total_loss_config.w_lm * loss_lm
+        mat = self.maturity.value()
         if self.language_model is not None:
-            aux = getattr(self.language_model, "_last_pred_coding_loss", None)
-            if aux is not None and aux.numel() > 0:
-                loss = loss + aux
-        return loss
+            stash_map = {
+                "_last_pred_coding_loss": "pred_coding",
+                "_last_world_loss":       "world",
+                "_last_forward_loss":     "forward",
+                "_last_motor_loss":       "motor",
+                "_last_kl_world_loss":    "kl_world",
+                "_last_novel_aux_loss":   "novel",
+                "_last_cpc_loss":         "cpc",
+                "_last_phi_loss":         "phi",
+            }
+            for stash_key, aux_key in stash_map.items():
+                aux = getattr(self.language_model, stash_key, None)
+                if aux is None or aux.numel() == 0:
+                    continue
+                w = self.total_loss_config.aux.scaled(aux_key, mat)
+                total = total + w * aux
+        # Record the LM-portion so train_step can update MAT after the
+        # backward pass without a second forward.
+        self._last_lm_loss_value = float(loss_lm.detach().item())
+        return total
 
     def _compute_loss_from_logits(self, logits: torch.Tensor,
                                   targets: torch.Tensor) -> torch.Tensor:
@@ -326,6 +372,10 @@ class BRIANHarness(nn.Module):
             self._accum_step = 0
 
         self._last_lr = float(optimizer.param_groups[0]["lr"])
+        # Tick the maturity tracker — drives the next step's aux weights.
+        # Matches Brain's pattern: update_maturity() is called by train.py
+        # AFTER the backward, with the (un-scaled, batch-level) LM loss.
+        self.maturity.update(self._last_lm_loss_value)
         return float(loss.detach().item())
 
     def eval_step(self, ids: torch.Tensor, targets: torch.Tensor,
