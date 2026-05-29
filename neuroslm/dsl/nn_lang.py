@@ -110,6 +110,19 @@ class ParamDecl:
 
 
 @dataclass
+class StateDecl:
+    """Persistent buffer state — register_buffer'd, not a parameter.
+
+    Read into a local at the forward prelude, written back at the postlude
+    so reassignments in the body persist across calls. The state-machine
+    semantics needed by NeurotransmitterSystem / trophic / vesicle pools.
+    """
+    name: str
+    shape_src: str
+    init: str
+
+
+@dataclass
 class Stmt:
     target: Optional[str]   # None for a return
     expr: "Expr"
@@ -121,6 +134,7 @@ class LayerDef:
     name: str
     args: List[str]
     params: List[ParamDecl]
+    states: List[StateDecl]        # persistent buffer state (NT, trophic, ...)
     sublayers: Dict[str, str]      # name → layer-type (Phase N4 composition)
     fwd_args: List[str]
     body: List[Stmt]
@@ -228,6 +242,9 @@ def _parse_expr(s: str) -> Expr:
 _LAYER_RE = re.compile(r"\b(?:layer|model)\s+(\w+)\s*\(([^)]*)\)\s*\{", re.S)
 # init=name or init=name(args)
 _PARAM_RE = re.compile(r"\bparam\s+(\w+)\s*:\s*(\([^)]*\))\s+init=(\w+(?:\([^)]*\))?)")
+# state mirrors param syntax: `state name: (shape) init=spec`. Read at the
+# forward prelude, written back at the postlude — persistent buffer.
+_STATE_RE = re.compile(r"\bstate\s+(\w+)\s*:\s*(\([^)]*\))\s+init=(\w+(?:\([^)]*\))?)")
 _SUBLAYER_RE = re.compile(r"\bsublayer\s+(\w+)\s*:\s*(\w+)")
 _FORWARD_RE = re.compile(r"\bforward\s*\(([^)]*)\)\s*\{", re.S)
 
@@ -253,6 +270,8 @@ def parse_layer(source: str) -> LayerDef:
 
     params = [ParamDecl(pm.group(1), pm.group(2), pm.group(3))
               for pm in _PARAM_RE.finditer(body_text)]
+    states = [StateDecl(sm.group(1), sm.group(2), sm.group(3))
+              for sm in _STATE_RE.finditer(body_text)]
     sublayers = {sm.group(1): sm.group(2) for sm in _SUBLAYER_RE.finditer(body_text)}
 
     fm = _FORWARD_RE.search(body_text)
@@ -264,7 +283,7 @@ def parse_layer(source: str) -> LayerDef:
     fwd_text = body_text[f_start + 1:f_end]
 
     body = _parse_forward_body(fwd_text)
-    return LayerDef(name, args, params, sublayers, fwd_args, body)
+    return LayerDef(name, args, params, states, sublayers, fwd_args, body)
 
 
 def _parse_forward_body(text: str) -> List[Stmt]:
@@ -343,14 +362,40 @@ def generate_layer_source(ld: LayerDef) -> str:
             f"        self.{p.name} = nn.Parameter("
             f"_alloc({p.init!r}, _evalshape({p.shape_src!r}, kw)))"
         )
+    # State buffers — persistent, not learnable. register_buffer puts them
+    # in named_buffers() (not named_parameters()), moves them across .to(),
+    # and survives state_dict round-trips.
+    for s in ld.states:
+        lines.append(
+            f"        self.register_buffer({s.name!r}, "
+            f"_alloc({s.init!r}, _evalshape({s.shape_src!r}, kw)))"
+        )
     # forward
     lines.append("")
     lines.append(f"    def forward(self, {', '.join(ld.fwd_args)}):")
     locals_ = set(ld.fwd_args)
+    # State prelude — read each state buffer into a local so the body can
+    # treat it like an ordinary variable (and rebind it).
+    for s in ld.states:
+        lines.append(f"        {s.name} = self.{s.name}")
+        locals_.add(s.name)
     for st in ld.body:
         rhs = _lower_expr(st.expr, locals_, ld.sublayers)
         if st.is_return:
-            lines.append(f"        return {rhs}")
+            # State postlude — copy locals back into the buffers *before*
+            # returning. .detach() so we don't pin a grad graph to the
+            # buffer across calls; torch.no_grad() so the in-place copy
+            # doesn't error under autograd version-tracking.
+            if ld.states:
+                lines.append(f"        _ret = {rhs}")
+                lines.append("        with torch.no_grad():")
+                for s in ld.states:
+                    lines.append(
+                        f"            self.{s.name}.copy_({s.name}.detach())"
+                    )
+                lines.append("        return _ret")
+            else:
+                lines.append(f"        return {rhs}")
         else:
             lines.append(f"        {st.target} = {rhs}")
             locals_.add(st.target)
