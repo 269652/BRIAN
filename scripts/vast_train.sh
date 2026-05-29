@@ -229,8 +229,12 @@ CREATE_OUT="$(vastai create instance "$OFFER_ID" \
     --disk "$VAST_DISK" \
     --label "neuroslm-full" \
     --env "-e GITHUB=$GITHUB -e HF_TOKEN=${HF_TOKEN:-}" \
-    --onstart-cmd "$ONSTART" \
-    --ssh 2>&1)"
+    --onstart-cmd "$ONSTART" 2>&1)"
+    # Note: no --ssh. vast.ai /.launch spawns an ssh keepalive whenever
+    # --ssh is set; the pytorch/pytorch image has no openssh-client so
+    # /.launch spins on "ssh: command not found" forever and onstart-cmd
+    # never runs (idle, billed). We don't need ssh — logs stream via
+    # vastai logs and checkpoints push over HTTPS. Same fix as vast_deploy.sh.
 
 # Parse JSON result. vastai prints a Python dict-literal, not strict JSON,
 # so we use eval-via-python rather than json.loads.
