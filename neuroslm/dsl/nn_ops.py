@@ -12,7 +12,7 @@ so the same op works for both eager reference comparison and generated
 code. Parameter *allocation* + init lives in the codegen layer (Phase N3).
 """
 from __future__ import annotations
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -179,6 +179,106 @@ def causal_self_attention(x: torch.Tensor,
         v = v[:, :, None, :, :].expand(-1, -1, n_groups, -1, -1).reshape(B, n_heads, T, head_dim)
 
     y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=0.0)
+    y = y.transpose(1, 2).contiguous().view(B, T, C)
+    return F.linear(y, out_weight)
+
+
+# ── Tonnetz-masked attention (Stage 2 OOD push) ────────────────────────
+
+_TONNETZ_MASK_CACHE: Dict[Tuple[int, int, int], torch.Tensor] = {}
+
+
+def _tonnetz_attention_mask(T: int, period: int = 12,
+                              device=None, dtype=torch.float32) -> torch.Tensor:
+    """Toroidal (Tonnetz) attention mask.
+
+    Each query at position q can attend to keys at positions k where
+    the *circular distance* `min(|q-k| mod period, period - |q-k| mod period)`
+    falls within a small bandwidth. This embeds a periodic harmonic
+    topology into the attention pattern: distant tokens that "rhyme"
+    modulo the period are reachable, but arbitrary leaps are suppressed.
+
+    The mask returned is additive (-inf for blocked positions, 0 for
+    allowed) so it composes with standard scaled-dot-product attention.
+
+    Args:
+        T:      sequence length
+        period: torus period (default 12 — musical octave)
+        device, dtype: tensor placement
+
+    Returns:
+        (T, T) additive attention mask. Combined with `is_causal=True`
+        at the call site to keep the autoregressive constraint.
+    """
+    key = (T, period, hash(device))
+    if key in _TONNETZ_MASK_CACHE:
+        cached = _TONNETZ_MASK_CACHE[key]
+        if cached.device == torch.device(device) if device else cached.device:
+            return cached.to(dtype)
+
+    idx = torch.arange(T, device=device)
+    # circular distance modulo period
+    diff = (idx[:, None] - idx[None, :]).abs() % period
+    circ = torch.minimum(diff, period - diff)
+    # Allow positions within bandwidth = period // 4 (e.g. 3 of 12)
+    bandwidth = max(1, period // 4)
+    allowed = circ <= bandwidth
+    # Also allow the "anchor" half of recent context regardless of torus
+    # (keeps short-range continuity intact — without this the mask is
+    # too restrictive on token-level dependencies).
+    local_window = max(8, period)
+    local = (idx[:, None] - idx[None, :]).abs() <= local_window
+    allowed = allowed | local
+    mask = torch.where(allowed, 0.0, float("-inf")).to(dtype)
+    _TONNETZ_MASK_CACHE[key] = mask
+    return mask
+
+
+def causal_self_attention_tonnetz(x: torch.Tensor,
+                                    q_weight: torch.Tensor,
+                                    kv_weight: torch.Tensor,
+                                    out_weight: torch.Tensor,
+                                    n_heads: int,
+                                    n_kv_heads: int,
+                                    max_ctx: int,
+                                    tonnetz_period: int = 12,
+                                    rope_base: float = 10000.0) -> torch.Tensor:
+    """Causal self-attention with a Tonnetz toroidal mask.
+
+    Identical to `causal_self_attention` except an additive Tonnetz
+    mask is composed with the causal constraint. The mask exponentially
+    suppresses attention to positions outside the torus bandwidth +
+    local-window, bounding the "convex hull volume" of attention mass
+    (cited as a hallucination biomarker).
+    """
+    B, T, C = x.shape
+    head_dim = C // n_heads
+    n_groups = n_heads // n_kv_heads
+
+    q = F.linear(x, q_weight).view(B, T, n_heads, head_dim).transpose(1, 2)
+    kv = F.linear(x, kv_weight).view(B, T, 2, n_kv_heads, head_dim).permute(2, 0, 3, 1, 4)
+    k, v = kv[0], kv[1]
+    q = F.normalize(q, dim=-1)
+    k = F.normalize(k, dim=-1)
+    cos, sin = rope_cache(max_ctx, head_dim, base=rope_base,
+                          device=x.device, dtype=x.dtype)
+    q = rope(q, cos.to(q.dtype), sin.to(q.dtype))
+    k = rope(k, cos.to(k.dtype), sin.to(k.dtype))
+    if n_groups > 1:
+        k = k[:, :, None, :, :].expand(-1, -1, n_groups, -1, -1).reshape(B, n_heads, T, head_dim)
+        v = v[:, :, None, :, :].expand(-1, -1, n_groups, -1, -1).reshape(B, n_heads, T, head_dim)
+
+    # Build the additive attention mask: causal AND tonnetz.
+    causal = torch.triu(
+        torch.full((T, T), float("-inf"), device=x.device, dtype=x.dtype),
+        diagonal=1)
+    tonnetz = _tonnetz_attention_mask(T, period=tonnetz_period,
+                                       device=x.device, dtype=x.dtype)
+    attn_mask = causal + tonnetz
+    # F.scaled_dot_product_attention accepts an additive mask via
+    # attn_mask=...; is_causal must be False when a custom mask is given.
+    y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask,
+                                        is_causal=False, dropout_p=0.0)
     y = y.transpose(1, 2).contiguous().view(B, T, C)
     return F.linear(y, out_weight)
 

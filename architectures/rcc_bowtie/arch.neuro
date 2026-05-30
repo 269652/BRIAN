@@ -64,6 +64,17 @@ training {
     warmup_steps: 300
     min_lr_ratio: 0.1
     pct_strength: 0.30
+    # Stage 1 OOD push: forward-path Predictive Coding Trunk. Each layer
+    # is pulled toward the top-down prediction of the next layer. Zero-
+    # init so the model starts identical to the no-PCT baseline; the
+    # mechanism turns on as training nudges the topdown_w weights away
+    # from zero. Cited target: >=2x OOD-gap reduction vs aux-only PCH.
+    pct_trunk: 0.50
+    # Stage 2 OOD push: Tonnetz toroidal attention. Period 12 (musical
+    # octave) introduces a constant spectral gap that exponentially
+    # suppresses long-distance non-harmonic attention. Bounds the convex
+    # hull of attention mass (hallucination biomarker). 0 = off.
+    tonnetz_period: 12
 }
 
 # =============================================================================

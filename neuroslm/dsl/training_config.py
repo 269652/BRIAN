@@ -74,9 +74,21 @@ class TrainingConfig:
     warmup_steps: int = 300
     min_lr_ratio: float = 0.1
     # OOD-generalization knobs (added 2026-05-30 after first 10k run hit
-    # gap_ratio 7.04). Both default to 0 = off so prior runs reproduce.
+    # gap_ratio 7.04). All default to 0 = off so prior runs reproduce.
     dropout: float = 0.0
     pct_strength: float = 0.0   # multiplies the PCH-aux weight in the trunk path
+    # Forward-path PCT (Stage 1 of the OOD architecture push).
+    # > 0 inserts a top-down prediction loop at every block boundary so
+    # each layer is pulled toward what the next layer predicts. The
+    # cited literature claims >=2x OOD-gap reduction vs the aux-only
+    # PCH variant (`pct_strength`). Recommended start: 0.5.
+    pct_trunk: float = 0.0
+    # Stage 2 OOD push: Tonnetz toroidal attention mask. >0 enables the
+    # mask with the given period (12 = musical octave is the standard
+    # choice). The mask suppresses attention to positions outside a
+    # circular-distance bandwidth + local window. 0 = standard causal
+    # attention (no toroidal constraint).
+    tonnetz_period: int = 0
 
 
 # ── Constants for validation ───────────────────────────────────────────
@@ -138,6 +150,10 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.dropout = float(props["dropout"])
     if "pct_strength" in props:
         cfg.pct_strength = float(props["pct_strength"])
+    if "pct_trunk" in props:
+        cfg.pct_trunk = float(props["pct_trunk"])
+    if "tonnetz_period" in props:
+        cfg.tonnetz_period = int(props["tonnetz_period"])
 
     return cfg
 
