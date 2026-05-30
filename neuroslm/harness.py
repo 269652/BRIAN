@@ -35,6 +35,7 @@ from neuroslm.dsl.training_config import TrainingConfig
 from neuroslm.dsl.maturity import (
     MaturityTracker, AuxWeights, TotalLossConfig,
 )
+from neuroslm.dsl.bema_optimizer import BEMAController, BEMAConfig
 
 
 # ── LR schedule (warmup + cosine) ──────────────────────────────────────
@@ -56,6 +57,43 @@ def cosine_warmup_lr(step: int, base_lr: float, warmup: int, total: int,
     min_lr = base_lr * min_lr_ratio
     cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
     return min_lr + (base_lr - min_lr) * cosine
+
+
+# ── Stage 6 OOD push: μP scaling helpers ───────────────────────────────
+
+def _mu_p_param_groups(model, base_lr: float, wd: float):
+    """Build AdamW param groups with width-aware LR multipliers (μP).
+
+    The rule (simplified Yang/Hu Tensor-Programs-IV):
+      - "embedding-like" params (vocab × d_model, or 1-D γ/β): LR × 1
+      - "hidden" params (d_model × d_model, etc.): LR × 1 / fan_in_ratio
+        where fan_in_ratio = fan_in / base_width (typical base=256)
+      - "output / lm_head" params: LR × 1 / d_model
+
+    Effect: representation updates stay O(1) across widths so the same
+    base_lr that worked at 51M continues to work at 1B+. At our current
+    51M (d_model=384) with base_width=256 the multipliers are close to
+    1, so this is a near no-op until we scale up.
+    """
+    base_width = 256
+    groups = []
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        # Output head: scale by 1/d_model
+        if "lm_head" in name:
+            d_model = p.shape[-1] if p.dim() >= 2 else p.shape[0]
+            mult = base_width / max(1, d_model)
+        # 2-D hidden weights: scale by 1/fan_in_ratio
+        elif p.dim() == 2:
+            fan_in = p.shape[1]
+            mult = base_width / max(1, fan_in)
+        else:
+            # 1-D (norms, biases) and embeddings: no scaling
+            mult = 1.0
+        groups.append({"params": [p], "lr": base_lr * mult,
+                        "weight_decay": wd})
+    return groups
 
 
 class BRIANHarness(nn.Module):
@@ -121,6 +159,11 @@ class BRIANHarness(nn.Module):
         self.total_loss_config: TotalLossConfig = TotalLossConfig()
         self.maturity: MaturityTracker = MaturityTracker()
         self._last_lm_loss_value: float = self.maturity.l_random
+        # Stage 3+4 OOD-push controllers. _bema is lazily built in
+        # _ensure_optimizer so it sees the constructed optimizer.
+        self._bema: Optional[BEMAController] = None
+        self._last_bema_info: Dict = {}
+        self._nemori_skipped: int = 0
 
     @classmethod
     def from_language_model(cls, language_model: nn.Module,
@@ -154,6 +197,9 @@ class BRIANHarness(nn.Module):
         h.total_loss_config = TotalLossConfig()
         h.maturity = MaturityTracker()
         h._last_lm_loss_value = h.maturity.l_random
+        h._bema = None
+        h._last_bema_info = {}
+        h._nemori_skipped = 0
         return h
 
     # ── Schedule + mixed-precision configuration ─────────────────────
@@ -344,8 +390,24 @@ class BRIANHarness(nn.Module):
 
         loss = self.compute_loss(ids, targets, nt_levels=nt_levels)
         accum = max(1, self.training_config.grad_accum)
-        scaled = loss / accum
 
+        # ── Stage 4 OOD push: NEMORI predictive-forgetting gate ──
+        # If surprise = |loss - ema_loss|/max(ema_loss, eps) < floor, the
+        # batch is "expected" and we SKIP the optimizer update (no gradient
+        # accumulated). Reduces I(X;Z) → tightens generalization bound.
+        # ema_loss for surprise == maturity.l_random at start (no history).
+        loss_f = float(loss.detach().item())
+        if self.training_config.nemori_floor > 0 and self._last_lm_loss_value > 0:
+            base = max(self._last_lm_loss_value, 1e-6)
+            surprise = abs(loss_f - base) / base
+            if surprise < self.training_config.nemori_floor:
+                self._nemori_skipped += 1
+                self._last_lr = float(optimizer.param_groups[0]["lr"])
+                self.maturity.update(loss_f)
+                self._last_lm_loss_value = loss_f
+                return loss_f
+
+        scaled = loss / accum
         # fp16 needs gradient scaling; bf16 and fp32 don't.
         if self._grad_scaler is not None:
             self._grad_scaler.scale(scaled).backward()
@@ -361,12 +423,23 @@ class BRIANHarness(nn.Module):
                 self._grad_scaler.unscale_(optimizer)
                 gnorm = torch.nn.utils.clip_grad_norm_(
                     self.parameters(), clip if (clip and clip > 0) else 1e9)
-                self._grad_scaler.step(optimizer)
-                self._grad_scaler.update()
+                # BEMA wraps optimizer.step() with rollback detection.
+                if self._bema is not None and self._bema.cfg.enabled:
+                    self._grad_scaler.unscale_(optimizer)  # already done
+                    info = self._bema.maybe_step(loss_f)
+                    self._last_bema_info = info
+                    self._grad_scaler.update()
+                else:
+                    self._grad_scaler.step(optimizer)
+                    self._grad_scaler.update()
             else:
                 gnorm = torch.nn.utils.clip_grad_norm_(
                     self.parameters(), clip if (clip and clip > 0) else 1e9)
-                optimizer.step()
+                if self._bema is not None and self._bema.cfg.enabled:
+                    info = self._bema.maybe_step(loss_f)
+                    self._last_bema_info = info
+                else:
+                    optimizer.step()
             self._last_gnorm = float(gnorm)
             optimizer.zero_grad(set_to_none=True)
             self._accum_step = 0
@@ -392,9 +465,17 @@ class BRIANHarness(nn.Module):
         lr = self.training_config.learning_rate
         wd = self.training_config.weight_decay
         if opt_name == "adamw":
-            self._optimizer = torch.optim.AdamW(
-                self.parameters(), lr=lr, weight_decay=wd
-            )
+            # Stage 6: μP-aware AdamW param groups when mu_p_scaling is on.
+            # Each parameter gets an LR multiplier based on its width so
+            # representation-level updates stay O(1) as d_model scales.
+            # At our 51M scale this is a near no-op; pays off at 1B+.
+            if self.training_config.mu_p_scaling:
+                groups = _mu_p_param_groups(self, base_lr=lr, wd=wd)
+                self._optimizer = torch.optim.AdamW(groups, lr=lr, weight_decay=wd)
+            else:
+                self._optimizer = torch.optim.AdamW(
+                    self.parameters(), lr=lr, weight_decay=wd
+                )
         elif opt_name == "adafactor":
             # Lazy import — Adafactor isn't always installed
             try:
@@ -411,6 +492,18 @@ class BRIANHarness(nn.Module):
                 )
         else:
             raise ValueError(f"unsupported optimizer {opt_name!r}")
+
+        # Stage 3 OOD push: wrap the optimizer with BEMA when enabled.
+        rw = self.training_config.bema_rollback_window
+        if rw > 0:
+            bema_cfg = BEMAConfig(
+                enabled=True,
+                rollback_window=rw,
+                snapshot_every=self.training_config.bema_snapshot_every,
+                cooldown=self.training_config.bema_cooldown,
+                max_snapshots=4,
+            )
+            self._bema = BEMAController(self, self._optimizer, bema_cfg)
         return self._optimizer
 
     # ── Parameter scopes (p3 gradient isolation) ────────────────────

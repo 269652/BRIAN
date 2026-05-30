@@ -89,6 +89,30 @@ class TrainingConfig:
     # circular-distance bandwidth + local window. 0 = standard causal
     # attention (no toroidal constraint).
     tonnetz_period: int = 0
+    # Stage 3 OOD push: BEMA branching optimizer wrapper. When > 0,
+    # rolls back the last `bema_rollback_window` optimizer updates if
+    # the loss-EMA rises for that many consecutive steps. Addresses
+    # the recurring "spike at step ~2400" pattern we keep hitting.
+    # 0 = off (no wrapping). 50 is a sensible default.
+    bema_rollback_window: int = 0
+    bema_snapshot_every: int = 50
+    bema_cooldown: int = 100
+    # Stage 4 OOD push: NEMORI predictive-forgetting surprise gate.
+    # > 0 enables a per-batch surprise check; batches with surprise
+    # BELOW nemori_floor are SKIPPED (no gradient update). Reduces
+    # I(X;Z) by refusing to learn from "expected" episodes. Surprise
+    # = |loss - ema_loss| / max(ema_loss, eps). Typical floor 0.05-0.20.
+    nemori_floor: float = 0.0
+    # Stage 7 OOD push: curriculum + trunk isolation. Curriculum string
+    # selects a data ordering strategy ("easy_to_hard", "random",
+    # "uniform"). Trunk isolation is enforced by an existing param_scope
+    # mechanism (Brain side); audited in tests.
+    curriculum: str = "random"
+    crystallization_step: int = 0    # 0 = no curriculum boundary
+    # Stage 6 OOD push: μP scaling. When True, applies width-aware
+    # init + per-param-group LR multipliers so representation updates
+    # stay O(1) as d_model scales. Only meaningful at 200M+ params.
+    mu_p_scaling: bool = False
 
 
 # ── Constants for validation ───────────────────────────────────────────
@@ -154,6 +178,20 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.pct_trunk = float(props["pct_trunk"])
     if "tonnetz_period" in props:
         cfg.tonnetz_period = int(props["tonnetz_period"])
+    if "bema_rollback_window" in props:
+        cfg.bema_rollback_window = int(props["bema_rollback_window"])
+    if "bema_snapshot_every" in props:
+        cfg.bema_snapshot_every = int(props["bema_snapshot_every"])
+    if "bema_cooldown" in props:
+        cfg.bema_cooldown = int(props["bema_cooldown"])
+    if "nemori_floor" in props:
+        cfg.nemori_floor = float(props["nemori_floor"])
+    if "curriculum" in props:
+        cfg.curriculum = _strip_quotes(props["curriculum"])
+    if "crystallization_step" in props:
+        cfg.crystallization_step = int(props["crystallization_step"])
+    if "mu_p_scaling" in props:
+        cfg.mu_p_scaling = _parse_bool(props["mu_p_scaling"])
 
     return cfg
 

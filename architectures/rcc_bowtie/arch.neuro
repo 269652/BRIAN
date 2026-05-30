@@ -75,6 +75,22 @@ training {
     # suppresses long-distance non-harmonic attention. Bounds the convex
     # hull of attention mass (hallucination biomarker). 0 = off.
     tonnetz_period: 12
+    # Stage 3 OOD push: BEMA branching optimizer. Roll back the last 50
+    # optimizer steps when the loss-EMA rises for 50 consecutive ticks.
+    # Addresses the recurring spike pattern at step ~2400 of every run.
+    bema_rollback_window: 50
+    bema_snapshot_every: 50
+    bema_cooldown: 100
+    # Stage 4 OOD push: NEMORI predictive-forgetting gate. Skip batches
+    # whose surprise (|loss - ema_loss|/ema_loss) falls below the floor.
+    # Reduces I(X;Z) by refusing to learn from expected episodes.
+    nemori_floor: 0.05
+    # Stage 6 OOD push: μP scaling. Disabled at 51M; on for larger runs.
+    mu_p_scaling: false
+    # Stage 7 OOD push: curriculum + isolation. random until crystallization
+    # then mix-curriculum (FineWeb-Edu first, chat after).
+    curriculum: "random"
+    crystallization_step: 0
 }
 
 # =============================================================================

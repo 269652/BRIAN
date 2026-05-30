@@ -283,6 +283,46 @@ def causal_self_attention_tonnetz(x: torch.Tensor,
     return F.linear(y, out_weight)
 
 
+# ── Stage 5 OOD push: Fisher-Rao retrieval metric ─────────────────────
+
+def fisher_rao_distance(query: torch.Tensor, keys: torch.Tensor,
+                         variance: torch.Tensor,
+                         eps: float = 1e-6) -> torch.Tensor:
+    """Fisher-Rao distance between a query and a bank of keys, weighted
+    by per-dimension variance (precision = 1/variance).
+
+    Replaces cosine similarity for hippocampal-style retrieval. Each
+    dimension's contribution is weighted by its statistical precision
+    so noisy / high-variance dimensions are down-weighted in the metric.
+    Result: as memory size scales, the retrieval ignores uncertain
+    dimensions automatically (no manual feature selection).
+
+    Args:
+        query:    (B, D)   batched query vectors
+        keys:     (M, D)   memory bank (M items, D features)
+        variance: (D,)     per-dimension running variance (≥ eps)
+
+    Returns:
+        (B, M)   distance matrix; smaller = more similar
+    """
+    precision = 1.0 / (variance.clamp(min=eps))  # (D,)
+    # Weighted squared diff: (B, M, D) → sum over D → (B, M)
+    diff = query.unsqueeze(1) - keys.unsqueeze(0)            # (B, M, D)
+    weighted_sq = (diff ** 2) * precision.view(1, 1, -1)
+    return weighted_sq.sum(dim=-1).sqrt()
+
+
+def fisher_rao_topk(query: torch.Tensor, keys: torch.Tensor,
+                     variance: torch.Tensor, k: int = 1
+                     ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Top-k nearest keys to each query under the Fisher-Rao metric.
+
+    Returns (distances, indices) each of shape (B, k).
+    """
+    d = fisher_rao_distance(query, keys, variance)
+    return d.topk(k, dim=-1, largest=False)
+
+
 def predictive_coding_head(h_current: torch.Tensor, h_next: torch.Tensor,
                             w1: torch.Tensor, b1: torch.Tensor,
                             w2: torch.Tensor) -> torch.Tensor:
