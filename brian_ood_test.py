@@ -67,8 +67,83 @@ def is_lfs_pointer(path: str) -> bool:
 
 # ── Step 2: load the model ─────────────────────────────────────────────────
 
+class _DSLOODAdapter:
+    """Minimal Brain-API wrapper for the DSL BRIANHarness LM.
+
+    The OOD eval calls `brain.forward_lm(ids, tgt) -> {"logits": ...}`,
+    `brain.train()`, `brain.to(device)`, `brain.modules()`. The DSL harness
+    exposes `harness(ids) -> logits`. This adapter makes a DSL run look
+    Brain-shaped to the eval loop without forking the OOD test logic.
+    """
+    def __init__(self, harness, language_module):
+        self.harness = harness
+        self.language = language_module
+        self.training = False
+
+    def to(self, device):
+        self.harness = self.harness.to(device)
+        return self
+
+    def train(self, mode: bool = True):
+        self.harness.train(mode)
+        self.training = mode
+        return self
+
+    def eval(self):
+        return self.train(False)
+
+    def modules(self):
+        return self.harness.modules()
+
+    def forward_lm(self, ids, targets=None):
+        logits = self.harness(ids)
+        return {"logits": logits, "lm_loss": torch.tensor(0.0)}
+
+
+def _is_dsl_checkpoint(path: str, ckpt) -> bool:
+    """Detect a DSL checkpoint by filename OR by state-dict layout."""
+    if os.path.basename(path).startswith("dsl_arch"):
+        return True
+    sd = ckpt.get("model") if isinstance(ckpt, dict) else None
+    if isinstance(sd, dict):
+        return any(k.startswith("language_model.") for k in sd.keys())
+    return False
+
+
+def _load_dsl(ckpt_path: str, ckpt, device: torch.device):
+    """Build a DSL BRIANHarness, load weights, wrap in the Brain-API adapter."""
+    from neuroslm.dsl.nn_lang import build_dsl_language_cortex
+    from neuroslm.dsl.preset_bridge import dsl_lm_config_from_preset
+    from neuroslm.harness import BRIANHarness
+
+    preset_name = "rcc_bowtie_30m_p4"
+    if isinstance(ckpt, dict) and "preset" in ckpt:
+        preset_name = ckpt["preset"]
+    print(f"[ood-dsl] building DSLLanguageCortex from preset={preset_name}")
+    pc = dsl_lm_config_from_preset(preset_name)
+    vocab = ckpt.get("vocab_size", pc["vocab"]) if isinstance(ckpt, dict) else pc["vocab"]
+    dsl_lm = build_dsl_language_cortex(
+        vocab=vocab, d_model=pc["d_model"], depth=pc["depth"],
+        n_heads=pc["n_heads"], max_ctx=pc["max_ctx"],
+        n_kv_heads=pc["n_kv_heads"])
+    harness = BRIANHarness.from_language_model(
+        dsl_lm, vocab_size=vocab, d_sem=pc["d_model"])
+    sd = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+    result = harness.load_state_dict(sd, strict=False)
+    print(f"[ood-dsl] loaded {len(sd)} keys; "
+          f"missing={len(result.missing_keys)}, "
+          f"unexpected={len(result.unexpected_keys)}")
+    if result.missing_keys[:5]:
+        print(f"[ood-dsl] first missing: {result.missing_keys[:5]}")
+    if result.unexpected_keys[:5]:
+        print(f"[ood-dsl] first unexpected: {result.unexpected_keys[:5]}")
+    harness = harness.to(device)
+    harness.train()
+    return _DSLOODAdapter(harness, dsl_lm)
+
+
 def load_brain(ckpt_path: str, device: torch.device):
-    """Rebuild Brain from the cfg saved IN the checkpoint, then load weights."""
+    """Rebuild Brain (or DSL) from the cfg saved IN the checkpoint, then load weights."""
     sys.path.insert(0, os.getcwd())
     from neuroslm.brain import Brain
     from neuroslm.config import BrainConfig, PRESETS
@@ -76,6 +151,27 @@ def load_brain(ckpt_path: str, device: torch.device):
 
     tok = Tokenizer()
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+
+    # DSL checkpoint? Take the adapter path before any Brain-specific logic.
+    if _is_dsl_checkpoint(ckpt_path, ckpt):
+        print(f"[load] detected DSL checkpoint: {os.path.basename(ckpt_path)}")
+        # Match the (brain, tok, cfg, step) tuple shape Brain returns below
+        # so the caller in main() doesn't need to special-case DSL.
+        adapter = _load_dsl(ckpt_path, ckpt, device)
+        # Synthesize a minimal cfg from the DSL preset so main() can read
+        # `cfg.lang_ctx` and `cfg.vocab_size` uniformly.
+        from neuroslm.dsl.preset_bridge import dsl_lm_config_from_preset
+        preset_name = (ckpt.get("preset") if isinstance(ckpt, dict)
+                       else None) or "rcc_bowtie_30m_p4"
+        pc = dsl_lm_config_from_preset(preset_name)
+        cfg = BrainConfig()
+        cfg.vocab_size = ckpt.get("vocab_size", pc["vocab"]) if isinstance(ckpt, dict) else pc["vocab"]
+        cfg.lang_ctx = pc["max_ctx"]
+        cfg.d_hidden = pc["d_model"]
+        cfg.lang_layers = pc["depth"]
+        cfg.lang_heads = pc["n_heads"]
+        step = ckpt.get("step", "?") if isinstance(ckpt, dict) else "?"
+        return adapter, tok, cfg, step
 
     cfg = BrainConfig()
     saved_cfg = (ckpt["cfg"] if isinstance(ckpt, dict)

@@ -141,6 +141,45 @@ for i in 1 2 3 4 5; do
   sleep 5
 done
 echo "── OOD eval done ──"
+
+# ── Also push the log file alongside the JSON ──────────────────────
+git add "${OUTPUT_FILE}.log" 2>/dev/null || true
+git commit -m "ood eval (${ROLE_TAG}) log on \${BRANCH}" 2>/dev/null || true
+for i in 1 2 3 4 5; do
+  if git -c credential.helper= push "\${PUSH_URL}" ${BRANCH} 2>&1 | tee /tmp/push.log | grep -q "${BRANCH} -> ${BRANCH}"; then
+    echo "✓ log pushed"; break
+  fi
+  echo "log push attempt \$i failed; fetching + retrying"
+  git -c credential.helper= fetch "\${PUSH_URL}" ${BRANCH}
+  git rebase FETCH_HEAD || true
+  sleep 5
+done
+
+# ── Self-destroy: tear down the eval instance once results are pushed ──
+# Without this the container idles at \$0.50-\$1+/hr after eval finishes.
+# Uses VAST_API_KEY passed via --env + INSTANCE_ID injected by vast.ai.
+echo "── self-destroying ood-eval instance ──"
+if ! command -v vastai >/dev/null 2>&1; then
+  pip install -q vastai 2>&1 | tail -3 || true
+fi
+if [ -n "\${VAST_API_KEY:-}" ] && command -v vastai >/dev/null 2>&1; then
+  vastai set api-key "\$VAST_API_KEY" >/dev/null 2>&1 || true
+  SELF_ID="\${INSTANCE_ID:-}"
+  if [ -z "\$SELF_ID" ]; then
+    SELF_ID=\$(vastai show instances --raw 2>/dev/null | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for i in (data or []):
+    if (i.get('label') or '').startswith('neuroslm-ood-'):
+        print(i.get('id','')); break" 2>/dev/null)
+  fi
+  if [ -n "\$SELF_ID" ]; then
+    echo "[onstart] vastai destroy instance \$SELF_ID"
+    vastai destroy instance "\$SELF_ID" 2>&1 || echo "destroy failed"
+    sleep 30
+  fi
+fi
+echo "── eval idle; destroy manually: vastai destroy instance <id> ──"
 ONSTART
 )
 
@@ -161,15 +200,16 @@ for o in offers:
 echo "── picked offer: $OFFER_ID ──"
 
 # ── Create the instance ──────────────────────────────────────────────────
-ENV_ARG="-e GITHUB=${GITHUB} -e HF_TOKEN=${HF_TOKEN:-}"
+ENV_ARG="-e GITHUB=${GITHUB} -e HF_TOKEN=${HF_TOKEN:-} -e VAST_API_KEY=${VAST_API_KEY}"
 echo "── creating ood-eval instance (label neuroslm-ood-${ROLE_TAG}) ──"
+# No --ssh (same fix as vast_train.sh): vast.ai /.launch spins on
+# missing ssh and onstart never runs. We don't need ssh here.
 vastai create instance "$OFFER_ID" \
   --image "$VAST_IMAGE" \
   --disk "$VAST_DISK" \
   --label "neuroslm-ood-${ROLE_TAG}" \
   --env "$ENV_ARG" \
-  --onstart-cmd "$ONSTART" \
-  --ssh
+  --onstart-cmd "$ONSTART"
 echo ""
 echo "════════════════════════════════════════════════════════════════"
 echo "  OOD eval instance launched for branch=${BRANCH}"

@@ -126,6 +126,14 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         cli.append("--wa-queries")
     if args.graph:
         cli.extend(["--graph", args.graph])
+    if args.flow:
+        cli.append("--flow")
+    if args.phi:
+        cli.append("--phi")
+    if args.discover:
+        cli.extend(["--discover", args.discover])
+        if args.top_k:
+            cli.extend(["--top-k", str(args.top_k)])
     return A.main(cli)
 
 
@@ -286,6 +294,14 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="emit short Wolfram-Alpha-pasteable queries")
     sa.add_argument("--graph", metavar="PATH",
                     help="render topology graph to PATH (.png/.svg)")
+    sa.add_argument("--flow", action="store_true",
+                    help="dataflow analysis: paths, bottlenecks, bowtie waist")
+    sa.add_argument("--phi", action="store_true",
+                    help="IIT Φ proxy + per-module contribution")
+    sa.add_argument("--discover", choices=["phi", "modularity", "sparsity"],
+                    help="propose architecture mods maximising the metric")
+    sa.add_argument("--top-k", type=int, default=10,
+                    help="top-K proposals for --discover")
     sa.add_argument("--all", action="store_true",
                     help="run every analysis above")
     sa.set_defaults(func=cmd_analyze)

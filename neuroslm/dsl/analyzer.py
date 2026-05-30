@@ -19,7 +19,7 @@ Why Python instead of Mathematica:
   - SymPy handles all the symbolic math the architecture needs.
   - NumPy / SciPy do the numerical eigenvalue work in microseconds.
   - Output can flow back into Python-based training analysis (e.g. compare
-    measured Φ trajectory against the symbolic prediction).
+    measured Phi trajectory against the symbolic prediction).
 
 CLI:
     py -3 -m neuroslm.dsl.analyzer architectures/rcc_bowtie \\
@@ -89,6 +89,28 @@ def compile_to_sympy(arch_root) -> SymbolicSystem:
     ir = compile_folder(Path(arch_root))
     sys = SymbolicSystem()
 
+    # ── Pre-pass: collect which synapses feed into which population so
+    # we can wire `x_<pop>` (the population's input) to the *sum* of
+    # weighted upstream outputs. This is what makes the fixed-point
+    # output meaningful as a *closed-loop* system rather than 66 local
+    # rules with independent `x` symbols.
+    #
+    # Composite input rule:
+    #     x_<tgt> = sum over (src, w) of  w * y_<src>
+    # (matrix W is folded into the weight; we don't track shapes here.)
+    incoming: Dict[str, List[Tuple[str, float]]] = {}
+    for syn in ir.synapses:
+        w = float(syn.weight) if syn.weight is not None else 1.0
+        incoming.setdefault(syn.target, []).append((syn.source, w))
+
+    def _composite_input(pop_name: str) -> Optional[sp.Expr]:
+        """Sum of weighted upstream y_<src>, or None if no incoming synapses."""
+        edges = incoming.get(pop_name, [])
+        if not edges:
+            return None
+        terms = [w * sp.Symbol(f"y_{src}") for (src, w) in edges]
+        return sum(terms[1:], terms[0])
+
     # 1a. Populations
     for pop in ir.populations:
         if getattr(pop, "ode", None):
@@ -98,24 +120,34 @@ def compile_to_sympy(arch_root) -> SymbolicSystem:
             sys.state_vars.append(sv)
             # rewrite the bare state symbol → tagged
             rhs_t = rhs.subs(sp.Symbol(ode.state_var), sv)
+            # Substitute composite input into the equation's `x` if present
+            ci = _composite_input(pop.name)
+            if ci is not None and sp.Symbol("x") in rhs_t.free_symbols:
+                rhs_t = rhs_t.subs(sp.Symbol("x"), ci)
             sys.equations[sv] = rhs_t
         elif getattr(pop, "equation", None):
             eq = parse_equation(pop.equation)
             rhs = _expand_for_analysis(eq.rhs)
             sv = sp.Symbol(f"y_{pop.name}")
             sys.state_vars.append(sv)
+            # Substitute the composite input so the FP system is closed-loop
+            ci = _composite_input(pop.name)
+            if ci is not None and sp.Symbol("x") in rhs.free_symbols:
+                rhs = rhs.subs(sp.Symbol("x"), ci)
             sys.equations[sv] = rhs
 
-    # 1b. Synapses — algebraic equations, no time evolution
+    # 1b. Synapses — algebraic equations expressing the transmission op.
+    # Now that population inputs are wired from composite upstream sums,
+    # the per-edge `y_<src>_to_<tgt>` entries are redundant for the
+    # closed-loop system; we still emit them so the graph + WA queries
+    # have explicit edges and so downstream consumers (visualization,
+    # discover) can reason about individual connections.
     for syn in ir.synapses:
         w = syn.weight if syn.weight is not None else 1.0
         sv = sp.Symbol(f"y_{syn.source}_to_{syn.target}")
-        x_pre = sp.Symbol(f"x_{syn.source}")
-        W = sp.Symbol(f"W_{syn.source}_{syn.target}")
-        # Default form `y = w * (x_pre @ W)` — at the symbolic level
-        # `@` becomes ordinary multiplication (we're not tracking shapes
-        # here, only the closed-form dependency structure).
-        rhs = w * x_pre * W
+        # Now references the actual upstream output (y_<src>) rather than
+        # a phantom x_<src> — keeps the system dependency graph honest.
+        rhs = w * sp.Symbol(f"y_{syn.source}")
         sys.state_vars.append(sv)
         sys.equations[sv] = rhs
 
@@ -264,11 +296,11 @@ def stability_analysis(sys: SymbolicSystem,
     then computes eigenvalues numerically.
 
     Classification rules:
-      - all Re(λ) < 0       → stable
-      - all Re(λ) > 0       → unstable
+      - all Re(lambda) < 0       → stable
+      - all Re(lambda) > 0       → unstable
       - mixed signs         → saddle
       - any |Im(λ)| > 0 and Re ≈ 0 → oscillatory
-      - any Re(λ) ≈ 0       → marginal
+      - any Re(lambda) ≈ 0       → marginal
     """
     import numpy as np
 
@@ -444,6 +476,401 @@ def wolfram_alpha_queries(arch_root,
     return queries
 
 
+# ── 5b. Neural flow analysis ────────────────────────────────────────────
+
+@dataclass
+class FlowReport:
+    """Dataflow trace through the architecture."""
+    paths: List[List[str]]                  # all simple paths sensory→motor
+    longest_path: List[str]
+    shortest_path: List[str]
+    bottleneck_edges: List[Tuple[str, str, float]]   # (src, tgt, score) — score↓ = worse bottleneck
+    fan_in: Dict[str, int]
+    fan_out: Dict[str, int]
+    bowtie_waist: List[str]                 # populations with min(fan_in + fan_out) on the source→sink critical path
+
+
+def analyze_flow(arch_root,
+                 sources: Optional[List[str]] = None,
+                 sinks: Optional[List[str]] = None,
+                 ) -> FlowReport:
+    """Trace dataflow from `sources` (default: any pop with no incoming
+    synapses) to `sinks` (default: any pop with no outgoing synapses).
+
+    Reveals:
+      - all simple paths sources → sinks (topology of information flow)
+      - shortest + longest paths (compute depth)
+      - bottleneck edges (low weight × narrow upstream fan-out)
+      - bowtie waist (smallest fan_in+fan_out on the critical path —
+        the architectural narrowing point that gives the bowtie its name)
+
+    Pure structural analysis, no training data needed.
+    """
+    from .multifile import compile_folder
+    import itertools
+
+    ir = compile_folder(Path(arch_root))
+    edges = [(s.source, s.target,
+              float(s.weight) if s.weight is not None else 1.0)
+             for s in ir.synapses]
+
+    fan_in:  Dict[str, int] = {p.name: 0 for p in ir.populations}
+    fan_out: Dict[str, int] = {p.name: 0 for p in ir.populations}
+    for src, tgt, _ in edges:
+        if src in fan_out:
+            fan_out[src] += 1
+        if tgt in fan_in:
+            fan_in[tgt] += 1
+
+    if sources is None:
+        sources = [p for p in fan_in if fan_in[p] == 0]
+    if sinks is None:
+        sinks = [p for p in fan_out if fan_out[p] == 0]
+
+    # BFS / DFS to enumerate simple paths (small graph — exhaustive is fine)
+    adj: Dict[str, List[Tuple[str, float]]] = {}
+    for src, tgt, w in edges:
+        adj.setdefault(src, []).append((tgt, w))
+
+    def _simple_paths(start: str, target: str, max_len: int = 12) -> List[List[str]]:
+        out, stack = [], [(start, [start], set([start]))]
+        while stack:
+            node, path, seen = stack.pop()
+            if len(path) > max_len:
+                continue
+            if node == target:
+                out.append(path)
+                continue
+            for (nxt, _) in adj.get(node, []):
+                if nxt not in seen:
+                    stack.append((nxt, path + [nxt], seen | {nxt}))
+        return out
+
+    all_paths: List[List[str]] = []
+    for s, t in itertools.product(sources, sinks):
+        all_paths.extend(_simple_paths(s, t))
+    all_paths.sort(key=len)
+
+    # Bottleneck scoring: edge weight / max(1, upstream fan-out) — a low
+    # score means information is being squeezed through a thin channel.
+    bottle: List[Tuple[str, str, float]] = []
+    for src, tgt, w in edges:
+        bottle.append((src, tgt, w / max(1, fan_out.get(src, 1))))
+    bottle.sort(key=lambda r: r[2])
+
+    # Bowtie waist: populations that appear on most source→sink paths
+    # AND have the smallest total fan. The classical bowtie waist for
+    # rcc_bowtie should be GWS / thalamus.
+    visits: Dict[str, int] = {}
+    for path in all_paths:
+        for node in path:
+            visits[node] = visits.get(node, 0) + 1
+    waist_scored = sorted(
+        ((node, visits.get(node, 0),
+          fan_in.get(node, 0) + fan_out.get(node, 0))
+         for node in visits),
+        key=lambda r: (-r[1], r[2]))   # most-visited first, narrowest second
+    waist = [n for (n, v, fan) in waist_scored[:5] if v > 0]
+
+    return FlowReport(
+        paths=all_paths,
+        longest_path=all_paths[-1] if all_paths else [],
+        shortest_path=all_paths[0] if all_paths else [],
+        bottleneck_edges=bottle[:5],
+        fan_in=fan_in,
+        fan_out=fan_out,
+        bowtie_waist=waist,
+    )
+
+
+# ── 5c. Integrated information (Phi) proxy ────────────────────────────────
+
+@dataclass
+class PhiReport:
+    """Graph-structural Phi proxy + per-module contribution decomposition."""
+    phi_proxy: float                                  # overall Phi-like score [0, ∞)
+    integration: float                                # effective connectivity (mean edge weight × density)
+    differentiation: float                            # 1 - clustering coefficient
+    per_module_contribution: List[Tuple[str, float]]  # node → Δphi if removed (sorted desc)
+    cyclic_edges: int                                 # count of edges that close a feedback cycle
+    n_strongly_connected: int                         # # strongly connected components
+
+
+def compute_phi_proxy(arch_root) -> PhiReport:
+    """Approximation of IIT's Phi from graph structure alone.
+
+    IIT proper requires a full mechanism description + perturbation; for
+    architectural exploration a graph proxy is enough:
+
+      Phi_proxy ≈ integration × differentiation
+        - integration:     mean weighted edge density (how connected)
+        - differentiation: 1 - clustering coefficient  (how non-redundant)
+
+    A bowtie with a narrow waist + diverse leaves scores high. A fully-
+    connected graph (no differentiation) and a totally-disconnected one
+    (no integration) both score near zero — which matches Tononi's
+    intuition that Phi is maximised in *balanced* architectures.
+
+    `per_module_contribution` is the sensitivity dphi from removing each
+    node — a quick proxy for which areas are most causally central.
+    """
+    from .multifile import compile_folder
+    ir = compile_folder(Path(arch_root))
+
+    nodes = [p.name for p in ir.populations]
+    n = max(1, len(nodes))
+    edges = [(s.source, s.target,
+              float(s.weight) if s.weight is not None else 1.0)
+             for s in ir.synapses
+             if s.source in nodes and s.target in nodes]
+
+    def _phi_of(node_set: List[str], edge_list: List[Tuple[str, str, float]]) -> float:
+        m = len(node_set)
+        if m < 2:
+            return 0.0
+        node_idx = {n: i for i, n in enumerate(node_set)}
+        active_edges = [(u, v, w) for (u, v, w) in edge_list
+                        if u in node_idx and v in node_idx]
+        if not active_edges:
+            return 0.0
+        # integration: mean(weight) × edge_density
+        density = len(active_edges) / max(1, m * (m - 1))
+        mean_w = sum(w for (_, _, w) in active_edges) / len(active_edges)
+        integration = mean_w * density
+        # differentiation: 1 - clustering. Count triangles in the undirected
+        # underlying graph; clustering = triangles / possible_triangles.
+        adj_set: Dict[str, set] = {}
+        for (u, v, _) in active_edges:
+            adj_set.setdefault(u, set()).add(v)
+            adj_set.setdefault(v, set()).add(u)
+        triangles = 0
+        for u in adj_set:
+            neigh = list(adj_set[u])
+            for i_, v in enumerate(neigh):
+                for w in neigh[i_+1:]:
+                    if w in adj_set.get(v, set()):
+                        triangles += 1
+        triangles //= 3
+        possible = m * (m - 1) * (m - 2) / 6
+        clustering = triangles / possible if possible > 0 else 0.0
+        differentiation = max(0.0, 1.0 - clustering)
+        return integration * differentiation
+
+    phi_full = _phi_of(nodes, edges)
+
+    # Per-node contribution: dphi from removal
+    per_contrib: List[Tuple[str, float]] = []
+    for node in nodes:
+        reduced = [n for n in nodes if n != node]
+        phi_reduced = _phi_of(reduced, edges)
+        per_contrib.append((node, phi_full - phi_reduced))
+    per_contrib.sort(key=lambda r: -r[1])
+
+    # Cyclic edges + SCC count via DFS
+    adj_dir: Dict[str, set] = {}
+    for (u, v, _) in edges:
+        adj_dir.setdefault(u, set()).add(v)
+    def _reaches(s: str, t: str) -> bool:
+        seen, stack = {s}, [s]
+        while stack:
+            x = stack.pop()
+            if x == t:
+                return True
+            for y in adj_dir.get(x, ()):
+                if y not in seen:
+                    seen.add(y); stack.append(y)
+        return False
+    cyclic = sum(1 for (u, v, _) in edges if _reaches(v, u))
+    # Quick SCC count (Tarjan-lite): nodes that can reach themselves
+    sccs_seen: set = set()
+    n_scc = 0
+    for u in nodes:
+        if u in sccs_seen:
+            continue
+        if _reaches(u, u):
+            comp = {u}
+            for v in adj_dir.get(u, ()):
+                if _reaches(v, u):
+                    comp.add(v)
+            sccs_seen |= comp
+            n_scc += 1
+        else:
+            sccs_seen.add(u)
+
+    # Recompute integration + differentiation for return
+    if edges:
+        density = len(edges) / max(1, n * (n - 1))
+        mean_w = sum(w for (_, _, w) in edges) / len(edges)
+        integration = mean_w * density
+    else:
+        integration = 0.0
+    differentiation = phi_full / integration if integration > 0 else 0.0
+
+    return PhiReport(
+        phi_proxy=phi_full,
+        integration=integration,
+        differentiation=differentiation,
+        per_module_contribution=per_contrib,
+        cyclic_edges=cyclic,
+        n_strongly_connected=n_scc,
+    )
+
+
+# ── 5d. Architecture discovery / optimization ───────────────────────────
+
+@dataclass
+class Modification:
+    """A proposed architectural change."""
+    kind: str            # "add_edge" | "remove_edge" | "boost_weight" | "weaken_weight"
+    source: str
+    target: str
+    delta: float         # weight delta (positive = stronger)
+    projected_metric: float
+    delta_metric: float  # change vs baseline (positive = improvement)
+
+
+def discover_modifications(arch_root,
+                            metric: str = "phi",
+                            top_k: int = 10,
+                            max_proposals: int = 50
+                            ) -> Tuple[float, List[Modification]]:
+    """Greedy local search for modifications that improve `metric`.
+
+    Returns (baseline_metric, top_k_proposals sorted by delta_metric).
+
+    Supported metrics:
+      * "phi"        — graph Phi proxy (compute_phi_proxy)
+      * "modularity" — fraction of edges within strongly connected components
+      * "sparsity"   — inverse of edge density (favours bowtie waist)
+
+    Searches over all 4 mod kinds (add/remove edge, boost/weaken weight)
+    and ranks by d-metric. Pure structural — does NOT retrain the model.
+
+    For training-aware discovery (minimize PPL, maximize generalization)
+    use the existing evolutionary engine (neuroslm/dsl/evolutionary.py)
+    which actually trains each candidate. This function is the fast
+    structural-only first pass.
+    """
+    from .multifile import compile_folder
+    ir = compile_folder(Path(arch_root))
+    pops = [p.name for p in ir.populations]
+    edges = {(s.source, s.target): float(s.weight) if s.weight else 1.0
+             for s in ir.synapses}
+
+    def _score_graph(es: Dict[Tuple[str, str], float]) -> float:
+        if metric == "phi":
+            return _phi_score(pops, es)
+        elif metric == "modularity":
+            return _modularity_score(pops, es)
+        elif metric == "sparsity":
+            return _sparsity_score(pops, es)
+        raise ValueError(f"unknown metric {metric!r}; use phi|modularity|sparsity")
+
+    baseline = _score_graph(edges)
+    proposals: List[Modification] = []
+
+    # 1. ADD edges that don't exist (limit to top candidates to bound search)
+    n_tried = 0
+    for src in pops:
+        for tgt in pops:
+            if src == tgt or (src, tgt) in edges:
+                continue
+            n_tried += 1
+            if n_tried > max_proposals * 6:
+                break
+            new_edges = dict(edges); new_edges[(src, tgt)] = 0.5
+            score = _score_graph(new_edges)
+            proposals.append(Modification(
+                kind="add_edge", source=src, target=tgt, delta=+0.5,
+                projected_metric=score, delta_metric=score - baseline,
+            ))
+
+    # 2. REMOVE existing edges
+    for (src, tgt), w in edges.items():
+        new_edges = dict(edges); del new_edges[(src, tgt)]
+        score = _score_graph(new_edges)
+        proposals.append(Modification(
+            kind="remove_edge", source=src, target=tgt, delta=-w,
+            projected_metric=score, delta_metric=score - baseline,
+        ))
+
+    # 3. BOOST / WEAKEN existing edges (continuous knob)
+    for (src, tgt), w in edges.items():
+        for delta in (+0.3, -0.3):
+            new_w = max(0.0, min(2.0, w + delta))
+            new_edges = dict(edges); new_edges[(src, tgt)] = new_w
+            score = _score_graph(new_edges)
+            kind = "boost_weight" if delta > 0 else "weaken_weight"
+            proposals.append(Modification(
+                kind=kind, source=src, target=tgt, delta=delta,
+                projected_metric=score, delta_metric=score - baseline,
+            ))
+
+    proposals.sort(key=lambda m: -m.delta_metric)
+    return baseline, proposals[:top_k]
+
+
+def _phi_score(pops, es) -> float:
+    n = len(pops)
+    if n < 2 or not es:
+        return 0.0
+    density = len(es) / max(1, n * (n - 1))
+    mean_w = sum(es.values()) / len(es)
+    integration = mean_w * density
+    adj: Dict[str, set] = {}
+    for (u, v) in es:
+        adj.setdefault(u, set()).add(v)
+        adj.setdefault(v, set()).add(u)
+    triangles = 0
+    for u in adj:
+        neigh = list(adj[u])
+        for i_, v in enumerate(neigh):
+            for w in neigh[i_+1:]:
+                if w in adj.get(v, set()):
+                    triangles += 1
+    triangles //= 3
+    possible = n * (n - 1) * (n - 2) / 6
+    clustering = triangles / possible if possible > 0 else 0.0
+    return integration * max(0.0, 1.0 - clustering)
+
+
+def _modularity_score(pops, es) -> float:
+    """Fraction of edges that close back into the source within ≤3 hops."""
+    if not es:
+        return 0.0
+    adj: Dict[str, set] = {}
+    for (u, v) in es:
+        adj.setdefault(u, set()).add(v)
+    closing = 0
+    for (u, v) in es:
+        # is there a 1-3-hop path v → ... → u?
+        seen = {v}
+        front = [v]
+        for _ in range(3):
+            new_front = []
+            for x in front:
+                for y in adj.get(x, ()):
+                    if y == u:
+                        closing += 1
+                        new_front = []
+                        break
+                    if y not in seen:
+                        seen.add(y); new_front.append(y)
+                else:
+                    continue
+                break
+            front = new_front
+    return closing / len(es)
+
+
+def _sparsity_score(pops, es) -> float:
+    n = len(pops)
+    if n < 2:
+        return 0.0
+    density = len(es) / max(1, n * (n - 1))
+    return 1.0 - density
+
+
 # ── 6. CLI ──────────────────────────────────────────────────────────────
 
 def _print_fixed_points(sys: SymbolicSystem, fps: List[FixedPoint]) -> None:
@@ -462,7 +889,7 @@ def _print_fixed_points(sys: SymbolicSystem, fps: List[FixedPoint]) -> None:
 def _print_stability(stab: StabilityResult) -> None:
     print(f"  classification: {stab.classification}")
     print(f"  spectral radius: {stab.spectral_radius:.4f}")
-    print(f"  max Re(λ):       {stab.largest_real_part:.4f}")
+    print(f"  max Re(lambda):       {stab.largest_real_part:.4f}")
     print(f"  is stable:       {stab.is_stable}")
     print(f"  first 8 eigenvalues:")
     for e in stab.eigenvalues[:8]:
@@ -482,12 +909,21 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="render topology graph to PATH (.png or .svg)")
     p.add_argument("--wa-queries", action="store_true",
                    help="emit Wolfram-Alpha-pasteable per-question queries")
+    p.add_argument("--flow", action="store_true",
+                   help="dataflow analysis: paths, bottlenecks, bowtie waist")
+    p.add_argument("--phi", action="store_true",
+                   help="IIT Phi proxy + per-module contribution")
+    p.add_argument("--discover", choices=["phi", "modularity", "sparsity"],
+                   help="propose modifications maximising the chosen metric")
+    p.add_argument("--top-k", type=int, default=10,
+                   help="top-K proposals (for --discover)")
     p.add_argument("--all", action="store_true",
                    help="run every analysis above")
     args = p.parse_args(argv)
 
     if args.all:
         args.fixed_points = args.jacobian = args.stability = args.wa_queries = True
+        args.flow = args.phi = True
         if not args.graph:
             args.graph = os.path.join(args.arch_root, "topology.png")
 
@@ -510,7 +946,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         nnz = sum(1 for i in range(J.shape[0]) for j in range(J.shape[1])
                   if J[i, j] != 0)
         density = nnz / (J.shape[0] * J.shape[1]) if J.shape[0] else 0.0
-        print(f"  shape: {J.shape[0]} × {J.shape[1]}")
+        print(f"  shape: {J.shape[0]} x {J.shape[1]}")
         print(f"  non-zero entries: {nnz} ({density:.1%} density)")
         print()
 
@@ -531,7 +967,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print()
 
     if args.graph:
-        print(f"--- Rendering topology graph → {args.graph} ---")
+        print(f"--- Rendering topology graph -> {args.graph} ---")
         try:
             render_topology(args.arch_root, args.graph)
             print(f"  saved {args.graph}")
@@ -546,6 +982,54 @@ def main(argv: Optional[List[str]] = None) -> int:
         for label, q in qs:
             print(f"  [{label}]")
             print(f"    {q}")
+        print()
+
+    if args.flow:
+        print("--- Neural flow analysis ---")
+        fr = analyze_flow(args.arch_root)
+        print(f"  paths (source pop -> sink pop): {len(fr.paths)}")
+        if fr.shortest_path:
+            print(f"  shortest path ({len(fr.shortest_path)} hops): "
+                  f"{' -> '.join(fr.shortest_path)}")
+        if fr.longest_path:
+            print(f"  longest path  ({len(fr.longest_path)} hops): "
+                  f"{' -> '.join(fr.longest_path)}")
+        print(f"  bowtie waist (top by visit count + narrow fan): "
+              f"{', '.join(fr.bowtie_waist[:3])}")
+        print(f"  bottleneck edges (lowest weight/fan_out - squeeze points):")
+        for src, tgt, score in fr.bottleneck_edges:
+            print(f"    {src:14s} -> {tgt:14s}  score={score:.3f}")
+        print()
+
+    if args.phi:
+        print("--- IIT Phi proxy ---")
+        pr = compute_phi_proxy(args.arch_root)
+        print(f"  Phi_proxy:         {pr.phi_proxy:.4f}")
+        print(f"  integration:     {pr.integration:.4f}  (mean_w * density)")
+        print(f"  differentiation: {pr.differentiation:.4f}  (1 - clustering)")
+        print(f"  feedback edges:  {pr.cyclic_edges}  (close a directed cycle)")
+        print(f"  strongly-conn. components: {pr.n_strongly_connected}")
+        print(f"  top 8 modules by dphi (sensitivity to removal):")
+        for name, contrib in pr.per_module_contribution[:8]:
+            print(f"    {name:18s} dphi={contrib:+.4f}")
+        print()
+
+    if args.discover:
+        print(f"--- Discovery (greedy local search, maximise {args.discover}) ---")
+        baseline, props = discover_modifications(
+            args.arch_root, metric=args.discover, top_k=args.top_k)
+        print(f"  baseline {args.discover}: {baseline:.4f}")
+        print(f"  top {len(props)} proposals (d-metric descending):")
+        for i, m in enumerate(props, 1):
+            arrow = "+" if m.delta_metric > 0 else ""
+            print(f"  {i:2d}. {m.kind:14s} {m.source:14s} -> {m.target:14s}  "
+                  f"delta={m.delta:+.2f}  new={m.projected_metric:.4f}  "
+                  f"({arrow}{m.delta_metric:.4f})")
+        print()
+        print(f"  NOTE: structural-only search. For training-aware discovery")
+        print(f"  (minimise PPL, maximise generalization) use the existing")
+        print(f"  evolutionary engine in neuroslm/dsl/evolutionary.py which")
+        print(f"  trains each candidate.")
         print()
 
     return 0

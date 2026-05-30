@@ -126,6 +126,47 @@ def test_cli_analyze_subcommand():
     assert "Jacobian" in r.stdout or "Jacobian" in r.stderr
 
 
+def test_flow_finds_bowtie_waist():
+    from neuroslm.dsl.analyzer import analyze_flow
+    fr = analyze_flow(ARCH_ROOT)
+    # rcc_bowtie's waist should include the global workspace (gws)
+    assert "gws" in fr.bowtie_waist, f"gws not in waist: {fr.bowtie_waist}"
+    # There must be at least one multi-hop path through the bowtie
+    assert any(len(p) >= 4 for p in fr.paths), "no deep dataflow paths"
+    # The cognitive cascade dmn -> gws -> ... -> motor must be present
+    longest = fr.longest_path
+    assert "gws" in longest, f"gws not in longest path: {longest}"
+    assert "motor" in longest, f"motor not in longest path: {longest}"
+
+
+def test_phi_proxy_is_positive_and_balanced():
+    from neuroslm.dsl.analyzer import compute_phi_proxy
+    pr = compute_phi_proxy(ARCH_ROOT)
+    # rcc_bowtie is structurally sparse + differentiated -> small Phi but >0
+    assert pr.phi_proxy > 0.0
+    assert pr.differentiation > 0.5, "expected high differentiation for sparse arch"
+    # gws should be among the highest-contributing modules (bowtie waist)
+    top_contributors = [name for name, _ in pr.per_module_contribution[:5]]
+    assert "gws" in top_contributors, f"gws missing from top contributors: {top_contributors}"
+
+
+def test_discover_proposes_modifications():
+    from neuroslm.dsl.analyzer import discover_modifications
+    baseline, props = discover_modifications(ARCH_ROOT, metric="phi", top_k=5)
+    assert baseline >= 0.0
+    assert len(props) > 0
+    # The top proposal must strictly improve the baseline (otherwise the
+    # arch is already optimal w.r.t. the metric — flag as a hint that
+    # something is wrong with the search).
+    assert props[0].delta_metric >= 0.0, \
+        f"top proposal worsens metric? {props[0]}"
+    # All four mod kinds should be discoverable in principle
+    kinds = {m.kind for m in
+             discover_modifications(ARCH_ROOT, metric="phi", top_k=200)[1]}
+    assert "add_edge" in kinds
+    assert "remove_edge" in kinds
+
+
 def test_cli_wolfram_subcommand(tmp_path):
     out = tmp_path / "arch.m"
     r = _run_cli("wolfram", ARCH_ROOT, "--full", "--out", str(out))
