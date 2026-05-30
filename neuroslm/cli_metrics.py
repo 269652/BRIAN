@@ -190,22 +190,33 @@ def claude_extract_insights(log_text: str, summary: Dict) -> Optional[str]:
         return None
     prompt = (
         "You are reviewing a training or OOD-eval log from the BRIAN "
-        "NeuroSLM project. The parsed summary is:\n\n"
+        "NeuroSLM project. Parsed summary:\n\n"
         + json.dumps(summary, indent=2)
-        + "\n\nWrite a short Markdown insight block (under 200 words) that:\n"
-        + "1. Names the run (use the run_id from the summary).\n"
-        + "2. Notes any *surprising or non-obvious* observation — loss "
-          "spikes, recovery patterns, anomalies, deviations from expected "
-          "trajectories, anything worth remembering.\n"
-        + "3. Suggests one concrete follow-up if relevant.\n"
-        + "If the run was uneventful, say so in one sentence — do not "
-          "invent observations."
+        + "\n\nWrite a Markdown insight block, UNDER 200 WORDS, that:\n"
+        + "- Names the run (run_id from summary).\n"
+        + "- Lists 2-4 key metrics (final PPL, gap_ratio, tok/s, anything "
+          "surprising).\n"
+        + "- Calls out anomalies: loss spikes, recoveries, divergences, "
+          "checkpoint-boundary effects.\n"
+        + "- Recommends ONE concrete next action.\n\n"
+        + "RULES:\n"
+        + "- DO NOT ask questions back. Write the analysis as a final "
+          "deliverable.\n"
+        + "- DO NOT invent metrics not in the summary or log.\n"
+        + "- If the run was uneventful, say so in one sentence and stop.\n"
+        + "Output ONLY the markdown block — no preamble, no `\\\"What "
+          "would you like me to do\\\"`.\n"
     )
+    # Windows subprocess needs the resolved executable path; `claude` on
+    # the PATH may be a .cmd shim that subprocess doesn't auto-resolve.
+    claude_path = shutil.which("claude") or "claude"
     try:
         proc = subprocess.run(
-            ["claude", "-p", prompt],
+            [claude_path, "-p", prompt],
             input=log_text[-30000:],   # tail; logs can be 100s of KB
-            text=True, capture_output=True, timeout=120)
+            text=True, capture_output=True, timeout=120,
+            encoding="utf-8", errors="replace",   # logs contain μ, Φ, λ
+            shell=(os.name == "nt"))
         if proc.returncode != 0:
             return f"_claude failed (exit {proc.returncode}): {proc.stderr[:200]}_"
         return proc.stdout.strip()

@@ -45,7 +45,11 @@ training {
     grad_clip:     1.0
     label_smoothing: 0.05
     dropout:       0.10
-    batch_size:   32
+    # batch 16 x ctx 2048 = 32k tokens/step (same as old 32x1024) but
+    # ctx is 2x richer. The 32x2048 combo OOM'd on cross-entropy (13 GiB
+    # logit tensor at fp32). If you want to push back to batch=32, also
+    # port Brain's chunked CE (brain.py _chunked_ce) into the harness.
+    batch_size:   16
     seq_len:      2048
     steps:        10000
     warmup_steps: 300
