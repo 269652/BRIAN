@@ -19,9 +19,19 @@ Usage:
 from __future__ import annotations
 import argparse
 import os
+import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+
+# Per-run id stamped into checkpoint filenames so concurrent / successive
+# runs to the same ckpt_dir never overwrite each other. Settable via the
+# DSL_RUN_ID env var (vast_train_dsl_loop sets it when resuming); falls
+# back to current UTC time at import.
+_RUN_ID = os.environ.get(
+    "DSL_RUN_ID", datetime.utcnow().strftime("%Y%m%d-%H%M%S"))
 
 import torch
 
@@ -209,16 +219,27 @@ def build_harness(arch_root: Path, vocab_size: int, d_sem: int,
     return harness
 
 
+_RUN_ID_RE = re.compile(r"dsl_arch_(\d{8}-\d{6})_step(\d+)\.pt$")
+_LEGACY_STEP_RE = re.compile(r"dsl_arch_step(\d+)\.pt$")
+
+
+def _checkpoint_step(path: Path) -> int:
+    """Extract step from `dsl_arch_{TS}_step{N}.pt` or legacy `dsl_arch_step{N}.pt`."""
+    m = _RUN_ID_RE.search(path.name) or _LEGACY_STEP_RE.search(path.name)
+    return int(m.group(2 if _RUN_ID_RE.search(path.name) else 1)) if m else 0
+
+
 def _maybe_resume(harness: BRIANHarness, ckpt_dir: Path) -> int:
-    """Load the most recent dsl_arch_step*.pt from ckpt_dir if present.
+    """Load the highest-step dsl_arch checkpoint, regardless of run-id prefix.
 
     Returns the resumed step (0 if no checkpoint found).
     """
     if not ckpt_dir.is_dir():
         return 0
     ckpts = sorted(
-        ckpt_dir.glob("dsl_arch_step*.pt"),
-        key=lambda p: int(p.stem.replace("dsl_arch_step", "")),
+        list(ckpt_dir.glob("dsl_arch_*_step*.pt"))
+        + list(ckpt_dir.glob("dsl_arch_step*.pt")),
+        key=_checkpoint_step,
     )
     if not ckpts:
         return 0
@@ -307,7 +328,11 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
             last_log = now
 
         if ckpt_dir is not None and step % save_every == 0:
-            path = ckpt_dir / f"dsl_arch_step{step}.pt"
+            # Filename includes a per-run timestamp prefix so concurrent /
+            # successive runs to the same dir never overwrite each other.
+            # Pattern: dsl_arch_{YYYYMMDD-HHMMSS}_step{N}.pt
+            # Resume globs all `dsl_arch_*_step*.pt` and picks highest step.
+            path = ckpt_dir / f"dsl_arch_{_RUN_ID}_step{step}.pt"
             harness.save_checkpoint(str(path), step=step)
             print(f"[train_dsl] saved checkpoint {path}", flush=True)
 
