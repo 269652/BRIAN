@@ -73,6 +73,10 @@ class TrainingConfig:
     steps: int = 10000
     warmup_steps: int = 300
     min_lr_ratio: float = 0.1
+    # OOD-generalization knobs (added 2026-05-30 after first 10k run hit
+    # gap_ratio 7.04). Both default to 0 = off so prior runs reproduce.
+    dropout: float = 0.0
+    pct_strength: float = 0.0   # multiplies the PCH-aux weight in the trunk path
 
 
 # ── Constants for validation ───────────────────────────────────────────
@@ -130,6 +134,10 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.warmup_steps = int(props["warmup_steps"])
     if "min_lr_ratio" in props:
         cfg.min_lr_ratio = float(props["min_lr_ratio"])
+    if "dropout" in props:
+        cfg.dropout = float(props["dropout"])
+    if "pct_strength" in props:
+        cfg.pct_strength = float(props["pct_strength"])
 
     return cfg
 

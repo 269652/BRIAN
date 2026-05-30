@@ -609,7 +609,8 @@ class DSLLanguageCortex(nn.Module):
                  n_heads: int, max_ctx: int,
                  n_kv_heads: Optional[int] = None,
                  geometry_expansion: float = 2.0,
-                 mod_capacity: float = 0.5):
+                 mod_capacity: float = 0.5,
+                 dropout: float = 0.0):
         super().__init__()
         n_kv_heads = n_kv_heads or n_heads
         head_dim = d_model // n_heads
@@ -618,6 +619,13 @@ class DSLLanguageCortex(nn.Module):
         Dhyper = int(d_model * geometry_expansion)
         R = max(8, Dhyper // 8)
         R_hidden = max(32, d_model // 8)
+        # Embed + residual dropout for OOD regularization. Applied post-
+        # embed and after each block's output so it touches every layer's
+        # output without changing the bit-identical-to-Brain DSL block
+        # internals (Brain itself uses dropout=0 on the baseline trunk;
+        # this path is an OOD-targeted addition controlled by arch.neuro's
+        # `training.dropout`).
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         Std = compile_layer(_STD_BLOCK_DSL)
         Diff = compile_layer(_DIFF_BLOCK_DSL)
@@ -663,6 +671,7 @@ class DSLLanguageCortex(nn.Module):
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         h = nn_ops.embedding(ids, self.embed)
+        h = self.dropout(h)
         self._layer_acts = []
         prev_layer = None
         pc_counter = 0
@@ -670,6 +679,7 @@ class DSLLanguageCortex(nn.Module):
         for blk, adapter in zip(self.blocks, self.adapters):
             h = blk(h)
             h = adapter(h)
+            h = self.dropout(h)
             self._layer_acts.append(h.detach())
             if prev_layer is not None and pc_counter < len(self.pch_w1):
                 pred_coding_loss = pred_coding_loss + nn_ops.predictive_coding_head(
@@ -688,10 +698,11 @@ class DSLLanguageCortex(nn.Module):
 
 
 def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
-                               n_heads: int, max_ctx: int,
+                               n_heads: int, max_ctx: int, dropout: float = 0.0,
                                n_kv_heads: Optional[int] = None,
                                geometry_expansion: float = 2.0,
                                mod_capacity: float = 0.5) -> DSLLanguageCortex:
     """Assemble Brain's full LanguageCortex from pure-DSL blocks."""
     return DSLLanguageCortex(vocab, d_model, depth, n_heads, max_ctx,
-                              n_kv_heads, geometry_expansion, mod_capacity)
+                              n_kv_heads, geometry_expansion, mod_capacity,
+                              dropout=dropout)

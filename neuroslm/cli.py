@@ -90,6 +90,25 @@ def _bash() -> str:
 
 # ── compile ────────────────────────────────────────────────────────────
 
+def cmd_compile_nfg(args: argparse.Namespace) -> int:
+    """Compile arch to a Neural Flow Graph: dict-of-dicts .py + .png render."""
+    from neuroslm.dsl.nfg import compile_nfg, render_nfg, emit_python
+    arch = _resolve_arch(args.arch)
+    g = compile_nfg(arch)
+    out_py = args.out or os.path.join(arch, "nfg.py")
+    out_png = args.png or os.path.join(arch, "nfg.png")
+    emit_python(g, out_py)
+    print(f"wrote NFG definition  -> {out_py}")
+    try:
+        render_nfg(g, out_png)
+        print(f"wrote NFG render      -> {out_png}")
+    except ImportError as e:
+        print(f"render skipped: {e}")
+        print("  install matplotlib + networkx to enable PNG output")
+    print(f"  stats: {g.stats()}")
+    return 0
+
+
 def cmd_compile(args: argparse.Namespace) -> int:
     """Compile an architecture .neuro folder to a runnable nn.Module class."""
     from neuroslm.dsl.codegen import CodeGenerator
@@ -409,14 +428,25 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Unified CLI for the NeuroSLM / BRIAN project.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    # compile
+    # compile (group: `brian compile <arch>` for nn.Module, or
+    #                  `brian compile nfg <arch>` for Neural Flow Graph)
     sc = sub.add_parser("compile",
-                        help="Compile an arch.neuro folder to a runnable nn.Module")
-    sc.add_argument("arch", help="architectures/<name>/ path")
+                        help="Compile an arch.neuro folder (nn.Module or NFG)")
+    sc.add_argument("arch_or_subcmd", nargs="?",
+                    help="architecture name OR 'nfg' for the NFG sub-command")
+    sc.add_argument("arch", nargs="?",
+                    help="architecture (only when first arg was 'nfg')")
     sc.add_argument("--out", help="write generated .py to this path")
+    sc.add_argument("--png", help="(nfg only) write PNG render to this path")
     sc.add_argument("--head", type=int, default=2000,
                     help="when printing to stdout, truncate after N chars")
-    sc.set_defaults(func=cmd_compile)
+    sc.set_defaults(func=lambda a: (
+        cmd_compile_nfg(argparse.Namespace(
+            arch=a.arch, out=a.out, png=a.png))
+        if a.arch_or_subcmd == "nfg"
+        else cmd_compile(argparse.Namespace(
+            arch=a.arch_or_subcmd, out=a.out, head=a.head))
+    ))
 
     # wolfram
     sw = sub.add_parser("wolfram",

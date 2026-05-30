@@ -7,6 +7,15 @@ name = "neuroslm"
 version = "0.1.0"
 description = "BRIAN — biologically-inspired SLM with DSL-defined architectures"
 requires-python = ">=3.10"
+dependencies = [
+    # CLI / analysis path. Heavy ML deps (torch, transformers, datasets)
+    # are listed in requirements.txt for the training/eval containers and
+    # NOT installed by default here so the brian CLI works without them.
+    "sympy>=1.12",
+    "matplotlib>=3.7",
+    "networkx>=3.0",
+    "vastai>=0.1",
+]
 
 [project.scripts]
 # `pip install -e .` puts this on your PATH as `brian`.

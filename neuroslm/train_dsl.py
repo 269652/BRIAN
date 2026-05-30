@@ -141,17 +141,33 @@ def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
     print(f"[train_dsl] training config: "
           f"loss_clip={cfg.loss_clipping.enabled}(f={cfg.loss_clipping.factor}), "
           f"opt={cfg.optimizer}, lr={cfg.learning_rate}, "
-          f"grad_accum={cfg.grad_accum}, label_smooth={cfg.label_smoothing}")
+          f"grad_accum={cfg.grad_accum}, label_smooth={cfg.label_smoothing}, "
+          f"wd={cfg.weight_decay}, dropout={cfg.dropout}, "
+          f"pct_strength={cfg.pct_strength}")
 
     # Full DSL LanguageCortex: interleaved Standard/Diff/MoD blocks +
     # NeuralGeometryAdapter after each, bit-identical to Brain's
     # LanguageCortex(baseline=False) on the LM-logits path (N8 passes).
+    # OOD-targeted: dropout on embed + per-block output controlled by
+    # cfg.dropout (defaults to 0 to preserve bit-identical behavior).
     lm = build_dsl_language_cortex(
         vocab=vocab_size, d_model=d_model, depth=depth,
-        n_heads=n_heads, max_ctx=max_ctx).to(device)
+        n_heads=n_heads, max_ctx=max_ctx, dropout=cfg.dropout).to(device)
     harness = BRIANHarness.from_language_model(
         lm, vocab_size=vocab_size, d_sem=d_model, training_config=cfg,
     ).to(device)
+    # PCT trunk-strength override: bump the PCH aux weight in the trunk
+    # path. AuxWeights.pred_coding tuple = (weight, center, width).
+    # Setting pct_strength > 0 multiplies the weight so PCH gradient
+    # actually shapes the trunk (default 0.10 weight × 0.30 strength
+    # boost = 0.13 effective trunk weight on PCH).
+    if cfg.pct_strength > 0:
+        from neuroslm.dsl.maturity import AuxWeights
+        w, c, width = harness.total_loss_config.aux.pred_coding
+        harness.total_loss_config.aux.pred_coding = (
+            w * (1.0 + cfg.pct_strength), c, width)
+        print(f"[train_dsl] PCT trunk-strength boost: "
+              f"pred_coding weight {w} -> {w * (1.0 + cfg.pct_strength)}")
 
     # Attach the metric observer (Φ, λ₁, ignition, oscillations, NT,
     # trophic, mesoLG), seeded with the architecture's NT baselines.
