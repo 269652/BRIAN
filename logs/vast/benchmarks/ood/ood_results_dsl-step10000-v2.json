@@ -1,7 +1,7 @@
 {
   "checkpoint_path": "lfs_checkpoints/dsl_arch_step10000.pt",
   "step": 10000,
-  "timestamp": "2026-05-30T14:45:52",
+  "timestamp": "2026-05-30T15:12:16",
   "n_params": 51231885,
   "tokenizer": "neuroslm.Tokenizer (gpt2 BPE, vocab=50257)",
   "ctx_len": 1024,
