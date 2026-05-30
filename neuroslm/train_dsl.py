@@ -245,21 +245,41 @@ def _checkpoint_step(path: Path) -> int:
     return int(m.group(2 if _RUN_ID_RE.search(path.name) else 1)) if m else 0
 
 
+def _is_lfs_pointer(path: Path) -> bool:
+    """True if `path` is an unpulled Git LFS pointer file (not the real blob).
+
+    `git clone ... GIT_LFS_SKIP_SMUDGE=1` leaves .pt files on disk as plain
+    text pointers (`version https://git-lfs.github.com/spec/v1\\n...`).
+    `torch.load` on those raises UnpicklingError('invalid load key, v.')
+    and looks like a checkpoint-corruption bug. Skip them here so resume
+    only considers real checkpoints.
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(48)
+        return head.startswith(b"version https://git-lfs")
+    except OSError:
+        return False
+
+
 def _maybe_resume(harness: BRIANHarness, ckpt_dir: Path) -> int:
     """Load the highest-step dsl_arch checkpoint, regardless of run-id prefix.
 
-    Returns the resumed step (0 if no checkpoint found).
+    Returns the resumed step (0 if no real checkpoint found). LFS pointer
+    files are filtered out so a freshly-cloned container without LFS
+    smudge doesn't crash on pickle-load.
     """
     if not ckpt_dir.is_dir():
         return 0
-    ckpts = sorted(
-        list(ckpt_dir.glob("dsl_arch_*_step*.pt"))
-        + list(ckpt_dir.glob("dsl_arch_step*.pt")),
-        key=_checkpoint_step,
-    )
-    if not ckpts:
+    all_ckpts = (list(ckpt_dir.glob("dsl_arch_*_step*.pt"))
+                 + list(ckpt_dir.glob("dsl_arch_step*.pt")))
+    real_ckpts = [p for p in all_ckpts if not _is_lfs_pointer(p)]
+    skipped = len(all_ckpts) - len(real_ckpts)
+    if skipped:
+        print(f"[train_dsl] skipping {skipped} LFS pointer file(s) in {ckpt_dir}")
+    if not real_ckpts:
         return 0
-    latest = ckpts[-1]
+    latest = sorted(real_ckpts, key=_checkpoint_step)[-1]
     step = harness.load_checkpoint(str(latest))
     print(f"[train_dsl] resumed from {latest} @ step {step}")
     return step
