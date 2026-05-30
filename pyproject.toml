@@ -1,3 +1,19 @@
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuroslm"
+version = "0.1.0"
+description = "BRIAN — biologically-inspired SLM with DSL-defined architectures"
+requires-python = ">=3.10"
+
+[project.scripts]
+# `pip install -e .` puts this on your PATH as `brian`.
+brian = "neuroslm.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["neuroslm*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

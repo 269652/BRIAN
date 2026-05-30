@@ -41,13 +41,32 @@ training run finishes.
 from __future__ import annotations
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 # ── Locate the repo root so commands work from any cwd ────────────────
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _resolve_arch(arg: str) -> str:
+    """Accept either `architectures/foo` or just `foo` → resolve to a real path.
+
+    Lookup order:
+      1. `<arg>` as given (relative to cwd) — if it contains an arch.neuro,
+         use it.
+      2. `architectures/<arg>` under the repo root.
+      3. The raw `<arg>` (lets the caller see the resolver error directly).
+    """
+    p = Path(arg)
+    if p.is_dir() and (p / "arch.neuro").is_file():
+        return str(p)
+    short = REPO_ROOT / "architectures" / arg
+    if short.is_dir() and (short / "arch.neuro").is_file():
+        return str(short)
+    return arg
 
 
 def _run(cmd: List[str], **kw) -> int:
@@ -75,7 +94,8 @@ def cmd_compile(args: argparse.Namespace) -> int:
     """Compile an architecture .neuro folder to a runnable nn.Module class."""
     from neuroslm.dsl.codegen import CodeGenerator
     from neuroslm.dsl.multifile import compile_folder
-    ir = compile_folder(Path(args.arch))
+    arch = _resolve_arch(args.arch)
+    ir = compile_folder(Path(arch))
     g = CodeGenerator(ir)
     src = g.generate_module_source()
     if args.out:
@@ -94,12 +114,13 @@ def cmd_wolfram(args: argparse.Namespace) -> int:
     from neuroslm.dsl.wolfram import (
         architecture_to_wolfram, architecture_to_wolfram_full, save_wolfram,
     )
+    arch = _resolve_arch(args.arch)
     if args.full:
-        code = architecture_to_wolfram_full(args.arch)
+        code = architecture_to_wolfram_full(arch)
     else:
-        code = architecture_to_wolfram(args.arch)
+        code = architecture_to_wolfram(arch)
     if args.out:
-        save_wolfram(args.arch, args.out, full=args.full)
+        save_wolfram(arch, args.out, full=args.full)
         print(f"wrote {args.out}  ({len(code)} chars)")
     else:
         print(code)
@@ -113,7 +134,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     from neuroslm.dsl import analyzer as A
     # Repackage namespace for analyzer.main()
     cli = []
-    cli.append(args.arch)
+    cli.append(_resolve_arch(args.arch))
     if args.all:
         cli.append("--all")
     if args.fixed_points:
@@ -215,6 +236,129 @@ def cmd_ood(args: argparse.Namespace) -> int:
         env["BRANCH"] = args.branch
     if args.tag:
         env["ROLE_TAG"] = args.tag
+    if args.windows:
+        env["MAX_OOD_WINDOWS"] = str(args.windows)
+    return _run([_bash(), "scripts/vast_ood_eval.sh"], env=env)
+
+
+# ── analyze-log ────────────────────────────────────────────────────────
+
+def cmd_analyze_log(args: argparse.Namespace) -> int:
+    """Parse a training/OOD log → upsert docs/metrics.md row → append finding."""
+    from neuroslm.cli_metrics import (
+        analyze_log_file, scan_ood_dir, METRICS_PATH, FINDINGS_PATH,
+        claude_available,
+    )
+    if args.scan_ood:
+        rows = scan_ood_dir()
+        print(f"scanned {len(rows)} OOD JSON files; updated {METRICS_PATH}")
+        return 0
+    if not args.logfile:
+        print("analyze-log: pass a logfile path or --scan-ood", file=sys.stderr)
+        return 2
+    p = Path(args.logfile)
+    metric = analyze_log_file(p, run_id=args.run_id, branch=args.branch,
+                              use_claude=not args.no_claude)
+    print("--- parsed metrics ---")
+    print(metric.md_row())
+    print()
+    print(f"upserted row in {METRICS_PATH}")
+    if not args.no_claude:
+        if claude_available():
+            print(f"appended insight to {FINDINGS_PATH}")
+        else:
+            print("(claude CLI not found on PATH — skipped narrative insights)")
+    return 0
+
+
+# ── eval ───────────────────────────────────────────────────────────────
+
+def cmd_eval(args: argparse.Namespace) -> int:
+    """Group command: `brian eval ood` etc."""
+    if args.eval_kind == "ood":
+        return _eval_ood(args)
+    print(f"unknown eval kind: {args.eval_kind}")
+    return 2
+
+
+def _find_dsl_checkpoints() -> List[Tuple[int, str]]:
+    """Return [(step, path), ...] sorted desc by step. Local first, then origin."""
+    ckpt_dir = REPO_ROOT / "lfs_checkpoints"
+    items: List[Tuple[int, str]] = []
+    if ckpt_dir.is_dir():
+        for p in ckpt_dir.glob("dsl_arch_step*.pt"):
+            m = re.search(r"step(\d+)", p.name)
+            if m:
+                items.append((int(m.group(1)), str(p.relative_to(REPO_ROOT))))
+    # Also list what's on origin (via git ls-tree on the lfs_checkpoints/ dir)
+    try:
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(REPO_ROOT), text=True).strip()
+        out = subprocess.check_output(
+            ["git", "ls-tree", f"origin/{branch}",
+             "lfs_checkpoints/", "--name-only"],
+            cwd=str(REPO_ROOT), text=True)
+        for line in out.splitlines():
+            if "dsl_arch_step" not in line:
+                continue
+            m = re.search(r"step(\d+)", line)
+            if not m:
+                continue
+            entry = (int(m.group(1)), line)
+            if entry not in items:
+                items.append(entry)
+    except Exception:
+        pass
+    items.sort(key=lambda r: -r[0])
+    return items
+
+
+def _eval_ood(args: argparse.Namespace) -> int:
+    """Interactive checkpoint picker → deploy vast_ood_eval.sh."""
+    ckpts = _find_dsl_checkpoints()
+    if not ckpts:
+        print("no DSL checkpoints found in lfs_checkpoints/ or on origin")
+        return 1
+    if args.checkpoint:
+        ckpt_path = args.checkpoint
+    else:
+        # Default to the highest-step checkpoint (latest training run "best").
+        print("=== DSL checkpoints (newest first) ===")
+        for i, (step, path) in enumerate(ckpts):
+            tag = " (default)" if i == 0 else ""
+            print(f"  [{i+1:2d}] step {step:>6d}  {path}{tag}")
+        sel = input(f"choose [1-{len(ckpts)}] (Enter for 1): ").strip()
+        if not sel:
+            sel = "1"
+        try:
+            idx = int(sel) - 1
+            ckpt_path = ckpts[idx][1]
+        except (ValueError, IndexError):
+            print(f"invalid selection: {sel!r}")
+            return 2
+
+    print(f"\n=== Deploying OOD eval ===")
+    print(f"  checkpoint = {ckpt_path}")
+    branch = args.branch or subprocess.check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=str(REPO_ROOT), text=True).strip()
+    print(f"  branch     = {branch}")
+    tag = args.tag or f"dsl-{Path(ckpt_path).stem.replace('dsl_arch_', '')}"
+    print(f"  role tag   = {tag}")
+
+    env = os.environ.copy()
+    env.update({
+        "PYTHONIOENCODING": "utf-8",
+        "BRANCH": branch,
+        "CKPT": ckpt_path,
+        "ROLE_TAG": tag,
+        # Restrict to verified A100 by default (override with VAST_GPU_QUERY)
+        "VAST_GPU_QUERY": env.get(
+            "VAST_GPU_QUERY",
+            "gpu_name in [A100_SXM4,A100_PCIE,A100_SXM,A100X] num_gpus=1 "
+            "rentable=true verified=true reliability>0.99"),
+    })
     if args.windows:
         env["MAX_OOD_WINDOWS"] = str(args.windows)
     return _run([_bash(), "scripts/vast_ood_eval.sh"], env=env)
@@ -343,13 +487,40 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="destroy every neuroslm-* labelled instance")
     sde.set_defaults(func=cmd_destroy)
 
-    # ood
+    # ood (legacy — explicit ckpt path)
     so = sub.add_parser("ood", help="Run OOD eval on a checkpoint")
     so.add_argument("ckpt", help="ckpt path (e.g. lfs_checkpoints/dsl_arch_step10000.pt)")
     so.add_argument("--branch")
     so.add_argument("--tag", default="eval", help="role tag for the eval JSON")
     so.add_argument("--windows", type=int)
     so.set_defaults(func=cmd_ood)
+
+    # eval (group: `brian eval ood` interactive picker)
+    se = sub.add_parser("eval",
+                        help="Evaluate a checkpoint (ood/...) — interactive picker")
+    ese = se.add_subparsers(dest="eval_kind", required=True)
+    ese_ood = ese.add_parser("ood",
+                             help="OOD eval on a DSL checkpoint (interactive)")
+    ese_ood.add_argument("--checkpoint",
+                         help="explicit ckpt path (skips picker)")
+    ese_ood.add_argument("--branch")
+    ese_ood.add_argument("--tag",
+                         help="role tag (defaults to step number)")
+    ese_ood.add_argument("--windows", type=int)
+    se.set_defaults(func=cmd_eval)
+
+    # analyze-log
+    sal = sub.add_parser("analyze-log",
+                         help="Parse log file → docs/metrics.md + claude → docs/FINDINGS.md")
+    sal.add_argument("logfile", nargs="?",
+                     help="path to a training or OOD log file")
+    sal.add_argument("--run-id", help="override the run id used as table key")
+    sal.add_argument("--branch", help="override the branch column")
+    sal.add_argument("--no-claude", action="store_true",
+                     help="skip the claude CLI insight extraction")
+    sal.add_argument("--scan-ood", action="store_true",
+                     help="scan logs/vast/benchmarks/ood/ and upsert every JSON")
+    sal.set_defaults(func=cmd_analyze_log)
 
     # test
     st = sub.add_parser("test", help="Run the DSL test suite (or a subset)")

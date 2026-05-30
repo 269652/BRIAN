@@ -50,7 +50,11 @@ VAST_IMAGE="${VAST_IMAGE:-pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime}"
 VAST_DISK="${VAST_DISK:-60}"
 # Wider GPU pool than training (eval is light: 107M model + 200 windows).
 VAST_GPU_QUERY="${VAST_GPU_QUERY:-gpu_name in [A100_SXM4,A100_PCIE,A100_SXM,A100X,A40,A10,RTX_4090,RTX_3090] num_gpus=1 rentable=true reliability>0.95}"
-OUTPUT_FILE="ood_results_${ROLE_TAG}.json"
+# Collect OOD benchmarks under a single directory so brian analyze-log
+# can scan them as a group. Filename includes the role tag so reruns
+# don't collide (different checkpoints / branches).
+OOD_DIR="logs/vast/benchmarks/ood"
+OUTPUT_FILE="${OOD_DIR}/ood_results_${ROLE_TAG}.json"
 
 # ── Resolve python with vastai (lifted from vast_deploy.sh) ──────────────
 _norm_path() {
@@ -119,11 +123,12 @@ echo "── bootstrap (pip deps, SKIP_LFS_RESUME=1) ──"
 # 5-15 min wasted on a slow link).
 SKIP_LFS_RESUME=1 bash scripts/vast_bootstrap.sh
 echo "── running OOD eval (max_windows=${MAX_OOD_WINDOWS}, batch=${BATCH_SIZE}) ──"
+mkdir -p "${OOD_DIR}"
 python -u brian_ood_test.py \\
   --checkpoint "${CKPT}" \\
   --max_ood_windows ${MAX_OOD_WINDOWS} \\
   --batch_size ${BATCH_SIZE} \\
-  --output "${OUTPUT_FILE}" 2>&1 | tee /workspace/brian/${OUTPUT_FILE}.log
+  --output "${OUTPUT_FILE}" 2>&1 | tee "${OUTPUT_FILE}.log"
 echo "── committing + pushing result ──"
 git config user.email "ood-eval@vast.local"
 git config user.name "ood-eval-bot"
