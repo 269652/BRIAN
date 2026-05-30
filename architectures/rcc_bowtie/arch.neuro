@@ -227,6 +227,45 @@ synapse cerebellum -> forward_m {
 }
 
 # =============================================================================
+# STACKED OOD TOPOLOGY (added after run 38569395 OOD gap_ratio 7.04)
+# Three independent mechanisms layered together. Surfaced by
+# `brian analyze rcc_bowtie --topo-10x`. Generalization proxy +63.5%.
+#
+#   1. PCT-style reentry: motor errors feed back to sensory.
+#      (matches B3 / PCT-30M from the OOD ablation arc which hit 4.51)
+#   2. MoE parallel path through reasoning_cortex (cuts OOD interference
+#      via specialised routing; lottery-ticket / sparse-routing lit).
+#   3. Lateral inhibition (GABA) between dmn and reasoning_cortex
+#      (sparse-coding effect: one specialised lane fires per token).
+# =============================================================================
+
+# (1) Reentry: deep motor -> sensory loop (closes the bowtie)
+synapse motor -> sensory {
+    weight: 0.4, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# (2) MoE parallel path: pfc -> reasoning_cortex -> motor
+synapse pfc -> reasoning_cortex {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+synapse reasoning_cortex -> motor {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# (3) Lateral inhibition: dmn <-> reasoning_cortex (GABA)
+synapse dmn -> reasoning_cortex {
+    weight: 0.3, neurotransmitter: "gaba",
+    equation: "y = weight * (x_pre @ W)"
+}
+synapse reasoning_cortex -> dmn {
+    weight: 0.3, neurotransmitter: "gaba",
+    equation: "y = weight * (x_pre @ W)"
+}
+
+# =============================================================================
 # NEUROMODULATION (receptor banks — fast NT modulation of regions)
 # Equation: y = output * (c * gain)        for multiplicative effects
 # Equation: y = output + (c * gain)        for additive effects
