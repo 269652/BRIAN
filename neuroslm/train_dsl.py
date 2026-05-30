@@ -300,12 +300,90 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
             f"| NT[{nt_str}]{osc_str}")
 
 
+def _mid_ood_eval(harness: BRIANHarness, step: int,
+                   ckpt_dir: Optional[Path],
+                   observer) -> None:
+    """Quick WikiText-103 ppl snapshot, logged inline + written as JSON.
+
+    Capped to 50 sliding windows so the eval costs <30s on an A100 and
+    doesn't disrupt training cadence noticeably. Writes one JSON per
+    checkpoint to <ckpt_dir>/../logs/vast/benchmarks/ood/.
+    """
+    import json
+    import math
+    import torch
+    from datasets import load_dataset
+
+    print(f"[mid-ood] step {step}: WikiText-103 snapshot...", flush=True)
+    was_training = harness.training
+    harness.eval()
+    try:
+        ds = load_dataset("wikitext", "wikitext-103-v1", split="test",
+                          streaming=True)
+        n_seq, total_loss, total_tok = 0, 0.0, 0
+        # Use the same tokenizer the harness was built with — derived
+        # from neuroslm.tokenizer.Tokenizer to keep BPE alignment exact.
+        from neuroslm.tokenizer import Tokenizer
+        tok = Tokenizer()
+        ctx = getattr(harness.language_model, "max_ctx", 1024) or 1024
+        for ex in ds:
+            text = ex.get("text", "")
+            if not text or len(text) < 50:
+                continue
+            ids = tok.encode(text)[: ctx + 1]
+            if len(ids) < 16:
+                continue
+            ids_t = torch.tensor([ids[:-1]], device=next(harness.parameters()).device)
+            tgt_t = torch.tensor([ids[1:]], device=ids_t.device)
+            with torch.no_grad():
+                logits = harness(ids_t)
+                # cross-entropy per-token
+                vocab = logits.shape[-1]
+                loss = torch.nn.functional.cross_entropy(
+                    logits.reshape(-1, vocab), tgt_t.reshape(-1),
+                    reduction="sum")
+            total_loss += float(loss)
+            total_tok += tgt_t.numel()
+            n_seq += 1
+            if n_seq >= 50:
+                break
+        avg_nll = total_loss / max(1, total_tok)
+        ppl = math.exp(min(avg_nll, 20.0))
+        print(f"[mid-ood] step {step}: wikitext ppl={ppl:.1f} "
+              f"({n_seq} seq, {total_tok} tok)", flush=True)
+        # Persist to logs/vast/benchmarks/ood/ so analyze-log picks it up
+        out_dir = Path("logs/vast/benchmarks/ood")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"ood_mid_{_RUN_ID}_step{step}.json"
+        out_path.write_text(json.dumps({
+            "step": step,
+            "run_id": _RUN_ID,
+            "ood_dataset": "wikitext-103-v1",
+            "ood_ppl": ppl,
+            "n_sequences": n_seq,
+            "n_tokens": total_tok,
+            "kind": "mid-training",
+        }, indent=2), encoding="utf-8")
+    finally:
+        if was_training:
+            harness.train()
+
+
 def train(harness: BRIANHarness, source: SyntheticBatchSource,
           steps: int, log_every: int = 20, save_every: int = 1000,
           ckpt_dir: Optional[Path] = None, start_step: int = 0,
-          tokens_per_step: int = 0) -> None:
+          tokens_per_step: int = 0,
+          ood_every: int = 0) -> None:
     """Run train_steps from `start_step+1` to `steps`. Emits the native
-    train.py metric format; saves checkpoints."""
+    train.py metric format; saves checkpoints.
+
+    If `ood_every > 0`: every `ood_every` steps, runs a quick OOD ppl
+    eval on WikiText-103 (capped to 50 windows for speed), prints the
+    result inline, and writes a JSON to logs/vast/benchmarks/ood/
+    ood_mid_<RUN_ID>_step{N}.json so it lands in the same per-step
+    metrics ledger as the final OOD eval. Lets you SEE generalization
+    improving (or not) while training is still running.
+    """
     if ckpt_dir is not None:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -352,6 +430,17 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
             harness.save_checkpoint(str(path), step=step)
             print(f"[train_dsl] saved checkpoint {path}", flush=True)
 
+        # Mid-training OOD eval — quick WikiText-103 ppl snapshot so we
+        # can SEE generalization moving without waiting for end-of-run.
+        # Writes one JSON per checkpoint to logs/vast/benchmarks/ood/
+        # so analyze-log groups them with the final eval.
+        if ood_every > 0 and step % ood_every == 0 and step > 0:
+            try:
+                _mid_ood_eval(harness, step, ckpt_dir, observer)
+            except Exception as e:
+                print(f"[train_dsl] mid-OOD eval failed at step {step}: {e}",
+                      flush=True)
+
 
 # ── CLI ──────────────────────────────────────────────────────────────
 
@@ -366,6 +455,11 @@ def main():
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--log_every", type=int, default=20)
     parser.add_argument("--save_every", type=int, default=1000)
+    parser.add_argument("--ood_every", type=int, default=0,
+                        help="If > 0, run a mid-training WikiText-103 OOD "
+                             "ppl snapshot every N steps. Writes JSON to "
+                             "logs/vast/benchmarks/ood/ for analyze-log "
+                             "to pick up alongside the final eval.")
     parser.add_argument("--ckpt_dir", default="lfs_checkpoints")
     parser.add_argument("--sink", default="motor",
                         help="population whose output feeds the LM head")
@@ -470,7 +564,7 @@ def main():
         harness=harness, source=source,
         steps=args.steps, log_every=args.log_every,
         save_every=args.save_every, ckpt_dir=ckpt_dir,
-        start_step=start_step,
+        start_step=start_step, ood_every=args.ood_every,
     )
 
     print("[train_dsl] done.")

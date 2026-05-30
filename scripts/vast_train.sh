@@ -78,6 +78,30 @@ BATCH="${BATCH:-}"
 GRAD_ACCUM="${GRAD_ACCUM:-}"
 SEQ_LEN="${SEQ_LEN:-}"
 D_SEM="${D_SEM:-}"
+# OOD_EVERY: mid-training WikiText-103 ppl snapshots every N steps.
+# Toggle via `--ood [N]` flag (parsed below) or env override. 0 = off.
+OOD_EVERY="${OOD_EVERY:-0}"
+
+# ─── --ood [N] flag: turn on mid-training OOD eval every N steps ─────
+# Pass `--ood` for the default 3000-step cadence, or `--ood 1000` etc.
+_args_left=("$@")
+_skip_next=0
+shift_pos=2   # PRESET + STEPS were positional
+for ((_i=shift_pos; _i<${#_args_left[@]}; _i++)); do
+    if [ "$_skip_next" = "1" ]; then _skip_next=0; continue; fi
+    case "${_args_left[$_i]}" in
+        --ood)
+            # Optional integer arg follows; default 3000.
+            _next="${_args_left[$((_i+1))]:-}"
+            if [[ "$_next" =~ ^[0-9]+$ ]]; then
+                OOD_EVERY="$_next"
+                _skip_next=1
+            else
+                OOD_EVERY=3000
+            fi
+            ;;
+    esac
+done
 
 REPO_URL="${REPO_URL:-https://github.com/269652/BRIAN.git}"
 REPO_SLUG="${REPO_URL#https://github.com/}"; REPO_SLUG="${REPO_SLUG%.git}"
@@ -207,10 +231,11 @@ echo "    log_pusher pid=\$LOG_PUSHER_PID"
 
 echo "── starting training ──"
 if [ "${USE_DSL}" = "1" ]; then
-    echo "    DSL mode: arch=${ARCH} steps=${STEPS} batch=${BATCH} seq_len=${SEQ_LEN} d_sem=${D_SEM}"
+    echo "    DSL mode: arch=${ARCH} steps=${STEPS} batch=${BATCH} seq_len=${SEQ_LEN} d_sem=${D_SEM} ood_every=${OOD_EVERY}"
     ARCH='${ARCH}' STEPS='${STEPS}' BATCH='${BATCH}' \\
         SEQ_LEN='${SEQ_LEN}' D_SEM='${D_SEM}' \\
         SAVE_EVERY='${SAVE_EVERY}' LOG_EVERY='${LOG_EVERY}' \\
+        OOD_EVERY='${OOD_EVERY}' \\
         bash scripts/vast_train_dsl_loop.sh 2>&1 | tee /workspace/train.log
 else
     echo "    Brain mode: preset=${PRESET} steps=${STEPS} batch=${BATCH} grad_accum=${GRAD_ACCUM}"

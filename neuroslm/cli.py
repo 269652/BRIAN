@@ -179,12 +179,15 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
 # ── deploy / deploy-100k / deploy-brain ───────────────────────────────
 
-def _deploy_dsl(steps: int, branch: Optional[str], extra_env: dict) -> int:
+def _deploy_dsl(steps: int, branch: Optional[str], extra_env: dict,
+                 ood_every: int = 0) -> int:
     """Run scripts/vast_train.sh with USE_DSL=1 + STEPS=N + (BRANCH)."""
     env = os.environ.copy()
     env["USE_DSL"] = "1"
     env["FRESH"] = "1"
     env["STEPS"] = str(steps)
+    if ood_every > 0:
+        env["OOD_EVERY"] = str(ood_every)
     if branch:
         env["BRANCH"] = branch
     env["PYTHONIOENCODING"] = "utf-8"
@@ -194,7 +197,9 @@ def _deploy_dsl(steps: int, branch: Optional[str], extra_env: dict) -> int:
 
 def cmd_deploy(args: argparse.Namespace) -> int:
     """Launch a DSL training run on vast.ai."""
-    return _deploy_dsl(steps=args.steps, branch=args.branch, extra_env={})
+    ood = args.ood if args.ood else 0
+    return _deploy_dsl(steps=args.steps, branch=args.branch,
+                       extra_env={}, ood_every=ood)
 
 
 def cmd_deploy_100k(args: argparse.Namespace) -> int:
@@ -485,6 +490,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Launch a DSL training run on vast.ai")
     sd.add_argument("--steps", type=int, default=10_000)
     sd.add_argument("--branch", help="git branch to train (default: current)")
+    sd.add_argument("--ood", type=int, nargs="?", const=3000,
+                    help="Run mid-training OOD eval every N steps "
+                         "(default 3000 if flag passed without value)")
     sd.set_defaults(func=cmd_deploy)
 
     # deploy-100k

@@ -54,6 +54,10 @@ MODE="${MODE:-mix}"
 CHAT_RATIO="${CHAT_RATIO:-0.6}"
 LOG_EVERY="${LOG_EVERY:-20}"
 SAVE_EVERY="${SAVE_EVERY:-1000}"
+# OOD_EVERY > 0 → run a quick WikiText-103 ppl snapshot every N steps
+# during training. Each snapshot writes a JSON to logs/vast/benchmarks/ood/
+# that brian analyze-log picks up. Defaults to 0 (off).
+OOD_EVERY="${OOD_EVERY:-0}"
 CKPT_DIR="${CKPT_DIR:-$REPO_DIR/lfs_checkpoints}"
 MAX_RESTARTS="${MAX_RESTARTS:-1000}"
 
@@ -91,6 +95,7 @@ while [ "$restart" -lt "$MAX_RESTARTS" ]; do
         --device cuda \
         --log_every "$LOG_EVERY" \
         --save_every "$SAVE_EVERY" \
+        --ood_every "$OOD_EVERY" \
         --ckpt_dir "$CKPT_DIR" \
         --resume
     rc=$?
