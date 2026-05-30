@@ -84,7 +84,10 @@ training {
     # Stage 4 OOD push: NEMORI predictive-forgetting gate. Skip batches
     # whose surprise (|loss - ema_loss|/ema_loss) falls below the floor.
     # Reduces I(X;Z) by refusing to learn from expected episodes.
-    nemori_floor: 0.05
+    # Disabled (0.0) for the initial 10k run — first deploy with 0.05
+    # skipped every batch at init because loss == ema_loss == ln(V).
+    # Re-enable once the harness gate auto-disables during warmup.
+    nemori_floor: 0.0
     # Stage 6 OOD push: μP scaling. Disabled at 51M; on for larger runs.
     mu_p_scaling: false
     # Stage 7 OOD push: curriculum + isolation. random until crystallization

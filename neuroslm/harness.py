@@ -395,9 +395,20 @@ class BRIANHarness(nn.Module):
         # If surprise = |loss - ema_loss|/max(ema_loss, eps) < floor, the
         # batch is "expected" and we SKIP the optimizer update (no gradient
         # accumulated). Reduces I(X;Z) → tightens generalization bound.
-        # ema_loss for surprise == maturity.l_random at start (no history).
+        #
+        # Auto-warmup guard: at init loss == ema_loss == ln(V), surprise=0,
+        # so naive gating skips every step → model never trains (bug seen
+        # in run 38608948). Only activate NEMORI once the model has moved
+        # meaningfully below the random-init floor — pragmatic threshold:
+        # ema_loss < 0.85 * l_random AND we've done at least 200 steps.
         loss_f = float(loss.detach().item())
-        if self.training_config.nemori_floor > 0 and self._last_lm_loss_value > 0:
+        nemori_active = (
+            self.training_config.nemori_floor > 0
+            and self._last_lm_loss_value > 0
+            and self._last_lm_loss_value < 0.85 * self.maturity.l_random
+            and self._global_step > 200
+        )
+        if nemori_active:
             base = max(self._last_lm_loss_value, 1e-6)
             surprise = abs(loss_f - base) / base
             if surprise < self.training_config.nemori_floor:
