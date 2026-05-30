@@ -191,14 +191,79 @@ def _layered_positions(g: NeuralFlowGraph) -> Dict[str, Tuple[float, float]]:
 
 # ── 3. Render to PNG ──────────────────────────────────────────────────
 
+# Anatomical region colors — overrides per-op coloring so the
+# diagram reads as a brain map, not a math expression
+_REGION_COLORS = {
+    "input":      "#3498db",   # sensory, association   — blue
+    "thalamic":   "#9b59b6",   # thalamus               — purple
+    "cortex":     "#f39c12",   # pfc, acc, dmn, gws...  — orange
+    "memory":     "#2ecc71",   # hippo, entorhinal      — green
+    "subcort":    "#16a085",   # amygdala, insula, bg.. — teal
+    "world":      "#7f8c8d",   # world, self_m, etc.    — slate
+    "output":     "#e74c3c",   # motor                  — red
+    "nuclei":     "#fdb6c8",   # vta, lc, raphe, etc.   — pink
+}
+_REGION_OF = {
+    # input
+    "sensory": "input", "association": "input",
+    # thalamic
+    "thalamus": "thalamic",
+    # cortex (incl. workspace + adjacent)
+    "pfc": "cortex", "acc": "cortex", "dmn": "cortex",
+    "gws": "cortex", "claustrum": "cortex", "neural_geometry": "cortex",
+    "qualia": "cortex", "thought_transformer": "cortex",
+    "math_cortex": "cortex", "reasoning_cortex": "cortex",
+    "language_cortex": "cortex",
+    # memory
+    "hippo": "memory", "entorhinal": "memory", "cerebellum": "memory",
+    # subcortical
+    "amygdala": "subcort", "insula": "subcort", "bg": "subcort",
+    "forward_m": "subcort", "evaluator": "subcort",
+    # world / self
+    "world": "world", "self_m": "world",
+    # output
+    "motor": "output",
+    # neuromod nuclei
+    "vta": "nuclei", "nucleus_accumbens": "nuclei",
+    "locus_coeruleus": "nuclei", "raphe_nuclei": "nuclei",
+    "nucleus_basalis": "nuclei", "substantia_nigra": "nuclei",
+}
+
+
+def _try_graphviz_layout(G, prog: str = "dot"):
+    """Try networkx's pygraphviz layout. Returns None if pygraphviz missing
+    or if graphviz dot is not installed. Times out fast — never hangs."""
+    # graphviz_layout shells out to `dot` — without graphviz installed on
+    # PATH it'll fail with an unhelpful subprocess error or hang. Probe
+    # cheaply first:
+    import shutil
+    if shutil.which("dot") is None:
+        return None
+    try:
+        from networkx.drawing.nx_pydot import graphviz_layout
+        return graphviz_layout(G, prog=prog)
+    except Exception:
+        try:
+            from networkx.drawing.nx_agraph import graphviz_layout
+            return graphviz_layout(G, prog=prog)
+        except Exception:
+            return None
+
+
 def render_nfg(g: NeuralFlowGraph, output_path: str,
-               figsize: Tuple[int, int] = (16, 11)) -> None:
-    """Render via matplotlib + networkx. Layered layout, distinct edge
-    styles for synapses vs modulations, op labels on nodes.
+               figsize: Tuple[int, int] = (20, 14),
+               layout: str = "auto") -> None:
+    """Render via matplotlib + networkx — region-colored populations, hub-
+    sized nodes, curved edges, distinct synapse/modulation styles.
+
+    Args:
+        layout: "auto" (prefer graphviz dot, else layered), "dot",
+                "spring", "layered".
     """
     import networkx as nx
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
+    from matplotlib.patches import FancyArrowPatch
 
     G = nx.DiGraph()
     for n in g.nodes:
@@ -207,60 +272,84 @@ def render_nfg(g: NeuralFlowGraph, output_path: str,
         G.add_edge(e.src, e.tgt, kind=e.kind, weight=e.weight,
                    nt=e.nt, effect=e.effect)
 
-    pos = _layered_positions(g)
-    # Any node missing from pos (orphan) → put at origin
+    # Layout selection. Kamada-Kawai gives the cleanest balanced layout
+    # for small (<100 node) graphs — handles nuclei + modulation edges
+    # together so neuromod nodes pull toward their targets instead of
+    # floating off to the margin (spring layout's typical failure).
+    pos = None
+    if layout in ("auto", "dot"):
+        pos = _try_graphviz_layout(G, "dot")
+    if pos is None and layout in ("auto", "kk"):
+        try:
+            pos = nx.kamada_kawai_layout(G, scale=4.0)
+        except Exception:
+            pos = None
+    if pos is None and layout in ("auto", "spring"):
+        pos = nx.spring_layout(G, seed=42, k=2.0, iterations=300)
+    if pos is None:
+        pos = _layered_positions(g)
     for n in g.nodes:
         pos.setdefault(n.name, (0.0, 0.0))
 
-    fig, ax = plt.subplots(figsize=figsize)
+    # Compute fan size to size nodes by hub-importance
+    fan: Dict[str, int] = {}
+    for e in g.edges:
+        if e.kind == "synapse":
+            fan[e.src] = fan.get(e.src, 0) + 1
+            fan[e.tgt] = fan.get(e.tgt, 0) + 1
 
-    # Population nodes — coloured by op
-    op_colors = {
-        "relu": "#a8d5e2", "softmax": "#f5cba7", "gated": "#d2b4de",
-        "tanh": "#a9dfbf", "ode": "#f5b7b1", "softmax_relu": "#f8c471",
-        "linear": "#d5dbdb",
-    }
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.set_facecolor("#fafbfc")
+
+    # ── Population nodes — colored by anatomical region ──
     pop_nodes = [n for n in g.nodes if n.kind == "pop"]
     for node in pop_nodes:
         x, y = pos[node.name]
-        color = op_colors.get(node.op, "#bdc3c7")
-        ax.scatter([x], [y], s=2400, c=color, edgecolors="#34495e",
-                   linewidths=1.5, zorder=3)
-        ax.text(x, y, node.name, ha="center", va="center", fontsize=8,
-                fontweight="bold", zorder=4)
-        ax.text(x, y - 0.35, node.op, ha="center", va="top", fontsize=6,
-                style="italic", color="#566573", zorder=4)
+        region = _REGION_OF.get(node.name, "world")
+        color = _REGION_COLORS[region]
+        # Size proportional to fan-degree (hubs ~ 2x leaves)
+        f = fan.get(node.name, 0)
+        size = 1800 + 220 * min(f, 10)
+        ax.scatter([x], [y], s=size, c=color, edgecolors="#2c3e50",
+                   linewidths=1.8, zorder=3, alpha=0.9)
+        ax.text(x, y, node.name, ha="center", va="center", fontsize=8.5,
+                fontweight="bold", color="white", zorder=4)
+        # Op annotation below the node (small pill)
+        ax.annotate(node.op, xy=(x, y), xytext=(0, -22),
+                    textcoords="offset points",
+                    ha="center", va="top", fontsize=6.5,
+                    style="italic", color="#2c3e50", zorder=4,
+                    bbox=dict(boxstyle="round,pad=0.18", fc="white",
+                              ec=color, lw=1.0, alpha=0.9))
 
-    # NT nodes — yellow ellipses with NT name
+    # ── NT nodes — yellow diamonds ──
     nt_nodes = [n for n in g.nodes if n.kind == "nt"]
     for node in nt_nodes:
         x, y = pos[node.name]
-        ax.scatter([x], [y], s=1500, c="#fcf3cf", marker="D",
-                   edgecolors="#b7950b", linewidths=1.2, zorder=3)
+        ax.scatter([x], [y], s=1200, c="#fff3a0", marker="D",
+                   edgecolors="#b7950b", linewidths=1.5, zorder=3, alpha=0.92)
         ax.text(x, y, node.name, ha="center", va="center", fontsize=7,
-                fontweight="bold", color="#7d6608", zorder=4)
+                fontweight="bold", color="#5d4501", zorder=4)
 
-    # Synapse edges — solid black, line width = weight
+    # ── Synapse edges — curved black arrows, width ∝ weight ──
     for e in g.edges:
         if e.kind != "synapse":
             continue
         if e.src not in pos or e.tgt not in pos:
             continue
         x0, y0 = pos[e.src]; x1, y1 = pos[e.tgt]
-        lw = max(0.5, e.weight * 1.4)
-        ax.annotate("", xy=(x1, y1), xytext=(x0, y0),
-                    arrowprops=dict(arrowstyle="->", lw=lw,
-                                    color="#2c3e50", shrinkA=22, shrinkB=22,
-                                    alpha=0.75), zorder=2)
-        # Edge label only when weight notably differs from 1.0 to reduce clutter
-        if abs(e.weight - 1.0) > 0.05:
-            mx, my = (x0 + x1) / 2, (y0 + y1) / 2
-            ax.text(mx, my, f"{e.weight:.1f}", fontsize=6,
-                    color="#2c3e50",
-                    bbox=dict(boxstyle="round,pad=0.15", fc="white",
-                              ec="none", alpha=0.85), zorder=3)
+        lw = max(0.7, e.weight * 1.8)
+        # Curved (rad>0) so parallel edges don't overlap; sign alternates
+        rad = 0.12 if (hash(e.src + e.tgt) & 1) else -0.12
+        arrow = FancyArrowPatch(
+            (x0, y0), (x1, y1),
+            arrowstyle="-|>", mutation_scale=12,
+            color="#2c3e50", lw=lw, alpha=0.7,
+            connectionstyle=f"arc3,rad={rad}",
+            shrinkA=22, shrinkB=22, zorder=2)
+        ax.add_patch(arrow)
 
-    # Modulation edges — dashed coloured by effect
+    # ── Modulation edges — dashed, color by effect ──
     for e in g.edges:
         if e.kind != "modulation":
             continue
@@ -268,33 +357,43 @@ def render_nfg(g: NeuralFlowGraph, output_path: str,
             continue
         x0, y0 = pos[e.src]; x1, y1 = pos[e.tgt]
         color = "#c0392b" if e.effect == "multiplicative" else "#2874a6"
-        ax.annotate("", xy=(x1, y1), xytext=(x0, y0),
-                    arrowprops=dict(arrowstyle="->", lw=0.9, color=color,
-                                    linestyle="dashed", shrinkA=18, shrinkB=22,
-                                    alpha=0.7), zorder=1)
+        rad = 0.18 if (hash(e.src + e.tgt) & 1) else -0.18
+        arrow = FancyArrowPatch(
+            (x0, y0), (x1, y1),
+            arrowstyle="-|>", mutation_scale=10,
+            color=color, lw=1.0, alpha=0.65,
+            linestyle=(0, (3, 2)),
+            connectionstyle=f"arc3,rad={rad}",
+            shrinkA=18, shrinkB=22, zorder=1)
+        ax.add_patch(arrow)
 
-    # Legend
-    legend_handles = [
-        mpatches.Patch(color="#a8d5e2", label="ReLU"),
-        mpatches.Patch(color="#f5cba7", label="softmax"),
-        mpatches.Patch(color="#d2b4de", label="gated"),
-        mpatches.Patch(color="#a9dfbf", label="tanh"),
-        mpatches.Patch(color="#f5b7b1", label="ODE"),
-        mpatches.Patch(color="#fcf3cf", label="neurotransmitter"),
-        mpatches.Patch(color="#c0392b", label="mod (multiplicative)"),
-        mpatches.Patch(color="#2874a6", label="mod (additive)"),
+    # ── Legends — two columns: regions + edge kinds ──
+    region_handles = [
+        mpatches.Patch(color=col, label=name)
+        for name, col in _REGION_COLORS.items()
     ]
-    ax.legend(handles=legend_handles, loc="lower left", fontsize=7,
-              ncol=2, framealpha=0.9)
+    edge_handles = [
+        mpatches.Patch(color="#2c3e50", label="synapse"),
+        mpatches.Patch(color="#c0392b", label="modulation (multiplicative)"),
+        mpatches.Patch(color="#2874a6", label="modulation (additive)"),
+        mpatches.Patch(color="#fff3a0", label="neurotransmitter"),
+    ]
+    leg1 = ax.legend(handles=region_handles, loc="upper left", fontsize=8,
+                     title="regions", framealpha=0.92, title_fontsize=9)
+    ax.add_artist(leg1)
+    ax.legend(handles=edge_handles, loc="lower left", fontsize=8,
+              title="edges", framealpha=0.92, title_fontsize=9)
 
     stats = g.stats()
-    ax.set_title(f"Neural Flow Graph — {g.arch_name}  "
-                 f"({stats['n_populations']} pops, {stats['n_synapses']} syn, "
-                 f"{stats['n_modulations']} mod, {stats['n_neurotransmitters']} NT)",
-                 fontsize=10)
+    ax.set_title(
+        f"Neural Flow Graph — {g.arch_name}\n"
+        f"{stats['n_populations']} populations · {stats['n_synapses']} synapses · "
+        f"{stats['n_modulations']} modulations · {stats['n_neurotransmitters']} NTs",
+        fontsize=12, pad=20)
     ax.set_axis_off()
     plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight",
+                facecolor="#fafbfc")
     plt.close()
 
 
