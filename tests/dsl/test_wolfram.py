@@ -95,5 +95,53 @@ class TestArchitectureToWolfram:
         assert sys_code.strip().startswith("{") and sys_code.strip().endswith("}")
 
 
+class TestArchitectureFullIITGrade:
+    """IIT-grade Wolfram emission: populations + synapses + modulations
+    + NT homeostatic ODEs as one Wolfram Association — every causal
+    element of the architecture in a single CAS-analyzable system."""
+
+    def test_emits_all_four_sections_for_rcc_bowtie(self):
+        import os
+        arch_root = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "architectures", "rcc_bowtie")
+        if not os.path.isdir(arch_root):
+            pytest.skip("rcc_bowtie arch not present in this checkout")
+        code = W.architecture_to_wolfram_full(arch_root)
+        for sec in ("Populations", "Synapses", "Modulations",
+                    "NeurotransmitterDynamics"):
+            assert f'"{sec}"' in code, f"missing section {sec}"
+        assert code.startswith("<|") and code.endswith("|>")
+
+    def test_section_flags_slice_output(self):
+        import os
+        arch_root = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "architectures", "rcc_bowtie")
+        if not os.path.isdir(arch_root):
+            pytest.skip("rcc_bowtie arch not present")
+        code = W.architecture_to_wolfram_full(
+            arch_root, include_populations=False, include_synapses=True,
+            include_modulations=False, include_nt_dynamics=False)
+        assert '"Synapses"' in code
+        assert '"Populations"' not in code
+        assert '"NeurotransmitterDynamics"' not in code
+
+    def test_nt_dynamics_ode_form(self):
+        """NT entries emitted as proper Wolfram ODEs: `c_<nt>'[t] == ...`."""
+        import os
+        arch_root = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "architectures", "rcc_bowtie")
+        if not os.path.isdir(arch_root):
+            pytest.skip("rcc_bowtie arch not present")
+        code = W.architecture_to_wolfram_full(
+            arch_root, include_populations=False, include_synapses=False,
+            include_modulations=False, include_nt_dynamics=True)
+        for nt in ("dopamine", "norepinephrine", "serotonin",
+                   "acetylcholine", "endocannabinoid", "glutamate", "gaba"):
+            assert f"c_{nt}'[t]" in code, f"NT ODE for {nt} missing"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
