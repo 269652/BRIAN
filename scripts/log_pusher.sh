@@ -59,14 +59,19 @@ while true; do
 
     cp -f "$SOURCE_LOG" "$LOG_REL"
 
-    # Only commit if the log actually changed since the last push.
-    if git diff --quiet -- "$LOG_REL" 2>/dev/null; then
+    # Stage first, then check for actual change vs the index/HEAD.
+    # The previous check `git diff --quiet -- "$LOG_REL"` returned 0 for
+    # *untracked* files (git diff only inspects tracked paths), so the very
+    # first cp of a new log file looked like "no change" and was never
+    # committed — zero logs ever made it to origin. Verified 2026-05-30
+    # on instance 38469631 (172 KB local, 0 commits on origin).
+    git add "$LOG_REL"
+    if git diff --cached --quiet -- "$LOG_REL" 2>/dev/null; then
         echo "[log_pusher] $(date -u +%H:%M:%SZ) log unchanged, skipping"
         continue
     fi
 
     SIZE="$(wc -c <"$LOG_REL")"
-    git add "$LOG_REL"
     git commit -m "logs(${INSTANCE_ID}): tail sync @ $(date -u +%H:%M:%SZ) (${SIZE} B)" \
         >/dev/null 2>&1 || {
             echo "[log_pusher] $(date -u +%H:%M:%SZ) commit failed (probably nothing to commit)"

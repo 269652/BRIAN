@@ -213,12 +213,82 @@ fi
 
 echo "── stopping log-pusher ──"
 kill \$LOG_PUSHER_PID 2>/dev/null || true
-# Final push of the complete log
+sleep 2   # give it a moment to exit cleanly
+
+# ── Final log push (one-shot) ──────────────────────────────────────
+# Run a single iteration of the pusher loop with PUSH_INTERVAL=1 so it
+# attempts exactly one commit+push of the complete train.log. The loop
+# is unbounded so we wrap with timeout — but we want it to exit ASAP,
+# not poll for 60s. Solution: send SIGTERM after the first cycle (~5s
+# at worst on a successful push).
 SOURCE_LOG=/workspace/train.log INSTANCE_ID="\$(hostname)" \\
     PUSH_INTERVAL=1 BRANCH='${BRANCH}' REPO_SLUG='${REPO_SLUG}' \\
-    timeout 60 bash scripts/log_pusher.sh || echo "final log push timed out"
+    timeout 30 bash scripts/log_pusher.sh 2>&1 | head -10 \\
+    || echo "[onstart] final log push: timeout/exit (best-effort)"
 
-echo "── training exited; instance idle. Destroy with: vastai destroy instance \$(hostname) ──"
+# ── Final checkpoint push (DSL trainer doesn't push on save) ──────
+# vast_train_dsl_loop's train_dsl.py saves checkpoints to lfs_checkpoints/
+# locally but doesn't push them — unlike Brain's train.py. Push every
+# dsl_arch_*.pt that landed during this run so the artefacts survive
+# the instance destroy.
+echo "── pushing final checkpoints ──"
+cd /workspace/brian
+ls -la lfs_checkpoints/dsl_arch_*.pt 2>/dev/null || echo "[onstart] no DSL checkpoints to push"
+git config user.email "vast-train@brian.local" || true
+git config user.name  "vast-train"             || true
+for ckpt in lfs_checkpoints/dsl_arch_*.pt; do
+    [ -e "\$ckpt" ] || continue
+    git add "\$ckpt" 2>/dev/null || true
+done
+if ! git diff --cached --quiet 2>/dev/null; then
+    git commit -m "chkpt(dsl): final push @ \$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
+        >/dev/null 2>&1 || echo "[onstart] commit failed"
+    PUSH_URL="https://x-access-token:\${GITHUB}@github.com/${REPO_SLUG}.git"
+    timeout 600 git push "\$PUSH_URL" "HEAD:${BRANCH}" 2>&1 \\
+        | sed "s#\${GITHUB}#***#g" \\
+        || echo "[onstart] checkpoint push failed (will not block destroy)"
+else
+    echo "[onstart] no new checkpoints to commit"
+fi
+
+# ── Self-destroy the vast instance ────────────────────────────────
+# Without this the container stays "running" after onstart exits and
+# bills you indefinitely. Verified 2026-05-30 on 38469631 (8 hours
+# idle after training completed, ~\$10 wasted). Uses the INSTANCE_ID
+# env var that vast.ai injects into every container, fallback to
+# looking ourselves up by container label.
+echo "── self-destroying instance ──"
+if ! command -v vastai >/dev/null 2>&1; then
+    pip install -q vastai 2>&1 | tail -3 || true
+fi
+if [ -n "\${VAST_API_KEY:-}" ] && command -v vastai >/dev/null 2>&1; then
+    vastai set api-key "\$VAST_API_KEY" >/dev/null 2>&1 || true
+    # Vast injects \$CONTAINER_ID and \$VAST_CONTAINERLABEL; the contract
+    # id is usually exposed as \$INSTANCE_ID. Try them in order.
+    SELF_ID="\${INSTANCE_ID:-\${VAST_CONTAINER_ID:-}}"
+    if [ -z "\$SELF_ID" ]; then
+        # Fall back: find our instance by label match.
+        SELF_ID="\$(vastai show instances --raw 2>/dev/null \\
+            | python3 -c "import sys, json
+data = json.load(sys.stdin)
+for i in (data or []):
+    if i.get('label') == 'neuroslm-full':
+        print(i.get('id', '')); break" 2>/dev/null)"
+    fi
+    if [ -n "\$SELF_ID" ]; then
+        echo "[onstart] vastai destroy instance \$SELF_ID"
+        vastai destroy instance "\$SELF_ID" 2>&1 || echo "[onstart] destroy failed"
+        # The destroy command kills our container — anything past this
+        # never executes. The echo below is reached only if destroy failed.
+        sleep 30
+    else
+        echo "[onstart] could not determine vast instance id; not destroying"
+    fi
+else
+    echo "[onstart] VAST_API_KEY not in env or vastai CLI missing — cannot self-destroy"
+fi
+
+echo "── training exited; FAILED to self-destroy. Run: vastai destroy instance <contract_id> ──"
 ONSTART
 )"
 
@@ -228,7 +298,7 @@ CREATE_OUT="$(vastai create instance "$OFFER_ID" \
     --image "$VAST_IMAGE" \
     --disk "$VAST_DISK" \
     --label "neuroslm-full" \
-    --env "-e GITHUB=$GITHUB -e HF_TOKEN=${HF_TOKEN:-}" \
+    --env "-e GITHUB=$GITHUB -e HF_TOKEN=${HF_TOKEN:-} -e VAST_API_KEY=$VAST_API_KEY" \
     --onstart-cmd "$ONSTART" 2>&1)"
     # Note: no --ssh. vast.ai /.launch spawns an ssh keepalive whenever
     # --ssh is set; the pytorch/pytorch image has no openssh-client so
