@@ -49,6 +49,15 @@ training {
     # ctx is 2x richer. The 32x2048 combo OOM'd on cross-entropy (13 GiB
     # logit tensor at fp32). If you want to push back to batch=32, also
     # port Brain's chunked CE (brain.py _chunked_ce) into the harness.
+    # ctx restored to 1024 + batch 32: throughput halved on ctx=2048
+    # (attention is O(seq^2)). Same 32k tok/step total, ~2x faster
+    # wall-clock. STACKED topology + dropout + pct carry the OOD wins;
+    # ctx-doubling was the lowest-impact regularizer in the original push.
+    # batch 16 x ctx 2048 = 32k tok/step (same total as prior 32x1024)
+    # but per-sequence context doubled. Long-range context matters for
+    # WikiText-103 OOD (academic prose has long-range deps). Throughput
+    # is 2x slower (attention O(seq^2)); proper fix would be to port
+    # Brain's chunked CE so we can run batch=32 ctx=2048 without OOM.
     batch_size:   16
     seq_len:      2048
     steps:        10000
