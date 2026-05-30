@@ -271,14 +271,47 @@ def cmd_analyze_log(args: argparse.Namespace) -> int:
     """Parse a training/OOD log → upsert docs/metrics.md row → append finding."""
     from neuroslm.cli_metrics import (
         analyze_log_file, scan_ood_dir, METRICS_PATH, FINDINGS_PATH,
-        claude_available,
+        claude_available, OOD_DIR,
     )
     if args.scan_ood:
         rows = scan_ood_dir()
         print(f"scanned {len(rows)} OOD JSON files; updated {METRICS_PATH}")
         return 0
+    if args.latest:
+        # Discover the newest training log + matching OOD JSONs and
+        # analyze them as a group.
+        logs_dir = REPO_ROOT / "logs" / "vast"
+        train_logs = sorted(logs_dir.glob("*__neuroslm-full.log"),
+                            key=lambda p: p.stat().st_mtime, reverse=True)
+        if not train_logs:
+            print("analyze-log --latest: no training logs in logs/vast/",
+                  file=sys.stderr)
+            return 1
+        latest = train_logs[0]
+        rid = latest.stem.split("__")[0]
+        print(f"=== latest training log: {latest.name} (run_id={rid}) ===")
+        metric = analyze_log_file(latest, run_id=rid,
+                                   branch=args.branch,
+                                   use_claude=not args.no_claude)
+        print("--- parsed metrics ---")
+        print(metric.md_row())
+        # Plus any matching OOD JSONs
+        ood_matches = sorted(OOD_DIR.glob(f"ood_*{rid}*.json")) + \
+                      sorted(OOD_DIR.glob(f"ood_*step*.json"))
+        ood_matches = list({p: None for p in ood_matches})   # dedupe
+        if ood_matches:
+            print(f"\nfound {len(ood_matches)} OOD JSON(s) — scanning...")
+            rows = scan_ood_dir()
+            print(f"upserted {len(rows)} OOD rows in {METRICS_PATH}")
+        print(f"\nmetrics ledger: {METRICS_PATH}")
+        if not args.no_claude:
+            print(f"findings: {FINDINGS_PATH}"
+                  if claude_available() else
+                  "(claude CLI not on PATH — narrative insights skipped)")
+        return 0
     if not args.logfile:
-        print("analyze-log: pass a logfile path or --scan-ood", file=sys.stderr)
+        print("analyze-log: pass a logfile path, --latest, or --scan-ood",
+              file=sys.stderr)
         return 2
     p = Path(args.logfile)
     metric = analyze_log_file(p, run_id=args.run_id, branch=args.branch,
@@ -558,6 +591,10 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="skip the claude CLI insight extraction")
     sal.add_argument("--scan-ood", action="store_true",
                      help="scan logs/vast/benchmarks/ood/ and upsert every JSON")
+    sal.add_argument("--latest", action="store_true",
+                     help="auto-discover the newest training log under "
+                          "logs/vast/ + its matching OOD JSONs and analyze "
+                          "them together")
     sal.set_defaults(func=cmd_analyze_log)
 
     # test
