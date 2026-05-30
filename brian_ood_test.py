@@ -95,6 +95,15 @@ class _DSLOODAdapter:
     def modules(self):
         return self.harness.modules()
 
+    def parameters(self, recurse: bool = True):
+        return self.harness.parameters(recurse)
+
+    def named_parameters(self, prefix: str = "", recurse: bool = True):
+        return self.harness.named_parameters(prefix, recurse)
+
+    def state_dict(self):
+        return self.harness.state_dict()
+
     def forward_lm(self, ids, targets=None):
         logits = self.harness(ids)
         return {"logits": logits, "lm_loss": torch.tensor(0.0)}

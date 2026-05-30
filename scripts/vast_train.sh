@@ -286,7 +286,10 @@ for i in (data or []):
     fi
     if [ -n "\$SELF_ID" ]; then
         echo "[onstart] vastai destroy instance \$SELF_ID"
-        vastai destroy instance "\$SELF_ID" 2>&1 || echo "[onstart] destroy failed"
+        # `yes y` answers the interactive confirmation prompt (no -y
+        # available in this vastai version). Without this the command
+        # hangs waiting for stdin and the instance never destroys.
+        yes y | vastai destroy instance "\$SELF_ID" 2>&1 || echo "[onstart] destroy failed"
         # The destroy command kills our container — anything past this
         # never executes. The echo below is reached only if destroy failed.
         sleep 30
