@@ -174,6 +174,8 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         cli.extend(["--discover", args.discover])
         if args.top_k:
             cli.extend(["--top-k", str(args.top_k)])
+    if args.topo_10x:
+        cli.append("--topo-10x")
     return A.main(cli)
 
 
@@ -510,10 +512,17 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="dataflow analysis: paths, bottlenecks, bowtie waist")
     sa.add_argument("--phi", action="store_true",
                     help="IIT Φ proxy + per-module contribution")
-    sa.add_argument("--discover", choices=["phi", "modularity", "sparsity"],
-                    help="propose architecture mods maximising the metric")
+    sa.add_argument(
+        "--discover",
+        choices=["phi", "modularity", "sparsity", "generalization", "ppl"],
+        help="propose architecture mods maximising the metric. The "
+             "'generalization' and 'ppl' choices use literature-grounded "
+             "structural proxies (no training required)")
     sa.add_argument("--top-k", type=int, default=10,
                     help="top-K proposals for --discover")
+    sa.add_argument("--topo-10x", action="store_true",
+                    help="surface the hand-curated high-leverage topological "
+                         "mutations targeting >10x OOD improvement")
     sa.add_argument("--all", action="store_true",
                     help="run every analysis above")
     sa.set_defaults(func=cmd_analyze)
