@@ -55,10 +55,7 @@ GITHUB="${GITHUB:-${GITHUB_PAT:-${GH_TOKEN:-}}}"
 
 # ─── Configuration (positional args > env > default) ─────────────────────
 PRESET="${1:-${PRESET:-rcc_bowtie_30m_p1}}"
-STEPS="${2:-${STEPS:-10000}}"
 BRANCH="${BRANCH:-$(git -C "$HERE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo master)}"
-BATCH="${BATCH:-4}"
-GRAD_ACCUM="${GRAD_ACCUM:-4}"
 SAVE_EVERY="${SAVE_EVERY:-1000}"
 LOG_EVERY="${LOG_EVERY:-20}"
 FRESH="${FRESH:-1}"
@@ -70,8 +67,17 @@ LOG_PUSH_INTERVAL="${LOG_PUSH_INTERVAL:-300}"
 # clipping etc. is configured in arch.neuro's `training { ... }` block.
 USE_DSL="${USE_DSL:-0}"
 ARCH="${ARCH:-rcc_bowtie}"
-SEQ_LEN="${SEQ_LEN:-256}"
-D_SEM="${D_SEM:-256}"
+# Training hyperparameters (STEPS, BATCH, GRAD_ACCUM, SEQ_LEN, D_SEM):
+# the canonical defaults live in architectures/<ARCH>/arch.neuro's
+# `training { ... }` block. Leave these unset here so vast_train_dsl_loop
+# (USE_DSL=1) or vast_train_loop (Brain) falls back to the arch config.
+# Pass an env override to force a specific value, e.g.
+#   STEPS=5000 BATCH=16 bash scripts/vast_train.sh
+STEPS="${2:-${STEPS:-}}"
+BATCH="${BATCH:-}"
+GRAD_ACCUM="${GRAD_ACCUM:-}"
+SEQ_LEN="${SEQ_LEN:-}"
+D_SEM="${D_SEM:-}"
 
 REPO_URL="${REPO_URL:-https://github.com/269652/BRIAN.git}"
 REPO_SLUG="${REPO_URL#https://github.com/}"; REPO_SLUG="${REPO_SLUG%.git}"
@@ -113,9 +119,12 @@ cat <<HDR
   vast_train.sh
     branch  = $BRANCH
     preset  = $PRESET
-    steps   = $STEPS
+    steps   = ${STEPS:-<from arch.neuro>}
     fresh   = $FRESH
-    batch   = $BATCH × grad_accum $GRAD_ACCUM
+    batch   = ${BATCH:-<from arch.neuro>} × grad_accum ${GRAD_ACCUM:-<from arch.neuro>}
+    seq_len = ${SEQ_LEN:-<from arch.neuro>}
+    use_dsl = $USE_DSL
+    arch    = $ARCH
     gpu     = $GPU_QUERY
 ════════════════════════════════════════════════════════════════
 HDR

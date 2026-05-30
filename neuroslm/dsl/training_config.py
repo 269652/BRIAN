@@ -48,7 +48,15 @@ class QuantizationConfig:
 
 @dataclass
 class TrainingConfig:
-    """Pipeline-level config the BRIAN harness consumes."""
+    """Pipeline-level config the BRIAN harness consumes.
+
+    Defaults match Brain's `rcc_bowtie_30m_p4` so an arch.neuro with no
+    `training {}` block trains under the same conditions as the reference
+    Brain run (matching loss/ppl/lm trajectory bit-for-bit when the trunk
+    is the bit-identical port). The five new fields (batch_size, seq_len,
+    steps, warmup_steps, min_lr_ratio) move runtime hyperparameters into
+    the architecture spec instead of leaving them in shell-script defaults.
+    """
     loss_clipping: LossClippingConfig = field(default_factory=LossClippingConfig)
     quantization: QuantizationConfig = field(default_factory=QuantizationConfig)
     grad_accum: int = 1
@@ -57,6 +65,14 @@ class TrainingConfig:
     weight_decay: float = 0.01
     grad_clip: float = 1.0
     label_smoothing: float = 0.0
+    # Runtime hyperparameters — declarative form of the deploy script flags.
+    # batch_size / seq_len affect tokens-per-step (Brain p4 uses 32 / 1024 →
+    # 32k tokens/step; DSL must match for trajectory parity).
+    batch_size: int = 4
+    seq_len: int = 256
+    steps: int = 10000
+    warmup_steps: int = 300
+    min_lr_ratio: float = 0.1
 
 
 # ── Constants for validation ───────────────────────────────────────────
@@ -103,6 +119,17 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.grad_clip = float(props["grad_clip"])
     if "label_smoothing" in props:
         cfg.label_smoothing = float(props["label_smoothing"])
+    # Runtime hyperparameters (deploy-script flags moved into the arch spec)
+    if "batch_size" in props:
+        cfg.batch_size = int(props["batch_size"])
+    if "seq_len" in props:
+        cfg.seq_len = int(props["seq_len"])
+    if "steps" in props:
+        cfg.steps = int(props["steps"])
+    if "warmup_steps" in props:
+        cfg.warmup_steps = int(props["warmup_steps"])
+    if "min_lr_ratio" in props:
+        cfg.min_lr_ratio = float(props["min_lr_ratio"])
 
     return cfg
 
@@ -165,8 +192,46 @@ def load_training_config_from_arch(arch_root) -> TrainingConfig:
 
 # ── Helpers (mirror multifile.py's small parsers) ─────────────────────
 
+def _strip_comments(source: str) -> str:
+    """Replace `# ...` to end-of-line with spaces.
+
+    Preserves line numbers and positions so other parsers see the same
+    offsets, but removes comment characters that would otherwise confuse
+    the brace/string walker (e.g. apostrophes in `Brain's reference run`
+    were entering string mode and swallowing `{` / `}` counts).
+    """
+    out = []
+    i, n = 0, len(source)
+    in_str = None
+    while i < n:
+        ch = source[i]
+        if in_str:
+            out.append(ch)
+            if ch == in_str and source[i - 1] != '\\':
+                in_str = None
+            i += 1
+            continue
+        if ch in ('"', "'"):
+            in_str = ch
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '#':
+            # Skip to end of line, replacing with spaces (preserve newline)
+            while i < n and source[i] != '\n':
+                out.append(' ')
+                i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return ''.join(out)
+
+
 def _extract_block(source: str, keyword: str) -> Optional[str]:
     """Find `<keyword> { ... }` at top level; return brace body or None."""
+    # Strip comments first so apostrophes/braces inside `# ...` text can't
+    # confuse the brace/string walker below.
+    source = _strip_comments(source)
     pattern = re.compile(rf'\b{re.escape(keyword)}\s*\{{', re.MULTILINE)
     m = pattern.search(source)
     if not m:

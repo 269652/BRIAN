@@ -26,9 +26,28 @@ cd "$REPO_DIR"
 
 ARCH="${ARCH:-rcc_bowtie}"
 PRESET="${PRESET:-rcc_bowtie_30m_p4}"   # sizes the DSL LM trunk to match P4
-STEPS="${STEPS:-10000}"
-BATCH="${BATCH:-4}"
-SEQ_LEN="${SEQ_LEN:-1024}"              # P4 lang_ctx
+
+# Read runtime hyperparameters from the architecture's `training { ... }`
+# block in arch.neuro. The arch declares its own training conditions so
+# the DSL trunk runs under the same setup Brain uses for the same arch —
+# no need to remember/sync defaults across scripts.
+_arch_root="architectures/${ARCH}"
+_arch_default() {
+    # Usage: _arch_default <attr> <fallback>
+    python3 - "$_arch_root" "$1" "$2" <<'PY' 2>/dev/null || echo "$2"
+import sys
+arch_root, attr, fallback = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    from neuroslm.dsl.training_config import load_training_config_from_arch
+    cfg = load_training_config_from_arch(arch_root)
+    print(getattr(cfg, attr, fallback))
+except Exception:
+    print(fallback)
+PY
+}
+STEPS="${STEPS:-$(_arch_default steps 10000)}"
+BATCH="${BATCH:-$(_arch_default batch_size 4)}"
+SEQ_LEN="${SEQ_LEN:-$(_arch_default seq_len 1024)}"
 D_SEM="${D_SEM:-384}"                   # P4 d_hidden (overridden by PRESET)
 DATA="${DATA:-real}"
 MODE="${MODE:-mix}"

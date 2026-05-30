@@ -29,14 +29,23 @@ architecture rcc_bowtie {
 # =============================================================================
 
 training {
+    # Hyperparameters must match the rcc_bowtie_30m_p4 reference run so
+    # the DSL-LM trunk trains under identical conditions to Brain.
+    # Validated against config.rcc_bowtie_30m_p4 derivation chain
+    # pct_30m: lang_ctx=1024, warmup_steps=300, lr=3e-4, weight_decay=0.05
     loss_clipping: { enabled: true, method: "per_sample", factor: 3.0 }
     quantization:  { enabled: false, bits: 8 }
     optimizer:     "adamw"
     learning_rate: 0.0003
-    weight_decay:  0.01
-    grad_accum:    4
+    weight_decay:  0.05
+    grad_accum:    1
     grad_clip:     1.0
     label_smoothing: 0.05
+    batch_size:   32
+    seq_len:      1024
+    steps:        10000
+    warmup_steps: 300
+    min_lr_ratio: 0.1
 }
 
 # =============================================================================
