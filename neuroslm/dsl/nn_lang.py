@@ -797,19 +797,30 @@ class DSLLanguageCortex(nn.Module):
         # GeneticOrchestrator has handed us a per-module offset.
         block_gain = None
         if self._nt_module_offset is not None:
-            offs = self._nt_module_offset            # (B, M, N_NT)
+            offs = self._nt_module_offset            # (B_orch, M, N_NT)
+            # Batch alignment: the orchestrator caches its outputs from
+            # the train step (B_orch = train batch size). When eval/OOD
+            # passes a different batch (often B=1), broadcasting `(B_orch,
+            # T, D)` against `(B_in, T, D)` produces (max(B_in, B_orch),
+            # T, D) — silently turning a B=1 OOD batch into B=4, then
+            # the LM head produces too many logit rows and CE shape
+            # mismatches. Fix: collapse offs to the input's batch size.
+            B_in = h.shape[0]
+            if offs.shape[0] != B_in:
+                if B_in == 1:
+                    offs = offs.mean(dim=0, keepdim=True)
+                else:
+                    # Repeat or slice to match — last resort for unusual
+                    # batch sizes. Mean-then-repeat keeps semantics intact.
+                    offs = offs.mean(dim=0, keepdim=True).expand(B_in, -1, -1)
             n_blocks = len(self.blocks)
             if self._block_module_idx is None or \
                     self._block_module_idx.numel() != n_blocks:
-                # Round-robin mapping if no explicit map was set
                 bm = torch.arange(n_blocks, device=offs.device) % offs.shape[1]
             else:
                 bm = self._block_module_idx.to(offs.device)
-            # Index_select rather than gather for shape clarity:
-            # offs (B, M, N) → per_block (B, depth, N)
-            per_block = offs.index_select(dim=1, index=bm)  # (B, depth, N_NT)
-            # Project to d_model and gate by alpha_nt
-            block_gain = self.alpha_nt * self.nt_proj(per_block)  # (B, depth, d_model)
+            per_block = offs.index_select(dim=1, index=bm)  # (B_in, depth, N_NT)
+            block_gain = self.alpha_nt * self.nt_proj(per_block)
         for bi, (blk, adapter) in enumerate(zip(self.blocks, self.adapters)):
             h = blk(h)
             h = adapter(h)
