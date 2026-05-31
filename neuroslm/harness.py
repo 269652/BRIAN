@@ -596,9 +596,18 @@ class BRIANHarness(nn.Module):
         do_update = (step % max(1, gcfg.update_every) == 0)
 
         if not do_update and self._last_orch_modulation is not None:
-            # Reuse cached modulation — already installed on the cortex,
-            # no new graph edges. Return a zero phi-loss so the auxiliary
-            # weight has no effect this step.
+            # Skipped step: install a DETACHED copy of the last live
+            # modulation. The cached tensor's autograd graph was freed
+            # by the previous backward(); referencing it again would
+            # try to traverse a freed graph ("Trying to backward through
+            # the graph a second time"). Detaching strips the graph so
+            # the cortex sees the values only — no grad flows through
+            # genes on this step, which is the contract for skipped
+            # steps (genes train every update_every steps).
+            cached = self._last_orch_modulation.detach()
+            if (self.language_model is not None
+                    and hasattr(self.language_model, "set_nt_modulation")):
+                self.language_model.set_nt_modulation(cached)
             return torch.zeros((), device=device)
 
         nt_levels = self._transmitter_sys.level
