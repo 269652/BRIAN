@@ -1,0 +1,34 @@
+════════════════════════════════════════════════════════════════
+  DSL-driven training loop
+  arch=rcc_bowtie (folder: architectures/rcc_bowtie)
+  steps=40000 batch=16 seq_len=2048 d_sem=384
+  ckpt_dir=/workspace/brian/lfs_checkpoints
+════════════════════════════════════════════════════════════════
+
+▶ launch attempt 1 @ 21:19:29Z
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 100m (~~100M): d_model=640 depth=8 heads=10 batch=4 ctx=2048 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=640 depth=8 heads=10 ctx=2048
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0003, grad_accum=1, label_smooth=0.05, wd=0.1, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 134.8M
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 640
+  parameters = 134,792,213
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0003)
+[train_dsl] device=cuda, warmup=300/40000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[data:chat] using OpenHermes-2.5 (teknium/OpenHermes-2.5)
+step    20 | loss 10.7538 | lm 10.7538 | ppl 46806.0 | gnorm 2.332 | lr 2.00e-05 | 24215 tok/s | Φ 0.785 | λ₁ 0.075 | ign 0.23 | mesoLG 0.51 | troph 8/8 μ0.86 | NT[DA=0.15 NE=0.20 5HT=0.35 ACh=0.25 eCB=0.10 Glu=0.45 GABA=0.15] | osc[δ=0.565 θ=0.201 γ=0.234]
+step    40 | loss 10.3457 | lm 10.3457 | ppl 31122.6 | gnorm 2.237 | lr 4.00e-05 | 26049 tok/s | Φ 0.533 | λ₁ 0.075 | ign 0.20 | mesoLG 0.51 | troph 8/8 μ1.51 | NT[DA=0.15 NE=0.20 5HT=0.35 ACh=0.25 eCB=0.10 Glu=0.45 GABA=0.15] | osc[δ=0.650 θ=0.185 γ=0.166]
+step    60 | loss 9.7668 | lm 9.7668 | ppl 17445.5 | gnorm 2.224 | lr 6.00e-05 | 26047 tok/s | Φ 0.248 | λ₁ 0.075 | ign 0.17 | mesoLG 0.51 | troph 8/8 μ2.36 | NT[DA=0.15 NE=0.20 5HT=0.35 ACh=0.25 eCB=0.10 Glu=0.45 GABA=0.15] | osc[δ=0.708 θ=0.173 γ=0.119]
+step    80 | loss 9.0846 | lm 9.0846 | ppl 8818.7 | gnorm 2.880 | lr 8.00e-05 | 26048 tok/s | Φ 0.090 | λ₁ 0.075 | ign 0.15 | mesoLG 0.52 | troph 8/8 μ3.35 | NT[DA=0.15 NE=0.20 5HT=0.35 ACh=0.25 eCB=0.10 Glu=0.45 GABA=0.15] | osc[δ=0.702 θ=0.162 γ=0.135]
+step   100 | loss 8.3679 | lm 8.3679 | ppl 4306.4 | gnorm 2.042 | lr 1.00e-04 | 26026 tok/s | Φ 0.034 | λ₁ 0.075 | ign 0.13 | mesoLG 0.52 | troph 8/8 μ4.31 | NT[DA=0.15 NE=0.20 5HT=0.35 ACh=0.25 eCB=0.10 Glu=0.45 GABA=0.15] | osc[δ=0.668 θ=0.180 γ=0.152]
+step   120 | loss 7.8223 | lm 7.8223 | ppl 2495.7 | gnorm 1.502 | lr 1.20e-04 | 26057 tok/s | Φ 0.027 | λ₁ 0.075 | ign 0.36 | mesoLG 0.52 | troph 8/8 μ5.08 | NT[DA=0.15 NE=0.20 5HT=0.35 ACh=0.25 eCB=0.10 Glu=0.45 GABA=0.15] | osc[δ=0.676 θ=0.163 γ=0.160]
+step   140 | loss 7.5044 | lm 7.5044 | ppl 1816.1 | gnorm 1.422 | lr 1.40e-04 | 26099 tok/s | Φ 0.031 | λ₁ 0.075 | ign 0.53 | mesoLG 0.51 | troph 8/8 μ5.44 | NT[DA=0.15 NE=0.20 5HT=0.35 ACh=0.25 eCB=0.10 Glu=0.45 GABA=0.15] | osc[δ=0.700 θ=0.184 γ=0.116]
+step   160 | loss 7.4231 | lm 7.4231 | ppl 1674.3 | gnorm 1.228 | lr 1.60e-04 | 26103 tok/s | Φ 0.036 | λ₁ 0.075 | ign 0.77 | mesoLG 0.51 | troph 8/8 μ5.21 | NT[DA=0.15 NE=0.20 5HT=0.35 ACh=0.25 eCB=0.10 Glu=0.45 GABA=0.15] | osc[δ=0.701 θ=0.182 γ=0.117]
