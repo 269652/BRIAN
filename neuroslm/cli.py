@@ -238,6 +238,168 @@ def cmd_status(_: argparse.Namespace) -> int:
     return _run([_bash(), "scripts/vast.sh", "show", "instances"], env=env)
 
 
+# ── ps (parsed-status table) ───────────────────────────────────────────
+
+# Regex for the standard train_dsl log line:
+#   step  9980 | loss 6.28 | lm 6.28 | ppl 536.1 | gnorm 0.91 | lr 3.00e-05 | 28891 tok/s
+_STEP_RE = re.compile(
+    r"step\s+(?P<step>\d+)\s+\|\s+"
+    r"loss\s+(?P<loss>[\d.]+)\s+\|\s+"
+    r"lm\s+[\d.]+\s+\|\s+"
+    r"ppl\s+(?P<ppl>[\d.]+).*?"
+    r"(?P<tps>\d+)\s+tok/s",
+    re.DOTALL,
+)
+# `[mid-ood] step 3000: wikitext ppl=1550.1`
+_MID_OOD_RE = re.compile(
+    r"\[mid-ood\]\s+step\s+(?P<step>\d+):\s+wikitext\s+ppl=(?P<ppl>[\d.]+)")
+
+
+def _parse_phase(log: str) -> str:
+    """Detect the run's current phase from log signatures."""
+    if "── self-destroying" in log or "vastai destroy instance" in log:
+        return "self-destroying"
+    if "training reached target" in log or "[train_dsl] done" in log:
+        return "training-done"
+    if "PASS-MARK EARLY EXIT" in log:
+        return "passmark-exit"
+    if "─ pushing final checkpoints ─" in log:
+        return "pushing-ckpts"
+    if "Traceback" in log:
+        return "ERROR"
+    if "step " in log:
+        return "training"
+    if "[train_dsl] DSL-LM" in log:
+        return "model-built"
+    if "── bootstrap" in log or "pip install" in log:
+        return "bootstrap"
+    if "── cloning " in log:
+        return "cloning"
+    return "booting"
+
+
+def _parse_status(log: str) -> dict:
+    """Pull the latest training metric + last mid-OOD result from a log tail."""
+    # Search in reverse for the last step line (regex on full text + take last)
+    step_matches = list(_STEP_RE.finditer(log))
+    mid_matches  = list(_MID_OOD_RE.finditer(log))
+    out = {"step": None, "loss": None, "ppl": None, "tps": None,
+           "mid_ood_step": None, "mid_ood_ppl": None,
+           "phase": _parse_phase(log)}
+    if step_matches:
+        m = step_matches[-1]
+        out["step"] = int(m.group("step"))
+        out["loss"] = float(m.group("loss"))
+        out["ppl"]  = float(m.group("ppl"))
+        out["tps"]  = int(m.group("tps"))
+    if mid_matches:
+        m = mid_matches[-1]
+        out["mid_ood_step"] = int(m.group("step"))
+        out["mid_ood_ppl"]  = float(m.group("ppl"))
+    return out
+
+
+def cmd_ps(args: argparse.Namespace) -> int:
+    """List active vast.ai neuroslm instances + parsed last metric line.
+
+    Output columns:
+      ID | LABEL | GPU | $/hr | UPTIME | PHASE | STEP | PPL | OOD-PPL | TOK/S
+    """
+    import json
+    vastai = _vastai_exe()
+    raw, rc = _run_capture([vastai, "show", "instances", "--raw"])
+    if rc != 0 and "DEPRECATED" not in raw:
+        print(f"vastai show failed: {raw[:300]}", file=sys.stderr)
+        return rc
+    # Strip DEPRECATED banner + any trailing post-JSON content. Walk
+    # the bracket depth from the first `[` to its matching close.
+    start = raw.find("[")
+    if start < 0:
+        data = []
+    else:
+        depth = 0
+        end = start
+        in_str = False
+        esc = False
+        for i in range(start, len(raw)):
+            ch = raw[i]
+            if in_str:
+                if esc: esc = False
+                elif ch == "\\": esc = True
+                elif ch == '"': in_str = False
+            elif ch == '"': in_str = True
+            elif ch == "[": depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        try:
+            data = json.loads(raw[start:end])
+        except json.JSONDecodeError as e:
+            print(f"json parse error: {e}", file=sys.stderr)
+            return 1
+    rows = []
+    for inst in data:
+        label = inst.get("label") or ""
+        if args.all or label.startswith("neuroslm"):
+            iid = inst.get("id")
+            log, _ = _run_capture([vastai, "logs", str(iid)])
+            status = _parse_status(log)
+            rows.append({
+                "id": iid,
+                "label": label or "(no label)",
+                "gpu": inst.get("gpu_name", "?"),
+                "cost": inst.get("dph_total", 0),
+                "uptime_mins": int(inst.get("uptime_mins", 0)
+                                    if inst.get("uptime_mins") else 0),
+                "status": inst.get("actual_status", "?"),
+                **status,
+            })
+    if not rows:
+        print("(no neuroslm instances — pass --all to list everything)")
+        return 0
+    # Render a table
+    hdr = (f"{'ID':>10}  {'LABEL':<28}  {'GPU':<12}  {'$/hr':>5}  "
+           f"{'UP(m)':>6}  {'PHASE':<16}  {'STEP':>6}  {'PPL':>8}  "
+           f"{'OOD-PPL':>9}  {'TOK/S':>7}")
+    print(hdr)
+    print("-" * len(hdr))
+    for r in rows:
+        step  = str(r["step"]) if r["step"] is not None else "-"
+        ppl   = f"{r['ppl']:.1f}" if r["ppl"] is not None else "-"
+        ood   = (f"{r['mid_ood_ppl']:.0f}@{r['mid_ood_step']}"
+                 if r["mid_ood_ppl"] is not None else "-")
+        tps   = f"{r['tps']/1000:.0f}k" if r["tps"] else "-"
+        cost  = f"{r['cost']:.2f}" if r["cost"] else "-"
+        print(f"{str(r['id']):>10}  {r['label'][:28]:<28}  "
+              f"{r['gpu'][:12]:<12}  {cost:>5}  {r['uptime_mins']:>6}  "
+              f"{r['phase']:<16}  {step:>6}  {ppl:>8}  {ood:>9}  {tps:>7}")
+    return 0
+
+
+def _vastai_exe() -> str:
+    """Locate the vastai executable. Prefers the project's .venv."""
+    candidates = [
+        REPO_ROOT / ".venv-2" / "Scripts" / "vastai.exe",
+        REPO_ROOT / ".venv"   / "Scripts" / "vastai.exe",
+        REPO_ROOT / ".venv-2" / "bin" / "vastai",
+        REPO_ROOT / ".venv"   / "bin" / "vastai",
+    ]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return "vastai"   # rely on PATH
+
+
+def _run_capture(cmd) -> Tuple[str, int]:
+    """Run a command and return (combined output, rc)."""
+    r = subprocess.run(cmd, capture_output=True, text=True,
+                        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                        encoding="utf-8", errors="replace")
+    return (r.stdout or "") + (r.stderr or ""), r.returncode
+
+
 def cmd_destroy(args: argparse.Namespace) -> int:
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
@@ -557,8 +719,16 @@ def _build_parser() -> argparse.ArgumentParser:
     sl.set_defaults(func=cmd_logs)
 
     # status
-    ss = sub.add_parser("status", help="List active vast instances")
+    ss = sub.add_parser("status", help="List active vast instances (raw vastai view)")
     ss.set_defaults(func=cmd_status)
+
+    # ps (parsed-status table — like `docker ps` for neuroslm runs)
+    sps = sub.add_parser(
+        "ps",
+        help="List neuroslm instances + parsed last metric line + phase")
+    sps.add_argument("--all", action="store_true",
+                     help="include non-neuroslm instances too")
+    sps.set_defaults(func=cmd_ps)
 
     # destroy
     sde = sub.add_parser("destroy", help="Tear down vast instance(s)")

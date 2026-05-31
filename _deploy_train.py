@@ -107,11 +107,13 @@ def vastai(*args, capture=False):
 print("setting api key...")
 vastai("set", "api-key", VAST_API_KEY)
 
-print("searching A100 offers...")
+print("searching A100 SXM4 offers (known-good hosts only)...")
+# A100 SXM4 only — PCIE hosts have hit recurring DNS/apt failures.
+# Reliability bumped to >0.995 to filter out flaky machines.
 offers_text, _ = vastai(
     "search", "offers",
-    "gpu_name in [A100_SXM4,A100_PCIE,A100_SXM,A100X] num_gpus=1 "
-    "rentable=true verified=true reliability>0.99 disk_space>=60",
+    "gpu_name=A100_SXM4 num_gpus=1 rentable=true verified=true "
+    "reliability>0.995 disk_space>=60 inet_down>=200",
     "-o", "dph+", "--raw", capture=True)
 start = offers_text.find("[")
 offers = json.loads(offers_text[start:]) if start >= 0 else []

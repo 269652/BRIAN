@@ -7,14 +7,30 @@ name = "neuroslm"
 version = "0.1.0"
 description = "BRIAN — biologically-inspired SLM with DSL-defined architectures"
 requires-python = ">=3.10"
+# CLI + analysis + deploy. These are what `pip install -e .` pulls in
+# so the `brian` command works out of the box. Heavy ML deps (torch,
+# transformers, datasets) are under [project.optional-dependencies.ml]
+# so a fresh CLI install doesn't need a 3 GB torch download.
 dependencies = [
-    # CLI / analysis path. Heavy ML deps (torch, transformers, datasets)
-    # are listed in requirements.txt for the training/eval containers and
-    # NOT installed by default here so the brian CLI works without them.
     "sympy>=1.12",
     "matplotlib>=3.7",
     "networkx>=3.0",
     "vastai>=0.1",
+    "pytest>=7.0",
+]
+
+[project.optional-dependencies]
+# `pip install -e .[ml]` adds the heavy training/eval ML deps.
+ml = [
+    "torch>=2.0",
+    "transformers>=4.30",
+    "datasets>=2.10",
+    "tiktoken>=0.5",
+    "einops>=0.7",
+]
+# `pip install -e .[dev]` adds testing/lint deps.
+dev = [
+    "pytest-cov>=4.0",
 ]
 
 [project.scripts]

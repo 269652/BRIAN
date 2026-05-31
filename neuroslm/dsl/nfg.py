@@ -230,6 +230,160 @@ _REGION_OF = {
 }
 
 
+# ── Neuroanatomical layout (reserved slots + region clusters) ─────────
+#
+# Treats the NFG as an anatomical diagram, not a generic graph. The
+# bowtie backbone (sensory -> thalamus -> gws -> pfc -> bg -> motor) is
+# laid out on a fixed spine; every other population is assigned to a
+# region cluster with a centroid attraction; modulation edges are routed
+# as light curved overlays AFTER geometry is fixed.
+
+# Anatomically-meaningful positions for the bowtie spine. (x, y) in
+# layout units. x runs sensory→motor left→right; y centers on 0.
+_RESERVED_SLOTS = {
+    # Bowtie afferent → integrator → efferent backbone (left → right)
+    "sensory":    (-7.0,  1.5),
+    "association":(-5.5,  1.5),
+    "thalamus":   (-3.5,  0.0),
+    "gws":        (-1.0,  0.0),     # global workspace — the waist
+    "pfc":        ( 1.5,  0.0),     # cognitive control
+    "bg":         ( 4.0,  0.0),     # action selection
+    "motor":      ( 6.5,  0.0),     # output
+
+    # Cortical ring above the spine
+    "acc":        ( 1.5,  2.0),     # ACC sits just above PFC
+    "dmn":        (-1.0,  2.5),     # DMN above workspace
+    "claustrum":  (-0.0,  2.0),
+    "thought_transformer": (1.0, 2.5),
+
+    # Memory cluster (left of PFC, below the spine)
+    "hippo":      ( 0.5, -2.0),
+    "entorhinal": (-0.5, -2.0),
+    "cerebellum": ( 3.0, -2.5),
+
+    # World / self / qualia
+    "world":      (-3.5,  2.5),
+    "self_m":     (-3.5, -2.5),
+    "qualia":     (-1.0, -2.5),
+    "neural_geometry": ( -2.0, 2.5),
+
+    # Subcortical affect (below sensory)
+    "amygdala":   (-5.5, -2.0),
+    "insula":     (-7.0, -2.0),
+
+    # BG-adjacent (forward model + evaluator)
+    "forward_m":  ( 4.0, -2.0),
+    "evaluator":  ( 5.5, -2.0),
+
+    # Math / reasoning / language cortex (top-right, MoE lanes)
+    "math_cortex":      ( 4.0,  2.5),
+    "reasoning_cortex": ( 3.0,  2.0),
+    "language_cortex":  ( 5.5,  2.5),
+}
+
+# Region cluster centroids — orphan nodes (not in _RESERVED_SLOTS) are
+# placed near their region's centroid with small jitter.
+_REGION_CENTROIDS = {
+    "input":    (-6.5,  1.0),
+    "thalamic": (-3.5,  0.0),
+    "cortex":   ( 0.0,  2.0),
+    "memory":   ( 0.0, -2.0),
+    "subcort":  ( 4.0, -1.5),
+    "world":    (-3.5,  0.0),
+    "output":   ( 6.5,  0.0),
+    "nuclei":   ( 7.5,  2.5),       # default nuclei perch (top-right ring)
+}
+
+# Per-nucleus reserved slots on the right-edge "NT ring" so neuromod
+# nuclei stop floating into the layout's middle.
+_NUCLEI_RING = {
+    "vta":                ( 8.5,  2.5),
+    "nucleus_accumbens":  ( 8.5,  1.5),
+    "locus_coeruleus":    ( 8.5,  0.5),
+    "raphe_nuclei":       ( 8.5, -0.5),
+    "nucleus_basalis":    ( 8.5, -1.5),
+    "substantia_nigra":   ( 8.5, -2.5),
+}
+
+
+def _neuroanatomical_layout(g: "NeuralFlowGraph",
+                             centroid_strength: float = 0.4,
+                             orphan_snap: bool = True,
+                             nt_ring_radius: float = 3.0
+                             ) -> Dict[str, Tuple[float, float]]:
+    """Backbone-first constrained placement.
+
+    Order:
+      1. Place every node that has a reserved slot.
+      2. For unplaced populations, snap to their region centroid + jitter.
+      3. Place nuclei on the right-edge ring.
+      4. Place NT diamonds on an inner concentric ring near their first
+         modulation target's region centroid (`nt_ring_radius` controls
+         how close to the target).
+      5. Run a light force-directed *de-overlap pass* only — no global
+         rewiring; clusters stay roughly in place.
+    """
+    import random
+    rng = random.Random(42)
+    pos: Dict[str, Tuple[float, float]] = {}
+
+    # 1. Reserved slots (backbone + cortical ring + memory + ...)
+    for n in g.nodes:
+        if n.name in _RESERVED_SLOTS:
+            pos[n.name] = _RESERVED_SLOTS[n.name]
+        elif n.name in _NUCLEI_RING:
+            pos[n.name] = _NUCLEI_RING[n.name]
+
+    # 2. Orphan populations → region centroid + jitter
+    if orphan_snap:
+        used_offsets: Dict[Tuple[float, float], int] = {}
+        for n in g.nodes:
+            if n.kind != "pop" or n.name in pos:
+                continue
+            region = _REGION_OF.get(n.name, "world")
+            cx, cy = _REGION_CENTROIDS.get(region, (0.0, 0.0))
+            slot = used_offsets.get((cx, cy), 0)
+            used_offsets[(cx, cy)] = slot + 1
+            # Stack vertically by 0.6 units per orphan in same region
+            jx = 0.4 * rng.uniform(-1, 1)
+            jy = -0.7 * slot + 0.3 * rng.uniform(-1, 1)
+            pos[n.name] = (cx + jx, cy + jy)
+
+    # 3. NT diamonds → place near each NT's first modulation target
+    target_lookup: Dict[str, str] = {}
+    for e in g.edges:
+        if e.kind == "modulation" and e.src not in target_lookup:
+            target_lookup[e.src] = e.tgt
+    for n in g.nodes:
+        if n.kind != "nt" or n.name in pos:
+            continue
+        first_tgt = target_lookup.get(n.name)
+        if first_tgt and first_tgt in pos:
+            tx, ty = pos[first_tgt]
+            # Place above-and-right of the modulation target
+            pos[n.name] = (tx + 0.8, ty + 1.0)
+        else:
+            pos[n.name] = (8.5 - len(pos) * 0.05, 3.0)
+
+    # 4. Light de-overlap: nudge any node within MIN_SEP of another
+    #    along the gradient between them. Single sweep — geometry stays
+    #    in place; we only relax overlaps.
+    MIN_SEP = 1.0
+    names = list(pos.keys())
+    for _ in range(3):   # 3 sweeps
+        for i, a in enumerate(names):
+            for b in names[i+1:]:
+                ax, ay = pos[a]; bx, by = pos[b]
+                dx, dy = bx - ax, by - ay
+                d = (dx * dx + dy * dy) ** 0.5
+                if d < MIN_SEP and d > 1e-3:
+                    push = (MIN_SEP - d) / 2.0
+                    ux, uy = dx / d, dy / d
+                    pos[a] = (ax - ux * push, ay - uy * push)
+                    pos[b] = (bx + ux * push, by + uy * push)
+    return pos
+
+
 def _try_graphviz_layout(G, prog: str = "dot"):
     """Try networkx's pygraphviz layout. Returns None if pygraphviz missing
     or if graphviz dot is not installed. Times out fast — never hangs."""
@@ -252,13 +406,37 @@ def _try_graphviz_layout(G, prog: str = "dot"):
 
 def render_nfg(g: NeuralFlowGraph, output_path: str,
                figsize: Tuple[int, int] = (20, 14),
-               layout: str = "auto") -> None:
+               layout: str = "neuroanatomical",
+               centroid_strength: float = 0.4,
+               orphan_snap: bool = True,
+               nt_ring_radius: float = 3.0,
+               backbone_weight: float = 1.0) -> None:
     """Render via matplotlib + networkx — region-colored populations, hub-
     sized nodes, curved edges, distinct synapse/modulation styles.
 
+    Default layout (`neuroanatomical_bowtie`):
+        - Bowtie spine (sensory -> thalamus -> gws -> pfc -> bg -> motor)
+          on fixed reserved slots.
+        - Other populations snapped to region-cluster centroids with
+          bounded jitter, so orphan subgraphs never drift away.
+        - Neuromod nuclei pinned on a right-edge ring.
+        - NT diamonds placed near each NT's first modulation target.
+        - Light de-overlap-only relaxation; geometry stays anatomical.
+
+    Other layouts available for comparison:
+        "dot"     -> graphviz hierarchical (needs `dot` on PATH)
+        "kk"      -> Kamada-Kawai (organic)
+        "spring"  -> force-directed (generic)
+        "layered" -> BFS-depth layering (my fallback)
+
     Args:
-        layout: "auto" (prefer graphviz dot, else layered), "dot",
-                "spring", "layered".
+        layout:            "neuroanatomical" (default) | "auto" | "dot" |
+                           "kk" | "spring" | "layered"
+        centroid_strength: how strongly orphans snap to region centroids
+                           (only used in neuroanatomical layout)
+        orphan_snap:       enable region-centroid snapping for orphans
+        nt_ring_radius:    where NT diamonds sit relative to their target
+        backbone_weight:   thicker arrows on the bowtie spine (visual)
     """
     import networkx as nx
     import matplotlib.pyplot as plt
@@ -272,20 +450,25 @@ def render_nfg(g: NeuralFlowGraph, output_path: str,
         G.add_edge(e.src, e.tgt, kind=e.kind, weight=e.weight,
                    nt=e.nt, effect=e.effect)
 
-    # Layout selection. Kamada-Kawai gives the cleanest balanced layout
-    # for small (<100 node) graphs — handles nuclei + modulation edges
-    # together so neuromod nodes pull toward their targets instead of
-    # floating off to the margin (spring layout's typical failure).
+    # Layout selection. Default: neuroanatomical (constrained slots +
+    # region clusters + backbone-first). Other layouts kept for
+    # comparison / debugging.
     pos = None
-    if layout in ("auto", "dot"):
+    if layout in ("neuroanatomical", "neuroanatomical_bowtie", "auto"):
+        pos = _neuroanatomical_layout(
+            g, centroid_strength=centroid_strength,
+            orphan_snap=orphan_snap, nt_ring_radius=nt_ring_radius)
+    elif layout == "dot":
         pos = _try_graphviz_layout(G, "dot")
-    if pos is None and layout in ("auto", "kk"):
+    elif layout == "kk":
         try:
             pos = nx.kamada_kawai_layout(G, scale=4.0)
         except Exception:
             pos = None
-    if pos is None and layout in ("auto", "spring"):
+    elif layout == "spring":
         pos = nx.spring_layout(G, seed=42, k=2.0, iterations=300)
+    elif layout == "layered":
+        pos = _layered_positions(g)
     if pos is None:
         pos = _layered_positions(g)
     for n in g.nodes:

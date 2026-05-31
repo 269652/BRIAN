@@ -1,11 +1,16 @@
-from setuptools import setup, find_packages
+"""Thin setup.py — modern config lives in pyproject.toml.
 
-setup(
-    name="brian-repo-wrapper",
-    version="0.0.1",
-    description="Wrapper package to allow editable install of the neuroslm code in repo 'brian'",
-    packages=find_packages(exclude=("tests", "docs", "checkpoints", "lfs_checkpoints")),
-    include_package_data=True,
-    install_requires=[],
-    zip_safe=False,
-)
+This file exists only for `pip install -e .` backward-compatibility with
+older pip versions and for the editable-install workflow. All metadata
+(name, version, deps, entry points like `brian = neuroslm.cli:main`)
+is declared in pyproject.toml.
+
+For a fresh install from scratch, use the wrapper scripts which create
+a venv and pip-install everything:
+
+    bash  scripts/install.sh        # Linux / macOS / git-bash on Windows
+    pwsh  scripts/install.ps1       # PowerShell on Windows
+"""
+from setuptools import setup
+
+setup()
