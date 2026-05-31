@@ -107,6 +107,23 @@ training {
         }
     }
 
+    # ── §6.5 Genetics ──
+    # Enables the GeneticOrchestrator (neuroslm/neurochem/genetics.py).
+    # ReZero payload init keeps the model identity-at-start; gene
+    # gradients open the cortex.alpha_nt gate progressively. fixed-genes
+    # preset "default" includes math/reasoning 5HT booster, PFC DA boost
+    # on surprise, and the GWS Glu floor. phi_weight is the multiplier
+    # on the orchestrator's -Phi auxiliary loss (small so it can't
+    # overpower the LM signal).
+    genetics: {
+        enabled:            true
+        n_genes:            32
+        d_pay:              16
+        phi_weight:         0.01
+        phi_target:         0.30
+        fixed_genes_preset: "default"
+    }
+
     # ── Hardware envelope ──
     # Deploy script filters vast.ai offers by these constraints.
     # `dist_strategy`: "single" | "ddp" | "fsdp". Picked per scale below
