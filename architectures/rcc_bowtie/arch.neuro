@@ -89,9 +89,14 @@ training {
 
     # Declarative early-exit conditions. First rule to fire saves a
     # checkpoint and exits the training loop.
+    #   1. fail-fast: train PPL must be < 100 by step 10k
+    #   2. fail-fast: OOD PPL must be < 1000 by step 10k
+    #   3. success-exit: stop training once OOD PPL stops falling
+    #      (no improvement vs the start of the last 2000-step window)
     pass_marks: {
-        train_ppl_ceiling_10k: { metric: "train_ppl", at_step: 10000, max: 150 }
-        ood_plateau:           { metric: "ood_ppl", window: 3000, trend: "stable", tol: 0.05 }
+        train_ppl_at_10k: { metric: "train_ppl", at_step: 10000, max: 100 }
+        ood_ppl_at_10k:   { metric: "ood_ppl", at_step: 10000, max: 1000 }
+        ood_not_falling:  { metric: "ood_ppl", window: 2000, trend: "falling", tol: 0.01 }
     }
 }
 
