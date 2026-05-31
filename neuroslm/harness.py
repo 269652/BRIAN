@@ -172,6 +172,10 @@ class BRIANHarness(nn.Module):
         self._genetics_module_names: list = []
         # Surprise EMA for the regulatory context fed into genes
         self._surprise_ema: float = 0.0
+        # Cached last orchestrator modulation — reused on skipped steps
+        # (genetics.update_every > 1) so the cortex's NT modulation
+        # stays installed without rebuilding the graph every step.
+        self._last_orch_modulation = None
         # Runtime metric registry — values queryable from anywhere in the
         # control flow node (other modules, schedulers, gene triggers).
         # Updated once per compute_loss step.
@@ -216,6 +220,7 @@ class BRIANHarness(nn.Module):
         h._transmitter_sys = None
         h._genetics_module_names = []
         h._surprise_ema = 0.0
+        h._last_orch_modulation = None
         h._metrics = {}
         return h
 
@@ -566,18 +571,37 @@ class BRIANHarness(nn.Module):
         """PRE-pass genetic expression: orchestrator → set NT modulation
         on the cortex BEFORE forward, so gene-parameter gradients flow.
 
-        Uses the PREVIOUS step's metrics (mat/surprise/phi) as the
-        regulatory context — the natural 1-step latency mirrors real
-        gene transcription. Returns the auxiliary `phi_loss` tensor
-        (a live tensor in the autograd graph for THIS step).
+        Throttled by `genetics.update_every`: orchestrator forward + the
+        full autograd graph through gene parameters only runs every Nth
+        step. On skipped steps the cortex sees the most recent live
+        modulation (cached) — bit-identical to running the orchestrator
+        with last step's context.
+
+        Diagnostics are throttled by `genetics.diagnostics_every` —
+        the `.item()` syncs (gene_expr_mean/max/active_frac) are the
+        single biggest per-step cost so we skip them in between.
+
+        Returns the auxiliary `phi_loss` tensor on update steps; a
+        zero scalar on skipped steps (so the total loss path is
+        unchanged but no extra grads are accumulated).
         """
         self._ensure_genetics()
         if (self._transmitter_sys.level.shape[0] != batch_size
                 or self._transmitter_sys.level.device != device):
             self._transmitter_sys.to(device)
             self._transmitter_sys.reset(batch_size, device)
-        nt_levels = self._transmitter_sys.level   # (B, N_NT)
-        # Previous-step metrics — zero on the very first call.
+
+        gcfg = self.training_config.genetics
+        step = self._global_step
+        do_update = (step % max(1, gcfg.update_every) == 0)
+
+        if not do_update and self._last_orch_modulation is not None:
+            # Reuse cached modulation — already installed on the cortex,
+            # no new graph edges. Return a zero phi-loss so the auxiliary
+            # weight has no effect this step.
+            return torch.zeros((), device=device)
+
+        nt_levels = self._transmitter_sys.level
         prev_mat = float(self._metrics.get("mat", 0.0))
         prev_surprise = float(self._metrics.get("surprise", 0.0))
         prev_phi = float(self._metrics.get("phi", 0.0))
@@ -586,19 +610,21 @@ class BRIANHarness(nn.Module):
         phi_t      = torch.full((batch_size,), prev_phi,      device=device)
         ctx = self._genetics_orch.build_context(nt_levels, surprise_t, mat_t)
         out = self._genetics_orch(ctx, phi=phi_t)
-        # Transmitter state overlay (detached — it's a per-step state buffer)
         self._transmitter_sys.set_module_offsets(
             baseline_off=out["baseline_offsets"].detach(),
             tau_shift=out["tau_shifts"].detach(),
         )
-        # LIVE (non-detached) modulation into the cortex — this is the
-        # path through which gene gradients flow back from the LM loss.
         if (self.language_model is not None
                 and hasattr(self.language_model, "set_nt_modulation")):
             self.language_model.set_nt_modulation(out["baseline_offsets"])
-        diag = self._genetics_orch.diagnostics()
-        for k, v in diag.items():
-            self._metrics["gene_" + k if not k.startswith("gene_") else k] = v
+        self._last_orch_modulation = out["baseline_offsets"]
+        # Diagnostics syncing is the big per-step CPU↔GPU cost; throttle
+        # to `diagnostics_every` steps so most steps stay sync-free.
+        if step % max(1, gcfg.diagnostics_every) == 0:
+            diag = self._genetics_orch.diagnostics()
+            for k, v in diag.items():
+                key = k if k.startswith("gene_") else f"gene_{k}"
+                self._metrics[key] = v
         return out["phi_loss"]
 
     def _compute_loss_from_logits(self, logits: torch.Tensor,

@@ -268,10 +268,17 @@ class GeneticsConfig:
     phi_weight: float = 0.01           # multiplier on -Phi added to total loss
     phi_target: float = 0.30           # target Phi (informational only)
     fixed_genes_preset: str = "default"
-    # Modules the orchestrator can target. If empty, defaults to the
-    # populations declared in the architecture (auto-discovered by the
-    # harness from the program IR at build time).
     target_modules: List[str] = field(default_factory=list)
+    # ── Performance knobs ──
+    # update_every:   orchestrator runs every N training steps; cached
+    #                 output is reused on skipped steps. ~25% load at
+    #                 N=4 recovers most of the throughput hit while
+    #                 still giving genes a smoothed training signal.
+    # diagnostics_every: gene-expr .item() syncs are GPU→CPU sync
+    #                 points; publishing every step throttles A100s.
+    #                 Default 50 ⇒ refresh diagnostics 2% of steps.
+    update_every: int = 4
+    diagnostics_every: int = 50
 
 
 @dataclass
@@ -552,6 +559,8 @@ def _parse_genetics(body: str) -> GeneticsConfig:
         if raw.startswith("[") and raw.endswith("]"):
             raw = raw[1:-1]
         g.target_modules = [_strip_quotes(x.strip()) for x in raw.split(",") if x.strip()]
+    if "update_every" in props:       g.update_every = int(props["update_every"])
+    if "diagnostics_every" in props:  g.diagnostics_every = int(props["diagnostics_every"])
     return g
 
 

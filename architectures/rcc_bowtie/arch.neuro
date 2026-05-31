@@ -160,9 +160,14 @@ training {
             depth:         10
             n_heads:       12
             max_ctx:       2048
-            batch_size:    8
+            # batch=4 / grad_accum=4: same effective tokens-per-step as
+            # batch=8, but the diff-attention block needs TWO attention
+            # matrices of (B, H, T, T) — at B=8 H=12 T=2048 that's 2 ×
+            # 1.6 GiB just for the softmax, OOMing the 40GB A100 once
+            # the orchestrator + activation buffers are also resident.
+            batch_size:    4
             seq_len:       2048
-            grad_accum:    2
+            grad_accum:    4
             approx_params: "~110M"
         }
 
