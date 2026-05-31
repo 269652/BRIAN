@@ -156,19 +156,21 @@ training {
         }
 
         100m: {
-            d_model:       768
-            depth:         10
-            n_heads:       12
+            # Honest ~100M: trunk + embedding + lm_head ≈ 103M.
+            # (The previous 768/10 config was 204M because embedding +
+            #  lm_head + diff-block doublings added ~94M on top.)
+            # Layout: depth=8 with i%3 pattern → 3 std + 3 diff + 2 mod
+            # blocks. 3 diff-attention blocks each need 2 × (B, H, T, T)
+            # softmax tensors — at B=4 H=10 T=2048 bf16 that's ~1.6 GiB
+            # per block, ~5 GiB total. Comfortable on a 40 GiB A100.
+            d_model:       640
+            depth:         8
+            n_heads:       10
             max_ctx:       2048
-            # batch=4 / grad_accum=4: same effective tokens-per-step as
-            # batch=8, but the diff-attention block needs TWO attention
-            # matrices of (B, H, T, T) — at B=8 H=12 T=2048 that's 2 ×
-            # 1.6 GiB just for the softmax, OOMing the 40GB A100 once
-            # the orchestrator + activation buffers are also resident.
             batch_size:    4
             seq_len:       2048
             grad_accum:    4
-            approx_params: "~110M"
+            approx_params: "~100M"
         }
 
         300m: {
