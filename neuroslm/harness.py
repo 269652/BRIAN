@@ -432,13 +432,19 @@ class BRIANHarness(nn.Module):
         self._last_lm_loss_value = float(loss_lm.detach().item())
 
         # ── Runtime metric registry update ──
-        # Compute a runtime Phi proxy from the per-token logit entropy:
-        #   higher entropy across the vocab = more "differentiated"
-        #   predictions = higher integrated information proxy.
-        # Cheap to compute (single softmax on already-computed logits).
+        # Cheap runtime Phi proxy: per-token softmax entropy normalised
+        # by ln(vocab). Computed on a SUBSAMPLE of tokens (64 per batch)
+        # because materialising `softmax(logits) * log_softmax(logits)`
+        # at (B, T, V) costs ~B·T·V·4 bytes — at B=8, T=2048, V=50257
+        # that's 6.7 GiB per tensor (OOM on a 40 GiB A100 once the LM
+        # activations are also resident).
         with torch.no_grad():
-            logprobs = F.log_softmax(logits.detach(), dim=-1)
-            ent = -(logprobs.exp() * logprobs).sum(dim=-1)        # (B, T)
+            B, T, V = logits.shape
+            n_sample = min(64, B * T)
+            idx = torch.randint(0, B * T, (n_sample,), device=logits.device)
+            sampled = logits.detach().reshape(B * T, V).index_select(0, idx)
+            logprobs = F.log_softmax(sampled, dim=-1)             # (n, V)
+            ent = -(logprobs.exp() * logprobs).sum(dim=-1)        # (n,)
             phi_proxy = float(ent.mean()) / max(1e-6, math.log(self.vocab_size))
         # Surprise EMA (drives gene transcription triggers)
         if self._surprise_ema == 0.0:
