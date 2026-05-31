@@ -128,9 +128,13 @@ training {
     # Deploy script filters vast.ai offers by these constraints.
     # `dist_strategy`: "single" | "ddp" | "fsdp". Picked per scale below
     # (large scales auto-override). Precision = bf16 (A100/H100 native).
+    # min_gpu_mem_gib: A100 SXM4 ships in 40 GB and 80 GB variants;
+    # without this filter vast.ai sometimes serves up tiny 16/20 GB
+    # MIG-sliced A100s ($0.7/hr range) that OOM at the first forward.
     hardware: {
         gpu_name:        "A100_SXM4"
         num_gpus:        1
+        min_gpu_mem_gib: 40
         min_reliability: 0.995
         min_inet_mbps:   200
         dist_strategy:   "single"
