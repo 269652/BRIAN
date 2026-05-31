@@ -638,32 +638,46 @@ class BRIANHarness(nn.Module):
 
     def _compute_loss_from_logits(self, logits: torch.Tensor,
                                   targets: torch.Tensor) -> torch.Tensor:
+        """Cross-entropy loss with optional label-smoothing + per-sample clip.
+
+        Memory: the naïve `F.cross_entropy(logits.reshape(-1, V), ...)` path
+        materialises an (N, V) gradient tensor during backward — at N=8192
+        V=50257 fp32 that's 1.6 GiB, and label_smoothing > 0 also builds an
+        (N, V) soft-target tensor, so peak backward memory is 4 such tensors
+        (logits + grad + softmax + smoothed target) ≈ 6.4 GiB and OOMs the
+        A100 once the trunk's activation graph is also resident.
+
+        Fix: chunk the CE over the (B*T) dimension. Each chunk's backward
+        only allocates an (CHUNK, V) gradient tensor — at CHUNK=1024 that's
+        200 MB peak instead of 1.6 GiB.
+        """
         batch, seq_len, vocab = logits.shape
         ls = self.training_config.label_smoothing
         clip = self.training_config.loss_clipping
+        flat_logits = logits.reshape(-1, vocab)
+        flat_targets = targets.reshape(-1)
+        N = flat_logits.shape[0]
+        # Threshold below which to skip chunking (small batches don't OOM).
+        CHUNK = 1024
+
+        def _per_token_ce() -> torch.Tensor:
+            if N <= CHUNK:
+                return F.cross_entropy(flat_logits, flat_targets,
+                                        reduction="none", label_smoothing=ls)
+            parts = []
+            for s in range(0, N, CHUNK):
+                e = min(s + CHUNK, N)
+                parts.append(F.cross_entropy(
+                    flat_logits[s:e], flat_targets[s:e],
+                    reduction="none", label_smoothing=ls))
+            return torch.cat(parts, dim=0)
 
         if not clip.enabled:
-            # Standard cross-entropy with optional label smoothing
-            return F.cross_entropy(
-                logits.reshape(-1, vocab),
-                targets.reshape(-1),
-                label_smoothing=ls,
-            )
+            return _per_token_ce().mean()
 
-        # Per-sample clipping: compute per-token CE, average to per-sequence,
-        # clip each sequence at `factor * batch_median`, then average.
-        per_token = F.cross_entropy(
-            logits.reshape(-1, vocab),
-            targets.reshape(-1),
-            reduction="none",
-            label_smoothing=ls,
-        )
-        per_token = per_token.reshape(batch, seq_len)
-        per_seq = per_token.mean(dim=1)             # (batch,)
-
-        # Median-based clip threshold; detached so the threshold itself
-        # isn't a gradient target (otherwise the clip dampens its own
-        # learning signal).
+        # Per-sample clipping path.
+        per_token = _per_token_ce().reshape(batch, seq_len)
+        per_seq = per_token.mean(dim=1)
         threshold = (per_seq.detach().median() * clip.factor).clamp(min=1e-8)
         clipped = torch.minimum(per_seq, threshold)
         return clipped.mean()

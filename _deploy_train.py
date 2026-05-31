@@ -91,6 +91,13 @@ export GITHUB='{GITHUB}' HF_TOKEN='' VAST_API_KEY='{VAST_API_KEY}'
 export DIST_STRATEGY={hw.dist_strategy}
 export NUM_GPUS={hw.num_gpus}
 export PRECISION={hw.precision}
+# Expandable-segments allocator dramatically reduces fragmentation on
+# long runs that mix bursty large tensors (CE backward, diff-attention
+# softmax) with small tensors (genetics overlays, optimizer state) —
+# fragmentation was OOMing 100M runs at step 100-220 even with chunked
+# CE because the allocator couldn't find contiguous regions for the
+# next backward's gradient buffer.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 date -u +"train boot @ %Y-%m-%dT%H:%M:%SZ"
 
 (command -v git >/dev/null 2>&1 && command -v git-lfs >/dev/null 2>&1) \\
