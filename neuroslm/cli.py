@@ -304,7 +304,105 @@ def cmd_ps(args: argparse.Namespace) -> int:
 
     Output columns:
       ID | LABEL | GPU | $/hr | UPTIME | PHASE | STEP | PPL | OOD-PPL | TOK/S
+
+    With --it (interactive/watch), redraws every `--interval` seconds
+    (default 3) until Ctrl-C.
     """
+    if args.it:
+        import time
+        try:
+            while True:
+                # Clear screen — works in PowerShell + bash
+                sys.stdout.write("\x1b[2J\x1b[H" if sys.stdout.isatty() else "\n" * 3)
+                ts = subprocess.run(
+                    ["date" if os.name != "nt" else "cmd", "/c", "echo", "%TIME%"],
+                    capture_output=True, text=True).stdout.strip()
+                print(f"brian ps --it (every {args.interval}s) — {ts}")
+                rc = _render_ps_once(args)
+                if rc != 0:
+                    return rc
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            print("\n(stopped)")
+            return 0
+    return _render_ps_once(args)
+
+
+def _detect_exit_reason(log_tail: str) -> tuple:
+    """From a log tail, infer (exit_reason: str, detail: str).
+
+    Returns one of: "passmark-exit", "completed", "crashed", "destroyed",
+    "stopped", "unknown" + a human-readable detail (e.g. the pass-mark name).
+    """
+    import re as _re
+    # Pass-mark early exit — pull out the rule name + reason
+    m = _re.search(r"PASS-MARK EARLY EXIT @ step (\d+): (.+)", log_tail)
+    if m:
+        return ("passmark-exit", f"step {m.group(1)}: {m.group(2)[:80]}")
+    if "training reached target" in log_tail:
+        return ("completed", "all steps done")
+    if "Traceback" in log_tail or "ERROR" in log_tail.upper():
+        # Find a meaningful tail line
+        for line in reversed(log_tail.splitlines()):
+            if "Error" in line or "Exception" in line or "Traceback" in line:
+                return ("crashed", line.strip()[:80])
+        return ("crashed", "exception in log")
+    if "vastai destroy instance" in log_tail or "── self-destroying" in log_tail:
+        return ("destroyed", "instance self-destroyed")
+    if "[train_dsl] done." in log_tail:
+        return ("stopped", "train loop returned")
+    return ("unknown", "")
+
+
+def _scan_recent_destroyed(top_n: int = 3) -> list:
+    """Walk logs/vast/*.log, group by instance id, return the most recent
+    `top_n` that are no longer running (parsed status indicates exit).
+
+    Returns a list of dicts {id, last_seen, exit_reason, detail, steps, ood_ppl}.
+    """
+    import re as _re
+    from datetime import datetime
+    log_dir = Path("logs/vast")
+    if not log_dir.is_dir():
+        return []
+    # Group by instance id (filename prefix before "__")
+    by_id: dict = {}
+    for p in log_dir.glob("*__neuroslm-*.log"):
+        iid = p.stem.split("__")[0]
+        prev = by_id.get(iid)
+        if prev is None or p.stat().st_mtime > prev.stat().st_mtime:
+            by_id[iid] = p
+    rows = []
+    for iid, path in by_id.items():
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        # Only include if we can find an exit signal (otherwise it's still live)
+        tail = text[-15000:]   # last ~15KB is enough for exit signals
+        reason, detail = _detect_exit_reason(tail)
+        if reason == "unknown":
+            continue
+        # Pull final step + last OOD ppl
+        step_matches = list(_STEP_RE.finditer(text))
+        mid_matches  = list(_MID_OOD_RE.finditer(text))
+        final_step = int(step_matches[-1].group("step")) if step_matches else None
+        last_ood   = float(mid_matches[-1].group("ppl")) if mid_matches else None
+        rows.append({
+            "id": iid,
+            "mtime": datetime.fromtimestamp(path.stat().st_mtime),
+            "exit_reason": reason,
+            "detail": detail,
+            "steps": final_step,
+            "ood_ppl": last_ood,
+            "logfile": path.name,
+        })
+    rows.sort(key=lambda r: r["mtime"], reverse=True)
+    return rows[:top_n]
+
+
+def _render_ps_once(args: argparse.Namespace) -> int:
+    """Single ps render — extracted from cmd_ps so --it can call it in a loop."""
     import json
     vastai = _vastai_exe()
     raw, rc = _run_capture([vastai, "show", "instances", "--raw"])
@@ -375,6 +473,22 @@ def cmd_ps(args: argparse.Namespace) -> int:
         print(f"{str(r['id']):>10}  {r['label'][:28]:<28}  "
               f"{r['gpu'][:12]:<12}  {cost:>5}  {r['uptime_mins']:>6}  "
               f"{r['phase']:<16}  {step:>6}  {ppl:>8}  {ood:>9}  {tps:>7}")
+
+    # ── Recently destroyed instances (reasons + last metrics) ──
+    destroyed = _scan_recent_destroyed(top_n=3)
+    if destroyed:
+        print()
+        print("Recent destroyed:")
+        dhdr = (f"  {'ID':>10}  {'WHEN':<19}  {'REASON':<15}  "
+                f"{'STEPS':>6}  {'OOD-PPL':>9}  DETAIL")
+        print(dhdr)
+        print("  " + "-" * (len(dhdr) - 2))
+        for r in destroyed:
+            steps = str(r["steps"]) if r["steps"] is not None else "-"
+            ood = f"{r['ood_ppl']:.0f}" if r["ood_ppl"] is not None else "-"
+            when = r["mtime"].strftime("%Y-%m-%d %H:%M:%S")
+            print(f"  {r['id']:>10}  {when:<19}  {r['exit_reason']:<15}  "
+                  f"{steps:>6}  {ood:>9}  {r['detail'][:80]}")
     return 0
 
 
@@ -728,6 +842,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="List neuroslm instances + parsed last metric line + phase")
     sps.add_argument("--all", action="store_true",
                      help="include non-neuroslm instances too")
+    sps.add_argument("-it", "--it", action="store_true",
+                     help="interactive watch mode — redraw every --interval "
+                          "seconds until Ctrl-C")
+    sps.add_argument("--interval", type=int, default=3,
+                     help="seconds between refreshes when --it is on (default 3)")
     sps.set_defaults(func=cmd_ps)
 
     # destroy

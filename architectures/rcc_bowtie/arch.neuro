@@ -88,15 +88,123 @@ training {
     }
 
     # Declarative early-exit conditions. First rule to fire saves a
-    # checkpoint and exits the training loop.
-    #   1. fail-fast: train PPL must be < 100 by step 10k
-    #   2. fail-fast: OOD PPL must be < 1000 by step 10k
-    #   3. success-exit: stop training once OOD PPL stops falling
-    #      (no improvement vs the start of the last 2000-step window)
+    # checkpoint and exits the training loop. NOTE: only the "OOD keeps
+    # falling" rule is active — the step-thresholded fail-fast rules were
+    # removed (they were triggering on early-training noise).
+    #
+    # Rule: exit when OOD-ppl trend stalls. Compares min(OOD) in the first
+    # half of the window vs min(OOD) in the second half. Requires
+    # `min_evals` data points before it can fire, so transient single-eval
+    # noise (~3% on a 50-window WikiText eval) can't trigger exit on its
+    # own. `tol: 0.02` = require a real ≥2% improvement.
     pass_marks: {
-        train_ppl_at_10k: { metric: "train_ppl", at_step: 10000, max: 100 }
-        ood_ppl_at_10k:   { metric: "ood_ppl", at_step: 10000, max: 1000 }
-        ood_not_falling:  { metric: "ood_ppl", window: 2000, trend: "falling", tol: 0.01 }
+        ood_not_falling:  {
+            metric: "ood_ppl",
+            window: 4000,
+            trend: "falling",
+            tol: 0.02,
+            min_evals: 5
+        }
+    }
+
+    # ── Hardware envelope ──
+    # Deploy script filters vast.ai offers by these constraints.
+    # `dist_strategy`: "single" | "ddp" | "fsdp". Picked per scale below
+    # (large scales auto-override). Precision = bf16 (A100/H100 native).
+    hardware: {
+        gpu_name:        "A100_SXM4"
+        num_gpus:        1
+        min_reliability: 0.995
+        min_inet_mbps:   200
+        dist_strategy:   "single"
+        precision:       "bf16"
+    }
+
+    # ── Multi-scale variants of the same architecture ──
+    # Pick at deploy time via env SCALE=<name>. Each variant inherits
+    # the global `hardware` block unless it declares its own override.
+    # approx_params is informational (rough trunk-only count).
+    scales: {
+        default: "30m_p4"
+
+        30m_p4: {
+            d_model:       512
+            depth:         8
+            n_heads:       8
+            max_ctx:       2048
+            batch_size:    16
+            seq_len:       2048
+            grad_accum:    1
+            approx_params: "30M"
+        }
+
+        100m: {
+            d_model:       768
+            depth:         10
+            n_heads:       12
+            max_ctx:       2048
+            batch_size:    8
+            seq_len:       2048
+            grad_accum:    2
+            approx_params: "~110M"
+        }
+
+        300m: {
+            d_model:       1024
+            depth:         24
+            n_heads:       16
+            max_ctx:       2048
+            batch_size:    8
+            seq_len:       2048
+            grad_accum:    2
+            approx_params: "300M"
+            hardware: {
+                gpu_name:        "A100_SXM4"
+                num_gpus:        2
+                min_reliability: 0.995
+                min_inet_mbps:   200
+                dist_strategy:   "ddp"
+                precision:       "bf16"
+            }
+        }
+
+        1b: {
+            d_model:       2048
+            depth:         24
+            n_heads:       16
+            max_ctx:       2048
+            batch_size:    4
+            seq_len:       2048
+            grad_accum:    4
+            approx_params: "1B"
+            hardware: {
+                gpu_name:        "A100_SXM4"
+                num_gpus:        4
+                min_reliability: 0.995
+                min_inet_mbps:   200
+                dist_strategy:   "ddp"
+                precision:       "bf16"
+            }
+        }
+
+        7b: {
+            d_model:       4096
+            depth:         32
+            n_heads:       32
+            max_ctx:       4096
+            batch_size:    2
+            seq_len:       4096
+            grad_accum:    8
+            approx_params: "7B"
+            hardware: {
+                gpu_name:        "H100_SXM"
+                num_gpus:        8
+                min_reliability: 0.995
+                min_inet_mbps:   500
+                dist_strategy:   "fsdp"
+                precision:       "bf16"
+            }
+        }
     }
 }
 

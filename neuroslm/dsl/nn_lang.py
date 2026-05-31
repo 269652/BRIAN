@@ -727,6 +727,47 @@ class DSLLanguageCortex(nn.Module):
         else:
             self.topdown_w = None
 
+        # ── NT modulation hook (GeneticOrchestrator → trunk) ──
+        # Each block reads a per-module NT offset (B, N_NT) and applies
+        # a learned per-channel gain on top of its output:
+        #     h = h * (1 + alpha_nt * nt_proj(nt_offset))
+        # `alpha_nt` is a ReZero scalar (init 0) — at step 0 the cortex
+        # is identical to the no-NT-modulation baseline. As alpha lifts
+        # off zero under the LM loss, gene → NT → trunk feedback closes.
+        # `nt_proj` is Linear(N_NT, d_model); init small-random so payload
+        # gradients flow on the first backward.
+        N_NT_LOCAL = 7   # matches neurochem.transmitters.N_NT (avoid import)
+        self.nt_proj = nn.Linear(N_NT_LOCAL, d_model, bias=False)
+        nn.init.normal_(self.nt_proj.weight, std=0.02)
+        self.alpha_nt = nn.Parameter(torch.zeros(1))
+        # Per-block module index (block_i → module_i). The harness writes
+        # the actual mapping via set_block_module_map(); default round-robin.
+        self._block_module_idx: Optional[torch.Tensor] = None
+        # Current per-module NT offset, set by set_nt_modulation each step.
+        # Shape (B, n_modules, N_NT). None → no modulation applied (bit-
+        # identical baseline path).
+        self._nt_module_offset: Optional[torch.Tensor] = None
+
+    def set_block_module_map(self, mapping):
+        """Tell the cortex which module each block represents.
+
+        `mapping` is an iterable of length `len(self.blocks)` of integer
+        indices into the orchestrator's module_names list. Falls back to
+        round-robin if unset.
+        """
+        import torch as _t
+        self._block_module_idx = _t.tensor(list(mapping), dtype=_t.long)
+
+    def set_nt_modulation(self, per_module_offset) -> None:
+        """Install the current per-module NT offset tensor.
+
+        Args:
+            per_module_offset: (B, n_modules, N_NT). Set by the harness
+                each step from the GeneticOrchestrator's `baseline_offsets`.
+                Pass `None` to disable NT modulation for this step.
+        """
+        self._nt_module_offset = per_module_offset
+
     def set_mat_multipliers(self, dropout_p: float, pct_trunk: float) -> None:
         """Update the MAT-phase-gated multipliers for dropout + PCT.
 
@@ -752,10 +793,31 @@ class DSLLanguageCortex(nn.Module):
         # Stash each block's output to enable PCT top-down feedback (the
         # next layer's output predicts this layer's input).
         block_outs: List[torch.Tensor] = []
-        for blk, adapter in zip(self.blocks, self.adapters):
+        # Precompute the per-block NT gain (B, depth, d_model) if the
+        # GeneticOrchestrator has handed us a per-module offset.
+        block_gain = None
+        if self._nt_module_offset is not None:
+            offs = self._nt_module_offset            # (B, M, N_NT)
+            n_blocks = len(self.blocks)
+            if self._block_module_idx is None or \
+                    self._block_module_idx.numel() != n_blocks:
+                # Round-robin mapping if no explicit map was set
+                bm = torch.arange(n_blocks, device=offs.device) % offs.shape[1]
+            else:
+                bm = self._block_module_idx.to(offs.device)
+            # Index_select rather than gather for shape clarity:
+            # offs (B, M, N) → per_block (B, depth, N)
+            per_block = offs.index_select(dim=1, index=bm)  # (B, depth, N_NT)
+            # Project to d_model and gate by alpha_nt
+            block_gain = self.alpha_nt * self.nt_proj(per_block)  # (B, depth, d_model)
+        for bi, (blk, adapter) in enumerate(zip(self.blocks, self.adapters)):
             h = blk(h)
             h = adapter(h)
             h = self.dropout(h)
+            if block_gain is not None:
+                # Broadcast (B, 1, d_model) over the (B, T, d_model) hidden
+                gain = block_gain[:, bi, :].unsqueeze(1)
+                h = h * (1.0 + gain)
             block_outs.append(h)
             self._layer_acts.append(h.detach())
 

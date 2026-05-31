@@ -24,6 +24,7 @@ maturity machinery, etc.) into both DSL constructs and harness hooks.
 """
 from __future__ import annotations
 import math
+import os
 from contextlib import nullcontext
 from typing import Optional, Dict, Any
 
@@ -164,6 +165,17 @@ class BRIANHarness(nn.Module):
         self._bema: Optional[BEMAController] = None
         self._last_bema_info: Dict = {}
         self._nemori_skipped: int = 0
+        # Genetics + runtime metric registry (see §6.5).
+        # Lazily built in _ensure_genetics() so it sees the actual model.
+        self._genetics_orch = None
+        self._transmitter_sys = None
+        self._genetics_module_names: list = []
+        # Surprise EMA for the regulatory context fed into genes
+        self._surprise_ema: float = 0.0
+        # Runtime metric registry — values queryable from anywhere in the
+        # control flow node (other modules, schedulers, gene triggers).
+        # Updated once per compute_loss step.
+        self._metrics: Dict[str, float] = {}
 
     @classmethod
     def from_language_model(cls, language_model: nn.Module,
@@ -200,7 +212,68 @@ class BRIANHarness(nn.Module):
         h._bema = None
         h._last_bema_info = {}
         h._nemori_skipped = 0
+        h._genetics_orch = None
+        h._transmitter_sys = None
+        h._genetics_module_names = []
+        h._surprise_ema = 0.0
+        h._metrics = {}
         return h
+
+    # ── Distributed training wrapping (DDP / FSDP) ────────────────────
+    def enable_distributed(self, strategy: str = "ddp",
+                            device_id: Optional[int] = None) -> None:
+        """Wrap the language model in DDP or FSDP for multi-GPU training.
+
+        Reads the DDP-related env vars set by torchrun (`RANK`,
+        `WORLD_SIZE`, `LOCAL_RANK`, `MASTER_ADDR`, `MASTER_PORT`). For
+        single-process runs the strategy="single" path is a no-op.
+
+        Call AFTER moving the harness to the correct CUDA device but
+        BEFORE the first `train_step`.
+        """
+        if strategy == "single" or strategy == "":
+            return
+        if self.language_model is None:
+            return
+        import torch.distributed as dist
+        if not dist.is_initialized():
+            backend = "nccl" if torch.cuda.is_available() else "gloo"
+            dist.init_process_group(backend=backend)
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        if torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
+            self.language_model = self.language_model.to(f"cuda:{local_rank}")
+        if strategy == "ddp":
+            from torch.nn.parallel import DistributedDataParallel as DDP
+            self.language_model = DDP(
+                self.language_model,
+                device_ids=[local_rank] if torch.cuda.is_available() else None,
+                find_unused_parameters=True,   # genetics + cortex hooks
+            )
+        elif strategy == "fsdp":
+            from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+            self.language_model = FSDP(self.language_model)
+        else:
+            raise ValueError(f"unknown dist_strategy {strategy!r}")
+
+    # ── Runtime metric registry — usable anywhere in the control flow ──
+    def metric(self, name: str, default: float = 0.0) -> float:
+        """Read a runtime metric (phi, mat, surprise, lm_loss, gene_expr_mean...).
+
+        Updated once per `compute_loss` step. Returns `default` if not yet
+        populated. Available metric names:
+            mat         — Maturity Index (0..1)
+            lm_loss     — language-modelling loss
+            surprise    — |loss - ema_loss| / max(ema_loss, eps)
+            phi         — runtime Phi proxy (logit-entropy-based)
+            phi_loss    — -phi (negated for backward)
+            gene_*      — diagnostics from the GeneticOrchestrator
+        """
+        return float(self._metrics.get(name, default))
+
+    def metrics_snapshot(self) -> Dict[str, float]:
+        """All currently published metrics."""
+        return dict(self._metrics)
 
     # ── Schedule + mixed-precision configuration ─────────────────────
 
@@ -321,6 +394,18 @@ class BRIANHarness(nn.Module):
             eff_pct  = mech.effective_pct_trunk(
                 mat_now, fallback=self.training_config.pct_trunk)
             self.language_model.set_mat_multipliers(eff_drop, eff_pct)
+
+        # ── PRE-pass genetic step ──
+        # Run the orchestrator BEFORE the forward so its (live, non-detached)
+        # baseline_offsets enter the forward graph this step and gene
+        # gradients flow back through the LM loss. Uses the previous step's
+        # metrics (mat, surprise, phi proxy) as regulatory context — the
+        # natural 1-step latency mirrors real transcription/translation.
+        pre_phi_loss = None
+        gcfg = self.training_config.genetics
+        if gcfg.enabled:
+            pre_phi_loss = self._step_genetics_pre(ids.shape[0], ids.device)
+
         logits = self(ids, nt_levels=nt_levels)
         loss_lm = self._compute_loss_from_logits(logits, targets)
         total = self.total_loss_config.w_lm * loss_lm
@@ -345,7 +430,170 @@ class BRIANHarness(nn.Module):
         # Record the LM-portion so train_step can update MAT after the
         # backward pass without a second forward.
         self._last_lm_loss_value = float(loss_lm.detach().item())
+
+        # ── Runtime metric registry update ──
+        # Compute a runtime Phi proxy from the per-token logit entropy:
+        #   higher entropy across the vocab = more "differentiated"
+        #   predictions = higher integrated information proxy.
+        # Cheap to compute (single softmax on already-computed logits).
+        with torch.no_grad():
+            logprobs = F.log_softmax(logits.detach(), dim=-1)
+            ent = -(logprobs.exp() * logprobs).sum(dim=-1)        # (B, T)
+            phi_proxy = float(ent.mean()) / max(1e-6, math.log(self.vocab_size))
+        # Surprise EMA (drives gene transcription triggers)
+        if self._surprise_ema == 0.0:
+            self._surprise_ema = self._last_lm_loss_value
+        ema_alpha = 0.05
+        surprise = abs(self._last_lm_loss_value - self._surprise_ema) / max(
+            1e-6, self._surprise_ema)
+        self._surprise_ema = (1 - ema_alpha) * self._surprise_ema + \
+            ema_alpha * self._last_lm_loss_value
+
+        self._metrics["mat"]      = float(mat)
+        self._metrics["lm_loss"]  = float(self._last_lm_loss_value)
+        self._metrics["surprise"] = float(surprise)
+        self._metrics["phi"]      = phi_proxy
+
+        # ── GeneticOrchestrator: add the pre-pass phi_loss (from the
+        # _step_genetics_pre call earlier) to the total. The orchestrator
+        # outputs are already in the forward graph this step so
+        # `total.backward()` will accumulate gene-parameter gradients.
+        if gcfg.enabled and pre_phi_loss is not None:
+            total = total + gcfg.phi_weight * pre_phi_loss
+            self._metrics["phi_loss"] = float(pre_phi_loss.detach())
         return total
+
+    def attach_arch_genetics(self, arch_root) -> None:
+        """Read `gene { ... }` / `protein { ... }` / `metric { ... }` blocks
+        from arch.neuro and merge them into the runtime config.
+
+        Called by train_dsl after the harness is built. Genes declared in
+        DSL show up as `FixedGeneSpec`s in the orchestrator; declared
+        proteins override `genetics.d_pay`; declared metrics populate
+        `training_config.metric_exposures`.
+        """
+        try:
+            from neuroslm.dsl.multifile import compile_folder
+            ir = compile_folder(arch_root)
+        except Exception:
+            return
+        # Override genetics config from the DSL
+        if ir.genes or ir.proteins or ir.metrics:
+            gcfg = self.training_config.genetics
+            gcfg.enabled = True
+            if ir.proteins:
+                # First protein's payload_dim wins (one protein per orchestrator)
+                gcfg.d_pay = ir.proteins[0].payload_dim
+            self._dsl_genes = list(ir.genes)
+        if ir.metrics:
+            from neuroslm.dsl.training_config import MetricExpose
+            self.training_config.metric_exposures = [
+                MetricExpose(name=m.name, compute=m.compute,
+                              expose_at=m.expose_at,
+                              every_n_steps=m.every_n_steps)
+                for m in ir.metrics
+            ]
+
+    def _ensure_genetics(self) -> None:
+        """Lazily build the GeneticOrchestrator + TransmitterSystem on
+        first use, sized from `training_config.genetics`.
+        """
+        if self._genetics_orch is not None:
+            return
+        from neuroslm.neurochem.genetics import (
+            GeneticConfig, GeneticOrchestrator, default_fixed_genes,
+            FixedGeneSpec, EFFECT_NT_BASELINE, EFFECT_RECEPTOR_TAU,
+            EFFECT_NT_RELEASE_GAIN)
+        from neuroslm.neurochem.transmitters import TransmitterSystem
+        gcfg = self.training_config.genetics
+        modules = list(gcfg.target_modules) or [
+            "sensory", "thalamus", "gws", "pfc", "bg", "motor",
+            "math_cortex", "reasoning_cortex",
+        ]
+        self._genetics_module_names = modules
+        cfg = GeneticConfig(
+            n_genes=gcfg.n_genes,
+            d_pay=gcfg.d_pay,
+            d_reg=4, d_tgt=max(8, len(modules)),
+        )
+        # Build fixed gene list: prefer DSL-declared genes; fall back to preset
+        dsl_genes = getattr(self, "_dsl_genes", None) or []
+        if dsl_genes:
+            kind_map = {
+                "nt_baseline_offset": EFFECT_NT_BASELINE,
+                "receptor_tau_shift": EFFECT_RECEPTOR_TAU,
+                "nt_release_gain":    EFFECT_NT_RELEASE_GAIN,
+            }
+            fixed = []
+            for g in dsl_genes:
+                if g.target not in modules:
+                    continue
+                effects = {kind_map[k]: v for k, v in g.effects.items()
+                           if k in kind_map}
+                fixed.append(FixedGeneSpec(
+                    name=g.name, target_module=g.target,
+                    constitutive=g.constitutive, trigger=g.trigger,
+                    effects=effects,
+                ))
+        elif gcfg.fixed_genes_preset == "default":
+            fixed = default_fixed_genes(modules)
+        elif gcfg.fixed_genes_preset == "minimal":
+            fixed = [FixedGeneSpec(
+                name="gws_glu_floor", target_module="gws",
+                constitutive=True,
+                effects={EFFECT_NT_BASELINE: {"Glu": 0.05}})]
+        else:
+            fixed = []
+        self._genetics_orch = GeneticOrchestrator(
+            cfg, module_names=modules, fixed_genes=fixed,
+            phi_target=gcfg.phi_target)
+        # Put the orchestrator on the same device as the LM (best effort).
+        try:
+            dev = next(self.parameters()).device
+            self._genetics_orch.to(dev)
+        except StopIteration:
+            pass
+        self._transmitter_sys = TransmitterSystem(n_modules=len(modules))
+        # Reset to batch=1; reset() is called from train_step on first batch.
+
+    def _step_genetics_pre(self, batch_size: int, device):
+        """PRE-pass genetic expression: orchestrator → set NT modulation
+        on the cortex BEFORE forward, so gene-parameter gradients flow.
+
+        Uses the PREVIOUS step's metrics (mat/surprise/phi) as the
+        regulatory context — the natural 1-step latency mirrors real
+        gene transcription. Returns the auxiliary `phi_loss` tensor
+        (a live tensor in the autograd graph for THIS step).
+        """
+        self._ensure_genetics()
+        if (self._transmitter_sys.level.shape[0] != batch_size
+                or self._transmitter_sys.level.device != device):
+            self._transmitter_sys.to(device)
+            self._transmitter_sys.reset(batch_size, device)
+        nt_levels = self._transmitter_sys.level   # (B, N_NT)
+        # Previous-step metrics — zero on the very first call.
+        prev_mat = float(self._metrics.get("mat", 0.0))
+        prev_surprise = float(self._metrics.get("surprise", 0.0))
+        prev_phi = float(self._metrics.get("phi", 0.0))
+        surprise_t = torch.full((batch_size,), prev_surprise, device=device)
+        mat_t      = torch.full((batch_size,), prev_mat,      device=device)
+        phi_t      = torch.full((batch_size,), prev_phi,      device=device)
+        ctx = self._genetics_orch.build_context(nt_levels, surprise_t, mat_t)
+        out = self._genetics_orch(ctx, phi=phi_t)
+        # Transmitter state overlay (detached — it's a per-step state buffer)
+        self._transmitter_sys.set_module_offsets(
+            baseline_off=out["baseline_offsets"].detach(),
+            tau_shift=out["tau_shifts"].detach(),
+        )
+        # LIVE (non-detached) modulation into the cortex — this is the
+        # path through which gene gradients flow back from the LM loss.
+        if (self.language_model is not None
+                and hasattr(self.language_model, "set_nt_modulation")):
+            self.language_model.set_nt_modulation(out["baseline_offsets"])
+        diag = self._genetics_orch.diagnostics()
+        for k, v in diag.items():
+            self._metrics["gene_" + k if not k.startswith("gene_") else k] = v
+        return out["phi_loss"]
 
     def _compute_loss_from_logits(self, logits: torch.Tensor,
                                   targets: torch.Tensor) -> torch.Tensor:

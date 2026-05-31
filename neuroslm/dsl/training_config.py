@@ -145,12 +145,133 @@ class PassMark:
     tol: float = 0.02          # relative tolerance for stability
     trend: str = ""            # "" | "stable" | "falling"
     action: str = "exit"       # only "exit" supported now
+    # Minimum number of data points (samples within the window) required
+    # before the trend check is allowed to fire. Defaults to 4 so noisy
+    # OOD eval blips (50-window WikiText is ±3% noisy) can't trigger an
+    # early-exit on a single bump. Set higher (e.g. 6) for stricter
+    # stability requirements.
+    min_evals: int = 4
 
 
 @dataclass
 class PassMarksConfig:
     """All declared early-exit rules. Empty list = no early exit."""
     rules: List[PassMark] = field(default_factory=list)
+
+
+@dataclass
+class HardwareConfig:
+    """`hardware { ... }` block — declares the target hardware envelope
+    for a training run. The deploy script reads these to filter vast.ai
+    offers; the harness reads them to pick DDP/FSDP wrapping.
+
+    Fields:
+        gpu_name:        e.g. "A100_SXM4" | "H100_SXM" | "RTX_4090"
+        num_gpus:        per instance (1 = single-GPU)
+        min_gpu_mem_gib: per-GPU minimum memory
+        min_reliability: vast.ai reliability filter (0..1)
+        min_inet_mbps:   minimum inet_down for clone speed
+        dist_strategy:   "single" | "ddp" | "fsdp"
+                          DDP works up to ~1B params; FSDP for >1B.
+        precision:       "fp32" | "bf16" | "fp16"
+    """
+    gpu_name: str = "A100_SXM4"
+    num_gpus: int = 1
+    min_gpu_mem_gib: int = 0
+    min_reliability: float = 0.995
+    min_inet_mbps: int = 200
+    dist_strategy: str = "single"
+    precision: str = "bf16"
+
+
+@dataclass
+class ScaleVariant:
+    """One entry in a `scales { ... }` block — a parameter scale of the
+    same architecture. Mirrors the BrainConfig dim knobs.
+
+    Fields:
+        name:        identifier (e.g. "30m_p4", "1b", "7b")
+        d_model:     trunk width
+        depth:       number of transformer blocks
+        n_heads:     attention heads
+        n_kv_heads:  KV heads for GQA (defaults to n_heads)
+        max_ctx:     context length
+        batch_size:  per-GPU batch
+        seq_len:     sequence length per sample
+        grad_accum:  gradient accumulation steps
+        learning_rate: μP-friendly LR; defaults inherited from training{}
+        approx_params: rough param count, informational
+        hardware:    optional per-scale hardware override (else inherits)
+    """
+    name: str = ""
+    d_model: int = 256
+    depth: int = 6
+    n_heads: int = 4
+    n_kv_heads: int = 0
+    max_ctx: int = 2048
+    batch_size: int = 16
+    seq_len: int = 2048
+    grad_accum: int = 1
+    learning_rate: float = 0.0
+    approx_params: str = ""
+    hardware: Optional["HardwareConfig"] = None
+
+
+@dataclass
+class ScalesConfig:
+    """All declared scales + the active selection."""
+    variants: Dict[str, ScaleVariant] = field(default_factory=dict)
+    # Default scale when the env-var SCALE isn't set
+    default: str = ""
+
+
+@dataclass
+class MetricExpose:
+    """`metric <name> { expose_at: [...] }` — where a computed metric is
+    materialised into the control-flow node.
+
+    Used by the codegen + harness to keep the per-step metric-publish
+    overhead bounded: only compute + publish each metric at the points
+    that actually consume it.
+
+    `compute`:
+        "lm_logits"   — entropy of the per-token softmax (default Phi proxy)
+        "iit_proxy"   — full IIT-4 graph proxy (heavy; once per N steps)
+        "external"    — supplied by the caller; harness does nothing
+    `expose_at`:
+        list of node tags where the metric is published. Recognised tags:
+        "lm_head", "gws", "pfc", "trunk", "gene_trigger", "all".
+        Empty list = expose ONLY at the loss site (cheapest).
+    """
+    name: str = "phi"
+    compute: str = "lm_logits"
+    expose_at: List[str] = field(default_factory=list)
+    every_n_steps: int = 1
+
+
+@dataclass
+class GeneticsConfig:
+    """`genetics { ... }` block — enables the GeneticOrchestrator.
+
+    When `enabled`, the harness builds a `GeneticOrchestrator` at
+    construction time, runs it inside `compute_loss` each step, and adds
+    its `phi_loss` (= -Phi) as an auxiliary loss with weight `phi_weight`.
+
+    `fixed_genes_preset`:
+      "default" — math/reasoning 5HT booster, PFC DA on surprise, GWS Glu floor
+      "none"    — only learnable genes; no hand-curated overlays
+      "minimal" — only the GWS glu floor (safest, single gene)
+    """
+    enabled: bool = False
+    n_genes: int = 32
+    d_pay: int = 16
+    phi_weight: float = 0.01           # multiplier on -Phi added to total loss
+    phi_target: float = 0.30           # target Phi (informational only)
+    fixed_genes_preset: str = "default"
+    # Modules the orchestrator can target. If empty, defaults to the
+    # populations declared in the architecture (auto-discovered by the
+    # harness from the program IR at build time).
+    target_modules: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -231,6 +352,18 @@ class TrainingConfig:
     mechanisms: MechanismsConfig = field(default_factory=MechanismsConfig)
     # Declarative early-exit rules. Empty list = train to STEPS.
     pass_marks: PassMarksConfig = field(default_factory=PassMarksConfig)
+    # GeneticOrchestrator — latent gene expression with Phi-loss coupling.
+    # See architecture.md §6.5. Disabled by default.
+    genetics: GeneticsConfig = field(default_factory=GeneticsConfig)
+    # Hardware envelope + multi-scale variants. The deploy script reads
+    # `hardware` to filter vast.ai offers; the harness reads `scales` +
+    # the SCALE env var to pick which variant to instantiate.
+    hardware: HardwareConfig = field(default_factory=HardwareConfig)
+    scales: ScalesConfig = field(default_factory=ScalesConfig)
+    # Declarative metric-exposure points. Each entry says "compute this
+    # metric and publish it at these node tags." Reduces data overhead by
+    # not exposing every metric everywhere.
+    metric_exposures: List[MetricExpose] = field(default_factory=list)
 
 
 # ── Constants for validation ───────────────────────────────────────────
@@ -316,8 +449,110 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.mechanisms = _parse_mechanisms(props["mechanisms"])
     if "pass_marks" in props:
         cfg.pass_marks = _parse_pass_marks(props["pass_marks"])
+    if "genetics" in props:
+        cfg.genetics = _parse_genetics(props["genetics"])
+    if "hardware" in props:
+        cfg.hardware = _parse_hardware(props["hardware"])
+    if "scales" in props:
+        cfg.scales = _parse_scales(props["scales"], cfg.hardware)
 
+    # `metric <name> { ... }` blocks live at the same level as `mechanisms`
+    # / `pass_marks`. Collect all of them.
+    cfg.metric_exposures = _parse_metric_exposures(props)
     return cfg
+
+
+def _parse_hardware(body: str) -> HardwareConfig:
+    body = _strip_braces(body)
+    props = _split_top_level_kv(body)
+    h = HardwareConfig()
+    if "gpu_name" in props:        h.gpu_name = _strip_quotes(props["gpu_name"])
+    if "num_gpus" in props:        h.num_gpus = int(props["num_gpus"])
+    if "min_gpu_mem_gib" in props: h.min_gpu_mem_gib = int(props["min_gpu_mem_gib"])
+    if "min_reliability" in props: h.min_reliability = float(props["min_reliability"])
+    if "min_inet_mbps" in props:   h.min_inet_mbps = int(props["min_inet_mbps"])
+    if "dist_strategy" in props:   h.dist_strategy = _strip_quotes(props["dist_strategy"])
+    if "precision" in props:       h.precision = _strip_quotes(props["precision"])
+    return h
+
+
+def _parse_scales(body: str, fallback_hw: HardwareConfig) -> ScalesConfig:
+    """Parse a `scales { name: { ... }, ... }` block."""
+    body = _strip_braces(body)
+    props = _split_top_level_kv(body)
+    cfg = ScalesConfig()
+    if "default" in props:
+        cfg.default = _strip_quotes(props.pop("default"))
+    for name, raw in props.items():
+        rp = _split_top_level_kv(_strip_braces(raw))
+        v = ScaleVariant(name=name)
+        if "d_model" in rp:       v.d_model = int(rp["d_model"])
+        if "depth" in rp:         v.depth = int(rp["depth"])
+        if "n_heads" in rp:       v.n_heads = int(rp["n_heads"])
+        if "n_kv_heads" in rp:    v.n_kv_heads = int(rp["n_kv_heads"])
+        if "max_ctx" in rp:       v.max_ctx = int(rp["max_ctx"])
+        if "batch_size" in rp:    v.batch_size = int(rp["batch_size"])
+        if "seq_len" in rp:       v.seq_len = int(rp["seq_len"])
+        if "grad_accum" in rp:    v.grad_accum = int(rp["grad_accum"])
+        if "learning_rate" in rp: v.learning_rate = float(rp["learning_rate"])
+        if "approx_params" in rp: v.approx_params = _strip_quotes(rp["approx_params"])
+        if "hardware" in rp:
+            v.hardware = _parse_hardware(rp["hardware"])
+        else:
+            v.hardware = fallback_hw
+        cfg.variants[name] = v
+    if not cfg.default and cfg.variants:
+        cfg.default = next(iter(cfg.variants))
+    return cfg
+
+
+def _parse_metric_exposures(props: Dict[str, str]) -> List[MetricExpose]:
+    """Collect every `metric_<name>: { ... }` or `metric: { name, ... }`
+    entry. The parser supports both forms — flat per-metric keys
+    (`metric_phi: { ... }`, `metric_mat: { ... }`) and a single grouped
+    entry that won't trigger on the legacy `metric` -> string fields.
+    """
+    out: List[MetricExpose] = []
+    for key, raw in props.items():
+        if not key.startswith("metric_"):
+            continue
+        body = _strip_braces(raw)
+        rp = _split_top_level_kv(body)
+        m = MetricExpose(name=key[len("metric_"):])
+        if "compute" in rp:
+            m.compute = _strip_quotes(rp["compute"])
+        if "every_n_steps" in rp:
+            m.every_n_steps = int(rp["every_n_steps"])
+        if "expose_at" in rp:
+            v = rp["expose_at"].strip()
+            if v.startswith("[") and v.endswith("]"):
+                v = v[1:-1]
+            m.expose_at = [_strip_quotes(x.strip()) for x in v.split(",") if x.strip()]
+        out.append(m)
+    return out
+
+
+def _parse_genetics(body: str) -> GeneticsConfig:
+    """Parse a `genetics { ... }` block.
+
+    Keys: enabled, n_genes, d_pay, phi_weight, phi_target,
+          fixed_genes_preset, target_modules: [a, b, c]
+    """
+    body = _strip_braces(body)
+    props = _split_top_level_kv(body)
+    g = GeneticsConfig()
+    if "enabled" in props:             g.enabled = _parse_bool(props["enabled"])
+    if "n_genes" in props:             g.n_genes = int(props["n_genes"])
+    if "d_pay" in props:               g.d_pay = int(props["d_pay"])
+    if "phi_weight" in props:          g.phi_weight = float(props["phi_weight"])
+    if "phi_target" in props:          g.phi_target = float(props["phi_target"])
+    if "fixed_genes_preset" in props:  g.fixed_genes_preset = _strip_quotes(props["fixed_genes_preset"])
+    if "target_modules" in props:
+        raw = props["target_modules"].strip()
+        if raw.startswith("[") and raw.endswith("]"):
+            raw = raw[1:-1]
+        g.target_modules = [_strip_quotes(x.strip()) for x in raw.split(",") if x.strip()]
+    return g
 
 
 def _parse_phase_gate(body: str) -> PhaseGate:
@@ -383,6 +618,7 @@ def _parse_pass_marks(body: str) -> PassMarksConfig:
         if "tol" in rp:      r.tol     = float(rp["tol"])
         if "trend" in rp:    r.trend   = _strip_quotes(rp["trend"])
         if "action" in rp:   r.action  = _strip_quotes(rp["action"])
+        if "min_evals" in rp: r.min_evals = int(rp["min_evals"])
         rules.append(r)
     return PassMarksConfig(rules=rules)
 

@@ -7,7 +7,7 @@ is implemented separately in phase 1.
 """
 import re
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 
 @dataclass
@@ -105,6 +105,88 @@ class ModulationIR(NodeIR):
 
 
 @dataclass
+class GeneIR(NodeIR):
+    """A declarative gene — wired into the GeneticOrchestrator as a
+    `FixedGeneSpec` at harness build time.
+
+    Fields:
+        name:         human-readable identifier
+        target:       module to modulate (one of the orchestrator's
+                       target_modules). "*" → all modules.
+        constitutive: True → always-on; False → trigger-gated
+        trigger:      dict like {"surprise_above": 0.3, "mat_above": 0.5}
+                       Only meaningful when constitutive=False.
+        effects:      dict of effect-kind → {NT-name: magnitude}
+                       Recognised kinds (see neurochem.genetics.EFFECT_*):
+                         "nt_baseline_offset"  — additive baseline shift
+                         "receptor_tau_shift"  — push τ_decay toward 1.0
+                                                   (reuptake blockade)
+                         "nt_release_gain"     — multiply release amounts
+    """
+    name: str
+    id: str = ""
+    target: str = ""
+    constitutive: bool = False
+    trigger: Dict = None
+    effects: Dict = None
+    properties: Dict = None
+
+    def __post_init__(self):
+        if self.trigger is None: self.trigger = {}
+        if self.effects is None: self.effects = {}
+        if self.properties is None: self.properties = {}
+
+
+@dataclass
+class ProteinIR(NodeIR):
+    """A learnable protein payload — the latent vector the GeneticLibrary
+    optimises to maximise Φ.
+
+    Fields:
+        name:         identifier
+        payload_dim:  vector length (becomes `d_pay` on the orchestrator)
+        init:         "zero" | "small_normal" (ReZero discipline)
+        optimize_for: "phi" | "lm_loss" | metric name; selects which
+                       auxiliary loss pulls the payload
+    """
+    name: str
+    id: str = ""
+    payload_dim: int = 16
+    init: str = "zero"
+    optimize_for: str = "phi"
+    properties: Dict = None
+
+    def __post_init__(self):
+        if self.properties is None: self.properties = {}
+
+
+@dataclass
+class MetricIR(NodeIR):
+    """A computed metric whose value is exposed at one or more node tags
+    so the rest of the architecture (gene triggers, schedulers, observers)
+    can read it without paying for compute everywhere.
+
+    Fields:
+        name:           identifier (e.g. "phi", "mat", "surprise")
+        compute:        "lm_logits" | "iit_proxy" | "external"
+        expose_at:      list of node tags
+                          {"lm_head", "gws", "pfc", "trunk",
+                           "gene_trigger", "all"}
+        every_n_steps:  recompute cadence (1 = every step)
+    """
+    name: str
+    id: str = ""
+    compute: str = "lm_logits"
+    expose_at: List[str] = None
+    every_n_steps: int = 1
+    properties: Dict = None
+
+    def __post_init__(self):
+        if self.expose_at is None: self.expose_at = []
+        if self.properties is None: self.properties = {}
+
+
+@dataclass
 class FormalSpecIR(NodeIR):
     name: str
     id: str = ""
@@ -174,6 +256,10 @@ class ProgramIR(NodeIR):
     circuits: List[CircuitIR] = None
     formal_specs: List[FormalSpecIR] = None
     sheaf_specs: List[SheetIR] = None
+    # §6.5 genetics — empty by default so legacy archs are unchanged.
+    genes: List["GeneIR"] = None
+    proteins: List["ProteinIR"] = None
+    metrics: List["MetricIR"] = None
 
     def __post_init__(self):
         if self.populations is None:
@@ -190,11 +276,18 @@ class ProgramIR(NodeIR):
             self.formal_specs = []
         if self.sheaf_specs is None:
             self.sheaf_specs = []
+        if self.genes is None:
+            self.genes = []
+        if self.proteins is None:
+            self.proteins = []
+        if self.metrics is None:
+            self.metrics = []
 
     @property
     def nodes(self):
         return (self.populations + self.neurotransmitter_systems + self.synapses +
-                self.modulations + self.formal_specs + self.sheaf_specs)
+                self.modulations + self.formal_specs + self.sheaf_specs +
+                self.genes + self.proteins + self.metrics)
 
 
 class NeuroMLError(Exception):
@@ -382,6 +475,12 @@ class NeuroMLCompiler:
                 properties=props_dict
             ))
 
+        # §6.5 genetics — balanced-brace extraction for gene/protein/metric
+        # since the bodies contain nested `{ ... }` (effects, trigger).
+        genes = _extract_genes(source)
+        proteins = _extract_proteins(source)
+        metrics = _extract_metrics(source)
+
         return ProgramIR(
             id="circuit",
             populations=pops,
@@ -390,6 +489,9 @@ class NeuroMLCompiler:
             modulations=mods,
             formal_specs=formal_specs,
             sheaf_specs=sheaves,
+            genes=genes,
+            proteins=proteins,
+            metrics=metrics,
         )
 
     @staticmethod
@@ -398,3 +500,181 @@ class NeuroMLCompiler:
         with open(filepath, 'r') as f:
             source = f.read()
         return NeuroMLCompiler.compile(source)
+
+
+# ── §6.5 genetics extractors (balanced-brace; nested {} allowed) ──────
+
+def _slice_balanced_brace(s: str, open_idx: int) -> Tuple[str, int]:
+    """Return (body, end_idx_exclusive) for the matching `{` at `open_idx`."""
+    depth = 0
+    in_str = None
+    i = open_idx
+    while i < len(s):
+        ch = s[i]
+        if in_str:
+            if ch == in_str: in_str = None
+        elif ch in ('"', "'"):
+            in_str = ch
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return s[open_idx + 1: i], i + 1
+        i += 1
+    raise NeuroMLError(f"unbalanced braces starting at {open_idx}")
+
+
+def _iter_named_blocks(source: str, keyword: str):
+    """Yield (name, body) for every `<keyword> <name> { ... }` block."""
+    pat = re.compile(rf'\b{re.escape(keyword)}\s+(\w+)\s*\{{')
+    for m in pat.finditer(source):
+        open_idx = m.end() - 1
+        try:
+            body, _ = _slice_balanced_brace(source, open_idx)
+        except NeuroMLError:
+            continue
+        yield m.group(1), body
+
+
+def _parse_nt_dict(raw: str) -> Dict[str, float]:
+    """Parse `{ "5HT": 0.10, "DA": 0.20 }` → dict of NT→magnitude."""
+    raw = raw.strip()
+    if raw.startswith("{") and raw.endswith("}"):
+        raw = raw[1:-1]
+    out: Dict[str, float] = {}
+    for piece in _split_top_level(raw):
+        if ":" not in piece:
+            continue
+        k, v = piece.split(":", 1)
+        k = k.strip().strip('"\'')
+        try:
+            out[k] = float(v.strip())
+        except ValueError:
+            continue
+    return out
+
+
+def _parse_trigger_block(raw: str) -> Dict:
+    """Parse `{ surprise_above: 0.30, mat_above: 0.55 }`."""
+    raw = raw.strip()
+    if raw.startswith("{") and raw.endswith("}"):
+        raw = raw[1:-1]
+    out: Dict = {}
+    for piece in _split_top_level(raw):
+        if ":" not in piece:
+            continue
+        k, v = piece.split(":", 1)
+        k = k.strip()
+        v = v.strip()
+        if v.startswith("{") and v.endswith("}"):
+            out[k] = _parse_nt_dict(v)
+        else:
+            try:
+                out[k] = float(v)
+            except ValueError:
+                out[k] = v.strip('"\'')
+    return out
+
+
+def _parse_effects_block(raw: str) -> Dict[str, Dict[str, float]]:
+    """Parse `{ nt_baseline_offset: { "5HT": 0.10 }, receptor_tau_shift: { ... } }`."""
+    raw = raw.strip()
+    if raw.startswith("{") and raw.endswith("}"):
+        raw = raw[1:-1]
+    out: Dict[str, Dict[str, float]] = {}
+    # Re-walk to split on top-level commas/newlines, keeping nested braces
+    pieces = []
+    buf = []
+    depth = 0
+    in_str = None
+    for ch in raw:
+        if in_str:
+            buf.append(ch)
+            if ch == in_str: in_str = None
+            continue
+        if ch in ('"', "'"):
+            in_str = ch; buf.append(ch); continue
+        if ch == "{": depth += 1; buf.append(ch); continue
+        if ch == "}": depth -= 1; buf.append(ch); continue
+        if (ch == "," or ch == "\n") and depth == 0:
+            piece = "".join(buf).strip()
+            if piece: pieces.append(piece)
+            buf = []
+            continue
+        buf.append(ch)
+    tail = "".join(buf).strip()
+    if tail: pieces.append(tail)
+    for piece in pieces:
+        if ":" not in piece:
+            continue
+        k, v = piece.split(":", 1)
+        k = k.strip()
+        out[k] = _parse_nt_dict(v.strip())
+    return out
+
+
+def _extract_genes(source: str) -> List["GeneIR"]:
+    out: List[GeneIR] = []
+    for name, body in _iter_named_blocks(source, "gene"):
+        props = _parse_properties(body)
+        target = (props.get("target") or "").strip().strip('"\'')
+        constitutive = (props.get("constitutive", "false").lower() in ("true", "1", "yes"))
+        trigger_raw = _extract_subblock(body, "trigger")
+        effects_raw = _extract_subblock(body, "effects")
+        trigger = _parse_trigger_block(trigger_raw) if trigger_raw else {}
+        effects = _parse_effects_block(effects_raw) if effects_raw else {}
+        out.append(GeneIR(
+            name=name, id=name, target=target,
+            constitutive=constitutive, trigger=trigger, effects=effects,
+            properties=props,
+        ))
+    return out
+
+
+def _extract_proteins(source: str) -> List["ProteinIR"]:
+    out: List[ProteinIR] = []
+    for name, body in _iter_named_blocks(source, "protein"):
+        props = _parse_properties(body)
+        payload_dim = int(float(props.get("payload_dim", 16)))
+        init = props.get("init", "zero").strip('"\'')
+        optimize_for = props.get("optimize_for", "phi").strip('"\'')
+        out.append(ProteinIR(
+            name=name, id=name,
+            payload_dim=payload_dim, init=init, optimize_for=optimize_for,
+            properties=props,
+        ))
+    return out
+
+
+def _extract_metrics(source: str) -> List["MetricIR"]:
+    out: List[MetricIR] = []
+    for name, body in _iter_named_blocks(source, "metric"):
+        props = _parse_properties(body)
+        compute = props.get("compute", "lm_logits").strip('"\'')
+        every_n_steps = int(float(props.get("every_n_steps", 1)))
+        expose_raw = (props.get("expose_at") or "").strip()
+        if expose_raw.startswith("[") and expose_raw.endswith("]"):
+            expose_raw = expose_raw[1:-1]
+        expose_at = [x.strip().strip('"\'') for x in expose_raw.split(",") if x.strip()]
+        out.append(MetricIR(
+            name=name, id=name,
+            compute=compute, expose_at=expose_at,
+            every_n_steps=every_n_steps,
+            properties=props,
+        ))
+    return out
+
+
+def _extract_subblock(body: str, key: str) -> str:
+    """Find `<key>: { ... }` inside `body` and return the brace body."""
+    pat = re.compile(rf'\b{re.escape(key)}\s*:\s*\{{')
+    m = pat.search(body)
+    if not m:
+        return ""
+    open_idx = m.end() - 1
+    try:
+        sub, _ = _slice_balanced_brace(body, open_idx)
+    except NeuroMLError:
+        return ""
+    return "{" + sub + "}"

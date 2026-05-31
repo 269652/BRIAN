@@ -191,6 +191,10 @@ _DECL_KEYWORDS_NAMED = (
     "function",
     "formal_spec",
     "sheaf",
+    # §6.5 — genetic orchestrator declarations
+    "gene",
+    "protein",
+    "metric",
 )
 _DECL_KEYWORDS_ARROW = ("synapse", "modulation")
 
@@ -685,7 +689,7 @@ class Resolver:
 # Recognise the head of a stored declaration text and pull out its body.
 _DECL_HEAD_RE = re.compile(
     r'^\s*(?P<kind>population|synapse|neurotransmitter|modulation|'
-    r'dynamics|function|formal_spec|sheaf)\s+'
+    r'dynamics|function|formal_spec|sheaf|gene|protein|metric)\s+'
     r'(?P<header>[^{]*)\{'
 )
 
@@ -897,6 +901,12 @@ def compile_folder(arch_root):
     _emit(arch_ast.private, ("neurotransmitter",))
     _emit(arch_ast.exports, ("neurotransmitter",))
 
+    # 1b. Inline populations declared in arch.neuro itself (rare — most
+    # archs use the modules/ import pattern — but tests + tiny standalone
+    # archs may inline pops directly).
+    _emit(arch_ast.private, ("population",))
+    _emit(arch_ast.exports, ("population",))
+
     # 2. Populations in import order
     for imp in arch_ast.imports:
         try:
@@ -919,6 +929,10 @@ def compile_folder(arch_root):
     # 4. Formal specs + sheaves
     _emit(arch_ast.private, ("formal_spec", "sheaf"))
     _emit(arch_ast.exports, ("formal_spec", "sheaf"))
+
+    # 4b. §6.5 genetics: genes, proteins, metrics
+    _emit(arch_ast.private, ("gene", "protein", "metric"))
+    _emit(arch_ast.exports, ("gene", "protein", "metric"))
 
     # 5. Anything from non-arch files that wasn't already imported (private
     #    decls that don't appear in arch.neuro's import list). Rare in

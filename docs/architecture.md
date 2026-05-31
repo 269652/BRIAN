@@ -1610,6 +1610,149 @@ The infancy/awakening split implements **"linguistic first" convergence**: let t
 
 ---
 
+### 6.5 Genomics & Latent Proteins — `GeneticOrchestrator`
+
+*`neuroslm/neurochem/genetics.py` — `GeneticLibrary`, `GeneticOrchestrator`,
+`FixedGeneSpec`*
+
+The Φ-loss objective shapes synaptic weights well, but the **neurochemical
+substrate** (per-module NT baselines, receptor decay constants, release
+gains) is set globally and cannot adapt locally. The Genetic Orchestrator
+closes that gap: a learnable population of "genes" whose **payloads** locally
+modulate each module's NT environment, biasing them toward configurations that
+raise Φ. Inspired by gene-expression regulation in biological neurons.
+
+#### Gene vector partitioning
+
+Each gene is a single vector of length `d_reg + d_tgt + d_pay` (defaults 4 / 8 / 16):
+
+```
+gene_i = [ regulatory_region | targeting_header | protein_payload ]
+            (d_reg)             (d_tgt)             (d_pay)
+```
+
+| Partition           | Role                                                     | Init       |
+|---------------------|----------------------------------------------------------|------------|
+| `regulatory_region` | Read by a small linear → expression-probability logit per gene given context $(\text{NT levels},\ \text{surprise},\ \text{MAT})$. Differentiable. | $\mathcal N(0, 0.02)$ |
+| `targeting_header`  | Projected to a softmax over modules (`Gumbel-softmax` in training, `argmax` at eval). Selects target module(s). | $\mathcal N(0, 0.02)$ |
+| `protein_payload`   | Latent vector pushed through three effect heads → per-NT magnitudes for *baseline offset*, *τ-decay shift* (reuptake blockade), and *release gain*. | `0` (ReZero) |
+
+The orchestrator stores all genes as a single `nn.Parameter(G, d_reg + d_tgt + d_pay)`
+so partitions stay coherent; Python-side metadata cannot drift out of sync.
+
+#### Expression cycle
+
+The genetic feedback loop runs once per training step, mirroring the
+biological **transcription → translation → modulation** cascade:
+
+1. **Transcription.** The regulatory MLP reads
+   $\text{ctx} = [\text{NT levels}_{1..N},\ \text{surprise},\ \text{MAT}] \in \mathbb R^{N+2}$,
+   projects to $d_\text{reg}$, then computes per-gene expression logits via
+   $\sigma(\,W_\text{reg} \cdot \text{ctx}\,) \cdot \text{regulatory}_g^\top$.
+   This re-uses the **Vesicle Emission Kernel** of §3.1 — expression *is*
+   surprise-triggered vesicle synthesis.
+
+2. **Translation.** The expression probability gates the gene's
+   `protein_payload`: $\text{payload}_g^\text{active}(b) = e_g(b) \cdot \text{payload}_g$.
+
+3. **Modulation.** Three release operators (§3.4) map the active payload to
+   per-NT magnitudes, then route via the gene's target distribution:
+
+   - `baseline_offsets[b, m, nt]` — added into `TransmitterSystem.module_level(m)`
+   - `tau_shifts[b, m, nt]` — pushes that module's τ-decay toward 1.0
+     (the reuptake-blockade pharmaco-mimicry path; ≈ what a SERT/DAT/NET
+     blocker does locally)
+   - `release_gains[b, m, nt]` — multiplies actual release amounts
+
+#### Module-specific NT control via "fixed genes"
+
+In addition to the learnable population, the orchestrator accepts a list of
+`FixedGeneSpec` — hand-curated genes wired by name. These bypass learning
+and apply their effects deterministically when the trigger fires.
+The default set (`default_fixed_genes`):
+
+| Gene                          | Target            | Trigger                | Effect                  |
+|-------------------------------|-------------------|------------------------|-------------------------|
+| `math_cortex_5HT_booster`     | `math_cortex`     | constitutive           | `5HT baseline +0.10`    |
+| `reasoning_cortex_5HT_booster`| `reasoning_cortex`| constitutive           | `5HT baseline +0.10`    |
+| `pfc_DA_surprise_boost`       | `pfc`             | `surprise > 0.30`      | `DA  baseline +0.20`    |
+| `gws_glu_floor`               | `gws`             | constitutive           | `Glu baseline +0.05`    |
+
+These give each cortex a locally distinct NT environment ("patience" 5-HT
+in math/reasoning cortex; DA spike in PFC under surprise; always-lit Glu in
+the global workspace) without dragging the global `TransmitterSystem` away
+from homeostasis.
+
+#### Pharmaco-mimicry (multi-receptor cocktails)
+
+A single fixed gene can produce **multi-receptor** effects, mimicking
+real-world psychoactive ligands by combining several entries:
+
+```python
+FixedGeneSpec(
+    name="cocaine_mimic_pfc",
+    target_module="pfc",
+    constitutive=True,
+    effects={
+        "receptor_tau_shift": {"DA": 0.50, "NE": 0.50, "5HT": 0.30},
+        # ↑ shifts each NT's τ_decay toward 1 → simulates DAT/NET/SERT
+        #   reuptake blockade in PFC only
+    },
+)
+```
+
+Because each effect head's output is bounded ($\tau$-shift through `sigmoid(.) * 0.99`),
+no shift can fully halt reuptake — the system stays physiologically plausible.
+
+#### Φ-loss coupling
+
+When the caller passes a per-batch Φ scalar into `forward(ctx, phi=...)`,
+the orchestrator exposes a `phi_loss = -phi.mean()` that the optimizer
+treats as an auxiliary objective. Because `protein_payload` parameters
+are leaves on the path
+$\text{payload}\to\text{head}\to\text{module modulation}\to\text{activations}\to\Phi$,
+each payload coordinate's gradient is exactly
+$\partial(-\Phi)/\partial\text{payload}_i$ — the optimizer pulls payloads
+toward configurations that **raise integrated information**.
+
+This is the missing link between the spec's "evolve neurochemistry to
+maximize Φ" claim and a concrete differentiable training signal.
+
+#### BDNF coupling (gene stability ↔ structural plasticity)
+
+A gene's expression statistics across a training window double as a
+plasticity signal for the trophic system (§6.2):
+
+$$\text{stability}_g = 1 - \text{var}_t(e_g(t)) \quad\implies\quad \text{BDNF release at target}_g$$
+
+Stable, oft-expressed genes elevate BDNF in their target modules,
+strengthening connections that depend on the gene's neurochemical state.
+Implementation hook: `GeneticOrchestrator.diagnostics()` returns
+`gene_expr_mean` and `gene_active_frac`, which the trophic loop reads.
+
+#### XLA / TPU compatibility
+
+All gene-selection paths use `F.gumbel_softmax(..., hard=True)` so the
+forward graph is **static and differentiable** on XLA backends. No
+`nonzero()` or Python-level iteration over expressed genes — the
+expression-threshold cut is applied as a smooth straight-through
+multiplier (`x` vs `0.1 * x`) to keep gradients flowing for the rare-but-
+important "unlearn this gene" path.
+
+#### Success criterion
+
+After 10k steps with the orchestrator active, the run is expected to show:
+
+- higher **integrated information Φ** vs the baseline-without-genes run
+  (≥10% relative improvement)
+- equal-or-lower **NT variance** (the locally specialized baselines free
+  the global homeostasis from per-module tugs)
+- no regression in **train PPL** (the ReZero payload init makes the
+  system identity-at-start; effects can only emerge if they pay for
+  themselves in the Φ-loss signal)
+
+---
+
 ## 7. Optimization & Infrastructure
 
 ### 7.1 Adaptive Compute (Maturity-aware)

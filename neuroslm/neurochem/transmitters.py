@@ -77,7 +77,17 @@ class TransmitterSystem(nn.Module):
     Provides `release(name, amount)` and `step()` which decays / replenishes.
     """
 
-    def __init__(self):
+    def __init__(self, n_modules: int = 0):
+        """Hold (B, N_NT) tensors of `level` and `vesicles`.
+
+        Args:
+            n_modules: if > 0, the system also accepts (B, M, N_NT) per-module
+                       baseline offsets + tau shifts via `set_module_offsets()`
+                       — the entry point the GeneticOrchestrator uses to make
+                       each module's NT environment locally distinct (e.g.
+                       extra 5HT in math_cortex without dragging the global
+                       NT system up).
+        """
         super().__init__()
         # Learnable per-NT modulation of the defaults (so homeostasis can adapt).
         self.bias = nn.Parameter(torch.zeros(N_NT))
@@ -88,6 +98,18 @@ class TransmitterSystem(nn.Module):
         self._release_cost= torch.tensor([NT_DEFAULTS[n].release_cost for n in NT_NAMES])
         self.register_buffer("level",    torch.zeros(1, N_NT))
         self.register_buffer("vesicles", torch.ones(1, N_NT))
+        # Per-module overlay state. Shape (B, M, N_NT) once set via
+        # set_module_offsets(). Zero-initialized so existing callers that
+        # never write to it stay bit-identical with the pre-refactor path.
+        self.n_modules = int(n_modules)
+        if self.n_modules > 0:
+            self.register_buffer("module_baseline_off",
+                                  torch.zeros(1, self.n_modules, N_NT))
+            self.register_buffer("module_tau_shift",
+                                  torch.zeros(1, self.n_modules, N_NT))
+        else:
+            self.module_baseline_off = None
+            self.module_tau_shift = None
         # Internal step counter, used by the early-training 5-HT hard cap
         # (see step()).  Auto-increments on every `step()` call so the cap
         # phases out naturally; can be set explicitly via `set_train_step()`.
@@ -97,10 +119,57 @@ class TransmitterSystem(nn.Module):
     def reset(self, batch_size: int, device):
         self.level    = self._baseline.to(device).expand(batch_size, -1).clone()
         self.vesicles = torch.ones(batch_size, N_NT, device=device)
+        if self.n_modules > 0:
+            self.module_baseline_off = torch.zeros(
+                batch_size, self.n_modules, N_NT, device=device)
+            self.module_tau_shift = torch.zeros(
+                batch_size, self.n_modules, N_NT, device=device)
 
     def detach_(self):
         self.level    = self.level.detach()
         self.vesicles = self.vesicles.detach()
+        if self.module_baseline_off is not None:
+            self.module_baseline_off = self.module_baseline_off.detach()
+        if self.module_tau_shift is not None:
+            self.module_tau_shift = self.module_tau_shift.detach()
+
+    # -- per-module NT overlay (entry point used by GeneticOrchestrator) -----
+    def set_module_offsets(self, baseline_off: torch.Tensor,
+                            tau_shift: torch.Tensor) -> None:
+        """Install (B, M, N_NT) per-module NT baseline + tau-decay overlays.
+
+        These are read by `module_level(module_idx)` and `module_tau(module_idx)`
+        so each module sees a locally-perturbed NT environment without affecting
+        the global `level` / `vesicles` state. Replaces — does not accumulate.
+        """
+        if self.n_modules == 0:
+            raise RuntimeError(
+                "TransmitterSystem was constructed with n_modules=0; "
+                "rebuild with n_modules=<N> to use per-module overlays.")
+        if baseline_off.shape[-2:] != (self.n_modules, N_NT):
+            raise ValueError(
+                f"baseline_off last 2 dims must be ({self.n_modules}, {N_NT}), "
+                f"got {tuple(baseline_off.shape)}")
+        self.module_baseline_off = baseline_off
+        self.module_tau_shift = tau_shift
+
+    def module_level(self, module_idx: int) -> torch.Tensor:
+        """Return per-module NT level vector (B, N_NT) — global level + offset."""
+        if self.module_baseline_off is None:
+            return self.level
+        return (self.level + self.module_baseline_off[:, module_idx, :]).clamp(0.0, 1.0)
+
+    def module_tau(self, module_idx: int) -> torch.Tensor:
+        """Effective decay constants (N_NT,) for a given module.
+
+        Reuptake blockade: shift τ_decay toward 1.0 by `module_tau_shift`.
+        """
+        device = self.level.device
+        base = self._tau_decay.to(device)
+        if self.module_tau_shift is None:
+            return base.expand(self.level.shape[0], N_NT)
+        shift = self.module_tau_shift[:, module_idx, :]
+        return (base.unsqueeze(0) + (1.0 - base.unsqueeze(0)) * shift).clamp(0.0, 0.999)
 
     # -- core dynamics --------------------------------------------------------
     def release(self, name: str, amount: torch.Tensor):

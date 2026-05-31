@@ -1,4 +1,13 @@
-"""Direct deploy of the 10k DSL training run with OOD mid-eval enabled."""
+"""Direct deploy of a DSL training run with OOD mid-eval enabled.
+
+Reads hardware + scale variants from arch.neuro:
+  - `hardware { gpu_name, num_gpus, min_reliability, min_inet_mbps,
+                dist_strategy, precision }`
+  - `scales { <variant>: { d_model, depth, ..., hardware? } }`
+
+Pick a scale with SCALE=<name> (e.g. SCALE=300m, SCALE=1b, SCALE=7b).
+The default scale is the one named in `scales { default: "..." }`.
+"""
 import json
 import os
 import subprocess
@@ -15,19 +24,73 @@ VAST_API_KEY = os.environ.get("VAST_API_KEY") or os.environ.get("VAST_AI")
 GITHUB = os.environ.get("GITHUB") or os.environ.get("GITHUB_PAT")
 assert VAST_API_KEY and GITHUB
 
-BRANCH = "arch/rcc-p4-loss-clip"
+BRANCH = os.environ.get("BRANCH", "arch/rcc-p4-loss-clip")
 REPO_SLUG = "269652/BRIAN"
 VAST_IMAGE = "pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime"
-OOD_EVERY = int(os.environ.get("OOD_EVERY", "3000"))
-STEPS = int(os.environ.get("STEPS", "10000"))
-# Per-run label suffix so parallel runs don't collide on labels +
-# their per-run-id checkpoint filenames stay separable in git.
+OOD_EVERY = int(os.environ.get("OOD_EVERY", "500"))
+STEPS = int(os.environ.get("STEPS", "40000"))
+ARCH = os.environ.get("ARCH", "rcc_bowtie")
+SCALE = os.environ.get("SCALE", "")
 LABEL_SUFFIX = os.environ.get("LABEL_SUFFIX", "")
-LABEL = "neuroslm-full" + (f"-{LABEL_SUFFIX}" if LABEL_SUFFIX else "")
+LABEL = "neuroslm-full" + (f"-{LABEL_SUFFIX}" if LABEL_SUFFIX else "") \
+    + (f"-{SCALE}" if SCALE else "")
+
+# ── Read hardware + scale from arch.neuro ──
+sys.path.insert(0, str(Path(__file__).parent))
+from neuroslm.dsl.training_config import load_training_config_from_arch
+ARCH_ROOT = Path("architectures") / ARCH
+tc = load_training_config_from_arch(ARCH_ROOT)
+
+scale_name = SCALE or tc.scales.default
+if scale_name and scale_name in tc.scales.variants:
+    scale = tc.scales.variants[scale_name]
+    hw = scale.hardware or tc.hardware
+    print(f"scale: {scale_name} (~{scale.approx_params})  "
+          f"d_model={scale.d_model} depth={scale.depth} "
+          f"batch={scale.batch_size} ctx={scale.seq_len} grad_accum={scale.grad_accum}")
+else:
+    hw = tc.hardware
+    scale = None
+    print(f"no scale variant — using default training {{}} block")
+print(f"hardware: gpu={hw.gpu_name} num_gpus={hw.num_gpus} "
+      f"dist={hw.dist_strategy} prec={hw.precision} "
+      f"reliability>{hw.min_reliability} inet>={hw.min_inet_mbps}")
+
+# Compose the offer-search query from the hardware envelope
+offer_query = (
+    f"gpu_name={hw.gpu_name} num_gpus={hw.num_gpus} "
+    f"rentable=true verified=true "
+    f"reliability>{hw.min_reliability} disk_space>=60 "
+    f"inet_down>={hw.min_inet_mbps}"
+)
+if hw.min_gpu_mem_gib > 0:
+    offer_query += f" gpu_ram>={hw.min_gpu_mem_gib * 1024}"
+
+# ── Per-scale env vars for the training script ──
+scale_env = ""
+if scale is not None:
+    scale_env = (
+        f"export SCALE={scale_name} "
+        f"D_MODEL={scale.d_model} "
+        f"DEPTH={scale.depth} "
+        f"N_HEADS={scale.n_heads} "
+        f"MAX_CTX={scale.max_ctx} "
+        f"BATCH_SIZE={scale.batch_size} "
+        f"SEQ_LEN={scale.seq_len} "
+        f"GRAD_ACCUM={scale.grad_accum} "
+    )
+disk_gib = 60 if hw.num_gpus <= 2 else 120 if hw.num_gpus <= 4 else 200
+launch_cmd = ("torchrun --nproc_per_node=" + str(hw.num_gpus)
+               if hw.num_gpus > 1 and hw.dist_strategy != "single"
+               else "python")
 
 ONSTART = f"""set -e
 export DEBIAN_FRONTEND=noninteractive
 export GITHUB='{GITHUB}' HF_TOKEN='' VAST_API_KEY='{VAST_API_KEY}'
+{scale_env}
+export DIST_STRATEGY={hw.dist_strategy}
+export NUM_GPUS={hw.num_gpus}
+export PRECISION={hw.precision}
 date -u +"train boot @ %Y-%m-%dT%H:%M:%SZ"
 
 (command -v git >/dev/null 2>&1 && command -v git-lfs >/dev/null 2>&1) \\
@@ -49,8 +112,8 @@ INSTANCE_ID="$(hostname)" PUSH_INTERVAL=300 \\
     nohup bash scripts/log_pusher.sh > /workspace/log_pusher.log 2>&1 &
 LOG_PUSHER_PID=$!
 
-echo "── starting DSL training (10k steps, mid-OOD every {OOD_EVERY}) ──"
-ARCH=rcc_bowtie STEPS={STEPS} OOD_EVERY={OOD_EVERY} FRESH=1 \\
+echo "── starting DSL training (scale={scale_name}, dist={hw.dist_strategy}, {STEPS} steps, mid-OOD every {OOD_EVERY}) ──"
+ARCH={ARCH} STEPS={STEPS} OOD_EVERY={OOD_EVERY} FRESH=1 \\
     bash scripts/vast_train_dsl_loop.sh 2>&1 | tee /workspace/train.log
 
 echo "── stopping log-pusher ──"
@@ -107,26 +170,22 @@ def vastai(*args, capture=False):
 print("setting api key...")
 vastai("set", "api-key", VAST_API_KEY)
 
-print("searching A100 SXM4 offers (known-good hosts only)...")
-# A100 SXM4 only — PCIE hosts have hit recurring DNS/apt failures.
-# Reliability bumped to >0.995 to filter out flaky machines.
+print(f"searching offers: {offer_query}")
 offers_text, _ = vastai(
-    "search", "offers",
-    "gpu_name=A100_SXM4 num_gpus=1 rentable=true verified=true "
-    "reliability>0.995 disk_space>=60 inet_down>=200",
+    "search", "offers", offer_query,
     "-o", "dph+", "--raw", capture=True)
 start = offers_text.find("[")
 offers = json.loads(offers_text[start:]) if start >= 0 else []
 if not offers:
     sys.exit("no offers")
 o = offers[0]
-print(f"picked offer {o['id']} ({o['gpu_name']}, ${o['dph_total']}/hr)")
+print(f"picked offer {o['id']} ({o['gpu_name']} x{o.get('num_gpus','?')}, ${o['dph_total']}/hr)")
 
 print("creating instance...")
 env_arg = f"-e GITHUB={GITHUB} -e HF_TOKEN= -e VAST_API_KEY={VAST_API_KEY}"
 vastai("create", "instance", str(o["id"]),
        "--image", VAST_IMAGE,
-       "--disk", "60",
+       "--disk", str(disk_gib),
        "--label", LABEL,
        "--env", env_arg,
        "--onstart-cmd", ONSTART)

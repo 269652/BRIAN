@@ -360,16 +360,25 @@ def _eval_pass_marks(rules, step: int,
             history = ppl_history if r.metric == "train_ppl" else ood_history
             recent = sorted([(s, v) for s, v in history.items()
                              if s > step - r.window])
-            if len(recent) < 3:
+            # Need at least 4 datapoints in the window so a single noisy
+            # OOD eval (50-window WikiText is ±3% noisy) can't trip the
+            # rule. Split into two halves and compare half-MIN vs half-MIN
+            # so we react to the *trend* not the noisy endpoints.
+            min_evals = max(4, int(getattr(r, "min_evals", 0) or 0))
+            if len(recent) < min_evals:
                 continue
-            first_v = recent[0][1]
-            last_v = recent[-1][1]
-            # "still falling" = last < first × (1 - tol). If it ISN'T falling
-            # we exit (we stop training when the metric stops improving).
-            if last_v >= first_v * (1.0 - r.tol):
+            mid = len(recent) // 2
+            first_half = [v for _, v in recent[:mid]]
+            second_half = [v for _, v in recent[mid:]]
+            first_min = min(first_half)
+            second_min = min(second_half)
+            # "still falling" = second-half min strictly below first-half min
+            # by more than `tol` relative. Otherwise → exit.
+            if second_min >= first_min * (1.0 - r.tol):
                 return True, (f"{r.name}: {r.metric} not falling "
-                              f"(first {first_v:.1f} -> last {last_v:.1f}) "
-                              f"over last {r.window} steps")
+                              f"(min[first_half]={first_min:.1f} vs "
+                              f"min[second_half]={second_min:.1f}, tol={r.tol}, "
+                              f"n={len(recent)}) over last {r.window} steps")
     return False, ""
 
 
@@ -630,6 +639,26 @@ def main():
               f"lr={pc['lr']} warmup={pc['warmup_steps']} "
               f"min_ratio={pc['min_lr_ratio']} wd={pc['weight_decay']}")
 
+    # SCALE env var (or arch.neuro's `scales {}` block) overrides preset.
+    # The deploy script sets SCALE + D_MODEL/DEPTH/... so the training
+    # process picks up the right trunk + batch/ctx without rebuilding
+    # the bash chain.
+    _scale_env = os.environ.get("SCALE", "")
+    if _scale_env or os.environ.get("D_MODEL"):
+        from neuroslm.dsl.training_config import load_training_config_from_arch
+        _tc_dsl = load_training_config_from_arch(arch_root)
+        _v = _tc_dsl.scales.variants.get(_scale_env)
+        if _v is not None:
+            d_model = int(os.environ.get("D_MODEL", _v.d_model))
+            depth   = int(os.environ.get("DEPTH",   _v.depth))
+            n_heads = int(os.environ.get("N_HEADS", _v.n_heads))
+            args.seq_len = int(os.environ.get("SEQ_LEN",  _v.seq_len))
+            args.batch_size = int(os.environ.get("BATCH_SIZE", _v.batch_size))
+            print(f"[train_dsl] scale {_scale_env} (~{_v.approx_params}): "
+                  f"d_model={d_model} depth={depth} heads={n_heads} "
+                  f"batch={args.batch_size} ctx={args.seq_len} "
+                  f"grad_accum={_v.grad_accum} dist={(_v.hardware or _tc_dsl.hardware).dist_strategy}")
+
     if args.model == "dsl_lm":
         harness = build_dsl_lm_harness(
             arch_root=arch_root, vocab_size=vocab_size, d_model=d_model,
@@ -657,6 +686,17 @@ def main():
     if args.device == "cuda":
         harness.enable_mixed_precision(dtype=args.amp)
         print(f"[train_dsl] mixed precision: {args.amp}")
+
+    # Distributed wrapping — read DIST_STRATEGY from env (set by the deploy
+    # script from arch.neuro's hardware {} block). torchrun is responsible
+    # for launching N processes; this just initialises the process group
+    # and wraps the LM in DDP/FSDP. Single-process runs are a no-op.
+    _dist = os.environ.get("DIST_STRATEGY", "single")
+    if _dist not in ("", "single") and int(os.environ.get("WORLD_SIZE", "1")) > 1:
+        print(f"[train_dsl] distributed: {_dist} (world_size="
+              f"{os.environ.get('WORLD_SIZE')} local_rank="
+              f"{os.environ.get('LOCAL_RANK')})")
+        harness.enable_distributed(strategy=_dist)
 
     print(harness.topology_summary())
     print(f"[train_dsl] device={args.device}, warmup={warmup}/{args.steps}")

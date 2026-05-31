@@ -31,6 +31,17 @@ from typing import Dict, List, Optional, Tuple
 METRICS_PATH = Path("docs/metrics.md")
 FINDINGS_PATH = Path("docs/FINDINGS.md")
 OOD_DIR = Path("logs/vast/benchmarks/ood")
+ANALYZED_DIR = Path("logs/analyzed")
+
+
+_MID_OOD_RE = re.compile(
+    r"\[mid-ood\]\s+step\s+(?P<step>\d+):\s+wikitext\s+ppl=(?P<ppl>[\d.]+)"
+)
+_EARLY_EXIT_RE = re.compile(
+    r"PASS-MARK EARLY EXIT @ step\s+(?P<step>\d+):\s+(?P<reason>.+)"
+)
+_NEMORI_SKIP_RE = re.compile(r"NEMORI.*skip", re.IGNORECASE)
+_ROLLBACK_RE = re.compile(r"BEMA.*roll(?:ed)?[ -]?back", re.IGNORECASE)
 
 
 @dataclass
@@ -236,6 +247,141 @@ def append_finding(run_id: str, body: str) -> None:
 # ── Top-level driver used by `brian analyze-log` ────────────────────────
 
 
+def parse_trajectory(text: str) -> Dict:
+    """Extract trajectory snapshots: every step line + mid-ood + early-exit."""
+    train_points: List[Dict] = []
+    for m in _STEP_RE.finditer(text):
+        train_points.append({
+            "step": int(m.group("step")),
+            "loss": float(m.group("loss")),
+            "ppl":  float(m.group("ppl")),
+            "gnorm": float(m.group("gnorm")),
+            "tps":  int(m.group("tps")),
+        })
+    ood_points: List[Dict] = []
+    for m in _MID_OOD_RE.finditer(text):
+        ood_points.append({
+            "step": int(m.group("step")),
+            "ood_ppl": float(m.group("ppl")),
+        })
+    early_exit = None
+    em = _EARLY_EXIT_RE.search(text)
+    if em:
+        early_exit = {
+            "step": int(em.group("step")),
+            "reason": em.group("reason").strip(),
+        }
+    # Spike detection: any step where ppl > 1.7× prev OR gnorm > 3× rolling-median
+    spikes = []
+    for i in range(5, len(train_points)):
+        prev = train_points[i - 1]["ppl"]
+        cur = train_points[i]["ppl"]
+        if cur > prev * 1.7:
+            spikes.append({"step": train_points[i]["step"],
+                           "ppl_jump": f"{prev:.0f}→{cur:.0f}"})
+    return {
+        "n_train_points": len(train_points),
+        "n_ood_points": len(ood_points),
+        "first_train": train_points[0] if train_points else None,
+        "last_train":  train_points[-1] if train_points else None,
+        "ood_trajectory": ood_points,
+        "early_exit": early_exit,
+        "spikes": spikes[:10],
+        "nemori_skips": len(_NEMORI_SKIP_RE.findall(text)),
+        "bema_rollbacks": len(_ROLLBACK_RE.findall(text)),
+    }
+
+
+def write_run_markdown(run_id: str, logfile: Path, metric: RunMetrics,
+                       summary: Dict, trajectory: Dict,
+                       insight: Optional[str] = None) -> Path:
+    """Write logs/analyzed/<run_id>.md with parsed trajectory + insights.
+
+    Idempotent — each call overwrites the previous file for that run_id.
+    """
+    ANALYZED_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = ANALYZED_DIR / f"{run_id}.md"
+
+    def _fmt(v, fmt="{:.2f}"):
+        return fmt.format(v) if v is not None else "—"
+
+    lines = []
+    lines.append(f"# Run {run_id}")
+    lines.append("")
+    lines.append(f"- date:    {metric.date}")
+    lines.append(f"- branch:  {metric.branch or '—'}")
+    lines.append(f"- arch:    {metric.arch}")
+    lines.append(f"- logfile: `{logfile.as_posix()}`")
+    lines.append("")
+
+    lines.append("## Final metrics")
+    lines.append("")
+    lines.append(f"| step | loss | lm | ppl | Phi | tok/s | OOD ppl | OOD ratio |")
+    lines.append(f"|------|------|----|-----|-----|-------|---------|-----------|")
+    lines.append(f"| {metric.steps or '—'} | {_fmt(metric.final_loss)} | "
+                 f"{_fmt(metric.final_lm)} | {_fmt(metric.final_ppl)} | "
+                 f"{_fmt(metric.phi, '{:.3f}')} | {_fmt(metric.tok_per_sec, '{:.0f}')} | "
+                 f"{_fmt(metric.ood_ppl, '{:.1f}')} | {_fmt(metric.ood_ratio, '{:.2f}')} |")
+    lines.append("")
+
+    if trajectory.get("early_exit"):
+        ee = trajectory["early_exit"]
+        lines.append("## Early-exit")
+        lines.append("")
+        lines.append(f"**Pass-mark fired at step {ee['step']}:**")
+        lines.append("")
+        lines.append(f"> {ee['reason']}")
+        lines.append("")
+
+    if trajectory.get("ood_trajectory"):
+        lines.append("## OOD trajectory (WikiText-103)")
+        lines.append("")
+        lines.append("| step | ood_ppl |")
+        lines.append("|------|---------|")
+        for p in trajectory["ood_trajectory"]:
+            lines.append(f"| {p['step']} | {p['ood_ppl']:.1f} |")
+        lines.append("")
+
+    if trajectory.get("first_train") and trajectory.get("last_train"):
+        a, b = trajectory["first_train"], trajectory["last_train"]
+        lines.append("## Training trajectory")
+        lines.append("")
+        lines.append(f"- first logged: step {a['step']}, loss {a['loss']:.3f}, ppl {a['ppl']:.1f}")
+        lines.append(f"- last logged:  step {b['step']}, loss {b['loss']:.3f}, ppl {b['ppl']:.1f}")
+        lines.append(f"- {trajectory['n_train_points']} step samples · "
+                     f"{trajectory['n_ood_points']} mid-OOD evals")
+        lines.append("")
+
+    spikes = trajectory.get("spikes") or []
+    if spikes:
+        lines.append("## Loss spikes (>1.7× jump)")
+        lines.append("")
+        for sp in spikes:
+            lines.append(f"- step {sp['step']}: ppl {sp['ppl_jump']}")
+        lines.append("")
+
+    extras = []
+    if trajectory.get("nemori_skips"):
+        extras.append(f"NEMORI batch skips: {trajectory['nemori_skips']}")
+    if trajectory.get("bema_rollbacks"):
+        extras.append(f"BEMA rollbacks: {trajectory['bema_rollbacks']}")
+    if extras:
+        lines.append("## Events")
+        lines.append("")
+        for e in extras:
+            lines.append(f"- {e}")
+        lines.append("")
+
+    if insight:
+        lines.append("## Claude insight")
+        lines.append("")
+        lines.append(insight.strip())
+        lines.append("")
+
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    return out_path
+
+
 def analyze_log_file(logfile: Path, run_id: Optional[str] = None,
                      branch: Optional[str] = None,
                      use_claude: bool = True) -> RunMetrics:
@@ -282,15 +428,27 @@ def analyze_log_file(logfile: Path, run_id: Optional[str] = None,
 
     upsert_metric_row(metric)
 
+    trajectory = parse_trajectory(text)
+    insight = None
     if use_claude:
         insight = claude_extract_insights(text, {
             "run_id": rid,
             "logfile": str(logfile),
             "summary": summary,
             "metric": metric.__dict__,
+            "trajectory_summary": {
+                "n_train_points": trajectory["n_train_points"],
+                "n_ood_points": trajectory["n_ood_points"],
+                "early_exit": trajectory["early_exit"],
+                "n_spikes": len(trajectory["spikes"]),
+            },
         })
         if insight:
             append_finding(rid, insight)
+
+    # Always write the per-run markdown — this is the canonical
+    # human-readable digest under logs/analyzed/<run_id>.md
+    write_run_markdown(rid, logfile, metric, summary, trajectory, insight)
 
     return metric
 
