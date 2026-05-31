@@ -63,8 +63,8 @@ offer_query = (
     f"reliability>{hw.min_reliability} disk_space>=60 "
     f"inet_down>={hw.min_inet_mbps}"
 )
-if hw.min_gpu_mem_gib > 0:
-    offer_query += f" gpu_ram>={hw.min_gpu_mem_gib * 1024}"
+    # GPU RAM filter is applied as a POST-filter after the search since
+    # vast.ai's CLI quoting for gpu_ram>=N is unreliable across versions.
 
 # ── Per-scale env vars for the training script ──
 scale_env = ""
@@ -183,6 +183,14 @@ offers_text, _ = vastai(
     "-o", "dph+", "--raw", capture=True)
 start = offers_text.find("[")
 offers = json.loads(offers_text[start:]) if start >= 0 else []
+# Post-filter by GPU RAM (in MB). 5% margin so 40 GB cards reporting
+# ~40537 MB still qualify.
+if hw.min_gpu_mem_gib > 0:
+    min_mb = int(hw.min_gpu_mem_gib * 1024 * 0.95)
+    before = len(offers)
+    offers = [o for o in offers if (o.get("gpu_ram") or 0) >= min_mb]
+    if before > len(offers):
+        print(f"filtered {before - len(offers)}/{before} offers by gpu_ram>={min_mb}MB")
 if not offers:
     sys.exit("no offers")
 o = offers[0]
