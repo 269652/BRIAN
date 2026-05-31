@@ -322,14 +322,68 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
             f"| NT[{nt_str}]{osc_str}")
 
 
+def _eval_pass_marks(rules, step: int,
+                      ppl_history, ood_history):
+    """Evaluate all pass-mark rules; return (should_exit: bool, reason: str).
+
+    `ppl_history` and `ood_history` are dicts {step: value}. The rule
+    semantics mirror the PassMark dataclass.
+    """
+    for r in rules:
+        # 1. Threshold-at-step
+        if r.at_step > 0 and r.window == 0 and not r.trend:
+            if step >= r.at_step:
+                history = ppl_history if r.metric == "train_ppl" else ood_history
+                # find closest measurement at-or-before at_step
+                hits = [v for s, v in history.items() if s <= r.at_step]
+                if not hits:
+                    continue   # no measurement yet
+                v = hits[-1]
+                if r.max is not None and v > r.max:
+                    return True, f"{r.name}: {r.metric}={v:.1f} > max {r.max}"
+                if r.min is not None and v < r.min:
+                    return True, f"{r.name}: {r.metric}={v:.1f} < min {r.min}"
+        # 2. Stability over window
+        elif r.window > 0 and r.trend == "stable":
+            history = ppl_history if r.metric == "train_ppl" else ood_history
+            recent = [v for s, v in sorted(history.items())
+                      if s > step - r.window]
+            if len(recent) < 3:
+                continue
+            spread = (max(recent) - min(recent)) / max(min(recent), 1e-6)
+            if spread < r.tol:
+                return True, (f"{r.name}: {r.metric} stable "
+                              f"(spread {spread:.3f} < {r.tol}) over "
+                              f"last {r.window} steps")
+        # 3. Falling trend over window
+        elif r.window > 0 and r.trend == "falling":
+            history = ppl_history if r.metric == "train_ppl" else ood_history
+            recent = sorted([(s, v) for s, v in history.items()
+                             if s > step - r.window])
+            if len(recent) < 3:
+                continue
+            first_v = recent[0][1]
+            last_v = recent[-1][1]
+            # "still falling" = last < first × (1 - tol). If it ISN'T falling
+            # we exit (we stop training when the metric stops improving).
+            if last_v >= first_v * (1.0 - r.tol):
+                return True, (f"{r.name}: {r.metric} not falling "
+                              f"(first {first_v:.1f} -> last {last_v:.1f}) "
+                              f"over last {r.window} steps")
+    return False, ""
+
+
 def _mid_ood_eval(harness: BRIANHarness, step: int,
                    ckpt_dir: Optional[Path],
-                   observer) -> None:
+                   observer) -> Optional[float]:
     """Quick WikiText-103 ppl snapshot, logged inline + written as JSON.
 
     Capped to 50 sliding windows so the eval costs <30s on an A100 and
     doesn't disrupt training cadence noticeably. Writes one JSON per
     checkpoint to <ckpt_dir>/../logs/vast/benchmarks/ood/.
+
+    Returns the OOD ppl as a float (or None on error). The caller
+    feeds it into the pass-marks history for early-exit checks.
     """
     import json
     import math
@@ -386,6 +440,7 @@ def _mid_ood_eval(harness: BRIANHarness, step: int,
             "n_tokens": total_tok,
             "kind": "mid-training",
         }, indent=2), encoding="utf-8")
+        return ppl
     finally:
         if was_training:
             harness.train()
@@ -415,6 +470,12 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
 
     observer = getattr(harness, "_observer", None)
 
+    # ── Pass-mark histories — feed the early-exit checker ──
+    pass_marks = getattr(harness.training_config, "pass_marks", None)
+    pass_rules = pass_marks.rules if pass_marks else []
+    train_ppl_history: dict = {}    # {step: train ppl}
+    ood_ppl_history: dict = {}      # {step: ood ppl}
+
     for step in range(start_step + 1, steps + 1):
         ids, targets = source.next()
         if not tokens_per_step:
@@ -442,6 +503,24 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
             print(_format_metrics_line(step, avg, avg, gnorm, lr,
                                         tok_per_s, metrics), flush=True)
             last_log = now
+            # Record train PPL for pass-mark checks
+            import math as _m
+            train_ppl_history[step] = _m.exp(min(avg, 20.0))
+
+        # ── Pass-mark early-exit check ──
+        if pass_rules and step % log_every == 0:
+            should_exit, reason = _eval_pass_marks(
+                pass_rules, step, train_ppl_history, ood_ppl_history)
+            if should_exit:
+                print(f"[train_dsl] PASS-MARK EARLY EXIT @ step {step}: {reason}",
+                      flush=True)
+                # Save a final checkpoint so the run isn't lost
+                if ckpt_dir is not None:
+                    path = ckpt_dir / f"dsl_arch_{_RUN_ID}_step{step}.pt"
+                    harness.save_checkpoint(str(path), step=step)
+                    print(f"[train_dsl] saved early-exit checkpoint {path}",
+                          flush=True)
+                return
 
         if ckpt_dir is not None and step % save_every == 0:
             # Filename includes a per-run timestamp prefix so concurrent /
@@ -458,7 +537,24 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
         # so analyze-log groups them with the final eval.
         if ood_every > 0 and step % ood_every == 0 and step > 0:
             try:
-                _mid_ood_eval(harness, step, ckpt_dir, observer)
+                ood_ppl = _mid_ood_eval(harness, step, ckpt_dir, observer)
+                if ood_ppl is not None:
+                    ood_ppl_history[step] = ood_ppl
+                # Pass-mark check IMMEDIATELY after mid-OOD lands so
+                # OOD-based rules (e.g. "exit when OOD < 700 at step 7k")
+                # fire as soon as the data is available.
+                if pass_rules:
+                    should_exit, reason = _eval_pass_marks(
+                        pass_rules, step, train_ppl_history, ood_ppl_history)
+                    if should_exit:
+                        print(f"[train_dsl] PASS-MARK EARLY EXIT @ step "
+                              f"{step}: {reason}", flush=True)
+                        if ckpt_dir is not None:
+                            path = ckpt_dir / f"dsl_arch_{_RUN_ID}_step{step}.pt"
+                            harness.save_checkpoint(str(path), step=step)
+                            print(f"[train_dsl] saved early-exit "
+                                  f"checkpoint {path}", flush=True)
+                        return
             except Exception as e:
                 print(f"[train_dsl] mid-OOD eval failed at step {step}: {e}",
                       flush=True)

@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 # ── Sub-config dataclasses ─────────────────────────────────────────────
@@ -44,6 +44,113 @@ class QuantizationConfig:
     """Optional post-training or training-time quantization."""
     enabled: bool = False
     bits: int = 8
+
+
+# ── Phase-gated mechanism configs (MAT-coupled ramp-in) ─────────────────
+
+@dataclass
+class PhaseGate:
+    """MAT-window phase gate: gate(mat) = 0.5*(1+tanh((mat-center)/width)).
+
+    Lifted from Brain's `_phase_gate` so each mechanism activates only
+    once the model has matured past `center`. Lets us ship mechanisms
+    that hurt early training (dropout, Tonnetz, NEMORI) without
+    capping the train PPL floor — they only kick in after the model
+    has reached the "fitting" phase.
+    """
+    center: float = 0.0   # MAT level at which gate crosses 0.5 (off below)
+    width: float = 0.10   # transition sharpness
+
+    def value(self, mat: float) -> float:
+        """Return gate value at the given MAT. 0 = off, 1 = full strength."""
+        import math
+        x = (float(mat) - float(self.center)) / max(1e-6, float(self.width))
+        return 0.5 * (1.0 + math.tanh(x))
+
+
+@dataclass
+class MechanismsConfig:
+    """All MAT-phase-gated mechanism knobs. Each is None when not declared.
+
+    The harness reads each mechanism's `strength × gate.value(mat)` at
+    every step. A mechanism with no entry behaves as the legacy
+    constant-strength flag (dropout, pct_trunk, etc.) which still
+    works for back-compat.
+    """
+    # Mechanism: (strength multiplier, phase gate). All optional —
+    # when None, the legacy flat-strength flag controls the mechanism.
+    dropout:    Optional[Tuple[float, PhaseGate]] = None
+    pct_trunk:  Optional[Tuple[float, PhaseGate]] = None
+    tonnetz:    Optional[Tuple[int, int, PhaseGate]] = None   # (period, bandwidth, gate)
+    nemori:     Optional[Tuple[float, PhaseGate]] = None
+    bema:       Optional[Tuple[int, PhaseGate]] = None
+
+    def effective_dropout(self, mat: float, fallback: float) -> float:
+        if self.dropout is None:
+            return fallback
+        strength, gate = self.dropout
+        return strength * gate.value(mat)
+
+    def effective_pct_trunk(self, mat: float, fallback: float) -> float:
+        if self.pct_trunk is None:
+            return fallback
+        strength, gate = self.pct_trunk
+        return strength * gate.value(mat)
+
+    def effective_nemori(self, mat: float, fallback: float) -> float:
+        if self.nemori is None:
+            return fallback
+        floor, gate = self.nemori
+        return floor * gate.value(mat)
+
+    def effective_tonnetz_period(self, mat: float, fallback: int) -> int:
+        if self.tonnetz is None:
+            return fallback
+        period, _bw, gate = self.tonnetz
+        # Tonnetz can't be "partial" — toggle on once gate > 0.5
+        return period if gate.value(mat) > 0.5 else 0
+
+    def effective_bema(self, mat: float, fallback: int) -> int:
+        if self.bema is None:
+            return fallback
+        rw, gate = self.bema
+        return rw if gate.value(mat) > 0.5 else 0
+
+
+# ── Pass marks (declarative early-exit conditions) ─────────────────────
+
+@dataclass
+class PassMark:
+    """One early-exit condition.
+
+    `name` identifies the rule in logs. The other fields encode a
+    metric-based check; the harness evaluates them at each step and
+    triggers early exit when any condition fires.
+
+    Three flavors:
+      1. Threshold-at-step:  `metric` ∈ {train_ppl, ood_ppl, train_loss}
+                              at `at_step` must be ≤ `max` (or ≥ `min`).
+      2. Stability:          `metric` must be stable (relative range
+                              < `tol`) over the last `window` steps.
+      3. Falling-trend:      `metric` must be falling (newest <
+                              window_min × (1 + `tol`)) over the last
+                              `window` steps.
+    """
+    name: str = ""
+    metric: str = "train_ppl"
+    at_step: int = 0           # 0 = no step constraint (any time)
+    max: Optional[float] = None
+    min: Optional[float] = None
+    window: int = 0            # >0 enables stability / trend check
+    tol: float = 0.02          # relative tolerance for stability
+    trend: str = ""            # "" | "stable" | "falling"
+    action: str = "exit"       # only "exit" supported now
+
+
+@dataclass
+class PassMarksConfig:
+    """All declared early-exit rules. Empty list = no early exit."""
+    rules: List[PassMark] = field(default_factory=list)
 
 
 @dataclass
@@ -113,6 +220,17 @@ class TrainingConfig:
     # init + per-param-group LR multipliers so representation updates
     # stay O(1) as d_model scales. Only meaningful at 200M+ params.
     mu_p_scaling: bool = False
+    # Preset for trunk-size selection. When set, arch.neuro overrides
+    # the env-var PRESET. Lets a single arch.neuro lock in BOTH the
+    # architecture AND the model scale.
+    preset: str = ""
+    # MAT-phase-gated mechanism activation. Each declared mechanism's
+    # effective strength is `declared × gate.value(maturity)`. See
+    # MechanismsConfig + PhaseGate above. Empty = use the flat-strength
+    # legacy fields (dropout, pct_trunk, ...) instead.
+    mechanisms: MechanismsConfig = field(default_factory=MechanismsConfig)
+    # Declarative early-exit rules. Empty list = train to STEPS.
+    pass_marks: PassMarksConfig = field(default_factory=PassMarksConfig)
 
 
 # ── Constants for validation ───────────────────────────────────────────
@@ -192,8 +310,81 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.crystallization_step = int(props["crystallization_step"])
     if "mu_p_scaling" in props:
         cfg.mu_p_scaling = _parse_bool(props["mu_p_scaling"])
+    if "preset" in props:
+        cfg.preset = _strip_quotes(props["preset"])
+    if "mechanisms" in props:
+        cfg.mechanisms = _parse_mechanisms(props["mechanisms"])
+    if "pass_marks" in props:
+        cfg.pass_marks = _parse_pass_marks(props["pass_marks"])
 
     return cfg
+
+
+def _parse_phase_gate(body: str) -> PhaseGate:
+    """`{ center: 0.5, width: 0.10 }` -> PhaseGate."""
+    body = _strip_braces(body)
+    props = _split_top_level_kv(body)
+    g = PhaseGate()
+    if "center" in props: g.center = float(props["center"])
+    if "width" in props:  g.width  = float(props["width"])
+    return g
+
+
+def _parse_mechanisms(body: str) -> MechanismsConfig:
+    """Parse a `mechanisms { ... }` block.
+
+    Each entry: `name: { strength|floor|period: ..., phase_gate: { ... } }`
+    """
+    body = _strip_braces(body)
+    props = _split_top_level_kv(body)
+    m = MechanismsConfig()
+    for name, mech_body in props.items():
+        mech_props = _split_top_level_kv(_strip_braces(mech_body))
+        gate = PhaseGate()
+        if "phase_gate" in mech_props:
+            gate = _parse_phase_gate(mech_props["phase_gate"])
+        if name == "dropout":
+            s = float(mech_props.get("strength", "0.1"))
+            m.dropout = (s, gate)
+        elif name == "pct_trunk":
+            s = float(mech_props.get("strength", "1.0"))
+            m.pct_trunk = (s, gate)
+        elif name == "tonnetz":
+            period = int(mech_props.get("period", "12"))
+            bw     = int(mech_props.get("bandwidth", "3"))
+            m.tonnetz = (period, bw, gate)
+        elif name == "nemori":
+            floor = float(mech_props.get("floor", "0.1"))
+            m.nemori = (floor, gate)
+        elif name == "bema":
+            rw = int(mech_props.get("rollback_window", "50"))
+            m.bema = (rw, gate)
+        # Silently ignore unknown mechanism names (forward-compat).
+    return m
+
+
+def _parse_pass_marks(body: str) -> PassMarksConfig:
+    """Parse a `pass_marks { ... }` block.
+
+    Entry shape: `name: { metric: "train_ppl", at_step: 10000, max: 80 }`
+                 `name: { metric: "ood_ppl", window: 2000, trend: "stable", tol: 0.02 }`
+    """
+    body = _strip_braces(body)
+    props = _split_top_level_kv(body)
+    rules = []
+    for name, rule_body in props.items():
+        rp = _split_top_level_kv(_strip_braces(rule_body))
+        r = PassMark(name=name)
+        if "metric" in rp:   r.metric  = _strip_quotes(rp["metric"])
+        if "at_step" in rp:  r.at_step = int(rp["at_step"])
+        if "max" in rp:      r.max     = float(rp["max"])
+        if "min" in rp:      r.min     = float(rp["min"])
+        if "window" in rp:   r.window  = int(rp["window"])
+        if "tol" in rp:      r.tol     = float(rp["tol"])
+        if "trend" in rp:    r.trend   = _strip_quotes(rp["trend"])
+        if "action" in rp:   r.action  = _strip_quotes(rp["action"])
+        rules.append(r)
+    return PassMarksConfig(rules=rules)
 
 
 def _parse_loss_clipping(body: str) -> LossClippingConfig:

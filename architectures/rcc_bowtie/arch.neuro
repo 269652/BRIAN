@@ -29,13 +29,10 @@ architecture rcc_bowtie {
 # =============================================================================
 
 training {
-    # Hyperparameters tuned for OOD generalization after the first 10k run
-    # hit gap_ratio 7.04 (STRONG OVERFITTING). Changes from prior:
-    #   weight_decay 0.05 -> 0.10   stronger L2
-    #   dropout      0    -> 0.10   classical regularizer
-    #   seq_len      1024 -> 2048   richer context, more data per step
-    #   pct_strength 0    -> 0.30   raise PCH gradient into trunk
-    # See docs/metrics.md for the run-by-run comparison.
+    # MAT-phase-gated mechanisms + declarative early-exit pass marks.
+    # `preset` sets the trunk dims (overrides env PRESET when set).
+    # See docs/OOD_PUSH_STAGES.md + docs/metrics.md.
+    preset:        "rcc_bowtie_30m_p4"
     loss_clipping: { enabled: true, method: "per_sample", factor: 3.0 }
     quantization:  { enabled: false, bits: 8 }
     optimizer:     "adamw"
@@ -44,7 +41,9 @@ training {
     grad_accum:    1
     grad_clip:     1.0
     label_smoothing: 0.05
-    dropout:       0.10
+    # Legacy flat-strength fallbacks all 0 so the mechanisms block
+    # below is the SOLE driver of mechanism activation.
+    dropout:       0.0
     # batch 16 x ctx 2048 = 32k tokens/step (same as old 32x1024) but
     # ctx is 2x richer. The 32x2048 combo OOM'd on cross-entropy (13 GiB
     # logit tensor at fp32). If you want to push back to batch=32, also
@@ -60,40 +59,40 @@ training {
     # Brain's chunked CE so we can run batch=32 ctx=2048 without OOM.
     batch_size:   16
     seq_len:      2048
-    steps:        10000
+    steps:        40000
     warmup_steps: 300
     min_lr_ratio: 0.1
-    pct_strength: 0.30
-    # Stage 1 OOD push: forward-path Predictive Coding Trunk. Each layer
-    # is pulled toward the top-down prediction of the next layer. Zero-
-    # init so the model starts identical to the no-PCT baseline; the
-    # mechanism turns on as training nudges the topdown_w weights away
-    # from zero. Cited target: >=2x OOD-gap reduction vs aux-only PCH.
-    pct_trunk: 0.50
-    # Stage 2 OOD push: Tonnetz toroidal attention. Period 12 (musical
-    # octave) introduces a constant spectral gap that exponentially
-    # suppresses long-distance non-harmonic attention. Bounds the convex
-    # hull of attention mass (hallucination biomarker). 0 = off.
-    tonnetz_period: 12
-    # Stage 3 OOD push: BEMA branching optimizer. Roll back the last 50
-    # optimizer steps when the loss-EMA rises for 50 consecutive ticks.
-    # Addresses the recurring spike pattern at step ~2400 of every run.
-    bema_rollback_window: 50
+    pct_strength: 0.0
+    pct_trunk: 0.0
+    tonnetz_period: 0
+    bema_rollback_window: 0
     bema_snapshot_every: 50
     bema_cooldown: 100
-    # Stage 4 OOD push: NEMORI predictive-forgetting gate. Skip batches
-    # whose surprise (|loss - ema_loss|/ema_loss) falls below the floor.
-    # Reduces I(X;Z) by refusing to learn from expected episodes.
-    # Disabled (0.0) for the initial 10k run — first deploy with 0.05
-    # skipped every batch at init because loss == ema_loss == ln(V).
-    # Re-enable once the harness gate auto-disables during warmup.
     nemori_floor: 0.0
-    # Stage 6 OOD push: μP scaling. Disabled at 51M; on for larger runs.
     mu_p_scaling: false
-    # Stage 7 OOD push: curriculum + isolation. random until crystallization
-    # then mix-curriculum (FineWeb-Edu first, chat after).
     curriculum: "random"
     crystallization_step: 0
+
+    # MAT-phase-gated mechanism activation. Each entry:
+    #   strength * phase_gate(mat).value()
+    # Gate centers chosen so the model reaches a low train PPL floor
+    # FIRST (mechanisms ~0 below MAT 0.3-0.5), then OOD regularizers
+    # ramp in as MAT crosses each center. Solves the trade-off the
+    # always-on stack hit in run 38610004 (train PPL 180 vs baseline 119).
+    mechanisms: {
+        dropout:    { strength: 0.15, phase_gate: { center: 0.40, width: 0.10 } }
+        pct_trunk:  { strength: 1.50, phase_gate: { center: 0.55, width: 0.08 } }
+        tonnetz:    { period: 12, bandwidth: 4, phase_gate: { center: 0.50, width: 0.10 } }
+        nemori:     { floor: 0.10, phase_gate: { center: 0.60, width: 0.08 } }
+        bema:       { rollback_window: 50, phase_gate: { center: 0.05, width: 0.05 } }
+    }
+
+    # Declarative early-exit conditions. First rule to fire saves a
+    # checkpoint and exits the training loop.
+    pass_marks: {
+        train_ppl_ceiling_10k: { metric: "train_ppl", at_step: 10000, max: 150 }
+        ood_plateau:           { metric: "ood_ppl", window: 3000, trend: "stable", tol: 0.05 }
+    }
 }
 
 # =============================================================================

@@ -305,6 +305,22 @@ class BRIANHarness(nn.Module):
           * `_last_cpc_loss`         → 'cpc'
           * `_last_phi_loss`         → 'phi'
         """
+        # ── MAT-phase-gated mechanism multipliers ──
+        # If the arch declared `mechanisms { dropout: { strength, phase_gate },
+        # pct_trunk: { ... } }`, refresh the cortex's runtime multipliers
+        # for this step. With phase_gate.center > 0 these start at ~0
+        # (mechanism OFF, vanilla baseline training) and ramp to full
+        # `strength` as maturity crosses `center`. Lets us reach the
+        # ~70 train-PPL floor first, then engage OOD regularizers.
+        if (self.language_model is not None
+                and hasattr(self.language_model, "set_mat_multipliers")):
+            mat_now = self.maturity.value()
+            mech = self.training_config.mechanisms
+            eff_drop = mech.effective_dropout(
+                mat_now, fallback=self.training_config.dropout)
+            eff_pct  = mech.effective_pct_trunk(
+                mat_now, fallback=self.training_config.pct_trunk)
+            self.language_model.set_mat_multipliers(eff_drop, eff_pct)
         logits = self(ids, nt_levels=nt_levels)
         loss_lm = self._compute_loss_from_logits(logits, targets)
         total = self.total_loss_config.w_lm * loss_lm
@@ -392,18 +408,18 @@ class BRIANHarness(nn.Module):
         accum = max(1, self.training_config.grad_accum)
 
         # ── Stage 4 OOD push: NEMORI predictive-forgetting gate ──
-        # If surprise = |loss - ema_loss|/max(ema_loss, eps) < floor, the
-        # batch is "expected" and we SKIP the optimizer update (no gradient
-        # accumulated). Reduces I(X;Z) → tightens generalization bound.
-        #
-        # Auto-warmup guard: at init loss == ema_loss == ln(V), surprise=0,
-        # so naive gating skips every step → model never trains (bug seen
-        # in run 38608948). Only activate NEMORI once the model has moved
-        # meaningfully below the random-init floor — pragmatic threshold:
-        # ema_loss < 0.85 * l_random AND we've done at least 200 steps.
+        # Now MAT-phase-gated when mechanisms.nemori is declared:
+        #     effective_floor = declared_floor × phase_gate(mat)
+        # Falls back to the flat `nemori_floor` flag for back-compat.
+        # Plus a hard warmup safety: never active before step 200 OR
+        # while loss is still near the random-init ln(V) (early-init
+        # bug fix from run 38608948).
         loss_f = float(loss.detach().item())
+        mat = self.maturity.value()
+        eff_nemori_floor = self.training_config.mechanisms.effective_nemori(
+            mat, fallback=self.training_config.nemori_floor)
         nemori_active = (
-            self.training_config.nemori_floor > 0
+            eff_nemori_floor > 0
             and self._last_lm_loss_value > 0
             and self._last_lm_loss_value < 0.85 * self.maturity.l_random
             and self._global_step > 200
@@ -411,7 +427,7 @@ class BRIANHarness(nn.Module):
         if nemori_active:
             base = max(self._last_lm_loss_value, 1e-6)
             surprise = abs(loss_f - base) / base
-            if surprise < self.training_config.nemori_floor:
+            if surprise < eff_nemori_floor:
                 self._nemori_skipped += 1
                 self._last_lr = float(optimizer.param_groups[0]["lr"])
                 self.maturity.update(loss_f)

@@ -653,6 +653,7 @@ class DSLLanguageCortex(nn.Module):
         # internals (Brain itself uses dropout=0 on the baseline trunk;
         # this path is an OOD-targeted addition controlled by arch.neuro's
         # `training.dropout`).
+        self._dropout_init = dropout
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         # Pick the standard-block template: Tonnetz variant when the
@@ -725,6 +726,22 @@ class DSLLanguageCortex(nn.Module):
                  for _ in range(n_pch)])
         else:
             self.topdown_w = None
+
+    def set_mat_multipliers(self, dropout_p: float, pct_trunk: float) -> None:
+        """Update the MAT-phase-gated multipliers for dropout + PCT.
+
+        Called by BRIANHarness.compute_loss before each forward when the
+        arch.neuro `mechanisms { ... }` block declares phase-gated
+        versions. Zero values disable the mechanism for this step.
+        """
+        if dropout_p > 0:
+            if not isinstance(self.dropout, nn.Dropout):
+                self.dropout = nn.Dropout(dropout_p)
+            else:
+                self.dropout.p = float(dropout_p)
+        else:
+            self.dropout = nn.Identity()
+        self.pct_trunk = float(pct_trunk)
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         h = nn_ops.embedding(ids, self.embed)
