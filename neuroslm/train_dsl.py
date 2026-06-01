@@ -414,8 +414,8 @@ def _mid_ood_eval(harness: BRIANHarness, step: int,
     was_training = harness.training
     harness.eval()
     try:
-        ds = load_dataset("wikitext", "wikitext-103-v1", split="test",
-                          streaming=True)
+        ds = load_dataset("Salesforce/wikitext", "wikitext-103-v1", split="test",
+                          streaming=True, trust_remote_code=True)
         n_seq, total_loss, total_tok = 0, 0.0, 0
         # Use the same tokenizer the harness was built with — derived
         # from neuroslm.tokenizer.Tokenizer to keep BPE alignment exact.
@@ -637,7 +637,8 @@ def _final_ood_eval(harness, step: int, ckpt_dir: Optional[Path],
     harness.eval()
     tok = Tokenizer()
     ctx = getattr(harness.language_model, "max_ctx", 1024) or 1024
-    ds = load_dataset("wikitext", "wikitext-103-v1", split="test", streaming=True)
+    ds = load_dataset("Salesforce/wikitext", "wikitext-103-v1", split="test",
+                      streaming=True, trust_remote_code=True)
     n_seq, total_loss, total_tok = 0, 0.0, 0
     for ex in ds:
         text = ex.get("text", "")
