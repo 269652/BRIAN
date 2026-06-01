@@ -980,9 +980,9 @@ def cmd_lint(args: argparse.Namespace) -> int:
     """Lint a .neuro file or architecture folder.
 
     With --autofix, automatically apply fixable diagnostics:
-    - Extract repeated equations as definitions
+    - Extract repeated equations to lib/equations.neuro
+    - Add import in arch.neuro for library equations
     - Replace inline equations with @references to definitions
-    - Suggest moving declarations to appropriate files
 
     Iterates until all autofix-able issues are resolved.
     """
@@ -996,13 +996,21 @@ def cmd_lint(args: argparse.Namespace) -> int:
         return 1
 
     # Lint the file or architecture
-    if path.is_dir() and (path / "arch.neuro").is_file():
+    is_arch_dir = path.is_dir() and (path / "arch.neuro").is_file()
+    if is_arch_dir:
         linter_file = path / "arch.neuro"
+        arch_dir = path
     elif path.suffix == ".neuro":
         linter_file = path
+        arch_dir = path.parent
     else:
         print(f"[ERROR] Not a .neuro file or architecture directory: {args.path}", file=sys.stderr)
         return 1
+
+    # Ensure lib directory exists
+    lib_dir = arch_dir / "lib"
+    lib_dir.mkdir(exist_ok=True)
+    lib_equations_file = lib_dir / "equations.neuro"
 
     total_fixes = 0
     iteration = 0
@@ -1029,6 +1037,8 @@ def cmd_lint(args: argparse.Namespace) -> int:
 
         # Apply autofix for repeated equations
         iteration_fixes = 0
+        equations_to_add = {}  # Track equations to add to lib
+
         for d in diags:
             if d.code == "repeated-equation":
                 # Extract equation from file
@@ -1042,57 +1052,76 @@ def cmd_lint(args: argparse.Namespace) -> int:
 
                 formula = msg_match.group(1)
 
-                # Check if equation definition already exists for this formula
-                if re.search(rf'formula: "{re.escape(formula)}"', content):
-                    # Infer name based on formula
-                    eq_name = _infer_equation_name(formula)
+                # Infer name based on formula
+                eq_name = _infer_equation_name(formula)
 
-                    # Check if this name already exists with different formula
-                    existing_match = re.search(rf'export equation {eq_name}\s*\{{\s*params:[^}}]*formula: "([^"]*)"', content)
-                    if existing_match and existing_match.group(1) != formula:
-                        # Name conflict - make it unique
-                        eq_name = f"{eq_name}_{len(set(re.findall(r'export equation (\w+)', content)))}"
+                # Check if this equation already exists in lib/equations.neuro
+                lib_content = lib_equations_file.read_text(encoding='utf-8') if lib_equations_file.exists() else ""
+                if re.search(rf'export equation {eq_name}\s*\{{\s*params:[^}}]*formula: "{re.escape(formula)}"', lib_content):
+                    # Already in lib, just replace references in arch.neuro
+                    print(f"[AUTOFIX] Use library equation '{eq_name}' (found in lib/equations.neuro)")
+                    new_content = re.sub(
+                        f'equation: "{re.escape(formula)}"',
+                        f'equation: @{eq_name}',
+                        content
+                    )
+                else:
+                    # Need to extract to lib/equations.neuro
+                    print(f"[AUTOFIX] Extract '{formula}' as '{eq_name}' -> lib/equations.neuro")
 
-                    # Skip if definition already exists
-                    if not re.search(rf'export equation {eq_name}\s*\{{\s*params:[^}}]*formula: "{re.escape(formula)}"', content):
-                        print(f"[AUTOFIX] Extract '{formula}' as '{eq_name}'")
+                    # Extract parameters
+                    params = []
+                    for param_match in re.finditer(r'\b([a-zA-Z_]\w*)\b', formula):
+                        param = param_match.group(1)
+                        builtins = {'ReLU', 'sigmoid', 'tanh', 'sin', 'cos', 'exp', 'log', 'sqrt',
+                                   'matmul', 'x', 'y', 's', 'V', 'dt', 'pi', 'e', 'max', 'min', 'output', 'c', 'gain', 'weight', 'x_pre', 'W'}
+                        if param not in builtins and param not in params:
+                            params.append(param)
 
-                        # Extract parameters
-                        params = []
-                        for param_match in re.finditer(r'\b([a-zA-Z_]\w*)\b', formula):
-                            param = param_match.group(1)
-                            builtins = {'ReLU', 'sigmoid', 'tanh', 'sin', 'cos', 'exp', 'log', 'sqrt',
-                                       'matmul', 'x', 'y', 's', 'V', 'dt', 'pi', 'e', 'max', 'min', 'output', 'c', 'gain', 'weight', 'x_pre', 'W'}
-                            if param not in builtins and param not in params:
-                                params.append(param)
+                    # Create equation definition
+                    eq_def = f"export equation {eq_name} {{\n    params: [{', '.join(params)}],\n    formula: \"{formula}\"\n}}\n"
+                    equations_to_add[eq_name] = eq_def
 
-                        # Create equation definition
-                        eq_def = f"export equation {eq_name} {{\n    params: [{', '.join(params)}],\n    formula: \"{formula}\"\n}}\n"
+                    # Replace all inline equations with @references in arch.neuro
+                    new_content = re.sub(
+                        f'equation: "{re.escape(formula)}"',
+                        f'equation: @{eq_name}',
+                        content
+                    )
 
-                        # Insert at top of file (after imports and comments)
-                        lines = content.split('\n')
-                        insert_pos = 0
-                        for i, line in enumerate(lines):
-                            if line.strip() and not line.strip().startswith('#') and not line.strip().startswith('import') and not line.strip().startswith('export equation'):
-                                insert_pos = i
-                                break
-
-                        lines.insert(insert_pos, eq_def)
+                    # Add/update import statement
+                    import_match = re.search(r'(import\s*\{([^}]*)\}\s*from\s*"@/lib/equations")', new_content)
+                    if import_match:
+                        # Update existing import
+                        existing_imports = import_match.group(2)
+                        if f'{eq_name}' not in existing_imports:
+                            new_import = f'import {{ {existing_imports}, {eq_name} }} from "@/lib/equations"'
+                            new_content = new_content.replace(import_match.group(1), new_import)
+                    else:
+                        # Create new import line at top
+                        lines = new_content.split('\n')
+                        insert_line = 0
+                        # Skip shebang and comments at the very top
+                        while insert_line < len(lines) and (lines[insert_line].startswith('#') or not lines[insert_line].strip()):
+                            insert_line += 1
+                        lines.insert(insert_line, f'import {{ {eq_name} }} from "@/lib/equations"')
                         new_content = '\n'.join(lines)
 
-                        # Replace all inline equations with @references
-                        new_content = re.sub(
-                            f'equation: "{re.escape(formula)}"',
-                            f'equation: @{eq_name}',
-                            new_content
-                        )
+                # Write arch.neuro back
+                with open(linter_file, 'w') as f:
+                    f.write(new_content)
 
-                        # Write back
-                        with open(linter_file, 'w') as f:
-                            f.write(new_content)
+                iteration_fixes += 1
+                total_fixes += 1
 
-                        iteration_fixes += 1
-                        total_fixes += 1
+        # Write all equations to lib/equations.neuro
+        if equations_to_add:
+            lib_content = lib_equations_file.read_text(encoding='utf-8') if lib_equations_file.exists() else ""
+            for eq_name, eq_def in equations_to_add.items():
+                # Check if equation already exists
+                if not re.search(rf'export equation {eq_name}\s*\{{', lib_content):
+                    lib_content += eq_def
+            lib_equations_file.write_text(lib_content, encoding='utf-8')
 
         if iteration_fixes == 0:
             break  # No more fixes in this iteration
