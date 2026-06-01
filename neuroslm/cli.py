@@ -327,10 +327,141 @@ def cmd_ps(args: argparse.Namespace) -> int:
     With --it (interactive/watch), redraws every `--interval` seconds
     until Ctrl-C. Uses double-buffering + cursor-home + clear-to-end-of-
     screen so the redraw is seamless (no flicker, no black flash).
+    
+    With --colab <url>, connects to a Colab log server and displays
+    training status from the remote notebook.
     """
+    # Colab mode — connect to remote log server
+    if getattr(args, "colab", None):
+        if args.it:
+            return _ps_colab_watch(args)
+        return _ps_colab_once(args)
     if args.it:
         return _ps_watch(args)
     return _render_ps_once(args)
+
+
+def _ps_colab_once(args: argparse.Namespace, out=None) -> int:
+    """Fetch status from a Colab log server and display it."""
+    import json
+    import urllib.request
+    import urllib.error
+    
+    sink = out if out is not None else sys.stdout
+    def _say(msg: str = "") -> None:
+        sink.write(msg + "\n")
+    
+    url = args.colab.rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{url}/status", timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.URLError as e:
+        _say(f"✗ Cannot connect to Colab: {e}")
+        _say(f"  URL: {url}")
+        return 1
+    except json.JSONDecodeError as e:
+        _say(f"✗ Invalid response from Colab: {e}")
+        return 1
+    
+    if out is None:
+        _say("Brian Task Manager — Colab monitor")
+        _say(f"  URL: {url}")
+        _say("")
+    
+    step = data.get("step")
+    ppl = data.get("ppl")
+    tps = data.get("tps")
+    ood_step = data.get("ood_step")
+    ood_ppl = data.get("ood_ppl")
+    lines = data.get("lines", 0)
+    
+    hdr = f"{'PLATFORM':<10}  {'STEP':>8}  {'PPL':>10}  {'TOK/S':>8}  {'OOD-PPL':>12}  {'LOG LINES':>10}"
+    _say(hdr)
+    _say("-" * len(hdr))
+    
+    step_s = str(step) if step is not None else "-"
+    ppl_s = f"{ppl:.1f}" if ppl is not None else "-"
+    tps_s = f"{tps/1000:.0f}k" if tps else "-"
+    ood_s = f"{ood_ppl:.0f}@{ood_step}" if ood_ppl is not None else "-"
+    
+    _say(f"{'Colab':<10}  {step_s:>8}  {ppl_s:>10}  {tps_s:>8}  {ood_s:>12}  {lines:>10}")
+    
+    # Show recent log tail if not in watch mode
+    if out is None and not getattr(args, "it", False):
+        _say("")
+        _say("Recent logs (last 20 lines):")
+        _say("-" * 60)
+        try:
+            with urllib.request.urlopen(f"{url}/logs", timeout=10) as resp:
+                logs = resp.read().decode()
+                for line in logs.strip().split("\n")[-20:]:
+                    _say(line)
+        except Exception:
+            _say("(could not fetch logs)")
+    
+    return 0
+
+
+def _ps_colab_watch(args: argparse.Namespace) -> int:
+    """Watch mode for Colab log server — streams live logs."""
+    import datetime
+    import io
+    import time
+    import urllib.request
+    import urllib.error
+    
+    url = args.colab.rstrip("/")
+    is_tty = sys.stdout.isatty()
+    
+    if is_tty:
+        sys.stdout.write("\x1b[?25l\x1b[2J\x1b[H")
+        sys.stdout.flush()
+    
+    try:
+        while True:
+            buf = io.StringIO()
+            ts = datetime.datetime.now().strftime("%H:%M:%S")
+            buf.write(f"Brian Task Manager — Colab monitor   "
+                      f"(refresh every {args.interval}s · Ctrl-C to exit)   "
+                      f"{ts}\n")
+            buf.write(f"URL: {url}\n")
+            buf.write("=" * 79 + "\n")
+            
+            rc = _ps_colab_once(args, out=buf)
+            if rc != 0:
+                if is_tty:
+                    sys.stdout.write("\x1b[?25h")
+                    sys.stdout.flush()
+                return rc
+            
+            # Add live log tail
+            buf.write("\n")
+            buf.write("Live logs (last 30 lines):\n")
+            buf.write("-" * 60 + "\n")
+            try:
+                with urllib.request.urlopen(f"{url}/logs", timeout=5) as resp:
+                    logs = resp.read().decode()
+                    for line in logs.strip().split("\n")[-30:]:
+                        buf.write(line + "\n")
+            except Exception as e:
+                buf.write(f"(could not fetch logs: {e})\n")
+            
+            if is_tty:
+                sys.stdout.write("\x1b[H" + buf.getvalue() + "\x1b[J")
+            else:
+                sys.stdout.write("\n\n" + buf.getvalue())
+            sys.stdout.flush()
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        if is_tty:
+            sys.stdout.write("\x1b[?25h\n")
+            sys.stdout.flush()
+        print("(stopped)")
+        return 0
+    finally:
+        if is_tty:
+            sys.stdout.write("\x1b[?25h")
+            sys.stdout.flush()
 
 
 def _ps_watch(args: argparse.Namespace) -> int:
@@ -1258,6 +1389,9 @@ def _build_parser() -> argparse.ArgumentParser:
                           "seconds until Ctrl-C")
     sps.add_argument("--interval", type=float, default=1.0,
                      help="seconds between refreshes when --it is on (default 1)")
+    sps.add_argument("--colab", metavar="URL",
+                     help="connect to Colab log server URL (from cell 5b). "
+                          "Shows training status from Colab notebook")
     sps.set_defaults(func=cmd_ps)
 
     # destroy
