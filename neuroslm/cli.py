@@ -93,7 +93,7 @@ def _bash() -> str:
 
 def cmd_compile_nfg(args: argparse.Namespace) -> int:
     """Compile arch to a Neural Flow Graph: dict-of-dicts .py + .png render."""
-    from neuroslm.dsl.nfg import compile_nfg, render_nfg, emit_python
+    from neuroslm.dsl.nfg import compile_nfg, render_nfg, emit_python, RCC_BOWTIE_SPEC, SEMANTIC_SPEC
     arch = _resolve_arch(args.arch)
     g = compile_nfg(arch)
     out_py = args.out or os.path.join(arch, "nfg.py")
@@ -101,8 +101,10 @@ def cmd_compile_nfg(args: argparse.Namespace) -> int:
     emit_python(g, out_py)
     print(f"wrote NFG definition  -> {out_py}")
     try:
-        render_nfg(g, out_png)
-        print(f"wrote NFG render      -> {out_png}")
+        spec = SEMANTIC_SPEC if getattr(args, 'semantic', False) else RCC_BOWTIE_SPEC
+        render_nfg(g, out_png, spec=spec)
+        layout_mode = "semantic" if spec.use_semantic_layout else "legacy"
+        print(f"wrote NFG render      -> {out_png}  (layout: {layout_mode})")
     except ImportError as e:
         print(f"render skipped: {e}")
         print("  install matplotlib + networkx to enable PNG output")
@@ -877,11 +879,13 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="architecture (only when first arg was 'nfg')")
     sc.add_argument("--out", help="write generated .py to this path")
     sc.add_argument("--png", help="(nfg only) write PNG render to this path")
+    sc.add_argument("--semantic", action="store_true",
+                    help="(nfg only) use semantic layout inference (data-driven)")
     sc.add_argument("--head", type=int, default=2000,
                     help="when printing to stdout, truncate after N chars")
     sc.set_defaults(func=lambda a: (
         cmd_compile_nfg(argparse.Namespace(
-            arch=a.arch, out=a.out, png=a.png))
+            arch=a.arch, out=a.out, png=a.png, semantic=a.semantic))
         if a.arch_or_subcmd == "nfg"
         else cmd_compile(argparse.Namespace(
             arch=a.arch_or_subcmd, out=a.out, head=a.head))
