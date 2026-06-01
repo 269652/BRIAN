@@ -333,6 +333,9 @@ def _detect_exit_reason(log_tail: str) -> tuple:
 
     Returns one of: "passmark-exit", "completed", "crashed", "destroyed",
     "stopped", "unknown" + a human-readable detail (e.g. the pass-mark name).
+
+    Skips vast.ai's reverse-tunnel SSH chatter ("Error: remote port forwarding
+    failed...") — those are sibling-process retries, not training failures.
     """
     import re as _re
     # Pass-mark early exit — pull out the rule name + reason
@@ -341,10 +344,18 @@ def _detect_exit_reason(log_tail: str) -> tuple:
         return ("passmark-exit", f"step {m.group(1)}: {m.group(2)[:80]}")
     if "training reached target" in log_tail:
         return ("completed", "all steps done")
-    if "Traceback" in log_tail or "ERROR" in log_tail.upper():
-        # Find a meaningful tail line
+    if "Traceback" in log_tail or any(
+            _re.search(r"\b(Error|Exception)\b", l) and "port forwarding" not in l
+            for l in log_tail.splitlines()):
+        # Find a meaningful tail line — skip SSH chatter
         for line in reversed(log_tail.splitlines()):
-            if "Error" in line or "Exception" in line or "Traceback" in line:
+            if "port forwarding" in line or "known hosts" in line:
+                continue
+            if ("Traceback" in line or
+                    _re.search(r"\b(Error|Exception)\b", line)):
+                # Skip pure-warning lines like "Warning: ..."
+                if line.strip().startswith("Warning:"):
+                    continue
                 return ("crashed", line.strip()[:80])
         return ("crashed", "exception in log")
     if "vastai destroy instance" in log_tail or "── self-destroying" in log_tail:
@@ -406,37 +417,48 @@ def _render_ps_once(args: argparse.Namespace) -> int:
     import json
     vastai = _vastai_exe()
     raw, rc = _run_capture([vastai, "show", "instances", "--raw"])
-    if rc != 0 and "DEPRECATED" not in raw:
+    # Failure modes: offline (rc!=0, raw contains 'connection'/'resolve'/empty),
+    # CLI error (rc!=0, raw has actual error), or success with DEPRECATED notice.
+    data = []
+    parse_ok = True
+    offline_marker = any(s in raw.lower() for s in
+                         ("connection", "failed to resolve", "could not resolve",
+                          "timed out", "getaddrinfo", "no route to host"))
+    if rc != 0 and "DEPRECATED" not in raw and not offline_marker:
         print(f"vastai show failed: {raw[:300]}", file=sys.stderr)
-        return rc
-    # Strip DEPRECATED banner + any trailing post-JSON content. Walk
-    # the bracket depth from the first `[` to its matching close.
-    start = raw.find("[")
-    if start < 0:
-        data = []
+        parse_ok = False
+    elif offline_marker or not raw.strip():
+        print("(offline — can't reach vast.ai; showing destroyed-instance "
+              "history from logs/vast/*)", file=sys.stderr)
+        parse_ok = False
     else:
-        depth = 0
-        end = start
-        in_str = False
-        esc = False
-        for i in range(start, len(raw)):
-            ch = raw[i]
-            if in_str:
-                if esc: esc = False
-                elif ch == "\\": esc = True
-                elif ch == '"': in_str = False
-            elif ch == '"': in_str = True
-            elif ch == "[": depth += 1
-            elif ch == "]":
-                depth -= 1
-                if depth == 0:
-                    end = i + 1
-                    break
-        try:
-            data = json.loads(raw[start:end])
-        except json.JSONDecodeError as e:
-            print(f"json parse error: {e}", file=sys.stderr)
-            return 1
+        start = raw.find("[")
+        if start < 0:
+            data = []
+        else:
+            depth = 0
+            end = start
+            in_str = False
+            esc = False
+            for i in range(start, len(raw)):
+                ch = raw[i]
+                if in_str:
+                    if esc: esc = False
+                    elif ch == "\\": esc = True
+                    elif ch == '"': in_str = False
+                elif ch == '"': in_str = True
+                elif ch == "[": depth += 1
+                elif ch == "]":
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            try:
+                data = json.loads(raw[start:end])
+            except json.JSONDecodeError as e:
+                print(f"(can't parse vastai response: {e}; falling back to "
+                      "destroyed-instance history)", file=sys.stderr)
+                parse_ok = False
     rows = []
     for inst in data:
         label = inst.get("label") or ""
@@ -454,28 +476,34 @@ def _render_ps_once(args: argparse.Namespace) -> int:
                 "status": inst.get("actual_status", "?"),
                 **status,
             })
-    if not rows:
-        print("(no neuroslm instances — pass --all to list everything)")
-        return 0
-    # Render a table
-    hdr = (f"{'ID':>10}  {'LABEL':<28}  {'GPU':<12}  {'$/hr':>5}  "
-           f"{'UP(m)':>6}  {'PHASE':<16}  {'STEP':>6}  {'PPL':>8}  "
-           f"{'OOD-PPL':>9}  {'TOK/S':>7}")
-    print(hdr)
-    print("-" * len(hdr))
-    for r in rows:
-        step  = str(r["step"]) if r["step"] is not None else "-"
-        ppl   = f"{r['ppl']:.1f}" if r["ppl"] is not None else "-"
-        ood   = (f"{r['mid_ood_ppl']:.0f}@{r['mid_ood_step']}"
-                 if r["mid_ood_ppl"] is not None else "-")
-        tps   = f"{r['tps']/1000:.0f}k" if r["tps"] else "-"
-        cost  = f"{r['cost']:.2f}" if r["cost"] else "-"
-        print(f"{str(r['id']):>10}  {r['label'][:28]:<28}  "
-              f"{r['gpu'][:12]:<12}  {cost:>5}  {r['uptime_mins']:>6}  "
-              f"{r['phase']:<16}  {step:>6}  {ppl:>8}  {ood:>9}  {tps:>7}")
+    if rows:
+        # Render the live table
+        hdr = (f"{'ID':>10}  {'LABEL':<28}  {'GPU':<12}  {'$/hr':>5}  "
+               f"{'UP(m)':>6}  {'PHASE':<16}  {'STEP':>6}  {'PPL':>8}  "
+               f"{'OOD-PPL':>9}  {'TOK/S':>7}")
+        print(hdr)
+        print("-" * len(hdr))
+        for r in rows:
+            step  = str(r["step"]) if r["step"] is not None else "-"
+            ppl   = f"{r['ppl']:.1f}" if r["ppl"] is not None else "-"
+            ood   = (f"{r['mid_ood_ppl']:.0f}@{r['mid_ood_step']}"
+                     if r["mid_ood_ppl"] is not None else "-")
+            tps   = f"{r['tps']/1000:.0f}k" if r["tps"] else "-"
+            cost  = f"{r['cost']:.2f}" if r["cost"] else "-"
+            print(f"{str(r['id']):>10}  {r['label'][:28]:<28}  "
+                  f"{r['gpu'][:12]:<12}  {cost:>5}  {r['uptime_mins']:>6}  "
+                  f"{r['phase']:<16}  {step:>6}  {ppl:>8}  {ood:>9}  {tps:>7}")
+    elif parse_ok:
+        # vastai responded with empty list → no live instances
+        live_hint = ""
+        if not args.all:
+            live_hint = " (pass --all to list non-neuroslm instances too)"
+        print(f"(no live instances{live_hint})")
 
     # ── Recently destroyed instances (reasons + last metrics) ──
-    destroyed = _scan_recent_destroyed(top_n=3)
+    # Always shown — even when offline or when no live instances exist,
+    # so the user has a continuous record of recent runs.
+    destroyed = _scan_recent_destroyed(top_n=5)
     if destroyed:
         print()
         print("Recent destroyed:")

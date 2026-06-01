@@ -116,6 +116,7 @@ SKIP_LFS_RESUME=1 bash scripts/vast_bootstrap.sh
 echo "── starting log-pusher (background) ──"
 INSTANCE_ID="$(hostname)" PUSH_INTERVAL=300 \\
     BRANCH='{BRANCH}' REPO_SLUG='{REPO_SLUG}' \\
+    ARCH_NAME='{ARCH}' LABEL='{LABEL}' TOTAL_STEPS='{STEPS}' \\
     nohup bash scripts/log_pusher.sh > /workspace/log_pusher.log 2>&1 &
 LOG_PUSHER_PID=$!
 
