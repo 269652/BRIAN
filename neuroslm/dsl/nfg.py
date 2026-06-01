@@ -16,11 +16,30 @@ Panels:
     [pass]     pass_marks rules
     [formal]   formal_spec + sheaf declarations
     [legend]   colours + edge styles
+
+Layout Strategy (v38+):
+    The layout compiler supports two modes:
+
+    1. **Legacy mode** (default for backward compatibility):
+       Uses hardcoded _PRESET_TEMPLATES, _RESERVED_SLOTS, _SUBSYSTEM_ENVELOPES.
+       Works well for the rcc_bowtie family but doesn't generalize.
+
+    2. **Semantic mode** (enabled via use_semantic_layout=True):
+       Uses the LayoutIntent system from layout_intent.py which derives
+       positions, envelopes, and edge prominence entirely from:
+       - param_scopes (declared in the DSL)
+       - topology (centrality, spine detection, clustering)
+       - optional DSL annotations (role, cluster, layout_hint)
+
+       No hardcoded population names required — works for ANY architecture.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .layout_intent import LayoutIntent
 
 
 # ── 0a. Locked rendering spec ─────────────────────────────────────────
@@ -69,10 +88,17 @@ class NFGRenderSpec:
     node_alpha:           float = 0.90
     # ── Figure ───────────────────────────────────────────────────────
     figsize:              tuple = (26, 16)
+    # ── Layout mode ──────────────────────────────────────────────────
+    # When True, uses LayoutIntent system for data-driven layout instead
+    # of hardcoded _PRESET_TEMPLATES / _SUBSYSTEM_ENVELOPES.
+    use_semantic_layout:  bool  = False
 
 
 # The canonical locked spec for the rcc_bowtie preset family (v37 baseline).
 RCC_BOWTIE_SPEC = NFGRenderSpec()
+
+# Semantic layout spec — same visual constants but data-driven positions/envelopes.
+SEMANTIC_SPEC = NFGRenderSpec(use_semantic_layout=True)
 
 
 # ── 0b. IR data classes (lightweight projection of compiler.ProgramIR) ─
@@ -765,11 +791,20 @@ def _phase_gate_curve(center: float, width: float, n: int = 50):
 
 def _draw_subsystem_envelopes(ax, pos: Dict[str, Tuple[float, float]],
                                pad: float = 0.78,
-                               spec: Optional["NFGRenderSpec"] = None) -> None:
+                               spec: Optional["NFGRenderSpec"] = None,
+                               envelopes: Optional[List[Tuple]] = None) -> None:
     """Draw uniform dashed rounded-rect envelopes around subsystem clusters.
 
     Visual grammar rules are driven by NFGRenderSpec so every envelope is
     guaranteed identical styling. Shown only when ≥2 members have positions.
+
+    Args:
+        ax: Matplotlib axes.
+        pos: Population positions.
+        pad: (deprecated) Use spec.envelope_pad instead.
+        spec: NFGRenderSpec with visual grammar constants.
+        envelopes: Optional list of (label, members, fill_color, border_color)
+                   tuples. If None, uses legacy _SUBSYSTEM_ENVELOPES.
     """
     import matplotlib.patches as mpatches
     rs = spec if spec is not None else RCC_BOWTIE_SPEC
@@ -781,7 +816,10 @@ def _draw_subsystem_envelopes(ax, pos: Dict[str, Tuple[float, float]],
     FILL_A    = rs.envelope_fill_alpha
     LABEL_FS  = rs.envelope_label_fs
 
-    for label, members, fc, ec in _SUBSYSTEM_ENVELOPES:
+    # Use provided envelopes or fall back to hardcoded legacy data
+    envelope_data = envelopes if envelopes is not None else _SUBSYSTEM_ENVELOPES
+
+    for label, members, fc, ec in envelope_data:
         pts = [pos[m] for m in members if m in pos]
         if len(pts) < 2:
             continue
@@ -806,23 +844,47 @@ def _draw_subsystem_envelopes(ax, pos: Dict[str, Tuple[float, float]],
 
 def _draw_main_graph(ax, g: "NeuralFlowGraph",
                      show_weights: bool, show_equations: bool,
-                     spec: Optional["NFGRenderSpec"] = None):
-    """Render the brain region graph onto the supplied Axes."""
+                     spec: Optional["NFGRenderSpec"] = None,
+                     layout_intent: Optional["LayoutIntent"] = None):
+    """Render the brain region graph onto the supplied Axes.
+
+    Args:
+        ax: Matplotlib axes.
+        g: Compiled NeuralFlowGraph.
+        show_weights: Show edge weight labels.
+        show_equations: Show population equations.
+        spec: NFGRenderSpec with visual grammar constants.
+        layout_intent: Optional LayoutIntent from semantic inference.
+                       If provided (and spec.use_semantic_layout=True),
+                       positions and envelopes are derived from this
+                       instead of hardcoded tables.
+    """
     import matplotlib.patches as mpatches
     from matplotlib.patches import FancyArrowPatch
 
     rs = spec if spec is not None else RCC_BOWTIE_SPEC
 
-    pos = _neuroanatomical_layout(g)
-    if not pos:
-        pos = _layered_positions(g)
+    # ── Layout: semantic vs legacy ─────────────────────────────────────
+    if rs.use_semantic_layout and layout_intent is not None:
+        # Semantic mode: positions and envelopes from LayoutIntent
+        from .layout_intent import intent_to_legacy_envelopes, intent_to_positions
+        pos = intent_to_positions(layout_intent)
+        envelope_data = intent_to_legacy_envelopes(layout_intent)
+        spine_nodes = layout_intent.spine
+    else:
+        # Legacy mode: hardcoded tables
+        pos = _neuroanatomical_layout(g)
+        if not pos:
+            pos = _layered_positions(g)
+        envelope_data = None  # use global _SUBSYSTEM_ENVELOPES
+        spine_nodes = _derive_spine(g)
+
     for n in g.nodes:
         pos.setdefault(n.name, (0.0, 0.0))
 
     # Spine highlight: draw a translucent band beneath the DSL-derived
     # primary pathway so the reader sees input → integration → control →
     # action at a glance.
-    spine_nodes = _derive_spine(g)
     spine_pts = [pos[n] for n in spine_nodes if n in pos]
     if len(spine_pts) >= 2:
         import matplotlib.patches as _mp
@@ -842,7 +904,7 @@ def _draw_main_graph(ax, g: "NeuralFlowGraph",
                 zorder=1)
 
     # Subsystem envelopes — drawn before nodes so they sit in the background
-    _draw_subsystem_envelopes(ax, pos, spec=rs)
+    _draw_subsystem_envelopes(ax, pos, spec=rs, envelopes=envelope_data)
 
     fan: Dict[str, int] = {}
     for e in g.edges:
@@ -1272,6 +1334,8 @@ def render_nfg(g: NeuralFlowGraph, output_path: str,
                         label (default off — usually identical y = w·(x@W))
         spec:           NFGRenderSpec controlling every visual grammar constant.
                         Defaults to RCC_BOWTIE_SPEC (the v37 locked baseline).
+                        Set spec.use_semantic_layout=True (e.g. SEMANTIC_SPEC)
+                        to use data-driven layout from LayoutIntent.
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -1279,6 +1343,12 @@ def render_nfg(g: NeuralFlowGraph, output_path: str,
     from matplotlib.gridspec import GridSpec
 
     rs = spec if spec is not None else RCC_BOWTIE_SPEC
+
+    # ── Compute LayoutIntent when in semantic mode ─────────────────────
+    layout_intent = None
+    if rs.use_semantic_layout:
+        from .layout_intent import infer_layout
+        layout_intent = infer_layout(g)
 
     # Try to load the training config + architecture for the sidebar
     arch_root = _inferred_arch_root(g)
@@ -1331,7 +1401,8 @@ def render_nfg(g: NeuralFlowGraph, output_path: str,
     _draw_main_graph(main_ax, g,
                      show_weights=show_weights,
                      show_equations=show_equations,
-                     spec=rs)
+                     spec=rs,
+                     layout_intent=layout_intent)
 
     # ── Sidebar column 1 (meta / training / mechanisms) ──
     # [row 1]: meta panel

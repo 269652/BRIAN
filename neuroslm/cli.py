@@ -774,35 +774,43 @@ def _eval_ood(args: argparse.Namespace) -> int:
 
 # ── test / push ────────────────────────────────────────────────────────
 
-def cmd_ai(args: argparse.Namespace) -> int:
-    """Group command: `brian ai document` etc."""
-    if args.ai_kind == "document":
-        return _ai_document(args)
-    print(f"unknown ai subcommand: {args.ai_kind}")
-    return 2
-
-
 _AGENT_SKILLS_DIR = "agents/skills"
 
 
-def _ai_document(args: argparse.Namespace) -> int:
-    """Run Claude Code against agents/skills/document/INSTRUCTIONS.md.
+def _list_ai_skills() -> List[str]:
+    """Return every agents/skills/<name>/ with an INSTRUCTIONS.md."""
+    skills_dir = REPO_ROOT / _AGENT_SKILLS_DIR
+    if not skills_dir.is_dir():
+        return []
+    out = []
+    for entry in sorted(skills_dir.iterdir()):
+        if entry.is_dir() and (entry / "INSTRUCTIONS.md").is_file():
+            out.append(entry.name)
+    return out
 
-    Each AI chore lives in `agents/skills/<name>/INSTRUCTIONS.md`. This
-    command loads the `document` skill and hands it to `claude -p`.
-    Documentation only — does not commit or push.
+
+def cmd_ai(args: argparse.Namespace) -> int:
+    """Run a Claude-Code-backed skill: `brian ai <name> [--auto]`.
+
+    Skills are folders under `agents/skills/<name>/INSTRUCTIONS.md`.
+    The INSTRUCTIONS.md is passed as the prompt to `claude -p` with
+    the repo root as cwd, so the skill can read any file in the repo.
+    `--auto` adds `--dangerously-skip-permissions` for unattended runs.
     """
+    skill_name = args.ai_kind
+    available = _list_ai_skills()
+    if skill_name not in available:
+        print(f"unknown skill: {skill_name!r}. "
+              f"Available: {', '.join(available) if available else '(none)'}",
+              file=sys.stderr)
+        return 2
     claude_path = shutil.which("claude")
     if claude_path is None:
         print("claude CLI not on PATH. Install it from "
               "https://github.com/anthropics/claude-code first.",
               file=sys.stderr)
         return 1
-    skill_name = "document"
     instructions = REPO_ROOT / _AGENT_SKILLS_DIR / skill_name / "INSTRUCTIONS.md"
-    if not instructions.is_file():
-        print(f"missing skill: {instructions}", file=sys.stderr)
-        return 1
     prompt_text = instructions.read_text(encoding="utf-8")
     print(f"=== brian ai {skill_name} — invoking claude ===")
     print(f"  skill:   {instructions.relative_to(REPO_ROOT)}")
@@ -979,16 +987,18 @@ def _build_parser() -> argparse.ArgumentParser:
     so.add_argument("--windows", type=int)
     so.set_defaults(func=cmd_ood)
 
-    # ai (group: `brian ai document` — runs Claude against docs/CLAUDE.md)
-    sa_ai = sub.add_parser("ai",
-                           help="AI-assisted chores (document, ...)")
-    esa_ai = sa_ai.add_subparsers(dest="ai_kind", required=True)
-    esa_ai_doc = esa_ai.add_parser(
-        "document",
-        help="Refresh docs/history.md + docs/changelog.md via claude")
-    esa_ai_doc.add_argument("--auto", action="store_true",
-                            help="pass --dangerously-skip-permissions to claude "
-                                 "(no interactive approvals)")
+    # ai (group: `brian ai <skill>` — every dir under agents/skills/
+    # with an INSTRUCTIONS.md becomes a subcommand automatically.)
+    sa_ai = sub.add_parser("ai", help="AI-assisted chores")
+    esa_ai = sa_ai.add_subparsers(dest="ai_kind", required=True,
+                                   help="skill name (auto-discovered from "
+                                        "agents/skills/)")
+    for _skill_name in _list_ai_skills():
+        _sp = esa_ai.add_parser(
+            _skill_name,
+            help=f"Run agents/skills/{_skill_name}/INSTRUCTIONS.md via claude")
+        _sp.add_argument("--auto", action="store_true",
+                          help="--dangerously-skip-permissions for unattended")
     sa_ai.set_defaults(func=cmd_ai)
 
     # eval (group: `brian eval ood [<ckpt>|--latest|<picker>]`)
