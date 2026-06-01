@@ -78,8 +78,6 @@ training {
     steps:        40000
     warmup_steps: 300
     min_lr_ratio: 0.1
-    pct_strength: 0.0
-    pct_trunk: 0.0
     tonnetz_period: 0
     bema_rollback_window: 0
     bema_snapshot_every: 50
