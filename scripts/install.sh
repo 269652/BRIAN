@@ -98,6 +98,71 @@ else
     exit 1
 fi
 
+# ── 5. Setup VSCode extension + linting ──────────────────────────────────
+echo ""
+echo "── setting up VSCode editor for .neuro DSL ──"
+
+# Detect VSCode extensions directory
+if [ -n "${VSCODE_EXTENSIONS:-}" ]; then
+    VSCODE_EXT_DIR="$VSCODE_EXTENSIONS"
+elif [ -d "$HOME/.config/Code/User/extensions" ]; then
+    VSCODE_EXT_DIR="$HOME/.config/Code/User/extensions"
+elif [ -d "$HOME/.vscode/extensions" ]; then
+    VSCODE_EXT_DIR="$HOME/.vscode/extensions"
+else
+    VSCODE_EXT_DIR="$HOME/.config/Code/User/extensions"
+    mkdir -p "$VSCODE_EXT_DIR"
+fi
+
+EXT_INSTALL_PATH="$VSCODE_EXT_DIR/neuro-dsl"
+if [ -d "$EXT_INSTALL_PATH" ]; then
+    echo "  (VSCode extension already installed)"
+else
+    echo "  installing VSCode extension to $VSCODE_EXT_DIR"
+    cp -r .vscode/extensions/neuro-dsl "$EXT_INSTALL_PATH"
+fi
+
+# Create VSCode workspace settings for .neuro linting
+VSCODE_DIR=".vscode"
+[ -d "$VSCODE_DIR" ] || mkdir -p "$VSCODE_DIR"
+
+SETTINGS_FILE="$VSCODE_DIR/settings.json"
+echo "  creating VSCode workspace settings: $SETTINGS_FILE"
+
+# Create or update settings.json
+if [ -f "$SETTINGS_FILE" ]; then
+    # Merge new settings into existing settings.json using jq (if available)
+    if command -v jq >/dev/null 2>&1; then
+        jq '. + {
+            "[neuro]": {
+                "editor.defaultFormatter": null,
+                "editor.formatOnSave": false,
+                "editor.wordBasedSuggestions": "off"
+            },
+            "files.associations": {
+                "*.neuro": "neuro"
+            }
+        }' "$SETTINGS_FILE" > "$SETTINGS_FILE.tmp" && mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"
+    else
+        echo "  warning: jq not found, skipping settings merge"
+    fi
+else
+    cat > "$SETTINGS_FILE" << 'EOF'
+{
+  "[neuro]": {
+    "editor.defaultFormatter": null,
+    "editor.formatOnSave": false,
+    "editor.wordBasedSuggestions": "off"
+  },
+  "files.associations": {
+    "*.neuro": "neuro"
+  }
+}
+EOF
+fi
+
+echo "✓ VSCode setup complete"
+
 echo ""
 echo "════════════════════════════════════════════════════════════════"
 echo "  ✓ install complete"

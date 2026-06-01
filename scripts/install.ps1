@@ -83,6 +83,71 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 Write-Host ""
+Write-Host "-- setting up VSCode editor for .neuro DSL" -ForegroundColor Cyan
+$vscode_ext_src = Join-Path $here ".vscode\extensions\neuro-dsl"
+$vscode_ext_dest = $null
+
+# Detect VSCode extensions directory
+if ($env:VSCODE_EXTENSIONS) {
+    $vscode_ext_dest = $env:VSCODE_EXTENSIONS
+} else {
+    $appdata = if ($env:APPDATA) { $env:APPDATA } else { [System.Environment]::GetFolderPath("ApplicationData") }
+    $vscode_ext_dest = Join-Path $appdata "Code\User\extensions"
+}
+
+# Create extensions directory if missing
+if (-not (Test-Path $vscode_ext_dest)) {
+    New-Item -ItemType Directory -Path $vscode_ext_dest -Force | Out-Null
+}
+
+$ext_install_path = Join-Path $vscode_ext_dest "neuro-dsl"
+if (Test-Path $ext_install_path) {
+    Write-Host "  (VSCode extension already installed at $ext_install_path)" -ForegroundColor Gray
+} else {
+    Write-Host "  installing VSCode extension to $ext_install_path" -ForegroundColor Cyan
+    Copy-Item -Path $vscode_ext_src -Destination $ext_install_path -Recurse -Force | Out-Null
+}
+
+# Create VSCode workspace settings for .neuro linting
+$vscode_settings_dir = Join-Path $here ".vscode"
+if (-not (Test-Path $vscode_settings_dir)) {
+    New-Item -ItemType Directory -Path $vscode_settings_dir -Force | Out-Null
+}
+
+$settings_file = Join-Path $vscode_settings_dir "settings.json"
+Write-Host "  creating VSCode workspace settings: $settings_file" -ForegroundColor Cyan
+
+$settings_content = @{
+    "[neuro]" = @{
+        "editor.defaultFormatter" = "null"
+        "editor.formatOnSave" = $false
+        "editor.wordBasedSuggestions" = "off"
+    }
+    "files.associations" = @{
+        "*.neuro" = "neuro"
+    }
+    "python.linting.enabled" = $true
+} | ConvertTo-Json -Depth 10
+
+# Read existing settings if they exist
+if (Test-Path $settings_file) {
+    try {
+        $existing = Get-Content $settings_file -Raw | ConvertFrom-Json -AsHashtable
+        # Merge new settings
+        foreach ($key in ($settings_content | ConvertFrom-Json).PSObject.Properties.Name) {
+            $existing[$key] = ($settings_content | ConvertFrom-Json).$key
+        }
+        $settings_content = $existing | ConvertTo-Json -Depth 10
+    } catch {
+        Write-Host "  warning: could not merge existing settings" -ForegroundColor Yellow
+    }
+}
+
+$settings_content | Set-Content -Path $settings_file -Encoding UTF8 -Force
+
+Write-Host "+ VSCode setup complete" -ForegroundColor Green
+
+Write-Host ""
 Write-Host "================================================================"
 Write-Host "  + install complete" -ForegroundColor Green
 Write-Host ""
@@ -93,4 +158,10 @@ Write-Host "  Then run:"
 Write-Host "    brian --help"
 Write-Host "    brian ps          # list active vast instances"
 Write-Host "    brian deploy      # launch a training run"
+Write-Host ""
+Write-Host "  VSCode setup:"
+Write-Host "    • .neuro syntax highlighting enabled"
+Write-Host "    • Linter can be run from command line:"
+Write-Host "      python neuroslm/dsl/neuro_linter.py <file_or_dir>"
+Write-Host "    • Open architectures/rcc_bowtie/arch.neuro to test"
 Write-Host "================================================================"

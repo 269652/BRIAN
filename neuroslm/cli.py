@@ -31,7 +31,7 @@ Commands (run `brian <cmd> -h` for per-command help):
     ood <ckpt> [--branch B]   Spin a throwaway OOD-eval instance
 
   Project
-    test [pattern]            pytest tests/dsl (optional path filter)
+    test [pattern] [--slow]   pytest tests/dsl (skips slow tests by default)
     push                      Commit + push current branch (PAT from .env)
 
 All vast commands use --ssh-less create + self-destroying onstart-cmd
@@ -922,6 +922,8 @@ def cmd_ai(args: argparse.Namespace) -> int:
 def cmd_test(args: argparse.Namespace) -> int:
     path = args.pattern if args.pattern else "tests/dsl/"
     cli = [sys.executable, "-m", "pytest", path, "-q"]
+    if not args.slow:
+        cli.extend(["-m", "not slow"])
     if args.verbose:
         cli.append("-v")
     return _run(cli)
@@ -1147,7 +1149,9 @@ def _build_parser() -> argparse.ArgumentParser:
     st.add_argument("pattern", nargs="?",
                     help="optional pytest path/file pattern")
     st.add_argument("-v", "--verbose", action="store_true")
-    st.set_defaults(func=cmd_test)
+    st.add_argument("--slow", action="store_true",
+                    help="include slow tests (by default slow tests are skipped)")
+    st.set_defaults(func=cmd_test, slow=False)
 
     # push
     sp = sub.add_parser("push",

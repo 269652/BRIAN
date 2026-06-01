@@ -496,7 +496,38 @@ class NeuroMLCompiler:
 
     @staticmethod
     def compile_file(filepath: str) -> ProgramIR:
-        """Compile DSL from file."""
+        """Compile DSL from file.
+
+        First runs the linter to validate syntax and semantics. Raises
+        NeuroMLError on linting errors before attempting compilation.
+        """
+        from pathlib import Path
+        from neuroslm.dsl.neuro_linter import NeuroLinter, Severity
+
+        filepath = Path(filepath)
+        if not filepath.exists():
+            raise NeuroMLError(f"File not found: {filepath}")
+
+        # Run linter first to catch errors early
+        linter = NeuroLinter(filepath)
+        diagnostics = linter.lint()
+
+        # Fail on structural/semantic errors
+        errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+        if errors:
+            error_msg = "\n".join([f"  {d.file.name}:{d.line}:{d.col} {d.message}" for d in errors])
+            raise NeuroMLError(
+                f"Linting failed: {len(errors)} error(s)\n{error_msg}"
+            )
+
+        # Warn about reference errors but don't fail (imported symbols may not be locally visible)
+        warnings = [d for d in diagnostics if d.severity == Severity.WARNING]
+        if warnings and len(warnings) <= 5:  # Only show if not too many
+            import sys
+            for w in warnings:
+                print(f"  warning: {w.file.name}:{w.line}:{w.col} {w.message}", file=sys.stderr)
+
+        # Now compile the source
         with open(filepath, 'r') as f:
             source = f.read()
         return NeuroMLCompiler.compile(source)

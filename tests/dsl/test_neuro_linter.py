@@ -3,6 +3,7 @@
 import pytest
 from pathlib import Path
 from neuroslm.dsl.neuro_linter import NeuroLinter, Severity, lint_file
+from neuroslm.dsl.compiler import NeuroMLCompiler, NeuroMLError
 
 
 @pytest.fixture
@@ -248,3 +249,44 @@ synapse sensory -> motor {
         linter.lint()
         assert "sensory" in linter.populations
         assert "motor" in linter.populations
+
+
+class TestCompilerIntegration:
+    """Test compiler integration with linter validation."""
+
+    def test_compiler_validates_with_linter(self, tmp_path):
+        """Compiler should run linter and reject files with structural errors."""
+        # Create a file with unmatched braces
+        f = tmp_path / "bad.neuro"
+        f.write_text("population test {\n    count: 256\n")
+
+        with pytest.raises(NeuroMLError) as exc_info:
+            NeuroMLCompiler.compile_file(str(f))
+
+        assert "Linting failed" in str(exc_info.value)
+        assert "error" in str(exc_info.value).lower()
+
+    def test_compiler_accepts_valid_file(self, tmp_path):
+        """Compiler should accept valid .neuro files."""
+        f = tmp_path / "valid.neuro"
+        f.write_text("""
+population test {
+    count: 256,
+    dynamics: "rate_code"
+}
+""")
+        # Should not raise
+        result = NeuroMLCompiler.compile_file(str(f))
+        assert result is not None
+
+    def test_compiler_lists_linting_errors(self, tmp_path):
+        """Compiler error message should list specific linting errors."""
+        f = tmp_path / "bad.neuro"
+        f.write_text("population test { count: 256 ")  # Missing closing brace
+
+        try:
+            NeuroMLCompiler.compile_file(str(f))
+            assert False, "Should have raised NeuroMLError"
+        except NeuroMLError as e:
+            # Error message should reference the problematic file
+            assert "Linting failed" in str(e)
