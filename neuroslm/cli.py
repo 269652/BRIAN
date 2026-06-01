@@ -43,6 +43,7 @@ import argparse
 import os
 import re
 import subprocess
+import shutil
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -773,6 +774,48 @@ def _eval_ood(args: argparse.Namespace) -> int:
 
 # ── test / push ────────────────────────────────────────────────────────
 
+def cmd_ai(args: argparse.Namespace) -> int:
+    """Group command: `brian ai document` etc."""
+    if args.ai_kind == "document":
+        return _ai_document(args)
+    print(f"unknown ai subcommand: {args.ai_kind}")
+    return 2
+
+
+_AGENT_SKILLS_DIR = "agents/skills"
+
+
+def _ai_document(args: argparse.Namespace) -> int:
+    """Run Claude Code against agents/skills/document/INSTRUCTIONS.md.
+
+    Each AI chore lives in `agents/skills/<name>/INSTRUCTIONS.md`. This
+    command loads the `document` skill and hands it to `claude -p`.
+    Documentation only — does not commit or push.
+    """
+    claude_path = shutil.which("claude")
+    if claude_path is None:
+        print("claude CLI not on PATH. Install it from "
+              "https://github.com/anthropics/claude-code first.",
+              file=sys.stderr)
+        return 1
+    skill_name = "document"
+    instructions = REPO_ROOT / _AGENT_SKILLS_DIR / skill_name / "INSTRUCTIONS.md"
+    if not instructions.is_file():
+        print(f"missing skill: {instructions}", file=sys.stderr)
+        return 1
+    prompt_text = instructions.read_text(encoding="utf-8")
+    print(f"=== brian ai {skill_name} — invoking claude ===")
+    print(f"  skill:   {instructions.relative_to(REPO_ROOT)}")
+    print(f"  repo:    {REPO_ROOT}")
+    print()
+    cli = [claude_path, "-p", prompt_text]
+    if args.auto:
+        cli.insert(1, "--dangerously-skip-permissions")
+    return subprocess.call(
+        cli, cwd=str(REPO_ROOT),
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+
+
 def cmd_test(args: argparse.Namespace) -> int:
     path = args.pattern if args.pattern else "tests/dsl/"
     cli = [sys.executable, "-m", "pytest", path, "-q"]
@@ -935,6 +978,18 @@ def _build_parser() -> argparse.ArgumentParser:
     so.add_argument("--tag", default="eval", help="role tag for the eval JSON")
     so.add_argument("--windows", type=int)
     so.set_defaults(func=cmd_ood)
+
+    # ai (group: `brian ai document` — runs Claude against docs/CLAUDE.md)
+    sa_ai = sub.add_parser("ai",
+                           help="AI-assisted chores (document, ...)")
+    esa_ai = sa_ai.add_subparsers(dest="ai_kind", required=True)
+    esa_ai_doc = esa_ai.add_parser(
+        "document",
+        help="Refresh docs/history.md + docs/changelog.md via claude")
+    esa_ai_doc.add_argument("--auto", action="store_true",
+                            help="pass --dangerously-skip-permissions to claude "
+                                 "(no interactive approvals)")
+    sa_ai.set_defaults(func=cmd_ai)
 
     # eval (group: `brian eval ood [<ckpt>|--latest|<picker>]`)
     se = sub.add_parser("eval",
