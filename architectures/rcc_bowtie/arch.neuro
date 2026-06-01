@@ -37,13 +37,18 @@ training {
     quantization:  { enabled: false, bits: 8 }
     optimizer:     "adamw"
     learning_rate: 0.0003
-    weight_decay:  0.10
+    weight_decay:  0.12
     grad_accum:    1
     grad_clip:     1.0
     label_smoothing: 0.05
-    # Legacy flat-strength fallbacks all 0 so the mechanisms block
-    # below is the SOLE driver of mechanism activation.
-    dropout:       0.0
+    # Regularisation — dropout is the single highest-impact OOD knob.
+    # P4 ran at 0.0 → OOD gap blew out to 13x.  0.12 balances capacity.
+    dropout:       0.12
+    # Predictive-coding trunk loss (auxiliary next-token prediction at
+    # intermediate layers). Acts as implicit label smoothing + forces
+    # internal representations to stay predictive → strong OOD reg.
+    pct_trunk:     0.4
+    pct_strength:  0.3
     # batch 16 x ctx 2048 = 32k tokens/step (same as old 32x1024) but
     # ctx is 2x richer. The 32x2048 combo OOM'd on cross-entropy (13 GiB
     # logit tensor at fp32). If you want to push back to batch=32, also
