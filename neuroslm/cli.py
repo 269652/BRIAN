@@ -645,32 +645,45 @@ def cmd_eval(args: argparse.Namespace) -> int:
 
 
 def _find_dsl_checkpoints() -> List[Tuple[int, str]]:
-    """Return [(step, path), ...] sorted desc by step. Local first, then origin."""
+    """Return [(step, path), ...] sorted desc by step. Local first, then origin.
+
+    Matches both filename schemes:
+      - legacy:        dsl_arch_step<N>.pt
+      - timestamped:   dsl_arch_<YYYYMMDD-HHMMSS>_step<N>.pt
+    """
     ckpt_dir = REPO_ROOT / "lfs_checkpoints"
     items: List[Tuple[int, str]] = []
+    seen: set = set()
     if ckpt_dir.is_dir():
-        for p in ckpt_dir.glob("dsl_arch_step*.pt"):
-            m = re.search(r"step(\d+)", p.name)
+        # Both `dsl_arch_step*.pt` and `dsl_arch_*_step*.pt` patterns.
+        for p in list(ckpt_dir.glob("dsl_arch_*step*.pt")) + \
+                  list(ckpt_dir.glob("dsl_arch_step*.pt")):
+            m = re.search(r"_step(\d+)\.pt$", p.name)
             if m:
-                items.append((int(m.group(1)), str(p.relative_to(REPO_ROOT))))
-    # Also list what's on origin (via git ls-tree on the lfs_checkpoints/ dir)
+                rel = str(p.relative_to(REPO_ROOT)).replace("\\", "/")
+                if rel not in seen:
+                    seen.add(rel)
+                    items.append((int(m.group(1)), rel))
+    # Also list what's on origin (silent if origin/<branch> not fetched yet)
     try:
         branch = subprocess.check_output(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=str(REPO_ROOT), text=True).strip()
+            cwd=str(REPO_ROOT), text=True,
+            stderr=subprocess.DEVNULL).strip()
         out = subprocess.check_output(
             ["git", "ls-tree", f"origin/{branch}",
              "lfs_checkpoints/", "--name-only"],
-            cwd=str(REPO_ROOT), text=True)
+            cwd=str(REPO_ROOT), text=True,
+            stderr=subprocess.DEVNULL)
         for line in out.splitlines():
-            if "dsl_arch_step" not in line:
+            if "dsl_arch" not in line:
                 continue
-            m = re.search(r"step(\d+)", line)
+            m = re.search(r"_step(\d+)\.pt$", line)
             if not m:
                 continue
-            entry = (int(m.group(1)), line)
-            if entry not in items:
-                items.append(entry)
+            if line not in seen:
+                seen.add(line)
+                items.append((int(m.group(1)), line))
     except Exception:
         pass
     items.sort(key=lambda r: -r[0])
@@ -678,15 +691,32 @@ def _find_dsl_checkpoints() -> List[Tuple[int, str]]:
 
 
 def _eval_ood(args: argparse.Namespace) -> int:
-    """Interactive checkpoint picker → deploy vast_ood_eval.sh."""
+    """Deploy a vast.ai OOD-eval instance for a DSL checkpoint.
+
+    Checkpoint selection (in priority order):
+      1. positional path:          `brian eval ood path/to.pt`
+      2. --checkpoint PATH
+      3. --latest                  → highest-step dsl_arch_*.pt
+      4. interactive picker        (default if none of the above)
+    """
     ckpts = _find_dsl_checkpoints()
     if not ckpts:
         print("no DSL checkpoints found in lfs_checkpoints/ or on origin")
         return 1
-    if args.checkpoint:
+    # Resolve the checkpoint.
+    ckpt_path = None
+    # Positional arg: `brian eval ood foo.pt` — and "--latest" allowed as the
+    # positional placeholder too, so `brian eval ood --latest` works.
+    pos = getattr(args, "ckpt_pos", None)
+    if pos and pos != "--latest":
+        ckpt_path = pos
+    if ckpt_path is None and getattr(args, "checkpoint", None):
         ckpt_path = args.checkpoint
-    else:
-        # Default to the highest-step checkpoint (latest training run "best").
+    if ckpt_path is None and (getattr(args, "latest", False) or pos == "--latest"):
+        ckpt_path = ckpts[0][1]
+        print(f"--latest → step {ckpts[0][0]}: {ckpt_path}")
+    if ckpt_path is None:
+        # Interactive picker (default to highest-step on Enter).
         print("=== DSL checkpoints (newest first) ===")
         for i, (step, path) in enumerate(ckpts):
             tag = " (default)" if i == 0 else ""
@@ -700,6 +730,18 @@ def _eval_ood(args: argparse.Namespace) -> int:
         except (ValueError, IndexError):
             print(f"invalid selection: {sel!r}")
             return 2
+    # Verify the checkpoint exists locally or in the origin tree before
+    # we spin up a vast.ai instance for nothing.
+    p = Path(ckpt_path)
+    if not p.is_absolute() and not (REPO_ROOT / ckpt_path).exists():
+        # Check if it's on origin via git ls-tree (matches _find_dsl_checkpoints).
+        known = any(c[1] == ckpt_path for c in ckpts)
+        if not known:
+            print(f"checkpoint not found locally or on origin: {ckpt_path}")
+            print("known checkpoints (newest first):")
+            for step, path in ckpts[:10]:
+                print(f"  step {step:>6d}  {path}")
+            return 1
 
     print(f"\n=== Deploying OOD eval ===")
     print(f"  checkpoint = {ckpt_path}")
@@ -892,14 +934,24 @@ def _build_parser() -> argparse.ArgumentParser:
     so.add_argument("--windows", type=int)
     so.set_defaults(func=cmd_ood)
 
-    # eval (group: `brian eval ood` interactive picker)
+    # eval (group: `brian eval ood [<ckpt>|--latest|<picker>]`)
     se = sub.add_parser("eval",
-                        help="Evaluate a checkpoint (ood/...) — interactive picker")
+                        help="Evaluate a checkpoint (ood/...) — by path, --latest, or picker")
     ese = se.add_subparsers(dest="eval_kind", required=True)
-    ese_ood = ese.add_parser("ood",
-                             help="OOD eval on a DSL checkpoint (interactive)")
+    ese_ood = ese.add_parser(
+        "ood",
+        help="OOD eval on a DSL checkpoint. Usage:\n"
+             "  brian eval ood path/to.pt    — explicit path\n"
+             "  brian eval ood --latest      — highest-step checkpoint\n"
+             "  brian eval ood               — interactive picker")
+    # Positional arg accepts either a checkpoint path or the literal
+    # "--latest" token (so `brian eval ood --latest` reads naturally).
+    ese_ood.add_argument("ckpt_pos", nargs="?",
+                         help="checkpoint path or '--latest'")
     ese_ood.add_argument("--checkpoint",
-                         help="explicit ckpt path (skips picker)")
+                         help="alias for the positional checkpoint")
+    ese_ood.add_argument("--latest", action="store_true",
+                         help="pick the highest-step dsl_arch_*.pt")
     ese_ood.add_argument("--branch")
     ese_ood.add_argument("--tag",
                          help="role tag (defaults to step number)")
