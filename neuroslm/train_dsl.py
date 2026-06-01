@@ -384,12 +384,19 @@ def _eval_pass_marks(rules, step: int,
 
 def _mid_ood_eval(harness: BRIANHarness, step: int,
                    ckpt_dir: Optional[Path],
-                   observer) -> Optional[float]:
+                   observer,
+                   train_ppl_history: Optional[dict] = None) -> Optional[float]:
     """Quick WikiText-103 ppl snapshot, logged inline + written as JSON.
 
     Capped to 50 sliding windows so the eval costs <30s on an A100 and
     doesn't disrupt training cadence noticeably. Writes one JSON per
     checkpoint to <ckpt_dir>/../logs/vast/benchmarks/ood/.
+
+    Args:
+        train_ppl_history: optional {step: train_ppl} dict — if provided,
+            computes `gap_ratio = ood_ppl / latest_train_ppl` and logs
+            it inline. Lets you SEE generalization (ood/train) move
+            during training without waiting for the final eval.
 
     Returns the OOD ppl as a float (or None on error). The caller
     feeds it into the pass-marks history for early-exit checks.
@@ -434,7 +441,19 @@ def _mid_ood_eval(harness: BRIANHarness, step: int,
                 break
         avg_nll = total_loss / max(1, total_tok)
         ppl = math.exp(min(avg_nll, 20.0))
-        print(f"[mid-ood] step {step}: wikitext ppl={ppl:.1f} "
+        # gap_ratio = ood_ppl / latest in-distribution train_ppl. >1 ⇒
+        # generalization gap; <1.5 is excellent, >3 strong overfit.
+        gap_ratio = None
+        train_ppl = None
+        if train_ppl_history:
+            # use the most recent train_ppl at or before this step
+            recent = [v for s, v in train_ppl_history.items() if s <= step]
+            if recent:
+                train_ppl = recent[-1]
+                gap_ratio = ppl / train_ppl if train_ppl > 0 else None
+        gap_str = (f" gap_ratio={gap_ratio:.2f} (train_ppl={train_ppl:.1f})"
+                   if gap_ratio is not None else "")
+        print(f"[mid-ood] step {step}: wikitext ppl={ppl:.1f}{gap_str} "
               f"({n_seq} seq, {total_tok} tok)", flush=True)
         # Persist to logs/vast/benchmarks/ood/ so analyze-log picks it up
         out_dir = Path("logs/vast/benchmarks/ood")
@@ -445,6 +464,8 @@ def _mid_ood_eval(harness: BRIANHarness, step: int,
             "run_id": _RUN_ID,
             "ood_dataset": "wikitext-103-v1",
             "ood_ppl": ppl,
+            "train_ppl": train_ppl,
+            "gap_ratio": gap_ratio,
             "n_sequences": n_seq,
             "n_tokens": total_tok,
             "kind": "mid-training",
@@ -546,7 +567,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
         # so analyze-log groups them with the final eval.
         if ood_every > 0 and step % ood_every == 0 and step > 0:
             try:
-                ood_ppl = _mid_ood_eval(harness, step, ckpt_dir, observer)
+                ood_ppl = _mid_ood_eval(harness, step, ckpt_dir, observer,
+                                          train_ppl_history=train_ppl_history)
                 if ood_ppl is not None:
                     ood_ppl_history[step] = ood_ppl
                 # Pass-mark check IMMEDIATELY after mid-OOD lands so
