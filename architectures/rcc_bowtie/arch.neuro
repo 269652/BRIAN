@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+    # -*- coding: utf-8 -*-
 # RCC Bowtie — package config + global wiring
 #
 # This `arch.neuro` is the architecture's entry point. It sets runtime
@@ -16,6 +16,21 @@
 #
 # References — Dehaene (2011), Baars (2005), Doya (1999), Tononi (2016),
 # Mashour (2020).
+
+export equation standard_synapse {
+    params: [weight, x_pre, W],
+    formula: "y = weight * (x_pre @ W)"
+}
+
+export equation additive_modulation {
+    params: [output, c, gain],
+    formula: "y = output + (c * gain)"
+}
+
+export equation multiplicative_modulation {
+    params: [output, c, gain],
+    formula: "y = output * (c * gain)"
+}
 
 architecture rcc_bowtie {
     d_sem: 256,
@@ -367,79 +382,79 @@ import { reasoning_cortex }                               from "@/modules/reason
 # Thalamic gating (sensory bottleneck control)
 synapse thalamus -> gws {
     weight: 0.8, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # State models → workspace
 synapse world -> gws {
     weight: 0.6, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 synapse self_m -> gws {
     weight: 0.6, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # GWS → memory (every conscious access broadcasts to hippocampus)
 synapse gws -> hippo {
     weight: 0.7, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # GWS → cognitive control (top-down planning)
 synapse gws -> pfc {
     weight: 0.8, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 synapse gws -> acc {
     weight: 0.7, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # PFC → basal ganglia (action selection)
 synapse pfc -> bg {
     weight: 0.6, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # Basal ganglia → motor (action execution; GABAergic disinhibition)
 synapse bg -> motor {
     weight: 0.8, neurotransmitter: "gaba",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # Forward model + evaluator feedback
 synapse forward_m -> evaluator {
     weight: 0.7, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # Memory feedback → PFC (recall-guided planning)
 synapse hippo -> pfc {
     weight: 0.5, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 synapse entorhinal -> pfc {
     weight: 0.4, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # Re-entry loop: PFC back to thalamus (bowtie closure → Φ > 0)
 synapse pfc -> thalamus {
     weight: 0.3, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # DMN → GWS (narrative broadcasts to conscious access)
 synapse dmn -> gws {
     weight: 0.5, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # Cerebellum → forward model (classical conditioning, motor learning)
 synapse cerebellum -> forward_m {
     weight: 0.6, neurotransmitter: "gaba",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # =============================================================================
@@ -458,27 +473,27 @@ synapse cerebellum -> forward_m {
 # (1) Reentry: deep motor -> sensory loop (closes the bowtie)
 synapse motor -> sensory {
     weight: 0.4, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # (2) MoE parallel path: pfc -> reasoning_cortex -> motor
 synapse pfc -> reasoning_cortex {
     weight: 0.5, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 synapse reasoning_cortex -> motor {
     weight: 0.5, neurotransmitter: "glutamate",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # (3) Lateral inhibition: dmn <-> reasoning_cortex (GABA)
 synapse dmn -> reasoning_cortex {
     weight: 0.3, neurotransmitter: "gaba",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 synapse reasoning_cortex -> dmn {
     weight: 0.3, neurotransmitter: "gaba",
-    equation: "y = weight * (x_pre @ W)"
+    equation: @standard_synapse
 }
 
 # =============================================================================
@@ -491,87 +506,87 @@ synapse reasoning_cortex -> dmn {
 # PFC — DA (motivation), 5HT (impulse control), ACh (attention), GABA (inhibition)
 modulation dopamine -> pfc {
     effect: "multiplicative", gain: 0.6,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 modulation serotonin -> pfc {
     effect: "additive", gain: 0.3,
-    equation: "y = output + (c * gain)"
+    equation: @additive_modulation
 }
 modulation acetylcholine -> pfc {
     effect: "multiplicative", gain: 0.4,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 modulation gaba -> pfc {
     effect: "multiplicative", gain: 0.4,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 
 # Hippocampus — ACh (encoding), Glu (binding)
 modulation acetylcholine -> hippo {
     effect: "multiplicative", gain: 0.5,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 modulation glutamate -> hippo {
     effect: "additive", gain: 0.4,
-    equation: "y = output + (c * gain)"
+    equation: @additive_modulation
 }
 
 # Basal ganglia — DA (motivation), GABA (competition)
 modulation dopamine -> bg {
     effect: "multiplicative", gain: 0.7,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 modulation gaba -> bg {
     effect: "multiplicative", gain: 0.5,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 
 # Thalamus — NE (arousal), GABA (relay control)
 modulation norepinephrine -> thalamus {
     effect: "multiplicative", gain: 0.5,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 modulation gaba -> thalamus {
     effect: "multiplicative", gain: 0.3,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 
 # Sensory — ACh (attention), eCB (inhibition)
 modulation acetylcholine -> sensory {
     effect: "multiplicative", gain: 0.3,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 modulation endocannabinoid -> sensory {
     effect: "multiplicative", gain: 0.3,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 
 # DMN — 5HT (introspection dampening), ACh (attention)
 modulation serotonin -> dmn {
     effect: "multiplicative", gain: 0.6,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 modulation acetylcholine -> dmn {
     effect: "multiplicative", gain: 0.2,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 
 # GWS — DA (salience boost)
 modulation dopamine -> gws {
     effect: "additive", gain: 0.5,
-    equation: "y = output + (c * gain)"
+    equation: @additive_modulation
 }
 
 # Amygdala — 5HT (fear suppression via raphe)
 modulation serotonin -> amygdala {
     effect: "multiplicative", gain: 0.7,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 
 # ACC — DA (motivation)
 modulation dopamine -> acc {
     effect: "multiplicative", gain: 0.5,
-    equation: "y = output * (c * gain)"
+    equation: @multiplicative_modulation
 }
 
 # =============================================================================

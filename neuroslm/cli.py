@@ -958,14 +958,33 @@ def cmd_push(args: argparse.Namespace) -> int:
 
 # ── lint ───────────────────────────────────────────────────────────────
 
+def _infer_equation_name(formula: str) -> str:
+    """Suggest equation name based on formula pattern."""
+    if "weight * (x_pre @ W)" in formula or "weight *(x_pre @ W)" in formula:
+        return "standard_synapse"
+    elif "output * (c * gain)" in formula:
+        return "multiplicative_modulation"
+    elif "output + (c * gain)" in formula:
+        return "additive_modulation"
+    elif "weight" in formula and "x_pre" in formula:
+        return "synapse_transmission"
+    else:
+        # Generate name based on first two operators/keywords
+        parts = re.findall(r'\b[a-z]\w*\b', formula.lower())
+        if len(parts) >= 2:
+            return "_".join(parts[:2])
+        return "custom_equation"
+
+
 def cmd_lint(args: argparse.Namespace) -> int:
     """Lint a .neuro file or architecture folder.
 
     With --autofix, automatically apply fixable diagnostics:
     - Extract repeated equations as definitions
     - Replace inline equations with @references to definitions
+    - Suggest moving declarations to appropriate files
 
-    Prompts for equation names when needed.
+    Iterates until all autofix-able issues are resolved.
     """
     from pathlib import Path
     from neuroslm.dsl.neuro_linter import NeuroLinter
@@ -978,102 +997,108 @@ def cmd_lint(args: argparse.Namespace) -> int:
 
     # Lint the file or architecture
     if path.is_dir() and (path / "arch.neuro").is_file():
-        linter = NeuroLinter(path / "arch.neuro")
+        linter_file = path / "arch.neuro"
     elif path.suffix == ".neuro":
-        linter = NeuroLinter(path)
+        linter_file = path
     else:
         print(f"[ERROR] Not a .neuro file or architecture directory: {args.path}", file=sys.stderr)
         return 1
 
-    diags = linter.lint()
+    total_fixes = 0
+    iteration = 0
+    max_iterations = 10  # Prevent infinite loops
 
-    if not diags:
-        print("[OK] No issues found")
-        return 0
+    # Iterate until no more fixes needed
+    while iteration < max_iterations:
+        iteration += 1
+        linter = NeuroLinter(linter_file)
+        diags = linter.lint()
 
-    print(f"[LINT] Found {len(diags)} issue(s):")
-    for d in diags:
-        severity = d.severity.value.upper()
-        print(f"  {severity} {d.file.name}:{d.line}:{d.col} [{d.code}] {d.message}")
+        if not diags:
+            print("[OK] No issues found")
+            break
 
-    if not args.autofix:
-        return 1 if any(d.severity.value == "error" for d in diags) else 0
+        if iteration == 1:  # Only print on first iteration
+            print(f"[LINT] Found {len(diags)} issue(s):")
+            for d in diags:
+                severity = d.severity.value.upper()
+                print(f"  {severity} {d.file.name}:{d.line}:{d.col} [{d.code}] {d.message}")
 
-    # Apply autofix for repeated equations
-    autofix_count = 0
-    for d in diags:
-        if d.code == "repeated-equation":
-            print(f"\n[AUTOFIX] {d.message}")
+        if not args.autofix:
+            return 1 if any(d.severity.value == "error" for d in diags) else 0
 
-            # Extract equation from file
-            with open(linter.file, 'r') as f:
-                content = f.read()
+        # Apply autofix for repeated equations
+        iteration_fixes = 0
+        for d in diags:
+            if d.code == "repeated-equation":
+                # Extract equation from file
+                with open(linter_file, 'r') as f:
+                    content = f.read()
 
-            # Extract equation formula from the diagnostic message
-            msg_match = re.search(r'formula: "([^"]*)"', d.message)
-            if not msg_match:
-                print(f"  [SKIP] Could not extract formula from message")
-                continue
+                # Extract equation formula from the diagnostic message
+                msg_match = re.search(r'formula: "([^"]*)"', d.message)
+                if not msg_match:
+                    continue
 
-            formula = msg_match.group(1)
+                formula = msg_match.group(1)
 
-            # Suggest equation name (from repeated pattern if possible)
-            if "weight * (x_pre @ W)" in formula:
-                suggested_name = "standard_synapse"
-            else:
-                suggested_name = "custom_equation"
+                # Check if equation definition already exists for this formula
+                if re.search(rf'formula: "{re.escape(formula)}"', content):
+                    # Infer name based on formula
+                    eq_name = _infer_equation_name(formula)
 
-            # Prompt for name if interactive
-            eq_name = suggested_name
-            if args.interactive:
-                try:
-                    user_input = input(f"  Equation name [{suggested_name}]: ").strip()
-                    if user_input:
-                        eq_name = user_input
-                except EOFError:
-                    pass
+                    # Check if this name already exists with different formula
+                    existing_match = re.search(rf'export equation {eq_name}\s*\{{\s*params:[^}}]*formula: "([^"]*)"', content)
+                    if existing_match and existing_match.group(1) != formula:
+                        # Name conflict - make it unique
+                        eq_name = f"{eq_name}_{len(set(re.findall(r'export equation (\w+)', content)))}"
 
-            # Extract parameters from formula
-            params = []
-            for param_match in re.finditer(r'\b([a-zA-Z_]\w*)\b', formula):
-                param = param_match.group(1)
-                builtins = {'ReLU', 'sigmoid', 'tanh', 'sin', 'cos', 'exp', 'log', 'sqrt',
-                           'matmul', 'x', 'y', 's', 'V', 'dt', 'pi', 'e', 'max', 'min'}
-                if param not in builtins and param not in params:
-                    params.append(param)
+                    # Skip if definition already exists
+                    if not re.search(rf'export equation {eq_name}\s*\{{\s*params:[^}}]*formula: "{re.escape(formula)}"', content):
+                        print(f"[AUTOFIX] Extract '{formula}' as '{eq_name}'")
 
-            # Create equation definition
-            eq_def = f"export equation {eq_name} {{\n    params: [{', '.join(params)}],\n    formula: \"{formula}\"\n}}\n"
+                        # Extract parameters
+                        params = []
+                        for param_match in re.finditer(r'\b([a-zA-Z_]\w*)\b', formula):
+                            param = param_match.group(1)
+                            builtins = {'ReLU', 'sigmoid', 'tanh', 'sin', 'cos', 'exp', 'log', 'sqrt',
+                                       'matmul', 'x', 'y', 's', 'V', 'dt', 'pi', 'e', 'max', 'min', 'output', 'c', 'gain', 'weight', 'x_pre', 'W'}
+                            if param not in builtins and param not in params:
+                                params.append(param)
 
-            # Insert at top of file
-            lines = content.split('\n')
-            insert_pos = 0
-            # Skip comments and imports at the top
-            for i, line in enumerate(lines):
-                if line.strip() and not line.strip().startswith('#'):
-                    if not line.strip().startswith('import'):
-                        insert_pos = i
-                        break
+                        # Create equation definition
+                        eq_def = f"export equation {eq_name} {{\n    params: [{', '.join(params)}],\n    formula: \"{formula}\"\n}}\n"
 
-            lines.insert(insert_pos, eq_def)
+                        # Insert at top of file (after imports and comments)
+                        lines = content.split('\n')
+                        insert_pos = 0
+                        for i, line in enumerate(lines):
+                            if line.strip() and not line.strip().startswith('#') and not line.strip().startswith('import') and not line.strip().startswith('export equation'):
+                                insert_pos = i
+                                break
 
-            # Replace all inline equations with @references
-            new_content = '\n'.join(lines)
-            new_content = re.sub(
-                f'equation: "{re.escape(formula)}"',
-                f'equation: @{eq_name}',
-                new_content
-            )
+                        lines.insert(insert_pos, eq_def)
+                        new_content = '\n'.join(lines)
 
-            # Write back
-            with open(linter.file, 'w') as f:
-                f.write(new_content)
+                        # Replace all inline equations with @references
+                        new_content = re.sub(
+                            f'equation: "{re.escape(formula)}"',
+                            f'equation: @{eq_name}',
+                            new_content
+                        )
 
-            autofix_count += 1
-            print(f"  [OK] Extracted '{eq_name}' and replaced references")
+                        # Write back
+                        with open(linter_file, 'w') as f:
+                            f.write(new_content)
 
-    if autofix_count > 0:
-        print(f"\n[AUTOFIX] Applied {autofix_count} fix(es)")
+                        iteration_fixes += 1
+                        total_fixes += 1
+
+        if iteration_fixes == 0:
+            break  # No more fixes in this iteration
+
+    if total_fixes > 0:
+        print(f"\n[AUTOFIX] Total: {total_fixes} fix(es) applied ({iteration} iteration(s))")
 
     return 0
 

@@ -102,6 +102,7 @@ class NeuroLinter:
             self._extract_declarations()
             self._check_references()
             self._check_equations()
+            self._check_architecture_organization()
 
         return self.diagnostics
 
@@ -367,6 +368,65 @@ class NeuroLinter:
                     f"Equation appears {len(occurrences)} times. Consider extracting as a definition: "
                     f'equation name {{ params: [...], formula: "{equation}" }}'
                 )
+
+    def _check_architecture_organization(self):
+        """Check for declarations that should be moved to lib files."""
+        # Only check if this is arch.neuro (root architecture file)
+        if self.file.name != "arch.neuro":
+            return
+
+        equation_count = 0
+        synapse_count = 0
+        first_equation_line = None
+        first_synapse_line = None
+
+        for line_no, line in enumerate(self.lines, 1):
+            stripped = line.strip()
+
+            if not stripped or stripped.startswith('#'):
+                continue
+
+            # Count equation definitions
+            if re.match(r'\b(export\s+)?equation\s+\w+\s*\{', stripped):
+                equation_count += 1
+                if first_equation_line is None:
+                    first_equation_line = line_no
+
+            # Count synapse declarations
+            if re.match(r'\b(export\s+)?synapse\s+', stripped):
+                synapse_count += 1
+                if first_synapse_line is None:
+                    first_synapse_line = line_no
+
+        # Warn once if equations should be extracted
+        if equation_count >= 3:
+            self._info(
+                first_equation_line or 1, 0, "arch-move-equations",
+                f"arch.neuro has {equation_count} equation definitions. "
+                "Consider moving to lib/equations.neuro for better organization."
+            )
+
+        # Warn once if synapses should be extracted
+        if synapse_count > 5:
+            self._info(
+                first_synapse_line or 1, 0, "arch-too-many-synapses",
+                f"arch.neuro has {synapse_count}+ synapse declarations. "
+                "Consider moving to lib/synapses.neuro and importing them."
+            )
+
+        # Check for large neurotransmitter definitions
+        nt_matches = re.findall(r'\bneurotransmitter\s+\w+', self.source)
+        if len(nt_matches) >= 5:
+            first_nt = None
+            for line_no, line in enumerate(self.lines, 1):
+                if re.search(r'\bneurotransmitter\s+\w+', line):
+                    first_nt = line_no
+                    break
+            self._info(
+                first_nt or 1, 0, "arch-many-nts",
+                f"arch.neuro has {len(nt_matches)} neurotransmitter definitions. "
+                "Consider moving to lib/neurotransmitters.neuro."
+            )
 
     def _check_equation_vars(self, equation: str, line_no: int, col: int):
         """Check that variables in equation are defined."""
