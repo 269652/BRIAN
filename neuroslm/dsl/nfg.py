@@ -23,7 +23,59 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 
-# ── 0. IR data classes (lightweight projection of compiler.ProgramIR) ─
+# ── 0a. Locked rendering spec ─────────────────────────────────────────
+# NFGRenderSpec captures every visual grammar constant that was converged
+# on over the v35-v37 iteration cycle. Passing a spec to render_nfg()
+# guarantees a stable, reproducible "house render" for any preset that
+# inherits from rcc_bowtie.
+#
+# To create a variant: dataclasses.replace(RCC_BOWTIE_SPEC, mod_top_k=3)
+# To freeze a new preset:  save as a module-level constant below.
+
+@dataclass(frozen=True)
+class NFGRenderSpec:
+    # ── Envelope grammar ─────────────────────────────────────────────
+    envelope_pad:         float = 0.78    # horizontal padding around member nodes
+    envelope_pad_v_frac:  float = 0.68    # vertical pad = pad * this fraction
+    envelope_rounding:    float = 0.55    # corner rounding (data units, uniform)
+    envelope_border_lw:   float = 1.3     # border linewidth (uniform)
+    envelope_dash:        tuple = (0, (5, 3))  # dash pattern (uniform)
+    envelope_fill_alpha:  float = 0.22    # fill alpha (uniform)
+    envelope_label_fs:    float = 8.0     # label fontsize (uniform)
+    # ── Modulation rendering ─────────────────────────────────────────
+    mod_top_k:            int   = 2       # full-prominence edges per target
+    mod_primary_alpha:    float = 0.58    # branch alpha for primary arcs
+    mod_demoted_alpha:    float = 0.22    # stub alpha for demoted arcs
+    mod_demoted_reach:    float = 0.18    # stub length as fraction of edge length
+    mod_rail_frac:        float = 0.40    # rail = this fraction toward centroid
+    # ── Synapse rendering ─────────────────────────────────────────────
+    syn_forward_lw_scale: float = 2.4     # lw = max(1.1, weight * this)
+    syn_feedback_lw_scale:float = 2.0
+    syn_hub_min_indeg:    int   = 3       # port-order hub threshold
+    syn_port_spread:      float = 0.60    # port arc spread: [-spread/2, +spread/2]
+    # ── Edge label suppression in dense trunk zone ───────────────────
+    # Edge weight labels are suppressed when BOTH endpoints are within
+    # trunk_label_zone_x of each other AND their midpoint y is within
+    # trunk_label_zone_y of 0 (the spine y).  This declutters
+    # thalamus/GWS/PFC without removing labels on peripheral edges.
+    trunk_label_zone_x:   float = 4.0    # half-width of suppression zone (x)
+    trunk_label_zone_y:   float = 1.2    # half-height of suppression zone (y)
+    # ── Spine band ───────────────────────────────────────────────────
+    spine_band_alpha:     float = 0.55
+    spine_band_color:     str   = "#fef9e7"
+    # ── Node sizes ───────────────────────────────────────────────────
+    node_base_size:       int   = 1800
+    node_fan_scale:       int   = 220    # size += fan_scale * min(fan,10)
+    node_alpha:           float = 0.90
+    # ── Figure ───────────────────────────────────────────────────────
+    figsize:              tuple = (26, 16)
+
+
+# The canonical locked spec for the rcc_bowtie preset family (v37 baseline).
+RCC_BOWTIE_SPEC = NFGRenderSpec()
+
+
+# ── 0b. IR data classes (lightweight projection of compiler.ProgramIR) ─
 
 @dataclass
 class NFGNode:
@@ -330,26 +382,26 @@ _NT_ABBREV = {
 # house layout regardless of graph-force relaxation.
 _PRESET_TEMPLATES: Dict[str, Dict[str, Tuple[float, float]]] = {
     "rcc_bowtie": {
-        # ── main spine (y=0) ──────────────────────────────────────────
-        "sensory":     (-7.0,  0.0), "association":  (-5.5,  0.0),
-        "thalamus":    (-3.5,  0.0), "gws":          (-1.0,  0.0),
-        "pfc":         ( 1.5,  0.0), "bg":           ( 4.0,  0.0),
-        "motor":       ( 6.5,  0.0),
+        # ── main spine (y=0) — wider spacing to reduce trunk crowding ─
+        "sensory":     (-8.0,  0.0), "association":  (-6.2,  0.0),
+        "thalamus":    (-4.2,  0.0), "gws":          (-1.4,  0.0),
+        "pfc":         ( 1.6,  0.0), "bg":           ( 4.4,  0.0),
+        "motor":       ( 7.2,  0.0),
         # ── upper cortical/cognitive loop ─────────────────────────────
-        "acc":              ( 1.5,  2.2), "dmn":           (-1.0,  2.7),
-        "claustrum":        ( 0.2,  2.2),
-        "thought_transformer": ( 0.8,  2.8),
-        "reasoning_cortex": ( 3.0,  2.2), "language_cortex": ( 5.5,  2.8),
-        "math_cortex":      ( 4.0,  2.8),
+        "acc":              ( 1.6,  2.4), "dmn":           (-1.4,  2.9),
+        "claustrum":        ( 0.2,  2.4),
+        "thought_transformer": ( 0.8,  3.0),
+        "reasoning_cortex": ( 3.2,  2.4), "language_cortex": ( 6.0,  3.0),
+        "math_cortex":      ( 4.6,  3.0),
         # ── memory cluster ────────────────────────────────────────────
-        "hippo":       ( 0.5, -2.2), "entorhinal":   (-0.5, -2.2),
-        "cerebellum":  ( 3.0, -2.8),
+        "hippo":       ( 0.5, -2.4), "entorhinal":   (-0.7, -2.4),
+        "cerebellum":  ( 3.4, -3.0),
         # ── self / world / predictive-control cluster ─────────────────
-        "world":       (-3.5,  2.5), "self_m":       (-3.5, -2.7),
-        "qualia":      (-1.0, -2.7), "neural_geometry": (-2.0,  2.7),
-        "forward_m":   ( 4.0, -2.2), "evaluator":    ( 5.5, -2.2),
+        "world":       (-4.2,  2.8), "self_m":       (-4.2, -3.0),
+        "qualia":      (-1.4, -2.9), "neural_geometry": (-2.4,  2.9),
+        "forward_m":   ( 4.4, -2.4), "evaluator":    ( 6.0, -2.4),
         # ── subcortical / interoceptive ───────────────────────────────
-        "amygdala":    (-5.5, -2.2), "insula":       (-7.0, -2.2),
+        "amygdala":    (-6.2, -2.4), "insula":       (-8.0, -2.4),
     },
 }
 
@@ -712,40 +764,54 @@ def _phase_gate_curve(center: float, width: float, n: int = 50):
 
 
 def _draw_subsystem_envelopes(ax, pos: Dict[str, Tuple[float, float]],
-                               pad: float = 0.72) -> None:
-    """Draw faint dashed rounded-rect envelopes around subsystem clusters.
+                               pad: float = 0.78,
+                               spec: Optional["NFGRenderSpec"] = None) -> None:
+    """Draw uniform dashed rounded-rect envelopes around subsystem clusters.
 
-    Envelopes are drawn at zorder=0 (behind everything) so they frame
-    the node circles without obscuring them.  Each group in
-    _SUBSYSTEM_ENVELOPES is shown only when ≥2 of its members have
-    known positions.
+    Visual grammar rules are driven by NFGRenderSpec so every envelope is
+    guaranteed identical styling. Shown only when ≥2 members have positions.
     """
     import matplotlib.patches as mpatches
+    rs = spec if spec is not None else RCC_BOWTIE_SPEC
+    _pad      = rs.envelope_pad
+    _pad_v    = rs.envelope_pad * rs.envelope_pad_v_frac
+    ROUNDING  = rs.envelope_rounding
+    BORDER_LW = rs.envelope_border_lw
+    DASH      = rs.envelope_dash
+    FILL_A    = rs.envelope_fill_alpha
+    LABEL_FS  = rs.envelope_label_fs
+
     for label, members, fc, ec in _SUBSYSTEM_ENVELOPES:
         pts = [pos[m] for m in members if m in pos]
         if len(pts) < 2:
             continue
         xs = [p[0] for p in pts]
         ys = [p[1] for p in pts]
-        xmin, xmax = min(xs) - pad, max(xs) + pad
-        ymin, ymax = min(ys) - pad * 0.72, max(ys) + pad * 0.72
+        xmin, xmax = min(xs) - _pad, max(xs) + _pad
+        ymin, ymax = min(ys) - _pad_v, max(ys) + _pad_v
         ax.add_patch(mpatches.FancyBboxPatch(
             (xmin, ymin), xmax - xmin, ymax - ymin,
-            boxstyle="round,pad=0.05,rounding_size=0.45",
-            linewidth=1.0, linestyle=(0, (4, 3)),
+            boxstyle=f"round,pad=0.05,rounding_size={ROUNDING}",
+            linewidth=BORDER_LW, linestyle=DASH,
             edgecolor=ec, facecolor=fc,
-            alpha=0.20, zorder=0))
-        ax.text(xmin + 0.14, ymax - 0.10, label,
+            alpha=FILL_A, zorder=0))
+        ax.text(xmin + 0.18, ymax - 0.08,
+                label,
                 ha="left", va="top",
-                fontsize=6.5, color=ec, style="italic",
-                alpha=0.80, zorder=1)
+                fontsize=LABEL_FS, fontweight="bold", color=ec,
+                alpha=0.95, zorder=2,
+                bbox=dict(boxstyle="round,pad=0.15", fc="white",
+                          ec=ec, lw=0.8, alpha=0.85))
 
 
 def _draw_main_graph(ax, g: "NeuralFlowGraph",
-                     show_weights: bool, show_equations: bool):
+                     show_weights: bool, show_equations: bool,
+                     spec: Optional["NFGRenderSpec"] = None):
     """Render the brain region graph onto the supplied Axes."""
     import matplotlib.patches as mpatches
     from matplotlib.patches import FancyArrowPatch
+
+    rs = spec if spec is not None else RCC_BOWTIE_SPEC
 
     pos = _neuroanatomical_layout(g)
     if not pos:
@@ -767,7 +833,8 @@ def _draw_main_graph(ax, g: "NeuralFlowGraph",
         ax.add_patch(_mp.FancyBboxPatch(
             (xmin, ymin), xmax - xmin, ymax - ymin,
             boxstyle="round,pad=0.10,rounding_size=0.5",
-            linewidth=0, facecolor="#fef9e7", alpha=0.55, zorder=0))
+            linewidth=0, facecolor=rs.spine_band_color,
+            alpha=rs.spine_band_alpha, zorder=0))
         ax.text((xmin + xmax) / 2, ymax + 0.05,
                 "input → integration → control → action",
                 ha="center", va="bottom",
@@ -775,7 +842,7 @@ def _draw_main_graph(ax, g: "NeuralFlowGraph",
                 zorder=1)
 
     # Subsystem envelopes — drawn before nodes so they sit in the background
-    _draw_subsystem_envelopes(ax, pos)
+    _draw_subsystem_envelopes(ax, pos, spec=rs)
 
     fan: Dict[str, int] = {}
     for e in g.edges:
@@ -823,7 +890,7 @@ def _draw_main_graph(ax, g: "NeuralFlowGraph",
         region = _REGION_OF.get(node.name, "world")
         color = _REGION_COLORS[region]
         f = fan.get(node.name, 0)
-        size = 1800 + 220 * min(f, 10)
+        size = rs.node_base_size + rs.node_fan_scale * min(f, 10)
         edge_c = "#2c3e50"
         edge_lw = 1.8
         if node.name in bio_set:
@@ -831,7 +898,7 @@ def _draw_main_graph(ax, g: "NeuralFlowGraph",
         elif node.name in trunk_set:
             edge_c, edge_lw = "#1f618d", 2.2   # trunk → deep blue border
         ax.scatter([x], [y], s=size, c=color, edgecolors=edge_c,
-                   linewidths=edge_lw, zorder=3, alpha=0.9)
+                   linewidths=edge_lw, zorder=3, alpha=rs.node_alpha)
         ax.text(x, y, node.name, ha="center", va="center", fontsize=8.5,
                 fontweight="bold", color="white", zorder=4)
         # Annotation pill: op + count/dim
@@ -859,19 +926,27 @@ def _draw_main_graph(ax, g: "NeuralFlowGraph",
         ax.text(x, y, abbrev, ha="center", va="center", fontsize=8,
                 fontweight="bold", color="#5d4501", zorder=4)
 
-    # Layout pass 3: identify hubs (in-degree >= 4) so we can give them
-    # ordered entry ports — each incoming edge enters from a distinct
-    # angle, reducing tangling at GWS / PFC.
+    # Port ordering for trunk hubs (thalamus, GWS, PFC, and any hub with
+    # in-degree >= 3). Edges are sorted so that sources to the LEFT of the
+    # hub enter from the left arc and sources to the RIGHT enter from the
+    # right arc. This eliminates most left-right crossings at trunk nodes.
     in_deg: Dict[str, int] = {}
     for e in g.edges:
         if e.kind == "synapse":
             in_deg[e.tgt] = in_deg.get(e.tgt, 0) + 1
-    hub_set = {n for n, d in in_deg.items() if d >= 4}
-    # Compute per-hub ordering: stable angle for each incoming source
+    hub_set = {n for n, d in in_deg.items() if d >= rs.syn_hub_min_indeg}
+    # Compute per-hub ordering: sort sources by their x-position so the
+    # leftmost source gets the most-negative curvature and the rightmost
+    # gets the most-positive — edges "spread out" symmetrically rather than
+    # all bunching into the same arc.
     hub_ports: Dict[Tuple[str, str], int] = {}
     for hub in hub_set:
-        sources = sorted({e.src for e in g.edges
-                          if e.kind == "synapse" and e.tgt == hub})
+        if hub not in pos:
+            continue
+        hx = pos[hub][0]
+        sources = sorted(
+            {e.src for e in g.edges if e.kind == "synapse" and e.tgt == hub},
+            key=lambda s: pos.get(s, (0.0, 0.0))[0] - hx)
         for i, src in enumerate(sources):
             hub_ports[(src, hub)] = i
 
@@ -898,8 +973,8 @@ def _draw_main_graph(ax, g: "NeuralFlowGraph",
             if e.tgt in hub_set and (e.src, e.tgt) in hub_ports:
                 n_in = max(1, in_deg[e.tgt])
                 port = hub_ports[(e.src, e.tgt)]
-                # Spread ports symmetrically in [-0.30, +0.30]
-                rad = -0.30 + 0.60 * port / max(1, n_in - 1)
+                half = rs.syn_port_spread / 2
+                rad = -half + rs.syn_port_spread * port / max(1, n_in - 1)
             else:
                 rad = 0.10 if (hash(e.src + e.tgt) & 1) else -0.10
             alpha = 0.92
@@ -911,61 +986,105 @@ def _draw_main_graph(ax, g: "NeuralFlowGraph",
             shrinkA=22, shrinkB=22,
             zorder=4 if (not is_cycle) else 3)
         ax.add_patch(arrow)
-        # Edge label: weight + NT abbrev
+        # Edge label: weight + NT abbrev.
+        # Suppressed when both endpoints are inside the dense trunk zone
+        # (midpoint within trunk_label_zone_x of center AND near y=0)
+        # to reduce label competition around thalamus/GWS/PFC.
         if show_weights:
             mx, my = (x0 + x1) / 2, (y0 + y1) / 2
-            label_bits = [f"w={e.weight:.2f}"]
-            if e.nt:
-                label_bits.append(_NT_ABBREV.get(e.nt, e.nt))
-            txt = " ".join(label_bits)
-            ax.text(mx, my + (0.18 if rad >= 0 else -0.18),
-                    txt, ha="center", va="center", fontsize=5.5,
-                    color=color, zorder=4,
-                    bbox=dict(boxstyle="round,pad=0.10", fc="white",
-                              ec="none", alpha=0.85))
+            in_trunk_zone = (
+                abs(mx) < rs.trunk_label_zone_x
+                and abs(my) < rs.trunk_label_zone_y
+            )
+            if not in_trunk_zone:
+                label_bits = [f"w={e.weight:.2f}"]
+                if e.nt:
+                    label_bits.append(_NT_ABBREV.get(e.nt, e.nt))
+                txt = " ".join(label_bits)
+                ax.text(mx, my + (0.18 if rad >= 0 else -0.18),
+                        txt, ha="center", va="center", fontsize=5.5,
+                        color=color, zorder=4,
+                        bbox=dict(boxstyle="round,pad=0.10", fc="white",
+                                  ec="none", alpha=0.85))
 
-    # Modulations — bundled per NT source so each NT's fan reads as a
-    # coherent lane rather than a diffuse mesh. For each (NT_src, target)
-    # we draw a two-segment curve that passes through a per-NT "rail
-    # point" placed just outside the NT diamond, so all edges from the
-    # same NT share a visual departure stub.
-    # Group modulation edges by source NT to compute their rail point.
+    # Modulations — selective prominence rendering.
+    #
+    # Rule: for each target population, only the top-K incoming modulation
+    # edges (ranked by |weight|) are drawn with full prominence (solid stem
+    # + curved branch). The rest are drawn as a single faint short stub
+    # directly from the NT diamond toward the target — visually present but
+    # not competing for attention.
+    #
+    # This keeps the diagram semantically complete while avoiding the
+    # "red canopy" look that comes from every long-range arc rising to the
+    # same ceiling height simultaneously.
+    MOD_TOP_K = rs.mod_top_k
+
     nt_outgoing: Dict[str, list] = {}
     for e in g.edges:
         if e.kind == "modulation" and e.src in pos and e.tgt in pos:
             nt_outgoing.setdefault(e.src, []).append(e)
 
+    # Rank by weight per target to decide which edges are "primary"
+    tgt_edges: Dict[str, list] = {}
+    for edges in nt_outgoing.values():
+        for e in edges:
+            tgt_edges.setdefault(e.tgt, []).append(e)
+    primary_edges: set = set()
+    for tgt, edges in tgt_edges.items():
+        top = sorted(edges, key=lambda e: abs(e.weight), reverse=True)[:MOD_TOP_K]
+        for e in top:
+            primary_edges.add(id(e))
+
     for nt_name, edges in nt_outgoing.items():
         nx, ny = pos[nt_name]
-        # Rail point: small offset toward the centroid of all targets,
-        # gives the fan a clear "stem" before splaying out.
-        tx = sum(pos[e.tgt][0] for e in edges) / len(edges)
-        ty = sum(pos[e.tgt][1] for e in edges) / len(edges)
+        # Rail: offset toward centroid of PRIMARY targets only (reduces
+        # the rail being pulled toward a distant outlier).
+        primary = [e for e in edges if id(e) in primary_edges]
+        ref_edges = primary if primary else edges
+        tx = sum(pos[e.tgt][0] for e in ref_edges) / len(ref_edges)
+        ty = sum(pos[e.tgt][1] for e in ref_edges) / len(ref_edges)
         dx, dy = tx - nx, ty - ny
         d = (dx * dx + dy * dy) ** 0.5 or 1.0
-        rail = (nx + 0.45 * dx / d, ny + 0.45 * dy / d)
+        # Rail: 40% of the way toward primary-target centroid
+        rail = (nx + rs.mod_rail_frac * dx / d, ny + rs.mod_rail_frac * dy / d)
+
         for e in edges:
             x1, y1 = pos[e.tgt]
             color = "#c0392b" if e.effect == "multiplicative" else "#2874a6"
-            # Stem: NT diamond → rail point (always straight, no arrow)
-            stem = FancyArrowPatch(
-                (nx, ny), rail,
-                arrowstyle="-",
-                color=color, lw=0.9, alpha=0.55,
-                linestyle=(0, (3, 2)),
-                connectionstyle="arc3,rad=0",
-                shrinkA=14, shrinkB=0, zorder=1)
-            ax.add_patch(stem)
-            # Branch: rail → target (curved + arrow)
-            rad = 0.18 if (hash(e.src + e.tgt) & 1) else -0.18
-            branch = FancyArrowPatch(
-                rail, (x1, y1),
-                arrowstyle="-|>", mutation_scale=10,
-                color=color, lw=0.9, alpha=0.62,
-                linestyle=(0, (3, 2)),
-                connectionstyle=f"arc3,rad={rad}",
-                shrinkA=0, shrinkB=22, zorder=1)
-            ax.add_patch(branch)
+            is_primary = id(e) in primary_edges
+
+            if is_primary:
+                # Full prominence: shared stem → curved branch
+                stem = FancyArrowPatch(
+                    (nx, ny), rail,
+                    arrowstyle="-",
+                    color=color, lw=0.9, alpha=0.50,
+                    linestyle=(0, (3, 2)),
+                    connectionstyle="arc3,rad=0",
+                    shrinkA=14, shrinkB=0, zorder=1)
+                ax.add_patch(stem)
+                rad = 0.15 if (hash(e.src + e.tgt) & 1) else -0.15
+                branch = FancyArrowPatch(
+                    rail, (x1, y1),
+                    arrowstyle="-|>", mutation_scale=10,
+                    color=color, lw=0.9, alpha=rs.mod_primary_alpha,
+                    linestyle=(0, (3, 2)),
+                    connectionstyle=f"arc3,rad={rad}",
+                    shrinkA=0, shrinkB=22, zorder=1)
+                ax.add_patch(branch)
+            else:
+                # Demoted: single faint short stub pointing toward target
+                mx = nx + rs.mod_demoted_reach * (x1 - nx) / max(d, 0.1)
+                my = ny + rs.mod_demoted_reach * (y1 - ny) / max(d, 0.1)
+                stub = FancyArrowPatch(
+                    (nx, ny), (mx, my),
+                    arrowstyle="-|>", mutation_scale=7,
+                    color=color, lw=0.55, alpha=rs.mod_demoted_alpha,
+                    linestyle=(0, (2, 3)),
+                    connectionstyle="arc3,rad=0",
+                    shrinkA=14, shrinkB=0, zorder=1)
+                ax.add_patch(stub)
 
     # Legends inside the main axis (compact)
     region_handles = [mpatches.Patch(color=col, label=name)
@@ -1140,6 +1259,7 @@ def render_nfg(g: NeuralFlowGraph, output_path: str,
                layout: str = "neuroanatomical",
                show_weights: bool = True,
                show_equations: bool = False,
+               spec: Optional[NFGRenderSpec] = None,
                **_ignored) -> None:
     """Render the NFG to PNG with the full sidebar of architecture metadata.
 
@@ -1150,11 +1270,15 @@ def render_nfg(g: NeuralFlowGraph, output_path: str,
         show_weights:   annotate each synapse with its weight + NT abbrev
         show_equations: show the per-synapse `y = ...` equation on the edge
                         label (default off — usually identical y = w·(x@W))
+        spec:           NFGRenderSpec controlling every visual grammar constant.
+                        Defaults to RCC_BOWTIE_SPEC (the v37 locked baseline).
     """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.gridspec import GridSpec
+
+    rs = spec if spec is not None else RCC_BOWTIE_SPEC
 
     # Try to load the training config + architecture for the sidebar
     arch_root = _inferred_arch_root(g)
@@ -1165,7 +1289,7 @@ def render_nfg(g: NeuralFlowGraph, output_path: str,
     except Exception:
         tc = None
 
-    fig = plt.figure(figsize=figsize, facecolor="#fafbfc")
+    fig = plt.figure(figsize=rs.figsize, facecolor="#fafbfc")
     # 3 columns: main graph (wide) | meta+train+mech | nt+pass+formal
     gs = GridSpec(
         nrows=8, ncols=3,
@@ -1206,7 +1330,8 @@ def render_nfg(g: NeuralFlowGraph, output_path: str,
     main_ax.set_facecolor("#fafbfc")
     _draw_main_graph(main_ax, g,
                      show_weights=show_weights,
-                     show_equations=show_equations)
+                     show_equations=show_equations,
+                     spec=rs)
 
     # ── Sidebar column 1 (meta / training / mechanisms) ──
     # [row 1]: meta panel
