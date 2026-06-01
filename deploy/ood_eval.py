@@ -1,8 +1,11 @@
 """Direct OOD eval deploy — bypasses bash for Windows speed.
 
+Invoked indirectly by `brian eval ood [<ckpt> | --latest]`. Can also be
+run standalone:
+
 Usage:
-    python _deploy_ood.py                                  # last DSL ckpt
-    CKPT=lfs_checkpoints/dsl_arch_step9000.pt ROLE_TAG=foo python _deploy_ood.py
+    python deploy/ood_eval.py                                # last DSL ckpt
+    CKPT=lfs_checkpoints/dsl_arch_step9000.pt python deploy/ood_eval.py
     ARGV: optional positional checkpoint path (overrides CKPT env var).
 
 Reads checkpoint path from (priority):
@@ -128,20 +131,30 @@ def vastai(*args, capture=False):
 print("setting api key...")
 vastai("set", "api-key", VAST_API_KEY)
 
-# Search offers
-print("searching offers...")
+# Search offers — restrict to known-good A100 SXM4 only.
+# PCIE A100s + cheap MIG slices had "loading" hangs (no container after
+# 30 min) on offer 38965155, which had to be destroyed manually.
+print("searching offers (A100_SXM4 only, reliability>0.995, min 40GB)...")
 offers_text, rc = vastai(
     "search", "offers",
-    "gpu_name in [A100_SXM4,A100_PCIE,A100_SXM,A100X] num_gpus=1 "
-    "rentable=true verified=true reliability>0.99 disk_space>=60",
+    "gpu_name=A100_SXM4 num_gpus=1 rentable=true verified=true "
+    "reliability>0.995 disk_space>=60 inet_down>=200",
     "-o", "dph+", "--raw", capture=True)
 # Strip any banner before the JSON
 start = offers_text.find("[")
 offers = json.loads(offers_text[start:]) if start >= 0 else []
+# Post-filter by GPU RAM (in MB). 5% margin so 40 GB cards reporting
+# ~40537 MB qualify; rejects 16-20 GB MIG slices that look like A100s.
+MIN_GPU_MB = int(40 * 1024 * 0.95)
+before = len(offers)
+offers = [o for o in offers if (o.get("gpu_ram") or 0) >= MIN_GPU_MB]
+if before > len(offers):
+    print(f"  filtered {before - len(offers)}/{before} offers by gpu_ram>={MIN_GPU_MB} MB")
 if not offers:
-    print("no offers!"); sys.exit(1)
+    print("no offers matching SXM4 + reliability + 40GB filter!"); sys.exit(1)
 offer_id = offers[0]["id"]
-print(f"picked offer {offer_id} (${offers[0]['dph_total']}/hr, {offers[0]['gpu_name']})")
+print(f"picked offer {offer_id} (${offers[0]['dph_total']}/hr, "
+      f"{offers[0]['gpu_name']}, {offers[0].get('gpu_ram','?')} MB)")
 
 # Create the instance
 print("creating instance...")

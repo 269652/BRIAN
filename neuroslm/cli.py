@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+    # -*- coding: utf-8 -*-
 """brian — unified CLI for the NeuroSLM / BRIAN project.
 
 One entry point for the operations you actually do day-to-day:
@@ -764,13 +764,17 @@ def _eval_ood(args: argparse.Namespace) -> int:
     })
     if args.windows:
         env["MAX_OOD_WINDOWS"] = str(args.windows)
-    # Python-based deploy (mirrors _deploy_train.py) — bypasses the bash
-    # script which can stall for minutes on Windows due to vastai-import
-    # detection + pip-install in the wrong python. The Python deploy uses
-    # the .venv-2/Scripts/vastai.exe directly and returns within seconds.
-    deploy_py = REPO_ROOT / "_deploy_ood.py"
+    # Python-based deploy (mirrors deploy/train_dsl.py) — bypasses the
+    # bash script which can stall for minutes on Windows due to
+    # vastai-import detection + pip-install in the wrong python.
+    deploy_py = REPO_ROOT / "deploy" / "ood_eval.py"
     if not deploy_py.is_file():
-        return _run([_bash(), "scripts/vast_ood_eval.sh"], env=env)
+        # Legacy fallback for older clones
+        legacy = REPO_ROOT / "_deploy_ood.py"
+        if legacy.is_file():
+            deploy_py = legacy
+        else:
+            return _run([_bash(), "scripts/vast_ood_eval.sh"], env=env)
     return _run([sys.executable, str(deploy_py), ckpt_path], env=env)
 
 
@@ -813,7 +817,22 @@ def cmd_ai(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
     instructions = REPO_ROOT / _AGENT_SKILLS_DIR / skill_name / "INSTRUCTIONS.md"
-    prompt_text = instructions.read_text(encoding="utf-8")
+    body = instructions.read_text(encoding="utf-8")
+    # Without an explicit imperative wrapper, `claude -p <long-markdown>`
+    # treats the markdown as descriptive context and responds with a
+    # conversational greeting ("What would you like me to do?"). Wrap
+    # the skill body so claude knows to EXECUTE it rather than DISCUSS it.
+    prompt_text = (
+        f"Execute the following skill from "
+        f"{instructions.relative_to(REPO_ROOT)} now. "
+        f"Start working immediately, do not ask for confirmation, do not "
+        f"summarise the skill back to me — perform the file edits the "
+        f"skill describes. When the skill instructs you to stop, stop and "
+        f"print the summary block.\n\n"
+        f"--- SKILL: {skill_name} ---\n\n"
+        f"{body}\n\n"
+        f"--- BEGIN NOW ---"
+    )
     print(f"=== brian ai {skill_name} — invoking claude ===")
     print(f"  skill:   {instructions.relative_to(REPO_ROOT)}")
     print(f"  repo:    {REPO_ROOT}")
