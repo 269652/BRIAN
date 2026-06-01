@@ -18,6 +18,7 @@ from neuroslm.harness import BRIANHarness
 
 
 class TestDSLLMLearnsContext:
+    @pytest.mark.slow
     def test_copy_previous_token_task(self):
         torch.manual_seed(0)
         vocab, D = 32, 64
@@ -48,6 +49,7 @@ class TestDSLLMLearnsContext:
         assert final < random_floor * 0.5, \
             f"final loss {final:.3f} not below half the random floor {random_floor:.3f}"
 
+    @pytest.mark.slow
     def test_per_token_baseline_cannot_learn_context(self):
         # Sanity: on the same task, a model with NO context (shuffling the
         # time dimension so position t can't see t-1) must stay near floor.
