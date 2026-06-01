@@ -1,0 +1,281 @@
+{
+  "scopeName": "source.neuro",
+  "fileTypes": ["neuro"],
+  "name": "NeuroSLM DSL",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#architecture" },
+    { "include": "#neurotransmitter" },
+    { "include": "#population" },
+    { "include": "#synapse" },
+    { "include": "#import" },
+    { "include": "#export" },
+    { "include": "#training" },
+    { "include": "#mechanism" },
+    { "include": "#dynamics" },
+    { "include": "#function" },
+    { "include": "#assignment" },
+    { "include": "#equation" },
+    { "include": "#string" },
+    { "include": "#number" },
+    { "include": "#operator" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.neuro",
+      "match": "#.*$"
+    },
+    "architecture": {
+      "name": "meta.architecture.neuro",
+      "begin": "\\b(architecture)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.neuro" },
+        "2": { "name": "entity.name.type.neuro" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.brace.neuro" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#architecture-field" }
+      ]
+    },
+    "architecture-field": {
+      "name": "meta.field.neuro",
+      "match": "([a-zA-Z_][a-zA-Z0-9_]*)\\s*:\\s*([^,}]+)",
+      "captures": {
+        "1": { "name": "variable.other.property.neuro" },
+        "2": { "name": "constant.numeric.neuro" }
+      }
+    },
+    "neurotransmitter": {
+      "name": "meta.neurotransmitter.neuro",
+      "begin": "\\b(neurotransmitter)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.neuro" },
+        "2": { "name": "entity.name.type.neuro" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.brace.neuro" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#architecture-field" }
+      ]
+    },
+    "population": {
+      "name": "meta.population.neuro",
+      "begin": "\\b(export\\s+)?(population)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.neuro" },
+        "2": { "name": "keyword.control.neuro" },
+        "3": { "name": "entity.name.type.neuro" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.brace.neuro" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#population-field" }
+      ]
+    },
+    "population-field": {
+      "patterns": [
+        {
+          "name": "meta.dynamics.neuro",
+          "match": "\\b(dynamics|equation|ode|count|timescale|capacity)\\s*:\\s*([^,}]+)",
+          "captures": {
+            "1": { "name": "variable.other.property.neuro" },
+            "2": { "name": "string.other.neuro" }
+          }
+        }
+      ]
+    },
+    "synapse": {
+      "name": "meta.synapse.neuro",
+      "begin": "\\b(synapse)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*->\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.neuro" },
+        "2": { "name": "entity.name.type.neuro" },
+        "3": { "name": "entity.name.type.neuro" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.brace.neuro" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#synapse-field" }
+      ]
+    },
+    "synapse-field": {
+      "patterns": [
+        {
+          "name": "meta.synapse-property.neuro",
+          "match": "\\b(weight|equation|neurotransmitter|strength)\\s*:\\s*([^,}]+)",
+          "captures": {
+            "1": { "name": "variable.other.property.neuro" },
+            "2": { "name": "string.other.neuro" }
+          }
+        }
+      ]
+    },
+    "training": {
+      "name": "meta.training.neuro",
+      "begin": "\\b(training)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.neuro" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.brace.neuro" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#training-field" }
+      ]
+    },
+    "training-field": {
+      "patterns": [
+        {
+          "match": "([a-zA-Z_][a-zA-Z0-9_]*)\\s*:\\s*([^,}]+)",
+          "captures": {
+            "1": { "name": "variable.other.property.neuro" },
+            "2": { "name": "string.other.neuro" }
+          }
+        }
+      ]
+    },
+    "mechanism": {
+      "name": "meta.mechanism.neuro",
+      "begin": "\\b(mechanisms?)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.neuro" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.brace.neuro" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#training-field" }
+      ]
+    },
+    "dynamics": {
+      "name": "meta.dynamics.neuro",
+      "begin": "\\b(dynamics)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.neuro" },
+        "2": { "name": "entity.name.type.neuro" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.brace.neuro" }
+      },
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#architecture-field" }
+      ]
+    },
+    "function": {
+      "name": "meta.function.neuro",
+      "begin": "\\b(function)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.neuro" },
+        "2": { "name": "entity.name.function.neuro" }
+      },
+      "end": "\\{",
+      "patterns": [
+        { "include": "#comment" }
+      ]
+    },
+    "export": {
+      "match": "\\b(export)\\b",
+      "name": "keyword.control.neuro"
+    },
+    "import": {
+      "match": "\\b(import)\\s+([a-zA-Z_][a-zA-Z0-9_/.]*)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.neuro" },
+        "2": { "name": "string.unquoted.neuro" }
+      }
+    },
+    "equation": {
+      "patterns": [
+        {
+          "name": "string.other.neuro",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "include": "#math-operators"
+            }
+          ]
+        }
+      ]
+    },
+    "math-operators": {
+      "patterns": [
+        {
+          "match": "\\b(sin|cos|tan|exp|log|sqrt|abs|ReLU|sigmoid|tanh)\\b",
+          "name": "support.function.neuro"
+        },
+        {
+          "match": "[+\\-*/=@<>]",
+          "name": "keyword.operator.neuro"
+        }
+      ]
+    },
+    "string": {
+      "name": "string.quoted.double.neuro",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.neuro",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "number": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.neuro",
+          "match": "\\b\\d+\\.\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.neuro",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "operator": {
+      "patterns": [
+        {
+          "match": "->",
+          "name": "keyword.operator.arrow.neuro"
+        },
+        {
+          "match": "[+\\-*/=@<>]",
+          "name": "keyword.operator.neuro"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "match": "[{}\\[\\](),;:]",
+          "name": "punctuation.neuro"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.neuro"
+        }
+      ]
+    }
+  }
+}

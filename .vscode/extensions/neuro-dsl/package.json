@@ -1,0 +1,32 @@
+{
+  "name": "neuro-dsl",
+  "displayName": "NeuroSLM DSL",
+  "description": "Syntax highlighting and linting for .neuro architecture files",
+  "version": "0.1.0",
+  "publisher": "neuroslm",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": ["Programming Languages", "Linters"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "neuro",
+        "aliases": ["NeuroSLM DSL", "neuro"],
+        "extensions": [".neuro"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "neuro",
+        "scopeName": "source.neuro",
+        "path": "./syntaxes/neuro.tmLanguage.json"
+      }
+    ]
+  },
+  "activationEvents": [
+    "onLanguage:neuro"
+  ],
+  "main": "./extension.js"
+}
