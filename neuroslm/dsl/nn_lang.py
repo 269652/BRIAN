@@ -638,7 +638,8 @@ class DSLLanguageCortex(nn.Module):
                  mod_capacity: float = 0.5,
                  dropout: float = 0.0,
                  pct_trunk: float = 0.0,
-                 tonnetz_period: int = 0):
+                 tonnetz_period: int = 0,
+                 stochastic_depth: float = 0.0):
         super().__init__()
         n_kv_heads = n_kv_heads or n_heads
         head_dim = d_model // n_heads
@@ -647,6 +648,11 @@ class DSLLanguageCortex(nn.Module):
         Dhyper = int(d_model * geometry_expansion)
         R = max(8, Dhyper // 8)
         R_hidden = max(32, d_model // 8)
+        # Stochastic depth: linearly increasing drop probability per block.
+        # At training time, block i is skipped (identity) with prob
+        # stochastic_depth * (i+1) / depth. At eval time, always active.
+        self.stochastic_depth = stochastic_depth
+        self._depth = depth
         # Embed + residual dropout for OOD regularization. Applied post-
         # embed and after each block's output so it touches every layer's
         # output without changing the bit-identical-to-Brain DSL block
@@ -822,6 +828,14 @@ class DSLLanguageCortex(nn.Module):
             per_block = offs.index_select(dim=1, index=bm)  # (B_in, depth, N_NT)
             block_gain = self.alpha_nt * self.nt_proj(per_block)
         for bi, (blk, adapter) in enumerate(zip(self.blocks, self.adapters)):
+            # ── Stochastic depth: skip block with linearly increasing prob ──
+            if self.training and self.stochastic_depth > 0:
+                drop_prob = self.stochastic_depth * (bi + 1) / self._depth
+                if torch.rand(1).item() < drop_prob:
+                    # Skip this block (identity); still record for PCT/metrics
+                    block_outs.append(h)
+                    self._layer_acts.append(h.detach())
+                    continue
             h = blk(h)
             h = adapter(h)
             h = self.dropout(h)
@@ -892,7 +906,8 @@ def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
                                geometry_expansion: float = 2.0,
                                mod_capacity: float = 0.5,
                                pct_trunk: float = 0.0,
-                               tonnetz_period: int = 0) -> DSLLanguageCortex:
+                               tonnetz_period: int = 0,
+                               stochastic_depth: float = 0.0) -> DSLLanguageCortex:
     """Assemble Brain's full LanguageCortex from pure-DSL blocks.
 
     `pct_trunk > 0` enables forward-path predictive coding: each layer
@@ -903,4 +918,5 @@ def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
     return DSLLanguageCortex(vocab, d_model, depth, n_heads, max_ctx,
                               n_kv_heads, geometry_expansion, mod_capacity,
                               dropout=dropout, pct_trunk=pct_trunk,
-                              tonnetz_period=tonnetz_period)
+                              tonnetz_period=tonnetz_period,
+                              stochastic_depth=stochastic_depth)

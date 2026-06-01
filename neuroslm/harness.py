@@ -413,6 +413,13 @@ class BRIANHarness(nn.Module):
 
         logits = self(ids, nt_levels=nt_levels)
         loss_lm = self._compute_loss_from_logits(logits, targets)
+
+        # ── Stage 8 OOD push: flooding loss ──
+        # |loss - b| + b prevents the model from memorizing below floor b.
+        flood = self.training_config.flooding_level
+        if flood > 0:
+            loss_lm = (loss_lm - flood).abs() + flood
+
         total = self.total_loss_config.w_lm * loss_lm
         mat = self.maturity.value()
         if self.language_model is not None:

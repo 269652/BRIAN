@@ -44,6 +44,17 @@ training {
     # Regularisation — dropout is the single highest-impact OOD knob.
     # P4 ran at 0.0 → OOD gap blew out to 13x.  0.12 balances capacity.
     dropout:       0.12
+    # Flooding loss (Ishida et al. 2020): prevents train loss from
+    # collapsing below this floor. |loss - b| + b bounces loss off the
+    # floor, maintaining useful gradients while stopping memorization.
+    # Set to ~4.0 (approx where train loss plateaus on WikiText before
+    # overfitting begins). 0 = off.
+    flooding_level: 4.0
+    # Stochastic depth (Huang et al. 2016): linearly increasing block
+    # skip probability. Acts as implicit ensemble + regularizer. The
+    # deepest block is skipped with prob=stochastic_depth during train.
+    # 0.1 is conservative; literature uses 0.1–0.5 for deep nets.
+    stochastic_depth: 0.1
     # Predictive-coding trunk loss (auxiliary next-token prediction at
     # intermediate layers). Acts as implicit label smoothing + forces
     # internal representations to stay predictive → strong OOD reg.

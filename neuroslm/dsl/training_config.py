@@ -344,6 +344,15 @@ class TrainingConfig:
     # I(X;Z) by refusing to learn from "expected" episodes. Surprise
     # = |loss - ema_loss| / max(ema_loss, eps). Typical floor 0.05-0.20.
     nemori_floor: float = 0.0
+    # Stage 8 OOD push: flooding loss (Ishida et al. 2020). Loss is
+    # transformed as |loss - b| + b where b = flooding_level. Prevents
+    # the model from over-fitting by refusing to push train loss below b.
+    # 0 = off (standard loss). Recommended: 3.5–4.5 for LM at 30M scale.
+    flooding_level: float = 0.0
+    # Stage 9 OOD push: stochastic depth (Huang et al. 2016). Each block
+    # has a linearly increasing probability of being skipped (identity).
+    # 0 = off. 0.1 means the deepest block is dropped 10% of the time.
+    stochastic_depth: float = 0.0
     # Stage 7 OOD push: curriculum + trunk isolation. Curriculum string
     # selects a data ordering strategy ("easy_to_hard", "random",
     # "uniform"). Trunk isolation is enforced by an existing param_scope
@@ -450,6 +459,10 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.bema_cooldown = int(props["bema_cooldown"])
     if "nemori_floor" in props:
         cfg.nemori_floor = float(props["nemori_floor"])
+    if "flooding_level" in props:
+        cfg.flooding_level = float(props["flooding_level"])
+    if "stochastic_depth" in props:
+        cfg.stochastic_depth = float(props["stochastic_depth"])
     if "curriculum" in props:
         cfg.curriculum = _strip_quotes(props["curriculum"])
     if "crystallization_step" in props:
