@@ -203,8 +203,11 @@ def _deploy_dsl(steps: int, branch: Optional[str], extra_env: dict,
 def cmd_deploy(args: argparse.Namespace) -> int:
     """Launch a DSL training run on vast.ai."""
     ood = args.ood if args.ood else 0
+    extra = {}
+    if args.scale:
+        extra["SCALE"] = args.scale
     return _deploy_dsl(steps=args.steps, branch=args.branch,
-                       extra_env={}, ood_every=ood)
+                       extra_env=extra, ood_every=ood)
 
 
 def cmd_deploy_100k(args: argparse.Namespace) -> int:
@@ -1012,6 +1015,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Launch a DSL training run on vast.ai")
     sd.add_argument("--steps", type=int, default=10_000)
     sd.add_argument("--branch", help="git branch to train (default: current)")
+    sd.add_argument("--scale", help="Scale variant from arch.neuro scales block "
+                    "(e.g. 100m, 300m, 1b). Default: arch's scales.default")
     sd.add_argument("--ood", type=int, nargs="?", const=3000,
                     help="Run mid-training OOD eval every N steps "
                          "(default 3000 if flag passed without value)")

@@ -107,10 +107,37 @@ REPO_URL="${REPO_URL:-https://github.com/269652/BRIAN.git}"
 REPO_SLUG="${REPO_URL#https://github.com/}"; REPO_SLUG="${REPO_SLUG%.git}"
 VAST_IMAGE="pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime"
 VAST_DISK=60
-# Default GPU filter: any A100 variant or 4090, verified host, reliability >0.99.
-# Some bad hosts have stuck container loops; this filter cuts most of them.
-# Override with GPU_QUERY env var if you need different hardware.
-GPU_QUERY="${GPU_QUERY:-gpu_name in [A100_SXM4,A100_PCIE,A100_SXM,A100X,RTX_4090] num_gpus=1 rentable=true verified=true reliability>0.99}"
+# GPU filter: read from arch.neuro's `hardware {}` block. Falls back to a
+# broad A100 filter if the arch doesn't declare hardware constraints.
+# Override with GPU_QUERY env var if you need to force specific hardware.
+if [ -z "${GPU_QUERY:-}" ]; then
+  GPU_QUERY="$(python3 - "$ARCH" "${SCALE:-}" <<'PY' 2>/dev/null || echo ""
+import sys
+arch, scale = sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else ""
+try:
+    from neuroslm.dsl.training_config import load_training_config_from_arch
+    cfg = load_training_config_from_arch(f"architectures/{arch}")
+    # If a scale variant has its own hardware block, use that.
+    hw = cfg.hardware
+    if scale and scale in (cfg.scales.variants or {}):
+        v = cfg.scales.variants[scale]
+        if hasattr(v, "hardware") and v.hardware and v.hardware.gpu_name:
+            hw = v.hardware
+    gpu = hw.gpu_name or "A100_SXM4"
+    n = hw.num_gpus or 1
+    rel = hw.min_reliability or 0.99
+    mem = getattr(hw, "min_gpu_mem_gib", 0) or 0
+    q = f"gpu_name={gpu} num_gpus={n} rentable=true verified=true reliability>{rel}"
+    if mem > 0:
+        q += f" gpu_ram>={mem}"
+    print(q)
+except Exception:
+    print("")
+PY
+)"
+  # Fallback if the python lookup failed or returned empty
+  [ -z "$GPU_QUERY" ] && GPU_QUERY="gpu_name=A100_SXM4 num_gpus=1 rentable=true verified=true reliability>0.995 gpu_ram>=40"
+fi
 
 # ─── Resolve a python that has vastai installed ──────────────────────────
 _pick_python() {
@@ -143,6 +170,7 @@ cat <<HDR
   vast_train.sh
     branch  = $BRANCH
     preset  = $PRESET
+    scale   = ${SCALE:-<default from arch.neuro>}
     steps   = ${STEPS:-<from arch.neuro>}
     fresh   = $FRESH
     batch   = ${BATCH:-<from arch.neuro>} × grad_accum ${GRAD_ACCUM:-<from arch.neuro>}
@@ -231,8 +259,8 @@ echo "    log_pusher pid=\$LOG_PUSHER_PID"
 
 echo "── starting training ──"
 if [ "${USE_DSL}" = "1" ]; then
-    echo "    DSL mode: arch=${ARCH} steps=${STEPS} batch=${BATCH} seq_len=${SEQ_LEN} d_sem=${D_SEM} ood_every=${OOD_EVERY}"
-    ARCH='${ARCH}' STEPS='${STEPS}' BATCH='${BATCH}' \\
+    echo "    DSL mode: arch=${ARCH} scale=${SCALE:-default} steps=${STEPS} batch=${BATCH} seq_len=${SEQ_LEN} d_sem=${D_SEM} ood_every=${OOD_EVERY}"
+    ARCH='${ARCH}' SCALE='${SCALE:-}' STEPS='${STEPS}' BATCH='${BATCH}' \\
         SEQ_LEN='${SEQ_LEN}' D_SEM='${D_SEM}' \\
         SAVE_EVERY='${SAVE_EVERY}' LOG_EVERY='${LOG_EVERY}' \\
         OOD_EVERY='${OOD_EVERY}' \\
