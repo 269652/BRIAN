@@ -319,6 +319,7 @@ class NeuroLinter:
 
     def _check_equations(self):
         """Validate equation syntax and variable bindings."""
+        equations = {}  # track equations for duplicate detection
         for line_no, line in enumerate(self.lines, 1):
             # Extract quoted strings (equations)
             for m in re.finditer(r'"([^"]*)"', line):
@@ -328,6 +329,21 @@ class NeuroLinter:
                 # Check for undefined variables in equation
                 self._check_equation_vars(equation, line_no, start_col)
 
+                # Track equation for duplicate detection
+                if '=' in equation and 'equation:' in line:
+                    if equation not in equations:
+                        equations[equation] = []
+                    equations[equation].append(line_no)
+
+        # Suggest extracting repeated equations as definitions
+        for equation, occurrences in equations.items():
+            if len(occurrences) >= 2:
+                self._info(
+                    occurrences[0], 0, "repeated-equation",
+                    f"Equation appears {len(occurrences)} times. Consider extracting as a definition: "
+                    f'equation name {{ params: [...], formula: "{equation}" }}'
+                )
+
     def _check_equation_vars(self, equation: str, line_no: int, col: int):
         """Check that variables in equation are defined."""
         # Extract all identifiers from the equation
@@ -336,7 +352,10 @@ class NeuroLinter:
         # Built-in variables and parameters
         builtins = {
             'x', 'y', 's', 'V', 'd_sem', 'dV', 'dt', 'tau', 'weight',
-            'x_pre', 'x_post', 'e', 'pi', 'nan', 'inf'
+            'x_pre', 'x_post', 'e', 'pi', 'nan', 'inf',
+            'W',  # weight matrix (standard notation)
+            'c', 'gain', 'output',  # modulation parameters
+            'coef',  # ODE coefficients
         }
 
         for ident in identifiers:
