@@ -956,6 +956,128 @@ def cmd_push(args: argparse.Namespace) -> int:
     return rc
 
 
+# ── lint ───────────────────────────────────────────────────────────────
+
+def cmd_lint(args: argparse.Namespace) -> int:
+    """Lint a .neuro file or architecture folder.
+
+    With --autofix, automatically apply fixable diagnostics:
+    - Extract repeated equations as definitions
+    - Replace inline equations with @references to definitions
+
+    Prompts for equation names when needed.
+    """
+    from pathlib import Path
+    from neuroslm.dsl.neuro_linter import NeuroLinter
+    import re
+
+    path = Path(args.path).resolve()
+    if not path.exists():
+        print(f"[ERROR] Path not found: {args.path}", file=sys.stderr)
+        return 1
+
+    # Lint the file or architecture
+    if path.is_dir() and (path / "arch.neuro").is_file():
+        linter = NeuroLinter(path / "arch.neuro")
+    elif path.suffix == ".neuro":
+        linter = NeuroLinter(path)
+    else:
+        print(f"[ERROR] Not a .neuro file or architecture directory: {args.path}", file=sys.stderr)
+        return 1
+
+    diags = linter.lint()
+
+    if not diags:
+        print("[OK] No issues found")
+        return 0
+
+    print(f"[LINT] Found {len(diags)} issue(s):")
+    for d in diags:
+        severity = d.severity.value.upper()
+        print(f"  {severity} {d.file.name}:{d.line}:{d.col} [{d.code}] {d.message}")
+
+    if not args.autofix:
+        return 1 if any(d.severity.value == "error" for d in diags) else 0
+
+    # Apply autofix for repeated equations
+    autofix_count = 0
+    for d in diags:
+        if d.code == "repeated-equation":
+            print(f"\n[AUTOFIX] {d.message}")
+
+            # Extract equation from file
+            with open(linter.file, 'r') as f:
+                content = f.read()
+
+            # Extract equation formula from the diagnostic message
+            msg_match = re.search(r'formula: "([^"]*)"', d.message)
+            if not msg_match:
+                print(f"  [SKIP] Could not extract formula from message")
+                continue
+
+            formula = msg_match.group(1)
+
+            # Suggest equation name (from repeated pattern if possible)
+            if "weight * (x_pre @ W)" in formula:
+                suggested_name = "standard_synapse"
+            else:
+                suggested_name = "custom_equation"
+
+            # Prompt for name if interactive
+            eq_name = suggested_name
+            if args.interactive:
+                try:
+                    user_input = input(f"  Equation name [{suggested_name}]: ").strip()
+                    if user_input:
+                        eq_name = user_input
+                except EOFError:
+                    pass
+
+            # Extract parameters from formula
+            params = []
+            for param_match in re.finditer(r'\b([a-zA-Z_]\w*)\b', formula):
+                param = param_match.group(1)
+                builtins = {'ReLU', 'sigmoid', 'tanh', 'sin', 'cos', 'exp', 'log', 'sqrt',
+                           'matmul', 'x', 'y', 's', 'V', 'dt', 'pi', 'e', 'max', 'min'}
+                if param not in builtins and param not in params:
+                    params.append(param)
+
+            # Create equation definition
+            eq_def = f"export equation {eq_name} {{\n    params: [{', '.join(params)}],\n    formula: \"{formula}\"\n}}\n"
+
+            # Insert at top of file
+            lines = content.split('\n')
+            insert_pos = 0
+            # Skip comments and imports at the top
+            for i, line in enumerate(lines):
+                if line.strip() and not line.strip().startswith('#'):
+                    if not line.strip().startswith('import'):
+                        insert_pos = i
+                        break
+
+            lines.insert(insert_pos, eq_def)
+
+            # Replace all inline equations with @references
+            new_content = '\n'.join(lines)
+            new_content = re.sub(
+                f'equation: "{re.escape(formula)}"',
+                f'equation: @{eq_name}',
+                new_content
+            )
+
+            # Write back
+            with open(linter.file, 'w') as f:
+                f.write(new_content)
+
+            autofix_count += 1
+            print(f"  [OK] Extracted '{eq_name}' and replaced references")
+
+    if autofix_count > 0:
+        print(f"\n[AUTOFIX] Applied {autofix_count} fix(es)")
+
+    return 0
+
+
 # ── arg parser ────────────────────────────────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -994,6 +1116,16 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="IIT-grade: populations + synapses + modulations + NT dynamics")
     sw.add_argument("--out", help="write Wolfram code to this .m file")
     sw.set_defaults(func=cmd_wolfram)
+
+    # lint
+    sl = sub.add_parser("lint",
+                        help="Lint a .neuro file or architecture folder")
+    sl.add_argument("path", help=".neuro file or architecture directory")
+    sl.add_argument("--autofix", action="store_true",
+                    help="Automatically apply fixable issues (extracts repeated equations)")
+    sl.add_argument("-i", "--interactive", action="store_true",
+                    help="Prompt for equation names when autofixing")
+    sl.set_defaults(func=cmd_lint)
 
     # analyze
     sa = sub.add_parser("analyze",

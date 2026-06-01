@@ -320,6 +320,21 @@ class NeuroLinter:
     def _check_equations(self):
         """Validate equation syntax and variable bindings."""
         equations = {}  # track equations for duplicate detection
+        definitions = {}  # track equation definitions: name -> formula
+
+        # First pass: extract equation definitions
+        for line_no, line in enumerate(self.lines, 1):
+            if 'export equation' in line or (re.match(r'\s*equation\s+\w+', line)):
+                # Extract equation definition name and formula
+                name_match = re.search(r'equation\s+(\w+)\s*\{', line)
+                if name_match:
+                    eq_name = name_match.group(1)
+                    # Formula is on same or next line(s)
+                    formula_match = re.search(r'formula:\s*"([^"]*)"', ' '.join(self.lines[line_no-1:min(line_no+2, len(self.lines))]))
+                    if formula_match:
+                        definitions[eq_name] = formula_match.group(1)
+
+        # Second pass: check equations
         for line_no, line in enumerate(self.lines, 1):
             # Extract quoted strings (equations)
             for m in re.finditer(r'"([^"]*)"', line):
@@ -329,8 +344,17 @@ class NeuroLinter:
                 # Check for undefined variables in equation
                 self._check_equation_vars(equation, line_no, start_col)
 
-                # Track equation for duplicate detection
+                # Check if this equation matches a definition
                 if '=' in equation and 'equation:' in line:
+                    for def_name, def_formula in definitions.items():
+                        if equation == def_formula and f'@{def_name}' not in line:
+                            self._info(
+                                line_no, start_col, "matches-definition",
+                                f"This equation matches definition '{def_name}'. "
+                                f"Replace with: equation: @{def_name}"
+                            )
+
+                    # Track equation for duplicate detection
                     if equation not in equations:
                         equations[equation] = []
                     equations[equation].append(line_no)

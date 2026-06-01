@@ -30,6 +30,98 @@ const BUILTIN_VARS = [
 exports.activate = function(context) {
   OUTPUT_CHANNEL.appendLine('NeuroSLM DSL extension activating...');
 
+  // Register code action provider for autofix
+  context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider(LANGUAGE_ID, {
+      provideCodeActions(document, range, context) {
+        const actions = [];
+
+        // Check diagnostics in this range
+        for (const diagnostic of context.diagnostics) {
+          if (diagnostic.code === 'repeated-equation') {
+            const action = new vscode.CodeAction(
+              'Extract as equation definition',
+              vscode.CodeActionKind.QuickFix
+            );
+            action.command = {
+              title: 'Extract as equation definition',
+              command: 'neuro-dsl.extractEquation',
+              arguments: [document, diagnostic]
+            };
+            action.diagnostics = [diagnostic];
+            actions.push(action);
+          }
+        }
+
+        return actions;
+      }
+    })
+  );
+
+  // Register command for extracting equations
+  context.subscriptions.push(
+    vscode.commands.registerCommand('neuro-dsl.extractEquation', async (document, diagnostic) => {
+      // Get equation name from user
+      const equationName = await vscode.window.showInputBox({
+        prompt: 'Enter equation name (e.g., standard_synapse)',
+        placeHolder: 'equation_name',
+        validateInput: (value) => {
+          if (!value.match(/^[a-z_][a-z0-9_]*$/i)) {
+            return 'Name must be a valid identifier (letters, numbers, underscores)';
+          }
+          return null;
+        }
+      });
+
+      if (!equationName) return;
+
+      const text = document.getText();
+      const lines = text.split('\n');
+
+      // Extract the equation from the diagnostic message
+      const match = text.match(/formula: "([^"]*)"/);
+      if (!match) {
+        vscode.window.showErrorMessage('Could not extract equation formula');
+        return;
+      }
+
+      const formula = match[1];
+
+      // Find all parameters in the formula
+      const params = [];
+      const paramMatch = formula.match(/\b([a-zA-Z_]\w*)\b/g);
+      if (paramMatch) {
+        const builtins = new Set(['ReLU', 'sigmoid', 'tanh', 'sin', 'cos', 'exp', 'log', 'sqrt', 'matmul', 'x', 'y', 's', 'V', 'dt', 'pi', 'e']);
+        paramMatch.forEach(p => {
+          if (!builtins.has(p) && !params.includes(p)) {
+            params.push(p);
+          }
+        });
+      }
+
+      // Create equation definition
+      const equationDef = `export equation ${equationName} {\n    params: [${params.join(', ')}],\n    formula: "${formula}"\n}\n`;
+
+      // Insert equation definition at top of file
+      const insertPos = new vscode.Position(0, 0);
+      const edit = new vscode.WorkspaceEdit();
+      edit.insert(document.uri, insertPos, equationDef + '\n');
+
+      // Replace all repeated equations with reference
+      const fullText = document.getText();
+      const replacementEdit = fullText.replace(new RegExp(`equation: "${formula.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'g'), `equation: @${equationName}`);
+
+      edit.replace(
+        document.uri,
+        new vscode.Range(new vscode.Position(0, 0), new vscode.Position(lines.length, 0)),
+        equationDef + '\n' + replacementEdit
+      );
+
+      await vscode.workspace.applyEdit(edit);
+      vscode.window.showInformationMessage(`✓ Extracted equation '${equationName}' and replaced ${(replacementEdit.match(new RegExp(`@${equationName}`, 'g')) || []).length} occurrences`);
+    })
+  );
+
   // Register autocomplete provider
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(LANGUAGE_ID, {

@@ -897,6 +897,18 @@ def compile_folder(arch_root):
             if kind in kinds:
                 parts.append(decl_text)
 
+    # 0. Auto-include shared equation library (if it exists)
+    # This makes equation definitions available to all modules
+    lib_equations_path = Path(arch_root).resolve() / "lib" / "equations.neuro"
+    if lib_equations_path.exists():
+        try:
+            with open(lib_equations_path, 'r') as f:
+                lib_content = f.read()
+                # Only include non-empty lines and skip comments
+                parts.append(lib_content)
+        except Exception:
+            pass
+
     # 1. Globals from arch.neuro — NT systems first
     _emit(arch_ast.private, ("neurotransmitter",))
     _emit(arch_ast.exports, ("neurotransmitter",))
