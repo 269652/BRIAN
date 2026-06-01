@@ -269,6 +269,12 @@ class GeneticsConfig:
     phi_target: float = 0.30           # target Phi (informational only)
     fixed_genes_preset: str = "default"
     target_modules: List[str] = field(default_factory=list)
+    # Gene-selection objective. "phi" adds -Phi*phi_weight as aux loss
+    # (genes train toward higher integrated information). "lm_loss"
+    # forces phi_weight=0 so genes train ONLY through the cortex →
+    # LM-loss gradient path — they're selected for whatever reduces
+    # next-token prediction error. "ppl" is an alias for "lm_loss".
+    optimize_for: str = "phi"
     # ── Performance knobs ──
     # update_every:   orchestrator runs every N training steps; cached
     #                 output is reused on skipped steps. ~25% load at
@@ -561,6 +567,11 @@ def _parse_genetics(body: str) -> GeneticsConfig:
         g.target_modules = [_strip_quotes(x.strip()) for x in raw.split(",") if x.strip()]
     if "update_every" in props:       g.update_every = int(props["update_every"])
     if "diagnostics_every" in props:  g.diagnostics_every = int(props["diagnostics_every"])
+    if "optimize_for" in props:
+        g.optimize_for = _strip_quotes(props["optimize_for"])
+        # "lm_loss" / "ppl" → genes only train via cortex grad path
+        if g.optimize_for in ("lm_loss", "ppl"):
+            g.phi_weight = 0.0
     return g
 
 

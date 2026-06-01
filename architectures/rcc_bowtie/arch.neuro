@@ -73,19 +73,13 @@ training {
     curriculum: "random"
     crystallization_step: 0
 
-    # MAT-phase-gated mechanism activation. Each entry:
-    #   strength * phase_gate(mat).value()
-    # Gate centers chosen so the model reaches a low train PPL floor
-    # FIRST (mechanisms ~0 below MAT 0.3-0.5), then OOD regularizers
-    # ramp in as MAT crosses each center. Solves the trade-off the
-    # always-on stack hit in run 38610004 (train PPL 180 vs baseline 119).
-    mechanisms: {
-        dropout:    { strength: 0.15, phase_gate: { center: 0.40, width: 0.10 } }
-        pct_trunk:  { strength: 1.50, phase_gate: { center: 0.55, width: 0.08 } }
-        tonnetz:    { period: 12, bandwidth: 4, phase_gate: { center: 0.50, width: 0.10 } }
-        nemori:     { floor: 0.10, phase_gate: { center: 0.60, width: 0.08 } }
-        bema:       { rollback_window: 50, phase_gate: { center: 0.05, width: 0.05 } }
-    }
+    # MAT-phase-gated mechanisms disabled for the 100M-genetics run.
+    # The MAT-ramp regularization was crippling early LM convergence
+    # (134M with phase-gated dropout active was 100+ ppl behind the 30M
+    # baseline at step 2500). Targets: loss<4, ppl<100 by step 10k —
+    # pure-baseline trunk is closest to the 30M-on-30M run that hit
+    # them. Genetics still active but selected for LM-loss (below).
+    mechanisms: {}
 
     # Declarative early-exit conditions. First rule to fire saves a
     # checkpoint and exits the training loop. NOTE: only the "OOD keeps
@@ -98,7 +92,10 @@ training {
     # noise (~3% on a 50-window WikiText eval) can't trigger exit on its
     # own. `tol: 0.02` = require a real ≥2% improvement.
     pass_marks: {
-        ood_not_falling:  {
+        # Hard target: ppl < 100 at step 10k.
+        ppl_at_10k:   { metric: "train_ppl", at_step: 10000, max: 100 }
+        # OOD trend rule (loose — 5 evals, 2% tol) as the success-exit.
+        ood_not_falling: {
             metric: "ood_ppl",
             window: 4000,
             trend: "falling",
@@ -108,20 +105,21 @@ training {
     }
 
     # ── §6.5 Genetics ──
-    # Enables the GeneticOrchestrator (neuroslm/neurochem/genetics.py).
-    # ReZero payload init keeps the model identity-at-start; gene
-    # gradients open the cortex.alpha_nt gate progressively. fixed-genes
-    # preset "default" includes math/reasoning 5HT booster, PFC DA boost
-    # on surprise, and the GWS Glu floor. phi_weight is the multiplier
-    # on the orchestrator's -Phi auxiliary loss (small so it can't
-    # overpower the LM signal).
+    # optimize_for: "lm_loss" — genes train ONLY through the cortex's
+    # alpha_nt → LM gradient path. No -Phi aux term (phi_weight forced
+    # to 0). This avoids the prior failure mode where genes were pulled
+    # toward Phi-good but LM-bad configurations during early training,
+    # hurting the LM convergence rate.
+    # ReZero payload + alpha_nt=0 init means the cortex is bit-identical
+    # to baseline at step 0; the gate only opens if doing so reduces LM.
     genetics: {
         enabled:            true
         n_genes:            32
         d_pay:              16
-        phi_weight:         0.01
-        phi_target:         0.30
+        optimize_for:       "lm_loss"
         fixed_genes_preset: "default"
+        update_every:       4
+        diagnostics_every:  50
     }
 
     # ── Hardware envelope ──
