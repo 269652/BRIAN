@@ -1,0 +1,18 @@
+{
+  "checkpoint_path": "lfs_checkpoints/dsl_arch_step9000.pt",
+  "step": 9000,
+  "timestamp": "2026-06-01T16:53:10",
+  "n_params": 51234574,
+  "tokenizer": "neuroslm.Tokenizer (gpt2 BPE, vocab=50257)",
+  "ctx_len": 1024,
+  "ood_dataset": "wikitext-103-v1",
+  "ood_tokens_evaluated": 102911,
+  "train_mode": "mix",
+  "train_batches": 100,
+  "train_tokens_evaluated": 409600,
+  "train_ppl": 116.70794035379416,
+  "ood_ppl": 835.2225756527363,
+  "gap": 718.5146352989422,
+  "gap_ratio": 7.15651885485085,
+  "verdict": "STRONG OVERFITTING"
+}
