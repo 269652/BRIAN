@@ -1,27 +1,78 @@
 # .neuro DSL Editor Setup Guide
 
-This guide explains how to set up syntax highlighting and linting for `.neuro` architecture files in VSCode.
+This guide explains how to set up the complete .neuro DSL development environment with syntax highlighting, real-time linting, autocomplete, and compiler validation.
 
 ## Quick Start
 
-### 1. Enable the VSCode Extension
+### 1. Run the Install Script
 
-The extension is already in `.vscode/extensions/neuro-dsl/`. VSCode should auto-discover it. To verify:
+The easiest way to set everything up:
 
-1. Open VSCode settings: `Ctrl+,` (or `Cmd+,` on Mac)
-2. Search for "neuro"
-3. You should see the extension listed as "NeuroSLM DSL"
+**Windows (PowerShell):**
+```powershell
+.\scripts\install.ps1
+```
 
-### 2. Verify Syntax Highlighting
+**Linux/macOS (bash):**
+```bash
+bash scripts/install.sh
+```
+
+This script will:
+- Install Python dependencies
+- Copy the VSCode extension to your extensions directory
+- Create workspace settings for `.neuro` files
+- Verify the installation
+
+### 2. Restart VSCode
+
+Close and reopen VSCode to activate the extension.
+
+### 3. Verify Setup
 
 1. Open any `.neuro` file (e.g., `architectures/rcc_bowtie/arch.neuro`)
 2. You should see:
-   - Keywords in blue (`architecture`, `population`, `synapse`, etc.)
-   - Strings in green (equations in quotes)
-   - Numbers in orange
-   - Comments in gray
+   - ✅ Colored syntax highlighting (keywords in blue, strings in green)
+   - ✅ Real-time linting errors/warnings in the Problems panel
+   - ✅ Autocomplete suggestions when you type (Ctrl+Space)
+   - ✅ Error messages for undefined populations, unmatched braces, etc.
 
-### 3. Run the Linter
+## Features
+
+### Real-Time Linting
+
+The extension validates your `.neuro` files automatically:
+- **On save**: Full linting
+- **On type**: Validation with 1-second debounce (to avoid lag)
+- **Diagnostics panel**: View all errors/warnings in `View → Problems`
+
+**Diagnostic levels:**
+- 🔴 **Error** (red): Structural issues (unmatched braces, syntax errors)
+- 🟡 **Warning** (yellow): Reference issues (undefined populations, unresolved imports)
+- ℹ️ **Info** (blue): Potential issues (possibly undefined variables)
+
+### Autocomplete
+
+Press **Ctrl+Space** (or **Cmd+Space** on Mac) to get suggestions for:
+- Keywords: `population`, `synapse`, `import`, `export`, `architecture`
+- Built-in functions: `sin`, `cos`, `exp`, `log`, `sqrt`, `ReLU`, `tanh`, `sigmoid`
+- Built-in variables: `x`, `y`, `s`, `V`, `d_sem`, `dt`
+- Population names from your current file
+
+### Compiler Validation
+
+When you compile a `.neuro` file, the compiler automatically:
+1. Runs the linter first
+2. **Exits immediately** if there are structural errors (unmatched braces, syntax errors)
+3. Provides detailed error messages with line/column numbers
+
+Example:
+```
+Linting failed: 1 error(s)
+  arch.neuro:42:5 Unclosed {
+```
+
+### Command-Line Linting
 
 From the command line:
 
@@ -168,6 +219,103 @@ echo "Linting passed!"
 
 - The linter currently does a single pass with import resolution
 - For very large architectures (100+ files), consider running it in CI only, not on save
+
+## Compiler Validation Details
+
+The compiler now integrates the linter to catch errors early:
+
+### How It Works
+
+1. You call `compile_file("arch.neuro")`
+2. Linter validates structure (braces, brackets, parens)
+3. If errors found → raises `NeuroMLError` immediately
+4. If no errors → proceeds with compilation
+
+### Example
+
+**With linting (catches errors early):**
+```python
+from neuroslm.dsl.compiler import NeuroMLCompiler
+
+try:
+    ir = NeuroMLCompiler.compile_file("arch.neuro")
+except NeuroMLError as e:
+    print(f"Validation failed: {e}")
+    # Error message includes line/col and specific issues
+```
+
+**Error output:**
+```
+NeuroMLError: Linting failed: 1 error(s)
+  arch.neuro:42:5 Unclosed {
+```
+
+## Advanced Usage
+
+### Manual Linting from Command Line
+
+```bash
+# Lint a single file
+python -m neuroslm.dsl.neuro_linter arch.neuro
+
+# Lint a directory
+python -m neuroslm.dsl.neuro_linter architectures/
+
+# JSON output (for CI/automation)
+python -m neuroslm.dsl.neuro_linter architectures/ --json > results.json
+```
+
+### CI/CD Integration
+
+```bash
+#!/bin/bash
+# ci_lint.sh
+
+set -e
+
+# Lint all architectures
+python -m neuroslm.dsl.neuro_linter architectures/ --json > .lint_results.json
+
+# Fail if errors (warnings are OK)
+ERROR_COUNT=$(jq '[.[] | select(.severity == "error")] | length' .lint_results.json)
+if [ "$ERROR_COUNT" -gt 0 ]; then
+  echo "Linting failed: $ERROR_COUNT error(s)"
+  exit 1
+fi
+
+echo "✓ Linting passed"
+```
+
+### Disabling Auto-Linting
+
+If you want to turn off real-time linting:
+
+1. Edit `.vscode/settings.json` (at repo root)
+2. Comment out the `neuro-dsl` configuration
+3. You can still run linting manually via command line
+
+## Troubleshooting
+
+### "Python not found" when opening .neuro files
+
+The extension looks for Python in this order:
+1. `.venv/Scripts/python.exe` (Windows venv)
+2. `.venv/bin/python` (Linux/macOS venv)
+3. System `python3` or `python`
+
+**Fix:** Ensure you've run the install script and activated the venv
+
+### Linting is slow
+
+- Linting is debounced to 1 second while typing
+- Full lint on save takes ~100ms for typical files
+- For very large architectures (100+ files), consider disabling auto-linting
+
+### Extension not showing color/linting
+
+1. Verify file has `.neuro` extension
+2. Check that extension is installed: `Ctrl+Shift+X` → search "NeuroSLM"
+3. Reload VSCode: `Ctrl+Shift+P` → "Developer: Reload Window"
 
 ## See Also
 
