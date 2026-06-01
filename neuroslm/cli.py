@@ -309,26 +309,72 @@ def cmd_ps(args: argparse.Namespace) -> int:
       ID | LABEL | GPU | $/hr | UPTIME | PHASE | STEP | PPL | OOD-PPL | TOK/S
 
     With --it (interactive/watch), redraws every `--interval` seconds
-    (default 3) until Ctrl-C.
+    until Ctrl-C. Uses double-buffering + cursor-home + clear-to-end-of-
+    screen so the redraw is seamless (no flicker, no black flash).
     """
     if args.it:
-        import time
-        try:
-            while True:
-                # Clear screen — works in PowerShell + bash
-                sys.stdout.write("\x1b[2J\x1b[H" if sys.stdout.isatty() else "\n" * 3)
-                ts = subprocess.run(
-                    ["date" if os.name != "nt" else "cmd", "/c", "echo", "%TIME%"],
-                    capture_output=True, text=True).stdout.strip()
-                print(f"brian ps --it (every {args.interval}s) — {ts}")
-                rc = _render_ps_once(args)
-                if rc != 0:
-                    return rc
-                time.sleep(args.interval)
-        except KeyboardInterrupt:
-            print("\n(stopped)")
-            return 0
+        return _ps_watch(args)
     return _render_ps_once(args)
+
+
+def _ps_watch(args: argparse.Namespace) -> int:
+    """Seamless watch mode for `brian ps --it`.
+
+    Strategy:
+      1. Hide cursor (\\e[?25l) for the duration of the watch.
+      2. Each tick: build the entire render into a StringIO, write it
+         in ONE go with cursor-home (\\e[H) + clear-to-end-of-screen
+         (\\e[J). No `\\e[2J` between draws — that's what causes the
+         black-screen flicker.
+      3. On Ctrl-C: show cursor (\\e[?25h), print "(stopped)".
+
+    Falls back to plain re-prints with newlines when stdout isn't a tty.
+    """
+    import datetime
+    import io
+    import time
+    is_tty = sys.stdout.isatty()
+    if is_tty:
+        # Hide cursor + clear once at start so the first frame paints a
+        # clean canvas. Subsequent frames only home + clear-to-end.
+        sys.stdout.write("\x1b[?25l\x1b[2J\x1b[H")
+        sys.stdout.flush()
+    try:
+        while True:
+            buf = io.StringIO()
+            ts = datetime.datetime.now().strftime("%H:%M:%S")
+            buf.write("Brian Task Manager — vast.ai monitor   "
+                       f"(refresh every {args.interval}s · Ctrl-C to exit)   "
+                       f"{ts}\n")
+            buf.write("=" * 79 + "\n")
+            # Render into the buffer so the actual terminal write is one
+            # atomic operation — no partial frames visible to the user.
+            rc = _render_ps_once(args, out=buf)
+            if rc != 0:
+                if is_tty:
+                    sys.stdout.write("\x1b[?25h")
+                    sys.stdout.flush()
+                return rc
+            if is_tty:
+                # Cursor home + write + clear-to-end. The clear erases
+                # any leftover characters past where the new frame ends
+                # (e.g. if the previous frame had a longer table) without
+                # blanking the screen first.
+                sys.stdout.write("\x1b[H" + buf.getvalue() + "\x1b[J")
+            else:
+                sys.stdout.write("\n\n" + buf.getvalue())
+            sys.stdout.flush()
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        if is_tty:
+            sys.stdout.write("\x1b[?25h\n")
+            sys.stdout.flush()
+        print("(stopped)")
+        return 0
+    finally:
+        if is_tty:
+            sys.stdout.write("\x1b[?25h")
+            sys.stdout.flush()
 
 
 def _detect_exit_reason(log_tail: str) -> tuple:
@@ -415,9 +461,25 @@ def _scan_recent_destroyed(top_n: int = 3) -> list:
     return rows[:top_n]
 
 
-def _render_ps_once(args: argparse.Namespace) -> int:
-    """Single ps render — extracted from cmd_ps so --it can call it in a loop."""
+def _render_ps_once(args: argparse.Namespace, out=None) -> int:
+    """Single ps render — extracted from cmd_ps so --it can call it in a loop.
+
+    `out`: optional file-like (e.g. io.StringIO from the watch loop). When
+    set, all output goes there instead of stdout; status/error messages
+    that would normally hit stderr also route to `out` so the watch
+    redraw stays atomic.
+    """
     import json
+    sink = out if out is not None else sys.stdout
+    def _say(msg: str = "") -> None:
+        sink.write(msg + "\n")
+    # Polished header (one-time; not re-emitted in watch mode because the
+    # caller already prints the per-tick timestamp line).
+    if out is None:
+        _say("Brian Task Manager — vast.ai instance + training monitor")
+        _say("  Interactive: brian ps --it --interval 1")
+        _say("  All GPUs:    brian ps --all")
+        _say("")
     vastai = _vastai_exe()
     raw, rc = _run_capture([vastai, "show", "instances", "--raw"])
     # Failure modes: offline (rc!=0, raw contains 'connection'/'resolve'/empty),
@@ -428,11 +490,11 @@ def _render_ps_once(args: argparse.Namespace) -> int:
                          ("connection", "failed to resolve", "could not resolve",
                           "timed out", "getaddrinfo", "no route to host"))
     if rc != 0 and "DEPRECATED" not in raw and not offline_marker:
-        print(f"vastai show failed: {raw[:300]}", file=sys.stderr)
+        _say(f"vastai show failed: {raw[:300]}")
         parse_ok = False
     elif offline_marker or not raw.strip():
-        print("(offline — can't reach vast.ai; showing destroyed-instance "
-              "history from logs/vast/*)", file=sys.stderr)
+        _say("(offline — can't reach vast.ai; showing destroyed-instance "
+             "history from logs/vast/*)")
         parse_ok = False
     else:
         start = raw.find("[")
@@ -459,8 +521,8 @@ def _render_ps_once(args: argparse.Namespace) -> int:
             try:
                 data = json.loads(raw[start:end])
             except json.JSONDecodeError as e:
-                print(f"(can't parse vastai response: {e}; falling back to "
-                      "destroyed-instance history)", file=sys.stderr)
+                _say(f"(can't parse vastai response: {e}; falling back to "
+                     "destroyed-instance history)")
                 parse_ok = False
     rows = []
     for inst in data:
@@ -480,12 +542,11 @@ def _render_ps_once(args: argparse.Namespace) -> int:
                 **status,
             })
     if rows:
-        # Render the live table
         hdr = (f"{'ID':>10}  {'LABEL':<28}  {'GPU':<12}  {'$/hr':>5}  "
                f"{'UP(m)':>6}  {'PHASE':<16}  {'STEP':>6}  {'PPL':>8}  "
                f"{'OOD-PPL':>9}  {'TOK/S':>7}")
-        print(hdr)
-        print("-" * len(hdr))
+        _say(hdr)
+        _say("-" * len(hdr))
         for r in rows:
             step  = str(r["step"]) if r["step"] is not None else "-"
             ppl   = f"{r['ppl']:.1f}" if r["ppl"] is not None else "-"
@@ -493,33 +554,30 @@ def _render_ps_once(args: argparse.Namespace) -> int:
                      if r["mid_ood_ppl"] is not None else "-")
             tps   = f"{r['tps']/1000:.0f}k" if r["tps"] else "-"
             cost  = f"{r['cost']:.2f}" if r["cost"] else "-"
-            print(f"{str(r['id']):>10}  {r['label'][:28]:<28}  "
-                  f"{r['gpu'][:12]:<12}  {cost:>5}  {r['uptime_mins']:>6}  "
-                  f"{r['phase']:<16}  {step:>6}  {ppl:>8}  {ood:>9}  {tps:>7}")
+            _say(f"{str(r['id']):>10}  {r['label'][:28]:<28}  "
+                 f"{r['gpu'][:12]:<12}  {cost:>5}  {r['uptime_mins']:>6}  "
+                 f"{r['phase']:<16}  {step:>6}  {ppl:>8}  {ood:>9}  {tps:>7}")
     elif parse_ok:
-        # vastai responded with empty list → no live instances
         live_hint = ""
         if not args.all:
             live_hint = " (pass --all to list non-neuroslm instances too)"
-        print(f"(no live instances{live_hint})")
+        _say(f"(no live instances{live_hint})")
 
-    # ── Recently destroyed instances (reasons + last metrics) ──
-    # Always shown — even when offline or when no live instances exist,
-    # so the user has a continuous record of recent runs.
+    # ── Recently destroyed instances ──
     destroyed = _scan_recent_destroyed(top_n=5)
     if destroyed:
-        print()
-        print("Recent destroyed:")
+        _say()
+        _say("Recent destroyed:")
         dhdr = (f"  {'ID':>10}  {'WHEN':<19}  {'REASON':<15}  "
                 f"{'STEPS':>6}  {'OOD-PPL':>9}  DETAIL")
-        print(dhdr)
-        print("  " + "-" * (len(dhdr) - 2))
+        _say(dhdr)
+        _say("  " + "-" * (len(dhdr) - 2))
         for r in destroyed:
             steps = str(r["steps"]) if r["steps"] is not None else "-"
             ood = f"{r['ood_ppl']:.0f}" if r["ood_ppl"] is not None else "-"
             when = r["mtime"].strftime("%Y-%m-%d %H:%M:%S")
-            print(f"  {r['id']:>10}  {when:<19}  {r['exit_reason']:<15}  "
-                  f"{steps:>6}  {ood:>9}  {r['detail'][:80]}")
+            _say(f"  {r['id']:>10}  {when:<19}  {r['exit_reason']:<15}  "
+                 f"{steps:>6}  {ood:>9}  {r['detail'][:80]}")
     return 0
 
 
@@ -991,8 +1049,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sps.add_argument("-it", "--it", action="store_true",
                      help="interactive watch mode — redraw every --interval "
                           "seconds until Ctrl-C")
-    sps.add_argument("--interval", type=int, default=3,
-                     help="seconds between refreshes when --it is on (default 3)")
+    sps.add_argument("--interval", type=float, default=1.0,
+                     help="seconds between refreshes when --it is on (default 1)")
     sps.set_defaults(func=cmd_ps)
 
     # destroy
