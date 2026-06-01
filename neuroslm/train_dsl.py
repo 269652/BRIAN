@@ -568,6 +568,94 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                 print(f"[train_dsl] mid-OOD eval failed at step {step}: {e}",
                       flush=True)
 
+    # ── End of training: ensure final checkpoint + run a final OOD pass ──
+    # The loop exits when `step == steps` but the periodic save fires AT
+    # `step % save_every == 0` BEFORE the step number rolls past. With
+    # steps=10000, save_every=1000, the last saved checkpoint was step
+    # 9000 (the 10000-loop iteration ends without re-checking save_every).
+    # Always save a final checkpoint named with the target step + a
+    # comprehensive OOD eval so the run has gap-ratio data.
+    if ckpt_dir is not None:
+        final_step = steps
+        final_path = ckpt_dir / f"dsl_arch_{_RUN_ID}_step{final_step}.pt"
+        harness.save_checkpoint(str(final_path), step=final_step)
+        print(f"[train_dsl] saved final checkpoint {final_path}", flush=True)
+
+    # Final OOD pass: a longer WikiText-103 eval (cap=200 windows instead
+    # of the mid-OOD cap=50) plus a train-set ppl on the same loader, so
+    # we can report gap_ratio = ood_ppl / train_ppl.
+    try:
+        _final_ood_eval(harness, steps, ckpt_dir, observer,
+                         train_ppl_history=train_ppl_history,
+                         ood_ppl_history=ood_ppl_history)
+    except Exception as e:
+        print(f"[train_dsl] final OOD eval failed: {e}", flush=True)
+
+
+def _final_ood_eval(harness, step: int, ckpt_dir: Optional[Path],
+                     observer, train_ppl_history: dict,
+                     ood_ppl_history: dict) -> None:
+    """End-of-training OOD eval: longer WikiText pass + gap_ratio.
+
+    Writes `ood_final_{run_id}.json` to logs/vast/benchmarks/ood/ so the
+    metrics ledger picks it up. Uses cap=200 sequences (4x the mid-OOD
+    snapshot) for a less-noisy final estimate.
+    """
+    import json, math, torch
+    from datasets import load_dataset
+    from neuroslm.tokenizer import Tokenizer
+
+    print(f"[train_dsl] final OOD eval @ step {step} (WikiText-103, cap=200)...",
+          flush=True)
+    was_training = harness.training
+    harness.eval()
+    tok = Tokenizer()
+    ctx = getattr(harness.language_model, "max_ctx", 1024) or 1024
+    ds = load_dataset("wikitext", "wikitext-103-v1", split="test", streaming=True)
+    n_seq, total_loss, total_tok = 0, 0.0, 0
+    for ex in ds:
+        text = ex.get("text", "")
+        if not text or len(text) < 50:
+            continue
+        ids = tok.encode(text)[: ctx + 1]
+        if len(ids) < 16:
+            continue
+        ids_t = torch.tensor([ids[:-1]], device=next(harness.parameters()).device)
+        tgt_t = torch.tensor([ids[1:]], device=ids_t.device)
+        with torch.no_grad():
+            logits = harness(ids_t)
+            loss = torch.nn.functional.cross_entropy(
+                logits.reshape(-1, logits.shape[-1]), tgt_t.reshape(-1),
+                reduction="sum")
+        total_loss += float(loss); total_tok += tgt_t.numel(); n_seq += 1
+        if n_seq >= 200:
+            break
+    ood_ppl = math.exp(min(total_loss / max(1, total_tok), 20.0))
+    # Train PPL = the latest in-distribution training perplexity (already
+    # logged). gap_ratio = ood_ppl / train_ppl.
+    last_train_step = max(train_ppl_history) if train_ppl_history else 0
+    train_ppl = train_ppl_history.get(last_train_step, float("nan"))
+    gap_ratio = ood_ppl / train_ppl if train_ppl and train_ppl > 0 else float("nan")
+    print(f"[train_dsl] final OOD: wikitext ppl={ood_ppl:.1f}  "
+          f"train_ppl={train_ppl:.1f}  gap_ratio={gap_ratio:.2f}  "
+          f"({n_seq} seq, {total_tok} tok)", flush=True)
+    out_dir = Path("logs/vast/benchmarks/ood")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"ood_final_{_RUN_ID}.json"
+    out_path.write_text(json.dumps({
+        "kind": "final",
+        "step": step,
+        "ood_ppl": ood_ppl,
+        "train_ppl": train_ppl,
+        "gap_ratio": gap_ratio,
+        "n_seq": n_seq,
+        "n_tok": total_tok,
+        "run_id": _RUN_ID,
+    }, indent=2), encoding="utf-8")
+    print(f"[train_dsl] wrote final OOD result → {out_path}", flush=True)
+    if was_training:
+        harness.train()
+
 
 # ── CLI ──────────────────────────────────────────────────────────────
 
