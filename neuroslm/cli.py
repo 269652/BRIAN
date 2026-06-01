@@ -186,10 +186,8 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
 def _deploy_dsl(steps: int, branch: Optional[str], extra_env: dict,
                  ood_every: int = 0) -> int:
-    """Run scripts/vast_train.sh with USE_DSL=1 + STEPS=N + (BRANCH)."""
+    """Run _deploy_train.py with the appropriate env vars."""
     env = os.environ.copy()
-    env["USE_DSL"] = "1"
-    env["FRESH"] = "1"
     env["STEPS"] = str(steps)
     if ood_every > 0:
         env["OOD_EVERY"] = str(ood_every)
@@ -197,7 +195,20 @@ def _deploy_dsl(steps: int, branch: Optional[str], extra_env: dict,
         env["BRANCH"] = branch
     env["PYTHONIOENCODING"] = "utf-8"
     env.update(extra_env)
-    return _run([_bash(), "scripts/vast_train.sh"], env=env)
+    # Use _deploy_train.py (fast, direct vast.ai API call) instead of
+    # vast_train.sh which hangs on Windows due to heredoc pipe issues.
+    deploy_script = REPO_ROOT / "_deploy_train.py"
+    python = _find_deploy_python()
+    return subprocess.call([python, str(deploy_script)], cwd=str(REPO_ROOT), env=env)
+
+
+def _find_deploy_python() -> str:
+    """Find the python with vastai installed (.venv-2 preferred)."""
+    venv2 = REPO_ROOT / ".venv-2" / "Scripts" / "python.exe"
+    if venv2.is_file():
+        return str(venv2)
+    # Fallback: current interpreter
+    return sys.executable
 
 
 def cmd_deploy(args: argparse.Namespace) -> int:
@@ -206,6 +217,8 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     extra = {}
     if args.scale:
         extra["SCALE"] = args.scale
+    if getattr(args, "label", None):
+        extra["LABEL_SUFFIX"] = args.label
     return _deploy_dsl(steps=args.steps, branch=args.branch,
                        extra_env=extra, ood_every=ood)
 
@@ -1017,6 +1030,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sd.add_argument("--branch", help="git branch to train (default: current)")
     sd.add_argument("--scale", help="Scale variant from arch.neuro scales block "
                     "(e.g. 100m, 300m, 1b). Default: arch's scales.default")
+    sd.add_argument("--label", help="Label suffix for the vast.ai instance")
     sd.add_argument("--ood", type=int, nargs="?", const=3000,
                     help="Run mid-training OOD eval every N steps "
                          "(default 3000 if flag passed without value)")
