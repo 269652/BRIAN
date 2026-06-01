@@ -484,3 +484,32 @@ The `PyGILState_Release` threading error after step 10,000 is a Python runtime c
 - Move forward with OOD evaluation or another variant?
 
 Based on your memory, this fits the P4 loss-clipping experiment. Should I check whether this meets your target PPL threshold for proceeding?
+
+---
+
+## NFG Layout — Revision Assessment (2026-06-01)
+
+**Revision:** rcc_bowtie NFG render after stabilisation of house layout.
+
+**Score:** Structural coherence 8.5 · Readability 8.2 · RCC bowtie identity 8.5 · Compiler-style maturity 8.3
+
+### What works
+- Graph has stabilised into a coherent house layout that no longer shifts unpredictably between runs.
+- Central RCC bowtie trunk is the strongest feature; the shaded backbone band clearly highlights world ? thalamus ? GWS ? PFC ? BG ? motor.
+- Nucleus placement across the top implies modulatory oversight rather than exclusion.
+- Core path edges feel intentional; dark backbone chain through PFC ? BG ? motor and the thalamus/GWS/PFC loop structure are readable at a glance.
+
+### Limitations identified
+- Lower peripheral nodes (insula, amygdala, self_m, qualia, cerebellum/forward_m/evaluator) still look like catalogued extras rather than fully snapped submodules.
+- The central highlighted band is doing explanatory work that the topology itself should eventually carry (the graph is understandable because of band + placement, not purely because attachment grammar and routing are solved).
+
+### Next steps (implemented in this commit)
+1. **Canonical slot templates** — _PRESET_TEMPLATES dict keyed by preset family (e.g. "rcc_bowtie"). Overrides _RESERVED_SLOTS so the same preset family always renders with the same stable house layout.
+2. **Subsystem envelopes** — _draw_subsystem_envelopes() draws faint dashed rounded-rect overlays for memory, self-model, predictive-ctrl, cortical-loop, and interoceptive groups. Drawn at zorder=0 so they frame but never obscure node circles.
+3. **Anchor constraint pass** — ANCHOR_ALPHA = 0.22 pull in _neuroanatomical_layout runs 3 iterations pulling each non-pinned population toward the weighted centroid of its synapse neighbours. Snaps peripheral nodes to their cluster without disturbing the pinned spine.
+4. **Modulation lane port assignment** — existing NT rail-point mechanism now combined with the per-NT ordered departure so each NT's arcs share a visual departure stub before splaying.
+
+### Remaining open items
+- Port-aware routing for NT arcs entering spine nodes (ordered entry ports per NT lane, not just departure stem).
+- Subsystem-aware force layout: repulsion between envelope groups so self-model and memory cannot drift into the cortical loop region.
+- Recognizable "compiler-generated neurodiagram" style will require explicit subsystem framing + canonicalised port grammar rather than more force-directed relaxation.

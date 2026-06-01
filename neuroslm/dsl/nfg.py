@@ -324,6 +324,57 @@ _NT_ABBREV = {
     "glutamate": "Glu", "gaba": "GABA",
 }
 
+# ── Canonical slot templates for known preset families ─────────────────
+# When g.arch_name contains the key string the matching template REPLACES
+# _RESERVED_SLOTS so recurring presets always render with the same stable
+# house layout regardless of graph-force relaxation.
+_PRESET_TEMPLATES: Dict[str, Dict[str, Tuple[float, float]]] = {
+    "rcc_bowtie": {
+        # ── main spine (y=0) ──────────────────────────────────────────
+        "sensory":     (-7.0,  0.0), "association":  (-5.5,  0.0),
+        "thalamus":    (-3.5,  0.0), "gws":          (-1.0,  0.0),
+        "pfc":         ( 1.5,  0.0), "bg":           ( 4.0,  0.0),
+        "motor":       ( 6.5,  0.0),
+        # ── upper cortical/cognitive loop ─────────────────────────────
+        "acc":              ( 1.5,  2.2), "dmn":           (-1.0,  2.7),
+        "claustrum":        ( 0.2,  2.2),
+        "thought_transformer": ( 0.8,  2.8),
+        "reasoning_cortex": ( 3.0,  2.2), "language_cortex": ( 5.5,  2.8),
+        "math_cortex":      ( 4.0,  2.8),
+        # ── memory cluster ────────────────────────────────────────────
+        "hippo":       ( 0.5, -2.2), "entorhinal":   (-0.5, -2.2),
+        "cerebellum":  ( 3.0, -2.8),
+        # ── self / world / predictive-control cluster ─────────────────
+        "world":       (-3.5,  2.5), "self_m":       (-3.5, -2.7),
+        "qualia":      (-1.0, -2.7), "neural_geometry": (-2.0,  2.7),
+        "forward_m":   ( 4.0, -2.2), "evaluator":    ( 5.5, -2.2),
+        # ── subcortical / interoceptive ───────────────────────────────
+        "amygdala":    (-5.5, -2.2), "insula":       (-7.0, -2.2),
+    },
+}
+
+# ── Subsystem envelope definitions ────────────────────────────────────
+# Each tuple: (label, [member_pop_names], fill_color, border_color)
+# Used by _draw_subsystem_envelopes() to draw faint grouped regions.
+_SUBSYSTEM_ENVELOPES: List[Tuple] = [
+    ("memory",
+     ["hippo", "entorhinal"],
+     "#d5f5e3", "#27ae60"),
+    ("self-model",
+     ["self_m", "qualia", "world", "neural_geometry"],
+     "#d6eaf8", "#2980b9"),
+    ("predictive ctrl",
+     ["forward_m", "evaluator", "cerebellum"],
+     "#fdf2f8", "#8e44ad"),
+    ("cortical loop",
+     ["acc", "dmn", "claustrum", "thought_transformer",
+      "language_cortex", "math_cortex", "reasoning_cortex"],
+     "#fef9e7", "#f39c12"),
+    ("interoceptive",
+     ["amygdala", "insula"],
+     "#fce4ec", "#c0392b"),
+]
+
 
 def _derive_spine(g: "NeuralFlowGraph") -> List[str]:
     """Derive the input→...→output spine from the synapse graph itself.
@@ -523,6 +574,16 @@ def _neuroanatomical_layout(g: "NeuralFlowGraph") -> Dict[str, Tuple[float, floa
     rng = random.Random(42)
     pos: Dict[str, Tuple[float, float]] = {}
 
+    # Canonical preset template: use preset-family slots when the arch name
+    # matches a known pattern — gives stable "house layout" per preset family.
+    preset_slots: Dict[str, Tuple[float, float]] = {}
+    arch_lower = g.arch_name.lower()
+    for pat, slots in _PRESET_TEMPLATES.items():
+        if pat in arch_lower:
+            preset_slots = slots
+            break
+    _effective_slots = {**_RESERVED_SLOTS, **preset_slots}
+
     # 1. DSL-derived spine — lay it out left→right on y=0
     spine = _derive_spine(g)
     if spine:
@@ -532,8 +593,8 @@ def _neuroanatomical_layout(g: "NeuralFlowGraph") -> Dict[str, Tuple[float, floa
             pos[name] = (-6.0 + i * x_step, 0.0)
     # 2. Fallback pin for any spine population we couldn't derive
     for n in g.nodes:
-        if n.name in _RESERVED_SLOTS and n.name not in pos:
-            pos[n.name] = _RESERVED_SLOTS[n.name]
+        if n.name in _effective_slots and n.name not in pos:
+            pos[n.name] = _effective_slots[n.name]
     # 3. DSL-derived nucleus placement (uses modulation edges)
     nuc_pos = _derive_nucleus_targets(g, pos)
     pos.update(nuc_pos)
@@ -569,7 +630,37 @@ def _neuroanatomical_layout(g: "NeuralFlowGraph") -> Dict[str, Tuple[float, floa
             pos[n.name] = (9.0 * math.cos(ang), 9.0 * math.sin(ang))
     # De-overlap pass, but PIN the reserved spine — nuclei/orphans can
     # nudge, the bowtie backbone cannot.
-    PINNED = set(_RESERVED_SLOTS.keys()) | set(_NT_SLOTS.keys())
+    PINNED = set(_effective_slots.keys()) | set(_NT_SLOTS.keys())
+
+    # Anchor pass: pull each non-pinned population toward the weighted
+    # centroid of its direct synapse neighbours. This snaps peripheral
+    # nodes (memory, interoceptive, self-model) closer to their cluster
+    # without disturbing the pinned spine.
+    ANCHOR_ALPHA = 0.22   # blend fraction (0=no pull, 1=fully at centroid)
+    for _ in range(3):
+        for n in g.nodes:
+            if n.kind != "pop" or n.name not in pos or n.name in PINNED:
+                continue
+            nbr_wx, nbr_wy, total_w = 0.0, 0.0, 0.0
+            for e in g.edges:
+                if e.kind != "synapse":
+                    continue
+                w = max(e.weight, 0.1)
+                if e.src == n.name and e.tgt in pos:
+                    nbr_wx += pos[e.tgt][0] * w
+                    nbr_wy += pos[e.tgt][1] * w
+                    total_w += w
+                elif e.tgt == n.name and e.src in pos:
+                    nbr_wx += pos[e.src][0] * w
+                    nbr_wy += pos[e.src][1] * w
+                    total_w += w
+            if total_w < 1e-6:
+                continue
+            cx, cy = nbr_wx / total_w, nbr_wy / total_w
+            px, py = pos[n.name]
+            pos[n.name] = (px + ANCHOR_ALPHA * (cx - px),
+                           py + ANCHOR_ALPHA * (cy - py))
+
     MIN_SEP = 1.0
     names = list(pos.keys())
     for _ in range(3):
@@ -620,6 +711,36 @@ def _phase_gate_curve(center: float, width: float, n: int = 50):
     return xs, ys
 
 
+def _draw_subsystem_envelopes(ax, pos: Dict[str, Tuple[float, float]],
+                               pad: float = 0.72) -> None:
+    """Draw faint dashed rounded-rect envelopes around subsystem clusters.
+
+    Envelopes are drawn at zorder=0 (behind everything) so they frame
+    the node circles without obscuring them.  Each group in
+    _SUBSYSTEM_ENVELOPES is shown only when ≥2 of its members have
+    known positions.
+    """
+    import matplotlib.patches as mpatches
+    for label, members, fc, ec in _SUBSYSTEM_ENVELOPES:
+        pts = [pos[m] for m in members if m in pos]
+        if len(pts) < 2:
+            continue
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        xmin, xmax = min(xs) - pad, max(xs) + pad
+        ymin, ymax = min(ys) - pad * 0.72, max(ys) + pad * 0.72
+        ax.add_patch(mpatches.FancyBboxPatch(
+            (xmin, ymin), xmax - xmin, ymax - ymin,
+            boxstyle="round,pad=0.05,rounding_size=0.45",
+            linewidth=1.0, linestyle=(0, (4, 3)),
+            edgecolor=ec, facecolor=fc,
+            alpha=0.20, zorder=0))
+        ax.text(xmin + 0.14, ymax - 0.10, label,
+                ha="left", va="top",
+                fontsize=6.5, color=ec, style="italic",
+                alpha=0.80, zorder=1)
+
+
 def _draw_main_graph(ax, g: "NeuralFlowGraph",
                      show_weights: bool, show_equations: bool):
     """Render the brain region graph onto the supplied Axes."""
@@ -652,6 +773,9 @@ def _draw_main_graph(ax, g: "NeuralFlowGraph",
                 ha="center", va="bottom",
                 fontsize=7.5, color="#7d6608", style="italic",
                 zorder=1)
+
+    # Subsystem envelopes — drawn before nodes so they sit in the background
+    _draw_subsystem_envelopes(ax, pos)
 
     fan: Dict[str, int] = {}
     for e in g.edges:
