@@ -17,6 +17,20 @@ class NodeIR:
 
 
 @dataclass
+class EquationDefnIR(NodeIR):
+    """User-defined reusable equation definition."""
+    name: str
+    params: List[str]
+    formula: str
+    id: str = ""
+    exported: bool = False
+
+    def __post_init__(self):
+        if self.id == "":
+            self.id = self.name
+
+
+@dataclass
 class PopulationIR(NodeIR):
     name: str
     count: int
@@ -249,6 +263,7 @@ class CircuitIR(NodeIR):
 @dataclass
 class ProgramIR(NodeIR):
     id: str = ""
+    equation_decls: List[EquationDefnIR] = None
     populations: List[PopulationIR] = None
     neurotransmitter_systems: List[NeurotransmitterSystemIR] = None
     synapses: List[SynapseIR] = None
@@ -262,6 +277,8 @@ class ProgramIR(NodeIR):
     metrics: List["MetricIR"] = None
 
     def __post_init__(self):
+        if self.equation_decls is None:
+            self.equation_decls = []
         if self.populations is None:
             self.populations = []
         if self.neurotransmitter_systems is None:
@@ -285,7 +302,7 @@ class ProgramIR(NodeIR):
 
     @property
     def nodes(self):
-        return (self.populations + self.neurotransmitter_systems + self.synapses +
+        return (self.equation_decls + self.populations + self.neurotransmitter_systems + self.synapses +
                 self.modulations + self.formal_specs + self.sheaf_specs +
                 self.genes + self.proteins + self.metrics)
 
@@ -363,10 +380,25 @@ class NeuroMLCompiler:
         if not source or len(source) < 10:
             raise NeuroMLError("Empty or invalid source")
 
-        # Basic validation: check for required keywords
-        required = ['population']
-        if not any(f'{k} ' in source for k in required):
+        # Basic validation: check for at least one declaration
+        declarations = ['population', 'equation', 'architecture', 'synapse', 'neurotransmitter']
+        if not any(f'{k} ' in source for k in declarations):
             raise NeuroMLError("Missing required declarations")
+
+        # Extract equation definitions
+        eq_defs = []
+        eq_pattern = r'(?:export\s+)?equation\s+(\w+)\s*\{([^}]+)\}'
+        for match in re.finditer(eq_pattern, source):
+            name, props = match.groups()
+            props_dict = _parse_properties(props)
+            params_str = props_dict.get('params', '[]').strip('[]').replace('"', '').replace("'", '')
+            params = [p.strip() for p in params_str.split(',') if p.strip()]
+            formula = props_dict.get('formula', '').strip('"\'')
+            is_exported = 'export equation' in source[max(0, match.start()-20):match.start()]
+            eq_defs.append(EquationDefnIR(
+                name=name, params=params, formula=formula,
+                id=name, exported=is_exported
+            ))
 
         # Extract populations with all fields: count, dynamics, timescale, capacity
         pops = []
@@ -483,6 +515,7 @@ class NeuroMLCompiler:
 
         return ProgramIR(
             id="circuit",
+            equation_decls=eq_defs,
             populations=pops,
             neurotransmitter_systems=nts,
             synapses=synapses,

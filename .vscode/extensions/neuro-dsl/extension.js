@@ -158,7 +158,9 @@ function lintFile(document) {
   });
 
   proc.on('error', (err) => {
-    OUTPUT_CHANNEL.appendLine(`Linter error: ${err.message}`);
+    OUTPUT_CHANNEL.appendLine(`✗ Linter process error: ${err.message}`);
+    OUTPUT_CHANNEL.appendLine('This usually means Python executable not found');
+    diagnosticCollection.set(document.uri, []);
   });
 
   proc.on('close', (code) => {
@@ -170,7 +172,7 @@ function lintFile(document) {
         if (output.trim()) {
           const results = JSON.parse(output);
           if (Array.isArray(results)) {
-            OUTPUT_CHANNEL.appendLine(`Found ${results.length} diagnostic(s)`);
+            OUTPUT_CHANNEL.appendLine(`✓ Linter found ${results.length} diagnostic(s)`);
             results.forEach(result => {
               const range = new vscode.Range(
                 new vscode.Position(result.line - 1, Math.max(0, result.col - 1)),
@@ -192,13 +194,18 @@ function lintFile(document) {
               diags.push(diag);
             });
           }
+        } else {
+          OUTPUT_CHANNEL.appendLine('✓ Linter passed (no issues)');
         }
       } catch (e) {
-        OUTPUT_CHANNEL.appendLine(`Parse error: ${e.message}`);
-        OUTPUT_CHANNEL.appendLine(`Output was: ${output}`);
+        OUTPUT_CHANNEL.appendLine(`✗ JSON parse error: ${e.message}`);
+        OUTPUT_CHANNEL.appendLine(`Output was: ${output.substring(0, 500)}`);
       }
+    } else if (code === null) {
+      OUTPUT_CHANNEL.appendLine(`✗ Linter killed or crashed`);
     } else {
-      OUTPUT_CHANNEL.appendLine(`Linter failed with code ${code}: ${errorOutput}`);
+      OUTPUT_CHANNEL.appendLine(`✗ Linter failed with code ${code}`);
+      OUTPUT_CHANNEL.appendLine(`stderr: ${errorOutput.substring(0, 500)}`);
     }
 
     diagnosticCollection.set(document.uri, diags);
@@ -210,6 +217,7 @@ function lintFile(document) {
  */
 function findPythonExecutable(workspaceFolder) {
   const basePath = workspaceFolder.uri.fsPath;
+  OUTPUT_CHANNEL.appendLine(`Workspace path: ${basePath}`);
 
   // Try venv locations in order
   const candidates = [
@@ -220,13 +228,15 @@ function findPythonExecutable(workspaceFolder) {
   ];
 
   for (const candidate of candidates) {
+    OUTPUT_CHANNEL.appendLine(`Checking: ${candidate}`);
     if (fs.existsSync(candidate)) {
-      OUTPUT_CHANNEL.appendLine(`Found Python at: ${candidate}`);
+      OUTPUT_CHANNEL.appendLine(`✓ Found Python at: ${candidate}`);
       return candidate;
     }
   }
 
-  OUTPUT_CHANNEL.appendLine('Venv Python not found, using system Python');
+  OUTPUT_CHANNEL.appendLine('⚠ Venv Python not found, falling back to system Python');
+  OUTPUT_CHANNEL.appendLine('This will fail if system Python < 3.7');
   return process.platform === 'win32' ? 'python.exe' : 'python3';
 }
 

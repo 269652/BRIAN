@@ -148,12 +148,14 @@ class CodeGenerator:
           pop.dynamics → macro lookup (either form, depending on decl)
         """
         if pop.ode:
-            decl = find_decl_for_ode(pop.ode)
-            return decl, pop.ode, True
+            ode_str = self._resolve_equation_ref(pop.ode)
+            decl = find_decl_for_ode(ode_str)
+            return decl, ode_str, True
 
         if pop.equation:
-            decl = find_decl_for_equation(pop.equation)
-            return decl, pop.equation, False
+            eq_str = self._resolve_equation_ref(pop.equation)
+            decl = find_decl_for_equation(eq_str)
+            return decl, eq_str, False
 
         decl = DYNAMICS_DECLS.get(pop.dynamics)
         if decl is None:
@@ -324,6 +326,20 @@ class CodeGenerator:
         "additive":       "y = output + (c * gain)",
     }
 
+    def _resolve_equation_ref(self, eq_str: str) -> str:
+        """Resolve equation reference (@name) to its formula.
+
+        If eq_str starts with @, look it up in equation_decls.
+        Otherwise, return eq_str unchanged.
+        """
+        if eq_str and eq_str.startswith("@"):
+            eq_name = eq_str[1:]
+            for eq_def in self.ir.equation_decls:
+                if eq_def.name == eq_name:
+                    return eq_def.formula
+            raise ValueError(f"undefined equation reference: {eq_str!r}")
+        return eq_str
+
     def _synapse_contribution_expr(self, i: int,
                                    syn: SynapseIR,
                                    src_expr: str) -> str:
@@ -335,6 +351,7 @@ class CodeGenerator:
         population's input sum.
         """
         eq_str = syn.equation or self._SYNAPSE_CANONICAL
+        eq_str = self._resolve_equation_ref(eq_str)
         eq = parse_equation(eq_str)
         weight = syn.weight if syn.weight is not None else 1.0
         name_map = {
@@ -358,6 +375,7 @@ class CodeGenerator:
                 )
             eq_str = self._MOD_CANONICAL[effect]
 
+        eq_str = self._resolve_equation_ref(eq_str)
         eq = parse_equation(eq_str)
         gain = mod.gain if mod.gain is not None else 1.0
         name_map = {
@@ -494,3 +512,13 @@ class CodeGenerator:
         )
         return "\n".join([f"class {cls_name}(nn.Module):", doc, ""]
                          + init + [""] + fwd)
+
+
+# ── Module-level convenience ────────────────────────────────────────────────
+
+def generate_module(ir: "ProgramIR", module_name: str = "GeneratedCircuit") -> str:
+    """Convenience wrapper: compile a ProgramIR to Python source.
+
+    Equivalent to ``CodeGenerator(ir, module_name).generate()``.
+    """
+    return CodeGenerator(ir, module_name=module_name).generate()
