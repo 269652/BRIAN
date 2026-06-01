@@ -455,3 +455,32 @@ raw logs into structured findings:
    held-out, WMDP-OOD, a held-out episodic-recall or
    narrative-coherence task. Where Layer-A capabilities can compete.
 8. **Rotate the GitHub PAT** (security, not research).
+
+## Run 38469631 — 2026-06-01 15:17 UTC
+
+I can see this is a successful training completion of the RCC BoWTie P4 architecture up to step 10,000. Here's what the log shows:
+
+**Training Outcome:**
+- ✓ Completed 10,000 steps as planned
+- Final PPL: **242.1** at step 10,000
+- Loss trajectory: relatively stable oscillation in the 5.2–6.3 range throughout
+- Checkpoint saved successfully: `dsl_arch_step10000.pt`
+
+**Training Dynamics:**
+- Significant PPL variance (174→536 range across steps) — typical under loss clipping (f=3.0)
+- Learning rate settled to minimum (3.00e-05)
+- Throughput: ~33k tok/s (slowing into the run)
+- All auxiliary metrics (Φ, λ₁, NT, osc) remained within expected bounds
+
+**Issue at Shutdown:**
+The `PyGILState_Release` threading error after step 10,000 is a Python runtime cleanup issue, not a training failure. The restart loop correctly:
+1. Detected training reached target
+2. Attempted resume (which promptly exited cleanly)
+3. Final state: idle instance ready for destruction
+
+**Question:** Are you looking to:
+- Compare this PPL (242.1 @ 10k) against baseline or prior runs?
+- Analyze the loss trajectory for stability/convergence rate?
+- Move forward with OOD evaluation or another variant?
+
+Based on your memory, this fits the P4 loss-clipping experiment. Should I check whether this meets your target PPL threshold for proceeding?

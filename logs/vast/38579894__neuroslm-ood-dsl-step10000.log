@@ -1,0 +1,319 @@
+Sat May 30 13:30:22 UTC 2026
+Hit:1 http://archive.ubuntu.com/ubuntu jammy InRelease
+Get:2 http://security.ubuntu.com/ubuntu jammy-security InRelease [129 kB]
+Get:3 http://archive.ubuntu.com/ubuntu jammy-updates InRelease [128 kB]
+Get:4 http://security.ubuntu.com/ubuntu jammy-security/universe amd64 Packages [1297 kB]
+Get:5 http://security.ubuntu.com/ubuntu jammy-security/restricted amd64 Packages [7090 kB]
+Get:6 http://security.ubuntu.com/ubuntu jammy-security/main amd64 Packages [3959 kB]
+Get:7 http://archive.ubuntu.com/ubuntu jammy-backports InRelease [127 kB]
+Get:8 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 Packages [1605 kB]
+Get:9 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 Packages [4311 kB]
+Get:10 http://archive.ubuntu.com/ubuntu jammy-updates/restricted amd64 Packages [7400 kB]
+Fetched 26.0 MB in 3s (8070 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+curl is already the newest version (7.81.0-1ubuntu1.24).
+less is already the newest version (590-1ubuntu0.22.04.3).
+locales is already the newest version (2.35-0ubuntu3.13).
+openssh-server is already the newest version (1:8.9p1-3ubuntu0.15).
+software-properties-common is already the newest version (0.99.22.9).
+sudo is already the newest version (1.9.9-1ubuntu2.6).
+tmux is already the newest version (3.2a-4ubuntu0.2).
+wget is already the newest version (1.21.2-2ubuntu1.1).
+0 upgraded, 0 newly installed, 0 to remove and 46 not upgraded.
+Reading package lists...
+Building dependency tree...
+Reading state information...
+git is already the newest version (1:2.34.1-1ubuntu1.17).
+rsync is already the newest version (3.2.7-0ubuntu0.22.04.6).
+0 upgraded, 0 newly installed, 0 to remove and 46 not upgraded.
+rm: cannot remove '/etc/forward_port2': No such file or directory
+Server listening on 0.0.0.0 port 22.
+Server listening on :: port 22.
+Sat May 30 13:30:29 UTC 2026
+Warning: Permanently added 'ssh7.vast.ai' (ED25519) to the list of known hosts.
+Reading package lists...
+Building dependency tree...
+Reading state information...
+git is already the newest version (1:2.34.1-1ubuntu1.17).
+The following NEW packages will be installed:
+  git-lfs
+0 upgraded, 1 newly installed, 0 to remove and 46 not upgraded.
+Need to get 3544 kB of archives.
+After this operation, 10.5 MB of additional disk space will be used.
+Get:1 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 git-lfs amd64 3.0.2-1ubuntu0.3 [3544 kB]
+debconf: delaying package configuration, since apt-utils is not installed
+Fetched 3544 kB in 0s (27.6 MB/s)
+Selecting previously unselected package git-lfs.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading d
+Preparing to unpack .../git-lfs_3.0.2-1ubuntu0.3_amd64.deb ...
+Unpacking git-lfs (3.0.2-1ubuntu0.3) ...
+Setting up git-lfs (3.0.2-1ubuntu0.3) ...
+Git LFS initialized.
+Cloning into 'brian'...
+Switched to a new branch 'arch/rcc-p4-loss-clip'
+Branch 'arch/rcc-p4-loss-clip' set up to track remote branch 'arch/rcc-p4-loss-clip' from 'origin'.
+── pulling ONLY LFS object: lfs_checkpoints/dsl_arch_step10000.pt ──
+── bootstrap (pip deps, SKIP_LFS_RESUME=1) ──
+── 1. System packages (git, git-lfs) ─────────────────────────────
+Updated git hooks.
+Git LFS initialized.
+── 2. GitHub credentials ─────────────────────────────────────────
+── 3. Clone repo (LFS pointers only) ─────────────────────────────
+── 4. Python dependencies ────────────────────────────────────────
+torch 2.3.0 cuda True
+Requirement already satisfied: numpy>=1.26 in /opt/conda/lib/python3.10/site-packages (from -r requirements.txt (line 4)) (1.26.4)
+Collecting tiktoken>=0.6 (from -r requirements.txt (line 5))
+  Downloading tiktoken-0.13.0-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (6.7 kB)
+Collecting datasets>=2.18 (from -r requirements.txt (line 6))
+  Downloading datasets-4.8.5-py3-none-any.whl.metadata (19 kB)
+Collecting tqdm>=4.66 (from -r requirements.txt (line 7))
+  Downloading tqdm-4.67.3-py3-none-any.whl.metadata (57 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 57.7/57.7 kB 5.2 MB/s eta 0:00:00
+Collecting einops>=0.7 (from -r requirements.txt (line 8))
+  Downloading einops-0.8.2-py3-none-any.whl.metadata (13 kB)
+Requirement already satisfied: networkx>=3.0 in /opt/conda/lib/python3.10/site-packages (from -r requirements.txt (line 9)) (3.1)
+Collecting accelerate>=0.27 (from -r requirements.txt (line 10))
+  Downloading accelerate-1.13.0-py3-none-any.whl.metadata (19 kB)
+Collecting regex (from tiktoken>=0.6->-r requirements.txt (line 5))
+  Downloading regex-2026.5.9-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 40.4/40.4 kB 83.2 kB/s eta 0:00:00
+Requirement already satisfied: requests in /opt/conda/lib/python3.10/site-packages (from tiktoken>=0.6->-r requirements.txt (line 5)) (2.31.0)
+Requirement already satisfied: filelock in /opt/conda/lib/python3.10/site-packages (from datasets>=2.18->-r requirements.txt (line 6)) (3.13.1)
+Collecting pyarrow>=21.0.0 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading pyarrow-24.0.0-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (3.0 kB)
+Collecting dill<0.4.2,>=0.3.0 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading dill-0.4.1-py3-none-any.whl.metadata (10 kB)
+Collecting pandas (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading pandas-2.3.3-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (91 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 91.2/91.2 kB 27.5 MB/s eta 0:00:00
+Collecting requests (from tiktoken>=0.6->-r requirements.txt (line 5))
+  Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+Collecting httpx<1.0.0 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting xxhash (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading xxhash-3.7.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (13 kB)
+Collecting multiprocess<0.70.20 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading multiprocess-0.70.19-py310-none-any.whl.metadata (7.5 kB)
+Requirement already satisfied: fsspec<=2026.2.0,>=2023.1.0 in /opt/conda/lib/python3.10/site-packages (from fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6)) (2024.3.1)
+Collecting huggingface-hub<2.0,>=0.25.0 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading huggingface_hub-1.17.0-py3-none-any.whl.metadata (14 kB)
+Requirement already satisfied: packaging in /opt/conda/lib/python3.10/site-packages (from datasets>=2.18->-r requirements.txt (line 6)) (23.2)
+Requirement already satisfied: pyyaml>=5.1 in /opt/conda/lib/python3.10/site-packages (from datasets>=2.18->-r requirements.txt (line 6)) (6.0.1)
+Requirement already satisfied: psutil in /opt/conda/lib/python3.10/site-packages (from accelerate>=0.27->-r requirements.txt (line 10)) (5.9.0)
+Requirement already satisfied: torch>=2.0.0 in /opt/conda/lib/python3.10/site-packages (from accelerate>=0.27->-r requirements.txt (line 10)) (2.3.0)
+Collecting safetensors>=0.4.3 (from accelerate>=0.27->-r requirements.txt (line 10))
+  Downloading safetensors-0.7.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.1 kB)
+Collecting aiohttp!=4.0.0a0,!=4.0.0a1 (from fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading aiohttp-3.13.5-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.1 kB)
+Collecting anyio (from httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading anyio-4.13.0-py3-none-any.whl.metadata (4.5 kB)
+Requirement already satisfied: certifi in /opt/conda/lib/python3.10/site-packages (from httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6)) (2024.2.2)
+Collecting httpcore==1.* (from httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Requirement already satisfied: idna in /opt/conda/lib/python3.10/site-packages (from httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6)) (3.4)
+Collecting h11>=0.16 (from httpcore==1.*->httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Collecting click>=8.4.0 (from huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading click-8.4.1-py3-none-any.whl.metadata (2.6 kB)
+Collecting hf-xet<2.0.0,>=1.4.3 (from huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading hf_xet-1.5.0-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (4.9 kB)
+Collecting typer<0.26.0,>=0.20.0 (from huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading typer-0.25.1-py3-none-any.whl.metadata (15 kB)
+Requirement already satisfied: typing-extensions>=4.1.0 in /opt/conda/lib/python3.10/site-packages (from huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6)) (4.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in /opt/conda/lib/python3.10/site-packages (from requests->tiktoken>=0.6->-r requirements.txt (line 5)) (2.0.4)
+Requirement already satisfied: urllib3<3,>=1.26 in /opt/conda/lib/python3.10/site-packages (from requests->tiktoken>=0.6->-r requirements.txt (line 5)) (2.1.0)
+Requirement already satisfied: sympy in /opt/conda/lib/python3.10/site-packages (from torch>=2.0.0->accelerate>=0.27->-r requirements.txt (line 10)) (1.12)
+Requirement already satisfied: jinja2 in /opt/conda/lib/python3.10/site-packages (from torch>=2.0.0->accelerate>=0.27->-r requirements.txt (line 10)) (3.1.3)
+Collecting python-dateutil>=2.8.2 (from pandas->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+Requirement already satisfied: pytz>=2020.1 in /opt/conda/lib/python3.10/site-packages (from pandas->datasets>=2.18->-r requirements.txt (line 6)) (2023.3.post1)
+Collecting tzdata>=2022.7 (from pandas->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading tzdata-2026.2-py2.py3-none-any.whl.metadata (1.4 kB)
+Collecting aiohappyeyeballs>=2.5.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading aiohappyeyeballs-2.6.2-py3-none-any.whl.metadata (5.9 kB)
+Collecting aiosignal>=1.4.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+Collecting async-timeout<6.0,>=4.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading async_timeout-5.0.1-py3-none-any.whl.metadata (5.1 kB)
+Requirement already satisfied: attrs>=17.3.0 in /opt/conda/lib/python3.10/site-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6)) (23.1.0)
+Collecting frozenlist>=1.1.1 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading frozenlist-1.8.0-cp310-cp310-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+Collecting multidict<7.0,>=4.5 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading multidict-6.7.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+Collecting propcache>=0.2.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading propcache-0.5.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (16 kB)
+Collecting yarl<2.0,>=1.17.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading yarl-1.24.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (94 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 94.2/94.2 kB 24.1 MB/s eta 0:00:00
+Requirement already satisfied: six>=1.5 in /opt/conda/lib/python3.10/site-packages (from python-dateutil>=2.8.2->pandas->datasets>=2.18->-r requirements.txt (line 6)) (1.16.0)
+Collecting shellingham>=1.3.0 (from typer<0.26.0,>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+Collecting rich>=13.8.0 (from typer<0.26.0,>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+Collecting annotated-doc>=0.0.2 (from typer<0.26.0,>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading annotated_doc-0.0.4-py3-none-any.whl.metadata (6.6 kB)
+Requirement already satisfied: exceptiongroup>=1.0.2 in /opt/conda/lib/python3.10/site-packages (from anyio->httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6)) (1.2.0)
+Requirement already satisfied: MarkupSafe>=2.0 in /opt/conda/lib/python3.10/site-packages (from jinja2->torch>=2.0.0->accelerate>=0.27->-r requirements.txt (line 10)) (2.1.3)
+Requirement already satisfied: mpmath>=0.19 in /opt/conda/lib/python3.10/site-packages (from sympy->torch>=2.0.0->accelerate>=0.27->-r requirements.txt (line 10)) (1.3.0)
+Collecting markdown-it-py>=2.2.0 (from rich>=13.8.0->typer<0.26.0,>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading markdown_it_py-4.2.0-py3-none-any.whl.metadata (7.4 kB)
+Requirement already satisfied: pygments<3.0.0,>=2.13.0 in /opt/conda/lib/python3.10/site-packages (from rich>=13.8.0->typer<0.26.0,>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6)) (2.15.1)
+Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=13.8.0->typer<0.26.0,>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+Downloading tiktoken-0.13.0-cp310-cp310-manylinux_2_28_x86_64.whl (1.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 44.9 MB/s eta 0:00:00
+Downloading datasets-4.8.5-py3-none-any.whl (528 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 529.0/529.0 kB 99.3 MB/s eta 0:00:00
+Downloading tqdm-4.67.3-py3-none-any.whl (78 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.4/78.4 kB 24.9 MB/s eta 0:00:00
+Downloading einops-0.8.2-py3-none-any.whl (65 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 65.6/65.6 kB 20.5 MB/s eta 0:00:00
+Downloading accelerate-1.13.0-py3-none-any.whl (383 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 383.7/383.7 kB 12.7 MB/s eta 0:00:00
+Downloading dill-0.4.1-py3-none-any.whl (120 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 120.0/120.0 kB 19.2 MB/s eta 0:00:00
+Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.5/73.5 kB 13.7 MB/s eta 0:00:00
+Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.8/78.8 kB 16.1 MB/s eta 0:00:00
+Downloading huggingface_hub-1.17.0-py3-none-any.whl (671 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 671.5/671.5 kB 58.9 MB/s eta 0:00:00
+Downloading multiprocess-0.70.19-py310-none-any.whl (134 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 134.9/134.9 kB 24.2 MB/s eta 0:00:00
+Downloading pyarrow-24.0.0-cp310-cp310-manylinux_2_28_x86_64.whl (48.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.8/48.8 MB 77.5 MB/s eta 0:00:00
+Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.1/73.1 kB 23.7 MB/s eta 0:00:00
+Downloading safetensors-0.7.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (507 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 507.2/507.2 kB 99.8 MB/s eta 0:00:00
+Downloading pandas-2.3.3-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 19.0 MB/s eta 0:00:00
+Downloading regex-2026.5.9-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (794 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 794.1/794.1 kB 101.5 MB/s eta 0:00:00
+Downloading xxhash-3.7.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (193 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 193.3/193.3 kB 36.9 MB/s eta 0:00:00
+Downloading aiohttp-3.13.5-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.7/1.7 MB 70.9 MB/s eta 0:00:00
+Downloading click-8.4.1-py3-none-any.whl (116 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 116.6/116.6 kB 22.2 MB/s eta 0:00:00
+Downloading hf_xet-1.5.0-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (4.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 130.9 MB/s eta 0:00:00
+Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 66.5 MB/s eta 0:00:00
+Downloading typer-0.25.1-py3-none-any.whl (58 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 58.4/58.4 kB 18.6 MB/s eta 0:00:00
+Downloading tzdata-2026.2-py2.py3-none-any.whl (349 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 349.3/349.3 kB 80.8 MB/s eta 0:00:00
+Downloading anyio-4.13.0-py3-none-any.whl (114 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 114.4/114.4 kB 33.7 MB/s eta 0:00:00
+Downloading aiohappyeyeballs-2.6.2-py3-none-any.whl (15 kB)
+Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+Downloading async_timeout-5.0.1-py3-none-any.whl (6.2 kB)
+Downloading frozenlist-1.8.0-cp310-cp310-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (219 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 219.5/219.5 kB 33.2 MB/s eta 0:00:00
+Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Downloading multidict-6.7.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (243 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 243.3/243.3 kB 36.2 MB/s eta 0:00:00
+Downloading propcache-0.5.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (60 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 60.1/60.1 kB 11.4 MB/s eta 0:00:00
+Downloading rich-15.0.0-py3-none-any.whl (310 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 310.7/310.7 kB 42.4 MB/s eta 0:00:00
+Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+Downloading yarl-1.24.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (106 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 106.7/106.7 kB 18.4 MB/s eta 0:00:00
+Downloading markdown_it_py-4.2.0-py3-none-any.whl (91 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 91.7/91.7 kB 15.3 MB/s eta 0:00:00
+Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+Installing collected packages: xxhash, tzdata, tqdm, shellingham, safetensors, requests, regex, python-dateutil, pyarrow, propcache, multidict, mdurl, hf-xet, h11, frozenlist, einops, dill, click, async-timeout, anyio, annotated-doc, aiohappyeyeballs, yarl, tiktoken, pandas, multiprocess, markdown-it-py, httpcore, aiosignal, rich, httpx, aiohttp, typer, huggingface-hub, datasets, accelerate
+  Attempting uninstall: tqdm
+    Found existing installation: tqdm 4.65.0
+    Uninstalling tqdm-4.65.0:
+      Successfully uninstalled tqdm-4.65.0
+  Attempting uninstall: requests
+    Found existing installation: requests 2.31.0
+    Uninstalling requests-2.31.0:
+      Successfully uninstalled requests-2.31.0
+  Attempting uninstall: click
+    Found existing installation: click 8.1.7
+    Uninstalling click-8.1.7:
+      Successfully uninstalled click-8.1.7
+Successfully installed accelerate-1.13.0 aiohappyeyeballs-2.6.2 aiohttp-3.13.5 aiosignal-1.4.0 annotated-doc-0.0.4 anyio-4.13.0 async-timeout-5.0.1 click-8.4.1 datasets-4.8.5 dill-0.4.1 einops-0.8.2 frozenlist-1.8.0 h11-0.16.0 hf-xet-1.5.0 httpcore-1.0.9 httpx-0.28.1 huggingface-hub-1.17.0 markdown-it-py-4.2.0 mdurl-0.1.2 multidict-6.7.1 multiprocess-0.70.19 pandas-2.3.3 propcache-0.5.2 pyarrow-24.0.0 python-dateutil-2.9.0.post0 regex-2026.5.9 requests-2.34.2 rich-15.0.0 safetensors-0.7.0 shelli
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+Collecting transformers<5,>=4.40
+  Downloading transformers-4.57.6-py3-none-any.whl.metadata (43 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.0/44.0 kB 3.3 MB/s eta 0:00:00
+Requirement already satisfied: filelock in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (3.13.1)
+Collecting huggingface-hub<1.0,>=0.34.0 (from transformers<5,>=4.40)
+  Downloading huggingface_hub-0.36.2-py3-none-any.whl.metadata (15 kB)
+Requirement already satisfied: numpy>=1.17 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (1.26.4)
+Requirement already satisfied: packaging>=20.0 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (23.2)
+Requirement already satisfied: pyyaml>=5.1 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (6.0.1)
+Requirement already satisfied: regex!=2019.12.17 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (2026.5.9)
+Requirement already satisfied: requests in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (2.34.2)
+Collecting tokenizers<=0.23.0,>=0.22.0 (from transformers<5,>=4.40)
+  Downloading tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+Requirement already satisfied: safetensors>=0.4.3 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (0.7.0)
+Requirement already satisfied: tqdm>=4.27 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (4.67.3)
+Requirement already satisfied: fsspec>=2023.5.0 in /opt/conda/lib/python3.10/site-packages (from huggingface-hub<1.0,>=0.34.0->transformers<5,>=4.40) (2024.3.1)
+Requirement already satisfied: hf-xet<2.0.0,>=1.1.3 in /opt/conda/lib/python3.10/site-packages (from huggingface-hub<1.0,>=0.34.0->transformers<5,>=4.40) (1.5.0)
+Requirement already satisfied: typing-extensions>=3.7.4.3 in /opt/conda/lib/python3.10/site-packages (from huggingface-hub<1.0,>=0.34.0->transformers<5,>=4.40) (4.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in /opt/conda/lib/python3.10/site-packages (from requests->transformers<5,>=4.40) (2.0.4)
+Requirement already satisfied: idna<4,>=2.5 in /opt/conda/lib/python3.10/site-packages (from requests->transformers<5,>=4.40) (3.4)
+Requirement already satisfied: urllib3<3,>=1.26 in /opt/conda/lib/python3.10/site-packages (from requests->transformers<5,>=4.40) (2.1.0)
+Requirement already satisfied: certifi>=2023.5.7 in /opt/conda/lib/python3.10/site-packages (from requests->transformers<5,>=4.40) (2024.2.2)
+Downloading transformers-4.57.6-py3-none-any.whl (12.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.0/12.0 MB 140.4 MB/s eta 0:00:00
+Downloading huggingface_hub-0.36.2-py3-none-any.whl (566 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 566.4/566.4 kB 97.9 MB/s eta 0:00:00
+Downloading tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 143.3 MB/s eta 0:00:00
+Installing collected packages: huggingface-hub, tokenizers, transformers
+  Attempting uninstall: huggingface-hub
+    Found existing installation: huggingface_hub 1.17.0
+    Uninstalling huggingface_hub-1.17.0:
+      Successfully uninstalled huggingface_hub-1.17.0
+Successfully installed huggingface-hub-0.36.2 tokenizers-0.22.2 transformers-4.57.6
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+── 5. HuggingFace token (optional) ───────────────────────────────
+  (no HF_TOKEN — dataset downloads are unauthenticated/slower)
+── 6. Pull the checkpoint we resume from (if any) ────────────────
+  SKIP_LFS_RESUME=1: skipping wholesale adamw ckpt pull 
+    (caller handled the specific ckpt it needs)
+✓ Bootstrap complete. Repo at: /workspace/brian
+  Next: bash scripts/vast_train_loop.sh
+── running OOD eval (max_windows=200, batch=4) ──
+[ood] device: cuda
+[load] detected DSL checkpoint: dsl_arch_step10000.pt
+[ood-dsl] building DSLLanguageCortex from preset=rcc_bowtie_30m_p4
+[ood-dsl] loaded 80 keys; missing=0, unexpected=0
+Traceback (most recent call last):
+  File "/workspace/brian/brian_ood_test.py", line 581, in <module>
+    raise SystemExit(main())
+  File "/workspace/brian/brian_ood_test.py", line 494, in main
+    n_params = sum(p.numel() for p in brain.parameters())
+AttributeError: '_DSLOODAdapter' object has no attribute 'parameters'
+── committing + pushing result ──
+fatal: pathspec 'logs/vast/benchmarks/ood/ood_results_dsl-step10000.json' did not match any files
+On branch arch/rcc-p4-loss-clip
+Your branch is up to date with 'origin/arch/rcc-p4-loss-clip'.
+nothing to commit, working tree clean
+nothing to commit
+✓ pushed
+── OOD eval done ──
+On branch arch/rcc-p4-loss-clip
+Your branch is up to date with 'origin/arch/rcc-p4-loss-clip'.
+nothing to commit, working tree clean
+✓ log pushed
+── self-destroying ood-eval instance ──
+ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
+pyopenssl 24.0.0 requires cryptography<43,>=41.0.5, but you have cryptography 46.0.5 which is incompatible.
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+[onstart] vastai destroy instance 38579894
+Are you sure you want to destroy instance 38579894? This is irreversible and will delete all data. [y/N] 
+Aborted.
+── eval idle; destroy manually: vastai destroy instance <id> ──
+

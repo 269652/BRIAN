@@ -1,0 +1,686 @@
+Tue May 26 01:45:59 UTC 2026
+Hit:1 http://archive.ubuntu.com/ubuntu jammy InRelease
+Hit:2 http://archive.ubuntu.com/ubuntu jammy-updates InRelease
+Get:3 http://security.ubuntu.com/ubuntu jammy-security InRelease [129 kB]
+Hit:4 http://archive.ubuntu.com/ubuntu jammy-backports InRelease
+Fetched 129 kB in 1s (156 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+curl is already the newest version (7.81.0-1ubuntu1.24).
+less is already the newest version (590-1ubuntu0.22.04.3).
+locales is already the newest version (2.35-0ubuntu3.13).
+openssh-server is already the newest version (1:8.9p1-3ubuntu0.15).
+software-properties-common is already the newest version (0.99.22.9).
+sudo is already the newest version (1.9.9-1ubuntu2.6).
+tmux is already the newest version (3.2a-4ubuntu0.2).
+wget is already the newest version (1.21.2-2ubuntu1.1).
+0 upgraded, 0 newly installed, 0 to remove and 45 not upgraded.
+Reading package lists...
+Building dependency tree...
+Reading state information...
+git is already the newest version (1:2.34.1-1ubuntu1.17).
+rsync is already the newest version (3.2.7-0ubuntu0.22.04.6).
+0 upgraded, 0 newly installed, 0 to remove and 45 not upgraded.
+rm: cannot remove '/etc/forward_port2': No such file or directory
+vast_train.sh boot @ 2026-05-26T01:46:04Z
+Server listening on 0.0.0.0 port 22.
+Server listening on :: port 22.
+Tue May 26 01:46:04 UTC 2026
+Hit:1 http://security.ubuntu.com/ubuntu jammy-security InRelease
+Hit:2 http://archive.ubuntu.com/ubuntu jammy InRelease
+Hit:3 http://archive.ubuntu.com/ubuntu jammy-updates InRelease
+Hit:4 http://archive.ubuntu.com/ubuntu jammy-backports InRelease
+Warning: Permanently added 'ssh4.vast.ai' (ED25519) to the list of known hosts.
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+git is already the newest version (1:2.34.1-1ubuntu1.17).
+The following NEW packages will be installed:
+  git-lfs
+0 upgraded, 1 newly installed, 0 to remove and 45 not upgraded.
+Need to get 3544 kB of archives.
+After this operation, 10.5 MB of additional disk space will be used.
+Get:1 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 git-lfs amd64 3.0.2-1ubuntu0.3 [3544 kB]
+debconf: delaying package configuration, since apt-utils is not installed
+Fetched 3544 kB in 0s (47.7 MB/s)
+Selecting previously unselected package git-lfs.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading d
+Preparing to unpack .../git-lfs_3.0.2-1ubuntu0.3_amd64.deb ...
+Unpacking git-lfs (3.0.2-1ubuntu0.3) ...
+Setting up git-lfs (3.0.2-1ubuntu0.3) ...
+Git LFS initialized.
+── cloning arch/rcc-bowtie ──
+Cloning into 'brian'...
+── bootstrap (pip deps + targeted LFS pull) ──
+── 1. System packages (git, git-lfs) ─────────────────────────────
+Updated git hooks.
+Git LFS initialized.
+── 2. GitHub credentials ─────────────────────────────────────────
+── 3. Clone repo (LFS pointers only) ─────────────────────────────
+── 4. Python dependencies ────────────────────────────────────────
+torch 2.3.0 cuda True
+Requirement already satisfied: numpy>=1.26 in /opt/conda/lib/python3.10/site-packages (from -r requirements.txt (line 4)) (1.26.4)
+Collecting tiktoken>=0.6 (from -r requirements.txt (line 5))
+  Downloading tiktoken-0.13.0-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (6.7 kB)
+Collecting datasets>=2.18 (from -r requirements.txt (line 6))
+  Downloading datasets-4.8.5-py3-none-any.whl.metadata (19 kB)
+Collecting tqdm>=4.66 (from -r requirements.txt (line 7))
+  Downloading tqdm-4.67.3-py3-none-any.whl.metadata (57 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 57.7/57.7 kB 2.2 MB/s eta 0:00:00
+Collecting einops>=0.7 (from -r requirements.txt (line 8))
+  Downloading einops-0.8.2-py3-none-any.whl.metadata (13 kB)
+Requirement already satisfied: networkx>=3.0 in /opt/conda/lib/python3.10/site-packages (from -r requirements.txt (line 9)) (3.1)
+Collecting accelerate>=0.27 (from -r requirements.txt (line 10))
+  Downloading accelerate-1.13.0-py3-none-any.whl.metadata (19 kB)
+Collecting regex (from tiktoken>=0.6->-r requirements.txt (line 5))
+  Downloading regex-2026.5.9-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 40.4/40.4 kB 1.8 MB/s eta 0:00:00
+Requirement already satisfied: requests in /opt/conda/lib/python3.10/site-packages (from tiktoken>=0.6->-r requirements.txt (line 5)) (2.31.0)
+Requirement already satisfied: filelock in /opt/conda/lib/python3.10/site-packages (from datasets>=2.18->-r requirements.txt (line 6)) (3.13.1)
+Collecting pyarrow>=21.0.0 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading pyarrow-24.0.0-cp310-cp310-manylinux_2_28_x86_64.whl.metadata (3.0 kB)
+Collecting dill<0.4.2,>=0.3.0 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading dill-0.4.1-py3-none-any.whl.metadata (10 kB)
+Collecting pandas (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading pandas-2.3.3-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (91 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 91.2/91.2 kB 5.2 MB/s eta 0:00:00
+Collecting requests (from tiktoken>=0.6->-r requirements.txt (line 5))
+  Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+Collecting httpx<1.0.0 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting xxhash (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading xxhash-3.7.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (13 kB)
+Collecting multiprocess<0.70.20 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading multiprocess-0.70.19-py310-none-any.whl.metadata (7.5 kB)
+Requirement already satisfied: fsspec<=2026.2.0,>=2023.1.0 in /opt/conda/lib/python3.10/site-packages (from fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6)) (2024.3.1)
+Collecting huggingface-hub<2.0,>=0.25.0 (from datasets>=2.18->-r requirements.txt (line 6))
+  Downloading huggingface_hub-1.16.1-py3-none-any.whl.metadata (14 kB)
+Requirement already satisfied: packaging in /opt/conda/lib/python3.10/site-packages (from datasets>=2.18->-r requirements.txt (line 6)) (23.2)
+Requirement already satisfied: pyyaml>=5.1 in /opt/conda/lib/python3.10/site-packages (from datasets>=2.18->-r requirements.txt (line 6)) (6.0.1)
+Requirement already satisfied: psutil in /opt/conda/lib/python3.10/site-packages (from accelerate>=0.27->-r requirements.txt (line 10)) (5.9.0)
+Requirement already satisfied: torch>=2.0.0 in /opt/conda/lib/python3.10/site-packages (from accelerate>=0.27->-r requirements.txt (line 10)) (2.3.0)
+Collecting safetensors>=0.4.3 (from accelerate>=0.27->-r requirements.txt (line 10))
+  Downloading safetensors-0.7.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.1 kB)
+Collecting aiohttp!=4.0.0a0,!=4.0.0a1 (from fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading aiohttp-3.13.5-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.1 kB)
+Collecting anyio (from httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading anyio-4.13.0-py3-none-any.whl.metadata (4.5 kB)
+Requirement already satisfied: certifi in /opt/conda/lib/python3.10/site-packages (from httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6)) (2024.2.2)
+Collecting httpcore==1.* (from httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Requirement already satisfied: idna in /opt/conda/lib/python3.10/site-packages (from httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6)) (3.4)
+Collecting h11>=0.16 (from httpcore==1.*->httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Collecting hf-xet<2.0.0,>=1.4.3 (from huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading hf_xet-1.5.0-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (4.9 kB)
+Collecting typer>=0.20.0 (from huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading typer-0.25.1-py3-none-any.whl.metadata (15 kB)
+Requirement already satisfied: typing-extensions>=4.1.0 in /opt/conda/lib/python3.10/site-packages (from huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6)) (4.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in /opt/conda/lib/python3.10/site-packages (from requests->tiktoken>=0.6->-r requirements.txt (line 5)) (2.0.4)
+Requirement already satisfied: urllib3<3,>=1.26 in /opt/conda/lib/python3.10/site-packages (from requests->tiktoken>=0.6->-r requirements.txt (line 5)) (2.1.0)
+Requirement already satisfied: sympy in /opt/conda/lib/python3.10/site-packages (from torch>=2.0.0->accelerate>=0.27->-r requirements.txt (line 10)) (1.12)
+Requirement already satisfied: jinja2 in /opt/conda/lib/python3.10/site-packages (from torch>=2.0.0->accelerate>=0.27->-r requirements.txt (line 10)) (3.1.3)
+Collecting python-dateutil>=2.8.2 (from pandas->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+Requirement already satisfied: pytz>=2020.1 in /opt/conda/lib/python3.10/site-packages (from pandas->datasets>=2.18->-r requirements.txt (line 6)) (2023.3.post1)
+Collecting tzdata>=2022.7 (from pandas->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading tzdata-2026.2-py2.py3-none-any.whl.metadata (1.4 kB)
+Collecting aiohappyeyeballs>=2.5.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading aiohappyeyeballs-2.6.2-py3-none-any.whl.metadata (5.9 kB)
+Collecting aiosignal>=1.4.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+Collecting async-timeout<6.0,>=4.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading async_timeout-5.0.1-py3-none-any.whl.metadata (5.1 kB)
+Requirement already satisfied: attrs>=17.3.0 in /opt/conda/lib/python3.10/site-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6)) (23.1.0)
+Collecting frozenlist>=1.1.1 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading frozenlist-1.8.0-cp310-cp310-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+Collecting multidict<7.0,>=4.5 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading multidict-6.7.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+Collecting propcache>=0.2.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading propcache-0.5.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (16 kB)
+Collecting yarl<2.0,>=1.17.0 (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2026.2.0,>=2023.1.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading yarl-1.24.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (94 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 94.2/94.2 kB 7.0 MB/s eta 0:00:00
+Requirement already satisfied: six>=1.5 in /opt/conda/lib/python3.10/site-packages (from python-dateutil>=2.8.2->pandas->datasets>=2.18->-r requirements.txt (line 6)) (1.16.0)
+Collecting click>=8.2.1 (from typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading click-8.4.1-py3-none-any.whl.metadata (2.6 kB)
+Collecting shellingham>=1.3.0 (from typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+Collecting rich>=13.8.0 (from typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+Collecting annotated-doc>=0.0.2 (from typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading annotated_doc-0.0.4-py3-none-any.whl.metadata (6.6 kB)
+Requirement already satisfied: exceptiongroup>=1.0.2 in /opt/conda/lib/python3.10/site-packages (from anyio->httpx<1.0.0->datasets>=2.18->-r requirements.txt (line 6)) (1.2.0)
+Requirement already satisfied: MarkupSafe>=2.0 in /opt/conda/lib/python3.10/site-packages (from jinja2->torch>=2.0.0->accelerate>=0.27->-r requirements.txt (line 10)) (2.1.3)
+Requirement already satisfied: mpmath>=0.19 in /opt/conda/lib/python3.10/site-packages (from sympy->torch>=2.0.0->accelerate>=0.27->-r requirements.txt (line 10)) (1.3.0)
+Collecting markdown-it-py>=2.2.0 (from rich>=13.8.0->typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading markdown_it_py-4.2.0-py3-none-any.whl.metadata (7.4 kB)
+Requirement already satisfied: pygments<3.0.0,>=2.13.0 in /opt/conda/lib/python3.10/site-packages (from rich>=13.8.0->typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6)) (2.15.1)
+Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=13.8.0->typer>=0.20.0->huggingface-hub<2.0,>=0.25.0->datasets>=2.18->-r requirements.txt (line 6))
+  Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+Downloading tiktoken-0.13.0-cp310-cp310-manylinux_2_28_x86_64.whl (1.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 47.5 MB/s eta 0:00:00
+Downloading datasets-4.8.5-py3-none-any.whl (528 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 529.0/529.0 kB 38.1 MB/s eta 0:00:00
+Downloading tqdm-4.67.3-py3-none-any.whl (78 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.4/78.4 kB 8.4 MB/s eta 0:00:00
+Downloading einops-0.8.2-py3-none-any.whl (65 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 65.6/65.6 kB 4.3 MB/s eta 0:00:00
+Downloading accelerate-1.13.0-py3-none-any.whl (383 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 383.7/383.7 kB 26.2 MB/s eta 0:00:00
+Downloading dill-0.4.1-py3-none-any.whl (120 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 120.0/120.0 kB 11.7 MB/s eta 0:00:00
+Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.5/73.5 kB 6.6 MB/s eta 0:00:00
+Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.8/78.8 kB 7.6 MB/s eta 0:00:00
+Downloading huggingface_hub-1.16.1-py3-none-any.whl (668 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 668.2/668.2 kB 40.6 MB/s eta 0:00:00
+Downloading multiprocess-0.70.19-py310-none-any.whl (134 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 134.9/134.9 kB 3.5 MB/s eta 0:00:00
+Downloading pyarrow-24.0.0-cp310-cp310-manylinux_2_28_x86_64.whl (48.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.8/48.8 MB 57.9 MB/s eta 0:00:00
+Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.1/73.1 kB 4.9 MB/s eta 0:00:00
+Downloading safetensors-0.7.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (507 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 507.2/507.2 kB 31.2 MB/s eta 0:00:00
+Downloading pandas-2.3.3-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 76.3 MB/s eta 0:00:00
+Downloading regex-2026.5.9-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (794 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 794.1/794.1 kB 42.3 MB/s eta 0:00:00
+Downloading xxhash-3.7.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (193 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 193.3/193.3 kB 11.5 MB/s eta 0:00:00
+Downloading aiohttp-3.13.5-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.7/1.7 MB 42.7 MB/s eta 0:00:00
+Downloading hf_xet-1.5.0-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (4.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 71.1 MB/s eta 0:00:00
+Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 229.9/229.9 kB 12.5 MB/s eta 0:00:00
+Downloading typer-0.25.1-py3-none-any.whl (58 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 58.4/58.4 kB 2.8 MB/s eta 0:00:00
+Downloading tzdata-2026.2-py2.py3-none-any.whl (349 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 349.3/349.3 kB 23.9 MB/s eta 0:00:00
+Downloading anyio-4.13.0-py3-none-any.whl (114 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 114.4/114.4 kB 12.8 MB/s eta 0:00:00
+Downloading aiohappyeyeballs-2.6.2-py3-none-any.whl (15 kB)
+Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+Downloading async_timeout-5.0.1-py3-none-any.whl (6.2 kB)
+Downloading click-8.4.1-py3-none-any.whl (116 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 116.6/116.6 kB 10.1 MB/s eta 0:00:00
+Downloading frozenlist-1.8.0-cp310-cp310-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (219 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 219.5/219.5 kB 23.8 MB/s eta 0:00:00
+Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Downloading multidict-6.7.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (243 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 243.3/243.3 kB 14.0 MB/s eta 0:00:00
+Downloading propcache-0.5.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (60 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 60.1/60.1 kB 3.6 MB/s eta 0:00:00
+Downloading rich-15.0.0-py3-none-any.whl (310 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 310.7/310.7 kB 16.4 MB/s eta 0:00:00
+Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+Downloading yarl-1.24.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (106 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 106.7/106.7 kB 6.5 MB/s eta 0:00:00
+Downloading markdown_it_py-4.2.0-py3-none-any.whl (91 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 91.7/91.7 kB 5.3 MB/s eta 0:00:00
+Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+Installing collected packages: xxhash, tzdata, tqdm, shellingham, safetensors, requests, regex, python-dateutil, pyarrow, propcache, multidict, mdurl, hf-xet, h11, frozenlist, einops, dill, click, async-timeout, anyio, annotated-doc, aiohappyeyeballs, yarl, tiktoken, pandas, multiprocess, markdown-it-py, httpcore, aiosignal, rich, httpx, aiohttp, typer, huggingface-hub, datasets, accelerate
+  Attempting uninstall: tqdm
+    Found existing installation: tqdm 4.65.0
+    Uninstalling tqdm-4.65.0:
+      Successfully uninstalled tqdm-4.65.0
+  Attempting uninstall: requests
+    Found existing installation: requests 2.31.0
+    Uninstalling requests-2.31.0:
+      Successfully uninstalled requests-2.31.0
+  Attempting uninstall: click
+    Found existing installation: click 8.1.7
+    Uninstalling click-8.1.7:
+      Successfully uninstalled click-8.1.7
+Successfully installed accelerate-1.13.0 aiohappyeyeballs-2.6.2 aiohttp-3.13.5 aiosignal-1.4.0 annotated-doc-0.0.4 anyio-4.13.0 async-timeout-5.0.1 click-8.4.1 datasets-4.8.5 dill-0.4.1 einops-0.8.2 frozenlist-1.8.0 h11-0.16.0 hf-xet-1.5.0 httpcore-1.0.9 httpx-0.28.1 huggingface-hub-1.16.1 markdown-it-py-4.2.0 mdurl-0.1.2 multidict-6.7.1 multiprocess-0.70.19 pandas-2.3.3 propcache-0.5.2 pyarrow-24.0.0 python-dateutil-2.9.0.post0 regex-2026.5.9 requests-2.34.2 rich-15.0.0 safetensors-0.7.0 shelli
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+Collecting transformers<5,>=4.40
+  Downloading transformers-4.57.6-py3-none-any.whl.metadata (43 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.0/44.0 kB 2.3 MB/s eta 0:00:00
+Requirement already satisfied: filelock in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (3.13.1)
+Collecting huggingface-hub<1.0,>=0.34.0 (from transformers<5,>=4.40)
+  Downloading huggingface_hub-0.36.2-py3-none-any.whl.metadata (15 kB)
+Requirement already satisfied: numpy>=1.17 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (1.26.4)
+Requirement already satisfied: packaging>=20.0 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (23.2)
+Requirement already satisfied: pyyaml>=5.1 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (6.0.1)
+Requirement already satisfied: regex!=2019.12.17 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (2026.5.9)
+Requirement already satisfied: requests in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (2.34.2)
+Collecting tokenizers<=0.23.0,>=0.22.0 (from transformers<5,>=4.40)
+  Downloading tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+Requirement already satisfied: safetensors>=0.4.3 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (0.7.0)
+Requirement already satisfied: tqdm>=4.27 in /opt/conda/lib/python3.10/site-packages (from transformers<5,>=4.40) (4.67.3)
+Requirement already satisfied: fsspec>=2023.5.0 in /opt/conda/lib/python3.10/site-packages (from huggingface-hub<1.0,>=0.34.0->transformers<5,>=4.40) (2024.3.1)
+Requirement already satisfied: hf-xet<2.0.0,>=1.1.3 in /opt/conda/lib/python3.10/site-packages (from huggingface-hub<1.0,>=0.34.0->transformers<5,>=4.40) (1.5.0)
+Requirement already satisfied: typing-extensions>=3.7.4.3 in /opt/conda/lib/python3.10/site-packages (from huggingface-hub<1.0,>=0.34.0->transformers<5,>=4.40) (4.11.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in /opt/conda/lib/python3.10/site-packages (from requests->transformers<5,>=4.40) (2.0.4)
+Requirement already satisfied: idna<4,>=2.5 in /opt/conda/lib/python3.10/site-packages (from requests->transformers<5,>=4.40) (3.4)
+Requirement already satisfied: urllib3<3,>=1.26 in /opt/conda/lib/python3.10/site-packages (from requests->transformers<5,>=4.40) (2.1.0)
+Requirement already satisfied: certifi>=2023.5.7 in /opt/conda/lib/python3.10/site-packages (from requests->transformers<5,>=4.40) (2024.2.2)
+Downloading transformers-4.57.6-py3-none-any.whl (12.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.0/12.0 MB 42.1 MB/s eta 0:00:00
+Downloading huggingface_hub-0.36.2-py3-none-any.whl (566 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 566.4/566.4 kB 29.8 MB/s eta 0:00:00
+Downloading tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 69.9 MB/s eta 0:00:00
+Installing collected packages: huggingface-hub, tokenizers, transformers
+  Attempting uninstall: huggingface-hub
+    Found existing installation: huggingface_hub 1.16.1
+    Uninstalling huggingface_hub-1.16.1:
+      Successfully uninstalled huggingface_hub-1.16.1
+Successfully installed huggingface-hub-0.36.2 tokenizers-0.22.2 transformers-4.57.6
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+── 5. HuggingFace token (optional) ───────────────────────────────
+  (no HF_TOKEN — dataset downloads are unauthenticated/slower)
+── 6. Pull the checkpoint we resume from (if any) ────────────────
+  resume checkpoints present:
+    624364126 /workspace/brian/lfs_checkpoints/neuroslm_large_107M_adamw_baseline_mix_83000.pt
+    624364126 /workspace/brian/lfs_checkpoints/neuroslm_large_107M_adamw_baseline_mix_84000.pt
+    624364126 /workspace/brian/lfs_checkpoints/neuroslm_large_107M_adamw_baseline_mix_85000.pt
+    445919514 /workspace/brian/lfs_checkpoints/neuroslm_large_107M_adamw_mix_1000.pt
+    445919514 /workspace/brian/lfs_checkpoints/neuroslm_large_107M_adamw_mix_2000.pt
+    445919514 /workspace/brian/lfs_checkpoints/neuroslm_large_107M_adamw_mix_3000.pt
+    446213644 /workspace/brian/lfs_checkpoints/neuroslm_large_107M_adamw_mix_best.pt
+✓ Bootstrap complete. Repo at: /workspace/brian
+  Next: bash scripts/vast_train_loop.sh
+── starting training ──
+    preset=rcc_bowtie_30m_p1 steps=10000 batch=4 grad_accum=4
+════════════════════════════════════════════════════════════════
+  NeuroSLM training loop
+  preset=rcc_bowtie_30m_p1 steps=10000 batch=4 grad_accum=4
+  optimizer=adamw  ckpt_dir=/workspace/brian/lfs_checkpoints
+  effective tokens/step ≈ batch*grad_accum*ctx
+════════════════════════════════════════════════════════════════
+▶ launch attempt 1 @ 01:49:16Z
+  FRESH=1: starting from step 0 (no resume).
+[train] device=cuda  backend=CUDA
+[train] regularization: dropout=0.1 weight_decay=0.05 decoupled_wd=True lr_decay_steps=10000 min_lr_ratio=0.1 label_smoothing=0.0
+[train] building Brain...
+/opt/conda/lib/python3.10/site-packages/torch/nn/modules/transformer.py:306: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}")
+[train] FULL (bio modules) | params: 67.99M (preset=rcc_bowtie_30m_p1, dtype=torch.bfloat16)
+[train] Brain topology:
+[train]   • LM trunk           :  32.68M
+[train]   • bio + bowtie       :  13.74M
+[train]   • neurochem + memory :  22.16M
+[train]   • TOTAL              :  68.58M
+[train]   • SRC-TEH            : False
+[train]   • neural_topology    : full
+[train]   • top modules (>=0.5M params):
+[train]       - language                  32.68M
+[train]       - orchestrator              17.06M
+[train]       - world                      1.95M
+[train]       - neural_geometry            1.85M
+[train]       - thought_transformer        1.47M
+[train]       - cerebellum                 1.40M
+[train]       - claustrum                  1.28M
+[train]       - pfc                        0.93M
+[train]       - dmn                        0.92M
+[train]       - self_m                     0.83M
+[train]       - narrative_system           0.81M
+[train]       - thalamus                   0.74M
+[train]       - projections                0.59M
+[train]       - trophic                    0.59M
+[train]       - cortical_sheet             0.56M
+[train]       - hippo                      0.56M
+[train] decoupled WD: 790 decayed matrices, 1133 exempt 1-D params (wd=0.05)
+[train] starting; ctx=1024, batch=4, steps=10000, mode=mix (chat_ratio=0.6)
+[train] >>> training loop starting: steps 0..10000 <<<
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[data:chat] using OpenHermes-2.5 (teknium/OpenHermes-2.5)
+step    20 | loss 10.8812 | lm 10.8807 | ppl 53138.7 | gnorm 4.252 | lr 1.90e-05 | 4268 tok/s | Φ 0.000 | λ₁ 1.000 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step    40 | loss 10.6008 | lm 10.5973 | ppl 40028.1 | gnorm 3.815 | lr 3.90e-05 | 34512 tok/s | Φ 0.000 | λ₁ 1.000 | ign 0.98 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step    60 | loss 10.1289 | lm 10.1269 | ppl 25006.9 | gnorm 2.460 | lr 5.90e-05 | 33866 tok/s | Φ 0.000 | λ₁ 1.000 | ign 0.99 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step    80 | loss 9.6094 | lm 9.6080 | ppl 14883.1 | gnorm 2.156 | lr 7.90e-05 | 33730 tok/s | Φ 0.000 | λ₁ 1.000 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step   100 | loss 9.1160 | lm 9.1130 | ppl 9072.7 | gnorm 2.090 | lr 9.90e-05 | 33743 tok/s | Φ 0.000 | λ₁ 1.000 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step   120 | loss 8.4242 | lm 8.4210 | ppl 4541.6 | gnorm 2.205 | lr 1.19e-04 | 33514 tok/s | Φ 0.000 | λ₁ 1.000 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step   140 | loss 7.9508 | lm 7.9521 | ppl 2841.4 | gnorm 1.970 | lr 1.39e-04 | 31033 tok/s | Φ 0.000 | λ₁ 1.000 | ign 0.99 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+step   160 | loss 7.3617 | lm 7.3595 | ppl 1571.0 | gnorm 1.217 | lr 1.59e-04 | 30300 tok/s | Φ 0.000 | λ₁ 1.000 | ign 0.70 | mesoLG 0.55 | troph 16/16 μ0.50 | NT[DA=0.43 NE=0.37 5HT=0.72 ACh=0.47 eCB=0.22 Glu=0.53 GABA=0.77] | osc[δ=0.000 θ=0.000 γ=0.000]
+[train] 🧠 Neural awakening at step 163: maturity=0.302, lm_loss=6.8787, entering growth phase
+step   180 | loss 7.2320 | lm 7.2260 | ppl 1374.7 | gnorm 1.181 | lr 1.79e-04 | 19497 tok/s | Φ 5.040 | λ₁ 0.129 | ign 1.00 | mesoLG 0.56 | troph 16/16 μ0.12 | NT[DA=0.45 NE=0.39 5HT=0.72 ACh=0.49 eCB=0.24 Glu=0.55 GABA=0.78] | osc[δ=0.800 θ=0.127 γ=0.008]
+step   200 | loss 7.0687 | lm 7.0566 | ppl 1160.5 | gnorm 0.981 | lr 1.99e-04 | 19375 tok/s | Φ 5.210 | λ₁ 0.084 | ign 1.00 | mesoLG 0.56 | troph 16/16 μ0.04 | NT[DA=0.47 NE=0.41 5HT=0.72 ACh=0.50 eCB=0.26 Glu=0.56 GABA=0.78] | osc[δ=0.778 θ=0.137 γ=0.015]
+[train] ⚡ grad spike at step 216: gnorm 3.98 > 2.76 (3.0×EMA) — step skipped (#1)
+[train] ⚡ grad spike at step 217: gnorm 4.41 > 2.76 (3.0×EMA) — step skipped (#2)
+step   220 | loss 7.0656 | lm 7.0520 | ppl 1155.2 | gnorm 1.406 | lr 2.19e-04 | 19215 tok/s | Φ 5.203 | λ₁ 0.094 | ign 0.93 | mesoLG 0.55 | troph 16/16 μ0.05 | NT[DA=0.47 NE=0.42 5HT=0.72 ACh=0.50 eCB=0.28 Glu=0.56 GABA=0.77] | osc[δ=0.302 θ=0.274 γ=0.088]
+step   240 | loss 6.9316 | lm 6.9142 | ppl 1006.5 | gnorm 1.160 | lr 2.39e-04 | 20788 tok/s | Φ 5.377 | λ₁ 0.132 | ign 0.91 | mesoLG 0.56 | troph 16/16 μ0.05 | NT[DA=0.47 NE=0.42 5HT=0.72 ACh=0.50 eCB=0.30 Glu=0.56 GABA=0.75] | osc[δ=0.849 θ=0.070 γ=0.019]
+[train] ⚡ grad spike at step 247: gnorm 5.09 > 3.82 (3.0×EMA) — step skipped (#3)
+[train] ⚡ grad spike at step 248: gnorm 6.12 > 3.82 (3.0×EMA) — step skipped (#4)
+step   260 | loss 6.6957 | lm 6.6710 | ppl 789.2 | gnorm 2.036 | lr 2.59e-04 | 20850 tok/s | Φ 5.267 | λ₁ 0.088 | ign 0.98 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.47 NE=0.42 5HT=0.72 ACh=0.50 eCB=0.31 Glu=0.51 GABA=0.82] | osc[δ=0.771 θ=0.118 γ=0.031]
+step   280 | loss 6.6920 | lm 6.6636 | ppl 783.3 | gnorm 1.284 | lr 2.79e-04 | 21696 tok/s | Φ 5.274 | λ₁ 0.100 | ign 0.98 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.47 NE=0.42 5HT=0.72 ACh=0.49 eCB=0.32 Glu=0.49 GABA=0.79] | osc[δ=0.766 θ=0.130 γ=0.025]
+step   300 | loss 6.6844 | lm 6.6378 | ppl 763.4 | gnorm 1.147 | lr 2.99e-04 | 21428 tok/s | Φ 5.308 | λ₁ 0.055 | ign 0.98 | mesoLG 0.55 | troph 16/16 μ0.06 | NT[DA=0.46 NE=0.42 5HT=0.72 ACh=0.48 eCB=0.33 Glu=0.49 GABA=0.75] | osc[δ=0.439 θ=0.184 γ=0.120]
+step   320 | loss 6.5414 | lm 6.4842 | ppl 654.7 | gnorm 1.562 | lr 3.00e-04 | 21743 tok/s | Φ 5.331 | λ₁ 0.086 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.45 NE=0.42 5HT=0.72 ACh=0.47 eCB=0.34 Glu=0.48 GABA=0.72] | osc[δ=0.716 θ=0.131 γ=0.021]
+step   340 | loss 6.4656 | lm 6.3995 | ppl 601.6 | gnorm 1.115 | lr 3.00e-04 | 21394 tok/s | Φ 4.858 | λ₁ 0.148 | ign 0.97 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.44 NE=0.41 5HT=0.72 ACh=0.46 eCB=0.34 Glu=0.47 GABA=0.72] | osc[δ=0.964 θ=0.020 γ=0.004]
+step   360 | loss 6.4660 | lm 6.3925 | ppl 597.3 | gnorm 1.015 | lr 3.00e-04 | 21693 tok/s | Φ 4.809 | λ₁ 0.260 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.44 NE=0.41 5HT=0.72 ACh=0.45 eCB=0.34 Glu=0.46 GABA=0.72] | osc[δ=0.762 θ=0.148 γ=0.017]
+step   380 | loss 6.3020 | lm 6.2265 | ppl 506.0 | gnorm 1.161 | lr 3.00e-04 | 20871 tok/s | Φ 5.324 | λ₁ 0.159 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.07 | NT[DA=0.43 NE=0.40 5HT=0.72 ACh=0.44 eCB=0.34 Glu=0.45 GABA=0.72] | osc[δ=0.541 θ=0.043 γ=0.111]
+step   400 | loss 6.2859 | lm 6.2072 | ppl 496.3 | gnorm 1.157 | lr 3.00e-04 | 21666 tok/s | Φ 5.688 | λ₁ 0.047 | ign 0.98 | mesoLG 0.55 | troph 16/16 μ0.08 | NT[DA=0.42 NE=0.40 5HT=0.72 ACh=0.43 eCB=0.34 Glu=0.44 GABA=0.72] | osc[δ=0.934 θ=0.013 γ=0.029]
+step   420 | loss 6.2820 | lm 6.1970 | ppl 491.3 | gnorm 1.076 | lr 3.00e-04 | 21180 tok/s | Φ 5.647 | λ₁ 0.141 | ign 0.33 | mesoLG 0.55 | troph 16/16 μ0.08 | NT[DA=0.41 NE=0.39 5HT=0.72 ACh=0.42 eCB=0.34 Glu=0.43 GABA=0.72] | osc[δ=0.547 θ=0.187 γ=0.064]
+step   440 | loss 6.1813 | lm 6.0894 | ppl 441.1 | gnorm 1.002 | lr 3.00e-04 | 21658 tok/s | Φ 4.823 | λ₁ 0.151 | ign 0.53 | mesoLG 0.55 | troph 16/16 μ0.09 | NT[DA=0.41 NE=0.39 5HT=0.72 ACh=0.41 eCB=0.34 Glu=0.42 GABA=0.72] | osc[δ=0.915 θ=0.041 γ=0.015]
+step   460 | loss 6.0705 | lm 5.9656 | ppl 389.8 | gnorm 1.006 | lr 3.00e-04 | 21583 tok/s | Φ 5.934 | λ₁ 0.091 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.10 | NT[DA=0.40 NE=0.39 5HT=0.72 ACh=0.41 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.821 θ=0.093 γ=0.016]
+step   480 | loss 6.1934 | lm 6.0745 | ppl 434.7 | gnorm 1.164 | lr 3.00e-04 | 21304 tok/s | Φ 5.880 | λ₁ 0.187 | ign 0.34 | mesoLG 0.55 | troph 16/16 μ0.10 | NT[DA=0.40 NE=0.39 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.829 θ=0.040 γ=0.029]
+step   500 | loss 5.9977 | lm 5.8877 | ppl 360.6 | gnorm 1.060 | lr 3.00e-04 | 20787 tok/s | Φ 5.910 | λ₁ 0.228 | ign 0.58 | mesoLG 0.55 | troph 16/16 μ0.11 | NT[DA=0.39 NE=0.38 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.354 θ=0.203 γ=0.063]
+step   520 | loss 6.0484 | lm 5.9330 | ppl 377.3 | gnorm 1.144 | lr 3.00e-04 | 21619 tok/s | Φ 6.031 | λ₁ 0.273 | ign 0.92 | mesoLG 0.55 | troph 16/16 μ0.11 | NT[DA=0.39 NE=0.38 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.546 θ=0.162 γ=0.121]
+step   540 | loss 6.0309 | lm 5.9038 | ppl 366.4 | gnorm 0.902 | lr 3.00e-04 | 21599 tok/s | Φ 5.922 | λ₁ 0.379 | ign 0.52 | mesoLG 0.55 | troph 16/16 μ0.10 | NT[DA=0.38 NE=0.38 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.884 θ=0.027 γ=0.025]
+step   560 | loss 5.8914 | lm 5.7663 | ppl 319.4 | gnorm 1.132 | lr 3.00e-04 | 21175 tok/s | Φ 6.020 | λ₁ 0.453 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.10 | NT[DA=0.38 NE=0.38 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.793 θ=0.075 γ=0.039]
+step   580 | loss 5.9465 | lm 5.8229 | ppl 338.0 | gnorm 1.107 | lr 2.99e-04 | 21675 tok/s | Φ 5.543 | λ₁ 0.412 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.09 | NT[DA=0.38 NE=0.38 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.518 θ=0.258 γ=0.082]
+step   600 | loss 5.9766 | lm 5.8481 | ppl 346.6 | gnorm 1.009 | lr 2.99e-04 | 20686 tok/s | Φ 5.620 | λ₁ 0.385 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.09 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.403 θ=0.225 γ=0.140]
+step   620 | loss 5.9895 | lm 5.8503 | ppl 347.3 | gnorm 0.897 | lr 2.99e-04 | 20171 tok/s | Φ 5.890 | λ₁ 0.428 | ign 0.40 | mesoLG 0.55 | troph 16/16 μ0.08 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.709 θ=0.103 γ=0.053]
+step   640 | loss 5.9895 | lm 5.8244 | ppl 338.5 | gnorm 1.132 | lr 2.99e-04 | 20007 tok/s | Φ 5.789 | λ₁ 0.216 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.08 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.930 θ=0.037 γ=0.010]
+step   660 | loss 5.8992 | lm 5.7219 | ppl 305.5 | gnorm 1.076 | lr 2.99e-04 | 20095 tok/s | Φ 6.383 | λ₁ 0.177 | ign 0.41 | mesoLG 0.55 | troph 16/16 μ0.09 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.785 θ=0.048 γ=0.024]
+step   680 | loss 5.9344 | lm 5.7401 | ppl 311.1 | gnorm 1.041 | lr 2.99e-04 | 20357 tok/s | Φ 5.923 | λ₁ 0.148 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.12 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.882 θ=0.029 γ=0.022]
+step   700 | loss 6.0504 | lm 5.8485 | ppl 346.7 | gnorm 0.949 | lr 2.99e-04 | 20915 tok/s | Φ 6.192 | λ₁ 0.172 | ign 0.38 | mesoLG 0.55 | troph 16/16 μ0.12 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.948 θ=0.019 γ=0.010]
+step   720 | loss 5.7836 | lm 5.5880 | ppl 267.2 | gnorm 0.996 | lr 2.99e-04 | 20916 tok/s | Φ 6.369 | λ₁ 0.174 | ign 0.82 | mesoLG 0.55 | troph 16/16 μ0.14 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.692 θ=0.207 γ=0.035]
+step   740 | loss 5.8359 | lm 5.6287 | ppl 278.3 | gnorm 0.938 | lr 2.99e-04 | 20551 tok/s | Φ 6.465 | λ₁ 0.225 | ign 0.94 | mesoLG 0.55 | troph 16/16 μ0.15 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.622 θ=0.109 γ=0.116]
+step   760 | loss 5.8992 | lm 5.6801 | ppl 293.0 | gnorm 0.933 | lr 2.99e-04 | 20724 tok/s | Φ 6.300 | λ₁ 0.229 | ign 0.87 | mesoLG 0.55 | troph 16/16 μ0.15 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.929 θ=0.029 γ=0.014]
+step   780 | loss 5.8760 | lm 5.6355 | ppl 280.2 | gnorm 1.035 | lr 2.98e-04 | 21158 tok/s | Φ 6.456 | λ₁ 0.273 | ign 0.80 | mesoLG 0.55 | troph 16/16 μ0.15 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.371 θ=0.155 γ=0.101]
+step   800 | loss 5.9461 | lm 5.6792 | ppl 292.7 | gnorm 0.913 | lr 2.98e-04 | 20970 tok/s | Φ 6.286 | λ₁ 0.318 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.15 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.410 θ=0.188 γ=0.137]
+step   820 | loss 5.8605 | lm 5.5939 | ppl 268.8 | gnorm 1.120 | lr 2.98e-04 | 20521 tok/s | Φ 6.447 | λ₁ 0.299 | ign 0.99 | mesoLG 0.55 | troph 16/16 μ0.14 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.459 θ=0.280 γ=0.082]
+step   840 | loss 5.8590 | lm 5.5902 | ppl 267.8 | gnorm 1.034 | lr 2.98e-04 | 21221 tok/s | Φ 6.267 | λ₁ 0.241 | ign 0.98 | mesoLG 0.55 | troph 16/16 μ0.14 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.626 θ=0.064 γ=0.068]
+step   860 | loss 5.7611 | lm 5.4819 | ppl 240.3 | gnorm 0.981 | lr 2.98e-04 | 21659 tok/s | Φ 6.135 | λ₁ 0.270 | ign 0.39 | mesoLG 0.55 | troph 16/16 μ0.16 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.507 θ=0.139 γ=0.081]
+step   880 | loss 5.8881 | lm 5.5915 | ppl 268.1 | gnorm 0.971 | lr 2.98e-04 | 21302 tok/s | Φ 6.213 | λ₁ 0.320 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.16 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.835 θ=0.048 γ=0.027]
+step   900 | loss 5.9180 | lm 5.6077 | ppl 272.5 | gnorm 0.936 | lr 2.97e-04 | 21043 tok/s | Φ 6.040 | λ₁ 0.279 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.16 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.857 θ=0.022 γ=0.021]
+step   920 | loss 5.7957 | lm 5.4887 | ppl 241.9 | gnorm 1.033 | lr 2.97e-04 | 21704 tok/s | Φ 6.808 | λ₁ 0.299 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.16 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.809 θ=0.076 γ=0.034]
+step   940 | loss 5.9574 | lm 5.6379 | ppl 280.9 | gnorm 1.006 | lr 2.97e-04 | 21797 tok/s | Φ 6.254 | λ₁ 0.299 | ign 0.73 | mesoLG 0.55 | troph 16/16 μ0.17 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.253 θ=0.120 γ=0.237]
+step   960 | loss 5.8652 | lm 5.5445 | ppl 255.8 | gnorm 1.136 | lr 2.97e-04 | 21751 tok/s | Φ 6.001 | λ₁ 0.270 | ign 0.32 | mesoLG 0.55 | troph 16/16 μ0.18 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.342 θ=0.273 γ=0.234]
+step   980 | loss 5.9660 | lm 5.6361 | ppl 280.4 | gnorm 0.884 | lr 2.97e-04 | 20777 tok/s | Φ 6.235 | λ₁ 0.359 | ign 0.80 | mesoLG 0.55 | troph 16/16 μ0.18 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.199 θ=0.119 γ=0.190]
+step  1000 | loss 5.8078 | lm 5.4804 | ppl 239.9 | gnorm 0.947 | lr 2.97e-04 | 19599 tok/s | Φ 5.909 | λ₁ 0.344 | ign 0.82 | mesoLG 0.55 | troph 16/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.448 θ=0.275 γ=0.091]
+[train] saved memory checkpoint neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_1000.mem | {'n_nodes': 0, 'n_edges': 0, 'n_causal_rules': 0, 'n_entities': 0}
+[train] intelligence: Φ=0.000 drift=0.000 coh=1.000 rules=0 cmp=837.0 selfref=0.00 ToM=0.00 ponder=1.00 reasΔ=+0.000
+[train] saved /workspace/brian/lfs_checkpoints/neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_1000.pt | trophic={'n_projections': 16, 'n_active': 16, 'n_pruned': 0, 'trophic_mean': 0.1884765625, 'trophic_max': 1.0, 'trophic_min': 0.0, 'saturated': 3}
+[train] ✓ pushed neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_1000.pt to Git LFS
+[train] ★ new BEST checkpoint @ step 1000: lm_ema 5.5561 (prev inf) → neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_best.pt
+[train] ✓ pushed neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_best.pt to Git LFS
+[prune_ckpts] 3 stream(s), nothing to prune (keep=3)
+step  1020 | loss 5.7340 | lm 5.4068 | ppl 222.9 | gnorm 0.912 | lr 2.96e-04 | 6634 tok/s | Φ 6.341 | λ₁ 0.340 | ign 0.94 | mesoLG 0.55 | troph 16/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.172 θ=0.235 γ=0.218]
+step  1040 | loss 5.6613 | lm 5.3348 | ppl 207.4 | gnorm 0.977 | lr 2.96e-04 | 20678 tok/s | Φ 6.094 | λ₁ 0.312 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.712 θ=0.029 γ=0.065]
+step  1060 | loss 5.7008 | lm 5.3719 | ppl 215.3 | gnorm 1.026 | lr 2.96e-04 | 20805 tok/s | Φ 6.493 | λ₁ 0.340 | ign 1.00 | mesoLG 0.55 | troph 16/16 μ0.20 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.807 θ=0.076 γ=0.043]
+step  1080 | loss 5.7166 | lm 5.3859 | ppl 218.3 | gnorm 1.068 | lr 2.96e-04 | 21074 tok/s | Φ 5.919 | λ₁ 0.340 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.363 θ=0.288 γ=0.116]
+step  1100 | loss 5.7520 | lm 5.4160 | ppl 225.0 | gnorm 0.936 | lr 2.96e-04 | 20475 tok/s | Φ 6.610 | λ₁ 0.365 | ign 0.30 | mesoLG 0.55 | troph 16/16 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.038 θ=0.185 γ=0.143]
+step  1120 | loss 5.9133 | lm 5.5674 | ppl 261.8 | gnorm 0.957 | lr 2.95e-04 | 21117 tok/s | Φ 5.482 | λ₁ 0.334 | ign 0.33 | mesoLG 0.54 | troph 16/16 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.664 θ=0.139 γ=0.077]
+step  1140 | loss 5.6680 | lm 5.3345 | ppl 207.4 | gnorm 0.977 | lr 2.95e-04 | 20761 tok/s | Φ 6.263 | λ₁ 0.326 | ign 0.65 | mesoLG 0.55 | troph 16/16 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.678 θ=0.007 γ=0.096]
+step  1160 | loss 5.7480 | lm 5.4048 | ppl 222.5 | gnorm 1.031 | lr 2.95e-04 | 21498 tok/s | Φ 6.083 | λ₁ 0.363 | ign 0.86 | mesoLG 0.55 | troph 16/16 μ0.24 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.091 θ=0.466 γ=0.071]
+step  1180 | loss 5.8711 | lm 5.5167 | ppl 248.8 | gnorm 0.994 | lr 2.95e-04 | 21571 tok/s | Φ 6.165 | λ₁ 0.352 | ign 0.88 | mesoLG 0.55 | troph 16/16 μ0.24 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.742 θ=0.057 γ=0.070]
+step  1200 | loss 5.7484 | lm 5.4026 | ppl 222.0 | gnorm 1.101 | lr 2.94e-04 | 21529 tok/s | Φ 5.427 | λ₁ 0.342 | ign 0.56 | mesoLG 0.55 | troph 16/16 μ0.25 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.388 θ=0.067 γ=0.118]
+step  1220 | loss 5.7871 | lm 5.4402 | ppl 230.5 | gnorm 0.863 | lr 2.94e-04 | 21433 tok/s | Φ 6.306 | λ₁ 0.346 | ign 1.00 | mesoLG 0.56 | troph 16/16 μ0.26 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.731 θ=0.027 γ=0.072]
+step  1240 | loss 5.7465 | lm 5.4001 | ppl 221.4 | gnorm 0.997 | lr 2.94e-04 | 20706 tok/s | Φ 6.221 | λ₁ 0.352 | ign 0.86 | mesoLG 0.55 | troph 9/16 μ0.29 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.654 θ=0.105 γ=0.102]
+step  1260 | loss 5.5996 | lm 5.2586 | ppl 192.2 | gnorm 1.060 | lr 2.94e-04 | 21082 tok/s | Φ 6.604 | λ₁ 0.354 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.29 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.595 θ=0.138 γ=0.087]
+step  1280 | loss 5.7193 | lm 5.3681 | ppl 214.5 | gnorm 0.937 | lr 2.93e-04 | 21088 tok/s | Φ 5.838 | λ₁ 0.336 | ign 0.32 | mesoLG 0.55 | troph 9/16 μ0.29 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.517 θ=0.186 γ=0.083]
+step  1300 | loss 5.6930 | lm 5.3479 | ppl 210.2 | gnorm 0.950 | lr 2.93e-04 | 20860 tok/s | Φ 6.269 | λ₁ 0.354 | ign 0.80 | mesoLG 0.55 | troph 9/16 μ0.30 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.118 θ=0.176 γ=0.244]
+step  1320 | loss 5.6055 | lm 5.2704 | ppl 194.5 | gnorm 0.949 | lr 2.93e-04 | 20880 tok/s | Φ 6.333 | λ₁ 0.383 | ign 0.31 | mesoLG 0.55 | troph 9/16 μ0.30 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.274 θ=0.162 γ=0.179]
+step  1340 | loss 5.6410 | lm 5.3021 | ppl 200.8 | gnorm 0.952 | lr 2.92e-04 | 20166 tok/s | Φ 5.738 | λ₁ 0.373 | ign 0.49 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.348 θ=0.372 γ=0.112]
+step  1360 | loss 5.6852 | lm 5.3529 | ppl 211.2 | gnorm 0.979 | lr 2.92e-04 | 20812 tok/s | Φ 6.255 | λ₁ 0.424 | ign 0.82 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.486 θ=0.281 γ=0.043]
+step  1380 | loss 5.6998 | lm 5.3641 | ppl 213.6 | gnorm 1.078 | lr 2.92e-04 | 20483 tok/s | Φ 6.187 | λ₁ 0.367 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.416 θ=0.113 γ=0.109]
+step  1400 | loss 5.5225 | lm 5.1891 | ppl 179.3 | gnorm 0.984 | lr 2.92e-04 | 20868 tok/s | Φ 5.895 | λ₁ 0.381 | ign 0.72 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.532 θ=0.114 γ=0.042]
+step  1420 | loss 5.6316 | lm 5.2934 | ppl 199.0 | gnorm 0.907 | lr 2.91e-04 | 20825 tok/s | Φ 6.404 | λ₁ 0.330 | ign 0.95 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.099 θ=0.502 γ=0.136]
+step  1440 | loss 5.1441 | lm 4.8337 | ppl 125.7 | gnorm 0.911 | lr 2.91e-04 | 20763 tok/s | Φ 6.048 | λ₁ 0.350 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.917 θ=0.013 γ=0.024]
+step  1460 | loss 5.2895 | lm 4.9680 | ppl 143.7 | gnorm 0.876 | lr 2.91e-04 | 20921 tok/s | Φ 6.394 | λ₁ 0.352 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.364 θ=0.098 γ=0.295]
+step  1480 | loss 5.1531 | lm 4.8243 | ppl 124.5 | gnorm 0.915 | lr 2.90e-04 | 20841 tok/s | Φ 6.300 | λ₁ 0.348 | ign 0.35 | mesoLG 0.56 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.331 θ=0.371 γ=0.111]
+step  1500 | loss 6.6160 | lm 6.1998 | ppl 492.6 | gnorm 1.272 | lr 2.90e-04 | 19482 tok/s | Φ 6.435 | λ₁ 0.498 | ign 1.00 | mesoLG 0.56 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.456 θ=0.451 γ=0.019]
+step  1520 | loss 6.2652 | lm 5.8631 | ppl 351.8 | gnorm 1.346 | lr 2.90e-04 | 20759 tok/s | Φ 6.093 | λ₁ 0.504 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.831 θ=0.129 γ=0.004]
+step  1540 | loss 6.1227 | lm 5.7470 | ppl 313.3 | gnorm 1.600 | lr 2.89e-04 | 20824 tok/s | Φ 6.581 | λ₁ 0.504 | ign 0.56 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.760 θ=0.157 γ=0.011]
+step  1560 | loss 6.1215 | lm 5.7664 | ppl 319.4 | gnorm 1.241 | lr 2.89e-04 | 20872 tok/s | Φ 6.261 | λ₁ 0.551 | ign 0.39 | mesoLG 0.56 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.737 θ=0.141 γ=0.019]
+step  1580 | loss 5.8965 | lm 5.5544 | ppl 258.4 | gnorm 1.097 | lr 2.89e-04 | 21020 tok/s | Φ 6.557 | λ₁ 0.504 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.835 θ=0.124 γ=0.003]
+step  1600 | loss 5.8672 | lm 5.5266 | ppl 251.3 | gnorm 1.203 | lr 2.88e-04 | 20895 tok/s | Φ 6.741 | λ₁ 0.500 | ign 0.32 | mesoLG 0.56 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.689 θ=0.170 γ=0.023]
+step  1620 | loss 6.0430 | lm 5.6900 | ppl 295.9 | gnorm 1.051 | lr 2.88e-04 | 20935 tok/s | Φ 6.222 | λ₁ 0.551 | ign 0.30 | mesoLG 0.56 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.929 θ=0.049 γ=0.004]
+step  1640 | loss 6.3133 | lm 5.9308 | ppl 376.5 | gnorm 1.022 | lr 2.88e-04 | 20998 tok/s | Φ 6.343 | λ₁ 0.416 | ign 1.00 | mesoLG 0.56 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.875 θ=0.080 γ=0.004]
+step  1660 | loss 6.0629 | lm 5.6873 | ppl 295.1 | gnorm 1.098 | lr 2.87e-04 | 21478 tok/s | Φ 6.523 | λ₁ 0.441 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.832 θ=0.116 γ=0.004]
+step  1680 | loss 6.0027 | lm 5.6286 | ppl 278.3 | gnorm 1.035 | lr 2.87e-04 | 20570 tok/s | Φ 8.545 | λ₁ 0.480 | ign 0.99 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.846 θ=0.097 γ=0.007]
+step  1700 | loss 5.8578 | lm 5.4610 | ppl 235.3 | gnorm 0.987 | lr 2.86e-04 | 21546 tok/s | Φ 7.355 | λ₁ 0.348 | ign 0.99 | mesoLG 0.56 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.910 θ=0.050 γ=0.007]
+step  1720 | loss 5.9598 | lm 5.5607 | ppl 260.0 | gnorm 0.856 | lr 2.86e-04 | 21665 tok/s | Φ 8.589 | λ₁ 0.355 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.616 θ=0.148 γ=0.031]
+step  1740 | loss 5.7465 | lm 5.3765 | ppl 216.3 | gnorm 0.840 | lr 2.86e-04 | 21620 tok/s | Φ 6.566 | λ₁ 0.445 | ign 0.32 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.902 θ=0.066 γ=0.003]
+step  1760 | loss 6.1617 | lm 5.7501 | ppl 314.2 | gnorm 1.077 | lr 2.85e-04 | 21222 tok/s | Φ 6.239 | λ₁ 0.363 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.911 θ=0.031 γ=0.015]
+step  1780 | loss 6.0457 | lm 5.6398 | ppl 281.4 | gnorm 1.218 | lr 2.85e-04 | 21600 tok/s | Φ 6.441 | λ₁ 0.346 | ign 0.97 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.503 θ=0.217 γ=0.056]
+step  1800 | loss 5.8574 | lm 5.4663 | ppl 236.6 | gnorm 1.188 | lr 2.84e-04 | 21632 tok/s | Φ 6.669 | λ₁ 0.303 | ign 0.96 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.669 θ=0.091 γ=0.048]
+step  1820 | loss 5.4066 | lm 5.0485 | ppl 155.8 | gnorm 1.040 | lr 2.84e-04 | 21567 tok/s | Φ 6.679 | λ₁ 0.379 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.874 θ=0.085 γ=0.004]
+step  1840 | loss 5.8129 | lm 5.4384 | ppl 230.1 | gnorm 1.111 | lr 2.84e-04 | 21677 tok/s | Φ 6.644 | λ₁ 0.428 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.852 θ=0.064 γ=0.010]
+step  1860 | loss 5.7543 | lm 5.3882 | ppl 218.8 | gnorm 1.003 | lr 2.83e-04 | 21630 tok/s | Φ 6.060 | λ₁ 0.412 | ign 0.91 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.817 θ=0.108 γ=0.013]
+step  1880 | loss 5.7164 | lm 5.3546 | ppl 211.6 | gnorm 0.960 | lr 2.83e-04 | 20090 tok/s | Φ 6.263 | λ₁ 0.420 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.851 θ=0.047 γ=0.018]
+step  1900 | loss 5.6418 | lm 5.2817 | ppl 196.7 | gnorm 1.012 | lr 2.82e-04 | 21366 tok/s | Φ 6.449 | λ₁ 0.422 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.859 θ=0.075 γ=0.012]
+step  1920 | loss 5.5742 | lm 5.2165 | ppl 184.3 | gnorm 1.117 | lr 2.82e-04 | 21336 tok/s | Φ 6.660 | λ₁ 0.375 | ign 0.79 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.934 θ=0.024 γ=0.014]
+step  1940 | loss 5.6352 | lm 5.2797 | ppl 196.3 | gnorm 1.129 | lr 2.81e-04 | 21024 tok/s | Φ 7.099 | λ₁ 0.371 | ign 0.96 | mesoLG 0.56 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.806 θ=0.113 γ=0.027]
+step  1960 | loss 5.8078 | lm 5.4456 | ppl 231.7 | gnorm 1.113 | lr 2.81e-04 | 20921 tok/s | Φ 5.726 | λ₁ 0.406 | ign 0.99 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.901 θ=0.070 γ=0.011]
+step  1980 | loss 5.7418 | lm 5.3834 | ppl 217.8 | gnorm 1.009 | lr 2.81e-04 | 20940 tok/s | Φ 5.846 | λ₁ 0.354 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.876 θ=0.076 γ=0.006]
+step  2000 | loss 5.3189 | lm 4.9628 | ppl 143.0 | gnorm 0.812 | lr 2.80e-04 | 19893 tok/s | Φ 6.885 | λ₁ 0.447 | ign 0.98 | mesoLG 0.56 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.889 θ=0.068 γ=0.010]
+[train] saved memory checkpoint neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_2000.mem | {'n_nodes': 0, 'n_edges': 0, 'n_causal_rules': 0, 'n_entities': 0}
+[train] intelligence: Φ=0.000 drift=0.050 coh=1.000 rules=0 cmp=1837.0 selfref=0.00 ToM=0.00 ponder=1.00 reasΔ=+0.000
+[train] saved /workspace/brian/lfs_checkpoints/neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_2000.pt | trophic={'n_projections': 16, 'n_active': 9, 'n_pruned': 7, 'trophic_mean': 0.3125, 'trophic_max': 1.0, 'trophic_min': 0.0, 'saturated': 5}
+[train] ✓ pushed neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_2000.pt to Git LFS
+[train] ★ new BEST checkpoint @ step 2000: lm_ema 5.2286 (prev 5.5561) → neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_best.pt
+[train] ✓ pushed neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_best.pt to Git LFS
+[prune_ckpts] 3 stream(s), nothing to prune (keep=3)
+step  2020 | loss 5.5969 | lm 5.2162 | ppl 184.2 | gnorm 1.010 | lr 2.80e-04 | 6571 tok/s | Φ 8.869 | λ₁ 0.381 | ign 1.00 | mesoLG 0.56 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.771 θ=0.167 γ=0.008]
+step  2040 | loss 5.6223 | lm 5.1737 | ppl 176.6 | gnorm 1.029 | lr 2.79e-04 | 19673 tok/s | Φ 7.146 | λ₁ 0.322 | ign 1.00 | mesoLG 0.56 | troph 9/16 μ0.34 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.789 θ=0.129 γ=0.013]
+step  2060 | loss 5.5824 | lm 5.0143 | ppl 150.6 | gnorm 1.269 | lr 2.79e-04 | 20804 tok/s | Φ 7.889 | λ₁ 0.328 | ign 1.00 | mesoLG 0.56 | troph 9/16 μ0.36 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.883 θ=0.074 γ=0.004]
+step  2080 | loss 5.3148 | lm 4.7799 | ppl 119.1 | gnorm 1.237 | lr 2.78e-04 | 20656 tok/s | Φ 7.561 | λ₁ 0.332 | ign 0.30 | mesoLG 0.56 | troph 9/16 μ0.39 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.827 θ=0.122 γ=0.004]
+step  2100 | loss 5.7574 | lm 5.2158 | ppl 184.2 | gnorm 1.102 | lr 2.78e-04 | 20711 tok/s | Φ 7.300 | λ₁ 0.330 | ign 0.30 | mesoLG 0.56 | troph 9/16 μ0.41 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.870 θ=0.085 γ=0.004]
+step  2120 | loss 5.5805 | lm 5.0480 | ppl 155.7 | gnorm 1.237 | lr 2.77e-04 | 20735 tok/s | Φ 8.119 | λ₁ 0.385 | ign 0.33 | mesoLG 0.56 | troph 9/16 μ0.44 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.766 θ=0.166 γ=0.009]
+step  2140 | loss 5.3199 | lm 4.8155 | ppl 123.4 | gnorm 1.022 | lr 2.77e-04 | 20455 tok/s | Φ 6.994 | λ₁ 0.338 | ign 1.00 | mesoLG 0.56 | troph 9/16 μ0.47 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.870 θ=0.095 γ=0.003]
+step  2160 | loss 5.0988 | lm 4.5993 | ppl 99.4 | gnorm 1.411 | lr 2.76e-04 | 21039 tok/s | Φ 6.762 | λ₁ 0.410 | ign 0.30 | mesoLG 0.56 | troph 9/16 μ0.48 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.41 GABA=0.72] | osc[δ=0.859 θ=0.107 γ=0.003]
+[train] ⚡ grad spike at step 2162: gnorm 47.75 > 4.89 (3.0×EMA) — step skipped (#5)
+[train] ⚡ grad spike at step 2163: gnorm 34.00 > 4.89 (3.0×EMA) — step skipped (#6)
+[train] ⚡ grad spike at step 2164: gnorm 148.00 > 4.89 (3.0×EMA) — step skipped (#7)
+[train] ⚡ grad spike at step 2165: gnorm 106.00 > 4.89 (3.0×EMA) — step skipped (#8)
+[train] ⚡ grad spike at step 2167: gnorm 6.44 > 5.41 (3.0×EMA) — step skipped (#9)
+[train] ⚡ grad spike at step 2168: gnorm 8.94 > 5.41 (3.0×EMA) — step skipped (#10)
+[train] ⚡ grad spike at step 2169: gnorm 15.38 > 5.41 (3.0×EMA) — step skipped (#11)
+[train] ⚡ grad spike at step 2171: gnorm 20.75 > 5.66 (3.0×EMA) — step skipped (#12)
+[train] ⚡ grad spike at step 2172: gnorm 29.25 > 5.66 (3.0×EMA) — step skipped (#13)
+[train] ⚡ grad spike at step 2173: gnorm 20.38 > 5.66 (3.0×EMA) — step skipped (#14)
+[train] ⚡ grad spike at step 2174: gnorm 18.62 > 5.66 (3.0×EMA) — step skipped (#15)
+[train] ⚡ grad spike at step 2175: gnorm 26.50 > 5.66 (3.0×EMA) — step skipped (#16)
+[train] ⚡ grad spike at step 2176: gnorm 39.00 > 5.66 (3.0×EMA) — step skipped (#17)
+[train] ⚡ grad spike at step 2177: gnorm 39.75 > 5.66 (3.0×EMA) — step skipped (#18)
+[train] ⚡ grad spike at step 2178: gnorm 10.88 > 5.66 (3.0×EMA) — step skipped (#19)
+[train] ⚡ grad spike at step 2179: gnorm 23.88 > 5.66 (3.0×EMA) — step skipped (#20)
+step  2180 | loss 5.0350 | lm 4.4460 | ppl 85.3 | gnorm 30.991 | lr 2.76e-04 | 20889 tok/s | Φ 6.686 | λ₁ 0.439 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.47 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.94] | osc[δ=0.571 θ=0.241 γ=0.028]
+step  2200 | loss 5.2432 | lm 4.7763 | ppl 118.7 | gnorm 1.256 | lr 2.75e-04 | 20797 tok/s | Φ 7.313 | λ₁ 0.477 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.45 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.84] | osc[δ=0.901 θ=0.060 γ=0.004]
+step  2220 | loss 5.3146 | lm 4.8574 | ppl 128.7 | gnorm 1.168 | lr 2.75e-04 | 20799 tok/s | Φ 7.813 | λ₁ 0.428 | ign 1.00 | mesoLG 0.56 | troph 9/16 μ0.43 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.97] | osc[δ=0.785 θ=0.141 γ=0.011]
+step  2240 | loss 5.1916 | lm 4.7497 | ppl 115.5 | gnorm 1.321 | lr 2.74e-04 | 20449 tok/s | Φ 7.553 | λ₁ 0.467 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.40 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.96] | osc[δ=0.781 θ=0.154 γ=0.008]
+step  2260 | loss 5.2502 | lm 4.7877 | ppl 120.0 | gnorm 1.355 | lr 2.74e-04 | 20329 tok/s | Φ 7.705 | λ₁ 0.455 | ign 0.32 | mesoLG 0.55 | troph 9/16 μ0.40 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.91] | osc[δ=0.823 θ=0.129 γ=0.004]
+step  2280 | loss 5.6520 | lm 5.2109 | ppl 183.3 | gnorm 1.180 | lr 2.73e-04 | 19840 tok/s | Φ 8.279 | λ₁ 0.447 | ign 1.00 | mesoLG 0.56 | troph 9/16 μ0.38 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.86] | osc[δ=0.841 θ=0.111 γ=0.004]
+step  2300 | loss 5.3312 | lm 4.9266 | ppl 137.9 | gnorm 1.188 | lr 2.73e-04 | 21484 tok/s | Φ 6.994 | λ₁ 0.480 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.36 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.81] | osc[δ=0.915 θ=0.062 γ=0.004]
+step  2320 | loss 5.6164 | lm 5.2105 | ppl 183.2 | gnorm 0.974 | lr 2.72e-04 | 21412 tok/s | Φ 6.953 | λ₁ 0.424 | ign 0.54 | mesoLG 0.55 | troph 9/16 μ0.32 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.76] | osc[δ=0.928 θ=0.046 γ=0.003]
+step  2340 | loss 5.7797 | lm 5.3053 | ppl 201.4 | gnorm 1.047 | lr 2.72e-04 | 20955 tok/s | Φ 8.170 | λ₁ 0.371 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.782 θ=0.164 γ=0.005]
+step  2360 | loss 6.0262 | lm 5.4022 | ppl 221.9 | gnorm 1.079 | lr 2.71e-04 | 20761 tok/s | Φ 6.942 | λ₁ 0.268 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.826 θ=0.124 γ=0.005]
+step  2380 | loss 5.7633 | lm 5.0796 | ppl 160.7 | gnorm 1.777 | lr 2.71e-04 | 19725 tok/s | Φ 7.543 | λ₁ 0.379 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.885 θ=0.076 γ=0.003]
+step  2400 | loss 5.4125 | lm 4.8649 | ppl 129.7 | gnorm 1.880 | lr 2.70e-04 | 19529 tok/s | Φ 6.861 | λ₁ 0.210 | ign 0.46 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.754 θ=0.128 γ=0.020]
+step  2420 | loss 5.2768 | lm 4.8224 | ppl 124.3 | gnorm 1.516 | lr 2.69e-04 | 19771 tok/s | Φ 6.899 | λ₁ 0.270 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.504 θ=0.136 γ=0.106]
+step  2440 | loss 5.3715 | lm 4.9357 | ppl 139.2 | gnorm 1.848 | lr 2.69e-04 | 21077 tok/s | Φ 6.228 | λ₁ 0.334 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.531 θ=0.240 γ=0.020]
+step  2460 | loss 5.2703 | lm 4.8530 | ppl 128.1 | gnorm 1.378 | lr 2.68e-04 | 21319 tok/s | Φ 6.138 | λ₁ 0.371 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.211 θ=0.185 γ=0.200]
+step  2480 | loss 5.3779 | lm 4.9117 | ppl 135.9 | gnorm 1.170 | lr 2.68e-04 | 21280 tok/s | Φ 6.362 | λ₁ 0.365 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.893 θ=0.073 γ=0.002]
+step  2500 | loss 5.1965 | lm 4.7651 | ppl 117.3 | gnorm 1.062 | lr 2.67e-04 | 20558 tok/s | Φ 6.865 | λ₁ 0.398 | ign 0.47 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.605 θ=0.143 γ=0.094]
+step  2520 | loss 5.3699 | lm 4.9418 | ppl 140.0 | gnorm 1.241 | lr 2.67e-04 | 21422 tok/s | Φ 6.475 | λ₁ 0.449 | ign 0.88 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.770 θ=0.195 γ=0.006]
+step  2540 | loss 5.3453 | lm 4.8995 | ppl 134.2 | gnorm 1.286 | lr 2.66e-04 | 21394 tok/s | Φ 7.099 | λ₁ 0.428 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.773 θ=0.180 γ=0.005]
+step  2560 | loss 4.9102 | lm 4.4172 | ppl 82.9 | gnorm 1.528 | lr 2.65e-04 | 21454 tok/s | Φ 6.438 | λ₁ 0.471 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.922 θ=0.057 γ=0.002]
+step  2580 | loss 5.1889 | lm 4.7355 | ppl 113.9 | gnorm 1.166 | lr 2.65e-04 | 21475 tok/s | Φ 7.188 | λ₁ 0.480 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.877 θ=0.087 γ=0.004]
+step  2600 | loss 4.9115 | lm 4.4882 | ppl 89.0 | gnorm 1.332 | lr 2.64e-04 | 21518 tok/s | Φ 6.936 | λ₁ 0.438 | ign 0.93 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.919 θ=0.059 γ=0.003]
+step  2620 | loss 5.6719 | lm 5.2410 | ppl 188.9 | gnorm 1.371 | lr 2.64e-04 | 21342 tok/s | Φ 6.663 | λ₁ 0.443 | ign 0.86 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.855 θ=0.096 γ=0.004]
+step  2640 | loss 5.5785 | lm 5.1357 | ppl 170.0 | gnorm 1.431 | lr 2.63e-04 | 19250 tok/s | Φ 6.975 | λ₁ 0.420 | ign 0.58 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.829 θ=0.129 γ=0.003]
+step  2660 | loss 5.6230 | lm 5.1413 | ppl 170.9 | gnorm 2.444 | lr 2.62e-04 | 21413 tok/s | Φ 6.739 | λ₁ 0.400 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.901 θ=0.067 γ=0.002]
+step  2680 | loss 5.5162 | lm 5.0329 | ppl 153.4 | gnorm 1.420 | lr 2.62e-04 | 21551 tok/s | Φ 7.759 | λ₁ 0.373 | ign 0.31 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.634 θ=0.271 γ=0.008]
+step  2700 | loss 5.6348 | lm 5.2049 | ppl 182.2 | gnorm 0.994 | lr 2.61e-04 | 21291 tok/s | Φ 6.496 | λ₁ 0.396 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.841 θ=0.110 γ=0.004]
+step  2720 | loss 5.3092 | lm 4.8691 | ppl 130.2 | gnorm 1.029 | lr 2.61e-04 | 21272 tok/s | Φ 8.742 | λ₁ 0.350 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.838 θ=0.108 γ=0.005]
+step  2740 | loss 5.1869 | lm 4.7421 | ppl 114.7 | gnorm 1.051 | lr 2.60e-04 | 20960 tok/s | Φ 6.912 | λ₁ 0.352 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.880 θ=0.086 γ=0.003]
+step  2760 | loss 4.9703 | lm 4.5395 | ppl 93.6 | gnorm 0.919 | lr 2.59e-04 | 18545 tok/s | Φ 7.283 | λ₁ 0.363 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.804 θ=0.126 γ=0.009]
+step  2780 | loss 5.7189 | lm 5.2285 | ppl 186.5 | gnorm 1.480 | lr 2.59e-04 | 18717 tok/s | Φ 6.811 | λ₁ 0.309 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.831 θ=0.125 γ=0.004]
+step  2800 | loss 5.9652 | lm 5.4460 | ppl 231.8 | gnorm 1.569 | lr 2.58e-04 | 18675 tok/s | Φ 7.234 | λ₁ 0.387 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.832 θ=0.119 γ=0.004]
+step  2820 | loss 5.8340 | lm 5.3221 | ppl 204.8 | gnorm 1.580 | lr 2.58e-04 | 18922 tok/s | Φ 7.102 | λ₁ 0.424 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.811 θ=0.147 γ=0.004]
+step  2840 | loss 5.4539 | lm 4.8927 | ppl 133.3 | gnorm 1.436 | lr 2.57e-04 | 18892 tok/s | Φ 7.151 | λ₁ 0.434 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.774 θ=0.171 γ=0.009]
+step  2860 | loss 5.3418 | lm 4.8007 | ppl 121.6 | gnorm 1.320 | lr 2.56e-04 | 19095 tok/s | Φ 6.843 | λ₁ 0.531 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.890 θ=0.068 γ=0.008]
+step  2880 | loss 4.9531 | lm 4.4175 | ppl 82.9 | gnorm 1.232 | lr 2.56e-04 | 18742 tok/s | Φ 7.234 | λ₁ 0.551 | ign 0.68 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.923 θ=0.054 γ=0.003]
+step  2900 | loss 5.0215 | lm 4.4980 | ppl 89.8 | gnorm 1.109 | lr 2.55e-04 | 16532 tok/s | Φ 7.613 | λ₁ 0.531 | ign 0.32 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.937 θ=0.049 γ=0.002]
+step  2920 | loss 5.0020 | lm 4.4517 | ppl 85.8 | gnorm 1.354 | lr 2.54e-04 | 19145 tok/s | Φ 8.262 | λ₁ 0.559 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.29 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.825 θ=0.122 γ=0.004]
+step  2940 | loss 5.0816 | lm 4.4509 | ppl 85.7 | gnorm 1.013 | lr 2.54e-04 | 19036 tok/s | Φ 7.002 | λ₁ 0.523 | ign 0.94 | mesoLG 0.55 | troph 9/16 μ0.28 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.835 θ=0.108 γ=0.018]
+step  2960 | loss 5.4264 | lm 4.8130 | ppl 123.1 | gnorm 1.078 | lr 2.53e-04 | 21351 tok/s | Φ 6.861 | λ₁ 0.404 | ign 0.82 | mesoLG 0.55 | troph 9/16 μ0.25 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.595 θ=0.297 γ=0.008]
+step  2980 | loss 5.6277 | lm 4.9667 | ppl 143.6 | gnorm 1.005 | lr 2.52e-04 | 19355 tok/s | Φ 7.394 | λ₁ 0.391 | ign 0.97 | mesoLG 0.55 | troph 9/16 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.797 θ=0.154 γ=0.005]
+step  3000 | loss 5.7492 | lm 5.0510 | ppl 156.2 | gnorm 1.120 | lr 2.52e-04 | 18375 tok/s | Φ 6.921 | λ₁ 0.439 | ign 0.99 | mesoLG 0.55 | troph 9/16 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.872 θ=0.085 γ=0.006]
+[train] saved memory checkpoint neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_3000.mem | {'n_nodes': 0, 'n_edges': 0, 'n_causal_rules': 0, 'n_entities': 0}
+[train] intelligence: Φ=0.000 drift=0.098 coh=1.000 rules=0 cmp=2048.0 selfref=0.00 ToM=0.00 ponder=1.00 reasΔ=+0.000
+[train] saved /workspace/brian/lfs_checkpoints/neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_3000.pt | trophic={'n_projections': 16, 'n_active': 9, 'n_pruned': 7, 'trophic_mean': 0.2060546875, 'trophic_max': 0.99609375, 'trophic_min': 0.0, 'saturated': 3}
+[train] ✓ pushed neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_3000.pt to Git LFS
+[train] ★ new BEST checkpoint @ step 3000: lm_ema 4.8564 (prev 5.2286) → neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_best.pt
+[train] ✓ pushed neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_best.pt to Git LFS
+[prune_ckpts] 3 stream(s), nothing to prune (keep=3)
+step  3020 | loss 5.7221 | lm 5.0397 | ppl 154.4 | gnorm 1.020 | lr 2.51e-04 | 6665 tok/s | Φ 6.978 | λ₁ 0.479 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.20 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.694 θ=0.227 γ=0.011]
+step  3040 | loss 5.6156 | lm 4.9683 | ppl 143.8 | gnorm 1.350 | lr 2.50e-04 | 21561 tok/s | Φ 7.248 | λ₁ 0.486 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.564 θ=0.242 γ=0.011]
+step  3060 | loss 5.4684 | lm 4.7870 | ppl 119.9 | gnorm 1.021 | lr 2.50e-04 | 21620 tok/s | Φ 6.829 | λ₁ 0.539 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.22 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.878 θ=0.094 γ=0.003]
+step  3080 | loss 5.5844 | lm 4.9079 | ppl 135.4 | gnorm 1.822 | lr 2.49e-04 | 21730 tok/s | Φ 8.106 | λ₁ 0.457 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.907 θ=0.062 γ=0.003]
+step  3100 | loss 6.1484 | lm 5.5016 | ppl 245.1 | gnorm 2.559 | lr 2.48e-04 | 21639 tok/s | Φ 6.701 | λ₁ 0.342 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.22 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.868 θ=0.095 γ=0.004]
+step  3120 | loss 5.7816 | lm 5.1882 | ppl 179.1 | gnorm 1.252 | lr 2.48e-04 | 19741 tok/s | Φ 7.260 | λ₁ 0.400 | ign 0.38 | mesoLG 0.55 | troph 9/16 μ0.22 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.871 θ=0.086 γ=0.004]
+step  3140 | loss 5.6941 | lm 5.0862 | ppl 161.8 | gnorm 1.162 | lr 2.47e-04 | 21200 tok/s | Φ 6.001 | λ₁ 0.414 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.848 θ=0.103 γ=0.005]
+step  3160 | loss 5.7285 | lm 5.0192 | ppl 151.3 | gnorm 0.970 | lr 2.46e-04 | 21642 tok/s | Φ 6.187 | λ₁ 0.379 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.837 θ=0.096 γ=0.015]
+step  3180 | loss 5.5621 | lm 5.0542 | ppl 156.7 | gnorm 1.016 | lr 2.45e-04 | 21509 tok/s | Φ 5.731 | λ₁ 0.410 | ign 0.93 | mesoLG 0.55 | troph 9/16 μ0.20 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.818 θ=0.048 γ=0.023]
+step  3200 | loss 5.5371 | lm 5.0217 | ppl 151.7 | gnorm 1.127 | lr 2.45e-04 | 20838 tok/s | Φ 6.214 | λ₁ 0.359 | ign 0.54 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.502 θ=0.143 γ=0.076]
+step  3220 | loss 5.4578 | lm 4.9469 | ppl 140.7 | gnorm 1.055 | lr 2.44e-04 | 20901 tok/s | Φ 6.564 | λ₁ 0.355 | ign 0.53 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.907 θ=0.068 γ=0.005]
+step  3240 | loss 5.4061 | lm 5.0011 | ppl 148.6 | gnorm 1.078 | lr 2.43e-04 | 20910 tok/s | Φ 6.580 | λ₁ 0.355 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.910 θ=0.063 γ=0.012]
+step  3260 | loss 5.6270 | lm 5.1769 | ppl 177.1 | gnorm 1.561 | lr 2.43e-04 | 20577 tok/s | Φ 8.262 | λ₁ 0.352 | ign 0.43 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.933 θ=0.045 γ=0.003]
+step  3280 | loss 5.7344 | lm 5.2548 | ppl 191.5 | gnorm 1.400 | lr 2.42e-04 | 20940 tok/s | Φ 7.309 | λ₁ 0.336 | ign 0.99 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.797 θ=0.140 γ=0.006]
+step  3300 | loss 5.5199 | lm 5.0524 | ppl 156.4 | gnorm 1.533 | lr 2.41e-04 | 20874 tok/s | Φ 8.099 | λ₁ 0.365 | ign 0.31 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.438 θ=0.186 γ=0.044]
+step  3320 | loss 5.2594 | lm 4.8263 | ppl 124.8 | gnorm 1.115 | lr 2.40e-04 | 19094 tok/s | Φ 7.327 | λ₁ 0.387 | ign 0.84 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.833 θ=0.095 γ=0.014]
+step  3340 | loss 5.4480 | lm 5.0334 | ppl 153.5 | gnorm 1.198 | lr 2.40e-04 | 20950 tok/s | Φ 6.594 | λ₁ 0.365 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.777 θ=0.134 γ=0.007]
+step  3360 | loss 6.1102 | lm 5.6467 | ppl 283.4 | gnorm 1.227 | lr 2.39e-04 | 21324 tok/s | Φ 6.656 | λ₁ 0.277 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.808 θ=0.121 γ=0.007]
+step  3380 | loss 5.7637 | lm 5.2850 | ppl 197.4 | gnorm 1.217 | lr 2.38e-04 | 21053 tok/s | Φ 7.896 | λ₁ 0.336 | ign 0.80 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.859 θ=0.097 γ=0.003]
+step  3400 | loss 5.9184 | lm 5.3573 | ppl 212.2 | gnorm 1.130 | lr 2.38e-04 | 21422 tok/s | Φ 6.956 | λ₁ 0.224 | ign 0.90 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.882 θ=0.077 γ=0.005]
+step  3420 | loss 5.8211 | lm 5.2451 | ppl 189.6 | gnorm 1.143 | lr 2.37e-04 | 21404 tok/s | Φ 7.172 | λ₁ 0.219 | ign 0.66 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.768 θ=0.174 γ=0.004]
+step  3440 | loss 6.0547 | lm 5.4453 | ppl 231.7 | gnorm 1.391 | lr 2.36e-04 | 21365 tok/s | Φ 7.510 | λ₁ 0.283 | ign 0.46 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.929 θ=0.053 γ=0.003]
+step  3460 | loss 6.2055 | lm 5.6450 | ppl 282.9 | gnorm 1.442 | lr 2.35e-04 | 20764 tok/s | Φ 7.629 | λ₁ 0.195 | ign 0.71 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.799 θ=0.134 γ=0.007]
+step  3480 | loss 6.0152 | lm 5.5219 | ppl 250.1 | gnorm 1.443 | lr 2.35e-04 | 20698 tok/s | Φ 7.181 | λ₁ 0.214 | ign 0.84 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.884 θ=0.040 γ=0.012]
+step  3500 | loss 5.7191 | lm 5.2936 | ppl 199.1 | gnorm 1.353 | lr 2.34e-04 | 20386 tok/s | Φ 7.110 | λ₁ 0.236 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.889 θ=0.084 γ=0.003]
+step  3520 | loss 5.4250 | lm 5.0468 | ppl 155.5 | gnorm 1.109 | lr 2.33e-04 | 21456 tok/s | Φ 5.714 | λ₁ 0.344 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.779 θ=0.181 γ=0.004]
+step  3540 | loss 5.3832 | lm 4.9824 | ppl 145.8 | gnorm 0.999 | lr 2.32e-04 | 21575 tok/s | Φ 6.043 | λ₁ 0.404 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.812 θ=0.093 γ=0.017]
+step  3560 | loss 5.2346 | lm 4.6794 | ppl 107.7 | gnorm 1.035 | lr 2.32e-04 | 21446 tok/s | Φ 6.950 | λ₁ 0.428 | ign 0.62 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.590 θ=0.122 γ=0.080]
+step  3580 | loss 5.2992 | lm 4.7796 | ppl 119.1 | gnorm 1.009 | lr 2.31e-04 | 21483 tok/s | Φ 7.383 | λ₁ 0.428 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.900 θ=0.058 γ=0.010]
+step  3600 | loss 5.7066 | lm 5.1835 | ppl 178.3 | gnorm 1.403 | lr 2.30e-04 | 21239 tok/s | Φ 6.826 | λ₁ 0.324 | ign 0.96 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.773 θ=0.097 γ=0.016]
+step  3620 | loss 5.4980 | lm 5.0465 | ppl 155.5 | gnorm 1.149 | lr 2.29e-04 | 21203 tok/s | Φ 7.151 | λ₁ 0.305 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.486 θ=0.185 γ=0.107]
+step  3640 | loss 5.3586 | lm 4.9834 | ppl 146.0 | gnorm 1.433 | lr 2.28e-04 | 20795 tok/s | Φ 6.294 | λ₁ 0.369 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.608 θ=0.119 γ=0.058]
+step  3660 | loss 5.3285 | lm 4.9538 | ppl 141.7 | gnorm 1.117 | lr 2.28e-04 | 21467 tok/s | Φ 6.166 | λ₁ 0.350 | ign 0.36 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.399 θ=0.400 γ=0.036]
+step  3680 | loss 5.1678 | lm 4.7353 | ppl 113.9 | gnorm 1.035 | lr 2.27e-04 | 19589 tok/s | Φ 7.392 | λ₁ 0.354 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.910 θ=0.045 γ=0.003]
+step  3700 | loss 5.1004 | lm 4.6673 | ppl 106.4 | gnorm 0.915 | lr 2.26e-04 | 21357 tok/s | Φ 7.634 | λ₁ 0.367 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.814 θ=0.119 γ=0.009]
+step  3720 | loss 4.8537 | lm 4.4846 | ppl 88.6 | gnorm 0.903 | lr 2.25e-04 | 21504 tok/s | Φ 6.713 | λ₁ 0.391 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.863 θ=0.097 γ=0.003]
+step  3740 | loss 4.6615 | lm 4.2899 | ppl 73.0 | gnorm 0.902 | lr 2.25e-04 | 21536 tok/s | Φ 7.364 | λ₁ 0.412 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.774 θ=0.156 γ=0.010]
+step  3760 | loss 4.6246 | lm 4.2127 | ppl 67.5 | gnorm 0.880 | lr 2.24e-04 | 21090 tok/s | Φ 7.142 | λ₁ 0.383 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.868 θ=0.064 γ=0.016]
+step  3780 | loss 5.3158 | lm 4.8620 | ppl 129.3 | gnorm 1.875 | lr 2.23e-04 | 20470 tok/s | Φ 7.217 | λ₁ 0.330 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.687 θ=0.188 γ=0.025]
+step  3800 | loss 4.6141 | lm 4.1799 | ppl 65.4 | gnorm 1.546 | lr 2.22e-04 | 19562 tok/s | Φ 6.688 | λ₁ 0.404 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.22 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.674 θ=0.221 γ=0.016]
+step  3820 | loss 4.6654 | lm 4.2124 | ppl 67.5 | gnorm 1.551 | lr 2.21e-04 | 20530 tok/s | Φ 7.225 | λ₁ 0.408 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.26 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.854 θ=0.087 γ=0.010]
+step  3840 | loss 4.5422 | lm 4.0835 | ppl 59.4 | gnorm 1.406 | lr 2.21e-04 | 20092 tok/s | Φ 6.386 | λ₁ 0.436 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.32 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.943 θ=0.035 γ=0.004]
+step  3860 | loss 5.7156 | lm 5.1914 | ppl 179.7 | gnorm 1.502 | lr 2.20e-04 | 19497 tok/s | Φ 6.209 | λ₁ 0.408 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.894 θ=0.073 γ=0.003]
+step  3880 | loss 5.7250 | lm 5.2040 | ppl 182.0 | gnorm 1.150 | lr 2.19e-04 | 19107 tok/s | Φ 6.323 | λ₁ 0.326 | ign 0.98 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.819 θ=0.122 γ=0.007]
+step  3900 | loss 5.7277 | lm 5.2236 | ppl 185.6 | gnorm 1.339 | lr 2.18e-04 | 19983 tok/s | Φ 6.548 | λ₁ 0.297 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.820 θ=0.086 γ=0.017]
+step  3920 | loss 5.3611 | lm 4.9138 | ppl 136.2 | gnorm 1.050 | lr 2.17e-04 | 17817 tok/s | Φ 6.668 | λ₁ 0.273 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.920 θ=0.057 γ=0.004]
+step  3940 | loss 5.3707 | lm 4.9190 | ppl 136.9 | gnorm 1.222 | lr 2.17e-04 | 20476 tok/s | Φ 6.160 | λ₁ 0.359 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.883 θ=0.084 γ=0.003]
+step  3960 | loss 5.0496 | lm 4.6546 | ppl 105.1 | gnorm 0.902 | lr 2.16e-04 | 20873 tok/s | Φ 6.390 | λ₁ 0.426 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.837 θ=0.080 γ=0.016]
+step  3980 | loss 5.3170 | lm 4.9185 | ppl 136.8 | gnorm 1.012 | lr 2.15e-04 | 20863 tok/s | Φ 6.512 | λ₁ 0.371 | ign 0.92 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.531 θ=0.177 γ=0.111]
+step  4000 | loss 5.2084 | lm 4.8181 | ppl 123.7 | gnorm 1.191 | lr 2.14e-04 | 20020 tok/s | Φ 6.565 | λ₁ 0.369 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.793 θ=0.118 γ=0.030]
+[train] saved memory checkpoint neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_4000.mem | {'n_nodes': 0, 'n_edges': 0, 'n_causal_rules': 0, 'n_entities': 0}
+[train] intelligence: Φ=0.000 drift=0.143 coh=1.000 rules=0 cmp=2048.0 selfref=0.00 ToM=0.00 ponder=1.00 reasΔ=+0.000
+[train] saved /workspace/brian/lfs_checkpoints/neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_4000.pt | trophic={'n_projections': 16, 'n_active': 9, 'n_pruned': 7, 'trophic_mean': 0.3125, 'trophic_max': 1.0, 'trophic_min': 0.0, 'saturated': 5}
+[train] ✓ pushed neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_4000.pt to Git LFS
+[train] ★ new BEST checkpoint @ step 4000: lm_ema 4.8518 (prev 4.8564) → neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_best.pt
+[train] ✓ pushed neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_best.pt to Git LFS
+[prune_ckpts] 3 stream(s), nothing to prune (keep=3)
+step  4020 | loss 5.2334 | lm 4.8311 | ppl 125.3 | gnorm 1.775 | lr 2.13e-04 | 6699 tok/s | Φ 6.403 | λ₁ 0.348 | ign 0.45 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.872 θ=0.075 γ=0.005]
+step  4040 | loss 5.0008 | lm 4.6231 | ppl 101.8 | gnorm 1.385 | lr 2.13e-04 | 20783 tok/s | Φ 6.705 | λ₁ 0.365 | ign 0.98 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.853 θ=0.088 γ=0.008]
+step  4060 | loss 5.1021 | lm 4.6752 | ppl 107.3 | gnorm 1.210 | lr 2.12e-04 | 20950 tok/s | Φ 6.504 | λ₁ 0.367 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.682 θ=0.160 γ=0.027]
+step  4080 | loss 5.0814 | lm 4.6680 | ppl 106.5 | gnorm 1.010 | lr 2.11e-04 | 20803 tok/s | Φ 6.852 | λ₁ 0.355 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.858 θ=0.085 γ=0.007]
+step  4100 | loss 5.6332 | lm 5.1794 | ppl 177.6 | gnorm 1.079 | lr 2.10e-04 | 20949 tok/s | Φ 6.697 | λ₁ 0.320 | ign 0.31 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.872 θ=0.090 γ=0.005]
+step  4120 | loss 5.3234 | lm 4.9074 | ppl 135.3 | gnorm 0.988 | lr 2.09e-04 | 20804 tok/s | Φ 6.304 | λ₁ 0.334 | ign 0.36 | mesoLG 0.56 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.866 θ=0.053 γ=0.009]
+step  4140 | loss 5.3748 | lm 4.9335 | ppl 138.9 | gnorm 1.137 | lr 2.08e-04 | 19248 tok/s | Φ 6.610 | λ₁ 0.340 | ign 0.92 | mesoLG 0.56 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.883 θ=0.081 γ=0.004]
+step  4160 | loss 4.9994 | lm 4.5747 | ppl 97.0 | gnorm 1.168 | lr 2.08e-04 | 19501 tok/s | Φ 7.350 | λ₁ 0.307 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.831 θ=0.092 γ=0.009]
+step  4180 | loss 4.8670 | lm 4.4576 | ppl 86.3 | gnorm 1.104 | lr 2.07e-04 | 19415 tok/s | Φ 6.505 | λ₁ 0.328 | ign 0.66 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.872 θ=0.080 γ=0.008]
+step  4200 | loss 5.1014 | lm 4.6762 | ppl 107.4 | gnorm 1.133 | lr 2.06e-04 | 19436 tok/s | Φ 7.765 | λ₁ 0.334 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.682 θ=0.203 γ=0.034]
+step  4220 | loss 4.9322 | lm 4.5167 | ppl 91.5 | gnorm 1.083 | lr 2.05e-04 | 17448 tok/s | Φ 6.257 | λ₁ 0.334 | ign 0.55 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.768 θ=0.154 γ=0.021]
+step  4240 | loss 4.9156 | lm 4.4685 | ppl 87.2 | gnorm 1.111 | lr 2.04e-04 | 19597 tok/s | Φ 6.263 | λ₁ 0.307 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.895 θ=0.016 γ=0.019]
+step  4260 | loss 5.0137 | lm 4.5404 | ppl 93.7 | gnorm 1.019 | lr 2.03e-04 | 19123 tok/s | Φ 6.430 | λ₁ 0.328 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.784 θ=0.135 γ=0.008]
+step  4280 | loss 4.7514 | lm 4.3007 | ppl 73.8 | gnorm 1.177 | lr 2.03e-04 | 19580 tok/s | Φ 6.761 | λ₁ 0.326 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.916 θ=0.058 γ=0.002]
+step  4300 | loss 4.9482 | lm 4.5196 | ppl 91.8 | gnorm 1.250 | lr 2.02e-04 | 19580 tok/s | Φ 6.417 | λ₁ 0.377 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.881 θ=0.064 γ=0.008]
+step  4320 | loss 4.7566 | lm 4.3594 | ppl 78.2 | gnorm 1.125 | lr 2.01e-04 | 19888 tok/s | Φ 7.269 | λ₁ 0.309 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.931 θ=0.041 γ=0.006]
+step  4340 | loss 4.8268 | lm 4.4284 | ppl 83.8 | gnorm 1.312 | lr 2.00e-04 | 21008 tok/s | Φ 6.937 | λ₁ 0.316 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.784 θ=0.128 γ=0.005]
+step  4360 | loss 4.8475 | lm 4.4235 | ppl 83.4 | gnorm 1.223 | lr 1.99e-04 | 21072 tok/s | Φ 5.453 | λ₁ 0.367 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.32 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.936 θ=0.048 γ=0.003]
+step  4380 | loss 4.8715 | lm 4.4442 | ppl 85.1 | gnorm 1.211 | lr 1.98e-04 | 20570 tok/s | Φ 5.867 | λ₁ 0.391 | ign 0.71 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.895 θ=0.068 γ=0.005]
+step  4400 | loss 5.0068 | lm 4.5744 | ppl 97.0 | gnorm 1.209 | lr 1.98e-04 | 20822 tok/s | Φ 5.578 | λ₁ 0.395 | ign 0.97 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.893 θ=0.055 γ=0.007]
+step  4420 | loss 4.8900 | lm 4.4938 | ppl 89.5 | gnorm 1.161 | lr 1.97e-04 | 21076 tok/s | Φ 6.040 | λ₁ 0.396 | ign 0.38 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.903 θ=0.053 γ=0.008]
+step  4440 | loss 5.1527 | lm 4.7573 | ppl 116.4 | gnorm 1.111 | lr 1.96e-04 | 21067 tok/s | Φ 6.233 | λ₁ 0.354 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.845 θ=0.105 γ=0.007]
+step  4460 | loss 4.8871 | lm 4.5079 | ppl 90.7 | gnorm 1.290 | lr 1.95e-04 | 21031 tok/s | Φ 6.026 | λ₁ 0.340 | ign 0.60 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.630 θ=0.251 γ=0.027]
+step  4480 | loss 5.1334 | lm 4.7349 | ppl 113.9 | gnorm 1.071 | lr 1.94e-04 | 20962 tok/s | Φ 6.351 | λ₁ 0.371 | ign 0.33 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.659 θ=0.200 γ=0.020]
+step  4500 | loss 5.0742 | lm 4.6762 | ppl 107.4 | gnorm 1.401 | lr 1.93e-04 | 20248 tok/s | Φ 6.401 | λ₁ 0.387 | ign 0.34 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.872 θ=0.057 γ=0.021]
+step  4520 | loss 4.8250 | lm 4.4510 | ppl 85.7 | gnorm 1.597 | lr 1.92e-04 | 18705 tok/s | Φ 5.756 | λ₁ 0.393 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.647 θ=0.191 γ=0.058]
+step  4540 | loss 5.0572 | lm 4.6730 | ppl 107.0 | gnorm 1.168 | lr 1.92e-04 | 20986 tok/s | Φ 6.305 | λ₁ 0.334 | ign 0.65 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.600 θ=0.111 γ=0.094]
+step  4560 | loss 5.1561 | lm 4.7618 | ppl 117.0 | gnorm 1.192 | lr 1.91e-04 | 21031 tok/s | Φ 7.780 | λ₁ 0.311 | ign 0.98 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.777 θ=0.090 γ=0.025]
+step  4580 | loss 5.0684 | lm 4.6877 | ppl 108.6 | gnorm 1.209 | lr 1.90e-04 | 20914 tok/s | Φ 6.271 | λ₁ 0.320 | ign 0.98 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.742 θ=0.076 γ=0.051]
+step  4600 | loss 5.0131 | lm 4.6380 | ppl 103.3 | gnorm 1.015 | lr 1.89e-04 | 20981 tok/s | Φ 6.255 | λ₁ 0.316 | ign 1.00 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.825 θ=0.111 γ=0.012]
+step  4620 | loss 5.2957 | lm 4.8960 | ppl 133.8 | gnorm 1.064 | lr 1.88e-04 | 20665 tok/s | Φ 5.901 | λ₁ 0.322 | ign 0.46 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.642 θ=0.138 γ=0.046]
+step  4640 | loss 5.0650 | lm 4.6709 | ppl 106.8 | gnorm 1.017 | lr 1.87e-04 | 20564 tok/s | Φ 5.394 | λ₁ 0.338 | ign 0.31 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.874 θ=0.076 γ=0.006]
+step  4660 | loss 5.0877 | lm 4.6833 | ppl 108.1 | gnorm 0.928 | lr 1.86e-04 | 20926 tok/s | Φ 5.955 | λ₁ 0.352 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.665 θ=0.263 γ=0.011]
+step  4680 | loss 5.1693 | lm 4.7570 | ppl 116.4 | gnorm 1.019 | lr 1.86e-04 | 20992 tok/s | Φ 6.212 | λ₁ 0.338 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.711 θ=0.136 γ=0.015]
+step  4700 | loss 5.7520 | lm 5.2734 | ppl 195.1 | gnorm 1.292 | lr 1.85e-04 | 20994 tok/s | Φ 6.331 | λ₁ 0.428 | ign 0.42 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.880 θ=0.073 γ=0.005]
+step  4720 | loss 6.4234 | lm 5.9584 | ppl 387.0 | gnorm 1.312 | lr 1.84e-04 | 20965 tok/s | Φ 5.961 | λ₁ 0.426 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.462 θ=0.279 γ=0.025]
+step  4740 | loss 6.1148 | lm 5.6852 | ppl 294.5 | gnorm 1.137 | lr 1.83e-04 | 20867 tok/s | Φ 6.138 | λ₁ 0.346 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.745 θ=0.132 γ=0.035]
+step  4760 | loss 6.2461 | lm 5.8119 | ppl 334.3 | gnorm 1.229 | lr 1.82e-04 | 20527 tok/s | Φ 6.616 | λ₁ 0.340 | ign 0.95 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.677 θ=0.234 γ=0.009]
+step  4780 | loss 6.1449 | lm 5.7161 | ppl 303.7 | gnorm 1.210 | lr 1.81e-04 | 19976 tok/s | Φ 6.890 | λ₁ 0.348 | ign 0.52 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.880 θ=0.074 γ=0.008]
+step  4800 | loss 6.2027 | lm 5.7523 | ppl 314.9 | gnorm 1.212 | lr 1.80e-04 | 20965 tok/s | Φ 7.548 | λ₁ 0.375 | ign 0.30 | mesoLG 0.55 | troph 9/16 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.567 θ=0.153 γ=0.049]
+step  4820 | loss 6.3207 | lm 5.8719 | ppl 354.9 | gnorm 1.336 | lr 1.79e-04 | 18478 tok/s | Φ 6.531 | λ₁ 0.395 | ign 0.61 | mesoLG 0.55 | troph 10/17 μ0.32 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.746 θ=0.084 γ=0.026]
+step  4840 | loss 6.3035 | lm 5.8610 | ppl 351.1 | gnorm 1.398 | lr 1.79e-04 | 20864 tok/s | Φ 6.701 | λ₁ 0.344 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.32 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.841 θ=0.095 γ=0.019]
+step  4860 | loss 6.1598 | lm 5.7394 | ppl 310.9 | gnorm 1.208 | lr 1.78e-04 | 21562 tok/s | Φ 6.937 | λ₁ 0.336 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.33 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.822 θ=0.070 γ=0.030]
+step  4880 | loss 6.1160 | lm 5.6950 | ppl 297.4 | gnorm 1.194 | lr 1.77e-04 | 21105 tok/s | Φ 7.054 | λ₁ 0.396 | ign 0.99 | mesoLG 0.55 | troph 10/17 μ0.33 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.923 θ=0.040 γ=0.007]
+step  4900 | loss 6.0594 | lm 5.6507 | ppl 284.5 | gnorm 1.219 | lr 1.76e-04 | 21562 tok/s | Φ 6.779 | λ₁ 0.402 | ign 0.52 | mesoLG 0.55 | troph 10/17 μ0.32 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.623 θ=0.171 γ=0.057]
+step  4920 | loss 6.0348 | lm 5.6466 | ppl 283.3 | gnorm 1.178 | lr 1.75e-04 | 21230 tok/s | Φ 8.503 | λ₁ 0.381 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.31 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.494 θ=0.178 γ=0.074]
+step  4940 | loss 5.9652 | lm 5.5687 | ppl 262.1 | gnorm 1.239 | lr 1.74e-04 | 20856 tok/s | Φ 6.699 | λ₁ 0.385 | ign 0.96 | mesoLG 0.55 | troph 10/17 μ0.30 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.795 θ=0.137 γ=0.024]
+step  4960 | loss 5.8043 | lm 5.4175 | ppl 225.3 | gnorm 1.325 | lr 1.73e-04 | 20745 tok/s | Φ 6.431 | λ₁ 0.373 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.30 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.494 θ=0.171 γ=0.095]
+step  4980 | loss 6.0465 | lm 5.6488 | ppl 284.0 | gnorm 1.090 | lr 1.72e-04 | 20845 tok/s | Φ 6.128 | λ₁ 0.410 | ign 0.97 | mesoLG 0.55 | troph 10/17 μ0.29 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.824 θ=0.060 γ=0.028]
+step  5000 | loss 5.8676 | lm 5.4564 | ppl 234.3 | gnorm 1.340 | lr 1.72e-04 | 20120 tok/s | Φ 5.541 | λ₁ 0.412 | ign 0.31 | mesoLG 0.55 | troph 10/17 μ0.28 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.918 θ=0.054 γ=0.004]
+[train] saved memory checkpoint neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_5000.mem | {'n_nodes': 0, 'n_edges': 0, 'n_causal_rules': 0, 'n_entities': 0}
+[train] intelligence: Φ=0.000 drift=0.185 coh=1.000 rules=0 cmp=2048.0 selfref=0.00 ToM=0.00 ponder=1.00 reasΔ=+0.000
+[train] saved /workspace/brian/lfs_checkpoints/neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_5000.pt | trophic={'n_projections': 17, 'n_active': 10, 'n_pruned': 7, 'trophic_mean': 0.2790028750896454, 'trophic_max': 1.0, 'trophic_min': 0.0, 'saturated': 4}
+[train] ✓ pushed neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_5000.pt to Git LFS
+[prune_ckpts] pruning 1 checkpoint(s) (3 files total, keep=3)
+  - neuroslm_rcc_bowtie_30m_p1_68M_adamw_mix_2000.pt
+[prune_ckpts] freed 0.0 MiB across 0 files, 1 git commit(s)
+step  5020 | loss 5.9285 | lm 5.5393 | ppl 254.5 | gnorm 1.289 | lr 1.71e-04 | 10267 tok/s | Φ 5.185 | λ₁ 0.395 | ign 0.30 | mesoLG 0.55 | troph 10/17 μ0.27 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.670 θ=0.241 γ=0.021]
+step  5040 | loss 5.8844 | lm 5.5054 | ppl 246.0 | gnorm 1.396 | lr 1.70e-04 | 20839 tok/s | Φ 6.208 | λ₁ 0.396 | ign 0.55 | mesoLG 0.55 | troph 10/17 μ0.27 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.755 θ=0.157 γ=0.016]
+step  5060 | loss 6.0828 | lm 5.6830 | ppl 293.8 | gnorm 1.167 | lr 1.69e-04 | 20802 tok/s | Φ 6.995 | λ₁ 0.371 | ign 0.88 | mesoLG 0.55 | troph 10/17 μ0.26 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.647 θ=0.172 γ=0.025]
+step  5080 | loss 5.9426 | lm 5.5724 | ppl 263.1 | gnorm 1.142 | lr 1.68e-04 | 20838 tok/s | Φ 6.621 | λ₁ 0.369 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.26 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.602 θ=0.266 γ=0.043]
+step  5100 | loss 5.8652 | lm 5.4997 | ppl 244.6 | gnorm 1.220 | lr 1.67e-04 | 21435 tok/s | Φ 6.906 | λ₁ 0.338 | ign 0.92 | mesoLG 0.55 | troph 10/17 μ0.27 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.628 θ=0.201 γ=0.027]
+step  5120 | loss 5.8324 | lm 5.4688 | ppl 237.2 | gnorm 1.177 | lr 1.66e-04 | 21445 tok/s | Φ 6.471 | λ₁ 0.330 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.27 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.834 θ=0.111 γ=0.006]
+step  5140 | loss 6.0102 | lm 5.6360 | ppl 280.3 | gnorm 1.172 | lr 1.65e-04 | 20947 tok/s | Φ 8.471 | λ₁ 0.330 | ign 0.30 | mesoLG 0.55 | troph 10/17 μ0.27 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.422 θ=0.258 γ=0.033]
+step  5160 | loss 6.0254 | lm 5.6448 | ppl 282.8 | gnorm 1.179 | lr 1.65e-04 | 21569 tok/s | Φ 6.689 | λ₁ 0.465 | ign 0.30 | mesoLG 0.55 | troph 10/17 μ0.27 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.644 θ=0.241 γ=0.024]
+step  5180 | loss 5.8418 | lm 5.4723 | ppl 238.0 | gnorm 1.151 | lr 1.64e-04 | 21687 tok/s | Φ 6.173 | λ₁ 0.396 | ign 0.30 | mesoLG 0.55 | troph 10/17 μ0.28 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.884 θ=0.073 γ=0.008]
+step  5200 | loss 6.0738 | lm 5.6771 | ppl 292.1 | gnorm 1.460 | lr 1.63e-04 | 21631 tok/s | Φ 6.466 | λ₁ 0.426 | ign 0.35 | mesoLG 0.56 | troph 10/17 μ0.28 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.785 θ=0.172 γ=0.005]
+step  5220 | loss 5.8668 | lm 5.4785 | ppl 239.5 | gnorm 1.249 | lr 1.62e-04 | 21618 tok/s | Φ 6.337 | λ₁ 0.490 | ign 0.91 | mesoLG 0.55 | troph 10/17 μ0.28 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.831 θ=0.118 γ=0.006]
+step  5240 | loss 5.8348 | lm 5.4687 | ppl 237.1 | gnorm 1.230 | lr 1.61e-04 | 17785 tok/s | Φ 6.647 | λ₁ 0.469 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.28 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.740 θ=0.173 γ=0.007]
+step  5260 | loss 6.1379 | lm 5.7697 | ppl 320.5 | gnorm 1.189 | lr 1.60e-04 | 19273 tok/s | Φ 6.331 | λ₁ 0.512 | ign 0.32 | mesoLG 0.55 | troph 10/17 μ0.27 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.613 θ=0.158 γ=0.031]
+step  5280 | loss 6.0277 | lm 5.6599 | ppl 287.1 | gnorm 1.159 | lr 1.59e-04 | 19554 tok/s | Φ 5.451 | λ₁ 0.377 | ign 0.30 | mesoLG 0.55 | troph 10/17 μ0.26 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.868 θ=0.083 γ=0.017]
+step  5300 | loss 5.9914 | lm 5.5816 | ppl 265.5 | gnorm 1.144 | lr 1.58e-04 | 19525 tok/s | Φ 6.037 | λ₁ 0.340 | ign 0.59 | mesoLG 0.55 | troph 10/17 μ0.25 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.730 θ=0.144 γ=0.016]
+step  5320 | loss 5.8426 | lm 5.4505 | ppl 232.9 | gnorm 1.181 | lr 1.58e-04 | 19488 tok/s | Φ 6.442 | λ₁ 0.371 | ign 0.92 | mesoLG 0.55 | troph 10/17 μ0.25 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.790 θ=0.121 γ=0.012]
+step  5340 | loss 5.8312 | lm 5.4713 | ppl 237.8 | gnorm 1.387 | lr 1.57e-04 | 19498 tok/s | Φ 6.380 | λ₁ 0.346 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.25 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.725 θ=0.145 γ=0.036]
+step  5360 | loss 5.9535 | lm 5.5865 | ppl 266.8 | gnorm 1.243 | lr 1.56e-04 | 19525 tok/s | Φ 6.231 | λ₁ 0.326 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.25 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.834 θ=0.106 γ=0.008]
+step  5380 | loss 5.8680 | lm 5.5040 | ppl 245.7 | gnorm 1.264 | lr 1.55e-04 | 19194 tok/s | Φ 6.437 | λ₁ 0.338 | ign 0.98 | mesoLG 0.55 | troph 10/17 μ0.25 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.661 θ=0.088 γ=0.070]
+step  5400 | loss 5.8254 | lm 5.4765 | ppl 239.0 | gnorm 1.326 | lr 1.54e-04 | 19586 tok/s | Φ 6.505 | λ₁ 0.354 | ign 0.93 | mesoLG 0.55 | troph 10/17 μ0.25 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.685 θ=0.170 γ=0.043]
+step  5420 | loss 5.8656 | lm 5.5081 | ppl 246.7 | gnorm 1.172 | lr 1.53e-04 | 19395 tok/s | Φ 4.945 | λ₁ 0.385 | ign 0.32 | mesoLG 0.55 | troph 10/17 μ0.25 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.795 θ=0.151 γ=0.011]
+step  5440 | loss 5.7059 | lm 5.3478 | ppl 210.1 | gnorm 1.171 | lr 1.52e-04 | 19401 tok/s | Φ 4.392 | λ₁ 0.389 | ign 0.74 | mesoLG 0.55 | troph 10/17 μ0.25 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.309 θ=0.243 γ=0.124]
+step  5460 | loss 5.8879 | lm 5.5217 | ppl 250.1 | gnorm 1.315 | lr 1.52e-04 | 19397 tok/s | Φ 5.100 | λ₁ 0.389 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.26 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.789 θ=0.153 γ=0.010]
+step  5480 | loss 5.8973 | lm 5.5295 | ppl 252.0 | gnorm 1.621 | lr 1.51e-04 | 19116 tok/s | Φ 6.221 | λ₁ 0.340 | ign 0.79 | mesoLG 0.55 | troph 10/17 μ0.26 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.799 θ=0.117 γ=0.013]
+step  5500 | loss 6.3281 | lm 5.9395 | ppl 379.7 | gnorm 1.514 | lr 1.50e-04 | 18154 tok/s | Φ 6.265 | λ₁ 0.383 | ign 0.93 | mesoLG 0.55 | troph 10/17 μ0.25 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.844 θ=0.108 γ=0.004]
+step  5520 | loss 6.5707 | lm 6.1849 | ppl 485.3 | gnorm 0.973 | lr 1.49e-04 | 19453 tok/s | Φ 6.523 | λ₁ 0.279 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.24 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.827 θ=0.107 γ=0.006]
+step  5540 | loss 6.5281 | lm 6.1434 | ppl 465.6 | gnorm 0.978 | lr 1.48e-04 | 19410 tok/s | Φ 6.502 | λ₁ 0.270 | ign 0.30 | mesoLG 0.55 | troph 10/17 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.729 θ=0.204 γ=0.006]
+step  5560 | loss 6.7270 | lm 6.3388 | ppl 566.1 | gnorm 1.294 | lr 1.47e-04 | 19168 tok/s | Φ 6.482 | λ₁ 0.547 | ign 0.36 | mesoLG 0.55 | troph 10/17 μ0.22 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.823 θ=0.124 γ=0.007]
+step  5580 | loss 6.5840 | lm 6.2583 | ppl 522.4 | gnorm 1.291 | lr 1.46e-04 | 16838 tok/s | Φ 6.772 | λ₁ 0.512 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.795 θ=0.133 γ=0.021]
+step  5600 | loss 6.4871 | lm 6.1720 | ppl 479.2 | gnorm 1.163 | lr 1.45e-04 | 19158 tok/s | Φ 6.776 | λ₁ 0.469 | ign 0.30 | mesoLG 0.55 | troph 10/17 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.884 θ=0.063 γ=0.012]
+step  5620 | loss 6.5242 | lm 6.2301 | ppl 507.8 | gnorm 1.284 | lr 1.45e-04 | 19341 tok/s | Φ 5.920 | λ₁ 0.447 | ign 0.30 | mesoLG 0.55 | troph 10/17 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.719 θ=0.076 γ=0.035]
+step  5640 | loss 6.4301 | lm 6.1492 | ppl 468.3 | gnorm 1.144 | lr 1.44e-04 | 19002 tok/s | Φ 6.000 | λ₁ 0.479 | ign 0.36 | mesoLG 0.55 | troph 10/17 μ0.20 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.729 θ=0.050 γ=0.032]
+step  5660 | loss 6.5371 | lm 6.2589 | ppl 522.6 | gnorm 1.322 | lr 1.43e-04 | 19458 tok/s | Φ 5.936 | λ₁ 0.428 | ign 0.95 | mesoLG 0.55 | troph 10/17 μ0.19 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.327 θ=0.337 γ=0.130]
+step  5680 | loss 6.0719 | lm 5.8079 | ppl 332.9 | gnorm 1.700 | lr 1.42e-04 | 19223 tok/s | Φ 6.319 | λ₁ 0.432 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.20 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.866 θ=0.102 γ=0.005]
+step  5700 | loss 6.0336 | lm 5.7769 | ppl 322.8 | gnorm 0.861 | lr 1.41e-04 | 19215 tok/s | Φ 6.523 | λ₁ 0.398 | ign 0.59 | mesoLG 0.55 | troph 10/17 μ0.21 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.796 θ=0.082 γ=0.041]
+step  5720 | loss 6.0195 | lm 5.7635 | ppl 318.4 | gnorm 0.836 | lr 1.40e-04 | 19238 tok/s | Φ 6.546 | λ₁ 0.449 | ign 0.95 | mesoLG 0.55 | troph 10/17 μ0.22 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.569 θ=0.092 γ=0.150]
+step  5740 | loss 6.0031 | lm 5.7491 | ppl 313.9 | gnorm 0.844 | lr 1.39e-04 | 19027 tok/s | Φ 6.665 | λ₁ 0.451 | ign 0.99 | mesoLG 0.55 | troph 10/17 μ0.22 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.486 θ=0.091 γ=0.167]
+step  5760 | loss 5.9352 | lm 5.6829 | ppl 293.8 | gnorm 0.853 | lr 1.39e-04 | 19310 tok/s | Φ 6.252 | λ₁ 0.418 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.22 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.818 θ=0.043 γ=0.026]
+step  5780 | loss 6.0094 | lm 5.7549 | ppl 315.7 | gnorm 0.970 | lr 1.38e-04 | 20475 tok/s | Φ 6.315 | λ₁ 0.402 | ign 0.71 | mesoLG 0.55 | troph 10/17 μ0.22 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.696 θ=0.085 γ=0.067]
+step  5800 | loss 5.9027 | lm 5.6525 | ppl 285.0 | gnorm 0.844 | lr 1.37e-04 | 20289 tok/s | Φ 6.065 | λ₁ 0.436 | ign 0.56 | mesoLG 0.55 | troph 10/17 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.603 θ=0.123 γ=0.068]
+step  5820 | loss 5.9230 | lm 5.6719 | ppl 290.6 | gnorm 0.795 | lr 1.36e-04 | 20323 tok/s | Φ 6.705 | λ₁ 0.414 | ign 1.00 | mesoLG 0.55 | troph 10/17 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.870 θ=0.103 γ=0.004]
+step  5840 | loss 5.9156 | lm 5.6658 | ppl 288.8 | gnorm 0.966 | lr 1.35e-04 | 20451 tok/s | Φ 6.712 | λ₁ 0.387 | ign 0.99 | mesoLG 0.55 | troph 10/17 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.457 θ=0.174 γ=0.109]
+step  5860 | loss 5.9539 | lm 5.7014 | ppl 299.3 | gnorm 0.886 | lr 1.34e-04 | 20279 tok/s | Φ 7.459 | λ₁ 0.406 | ign 0.99 | mesoLG 0.55 | troph 10/17 μ0.23 | NT[DA=0.38 NE=0.37 5HT=0.72 ACh=0.40 eCB=0.34 Glu=0.33 GABA=0.72] | osc[δ=0.425 θ=0.266 γ=0.083]
+
