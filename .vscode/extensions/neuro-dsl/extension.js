@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 
 const LANGUAGE_ID = 'neuro';
+const OUTPUT_CHANNEL = vscode.window.createOutputChannel('NeuroSLM DSL');
 
 // Collect diagnostics from linter output
 const diagnosticCollection = vscode.languages.createDiagnosticCollection('neuro');
@@ -27,15 +28,13 @@ const BUILTIN_VARS = [
 ];
 
 exports.activate = function(context) {
-  console.log('NeuroSLM DSL extension activated');
+  OUTPUT_CHANNEL.appendLine('NeuroSLM DSL extension activating...');
 
-  // Register document formatter
+  // Register autocomplete provider
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(LANGUAGE_ID, {
       provideCompletionItems(document, position) {
         const linePrefix = document.lineAt(position).text.substr(0, position.character);
-
-        // Get word being completed
         const wordMatch = linePrefix.match(/\b([a-zA-Z_][a-zA-Z0-9_]*)$/);
         const word = wordMatch ? wordMatch[1] : '';
 
@@ -45,16 +44,14 @@ exports.activate = function(context) {
         KEYWORDS.forEach(keyword => {
           if (keyword.startsWith(word)) {
             const item = new vscode.CompletionItem(keyword, vscode.CompletionItemKind.Keyword);
-            item.insertText = keyword;
             completions.push(item);
           }
         });
 
-        // Add built-in functions
+        // Add built-in functions with snippet
         BUILTIN_FUNCTIONS.forEach(fn => {
           if (fn.startsWith(word)) {
             const item = new vscode.CompletionItem(fn, vscode.CompletionItemKind.Function);
-            item.insertText = fn + '()';
             item.insertText = new vscode.SnippetString(fn + '($0)');
             completions.push(item);
           }
@@ -64,19 +61,17 @@ exports.activate = function(context) {
         BUILTIN_VARS.forEach(v => {
           if (v.startsWith(word)) {
             const item = new vscode.CompletionItem(v, vscode.CompletionItemKind.Variable);
-            item.insertText = v;
             completions.push(item);
           }
         });
 
-        // Extract populations from current file for autocomplete
+        // Extract populations from current file
         const text = document.getText();
         const popMatches = text.matchAll(/(?:export\s+)?population\s+(\w+)/g);
         for (const match of popMatches) {
           const popName = match[1];
           if (popName.startsWith(word)) {
             const item = new vscode.CompletionItem(popName, vscode.CompletionItemKind.Class);
-            item.insertText = popName;
             completions.push(item);
           }
         }
@@ -86,15 +81,13 @@ exports.activate = function(context) {
     })
   );
 
-  // Register linter command
+  // Lint on open
   context.subscriptions.push(
-    vscode.commands.registerCommand('neuro-dsl.lint', async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor || editor.document.languageId !== LANGUAGE_ID) {
-        vscode.window.showWarningMessage('Not a .neuro file');
-        return;
+    vscode.workspace.onDidOpenTextDocument((doc) => {
+      if (doc.languageId === LANGUAGE_ID) {
+        OUTPUT_CHANNEL.appendLine(`Linting on open: ${doc.fileName}`);
+        lintFile(doc);
       }
-      lintFile(editor.document);
     })
   );
 
@@ -102,21 +95,13 @@ exports.activate = function(context) {
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (doc.languageId === LANGUAGE_ID) {
+        OUTPUT_CHANNEL.appendLine(`Linting on save: ${doc.fileName}`);
         lintFile(doc);
       }
     })
   );
 
-  // Lint on open
-  context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument((doc) => {
-      if (doc.languageId === LANGUAGE_ID) {
-        lintFile(doc);
-      }
-    })
-  );
-
-  // Lint on change (with debounce)
+  // Lint on change (debounced)
   let changeTimeout;
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((event) => {
@@ -124,38 +109,41 @@ exports.activate = function(context) {
         clearTimeout(changeTimeout);
         changeTimeout = setTimeout(() => {
           lintFile(event.document);
-        }, 1000);
+        }, 1500);
       }
     })
   );
+
+  OUTPUT_CHANNEL.appendLine('✓ NeuroSLM DSL extension activated successfully');
 };
 
 /**
- * Run the Python linter on a document and update diagnostics
+ * Run the Python linter on a document
  */
 function lintFile(document) {
   const filePath = document.uri.fsPath;
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
 
   if (!workspaceFolder) {
+    OUTPUT_CHANNEL.appendLine('No workspace folder found');
     return;
   }
 
-  // Find python executable
   const pythonCmd = findPythonExecutable(workspaceFolder);
+  OUTPUT_CHANNEL.appendLine(`Using Python: ${pythonCmd}`);
+
   if (!pythonCmd) {
-    console.error('Python not found');
+    OUTPUT_CHANNEL.appendLine('Error: Python executable not found');
     return;
   }
 
-  // Run linter with JSON output
+  // Run linter
   const proc = spawn(pythonCmd, [
     '-m', 'neuroslm.dsl.neuro_linter',
     filePath,
     '--json'
   ], {
-    cwd: workspaceFolder.uri.fsPath,
-    encoding: 'utf8'
+    cwd: workspaceFolder.uri.fsPath
   });
 
   let output = '';
@@ -169,35 +157,48 @@ function lintFile(document) {
     errorOutput += data.toString();
   });
 
+  proc.on('error', (err) => {
+    OUTPUT_CHANNEL.appendLine(`Linter error: ${err.message}`);
+  });
+
   proc.on('close', (code) => {
     const diags = [];
 
-    try {
-      const results = JSON.parse(output);
-      if (Array.isArray(results)) {
-        results.forEach(result => {
-          const range = new vscode.Range(
-            new vscode.Position(result.line - 1, result.col - 1),
-            new vscode.Position(result.line - 1, result.col + 10)
-          );
+    if (code === 0 || code === 1) {
+      // code 0 = success, code 1 = had errors/warnings (both are ok)
+      try {
+        if (output.trim()) {
+          const results = JSON.parse(output);
+          if (Array.isArray(results)) {
+            OUTPUT_CHANNEL.appendLine(`Found ${results.length} diagnostic(s)`);
+            results.forEach(result => {
+              const range = new vscode.Range(
+                new vscode.Position(result.line - 1, Math.max(0, result.col - 1)),
+                new vscode.Position(result.line - 1, Math.min(result.col + 10, 999))
+              );
 
-          const severity = {
-            'error': vscode.DiagnosticSeverity.Error,
-            'warning': vscode.DiagnosticSeverity.Warning,
-            'info': vscode.DiagnosticSeverity.Information
-          }[result.severity] || vscode.DiagnosticSeverity.Information;
+              const severity = {
+                'error': vscode.DiagnosticSeverity.Error,
+                'warning': vscode.DiagnosticSeverity.Warning,
+                'info': vscode.DiagnosticSeverity.Information
+              }[result.severity] || vscode.DiagnosticSeverity.Information;
 
-          const diag = new vscode.Diagnostic(
-            range,
-            `[${result.code}] ${result.message}`,
-            severity
-          );
-          diag.source = 'neuro-linter';
-          diags.push(diag);
-        });
+              const diag = new vscode.Diagnostic(
+                range,
+                `[${result.code}] ${result.message}`,
+                severity
+              );
+              diag.source = 'neuro-linter';
+              diags.push(diag);
+            });
+          }
+        }
+      } catch (e) {
+        OUTPUT_CHANNEL.appendLine(`Parse error: ${e.message}`);
+        OUTPUT_CHANNEL.appendLine(`Output was: ${output}`);
       }
-    } catch (e) {
-      console.error('Failed to parse linter output:', e);
+    } else {
+      OUTPUT_CHANNEL.appendLine(`Linter failed with code ${code}: ${errorOutput}`);
     }
 
     diagnosticCollection.set(document.uri, diags);
@@ -210,25 +211,27 @@ function lintFile(document) {
 function findPythonExecutable(workspaceFolder) {
   const basePath = workspaceFolder.uri.fsPath;
 
-  // Try common venv locations
+  // Try venv locations in order
   const candidates = [
-    path.join(basePath, '.venv', 'Scripts', 'python.exe'),  // Windows
-    path.join(basePath, '.venv', 'bin', 'python'),           // Unix
-    path.join(basePath, 'venv', 'Scripts', 'python.exe'),    // Windows
-    path.join(basePath, 'venv', 'bin', 'python'),            // Unix
+    path.join(basePath, '.venv', 'Scripts', 'python.exe'),
+    path.join(basePath, '.venv', 'bin', 'python'),
+    path.join(basePath, 'venv', 'Scripts', 'python.exe'),
+    path.join(basePath, 'venv', 'bin', 'python'),
   ];
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
+      OUTPUT_CHANNEL.appendLine(`Found Python at: ${candidate}`);
       return candidate;
     }
   }
 
-  // Fall back to system python
+  OUTPUT_CHANNEL.appendLine('Venv Python not found, using system Python');
   return process.platform === 'win32' ? 'python.exe' : 'python3';
 }
 
 exports.deactivate = function() {
   diagnosticCollection.clear();
   diagnosticCollection.dispose();
+  OUTPUT_CHANNEL.dispose();
 };
