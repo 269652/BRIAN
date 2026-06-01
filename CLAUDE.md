@@ -192,3 +192,55 @@ experiment files (OOD_PUSH_STAGES.md, *_SUMMARY.md) should be moved to
 python scripts/maintain_technical_report.py --fix
 ```
 to auto-archive known stale files. Then commit the archive move.
+
+---
+
+## 10. arch.neuro change → deploy → observe → record (the scientific loop)
+
+Edits to any `architectures/*/arch.neuro` (or to a mechanism that the DSL
+exposes — `neuroslm/dsl/*.py`, `neuroslm/harness.py` training-loop knobs)
+are **research experiments**, not refactors. The project's evolution only
+has scientific value if every such change is paired with a measurement
+and a recorded observation. Follow this loop without exception:
+
+1. **Form the hypothesis explicitly.** Before editing the `.neuro` file,
+   write one sentence stating what metric (`train_ppl`, `OOD_ppl`,
+   `gap_ratio`, `tok/s`, Φ, …) you expect to move, in which direction,
+   and by how much. Note the prior baseline number from `findings.md`.
+
+2. **Commit the `.neuro` change + any wiring together** with a message of
+   the form `arch: <mechanism>=<value> (Hxx hypothesis)`. The catalog in
+   `docs/OOD_MECHANISMS.md` must list any newly exposed DSL field.
+
+3. **Deploy** with a label that encodes the change:
+   `brian deploy --label neuroslm-<change>-v<n>`. Capture the returned
+   vast.ai instance id — it is the artifact id for this experiment.
+
+4. **Observe.** Use `brian ps` / `brian logs <id>` to read out the PPL /
+   OOD-PPL / gap_ratio trajectory at canonical checkpoints (step 500,
+   1000, 2000, 5000, full). Don't trust eyeballs — copy the numbers.
+
+5. **Record in `docs/findings.md`** as a new `Hxx` section *before*
+   moving on to the next change. Required fields: hypothesis, spec
+   (commit + arch.neuro lines), run (vast id + label + GPU + cost),
+   trajectory table, outcome (✅/🟡/🟠/❌), follow-up. Cite the run's
+   instance id so the raw log under `logs/vast/` can be retrieved.
+
+6. **Destroy** the instance once the verdict is recorded (cost
+   discipline), unless the user explicitly asks to keep it running.
+
+7. **Negative results count.** A FALSIFIED hypothesis is just as
+   valuable as a confirmed one and *must* be recorded. Deleting or
+   silently overwriting a failed-experiment finding destroys the
+   evolutionary signal this project depends on.
+
+Anti-patterns to refuse:
+- Editing `arch.neuro`, deploying, and then editing again before the
+  first run produces a measurement — the two changes become
+  inseparable. Wait for the trajectory, record it, *then* iterate.
+- Bundling more than one mechanism change in one experiment without
+  noting it explicitly as a "stack" finding (see H13/H14 for the
+  pattern). A stack finding *must* spawn a follow-up "single-mechanism
+  ablation" backlog entry.
+- Recording a finding without the instance id — the raw log is the
+  only thing that lets a future reader audit the claim.
