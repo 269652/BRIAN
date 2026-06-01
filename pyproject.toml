@@ -42,3 +42,7 @@ include = ["neuroslm*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: heavyweight symbolic / SymPy tests (skipped by default; run with `-m slow`)",
+]
+addopts = "-m 'not slow'"

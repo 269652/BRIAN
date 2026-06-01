@@ -155,7 +155,10 @@ def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
         n_heads=n_heads, max_ctx=max_ctx,
         dropout=cfg.dropout, pct_trunk=cfg.pct_trunk,
         tonnetz_period=cfg.tonnetz_period,
-        stochastic_depth=cfg.stochastic_depth).to(device)
+        stochastic_depth=cfg.stochastic_depth,
+        grid_positions=cfg.grid_positions,
+        episodic_memory=cfg.episodic_memory,
+        surprise_head=cfg.surprise_head).to(device)
     harness = BRIANHarness.from_language_model(
         lm, vocab_size=vocab_size, d_sem=d_model, training_config=cfg,
     ).to(device)

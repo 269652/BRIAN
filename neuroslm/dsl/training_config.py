@@ -365,6 +365,17 @@ class TrainingConfig:
     # which prevents memorisation-style overfitting. 0 or 1.0 = off.
     # Typical values: 0.75–0.95. 0.85 is the ULMFiT default.
     llrd: float = 1.0
+    # ── Novel-topology mechanisms (H15 / H16 / H19) ──────────────────
+    # Each accepts a dict or `None` (= off). When all are None the
+    # cortex is bit-identical to the legacy baseline (zero-init
+    # discipline enforced inside neuroslm/dsl/novel_topology.py).
+    # H16 — multi-scale grid-cell positional bias. Provable length-OOD.
+    grid_positions: Optional[Dict[str, Any]] = None
+    # H15 — episodic kNN memory. Read-blend via ReZero gate (alpha=0).
+    episodic_memory: Optional[Dict[str, Any]] = None
+    # H19 — local-context surprise head. Composes with H15 via
+    # `episodic_memory.write_gate = "surprise"`.
+    surprise_head: Optional[Dict[str, Any]] = None
     # Stage 7 OOD push: curriculum + trunk isolation. Curriculum string
     # selects a data ordering strategy ("easy_to_hard", "random",
     # "uniform"). Trunk isolation is enforced by an existing param_scope
@@ -479,6 +490,13 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.z_loss = float(props["z_loss"])
     if "llrd" in props:
         cfg.llrd = float(props["llrd"])
+    # Novel-topology mechanisms (H15/H16/H19) — parse as generic dicts.
+    if "grid_positions" in props:
+        cfg.grid_positions = _parse_novel_topology_dict(props["grid_positions"])
+    if "episodic_memory" in props:
+        cfg.episodic_memory = _parse_novel_topology_dict(props["episodic_memory"])
+    if "surprise_head" in props:
+        cfg.surprise_head = _parse_novel_topology_dict(props["surprise_head"])
     if "curriculum" in props:
         cfg.curriculum = _strip_quotes(props["curriculum"])
     if "crystallization_step" in props:
@@ -571,6 +589,42 @@ def _parse_metric_exposures(props: Dict[str, str]) -> List[MetricExpose]:
                 v = v[1:-1]
             m.expose_at = [_strip_quotes(x.strip()) for x in v.split(",") if x.strip()]
         out.append(m)
+    return out
+
+
+def _parse_novel_topology_dict(body: str) -> Dict[str, Any]:
+    """Parse a `<name> { key: value, ... }` block into a plain dict.
+
+    Used for H15 / H16 / H19 novel-topology specs. Values are typed
+    heuristically: bool → int → float → quoted string → bare string.
+    The downstream factory in neuroslm.dsl.novel_topology coerces
+    them to the right type with sensible defaults, so we don't try
+    to be clever here.
+    """
+    body = _strip_braces(body)
+    props = _split_top_level_kv(body)
+    out: Dict[str, Any] = {}
+    for k, raw in props.items():
+        s = raw.strip()
+        if s.lower() in ("true", "false"):
+            out[k] = (s.lower() == "true")
+            continue
+        try:
+            out[k] = int(s)
+            continue
+        except (ValueError, TypeError):
+            pass
+        try:
+            out[k] = float(s)
+            continue
+        except (ValueError, TypeError):
+            pass
+        if (s.startswith('"') and s.endswith('"')) or \
+           (s.startswith("'") and s.endswith("'")):
+            out[k] = s[1:-1]
+            continue
+        out[k] = s
+    out.setdefault("enabled", True)
     return out
 
 

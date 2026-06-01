@@ -36,6 +36,9 @@ import torch
 import torch.nn as nn
 
 from neuroslm.dsl import nn_ops
+from neuroslm.dsl.novel_topology import (
+    make_grid_positions, make_episodic_memory, make_surprise_head,
+)
 
 
 # Op atoms callable from the DSL (introspected from nn_ops)
@@ -639,7 +642,10 @@ class DSLLanguageCortex(nn.Module):
                  dropout: float = 0.0,
                  pct_trunk: float = 0.0,
                  tonnetz_period: int = 0,
-                 stochastic_depth: float = 0.0):
+                 stochastic_depth: float = 0.0,
+                 grid_positions=None,
+                 episodic_memory=None,
+                 surprise_head=None):
         super().__init__()
         n_kv_heads = n_kv_heads or n_heads
         head_dim = d_model // n_heads
@@ -754,6 +760,17 @@ class DSLLanguageCortex(nn.Module):
         # identical baseline path).
         self._nt_module_offset: Optional[torch.Tensor] = None
 
+        # ── Novel-topology mechanisms (H15 / H16 / H19) — all zero-init ──
+        # Each factory returns None when the spec is False/None, so the
+        # legacy DSLLanguageCortex remains bit-identical when none enabled.
+        # See neuroslm/dsl/novel_topology.py and docs/findings.md H15/H16/H19.
+        self._grid_positions = make_grid_positions(grid_positions, d_model)
+        self._episodic_memory = make_episodic_memory(episodic_memory, d_model)
+        self._surprise_head = make_surprise_head(surprise_head, d_model, vocab)
+        # Diagnostic: per-token surprise (B, T) from the last forward.
+        # Read by the harness for loss reweighting; None when off.
+        self.last_token_surprise: Optional[torch.Tensor] = None
+
     def set_block_module_map(self, mapping):
         """Tell the cortex which module each block represents.
 
@@ -793,6 +810,14 @@ class DSLLanguageCortex(nn.Module):
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         h = nn_ops.embedding(ids, self.embed)
         h = self.dropout(h)
+        # ── H16: Grid-cell positional bias (additive on embedding) ──
+        # Zero-init proj at construction ⇒ first forward bit-identical
+        # to baseline. As proj learns, multi-scale position code shapes
+        # the residual. Cheap O(L·K).
+        if self._grid_positions is not None:
+            pos_bias = self._grid_positions(h.shape[1],
+                                            device=h.device, dtype=h.dtype)
+            h = h + pos_bias.unsqueeze(0)
         self._layer_acts = []
         pred_coding_loss = torch.zeros((), device=h.device, dtype=h.dtype)
 
@@ -907,7 +932,30 @@ class DSLLanguageCortex(nn.Module):
         self._last_pred_coding_loss = pred_coding_loss
         h_final = block_outs[-1] if block_outs else h
         h_final = nn_ops.rmsnorm(h_final, self.gamma_f)
-        return nn_ops.linear(h_final, self.lm_head)
+        logits = nn_ops.linear(h_final, self.lm_head)
+
+        # ── H19: Surprise head — local-context NLL vs global NLL ──
+        # Uses ids as next-token labels (NLL of token t given <t under
+        # causal mask). Surprise (B, T) is exposed for episodic write
+        # gating and downstream loss-reweighting hooks.
+        if self._surprise_head is not None and self.training:
+            self._surprise_head.set_labels(ids)
+            self.last_token_surprise = self._surprise_head(h_final, logits)
+        else:
+            self.last_token_surprise = None
+
+        # ── H15: Episodic kNN memory — read (gated) + write (surprise) ──
+        # alpha=0 at init ⇒ delta is zero ⇒ logits unchanged. As alpha
+        # lifts off zero under LM loss, blended episodes enter the
+        # residual and we re-project to logits. Keeps the no-op path
+        # free of extra lm_head work.
+        if self._episodic_memory is not None:
+            delta = self._episodic_memory(h_final,
+                                          surprise=self.last_token_surprise)
+            if self._episodic_memory.alpha.detach().abs().item() > 0:
+                h_final_blended = h_final + delta
+                logits = nn_ops.linear(h_final_blended, self.lm_head)
+        return logits
 
 
 def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
@@ -917,16 +965,29 @@ def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
                                mod_capacity: float = 0.5,
                                pct_trunk: float = 0.0,
                                tonnetz_period: int = 0,
-                               stochastic_depth: float = 0.0) -> DSLLanguageCortex:
+                               stochastic_depth: float = 0.0,
+                               grid_positions=None,
+                               episodic_memory=None,
+                               surprise_head=None) -> DSLLanguageCortex:
     """Assemble Brain's full LanguageCortex from pure-DSL blocks.
 
     `pct_trunk > 0` enables forward-path predictive coding: each layer
     is pulled toward what the next layer predicts it should be. Zero-init
     so the residual identity is preserved at start. Targets the >=2x OOD
     gap reduction claimed for PCT vs. standard backprop training.
+
+    Novel-topology kwargs (all default OFF, see neuroslm/dsl/novel_topology.py):
+        grid_positions     — H16, multi-scale grid-cell positional bias.
+        episodic_memory    — H15, kNN memory blended via ReZero gate.
+        surprise_head      — H19, local-NLL surprise (gates H15 writes).
+    Each accepts True / False / None / dict; bit-identical to baseline
+    when all are False/None.
     """
     return DSLLanguageCortex(vocab, d_model, depth, n_heads, max_ctx,
                               n_kv_heads, geometry_expansion, mod_capacity,
                               dropout=dropout, pct_trunk=pct_trunk,
                               tonnetz_period=tonnetz_period,
-                              stochastic_depth=stochastic_depth)
+                              stochastic_depth=stochastic_depth,
+                              grid_positions=grid_positions,
+                              episodic_memory=episodic_memory,
+                              surprise_head=surprise_head)
