@@ -758,15 +758,17 @@ def _eval_ood(args: argparse.Namespace) -> int:
         "BRANCH": branch,
         "CKPT": ckpt_path,
         "ROLE_TAG": tag,
-        # Restrict to verified A100 by default (override with VAST_GPU_QUERY)
-        "VAST_GPU_QUERY": env.get(
-            "VAST_GPU_QUERY",
-            "gpu_name in [A100_SXM4,A100_PCIE,A100_SXM,A100X] num_gpus=1 "
-            "rentable=true verified=true reliability>0.99"),
     })
     if args.windows:
         env["MAX_OOD_WINDOWS"] = str(args.windows)
-    return _run([_bash(), "scripts/vast_ood_eval.sh"], env=env)
+    # Python-based deploy (mirrors _deploy_train.py) — bypasses the bash
+    # script which can stall for minutes on Windows due to vastai-import
+    # detection + pip-install in the wrong python. The Python deploy uses
+    # the .venv-2/Scripts/vastai.exe directly and returns within seconds.
+    deploy_py = REPO_ROOT / "_deploy_ood.py"
+    if not deploy_py.is_file():
+        return _run([_bash(), "scripts/vast_ood_eval.sh"], env=env)
+    return _run([sys.executable, str(deploy_py), ckpt_path], env=env)
 
 
 # ── test / push ────────────────────────────────────────────────────────
