@@ -652,11 +652,15 @@ def main():
             d_model = int(os.environ.get("D_MODEL", _v.d_model))
             depth   = int(os.environ.get("DEPTH",   _v.depth))
             n_heads = int(os.environ.get("N_HEADS", _v.n_heads))
+            # argparse attribute names: --batch → args.batch, --seq_len →
+            # args.seq_len, --d_sem → args.d_sem. The SCALE block in
+            # arch.neuro overrides whatever the bash launcher passed.
             args.seq_len = int(os.environ.get("SEQ_LEN",  _v.seq_len))
-            args.batch_size = int(os.environ.get("BATCH_SIZE", _v.batch_size))
+            args.batch   = int(os.environ.get("BATCH_SIZE", _v.batch_size))
+            args.d_sem   = d_model
             print(f"[train_dsl] scale {_scale_env} (~{_v.approx_params}): "
                   f"d_model={d_model} depth={depth} heads={n_heads} "
-                  f"batch={args.batch_size} ctx={args.seq_len} "
+                  f"batch={args.batch} ctx={args.seq_len} "
                   f"grad_accum={_v.grad_accum} dist={(_v.hardware or _tc_dsl.hardware).dist_strategy}")
 
     if args.model == "dsl_lm":
