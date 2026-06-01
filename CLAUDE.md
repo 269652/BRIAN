@@ -63,14 +63,14 @@ Allowed top-level `.md`:
 - Anything else needs explicit user approval.
 
 Allowed `docs/` `.md`:
-- `architecture.md` — primary spec
-- `history.md` — claim/evidence ledger (auto-maintained)
+- `architecture.md` — primary spec (detailed §0–12 for codebase maintainers)
+- `technical_report.md` — executive summary (for external AIs + new contributors)
+- `findings.md` — running hypothesis ledger (Layer A + Layer B evidence)
+- `history.md` — session notes + decisions (auto-maintained)
 - `changelog.md` — git-derived (auto-maintained)
 - `metrics.md` — auto-updated by `brian analyze-log`
-- `findings.md` — running hypothesis notes
 - `dsl.md`, `dsl_nn_language.md`, `dsl_subsystem_roadmap.md` — DSL docs
-- `OOD_PUSH_STAGES.md` — pending; will be folded into `history.md` then
-  archived.
+- `OOD_PUSH_STAGES.md` — deprecated; migrate to archive then delete.
 
 `docs/archive/` is the graveyard. Move-then-cite, never delete-then-forget.
 
@@ -144,3 +144,51 @@ If the user explicitly asks for a long-form document:
 Match the scope of your actions to what was requested. If the user
 asks to "fix the bug," they didn't ask for a refactor — they didn't
 ask for renaming, they didn't ask for a new abstraction. Stay tight.
+
+---
+
+## 9. Documentation Synchronization
+
+Every architectural change **must** synchronize documentation:
+
+1. **Architecture change → arch.neuro first.** The `.neuro` file is the
+   canonical source of truth. Update it before implementation.
+2. **Significant spec changes → architecture.md.** If you change the
+   design (add a subsystem, alter a mechanism, change equations), update
+   the corresponding section in `docs/architecture.md`.
+3. **New evidence (test or result) → findings.md.** Every Layer A test
+   and Layer B OOD eval result gets a row in the hypothesis ledger with
+   an explicit link to the artifact (test name or JSON path).
+4. **New public-facing documentation → technical_report.md.** This is the
+   report external AIs see. Keep it synchronized with findings.md via:
+   ```bash
+   python scripts/maintain_technical_report.py --verbose
+   ```
+   This checks that all evidence links exist and detects drift between
+   arch.neuro and the report. Fix any issues before committing.
+5. **Commit all synced docs together.** If you change arch.neuro,
+   architecture.md, findings.md, or technical_report.md, commit them in
+   the same change set. One logical change = one commit with all docs.
+
+Example commit (good):
+```
+arch: add ReZero zero-init gates (§5.3 fix)
+
+- Add λ_motor, λ_mem, λ_thought scalars to forward injection paths
+- Update arch.neuro lines 50–60 (ReZero gate config)
+- Update architecture.md §5.3 (new mechanism spec)
+- Update findings.md H8 (evidence link to test + OOD result)
+- Update technical_report.md §7.2 (current state)
+- Audit passed: no drift detected
+
+[EVIDENCE: tests/test_stabilization.py::test_rezero_zero_init]
+[EVIDENCE: results/ood_rezero-fixed_107M_step7000.json]
+```
+
+**Archive policy.** Old session notes, investigation logs, and abandoned
+experiment files (OOD_PUSH_STAGES.md, *_SUMMARY.md) should be moved to
+`docs/archive/YYYY-MM-DD_*.md` when they stop being load-bearing. Use:
+```bash
+python scripts/maintain_technical_report.py --fix
+```
+to auto-archive known stale files. Then commit the archive move.

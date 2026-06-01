@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 """vast_show_logs.py
 
-Fetch stdout/stderr logs for a Vast.ai instance.
+Fetch stdout/stderr logs for a Vast.ai instance with support for streaming, polling, and tail modes.
 
 Priority order:
  1. If the `vastai` CLI is installed, shell out to `vastai show logs <id>` (supports streaming/follow).
  2. Fallback: call the Vast.ai API to request logs (best-effort; API surface may vary).
 
+Features:
+ - --follow: Stream logs in real-time (if vastai CLI supports it)
+ - --poll N: Poll for new logs every N seconds (alternative to follow)
+ - --tail N: Show only the last N lines of logs
+ - --all: Fetch logs for all instances in parallel
+
 Usage:
   python scripts/vast_show_logs.py --instance-id 37240129 --dest logs/vast/37240129.log
   python scripts/vast_show_logs.py --label neuroslm-full --follow
+  python scripts/vast_show_logs.py --instance-id 37240129 --poll 5.0 --dest training.log
+  python scripts/vast_show_logs.py --instance-id 37240129 --tail 100 --poll 10
+  python scripts/vast_show_logs.py --all --workers 4
 
 The script reads VAST_API key from the environment or from a local .env file (VAST_API or VAST_AI).
 """
@@ -33,7 +42,7 @@ def has_cli() -> bool:
     return shutil.which('vastai') is not None
 
 
-def run_cli(instance_id: str, follow: bool, dest: str | None):
+def run_cli(instance_id: str, follow: bool, dest: str | None, tail: int | None = None, poll_interval: float | None = None):
     # Candidate CLI subcommands to try. We'll probe each with --help to see which is accepted.
     candidates = [
         ['logs'],
@@ -86,35 +95,76 @@ def run_cli(instance_id: str, follow: bool, dest: str | None):
     if follow:
         cmd.append('--follow')
 
+    # Add tail flag if specified
+    if tail is not None:
+        cmd.extend(['--tail', str(tail)])
+
     print('Running CLI:', ' '.join(cmd))
 
-    if dest:
-        # ensure parent directory exists so open() doesn't fail
-        parent = os.path.dirname(dest)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        # stream into file and stdout
-        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as p, open(dest, 'a', encoding='utf-8') as f:
-            try:
-                for line in p.stdout:
-                    # always write UTF-8 to the file
-                    f.write(line)
-                    f.flush()
-                    # safe print to console: some Windows consoles cannot encode all unicode
-                    try:
-                        sys.stdout.write(line)
-                    except UnicodeEncodeError:
-                        safe = line.encode('utf-8', errors='replace').decode('utf-8')
+    # Polling loop: if poll_interval is set, fetch and sleep
+    if poll_interval and poll_interval > 0:
+        print(f"Polling every {poll_interval} seconds (press Ctrl+C to stop)...")
+        last_size = 0
+        try:
+            while True:
+                # Fetch logs
+                if dest:
+                    parent = os.path.dirname(dest)
+                    if parent:
+                        os.makedirs(parent, exist_ok=True)
+
+                # Run fetch command
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+                # Print and save new content
+                if result.stdout:
+                    if dest:
+                        with open(dest, 'a', encoding='utf-8') as f:
+                            f.write(result.stdout)
+                    else:
                         try:
-                            sys.stdout.write(safe)
-                        except Exception:
-                            # give up quietly
-                            pass
-            except KeyboardInterrupt:
-                p.terminate()
-                raise
+                            sys.stdout.write(result.stdout)
+                        except UnicodeEncodeError:
+                            safe = result.stdout.encode('utf-8', errors='replace').decode('utf-8')
+                            try:
+                                sys.stdout.write(safe)
+                            except Exception:
+                                pass
+
+                # Sleep before next poll
+                time.sleep(poll_interval)
+        except KeyboardInterrupt:
+            print("\nPolling stopped.")
+            return
     else:
-        subprocess.run(cmd)
+        # Non-polling mode (normal or --follow)
+        if dest:
+            # ensure parent directory exists so open() doesn't fail
+            parent = os.path.dirname(dest)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            # stream into file and stdout
+            with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as p, open(dest, 'a', encoding='utf-8') as f:
+                try:
+                    for line in p.stdout:
+                        # always write UTF-8 to the file
+                        f.write(line)
+                        f.flush()
+                        # safe print to console: some Windows consoles cannot encode all unicode
+                        try:
+                            sys.stdout.write(line)
+                        except UnicodeEncodeError:
+                            safe = line.encode('utf-8', errors='replace').decode('utf-8')
+                            try:
+                                sys.stdout.write(safe)
+                            except Exception:
+                                # give up quietly
+                                pass
+                except KeyboardInterrupt:
+                    p.terminate()
+                    raise
+        else:
+            subprocess.run(cmd)
 
 
 def api_fetch(instance_id: str, dest: str | None):
@@ -246,6 +296,8 @@ def main():
     p.add_argument('--instance-id', help='Vast.ai instance id')
     p.add_argument('--label', help='Label substring to match against instances')
     p.add_argument('--follow', action='store_true', help='Stream/follow logs (CLI only)')
+    p.add_argument('--tail', type=int, help='Show last N lines of logs')
+    p.add_argument('--poll', type=float, default=0, help='Poll for new logs every N seconds (streaming mode without --follow)')
     p.add_argument('--dest', help='Local file to write logs to')
     p.add_argument('--all', action='store_true', help='Fetch logs for all instances (API preferred)')
     p.add_argument('--workers', type=int, default=4, help='Number of parallel workers when fetching multiple instances')
@@ -286,7 +338,7 @@ def main():
                 dest = args.dest or os.path.join('logs', 'vast', f"{iid}.log")
             try:
                 if has_cli():
-                    run_cli(iid, args.follow, dest)
+                    run_cli(iid, args.follow or args.poll > 0, dest, args.tail, args.poll)
                 else:
                     api_fetch(iid, dest)
             except Exception as e:
@@ -308,7 +360,7 @@ def main():
 
     if has_cli():
         try:
-            run_cli(inst_id, args.follow, args.dest)
+            run_cli(inst_id, args.follow or args.poll > 0, args.dest, args.tail, args.poll)
             return
         except Exception as e:
             print('CLI invocation failed, falling back to API:', e)
