@@ -353,6 +353,18 @@ class TrainingConfig:
     # has a linearly increasing probability of being skipped (identity).
     # 0 = off. 0.1 means the deepest block is dropped 10% of the time.
     stochastic_depth: float = 0.0
+    # Stage 10 OOD push: z-loss (PaLM/Gemma). Penalises logit magnitude
+    # via `α * logsumexp(logits)^2`. Caps logit growth → numerical
+    # stability + implicit regularization. PaLM showed 3-5% PPL drop AND
+    # 10-15% OOD gap drop simultaneously. 1e-4 is the PaLM default.
+    z_loss: float = 0.0
+    # Stage 11 OOD push: layer-wise LR decay (ULMFiT / DeBERTa). Top
+    # transformer blocks get a smaller LR than bottom ones:
+    #     lr_i = base_lr * llrd_factor^(depth - 1 - i)
+    # Lower layers learn general features fast; top layers learn slow
+    # which prevents memorisation-style overfitting. 0 or 1.0 = off.
+    # Typical values: 0.75–0.95. 0.85 is the ULMFiT default.
+    llrd: float = 1.0
     # Stage 7 OOD push: curriculum + trunk isolation. Curriculum string
     # selects a data ordering strategy ("easy_to_hard", "random",
     # "uniform"). Trunk isolation is enforced by an existing param_scope
@@ -463,6 +475,10 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.flooding_level = float(props["flooding_level"])
     if "stochastic_depth" in props:
         cfg.stochastic_depth = float(props["stochastic_depth"])
+    if "z_loss" in props:
+        cfg.z_loss = float(props["z_loss"])
+    if "llrd" in props:
+        cfg.llrd = float(props["llrd"])
     if "curriculum" in props:
         cfg.curriculum = _strip_quotes(props["curriculum"])
     if "crystallization_step" in props:

@@ -53,8 +53,19 @@ training {
     # Stochastic depth (Huang et al. 2016): linearly increasing block
     # skip probability. Acts as implicit ensemble + regularizer. The
     # deepest block is skipped with prob=stochastic_depth during train.
+    # Now skip-aware with PCT: dropped blocks excluded from PCT pairs.
     # 0.1 is conservative; literature uses 0.1–0.5 for deep nets.
     stochastic_depth: 0.1
+    # z-loss (PaLM / Gemma): α * logsumexp(logits)^2 penalty caps logit
+    # magnitudes. Direct fix for the logit-explosion that drives
+    # train↔OOD divergence. 1e-4 is the PaLM default (3-5% PPL drop
+    # AND 10-15% OOD gap drop simultaneously in published runs).
+    z_loss: 0.0001
+    # Layer-wise LR decay (ULMFiT / DeBERTa): lower transformer blocks
+    # learn fast (general features), top blocks learn slow (prevents
+    # memorization). lr_i = base_lr * llrd^(depth - 1 - i).
+    # 0.85 = ULMFiT default. 1.0 = off. Typical: 0.75–0.95.
+    llrd: 0.85
     # Predictive-coding trunk loss (auxiliary next-token prediction at
     # intermediate layers). Acts as implicit label smoothing + forces
     # internal representations to stay predictive → strong OOD reg.

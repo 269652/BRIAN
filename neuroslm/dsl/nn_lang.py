@@ -827,54 +827,64 @@ class DSLLanguageCortex(nn.Module):
                 bm = self._block_module_idx.to(offs.device)
             per_block = offs.index_select(dim=1, index=bm)  # (B_in, depth, N_NT)
             block_gain = self.alpha_nt * self.nt_proj(per_block)
+        # Track which blocks were dropped so PCT can skip them (skip-aware
+        # pairing). Without this, dropped blocks pollute PCT pairs with
+        # zero residuals → silent regularizer-disable when stochastic_depth
+        # is active. With it, PCT forms pairs over only the surviving
+        # subsequence, so dropout and predictive coding compose cleanly.
+        dropped_mask: List[bool] = []
         for bi, (blk, adapter) in enumerate(zip(self.blocks, self.adapters)):
             # ── Stochastic depth: skip block with linearly increasing prob ──
+            is_dropped = False
             if self.training and self.stochastic_depth > 0:
                 drop_prob = self.stochastic_depth * (bi + 1) / self._depth
                 if torch.rand(1).item() < drop_prob:
-                    # Skip this block (identity); still record for PCT/metrics
-                    block_outs.append(h)
-                    self._layer_acts.append(h.detach())
-                    continue
-            h = blk(h)
-            h = adapter(h)
-            h = self.dropout(h)
-            if block_gain is not None:
-                # Broadcast (B, 1, d_model) over the (B, T, d_model) hidden
-                gain = block_gain[:, bi, :].unsqueeze(1)
-                h = h * (1.0 + gain)
+                    is_dropped = True
+
+            if not is_dropped:
+                h = blk(h)
+                h = adapter(h)
+                h = self.dropout(h)
+                if block_gain is not None:
+                    # Broadcast (B, 1, d_model) over the (B, T, d_model) hidden
+                    gain = block_gain[:, bi, :].unsqueeze(1)
+                    h = h * (1.0 + gain)
             block_outs.append(h)
+            dropped_mask.append(is_dropped)
             self._layer_acts.append(h.detach())
 
-        # ── PCT trunk pass (forward-path predictive coding) ──
-        # For each adjacent pair (i, i+1):
-        #   pred  = TopDown(h_{i+1})          # what i+1 expects h_i to be
+        # ── PCT trunk pass (skip-aware forward-path predictive coding) ──
+        # For each adjacent pair of NON-DROPPED blocks (i, j):
+        #   pred  = TopDown(h_j)              # what j expects h_i to be
         #   err   = h_i - pred                # prediction error at layer i
-        # The per-pair errors are aggregated (weighted by depth-distance,
-        # so the closest pair counts most) and added as a correction to
-        # h_final. This:
-        #   (a) wires topdown_w into the trunk's forward path so its
-        #       gradient shapes the trunk over training, AND
-        #   (b) lets us compute it in one forward pass (vs. the proper
-        #       PCT fixed-point iteration which would 2x forward cost).
+        # When stochastic depth dropped some blocks, we form pairs over
+        # only the surviving subsequence so PCT residuals are always
+        # meaningful (not just `0 - 0 = 0` for dropped pairs).
         # Zero-init topdown_w means pct_correction starts at exactly
         # block_outs[i], so err = 0 and h_final is unperturbed at init.
         if self.pct_trunk > 0 and self.topdown_w is not None:
             alpha = 0.5      # safety damping so PCT can't dominate
             depth_t = len(block_outs)
             pct_correction = torch.zeros_like(block_outs[-1])
-            for i in range(depth_t - 1):
-                # Per-layer-pair residual difference (between adjacent
-                # block outputs). Pass through the learned topdown
-                # projection — at zero-init this entire term is exactly
-                # zero, so PCT starts as a no-op and the model is
-                # identical to the no-PCT baseline at step 0.
-                residual_diff = block_outs[i] - block_outs[i + 1]
-                err = nn_ops.linear(residual_diff, self.topdown_w[i])
-                # Weight by 1/(depth - i) so the pair closest to the
-                # output (largest i) dominates the correction.
+            # Active (non-dropped) block indices, in order
+            active = [i for i, d in enumerate(dropped_mask) if not d]
+            # Fall back to all blocks if nothing was dropped (common case
+            # at eval time + when stochastic_depth=0)
+            if not active:
+                active = list(range(depth_t))
+            for k in range(len(active) - 1):
+                i_lo = active[k]
+                i_hi = active[k + 1]
+                # Per-layer-pair residual difference. Use topdown_w[i_lo]
+                # — the head is indexed by the LOWER block of the pair.
+                if i_lo >= len(self.topdown_w):
+                    break
+                residual_diff = block_outs[i_lo] - block_outs[i_hi]
+                err = nn_ops.linear(residual_diff, self.topdown_w[i_lo])
+                # Weight by 1/(depth - i_lo) so the pair closest to the
+                # output (largest i_lo) dominates the correction.
                 pct_correction = (
-                    pct_correction - alpha * self.pct_trunk * err / (depth_t - i)
+                    pct_correction - alpha * self.pct_trunk * err / (depth_t - i_lo)
                 )
             # Apply the aggregated correction to the final hidden state
             # that feeds the LM head.
