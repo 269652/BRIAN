@@ -484,6 +484,10 @@ class DSLLanguageModel(nn.Module):
         # ignition, oscillations, trophic). Detached so metrics never
         # perturb the training graph.
         self._layer_acts = []
+        # Final non-detached hidden state for PR2 regularizers (DAR/PCC/
+        # Isotropy/CMD). Cleared each forward and re-stashed right before
+        # the LM head projection.
+        self._last_hidden = None
         for blk in self.blocks:
             h = blk(h)
             self._layer_acts.append(h.detach())
@@ -937,7 +941,8 @@ class DSLLanguageCortex(nn.Module):
         self._last_pred_coding_loss = pred_coding_loss
         h_final = block_outs[-1] if block_outs else h
         h_final = nn_ops.rmsnorm(h_final, self.gamma_f)
-        logits = nn_ops.linear(h_final, self.lm_head)
+        h_for_head = h_final
+        logits = nn_ops.linear(h_for_head, self.lm_head)
 
         # ── H19: Surprise head — local-context NLL vs global NLL ──
         # Uses ids as next-token labels (NLL of token t given <t under
@@ -959,7 +964,11 @@ class DSLLanguageCortex(nn.Module):
                                           surprise=self.last_token_surprise)
             if self._episodic_memory.alpha.detach().abs().item() > 0:
                 h_final_blended = h_final + delta
-                logits = nn_ops.linear(h_final_blended, self.lm_head)
+                h_for_head = h_final_blended
+                logits = nn_ops.linear(h_for_head, self.lm_head)
+        # PR2: expose the exact hidden state used by the LM head projection
+        # so the harness regularization controller can consume it.
+        self._last_hidden = h_for_head
         return logits
 
 
