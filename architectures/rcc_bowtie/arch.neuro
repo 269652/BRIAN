@@ -199,9 +199,9 @@ training {
             depth:         8
             n_heads:       8
             max_ctx:       2048
-            batch_size:    16
+            batch_size:    2       # reduced from 16 → memory constraint
             seq_len:       2048
-            grad_accum:    1
+            grad_accum:    8       # 2×8=16 effective batch (same as before)
             approx_params: "30M"
         }
 
