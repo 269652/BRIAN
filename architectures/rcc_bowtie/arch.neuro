@@ -309,7 +309,9 @@ training {
         # D. Cross-Module Disagreement — penalize JSD between LM and a
         #    second read-out head (narrative). Flips the Phi pillar:
         #    *disagreement* (not agreement) is the OOD-robust signal.
-        cmd: { enabled: true, weight: 0.05, divergence: "jsd",
+        #    DISABLED: OOM at batch=4 seq=2048 (needs 6GB for dual softmax).
+        #    Re-enable for smaller batches or when using gradient checkpointing.
+        cmd: { enabled: false, weight: 0.05, divergence: "jsd",
                heads: ["lm", "narrative"] }
 
         # E. Adaptive mixture controller — anneals chat_ratio to preserve
