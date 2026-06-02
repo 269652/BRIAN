@@ -408,7 +408,13 @@ def _slice_arrow_block(body: str, start: int, keyword: str):
 
 
 def _slice_braced(body: str, start: int):
-    """Given `body[start] == '{'`, return (inside_text, position_after_close)."""
+    """Given `body[start] == '{'`, return (inside_text, position_after_close).
+
+    Tracks string literals (so braces inside `"..."` are ignored) AND
+    line comments starting with `#` (so a stray apostrophe in a comment
+    like `# there's no bottleneck` does NOT enter string-tracking mode
+    and swallow subsequent closing braces).
+    """
     assert body[start] == "{"
     depth = 1
     i = start + 1
@@ -418,6 +424,11 @@ def _slice_braced(body: str, start: int):
         if in_str:
             if ch == in_str:
                 in_str = None
+        elif ch == "#":
+            # Skip to end of line — comments are not parsed.
+            nl = body.find("\n", i)
+            i = len(body) if nl == -1 else nl
+            continue
         elif ch in ('"', "'"):
             in_str = ch
         elif ch == "{":
