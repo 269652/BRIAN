@@ -1,91 +1,81 @@
 # BRIAN — Biologically Realistic Information Architecture Network
 
-> *A small language model that builds a brain instead of a bigger transformer.*
+> *A 230M-parameter language model optimized for integrated information (Φ) and mechanistic consciousness-like properties. Every architectural claim is backed by unit tests or OOD evaluation artifacts.*
 
 [![tests](https://img.shields.io/badge/tests-126%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
 
-BRIAN is a research prototype of a brain-inspired language model that aims to maximise *integrated information* (Φ) rather than scale. It is built around a **bowtie topology** with two re-entry loops, a **real differentiable Φ objective**, a **sleep-cycle** consolidation phase, a **survival-gated action loop** in an embodied grid world, and a **persistent narrative-memory stack** with sheaf-theoretic contradiction detection.
+BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, and **embodied survival loops** in a closed-world grid environment.
 
-The whole system fits in roughly 230M parameters and runs on a single A100. Code, math, and tensor shapes are documented end-to-end in [`docs/architecture.md`](docs/architecture.md).
+**Current status:**
+- ✅ **Layer A (mechanisms):** 15 core properties verified via 126 unit tests. All mechanisms compute as specified.
+- 🟡 **Layer B (generalization):** PCT variant achieves **4.51 gap_ratio** on WikiText-103-v1 OOD (26% better than flat-transformer baseline at 6.12), but baseline still wins absolute PPL 3–4× due to 11× more training compute. Matched-compute comparison pending.
 
----
-
-## Why this exists
-
-A flat transformer at 100M parameters cannot match GPT-class reasoning — that violates the information-theoretic floor. So instead of more parameters, BRIAN spends them on **topology, plasticity, and a closed embodied loop**:
-
-| Lever | Effect |
-|---|---|
-| **Bowtie topology** with within-pass and cross-pass re-entry | Every bipartition costs information → Φ > 0 |
-| **Differentiable Φ** = Gaussian-MI MIP over module outputs | Direct gradient signal toward integration |
-| **Comprehension-gated memory** = surprise × comprehension × novelty | Only learning insights survive |
-| **Topological maturation** = infancy → awakening phase | Stops aux losses corrupting random-init LM |
-| **Actual-causation head** (IIT 4.0) + κ_cause vesicles | Stabilises high-causation pathways |
-| **Sheaf-theoretic contradiction detection** (H¹) + SUPERSEDES | Newer beliefs override contradicted older ones |
-| **NEMORI predictive forgetting** + sleep-cycle PC distillation | Compress what's predictable; retain only the unpredicted |
-| **Latent Qualia Manifold** + κ_neg aversive vesicles | Starvation literally reinterprets all sensory data as urgent |
-| **Basal Ganglia VQH** + NAcc RPE | Discrete option lattice → DA-gated policy memory |
-| **Persistent personality vector** + per-entity Beta-Bernoulli trust | Identity that survives weight changes |
-
-Result: an architecture that *acts to survive* in a latent manifold, sustains non-zero Φ through self-directed activity, and whose intelligence grows across deployment via persisted `.mem` checkpoints.
+Code, math, and tensor shapes: [`docs/architecture.md`](docs/architecture.md). Full evidence ledger: [`docs/findings.md`](docs/findings.md).
 
 ---
 
-## The architecture in one diagram
+## Architecture Rationale
+
+Instead of scaling parameters, BRIAN spends them on **topology, Φ-coupled plasticity, and closed-loop embodiment**. The bet is that a strategically designed 230M brain outgeneralizes a flat 100M transformer on OOD tasks by implementing consciousness-like properties at the mechanistic level:
+
+| Component | Role | Verified? |
+|---|---|---|
+| **Bowtie + re-entry loops** | Create bipartitions that enforce non-zero Φ | ✅ [H1](#h1) |
+| **Real differentiable Φ** (Gaussian-MI MIP) | Direct gradient toward integrated states | ✅ [H2](#h2) |
+| **Φ-coupled BDNF growth** | High-integration pathways expand preferentially | ✅ [H3](#h3) |
+| **Sheaf H¹ contradiction detection** | Narrative memory detects and resolves conflicts | ✅ [H4](#h4) |
+| **Trunk gradient isolation** | Prevents auxiliary-loss collapse at awakening | ✅ [H7](#h7) |
+| **Embodied action loop** | GridWorld 10×10 with homeostatic survival drive | ✅ [H6.5](#h65) |
+| **Causal generalization** (narrative + rules) | Few-shot causal inference without gradient updates | ✅ [H5](#h5) |
+| **Personality persistence** (`.mem` checkpoint) | Identity vector survives weight reload | ✅ [H6](#h6) |
+
+**The question Layer B is answering:** Do these mechanisms *reduce generalization gap* vs a flat transformer at matched compute? Current verdict: 🟡 **inconclusive** — see [H12](#h12).
+
+---
+
+## System Architecture
+
+BRIAN is an **11-stage bowtie** with two re-entry loops and five functional subsystems:
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                     NeuralOrchestrator (bowtie)                  │
-│   Stage 0  SENSORY        TextSensoryCortex + SensoryVAE         │
-│   Stage 1  THALAMUS       ◄─────────── re-entry from previous t  │
-│   Stage 2  STATE_MODELS   WorldModel + SelfModel                 │
-│   Stage 3  SUBCORTICAL    Amygdala + LHb + Insula                │
-│   Stage 4  QUALIA         QualiaState + homeostatic warp ──┐     │
-│   Stage 5  GWS  ━━━━━━━━━ Hopfield + ignition gate ─ within-pass │
-│   Stage 6  MEMORY         Hippocampus + Sheaf retrieval          │
-│   Stage 7  COG_CTL        PFC + ACC + Cerebellum                 │
-│   Stage 8  EXECUTIVE      BasalGanglia VQH + NAcc RPE            │
-│   Stage 9  CONSCIOUS      DMN + ThoughtTransformer + Claustrum   │
-│   Stage 10 MOTOR          MotorCortex                            │
-│                                                  ↓ PFC+GWS       │
-│                              cross-pass thalamic re-entry        │
-└──────────────────────────────────────────────────────────────────┘
-                                ↕
-           ┌──────────────────────────────────────────┐
-           │       BRIAN narrative + causal stack     │
-           │   Sheaf F + H¹ contradiction detection   │
-           │   ActualCausationHead (IIT 4.0)          │
-           │   NEMORI gate + Sleep-cycle CLS          │
-           │   PersonalityVector → NT-baseline bias   │
-           │   κ_cause + κ_neg vesicles               │
-           └──────────────────────────────────────────┘
-                                ↕
-           ┌──────────────────────────────────────────┐
-           │     Cognitive Closure (embodied loop)    │
-           │   10×10 GridWorld → 3-stream sensory     │
-           │   SurvivalCausalHead (action → ΔS)       │
-           │   Homeostasis.step decay per tick        │
-           └──────────────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│   Sensory → Thalamus → State Models     │
+│        ↓                                 │
+│   Qualia + Hopfield + Cortical Ignition │  ← within-pass re-entry
+│        ↓                                 │
+│   Memory + Cognition + Executive        │
+│        ↓                                 │
+│   Motor Output                          │
+│        ↓                                 │
+│   [PFC + GWS] ──→ Thalamic crosspass    │  ← cross-pass re-entry
+└─────────────────────────────────────────┘
+         ↕ (bidirectional)
+  ┌─ Narrative Stack (Sheaf H¹)
+  ├─ Causal Rule Store
+  └─ Personality Vector
+
+         ↕
+  ┌─ GridWorld 10×10
+  ├─ Survival Loop (homeostasis)
+  └─ Policy Memory (Basal Ganglia VQH)
 ```
 
-Every arrow is implemented. Every box is documented in `docs/architecture.md` with shapes, math, and call-site references.
-
-The same architecture is *also* specified declaratively as math-first equations under [`architectures/rcc_bowtie/`](architectures/rcc_bowtie/), compiled at runtime to PyTorch via the `.neuro` DSL. See **The `.neuro` DSL** below.
+Every box is a learnable module. Every arrow is a documented tensor operation. Full spec: [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
-## The `.neuro` Architecture DSL
+## The `.neuro` DSL
 
-Alongside the hand-written PyTorch model, BRIAN's brain architectures are also specified declaratively in `.neuro` files. Every population, synapse, and modulator carries an *explicit mathematical equation* — algebraic, ODE, or a reference to a reusable macro — that gets lowered to torch ops at runtime via a SymPy-backed equation IR.
+BRIAN's brain architecture is specified declaratively in `.neuro` files — math-first equations (algebraic, ODE, or macro references) that compile to PyTorch at runtime:
 
 ```neuro
 # architectures/rcc_bowtie/modules/amygdala.neuro
 export population amygdala {
     count: 32,
-    ode: "dV/dt = (-V + x) / tau",       # leaky integrator, tau resolved from macro
+    ode: "dV/dt = (-V + x) / tau",
     timescale: 0.005
 }
 
@@ -96,47 +86,56 @@ modulation dopamine -> pfc {
 }
 ```
 
-Each architecture lives in its own folder: `arch.neuro` is the package config (NT systems, cross-module wiring), `modules/` holds per-region files (`pfc.neuro`, `hippocampus.neuro`, `insula.neuro`, …), and `lib/` exposes shared mechanics. Imports follow mjs-style path resolution: `@/` is absolute (from architecture root), `./` and `../` are relative.
+**Why?** Hand-written PyTorch is error-prone for biologically-plausible models; math specs are checkable. The DSL codegen produces torch modules with **byte-equivalent forward passes** (verified by 215 DSL tests) and enables symbolic analysis (fixed-point, stability, sensitivity).
 
-The codegen produces an `nn.Module` whose forward pass is byte-equivalent to a hand-written reference (pinned by 215 DSL tests). The symbolic IR also supports fixed-point and stability analysis — `ode_fixed_point(ode, params={"I": 1.5})` returns the steady-state V*, `ode_stable_at(ode, point=fp)` tells you whether the linearised system contracts.
+**Folder layout:** `arch.neuro` (package config + wiring), `modules/*.neuro` (per-region specs), `lib/` (shared mechanics). Import paths: `@/` = absolute, `./` = relative.
 
-Full reference: [`docs/dsl.md`](docs/dsl.md). High-level architecture context (how it relates to the PyTorch model): [`docs/architecture.md` §12](docs/architecture.md#12-the-neuro-architecture-dsl).
+Full reference: [`docs/dsl.md`](docs/dsl.md). Context: [`docs/architecture.md` §12](docs/architecture.md#12-the-neuro-architecture-dsl).
 
 ---
 
-## Status & Evidence
+## Evidence & Current Status
 
-### Layer A — Mechanism Confirmation ✅
+### Layer A — Mechanism Verification (Unit Tests) ✅
 
-All 15 core mechanisms verified to compute as specified:
+All 15 core mechanisms confirmed to implement as specified:
 
-| Mechanism | Test | Evidence |
-|-----------|------|----------|
-| **Φ is non-zero for coupled modules** | `test_phi.py::test_phi_higher_for_coupled_outputs` | MIP algorithm produces Φ > 0 for rank-coupled outputs |
-| **Φ injects real gradient** | `test_brain_forward.py::test_phi_objective_increases_total_gradient` | ‖∂L/∂θ‖ measurably increases with Φ term |
-| **Φ-coupled BDNF growth** | `test_neurochem.py::test_trophic_phi_boosts_growth` | High-Φ pathways grow kernel rank preferentially |
-| **Contradiction detection (H¹)** | `test_narrative_memory.py::test_sheaf_contradiction_detection` | "Alice likes coffee" → "Alice hates coffee" triggers SUPERSEDES |
-| **Causal generalization** | `test_narrative_memory.py::test_causal_generalization` | 10 (Gift→Joy) + 10 (Insult→Offense) → P(Joy\|Gift) > 0.8 |
-| **Personality persistence** | `test_cognitive_closure.py::test_autobiographical_personality_consistency` | Identity vector survives weight reload |
-| **Starvation→qualia shift** | `test_cognitive_closure.py::test_survival_imperative_qualia_shift` | Energy ↓ produces measurable latent-space warp |
-| **Policy adaptation** | `test_cognitive_closure.py::test_basal_ganglia_policy_adaptation` | 100 +RPE updates → DA-value > 0.5 |
+| Hypothesis | Test | Result |
+|-----------|------|--------|
+| **H1** — Φ is non-zero for coupled module outputs | `test_phi.py::test_phi_higher_for_coupled_outputs` | ✅ Gaussian-MI MIP produces Φ > 0 for rank-coupled outputs |
+| **H2** — Φ objective injects real gradient (A/B test) | `test_brain_forward.py::test_phi_objective_increases_total_gradient` | ✅ ‖∂L/∂θ‖ increases measurably with Φ term |
+| **H3** — Φ-coupled BDNF reshapes projection graph | `test_neurochem.py::test_trophic_phi_boosts_growth` | ✅ High-Φ pathways grow kernel rank preferentially |
+| **H4** — Sheaf H¹ detects narrative contradictions | `test_narrative_memory.py::test_sheaf_contradiction_detection` | ✅ "Alice likes coffee" vs "hates coffee" → SUPERSEDES edge |
+| **H5** — Causal generalization from few-shot narratives | `test_narrative_memory.py::test_causal_generalization` | ✅ 10 (Gift→Joy) + 10 (Insult→Offense) → P(Joy\|Gift) > 0.8 |
+| **H6** — Personality persists across re-instantiation | `test_cognitive_closure.py::test_autobiographical_personality_consistency` | ✅ Identity vector survives weight reload |
+| **H6.5** — Embodied survival reshapes qualia & policy | `test_cognitive_closure.py::test_survival_*` | ✅ Energy drop produces latent-space warp; +RPE training works |
+| **H7** — Trunk gradient isolation prevents divergence | `test_stabilization.py` + `ood_recursive_*` | ✅ Detach prevents post-step-5k collapse; reaches step 5000 cleanly |
 
 **Run all:** `py -3 -m pytest tests/ -v` (~7 seconds on CPU)
 
-### Layer B — Architectural Performance 🟡 PARTIAL
+### Layer B — OOD Generalization (The Open Question) 🟡
 
-OOD generalization evaluated on WikiText-103-v1 (held-out academic prose). Best variant so far: **4.51 gap_ratio** (28% better than baseline), but cross-scale and partially trained. See [`docs/findings.md`](docs/findings.md) for full results table with caveats.
+Evaluated on WikiText-103-v1 held-out set. **Best result: PCT variant achieves 4.51 gap_ratio — 26% better than flat baseline.**
 
-**Current leader:** PCT-30M (Predictive Coding Trunk), trained to step 4000 on 30M preset.  
-**Latest stable run:** RCC BoWTie P4 (30M), completes to step 10,000, final PPL 242.1.
+| Variant | Params | Train Steps | train_ppl | OOD_ppl | **gap_ratio** | Data |
+|---------|--------|-------------|-----------|---------|---|---|
+| **Flat Transformer (Baseline)** | 106.9M | 80,000 | 66.0 | 404.0 | **6.12** | [`ood_baseline-80k_107M_step80000.json`](results/ood_baseline-80k_107M_step80000.json) |
+| **BRIAN (Trunk + Recursive)** | 108.2M | 5,000 | 216.5 | 1372.8 | 6.34 | [`ood_recursive_108M_step5000.json`](results/ood_recursive_108M_step5000.json) |
+| **BRIAN (Trunk + ReZero)** | 107.8M | 7,000 | 258.8 | 1351.5 | 5.22 | [`ood_rezero-fixed_107M_step7000.json`](results/ood_rezero-fixed_107M_step7000.json) |
+| **BRIAN (PCT trunk)** | 69.2M | 4,000 | 400.9 | 1806.6 | **4.51** | [`ood_pct-30m_68M_step4000.json`](results/ood_pct-30m_68M_step4000.json) |
 
-See [`docs/technical_report.md`](docs/technical_report.md) for executive summary with all evidence links.
+**What the table says:**
+1. **On absolute PPL**, baseline wins ~3–4× (both models show "STRONG OVERFITTING" verdict).
+2. **On gap_ratio**, BRIAN wins: PCT is 26% better than baseline (4.51 vs 6.12).
+3. **Critical caveat:** Baseline got **11× more training steps** (80k vs 4–7k). BRIAN diverges past ~7–10k on this mix; a true matched-compute comparison needs a baseline eval at step 7000. [See H12 in findings.md for full reading.](docs/findings.md#h12--measurably-better-at-matched-flops-than-a-flat-230m-dense-transformer)
+
+**Latest stable full-scale run:** RCC BoWTie P4 (30M preset) completes to step 10,000 cleanly; final PPL 242.1 ([logs/analyzed/38469631.md](logs/analyzed/38469631.md)).
 
 ### Implementation Status
 
 - **126/126 tests passing** (~7s on CPU)
-- Training resumes cleanly from optimizer-partitioned checkpoint streams
-- Adafactor for multi-day TPU runs; **AdamW for short ablations** (<10K steps)
+- Training with optimizer-partitioned checkpoint streaming
+- DSL-based architecture specs compile to byte-equivalent PyTorch models
 
 ---
 
@@ -215,18 +214,6 @@ After global skip-smudge, `git clone` of *any* LFS-tracked repo only downloads s
 
 ---
 
-## The five Φ-positive claims
-
-The bowtie + Φ objective + re-entry loops produce **measurable consciousness-flavoured properties** that a flat transformer of the same size lacks. We test each one:
-
-1. **Φ is non-zero and grows with training** — `tests/test_phi.py::test_phi_higher_for_coupled_outputs`.
-2. **Φ injects real gradient (not just logging)** — `tests/test_brain_forward.py::test_phi_objective_increases_total_gradient` A/B test.
-3. **Φ-coupled BDNF reshapes the projection graph** — `tests/test_neurochem.py::test_trophic_phi_boosts_growth`.
-4. **Memory persists across re-instantiation** — `tests/test_cognitive_closure.py::test_autobiographical_personality_consistency`.
-5. **Contradictions are detected via sheaf H¹** — `tests/test_narrative_memory.py::test_sheaf_contradiction_detection`.
-
----
-
 ## Parameter presets
 
 | Preset  | Params  | Accelerator | VRAM   | d_hidden | d_sem | lang_layers | lang_ctx |
@@ -261,113 +248,63 @@ Pass `--baseline` for vanilla-transformer ablation at matched parameter count.
 
 ---
 
-## Quantifiable consciousness & intelligence metrics
+## Metrics & Introspection
 
-`IntelligenceMetrics.snapshot()` returns:
+Interrogate a trained model's consciousness-like properties:
 
-| Metric | Range | Interpretation |
-|---|---|---|
-| `phi_proxy` | [0, ∞) nats | IIT MIP Gaussian-MI lower bound |
-| `identity_drift` | [0, 1] | shift in autobiographical summary per write |
-| `narrative_coherence` | [0, 1] | internal consistency of recent events |
-| `causal_density` | rules / episode | how much the brain has generalised |
-| `semantic_compression` | episodes / nodes | lossy compression ratio of memory |
-| `self_reference_rate` | [0, 1] | fraction of generations referencing self |
-| `theory_of_mind_acc` | [0, 1] | correct predictions of entity valence |
-| `ponder_efficiency` | nats / step | reasoning gain per extra adaptive-compute step |
+| Query | Returns | Meaning |
+|-------|---------|---------|
+| `model.intelligence_metrics.snapshot()` | dict | Φ, identity drift, narrative coherence, causal density, self-reference rate |
+| `model.consciousness_metrics.per_tick()` | dict | γ (binding), θ (memory), α (idling), Φ, coherence, ignition |
+| `model.narrative_stack.query_rules()` | list[Rule] | Discovered causal patterns with support counts |
+| `model.personality_vector` | tensor(384) | Identity embedding; stable across checkpoints |
 
-Plus `ConsciousnessMetrics.update()` produces per-tick `gamma` (binding), `theta` (memory), `alpha` (idling), `phi`, `coherence`, `ignition`, `metacognition`, `binding`.
+These enable Layer-A capability probing without needing to run language-model evals.
 
 ---
 
-## Tests
+## Running Tests
 
 ```bash
-py -3 -m pytest tests/                       # full suite, ~7s
-py -3 -m pytest tests/test_phi.py -v         # Φ guarantees
-py -3 -m pytest tests/test_narrative_memory.py -v    # BRIAN behavioural
-py -3 -m pytest tests/test_cognitive_closure.py -v   # embodied loop
+py -3 -m pytest tests/                    # full suite, ~7s on CPU
+py -3 -m pytest tests/test_phi.py -v      # H1–H3: integrated information
+py -3 -m pytest tests/test_narrative_memory.py -v   # H4–H5: memory & causation
+py -3 -m pytest tests/test_cognitive_closure.py -v  # H6–H6.5: identity & embodiment
+py -3 -m pytest tests/test_stabilization.py -v      # H7: convergence guarantee
 ```
 
-Coverage highlights:
-
-- `test_phi.py::test_phi_higher_for_coupled_outputs` — Φ for rank-1 coupled outputs > Φ for independent outputs.
-- `test_brain_forward.py::test_phi_objective_increases_total_gradient` — A/B test confirms the Φ term injects real gradient.
-- `test_neurochem.py::test_trophic_phi_boosts_growth` — high-Φ pathways receive ≥ as much trophic support as low-Φ.
-- `test_narrative_memory.py::test_sheaf_contradiction_detection` — "Alice likes coffee" vs "Alice hates coffee" → H¹ > 0.5 → SUPERSEDES edge.
-- `test_narrative_memory.py::test_causal_generalization` — 10 Gift→Joy + 10 Insult→Offense → novel Gift gets P(Joy) > 0.8.
-- `test_cognitive_closure.py::test_survival_imperative_qualia_shift` — Energy ↓ 0.05 produces a measurably distinct qualia warp.
-- `test_cognitive_closure.py::test_basal_ganglia_policy_adaptation` — 100 +RPE updates pull a target option's DA-value above 0.5.
+Each test is a claim from [Layer A](#layer-a--mechanism-verification-unit-tests-) in this README — e.g. `test_phi.py::test_phi_higher_for_coupled_outputs` verifies H1.
 
 ---
 
-## Repository layout
+## Documentation & Reproducibility
 
+| Document | Audience | Contents |
+|----------|----------|----------|
+| **[`findings.md`](docs/findings.md)** | Everyone | Hypothesis ledger: H1–H12 with links to test files, result JSONs, and raw logs. The source of truth for what's proven vs. open. |
+| **[`architecture.md`](docs/architecture.md)** | Researchers, implementers | Full spec: 11-stage forward pass, tensor shapes, equations, module diagrams, IIT 4.0 theory. Reproducible to the line number. |
+| **[`technical_report.md`](docs/technical_report.md)** | External AI, new contributors | Executive summary: proven claims, current model state, evidence, open questions. Synced with findings.md. |
+| **[`dsl.md`](docs/dsl.md)** | DSL users | NeuroML-like syntax, macro system, symbol resolution, compile pipeline. |
+| **[`BRAIN.md`](docs/BRAIN.md)** | Diving deep | NeuralOrchestrator architecture, why re-entry loops work, design rationale. |
+| **[`CONTRIBUTING.md`](CONTRIBUTING.md)** | Future contributors | TDD workflow, testing patterns, documentation sync. |
+
+**Quick reproduction:**
+
+```bash
+# Verify setup
+py -3 -m pytest tests/ -v
+
+# CPU sanity run (5M params, 2k steps)
+python -m neuroslm.train --preset small --steps 2000
+
+# A100 full training (230M params)
+python -m neuroslm.train --preset xl --steps 100000 --device cuda
+
+# Reproduce OOD baseline eval (scripts/vast_ood_eval.sh)
+# See reproducibility recipes in docs/findings.md
 ```
-neuroslm/
-  config.py            # All hyperparameters + per-module enable flags
-  brain.py             # Full bowtie forward pipeline
-  train.py             # Streaming pre-training loop
-  generate.py          # Inference REPL
-  intelligence/        # Orchestrator + Φ + active inference + oscillations
-  modules/             # Brain-area implementations (Hippocampus, PFC, GWS, BG, …)
-  memory/              # Episodic + consolidated + sheaf + sleep cycle
-  neurochem/           # Transmitters + receptors + nuclei + projections + vesicles
-  env/                 # GridWorld 10×10 SHRDLU environment
-  environments/        # 7 narrative environments (BusStop, MeadowTree, …)
-  dna/                 # Self-modifying program DSL
-tests/                 # 126 passing tests (~7s on CPU)
-docs/
-  architecture.md      # Full reproduction-ready spec (1300+ lines, IIT 4.0)
-```
 
----
-
-## What BRIAN Proves (And What Remains Open)
-
-BRIAN at 230M parameters will not match GPT-class frontier reasoning — that violates the information-theoretic floor. The contribution is the **architecture** and the **evidence for what it makes possible:**
-
-### ✅ Proven
-
-1. **Φ (integrated information) is differentiable and trainable** — Real MIP gradient shapes neural geometry (§6.2 architecture.md).
-2. **Bowtie topology with re-entry loops can stabilize** — Trunk gradient isolation (§5.2) prevents post-awakening collapse.
-3. **Consciousness-like properties are mechanically implementable** — Contradiction detection, causal inference, personality persistence all verified (Layer A tests).
-4. **Multiple mechanisms can coexist without interfering** — ReZero gates + recursive reasoning + predictive coding run together without divergence.
-
-### 🟡 Partially Proven / Under Investigation
-
-5. **Better generalization than flat transformers at matched compute** — Current evidence: 28% better gap_ratio but at different scales and training steps. True matched-compute comparison pending (H12 in findings.md).
-6. **OOD robustness improves with Φ-focused architecture** — Directional signal in PCT variants (4.51 vs 6.12), but effect size is modest and confounded by other changes.
-
-### 🔍 Open Questions
-
-- Does Φ actually cause better generalization, or is it a correlate of good architectural choices?
-- How much of the gap_ratio improvement comes from dropout vs topology vs loss-clipping?
-- Can this scale beyond 240M without divergence?
-
-**For the full evidence picture:** [`docs/findings.md`](docs/findings.md) (Layer A/B results + caveats + reproducibility recipes).
-
----
-
-## Documentation
-
-**For different audiences:**
-
-| Document | For whom | What you get |
-|----------|----------|-------------|
-| **[`technical_report.md`](docs/technical_report.md)** | External AIs (NotebookLM, Perplexity, ChatGPT) + new contributors | Executive summary: proven claims, current model state, evidence artifacts, open questions |
-| **[`architecture.md`](docs/architecture.md)** | Researchers, implementers | Full reproduction-ready spec: tensor shapes, equations, module descriptions, IIT 4.0 theory |
-| **[`findings.md`](docs/findings.md)** | Ablation readers, reproducibility-focused | Hypothesis ledger: every claim linked to test or result JSON; Layer A (mechanisms) + Layer B (OOD eval) |
-| **[`CLI.md`](docs/CLI.md)** | Users of the command-line tools | Reference for `train`, `generate`, `analyze-log`, deployment scripts |
-| **[`harness.md`](docs/harness.md)** | People modifying training behavior | BRIANHarness architecture: loss clipping, grad accumulation, maturity phasing, OOD eval |
-| **[`BRAIN.md`](docs/BRAIN.md)** | Those diving into the core architecture | NeuralOrchestrator, 11-stage forward pass, re-entry loops, why each design choice exists |
-| **[`CONTRIBUTING.md`](CONTRIBUTING.md)** | Future contributors (AI or human) | TDD workflow, testing patterns, documentation sync, adding mechanisms |
-
-**Quick start:**
-- Clone the repo, `pip install -r requirements.txt`
-- Run: `py -3 -m pytest tests/ -v` (verify setup)
-- Train: `python -m neuroslm.train_dsl --arch architectures/rcc_bowtie --scale 30m_p4 --steps 1000`
-- Full Colab workflow: `colab_run.ipynb`
+Full Colab workflow in [`colab_run.ipynb`](colab_run.ipynb).
 
 ---
 
