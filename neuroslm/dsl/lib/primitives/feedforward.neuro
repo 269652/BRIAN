@@ -1,0 +1,232 @@
+# ═══════════════════════════════════════════════════════════════════════
+# FEEDFORWARD PRIMITIVES — Position-wise Networks
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Feedforward networks in transformers are applied independently to each
+# position in the sequence. They provide the non-linearity and capacity
+# for the model to learn complex functions beyond attention.
+#
+# Design: Each variant specifies the transformation h → h' at a single
+# position. The actual implementation broadcasts across the sequence.
+
+# ── 1. STANDARD FFN (Vaswani et al. 2017) ───────────────────────────────
+
+export equation standard_ffn {
+    equation: """
+        FFN(x) = W_2 σ(W_1 x + b_1) + b_2
+    """
+    
+    where: {
+        W_1: "linear(d_model, d_ff)"
+        W_2: "linear(d_ff, d_model)"
+        b_1: "bias(d_ff)"
+        b_2: "bias(d_model)"
+        σ:   "activation (relu, gelu, swish)"
+        d_ff: "expansion_factor * d_model  # typically 4x"
+    }
+    
+    properties: {
+        parameter_count: "2 * d_model * d_ff  # dominates transformer params"
+        expansion_factor: "4 (typical), but varies: 2.67 (T5), 8 (some LLMs)"
+    }
+}
+
+# ── 2. GELU ACTIVATION ──────────────────────────────────────────────────
+#
+# Hendrycks & Gimpel (2016): Gaussian Error Linear Unit
+# Used in BERT, GPT-2, GPT-3.
+
+export equation gelu_ffn {
+    base: standard_ffn
+    
+    where: {
+        σ: "gelu"
+    }
+    
+    # Exact GELU (expensive) vs approximate (common in practice)
+    equation_exact: "GELU(x) = x Φ(x)  where Φ is Gaussian CDF"
+    equation_approx: "GELU(x) ≈ 0.5 x (1 + tanh(√(2/π) (x + 0.044715 x³)))"
+    
+    properties: {
+        smoothness: "C^∞ (infinitely differentiable)"
+        stochastic_interpretation: "expected output of x * Bernoulli(Φ(x))"
+    }
+}
+
+# ── 3. SWISH / SiLU ACTIVATION ──────────────────────────────────────────
+#
+# Ramachandran et al. (2017): Self-gated activation.
+# Used in EfficientNet, some modern LLMs.
+
+export equation swish_ffn {
+    base: standard_ffn
+    
+    where: {
+        σ: "swish"
+    }
+    
+    equation: "Swish(x) = x σ(βx)  where σ is sigmoid"
+    
+    # SiLU is Swish with β=1 (most common)
+    equation_silu: "SiLU(x) = x σ(x)"
+    
+    properties: {
+        smoothness: "C^∞"
+        bounded_below: "unbounded above (like ReLU), but smooth"
+        derivative: "Swish'(x) = Swish(x) + σ(βx)(1 - Swish(x))"
+    }
+}
+
+# ── 4. SWIGLU (Shazeer 2020) ────────────────────────────────────────────
+#
+# Gated Linear Unit variant with Swish activation.
+# Used in PaLM, Llama, Claude — current SOTA for LLMs.
+
+export equation swiglu_ffn {
+    equation: """
+        FFN(x) = (Swish(W_gate x) ⊙ W_1 x) W_2
+    """
+    
+    where: {
+        W_gate: "linear(d_model, d_ff)"
+        W_1:    "linear(d_model, d_ff)"
+        W_2:    "linear(d_ff, d_model)"
+        ⊙:      "element-wise multiplication"
+    }
+    
+    # Equivalent formulation (clearer structure)
+    equation_alt: """
+        gate = Swish(W_gate x)
+        value = W_1 x
+        FFN(x) = W_2 (gate ⊙ value)
+    """
+    
+    properties: {
+        parameter_count: "3 * d_model * d_ff  # 50% more than standard FFN"
+        quality: "2-5% better perplexity than GELU at same param count"
+        gating_mechanism: "learned modulation of value pathway"
+    }
+}
+
+# ── 5. GEGLU (Shazeer 2020) ─────────────────────────────────────────────
+#
+# GLU variant with GELU activation.
+
+export equation geglu_ffn {
+    equation: """
+        FFN(x) = (GELU(W_gate x) ⊙ W_1 x) W_2
+    """
+    
+    where: {
+        W_gate: "linear(d_model, d_ff)"
+        W_1:    "linear(d_model, d_ff)"
+        W_2:    "linear(d_ff, d_model)"
+    }
+    
+    properties: {
+        parameter_count: "3 * d_model * d_ff"
+        used_in: "T5, some diffusion models"
+    }
+}
+
+# ── 6. MIXTURE OF EXPERTS (MoE) FFN ─────────────────────────────────────
+#
+# Shazeer et al. (2017): Conditional computation — activate subset of experts.
+# Used in Switch Transformer, GLaM, GPT-4 (rumored).
+
+export equation moe_ffn {
+    equation: """
+        # Router selects top-k experts per token
+        router_logits = W_router x
+        expert_weights, expert_indices = TopK(softmax(router_logits), k)
+        
+        # Compute only selected experts
+        output = Σ_i expert_weights[i] * Expert_indices[i](x)
+    """
+    
+    where: {
+        W_router: "linear(d_model, n_experts)"
+        n_experts: "total expert count (e.g., 128)"
+        k: "experts activated per token (typically 1 or 2)"
+        Expert_i: "standard_ffn_i  # each expert is a separate FFN"
+    }
+    
+    # Load balancing loss (auxiliary) to prevent expert collapse
+    constraint load_balance: """
+        # Encourage uniform expert usage
+        auxiliary_loss = α * Σ_e (fraction_tokens_to_e - 1/n_experts)²
+    """
+    
+    properties: {
+        parameter_count: "n_experts * (2 * d_model * d_ff)  # can be 100B+ params"
+        active_parameters: "k * (2 * d_model * d_ff)  # but only k experts run"
+        training_complexity: "requires expert parallelism across devices"
+        quality: "10-100x more parameters at same FLOP cost"
+    }
+}
+
+# ── 7. SQUARED RELU (Primer, So et al. 2021) ───────────────────────────
+#
+# Simple variant: square the ReLU output. Surprisingly effective.
+
+export equation squared_relu_ffn {
+    base: standard_ffn
+    
+    where: {
+        σ: "squared_relu"
+    }
+    
+    equation: "SquaredReLU(x) = (ReLU(x))²"
+    
+    properties: {
+        derivative: "2x if x > 0, else 0  # steeper than ReLU"
+        used_in: "Primer (Google), some vision transformers"
+    }
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# ACTIVATION FUNCTIONS (reusable primitives)
+# ═══════════════════════════════════════════════════════════════════════
+
+export equation relu {
+    equation: "ReLU(x) = max(0, x)"
+    derivative: "1 if x > 0 else 0"
+}
+
+export equation gelu {
+    # Exact form
+    equation_exact: "GELU(x) = x Φ(x)"
+    
+    # Tanh approximation (faster, commonly used)
+    equation_approx: "GELU(x) ≈ 0.5 x (1 + tanh(√(2/π) (x + 0.044715 x³)))"
+}
+
+export equation swish {
+    equation: "Swish(x, β) = x σ(βx)"
+    
+    # Special case: SiLU (Swish with β=1)
+    equation_silu: "SiLU(x) = x σ(x)"
+}
+
+export equation squared_relu {
+    equation: "SquaredReLU(x) = (max(0, x))²"
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# DESIGN NOTES
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Q: Why so many FFN variants?
+# A: FFN accounts for 2/3 of transformer parameters. Small improvements
+#    (SwiGLU 2-5% better than GELU) compound over billions of parameters.
+#
+# Q: Which to use?
+# A: Default recommendations (2026):
+#    - Small models (<1B):  GELU (simple, well-tested)
+#    - Medium (1-10B):      SwiGLU (best quality/compute)
+#    - Large (10B+):        SwiGLU or MoE (if have infra)
+#    - Vision:              GELU or SquaredReLU
+#
+# Q: Parameter count vs quality?
+# A: SwiGLU uses 50% more params than GELU but delivers 2-5% better loss.
+#    That's ~1.5x compute for ~1.03x quality — worth it for foundation models.

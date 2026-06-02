@@ -1,0 +1,262 @@
+# ═══════════════════════════════════════════════════════════════════════
+# TRANSFORMER — Canonical Architecture (Vaswani et al. 2017)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# This is the foundational specification. All modern LLMs (GPT, BERT, T5,
+# Claude, Llama) are variants of this architecture with different choices
+# of attention, feedforward, and normalization primitives.
+#
+# Design: This file defines the STRUCTURE. The primitives (attention, FFN)
+# are imported from lib/primitives/. Concrete models (GPT-4, Claude) just
+# specify which primitives to use.
+
+import { 
+    multi_head_attention,
+    causal_attention,
+    rope_attention
+} from "@/lib/primitives/attention"
+
+import {
+    standard_ffn,
+    swiglu_ffn
+} from "@/lib/primitives/feedforward"
+
+import {
+    rms_norm,
+    layer_norm,
+    pre_norm_architecture
+} from "@/lib/primitives/normalization"
+
+# ── CORE TRANSFORMER BLOCK ──────────────────────────────────────────────
+#
+# The fundamental unit: attention + feedforward + residuals + normalization.
+# Stack N of these to get a transformer.
+
+export formal_spec transformer_block {
+    signature: "h_in → h_out  where shape = (batch, seq_len, d_model)"
+    
+    # Pre-norm architecture (modern default)
+    equation: """
+        # 1. Self-attention sub-layer
+        attn_input = Norm(h_in)
+        attn_output = Attention(attn_input, attn_input, attn_input)
+        h_mid = h_in + attn_output
+        
+        # 2. Feed-forward sub-layer
+        ffn_input = Norm(h_mid)
+        ffn_output = FFN(ffn_input)
+        h_out = h_mid + ffn_output
+    """
+    
+    where: {
+        Norm:      "normalization strategy (LayerNorm or RMSNorm)"
+        Attention: "attention variant (MHA, GQA, MQA, etc.)"
+        FFN:       "feedforward network (standard, SwiGLU, MoE, etc.)"
+    }
+    
+    # Information flow diagram:
+    #
+    #   h_in ──────┬────────────────> (+) ───> h_mid ──────┬──────────> (+) ───> h_out
+    #              │                   ↑                    │             ↑
+    #              └──> Norm ──> Attention ────┘           └──> Norm ──> FFN ────┘
+    #
+    # The residual connections (the straight arrows) are critical for
+    # gradient flow in deep networks.
+    
+    properties: {
+        parameter_count: "d_model² (attention) + 2*d_model*d_ff (FFN) + 2*d_model (norms)"
+        trainability: "stable up to 100+ layers with pre-norm"
+    }
+}
+
+# ── DECODER-ONLY TRANSFORMER (GPT, Claude, Llama) ───────────────────────
+#
+# Autoregressive language model: predict next token given past tokens.
+
+export architecture transformer_decoder {
+    signature: "token_ids → logits"
+    
+    components: {
+        # 1. Token embedding
+        embedding: {
+            equation: "E(x) = W_embed[x]"
+            where: {
+                W_embed: "learned_matrix(vocab_size, d_model)"
+            }
+        }
+        
+        # 2. Positional encoding (choose one)
+        positional_encoding: {
+            # Option A: Learned absolute positions (GPT-2, BERT)
+            learned: "P_learned[position]"
+            
+            # Option B: RoPE (Llama, PaLM)
+            rope: "apply_rotary_emb(h, positions)"
+            
+            # Option C: ALiBi (BLOOM, MPT)
+            alibi: "bias in attention logits"
+        }
+        
+        # 3. Transformer stack
+        stack: {
+            depth: "N  # number of layers (12-120 typical)"
+            
+            # Each layer is a transformer_block
+            equation: """
+                h_0 = Embedding(tokens) + PositionalEncoding(positions)
+                
+                for l in 1..N:
+                    h_l = TransformerBlock_l(h_{l-1})
+                
+                h_final = Norm(h_N)  # final layer norm
+            """
+        }
+        
+        # 4. Language modeling head
+        lm_head: {
+            equation: "logits = W_unembed h_final"
+            where: {
+                W_unembed: "linear(d_model, vocab_size)"
+                # Often tied to W_embed: W_unembed = W_embed^T
+            }
+        }
+    }
+    
+    # Causal constraint: position i cannot attend to j > i
+    constraint causal_masking: {
+        attention_type: "causal_attention"
+        rationale: "Autoregressive: predict future from past only"
+    }
+    
+    # Loss function
+    training: {
+        objective: "next_token_prediction"
+        equation: "ℒ = -𝔼[log P(x_{t+1} | x_{≤t})]"
+    }
+}
+
+# ── ENCODER-ONLY TRANSFORMER (BERT) ─────────────────────────────────────
+#
+# Bidirectional context: use future tokens to understand current token.
+# Used for tasks like classification, NER, question answering.
+
+export architecture transformer_encoder {
+    signature: "token_ids → contextualized_embeddings"
+    
+    # Structure is same as decoder, but NO causal masking
+    constraint bidirectional: {
+        attention_type: "multi_head_attention"  # NOT causal
+        rationale: "Position i CAN attend to j > i (future context)"
+    }
+    
+    # Common training objectives
+    training: {
+        objectives: [
+            "masked_language_modeling",  # BERT: predict [MASK] tokens
+            "next_sentence_prediction"   # BERT: is sentence B next after A?
+        ]
+    }
+}
+
+# ── ENCODER-DECODER TRANSFORMER (T5, BART) ──────────────────────────────
+#
+# Seq-to-seq: encoder processes input, decoder generates output.
+# Used for translation, summarization, question answering.
+
+export architecture transformer_encoder_decoder {
+    signature: "(input_ids, output_ids) → logits"
+    
+    components: {
+        # Encoder: bidirectional
+        encoder: {
+            base: "transformer_encoder"
+            output: "encoded_context  # (batch, input_len, d_model)"
+        }
+        
+        # Decoder: autoregressive + cross-attention to encoder
+        decoder: {
+            base: "transformer_decoder"
+            
+            # Each decoder block has THREE sub-layers:
+            equation: """
+                # 1. Causal self-attention (on decoder inputs)
+                h_self = h + CausalAttention(Norm(h), Norm(h), Norm(h))
+                
+                # 2. Cross-attention to encoder (NEW)
+                h_cross = h_self + CrossAttention(
+                    query=Norm(h_self),
+                    key=encoded_context,
+                    value=encoded_context
+                )
+                
+                # 3. Feed-forward
+                h_out = h_cross + FFN(Norm(h_cross))
+            """
+        }
+    }
+    
+    training: {
+        objective: "conditional_next_token_prediction"
+        equation: "ℒ = -𝔼[log P(y_t | y_{<t}, x)]"
+        where: {
+            x: "input sequence (encoder)"
+            y: "output sequence (decoder)"
+        }
+    }
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# PARAMETER SCALING LAWS
+# ═══════════════════════════════════════════════════════════════════════
+#
+# How parameter count scales with architecture choices.
+
+export formal_spec parameter_count {
+    # Total parameters in a decoder-only transformer
+    equation: """
+        P_total = P_embed + P_transformer + P_head
+        
+        P_embed = vocab_size * d_model
+        P_transformer = N * P_block
+        P_head = d_model * vocab_size  # (often tied to P_embed)
+        
+        P_block = P_attention + P_ffn + P_norm
+        P_attention = 4 * d_model²  # W_Q, W_K, W_V, W_O
+        P_ffn = 2 * d_model * d_ff  # typically d_ff = 4 * d_model
+        P_norm = 2 * d_model  # (or d_model for RMSNorm)
+    """
+    
+    # Simplified for typical choices (d_ff = 4*d_model, RMSNorm)
+    equation_simplified: """
+        P_total ≈ 2 * vocab_size * d_model  # embeddings
+                + N * (12 * d_model²)        # transformer blocks
+    """
+    
+    # Example: GPT-3 175B
+    verification: {
+        vocab_size: 50257
+        d_model: 12288
+        N: 96
+        
+        P_embed: "2 * 50257 * 12288 ≈ 1.2B"
+        P_transformer: "96 * 12 * 12288² ≈ 174B"
+        P_total: "≈175B ✓"
+    }
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# DESIGN PRINCIPLES
+# ═══════════════════════════════════════════════════════════════════════
+#
+# 1. **Separation of concerns**: Structure (this file) vs primitives
+#    (attention.neuro, feedforward.neuro). Change primitives without
+#    changing structure.
+#
+# 2. **Composability**: transformer_decoder is <50 lines because it
+#    imports transformer_block. transformer_encoder_decoder reuses both.
+#
+# 3. **Declarative**: Specify WHAT (equations, constraints), not HOW.
+#    The compiler handles Flash Attention, kernel fusion, mixed precision.
+#
+# 4. **Extensibility**: New attention variant (e.g., Linear Attention)?
+#    Add to attention.neuro, use it here by changing one import.

@@ -1,0 +1,281 @@
+# ═══════════════════════════════════════════════════════════════════════
+# ATTENTION PRIMITIVES — Canonical Implementations
+# ═══════════════════════════════════════════════════════════════════════
+#
+# This library provides mathematically precise definitions of all common
+# attention mechanisms used in modern transformers. Each variant is a
+# pure function: given Q, K, V → output + attention weights.
+#
+# Design principle: Specify WHAT the attention computes, not HOW.
+# The compiler chooses the optimal implementation (flash attention,
+# chunking, kernel fusion) based on hardware and sequence length.
+#
+# References:
+#   [1] Vaswani et al. "Attention is All You Need" (2017)
+#   [2] Shazeer et al. "Fast Transformer Decoding" (2019) — Multi-Query
+#   [3] Ainslie et al. "GQA: Training Generalized Multi-Query..." (2023)
+#   [4] Dao et al. "FlashAttention-2" (2023)
+#   [5] Press et al. "ALiBi: Attention with Linear Biases" (2022)
+
+# ── 1. SCALED DOT-PRODUCT ATTENTION (Canonical) ────────────────────────
+#
+# The fundamental building block. All other attention variants are
+# modifications of this equation.
+
+export equation scaled_dot_product_attention {
+    signature: "(Q, K, V) → (output, attn_weights)"
+    
+    equation: """
+        scores = (Q K^T) / √d_k
+        attn_weights = softmax(scores)
+        output = attn_weights V
+    """
+    
+    where: {
+        Q: "(batch, n_heads, seq_len_q, d_k)"
+        K: "(batch, n_heads, seq_len_k, d_k)"
+        V: "(batch, n_heads, seq_len_v, d_v)"
+        d_k: "head_dim (typically d_model / n_heads)"
+    }
+    
+    # Information-theoretic properties
+    properties: {
+        permutation_equivariant: "Attn(π(X)) = π(Attn(X))"
+        bounded_output: "‖output‖_2 ≤ ‖V‖_2"
+        probability_distribution: "∑_j attn_weights[i,j] = 1  ∀i"
+    }
+}
+
+# ── 2. CAUSAL (MASKED) ATTENTION ────────────────────────────────────────
+#
+# Autoregressive models (GPT, Claude) cannot attend to future tokens.
+
+export equation causal_attention {
+    base: scaled_dot_product_attention
+    
+    constraint: "attn_weights[i,j] = 0  ∀ j > i"
+    
+    # Implementation: apply mask before softmax
+    equation: """
+        scores = (Q K^T) / √d_k
+        masked_scores = scores + causal_mask
+        attn_weights = softmax(masked_scores)
+        output = attn_weights V
+    """
+    
+    where: {
+        causal_mask: "upper_triangular_mask(seq_len, value: -∞)"
+    }
+}
+
+# ── 3. MULTI-HEAD ATTENTION (MHA) ───────────────────────────────────────
+#
+# Standard transformer attention: separate Q, K, V projections per head.
+
+export equation multi_head_attention {
+    equation: """
+        # Project inputs to Q, K, V for each head
+        Q_i = X W_Q^i    for i in 1..n_heads
+        K_i = X W_K^i
+        V_i = X W_V^i
+        
+        # Compute attention per head
+        head_i = Attention(Q_i, K_i, V_i)
+        
+        # Concatenate and project
+        output = Concat(head_1, ..., head_n) W_O
+    """
+    
+    where: {
+        W_Q: "list[linear(d_model, d_k)] for _ in range(n_heads)"
+        W_K: "list[linear(d_model, d_k)] for _ in range(n_heads)"
+        W_V: "list[linear(d_model, d_v)] for _ in range(n_heads)"
+        W_O: "linear(n_heads * d_v, d_model)"
+        n_heads: "number of attention heads"
+        d_k: "d_model / n_heads  # key/query dimension"
+        d_v: "d_model / n_heads  # value dimension"
+    }
+    
+    properties: {
+        parameter_count: "4 * d_model² (W_Q, W_K, W_V, W_O)"
+        memory_complexity: "O(n_heads * seq_len² * d_k)"
+    }
+}
+
+# ── 4. MULTI-QUERY ATTENTION (MQA) ──────────────────────────────────────
+#
+# Shazeer (2019): Share K, V across heads to reduce KV cache size.
+# Used in PaLM, Falcon.
+
+export equation multi_query_attention {
+    equation: """
+        # Multiple query heads, single K/V head
+        Q_i = X W_Q^i    for i in 1..n_heads
+        K   = X W_K      # shared across all heads
+        V   = X W_V      # shared across all heads
+        
+        head_i = Attention(Q_i, K, V)
+        output = Concat(head_1, ..., head_n) W_O
+    """
+    
+    where: {
+        W_Q: "list[linear(d_model, d_k)] for _ in range(n_heads)"
+        W_K: "linear(d_model, d_k)  # single shared projection"
+        W_V: "linear(d_model, d_v)  # single shared projection"
+        W_O: "linear(n_heads * d_v, d_model)"
+    }
+    
+    properties: {
+        parameter_count: "~2.5 * d_model²  (saves 1.5x vs MHA)"
+        kv_cache_size: "1/n_heads of MHA (critical for long context)"
+        quality_tradeoff: "slightly lower than MHA, but 2-5% degradation acceptable"
+    }
+}
+
+# ── 5. GROUPED-QUERY ATTENTION (GQA) ────────────────────────────────────
+#
+# Ainslie et al. (2023): Interpolate between MHA and MQA.
+# Used in Llama-2, Mistral, Claude.
+
+export equation grouped_query_attention {
+    equation: """
+        # Partition query heads into groups; share K/V within group
+        n_groups = n_query_heads / group_size
+        
+        for g in 1..n_groups:
+            K_g = X W_K^g    # one K/V pair per group
+            V_g = X W_V^g
+            
+            for i in group_range(g):
+                Q_i = X W_Q^i
+                head_i = Attention(Q_i, K_g, V_g)
+        
+        output = Concat(all_heads) W_O
+    """
+    
+    where: {
+        n_query_heads: "total number of query heads (e.g., 32)"
+        n_kv_heads: "number of KV heads (e.g., 8)"
+        group_size: "n_query_heads / n_kv_heads"
+    }
+    
+    # Example: Llama-2 70B uses 64 query heads, 8 KV heads → 8x cache savings
+    properties: {
+        flexibility: "MHA when n_kv_heads = n_query_heads, MQA when n_kv_heads = 1"
+        quality: "98-99% of MHA quality with 4-8x KV cache reduction"
+    }
+}
+
+# ── 6. ALIBI (Attention with Linear Biases) ────────────────────────────
+#
+# Press et al. (2022): Replace absolute/rotary positional encodings
+# with a simple bias in the attention logits. Extrapolates better.
+
+export equation alibi_attention {
+    base: scaled_dot_product_attention
+    
+    equation: """
+        scores = (Q K^T) / √d_k + alibi_bias
+        attn_weights = softmax(scores)
+        output = attn_weights V
+    """
+    
+    where: {
+        alibi_bias: "m * (i - j)  where m is head-specific slope"
+        # Head-specific slopes: geometric sequence
+        # m_h = 2^(-8h/n_heads) for h in 1..n_heads
+    }
+    
+    properties: {
+        no_positional_encoding: "eliminates W_pos, saves parameters"
+        extrapolation: "trains on 2k tokens, infers on 10k+ with <5% degradation"
+        efficiency: "bias computation is O(seq_len²) but cheap (no learned params)"
+    }
+}
+
+# ── 7. ROTARY POSITIONAL EMBEDDING (RoPE) ───────────────────────────────
+#
+# Su et al. (2021): Apply rotation matrices to Q, K before attention.
+# Encodes relative position as phase shifts. Used in GPT-Neo, PaLM, Llama.
+
+export equation rope_attention {
+    base: scaled_dot_product_attention
+    
+    equation: """
+        # Apply rotation to Q, K (not V)
+        Q_rot = apply_rotary_emb(Q, positions)
+        K_rot = apply_rotary_emb(K, positions)
+        
+        scores = (Q_rot K_rot^T) / √d_k
+        attn_weights = softmax(scores)
+        output = attn_weights V
+    """
+    
+    where: {
+        apply_rotary_emb: """
+            R(θ, m) = [cos(mθ), -sin(mθ); sin(mθ), cos(mθ)]
+            θ_i = base^(-2i/d)  for i in 0..d/2
+            RoPE(x, pos) = [R(θ_0, pos) x[0:2], R(θ_1, pos) x[2:4], ...]
+        """
+        base: "10000 (typical) or 500000 (long context, Claude)"
+    }
+    
+    properties: {
+        relative_position: "Attn(i,j) only depends on (i-j), not absolute i,j"
+        extrapolation: "better than sinusoidal, worse than ALiBi"
+        computation: "O(d_model * seq_len) rotation per layer"
+    }
+}
+
+# ── 8. FLASH ATTENTION (Optimization, not new math) ─────────────────────
+#
+# Dao et al. (2023): Reorder operations to minimize HBM access.
+# **Not a new equation** — same math as scaled_dot_product, different execution.
+
+export equation flash_attention {
+    base: scaled_dot_product_attention
+    
+    # The math is identical; this is a compiler hint.
+    optimization: {
+        kernel: "fused_softmax_matmul"
+        memory_hierarchy: "tile Q, K, V to fit in SRAM"
+        io_complexity: "O(seq_len) HBM reads (vs O(seq_len²) naive)"
+    }
+    
+    # When the compiler should use this
+    constraint: {
+        min_seq_len: 512           # overhead not worth it for short sequences
+        requires_cuda: true         # CPU fallback to standard attention
+        precision: ["fp16", "bf16"] # fp32 less benefit
+    }
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# UTILITY: Positional Encoding Strategies
+# ═══════════════════════════════════════════════════════════════════════
+
+export equation sinusoidal_position_encoding {
+    equation: """
+        PE(pos, 2i)   = sin(pos / 10000^(2i/d_model))
+        PE(pos, 2i+1) = cos(pos / 10000^(2i/d_model))
+    """
+    
+    properties: {
+        learned: false
+        extrapolation: "poor (trained on max_len, fails beyond)"
+    }
+}
+
+export equation learned_position_encoding {
+    equation: "PE = W_pos[position]"
+    
+    where: {
+        W_pos: "learned_embedding(max_seq_len, d_model)"
+    }
+    
+    properties: {
+        learned: true
+        extrapolation: "none (cannot exceed max_seq_len)"
+        parameter_cost: "max_seq_len * d_model"
+    }
+}

@@ -1,0 +1,302 @@
+# ═══════════════════════════════════════════════════════════════════════
+# CLAUDE ARCHITECTURE — Anthropic's Constitutional AI LLM
+# ═══════════════════════════════════════════════════════════════════════
+#
+# NOTE: This is SPECULATIVE. Anthropic has not released architecture details.
+# Based on public hints, scaling laws, and performance characteristics.
+#
+# Rumored/inferred design choices:
+#   - Sparse attention (likely Mixture of Experts or similar)
+#   - Very long context (100k+ tokens in Claude 2, 200k in Claude 3)
+#   - Constitutional AI training (multi-stage RLHF)
+#   - Likely uses modern efficiency primitives (GQA, RMSNorm, SwiGLU)
+
+import { transformer_decoder } from "@/lib/architectures/transformer"
+import { grouped_query_attention, sparse_attention } from "@/lib/primitives/attention"
+import { moe_ffn, swiglu_ffn } from "@/lib/primitives/feedforward"
+import { rms_norm } from "@/lib/primitives/normalization"
+
+# ── Claude (Estimated Architecture) ─────────────────────────────────────
+#
+# Likely a decoder-only transformer with:
+#   - Sparse/efficient attention for long context
+#   - Mixture of Experts for parameter efficiency
+#   - Multi-stage RLHF (Constitutional AI)
+
+export architecture claude_speculative {
+    base: "transformer_decoder"
+    
+    # Rumored primitive choices (based on efficiency + long context)
+    primitives: {
+        attention: "grouped_query_attention + sparse_sliding_window"
+        feedforward: "moe_ffn(n_experts=16, top_k=2)"  # Likely MoE
+        normalization: "rms_norm(pre_norm=true)"
+        positional: "alibi"  # Enables length extrapolation
+    }
+    
+    # Hybrid attention strategy for 100k context
+    attention_strategy: {
+        local: {
+            type: "sliding_window"
+            window_size: 4096
+            rationale: "Most tokens attend to nearby context"
+        }
+        
+        global: {
+            type: "sparse_attention"
+            pattern: "every_nth(n=64)"
+            rationale: "Selective long-range dependencies"
+        }
+        
+        combined: """
+            # Token at position i attends to:
+            1. Local window: [i-4096, i]  (dense)
+            2. Global checkpoints: [0, 64, 128, ...] (sparse)
+            
+            This gives O(n) complexity instead of O(n²).
+        """
+    }
+    
+    # Estimated model sizes (based on performance)
+    variants: {
+        # Claude 1 (deprecated)
+        claude_1: {
+            estimated_params: "~52B"
+            context_length: 100000
+            knowledge_cutoff: "Early 2023"
+        }
+        
+        # Claude 2 (2023)
+        claude_2: {
+            estimated_params: "~130B active, ~500B total (MoE)"
+            context_length: 100000
+            d_model: 10240  # estimate
+            n_layers: 80     # estimate
+            n_heads: 64
+            n_kv_heads: 8
+            n_experts: 16
+            active_experts: 2
+        }
+        
+        # Claude 3 family (2024)
+        claude_3_haiku: {
+            estimated_params: "~30B active"
+            context_length: 200000
+            speed: "fastest (optimized for low latency)"
+            use_case: "Near-instant responses, high throughput"
+        }
+        
+        claude_3_sonnet: {
+            estimated_params: "~100B active"
+            context_length: 200000
+            speed: "balanced"
+            use_case: "General-purpose, good quality/speed tradeoff"
+        }
+        
+        claude_3_opus: {
+            estimated_params: "~200B active, ~1T total (MoE estimate)"
+            context_length: 200000
+            speed: "slowest (highest quality)"
+            capabilities: "Competitive with GPT-4 on many benchmarks"
+        }
+    }
+    
+    # Long context handling (KEY INNOVATION)
+    context_architecture: {
+        problem: """
+            Standard attention: O(n²) memory for context length n.
+            For 100k tokens: 100k² = 10B attention scores = 40GB memory!
+        """
+        
+        solution: """
+            1. ALiBi positional bias (no learned positions → extrapolation)
+            2. Sliding window attention (local context, O(n) memory)
+            3. Sparse global attention (long-range, O(n) memory)
+            4. FlashAttention-2 (memory-efficient kernel)
+            5. Possible: Mixture of Experts (more capacity, same compute)
+        """
+        
+        result: """
+            - 100k context (Claude 2) → 200k context (Claude 3)
+            - Still fits in 80GB A100 GPUs
+            - Empirically strong performance on long-document tasks
+        """
+    }
+    
+    training: {
+        # Multi-stage Constitutional AI
+        stage_1_pretraining: {
+            objective: "next_token_prediction"
+            dataset: "Unknown (likely 1-5T tokens)"
+            optimizer: "AdamW"
+        }
+        
+        stage_2_sft: {
+            objective: "supervised_fine_tuning"
+            dataset: "Human demonstrations + AI-generated examples"
+            focus: "Helpfulness, harmlessness, honesty (HHH)"
+        }
+        
+        stage_3_constitutional_ai: {
+            method: "RLAIF (RL from AI Feedback)"
+            process: """
+                1. Model generates responses
+                2. AI critic evaluates against constitution (rules)
+                3. Model learns from AI feedback (no human in loop)
+                4. Iterative refinement
+            """
+            
+            constitution: [
+                "Be helpful and harmless",
+                "Refuse harmful requests",
+                "Acknowledge uncertainty",
+                "Avoid sycophancy (don't just agree with user)",
+                "Provide balanced perspectives"
+            ]
+        }
+        
+        stage_4_rlhf: {
+            objective: "Preference learning from human comparisons"
+            method: "DPO or PPO-style optimization"
+        }
+    }
+    
+    design_notes: """
+        Claude's key differentiators:
+        
+        1. **Long context**: 100k → 200k tokens (vs 8k-32k for GPT-4)
+           - Enables: entire codebases, long documents, extended conversations
+        
+        2. **Constitutional AI**: Multi-stage RLHF with AI-driven feedback
+           - Result: Strong safety/alignment without over-restriction
+        
+        3. **Performance**: Claude 3 Opus competitive with GPT-4
+           - Math, code, reasoning, long-context tasks
+        
+        4. **Efficiency tiers**: Haiku (fast) → Sonnet (balanced) → Opus (quality)
+           - Likely MoE architecture: share base, different expert routing
+        
+        Architecture speculation:
+        - Probably NOT standard dense transformer (too expensive for 200k)
+        - Likely sparse attention (sliding window + global checkpoints)
+        - Likely Mixture of Experts (parameter efficiency)
+        - Likely ALiBi positional bias (length extrapolation)
+        - Likely RMSNorm + SwiGLU (standard modern choices)
+    """
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# CONTEXT LENGTH COMPARISON
+# ═══════════════════════════════════════════════════════════════════════
+
+export comparison context_lengths {
+    models: {
+        "GPT-3": {
+            context: 2048
+            attention_cost: "2k² = 4M scores"
+        }
+        
+        "GPT-3.5-turbo": {
+            context: 4096
+            attention_cost: "4k² = 16M scores (4x GPT-3)"
+        }
+        
+        "GPT-4": {
+            context: 8192  # or 32k variant
+            attention_cost: "8k² = 64M scores (16x GPT-3)"
+        }
+        
+        "GPT-4-turbo": {
+            context: 128000
+            attention_cost: "128k² = 16B scores (4000x GPT-3) [IMPOSSIBLE without sparse]"
+            likely_method: "Sparse attention or sliding window"
+        }
+        
+        "Claude 2": {
+            context: 100000
+            attention_cost: "100k² = 10B scores [IMPOSSIBLE without sparse]"
+            method: "Sliding window + sparse global attention (inferred)"
+        }
+        
+        "Claude 3": {
+            context: 200000
+            attention_cost: "200k² = 40B scores [IMPOSSIBLE without sparse]"
+            method: "Advanced sparse attention + ALiBi + FlashAttention-2"
+        }
+        
+        "LLaMA 3 405B": {
+            context: 128000
+            method: "RoPE frequency scaling (YaRN)"
+        }
+    }
+    
+    technical_note: """
+        Standard attention is O(n²) in memory and compute:
+            Attention scores = Q @ K^T  →  (batch, n_heads, seq_len, seq_len)
+        
+        For 100k context:
+            - 100k² = 10 billion scores
+            - At FP16: 10B * 2 bytes = 20GB per batch per layer
+            - With 80 layers: 1600GB = 1.6TB [IMPOSSIBLE]
+        
+        Solutions for long context:
+        1. Sparse attention: Only compute subset of scores (Longformer, BigBird)
+        2. Sliding window: Each token attends to nearby window (LongNet)
+        3. FlashAttention: Recompute scores on-the-fly (memory vs compute tradeoff)
+        4. Linear attention: Replace softmax(QK^T) with kernel trick (O(n) memory)
+        
+        Claude/GPT-4-turbo likely use: FlashAttention-2 + sparse patterns
+    """
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# CONSTITUTIONAL AI vs RLHF
+# ═══════════════════════════════════════════════════════════════════════
+
+export comparison training_methodology {
+    dimensions: [
+        "Human annotation needed?",
+        "Scalability",
+        "Consistency",
+        "Transparency"
+    ]
+    
+    standard_rlhf: [
+        "Yes (expensive, slow)",
+        "Limited by human bandwidth",
+        "Depends on annotator agreement",
+        "Opaque (black-box preferences)"
+    ]
+    
+    constitutional_ai: [
+        "Minimal (only for final stage)",
+        "High (AI feedback scales easily)",
+        "High (consistent evaluation vs rules)",
+        "Transparent (explicit constitution)"
+    ]
+    
+    process: {
+        rlhf: """
+            1. Pretrain LM
+            2. Collect human demonstrations → SFT
+            3. Collect human preference comparisons → train reward model
+            4. RL: optimize policy against reward model (PPO)
+        """
+        
+        constitutional_ai: """
+            1. Pretrain LM
+            2. SFT on human + AI-generated examples
+            3. AI critique: Model generates responses, AI evaluates vs constitution
+            4. RLAIF: RL from AI feedback (instead of human feedback)
+            5. (Optional) Final RLHF pass with human preferences
+        """
+    }
+    
+    key_difference: """
+        RLHF: "Learn from human preferences" (implicit values)
+        Constitutional AI: "Learn from explicit rules" (transparent values)
+        
+        Result: Constitutional AI is more scalable and transparent,
+                but requires careful constitution design.
+    """
+}

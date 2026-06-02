@@ -1,0 +1,339 @@
+# ═══════════════════════════════════════════════════════════════════════
+# GPT ARCHITECTURE — Decoder-Only Transformer Instantiations
+# ═══════════════════════════════════════════════════════════════════════
+#
+# This file specifies the exact choices that define GPT-2, GPT-3, GPT-4,
+# and similar models. Each is a transformer_decoder with specific:
+#   - Normalization (LayerNorm pre-norm)
+#   - Attention (Causal MHA)
+#   - FFN (GELU activation)
+#   - Positional encoding (Learned absolute positions)
+
+import { transformer_decoder } from "@/lib/architectures/transformer"
+import { causal_attention, multi_head_attention } from "@/lib/primitives/attention"
+import { gelu_ffn } from "@/lib/primitives/feedforward"
+import { layer_norm } from "@/lib/primitives/normalization"
+
+# ── GPT-2 (117M - 1.5B parameters) ──────────────────────────────────────
+#
+# The original OpenAI GPT-2 architecture (Radford et al. 2019)
+
+export architecture gpt2 {
+    base: "transformer_decoder"
+    
+    # Concrete primitive choices
+    primitives: {
+        attention: "causal_attention(type=multi_head, n_heads=12)"
+        feedforward: "gelu_ffn(d_ff=4*d_model)"
+        normalization: "layer_norm(pre_norm=true)"
+        positional: "learned_absolute_positions"
+    }
+    
+    # Model sizes (GPT-2 Small → XL)
+    variants: {
+        small: {
+            d_model: 768
+            n_heads: 12
+            n_layers: 12
+            d_ff: 3072  # 4 * d_model
+            vocab_size: 50257
+            context_length: 1024
+            parameters: "117M"
+        }
+        
+        medium: {
+            d_model: 1024
+            n_heads: 16
+            n_layers: 24
+            d_ff: 4096
+            vocab_size: 50257
+            context_length: 1024
+            parameters: "345M"
+        }
+        
+        large: {
+            d_model: 1280
+            n_heads: 20
+            n_layers: 36
+            d_ff: 5120
+            vocab_size: 50257
+            context_length: 1024
+            parameters: "762M"
+        }
+        
+        xl: {
+            d_model: 1600
+            n_heads: 25
+            n_layers: 48
+            d_ff: 6400
+            vocab_size: 50257
+            context_length: 1024
+            parameters: "1.5B"
+        }
+    }
+    
+    # Training details
+    training: {
+        optimizer: "AdamW(β1=0.9, β2=0.999, ε=1e-8, weight_decay=0.01)"
+        learning_rate: "cosine_decay(max=2.5e-4, min=2.5e-5, warmup_steps=2000)"
+        batch_size: "512 sequences (gradient accumulation)"
+        context: "1024 tokens (full context)"
+        
+        # Regularization
+        dropout: 0.1  # applied to embeddings, attention, residuals
+        label_smoothing: 0.0
+    }
+    
+    # Key design choices
+    design_notes: """
+        1. Pre-norm architecture (norm BEFORE attention/FFN, not after)
+        2. GELU activation (smooth approximation to ReLU)
+        3. Learned absolute positional embeddings
+        4. Weight tying: input embedding = output projection (transposed)
+        5. Residual dropout (0.1) + attention dropout (0.1)
+    """
+}
+
+# ── GPT-3 (125M - 175B parameters) ──────────────────────────────────────
+#
+# OpenAI GPT-3 (Brown et al. 2020) — same architecture, much larger scale
+
+export architecture gpt3 {
+    base: "gpt2"  # Same architecture, different scale
+    
+    # Notable change: sparse attention in larger models (not in DSL yet)
+    
+    variants: {
+        small: {
+            d_model: 768
+            n_heads: 12
+            n_layers: 12
+            parameters: "125M"
+            context_length: 2048  # doubled from GPT-2
+        }
+        
+        medium: {
+            d_model: 1024
+            n_heads: 16
+            n_layers: 24
+            parameters: "350M"
+            context_length: 2048
+        }
+        
+        large: {
+            d_model: 1536
+            n_heads: 16
+            n_layers: 24
+            parameters: "760M"
+            context_length: 2048
+        }
+        
+        xl: {
+            d_model: 2048
+            n_heads: 24
+            n_layers: 24
+            parameters: "1.3B"
+            context_length: 2048
+        }
+        
+        "2.7B": {
+            d_model: 2560
+            n_heads: 32
+            n_layers: 32
+            parameters: "2.7B"
+            context_length: 2048
+        }
+        
+        "6.7B": {
+            d_model: 4096
+            n_heads: 32
+            n_layers: 32
+            parameters: "6.7B"
+            context_length: 2048
+        }
+        
+        "13B": {
+            d_model: 5140
+            n_heads: 40
+            n_layers: 40
+            parameters: "13B"
+            context_length: 2048
+        }
+        
+        "175B": {
+            d_model: 12288
+            n_heads: 96
+            n_layers: 96
+            parameters: "175B"
+            context_length: 2048
+        }
+    }
+    
+    training: {
+        dataset: "570GB text (Common Crawl, WebText, Books, Wikipedia)"
+        compute: "3.14e23 FLOPs (175B model)"
+        optimizer: "AdamW(β1=0.9, β2=0.95)"
+        batch_size: "3.2M tokens"
+        learning_rate: "cosine_decay(max=6e-5, warmup=375M tokens)"
+    }
+    
+    design_notes: """
+        1. Alternating dense and locally banded sparse attention (96-layer model)
+        2. Larger context window (2048 vs 1024 in GPT-2)
+        3. Massive scale: 96 layers, 12,288 dimensions, 175B parameters
+        4. Few-shot learning: strong performance with no fine-tuning
+    """
+}
+
+# ── GPT-NeoX / Pythia (410M - 20B) ──────────────────────────────────────
+#
+# EleutherAI's open-source GPT-3 reimplementation with improvements
+
+export architecture gpt_neox {
+    base: "transformer_decoder"
+    
+    # Key differences from GPT-2/3
+    primitives: {
+        attention: "causal_attention(type=multi_head)"
+        feedforward: "gelu_ffn(d_ff=4*d_model, parallel_residual=true)"  # NEW
+        normalization: "layer_norm(pre_norm=true)"
+        positional: "rotary_embeddings"  # NEW: RoPE instead of learned
+    }
+    
+    # Parallel residual: apply attention and FFN in parallel, not serial
+    equation_override: """
+        # Standard (GPT-2): h_out = h + FFN(Norm(h + Attention(Norm(h))))
+        # Parallel (GPT-NeoX): h_out = h + Attention(Norm(h)) + FFN(Norm(h))
+        
+        attn_out = Attention(Norm(h_in))
+        ffn_out = FFN(Norm(h_in))
+        h_out = h_in + attn_out + ffn_out
+    """
+    
+    variants: {
+        "410M": { d_model: 1024, n_heads: 16, n_layers: 24 }
+        "1.4B": { d_model: 2048, n_heads: 16, n_layers: 24 }
+        "2.8B": { d_model: 2560, n_heads: 32, n_layers: 32 }
+        "6.9B": { d_model: 4096, n_heads: 32, n_layers: 32 }
+        "12B":  { d_model: 5120, n_heads: 40, n_layers: 36 }
+        "20B":  { d_model: 6144, n_heads: 64, n_layers: 44 }
+    }
+    
+    design_notes: """
+        1. Rotary positional embeddings (RoPE) → better length extrapolation
+        2. Parallel residual connections → 15% faster training
+        3. Flash Attention → 2-4x memory reduction, 2-3x speedup
+    """
+}
+
+# ── GPT-4 (Rumored Architecture) ────────────────────────────────────────
+#
+# NOTE: This is SPECULATIVE based on public hints and scaling laws.
+# OpenAI has not released GPT-4 architecture details.
+
+export architecture gpt4_speculative {
+    base: "transformer_decoder"
+    
+    # Rumored improvements
+    primitives: {
+        attention: "grouped_query_attention(n_kv_heads=8)"  # GQA instead of MHA
+        feedforward: "moe_ffn(n_experts=16, top_k=2)"      # Mixture of Experts
+        normalization: "rms_norm(pre_norm=true)"           # RMSNorm instead of LayerNorm
+        positional: "rotary_embeddings"                    # RoPE
+    }
+    
+    # Possible configuration (rumors suggest 1.8T total, sparse)
+    estimated_config: {
+        d_model: 16384
+        n_heads: 128
+        n_kv_heads: 8      # GQA: 16x fewer KV heads
+        n_layers: 120
+        n_experts: 16      # MoE: 16 experts per FFN
+        active_experts: 2  # Only 2 experts active per token
+        
+        # Effective parameter count
+        dense_params: "~220B (non-expert layers)"
+        expert_params: "~1.58T (MoE FFN layers)"
+        active_params: "~220B (only 2/16 experts active)"
+    }
+    
+    design_notes: """
+        This is ENTIRELY SPECULATIVE. Known facts:
+        - GPT-4 handles 32k context (vs 8k in GPT-3.5)
+        - Multimodal (text + images)
+        - Significantly better reasoning, math, code
+        
+        Likely improvements over GPT-3:
+        - Grouped Query Attention (faster inference, same quality)
+        - Mixture of Experts (more parameters, same compute)
+        - RMSNorm (10-20% faster than LayerNorm)
+        - RoPE (better extrapolation to long contexts)
+        - Extended context (32k → maybe 128k with sparse attention)
+    """
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# COMPARISON TABLE
+# ═══════════════════════════════════════════════════════════════════════
+
+export comparison gpt_evolution {
+    dimensions: [
+        "Architecture",
+        "Attention",
+        "FFN",
+        "Normalization",
+        "Positional",
+        "Context Length",
+        "Largest Model"
+    ]
+    
+    rows: {
+        GPT-2: [
+            "Decoder-only",
+            "Causal MHA",
+            "GELU (serial)",
+            "LayerNorm (pre)",
+            "Learned absolute",
+            "1024",
+            "1.5B"
+        ]
+        
+        GPT-3: [
+            "Decoder-only",
+            "Causal MHA + sparse",
+            "GELU (serial)",
+            "LayerNorm (pre)",
+            "Learned absolute",
+            "2048",
+            "175B"
+        ]
+        
+        GPT-NeoX: [
+            "Decoder-only",
+            "Causal MHA",
+            "GELU (parallel)",
+            "LayerNorm (pre)",
+            "RoPE",
+            "2048",
+            "20B"
+        ]
+        
+        "GPT-4 (rumored)": [
+            "Decoder-only",
+            "Causal GQA",
+            "SwiGLU MoE",
+            "RMSNorm (pre)",
+            "RoPE",
+            "32k",
+            "~1.8T (220B active)"
+        ]
+    }
+    
+    trend: """
+        Evolution: MHA → GQA (efficiency)
+                   GELU → SwiGLU MoE (capacity)
+                   LayerNorm → RMSNorm (speed)
+                   Learned → RoPE (extrapolation)
+                   1k → 32k context (capability)
+    """
+}

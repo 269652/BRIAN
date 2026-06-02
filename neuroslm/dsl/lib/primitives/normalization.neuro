@@ -1,0 +1,186 @@
+# ═══════════════════════════════════════════════════════════════════════
+# NORMALIZATION PRIMITIVES
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Normalization is critical for training stability in deep networks.
+# These primitives define *where* and *how* to normalize activations.
+
+# ── 1. LAYER NORMALIZATION (Ba et al. 2016) ────────────────────────────
+#
+# Normalize across features (not batch). Standard in transformers.
+
+export equation layer_norm {
+    equation: """
+        μ = mean(x)
+        σ² = var(x)
+        x_norm = (x - μ) / √(σ² + ε)
+        output = γ ⊙ x_norm + β
+    """
+    
+    where: {
+        μ:   "mean over d_model dimension"
+        σ²:  "variance over d_model dimension"
+        ε:   "1e-5  # numerical stability"
+        γ:   "learned_vector(d_model)  # gain"
+        β:   "learned_vector(d_model)  # bias"
+    }
+    
+    properties: {
+        independence: "batch-independent (unlike BatchNorm)"
+        parameter_count: "2 * d_model  # γ and β"
+        used_in: "BERT, GPT-2 (original transformer)"
+    }
+}
+
+# ── 2. RMS NORMALIZATION (Zhang & Sennrich 2019) ───────────────────────
+#
+# Simplification of LayerNorm: skip mean centering, just scale by RMS.
+# Used in T5, Llama, PaLM, Claude — now preferred for LLMs.
+
+export equation rms_norm {
+    equation: """
+        RMS = √(mean(x²) + ε)
+        x_norm = x / RMS
+        output = γ ⊙ x_norm
+    """
+    
+    where: {
+        ε:   "1e-6  # numerical stability"
+        γ:   "learned_vector(d_model)  # gain (no bias)"
+    }
+    
+    properties: {
+        parameter_count: "d_model  # 50% less than LayerNorm"
+        computation: "~10-15% faster (no mean subtraction)"
+        quality: "equivalent to LayerNorm in practice"
+        re_centering: "implicitly re-centers due to ReLU/GELU activations"
+    }
+}
+
+# ── 3. PRE-NORM vs POST-NORM PLACEMENT ──────────────────────────────────
+#
+# WHERE to apply normalization matters as much as WHICH norm to use.
+
+export formal_spec pre_norm_architecture {
+    rule: "normalize before sub-layer, add residual after"
+    
+    equation: """
+        # Attention sub-layer
+        h1 = x + Attention(Norm(x))
+        
+        # FFN sub-layer
+        h2 = h1 + FFN(Norm(h1))
+    """
+    
+    properties: {
+        gradient_flow: "excellent (residual bypasses norm)"
+        training_stability: "can train deep (100+ layers) without warmup"
+        used_in: "GPT-3, T5, Llama, Claude — standard for modern LLMs"
+    }
+}
+
+export formal_spec post_norm_architecture {
+    rule: "apply sub-layer, then normalize the sum"
+    
+    equation: """
+        # Attention sub-layer
+        h1 = Norm(x + Attention(x))
+        
+        # FFN sub-layer
+        h2 = Norm(h1 + FFN(h1))
+    """
+    
+    properties: {
+        gradient_flow: "worse (gradient must pass through final norm)"
+        training_stability: "requires careful warmup, learning rate tuning"
+        used_in: "original Transformer (2017), BERT"
+        why_deprecated: "pre-norm is strictly better for large scale"
+    }
+}
+
+# ── 4. QKNORM (Dehghani et al. 2023) ────────────────────────────────────
+#
+# Apply RMSNorm to Q and K *inside* attention. Stabilizes training at
+# extreme scale (>100B params). Used in Gemini.
+
+export equation qk_norm_attention {
+    equation: """
+        Q_norm = RMSNorm(Q)
+        K_norm = RMSNorm(K)
+        
+        scores = (Q_norm K_norm^T) / √d_k
+        attn_weights = softmax(scores)
+        output = attn_weights V
+    """
+    
+    properties: {
+        stabilization: "prevents attention logit explosion at scale"
+        cost: "2 additional RMSNorm calls per attention layer"
+        when_to_use: "models >50B parameters, or high learning rates"
+    }
+}
+
+# ── 5. BATCH NORMALIZATION (NOT USED in transformers) ──────────────────
+#
+# Included for completeness. BatchNorm is standard in CNNs but problematic
+# for variable-length sequences.
+
+export equation batch_norm {
+    equation: """
+        # Normalize over batch dimension
+        μ_batch = mean(x, dim=batch)
+        σ²_batch = var(x, dim=batch)
+        x_norm = (x - μ_batch) / √(σ²_batch + ε)
+        output = γ ⊙ x_norm + β
+    """
+    
+    properties: {
+        sequence_dependency: "requires same sequence length across batch"
+        why_not_used: "LayerNorm is batch-independent, works with variable lengths"
+    }
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# NORMALIZATION STRATEGY SELECTOR
+# ═══════════════════════════════════════════════════════════════════════
+
+export formal_spec normalization_strategy {
+    # Decision tree for choosing normalization
+    
+    rule default: {
+        type: "rms_norm"
+        placement: "pre"
+        rationale: "Standard for modern LLMs (2023+)"
+    }
+    
+    rule legacy_compatibility: {
+        type: "layer_norm"
+        placement: "post"
+        when: "reproducing BERT or original Transformer"
+    }
+    
+    rule extreme_scale: {
+        type: "rms_norm + qk_norm"
+        placement: "pre"
+        when: "model_size > 50B or learning_rate > 1e-3"
+    }
+    
+    # Design principle: pre-norm + RMSNorm is the safe default.
+    # Only deviate if you have a specific reason (reproducibility, ablation).
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# DESIGN NOTES
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Q: Why did we move from LayerNorm → RMSNorm?
+# A: Same quality, 10-15% faster, 50% fewer parameters. Zero downside.
+#
+# Q: Why is pre-norm better than post-norm?
+# A: Gradient flow. In post-norm, gradients must pass through the final
+#    LayerNorm, which can scale them down unpredictably. Pre-norm lets
+#    gradients bypass normalization via the residual connection.
+#
+# Q: When to use QKNorm?
+# A: Training instability at >50B params (attention logits explode).
+#    Not needed for <10B models. Adds ~5% compute cost.

@@ -1,0 +1,417 @@
+# ═══════════════════════════════════════════════════════════════════════
+# OPTIMIZER PRIMITIVES — Gradient Descent Variants
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Optimizers are the algorithms that update model parameters based on
+# gradients. This library defines the canonical equations for:
+#   - SGD (with momentum)
+#   - Adam / AdamW
+#   - RMSprop
+#   - Adafactor (memory-efficient)
+#   - Lion (new, efficient)
+#
+# These are MATHEMATICAL specs, not implementations. The compiler generates
+# optimized PyTorch Optimizer classes.
+
+# ── STOCHASTIC GRADIENT DESCENT (SGD) ───────────────────────────────────
+
+export equation sgd {
+    signature: "(θ, ∇θ, lr) → θ_new"
+    
+    equation: """
+        θ_{t+1} = θ_t - η ∇ℒ(θ_t)
+    """
+    
+    where: {
+        θ: "model parameters"
+        η: "learning rate (lr)"
+        "∇ℒ": "gradient of loss w.r.t. parameters"
+    }
+    
+    properties: {
+        memory: "O(0) — no extra state"
+        convergence: "Guaranteed for convex problems with decreasing lr"
+        speed: "Fast per-step"
+        practical_use: "Rare in modern deep learning (too noisy)"
+    }
+}
+
+export equation sgd_momentum {
+    signature: "(θ, ∇θ, m, lr, β) → (θ_new, m_new)"
+    
+    equation: """
+        m_{t+1} = β m_t + ∇ℒ(θ_t)
+        θ_{t+1} = θ_t - η m_{t+1}
+    """
+    
+    where: {
+        m: "momentum buffer (exponential moving average of gradients)"
+        β: "momentum coefficient (typically 0.9)"
+        η: "learning rate"
+    }
+    
+    properties: {
+        memory: "O(P) — one momentum buffer per parameter"
+        benefit: "Smooths noisy gradients, accelerates convergence"
+        typical_β: "0.9 (10-step moving average)"
+    }
+    
+    intuition: """
+        Like a ball rolling down a hill: accumulates velocity in
+        consistent directions, dampens oscillations in inconsistent ones.
+    """
+}
+
+export equation sgd_nesterov {
+    signature: "(θ, ∇θ, m, lr, β) → (θ_new, m_new)"
+    
+    equation: """
+        m_{t+1} = β m_t + ∇ℒ(θ_t)
+        θ_{t+1} = θ_t - η (β m_{t+1} + ∇ℒ(θ_t))
+    """
+    
+    design_note: "Look-ahead: evaluate gradient at θ + β*m instead of θ"
+    
+    properties: {
+        benefit: "Better convergence than standard momentum (especially for convex problems)"
+        use_case: "Computer vision (ResNets trained with Nesterov momentum)"
+    }
+}
+
+# ── ADAPTIVE LEARNING RATE OPTIMIZERS ───────────────────────────────────
+
+export equation rmsprop {
+    signature: "(θ, ∇θ, v, lr, β, ε) → (θ_new, v_new)"
+    
+    equation: """
+        v_{t+1} = β v_t + (1 - β) (∇ℒ)²
+        θ_{t+1} = θ_t - η (∇ℒ / (√v_{t+1} + ε))
+    """
+    
+    where: {
+        v: "exponential moving average of squared gradients"
+        β: "decay rate (typically 0.99)"
+        ε: "numerical stability term (1e-8)"
+    }
+    
+    properties: {
+        memory: "O(P) — one second-moment buffer"
+        benefit: "Per-parameter adaptive learning rates"
+        rationale: "Large gradients → small updates, small gradients → large updates"
+    }
+    
+    intuition: """
+        Normalize updates by RMS (root mean square) of recent gradients.
+        Parameters with volatile gradients get smaller effective lr.
+    """
+}
+
+# ── ADAM FAMILY ─────────────────────────────────────────────────────────
+#
+# The most popular optimizer family for transformers.
+
+export equation adam {
+    signature: "(θ, ∇θ, m, v, t, lr, β1, β2, ε) → (θ_new, m_new, v_new)"
+    
+    equation: """
+        # Update biased first and second moments
+        m_{t+1} = β1 m_t + (1 - β1) ∇ℒ
+        v_{t+1} = β2 v_t + (1 - β2) (∇ℒ)²
+        
+        # Bias correction (important in early training)
+        m̂ = m_{t+1} / (1 - β1^t)
+        v̂ = v_{t+1} / (1 - β2^t)
+        
+        # Parameter update
+        θ_{t+1} = θ_t - η (m̂ / (√v̂ + ε))
+    """
+    
+    where: {
+        m: "first moment (momentum, exponential avg of gradients)"
+        v: "second moment (exponential avg of squared gradients)"
+        t: "timestep (for bias correction)"
+        β1: "first moment decay (typically 0.9)"
+        β2: "second moment decay (typically 0.999)"
+        ε: "numerical stability (1e-8)"
+    }
+    
+    properties: {
+        memory: "O(2P) — two buffers (m and v) per parameter"
+        benefit: "Combines momentum + adaptive learning rates"
+        default_config: "β1=0.9, β2=0.999, ε=1e-8"
+        use_case: "General-purpose, very robust"
+    }
+    
+    design_note: """
+        Adam = RMSprop + Momentum + Bias correction
+        
+        Why bias correction?
+        - At t=1: m_1 = (1-β1)∇ℒ (biased toward 0)
+        - Correction: m̂_1 = m_1/(1-β1) = ∇ℒ (unbiased)
+        - Becomes negligible for large t (β1^1000 ≈ 0)
+    """
+}
+
+export equation adamw {
+    signature: "(θ, ∇θ, m, v, t, lr, β1, β2, ε, λ) → (θ_new, m_new, v_new)"
+    
+    equation: """
+        # Standard Adam updates for m, v
+        m_{t+1} = β1 m_t + (1 - β1) ∇ℒ
+        v_{t+1} = β2 v_t + (1 - β2) (∇ℒ)²
+        m̂ = m_{t+1} / (1 - β1^t)
+        v̂ = v_{t+1} / (1 - β2^t)
+        
+        # DECOUPLED weight decay (applied AFTER adaptive lr)
+        θ_{t+1} = θ_t - η (m̂ / (√v̂ + ε)) - η λ θ_t
+    """
+    
+    where: {
+        λ: "weight decay coefficient (typically 0.01 - 0.1)"
+    }
+    
+    key_difference: """
+        Adam: weight decay in gradient → coupled with adaptive lr
+        AdamW: weight decay in parameter update → decoupled
+        
+        Result: AdamW generalizes better (especially for transformers)
+    """
+    
+    properties: {
+        memory: "O(2P)"
+        benefit: "Better generalization than Adam"
+        default_config: "β1=0.9, β2=0.999, ε=1e-8, λ=0.01"
+        use_case: "DEFAULT for training transformers"
+    }
+    
+    typical_settings: {
+        gpt3: "β1=0.9, β2=0.95, λ=0.1"
+        llama: "β1=0.9, β2=0.95, λ=0.1"
+        bert: "β1=0.9, β2=0.999, λ=0.01"
+    }
+}
+
+export equation adafactor {
+    signature: "(θ, ∇θ, r, c, t, lr, β2) → (θ_new, r_new, c_new)"
+    
+    # Memory-efficient variant: factorize second moment matrix
+    equation: """
+        # Instead of full v ∈ ℝ^P, store:
+        #   - Row factors r ∈ ℝ^n
+        #   - Column factors c ∈ ℝ^m
+        # For matrix parameters (n×m): v ≈ r ⊗ c (outer product)
+        
+        # Update factors
+        r_{t+1} = β2 r_t + (1 - β2) mean((∇ℒ)², dim=columns)
+        c_{t+1} = β2 c_t + (1 - β2) mean((∇ℒ)², dim=rows)
+        
+        # Approximate second moment
+        v̂ ≈ r ⊗ c / mean(r ⊗ c)
+        
+        # Update
+        θ_{t+1} = θ_t - η (∇ℒ / √v̂)
+    """
+    
+    properties: {
+        memory: "O(√P) — factorized second moment (n + m << n*m)"
+        benefit: "Trains large models with limited GPU memory"
+        tradeoff: "Slightly worse convergence than Adam"
+        use_case: "T5, mT5 (Google models trained with memory constraints)"
+    }
+}
+
+# ── MODERN OPTIMIZERS ───────────────────────────────────────────────────
+
+export equation lion {
+    signature: "(θ, ∇θ, m, lr, β1, β2, λ) → (θ_new, m_new)"
+    
+    # New optimizer from Google (2023): simpler than Adam, works better
+    equation: """
+        # Update using SIGN of momentum-smoothed gradient
+        m_{t+1} = β1 m_t + (1 - β1) ∇ℒ
+        θ_{t+1} = θ_t - η sign(β2 m_t + (1 - β2) ∇ℒ) - η λ θ_t
+    """
+    
+    where: {
+        "sign(·)": "element-wise sign function (-1, 0, or +1)"
+        β1: "momentum decay (typically 0.9)"
+        β2: "interpolation coefficient (typically 0.99)"
+        λ: "weight decay (typically larger than AdamW)"
+    }
+    
+    properties: {
+        memory: "O(P) — only one momentum buffer (vs 2 for Adam)"
+        benefit: "Faster convergence, better generalization than AdamW"
+        tradeoff: "Requires larger weight decay (λ=3-10x AdamW)"
+        use_case: "Image models (ViT), early results for LLMs"
+    }
+    
+    design_note: """
+        Key insight: sign(gradient) is enough information.
+        - Removes magnitude dependence (like normalized gradient descent)
+        - Memory-efficient (no second moment)
+        - Empirically strong results
+    """
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# LEARNING RATE SCHEDULES
+# ═══════════════════════════════════════════════════════════════════════
+
+export equation constant_lr {
+    equation: "η(t) = η_base"
+    use_case: "Fine-tuning (when close to optimum)"
+}
+
+export equation linear_warmup {
+    equation: """
+        η(t) = η_base * min(1, t / t_warmup)
+    """
+    
+    where: {
+        t_warmup: "number of warmup steps (typically 2000-10000)"
+    }
+    
+    rationale: """
+        Start with small lr to avoid instability in early training.
+        Adam's bias correction helps, but warmup is still beneficial.
+    """
+}
+
+export equation cosine_decay {
+    equation: """
+        η(t) = η_min + 0.5 * (η_max - η_min) * (1 + cos(π * t / T))
+    """
+    
+    where: {
+        T: "total training steps"
+        η_min: "minimum learning rate (often 0.1 * η_max)"
+    }
+    
+    properties: {
+        shape: "Smooth decay from η_max to η_min"
+        benefit: "Better final convergence than linear decay"
+        use_case: "GPT-3, BERT, most modern LLMs"
+    }
+}
+
+export equation cosine_with_warmup {
+    equation: """
+        # Warmup phase
+        if t < t_warmup:
+            η(t) = η_max * t / t_warmup
+        
+        # Cosine decay phase
+        else:
+            t' = (t - t_warmup) / (T - t_warmup)
+            η(t) = η_min + 0.5 * (η_max - η_min) * (1 + cos(π * t'))
+    """
+    
+    typical_config: {
+        t_warmup: "0.01 * T (1% of total steps)"
+        η_max: "3e-4 (GPT), 6e-5 (GPT-3 175B)"
+        η_min: "0.1 * η_max"
+    }
+    
+    use_case: "DEFAULT for transformer training"
+}
+
+export equation inverse_sqrt {
+    equation: """
+        η(t) = η_base * min(1, t / t_warmup) * (t_warmup / t)^0.5
+    """
+    
+    rationale: "Decay proportional to 1/√t (theoretical motivation from optimization theory)"
+    use_case: "Original Transformer (Vaswani 2017), some academic papers"
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# GRADIENT CLIPPING
+# ═══════════════════════════════════════════════════════════════════════
+
+export equation clip_by_norm {
+    equation: """
+        ∇ℒ_clipped = ∇ℒ * min(1, C / ||∇ℒ||)
+    """
+    
+    where: {
+        C: "max gradient norm (typically 1.0)"
+        "||·||": "L2 norm"
+    }
+    
+    rationale: "Prevent gradient explosion (especially in RNNs, early training)"
+    use_case: "GPT-2, GPT-3 (C=1.0)"
+}
+
+export equation clip_by_value {
+    equation: """
+        ∇ℒ_clipped = clip(∇ℒ, -C, C)
+    """
+    
+    where: {
+        C: "max gradient value (element-wise)"
+    }
+    
+    use_case: "Less common (norm clipping is preferred)"
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# OPTIMIZER COMPARISON
+# ═══════════════════════════════════════════════════════════════════════
+
+export comparison optimizer_choice {
+    dimensions: ["Memory", "Speed", "Quality", "Use Case"]
+    
+    rows: {
+        SGD_Momentum: [
+            "O(P)",
+            "Fastest",
+            "Good (convex)",
+            "Computer vision (ResNets)"
+        ]
+        
+        RMSprop: [
+            "O(P)",
+            "Fast",
+            "Good (RNNs)",
+            "Legacy (RNNs, RL)"
+        ]
+        
+        Adam: [
+            "O(2P)",
+            "Medium",
+            "Good",
+            "General-purpose"
+        ]
+        
+        AdamW: [
+            "O(2P)",
+            "Medium",
+            "Best (LLMs)",
+            "DEFAULT for transformers"
+        ]
+        
+        Adafactor: [
+            "O(√P)",
+            "Medium",
+            "Good",
+            "Memory-constrained (T5)"
+        ]
+        
+        Lion: [
+            "O(P)",
+            "Fast",
+            "Best? (new)",
+            "Vision, early LLM results"
+        ]
+    }
+    
+    recommendation: """
+        For transformers: AdamW with cosine decay + warmup
+        
+        Typical config:
+            optimizer: AdamW(β1=0.9, β2=0.95, weight_decay=0.1)
+            lr_schedule: cosine_with_warmup(max=3e-4, min=3e-5, warmup=2000)
+            grad_clip: 1.0
+    """
+}

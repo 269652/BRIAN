@@ -1,0 +1,320 @@
+# ═══════════════════════════════════════════════════════════════════════
+# LLAMA ARCHITECTURE — Meta's Open-Source Decoder-Only LLM
+# ═══════════════════════════════════════════════════════════════════════
+#
+# LLaMA, LLaMA 2, LLaMA 3 (Meta AI, 2023-2024)
+# Key improvements over GPT:
+#   - RMSNorm (faster than LayerNorm)
+#   - SwiGLU activation (better than GELU)
+#   - RoPE positional embeddings (better extrapolation)
+#   - Grouped Query Attention (faster inference)
+
+import { transformer_decoder } from "@/lib/architectures/transformer"
+import { grouped_query_attention, rope_attention } from "@/lib/primitives/attention"
+import { swiglu_ffn } from "@/lib/primitives/feedforward"
+import { rms_norm } from "@/lib/primitives/normalization"
+
+# ── LLaMA 1 (7B - 65B parameters) ───────────────────────────────────────
+#
+# Meta AI, Feb 2023: Competitive with GPT-3 at smaller scale
+
+export architecture llama {
+    base: "transformer_decoder"
+    
+    # Primitive choices (all improvements over GPT-2/3)
+    primitives: {
+        attention: "rope_attention(type=multi_head)"
+        feedforward: "swiglu_ffn(d_ff=8/3 * d_model)"  # SwiGLU uses 2 gates
+        normalization: "rms_norm(pre_norm=true)"
+        positional: "rotary_embeddings"  # baked into attention
+    }
+    
+    # Architecture equation (pre-norm + RoPE + SwiGLU)
+    equation: """
+        # Each transformer block:
+        h_attn = h + RoPE_Attention(RMSNorm(h))
+        h_out  = h_attn + SwiGLU(RMSNorm(h_attn))
+        
+        # Final output:
+        logits = W_unembed @ RMSNorm(h_final)
+    """
+    
+    variants: {
+        "7B": {
+            d_model: 4096
+            n_heads: 32
+            n_layers: 32
+            d_ff: 11008  # ≈ (8/3) * 4096
+            vocab_size: 32000
+            context_length: 2048
+            parameters: "6.7B"
+        }
+        
+        "13B": {
+            d_model: 5120
+            n_heads: 40
+            n_layers: 40
+            d_ff: 13824
+            vocab_size: 32000
+            context_length: 2048
+            parameters: "13.0B"
+        }
+        
+        "33B": {
+            d_model: 6656
+            n_heads: 52
+            n_layers: 60
+            d_ff: 17920
+            vocab_size: 32000
+            context_length: 2048
+            parameters: "32.5B"
+        }
+        
+        "65B": {
+            d_model: 8192
+            n_heads: 64
+            n_layers: 80
+            d_ff: 22016
+            vocab_size: 32000
+            context_length: 2048
+            parameters: "65.2B"
+        }
+    }
+    
+    training: {
+        dataset: "1.4T tokens (CommonCrawl, C4, Github, Wikipedia, Books, ArXiv, StackExchange)"
+        optimizer: "AdamW(β1=0.9, β2=0.95, weight_decay=0.1)"
+        learning_rate: "cosine_decay(max=3e-4, min=3e-5, warmup=2000 steps)"
+        batch_size: "4M tokens"
+        gradient_clipping: 1.0
+    }
+    
+    design_notes: """
+        1. SwiGLU FFN: 50% more parameters than GELU, but 2-5% better loss
+           d_ff = (8/3)*d_model instead of 4*d_model
+        2. RMSNorm: 10-20% faster than LayerNorm, similar performance
+        3. RoPE: length extrapolation (trained on 2k, works on 4k+)
+        4. No bias terms in linear layers (simplifies distributed training)
+    """
+}
+
+# ── LLaMA 2 (7B - 70B parameters) ───────────────────────────────────────
+#
+# Meta AI, July 2023: Longer context, better training data
+
+export architecture llama2 {
+    base: "llama"  # Same architecture
+    
+    # Key improvement: 4k context (2x LLaMA 1)
+    variants: {
+        "7B": {
+            d_model: 4096
+            n_heads: 32
+            n_layers: 32
+            context_length: 4096  # DOUBLED
+            parameters: "6.7B"
+        }
+        
+        "13B": {
+            d_model: 5120
+            n_heads: 40
+            n_layers: 40
+            context_length: 4096
+            parameters: "13.0B"
+        }
+        
+        "70B": {
+            d_model: 8192
+            n_heads: 64
+            n_kv_heads: 8          # NEW: Grouped Query Attention
+            n_layers: 80
+            d_ff: 28672
+            context_length: 4096
+            parameters: "68.9B"
+        }
+    }
+    
+    # 70B model uses GQA (major change)
+    primitives_70B: {
+        attention: "grouped_query_attention(n_heads=64, n_kv_heads=8)"
+        # 8 KV heads shared across 64 query heads (8 queries per KV)
+    }
+    
+    training: {
+        dataset: "2T tokens (40% more than LLaMA 1)"
+        refinement: "RLHF (Reinforcement Learning from Human Feedback)"
+        safety: "Red teaming, adversarial testing"
+    }
+    
+    design_notes: """
+        1. Grouped Query Attention (70B): 8x faster inference, same quality
+        2. Ghost Attention (RLHF): multi-turn conversation consistency
+        3. Longer context: 4096 tokens (LLaMA 1 was 2048)
+        4. License: Commercial use allowed (major change)
+    """
+}
+
+# ── LLaMA 3 (8B - 405B parameters) ──────────────────────────────────────
+#
+# Meta AI, April 2024: Massive scale, 128k context
+
+export architecture llama3 {
+    base: "llama2"
+    
+    # Architecture mostly unchanged, but:
+    primitives: {
+        attention: "grouped_query_attention(n_kv_heads=8)"
+        feedforward: "swiglu_ffn"
+        normalization: "rms_norm"
+        positional: "rotary_embeddings"
+        tokenizer: "tiktoken (128k vocab, 2x LLaMA 2)"  # NEW
+    }
+    
+    variants: {
+        "8B": {
+            d_model: 4096
+            n_heads: 32
+            n_kv_heads: 8   # GQA
+            n_layers: 32
+            vocab_size: 128256  # LARGER VOCAB
+            context_length: 8192  # 2x LLaMA 2
+            parameters: "8.0B"
+        }
+        
+        "70B": {
+            d_model: 8192
+            n_heads: 64
+            n_kv_heads: 8
+            n_layers: 80
+            vocab_size: 128256
+            context_length: 8192
+            parameters: "70.6B"
+        }
+        
+        "405B": {
+            d_model: 16384
+            n_heads: 128
+            n_kv_heads: 8
+            n_layers: 126
+            d_ff: 53248
+            vocab_size: 128256
+            context_length: 128000  # 128k CONTEXT!
+            parameters: "405B"
+        }
+    }
+    
+    training: {
+        dataset: "15T tokens (7.5x LLaMA 2)"
+        pretraining: {
+            schedule: "cosine decay with 8000 warmup steps"
+            learning_rate_max: "8e-5 (405B), 3e-4 (8B)"
+            batch_size: "16M tokens (405B)"
+        }
+        
+        post_training: {
+            sft: "Supervised Fine-Tuning on 10M high-quality examples"
+            rlhf: "Direct Preference Optimization (DPO)"
+            rejection_sampling: "Multi-round refinement"
+        }
+    }
+    
+    # 128k context via RoPE extension
+    rope_config: {
+        base_context: 8192
+        extended_context: 128000
+        method: "RoPE frequency scaling (YaRN-style)"
+    }
+    
+    design_notes: """
+        1. 15T token dataset (vs 1.4T LLaMA 1, 2T LLaMA 2)
+        2. 128k context (16x LLaMA 2) via RoPE scaling
+        3. Larger vocab: 128k tokens (tiktoken, GPT-4 tokenizer)
+        4. 405B model: competitive with GPT-4 on many benchmarks
+        5. Better multilingual support (trained on 5% non-English)
+    """
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# COMPARISON: LLaMA vs GPT
+# ═══════════════════════════════════════════════════════════════════════
+
+export comparison llama_vs_gpt {
+    dimensions: [
+        "Normalization",
+        "Activation",
+        "Positional",
+        "Attention (large models)",
+        "Context (latest)",
+        "Speed"
+    ]
+    
+    rows: {
+        GPT-3: [
+            "LayerNorm",
+            "GELU",
+            "Learned absolute",
+            "Multi-Head Attention",
+            "2048",
+            "Baseline"
+        ]
+        
+        LLaMA: [
+            "RMSNorm",
+            "SwiGLU",
+            "RoPE",
+            "Multi-Head Attention",
+            "2048",
+            "1.2x faster"
+        ]
+        
+        LLaMA-2: [
+            "RMSNorm",
+            "SwiGLU",
+            "RoPE",
+            "Grouped Query Attention (70B)",
+            "4096",
+            "1.3x faster (GQA: 8x faster inference)"
+        ]
+        
+        LLaMA-3: [
+            "RMSNorm",
+            "SwiGLU",
+            "RoPE + scaling",
+            "Grouped Query Attention",
+            "128000",
+            "1.3x faster + 8x inference speedup"
+        ]
+    }
+    
+    summary: """
+        LLaMA improvements over GPT:
+        1. Efficiency: RMSNorm (20% faster), GQA (8x inference)
+        2. Quality: SwiGLU (2-5% better loss for 50% more params)
+        3. Context: RoPE extrapolation (2k → 128k with scaling)
+        4. Data: More tokens (1.4T → 15T) + RLHF
+        
+        Result: LLaMA 3 405B matches/exceeds GPT-4 on many tasks
+                at ~1/4 the rumored parameter count (1.8T).
+    """
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# IMPLEMENTATION NOTE
+# ═══════════════════════════════════════════════════════════════════════
+#
+# This DSL spec is 300 lines. The actual PyTorch implementation would be:
+#   - 2000+ lines of model code
+#   - 1000+ lines of training loop
+#   - 500+ lines of data loading
+#   - 1000+ lines of optimization (Flash Attention, tensor parallel, etc.)
+#
+# The DSL compiler handles all of that. You just specify:
+#   - Which primitives to use (RMSNorm, SwiGLU, GQA)
+#   - Architecture dimensions (d_model, n_layers, n_heads)
+#   - Training protocol (optimizer, learning rate, batch size)
+#
+# The compiler generates optimized PyTorch code with:
+#   - Flash Attention (memory-efficient attention)
+#   - Kernel fusion (fuse RMSNorm into matmul)
+#   - Tensor parallelism (split across GPUs)
+#   - Mixed precision (FP16/BF16 for speed)
