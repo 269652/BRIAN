@@ -45,22 +45,30 @@ bad.
 
 ## 3. No unneeded `.md` files
 
-Every markdown file in this repo has to justify existing. Before
-creating a new one, ask:
+**Every file in this repo must earn its place.** Every markdown file has
+to justify existing by meeting a durable need. Treat file creation as a
+commitment: the file will be maintained, kept in sync, and read
+repeatedly. Session artifacts, one-off notes, and temporary summaries do
+not belong in the repo.
+
+Before creating any `.md`, ask yourself:
 
 - **Is there an existing file this content belongs in?** Append, don't
   fork. (E.g. session summaries belong in `docs/history.md`, never as
   `FINAL_SUMMARY.md` at the root.)
-- **Will someone reread this in a week?** If no, it's a chat artifact.
-  Write it in the conversation, not as a file.
-- **Is this a "completion stamp" or "investigation log"?** Those rot
-  fast. They go in `docs/archive/` with a dated name (`YYYY-MM-DD_*.md`)
-  the moment they stop being load-bearing, or get deleted entirely.
+- **Will someone (including you in 3 months) reread this?** If no, it's a
+  chat artifact — write it in the conversation, not as a persistent file.
+- **Is this a "completion stamp", "status update", or "investigation log"?**
+  Those rot fast. If they must be archived: move to `docs/archive/` with
+  a dated name (`YYYY-MM-DD_*.md`), or delete. Do not leave them in
+  active docs.
+- **Am I creating this file because it's genuinely needed, or just because
+  I feel like documenting something?** Default: don't. Use the conversation.
 
 Allowed top-level `.md`:
-- `README.md`
-- `CLAUDE.md` (this file)
-- Anything else needs explicit user approval.
+- `README.md` — project overview
+- `CLAUDE.md` — this file (repo-wide rules)
+- Anything else needs **explicit user approval** before the first commit.
 
 Allowed `docs/` `.md`:
 - `architecture.md` — primary spec (detailed §0–12 for codebase maintainers)
@@ -70,28 +78,48 @@ Allowed `docs/` `.md`:
 - `changelog.md` — git-derived (auto-maintained)
 - `metrics.md` — auto-updated by `brian analyze-log`
 - `dsl.md`, `dsl_nn_language.md`, `dsl_subsystem_roadmap.md` — DSL docs
-- `OOD_PUSH_STAGES.md` — deprecated; migrate to archive then delete.
+- `BRIAN.md`, `CLI.md`, `harness.md` — reference documentation
+- Anything else needs **explicit user approval**.
 
-`docs/archive/` is the graveyard. Move-then-cite, never delete-then-forget.
+`docs/archive/` is the graveyard for dead session notes and investigation
+logs. Move stale files there with a `YYYY-MM-DD_` prefix, never delete
+silently. Citation trail must be preserved.
 
 ---
 
-## 4. File creation has to serve a purpose
+## 4. Any file added to the repo must have a durable purpose
 
-Beyond `.md`, this also covers:
-- One-off Python scripts at the repo root: only if they're a deploy
-  helper (`_deploy_*.py`) or a debugging shim that gets deleted in
-  the same PR. **Never** leave `_test.py`, `_check.py`, `_dbg.py`
-  artifacts around — those are scratch.
-- Generated artifacts (`.png`, `.html`, large `.json`, large
-  notebooks): only if they're explicitly user-requested OR they're
-  the canonical output of a tool that the user runs (`compile nfg`,
-  `analyze-log`).
-- Don't add directories you don't immediately populate with code +
-  tests.
+This is the universal rule. The repo is not a scratchpad. Every file is a
+commitment to maintenance, clarity, and justification. Before you create
+a file, know why it belongs in the repo and why it will still belong in
+6 months.
 
-The default action when in doubt is **not to create the file**. Use
-the conversation.
+**Test files & scripts:**
+- `.py` test files: belong in `tests/` with a real test suite. Standalone
+  scripts like `_test.py`, `_check.py`, `_dbg.py`, or `scratch.py` are
+  never committed — those are local experiments.
+- One-off Python scripts at the repo root: only if they're labeled
+  `_deploy_*.py` (a deploy helper) AND will be used repeatedly. Debugging
+  shims and one-shot verification scripts go in the conversation, not the
+  repo.
+- Test output files: never commit `.log`, `_output.txt`, or `_summary.md`
+  files created during testing. Those are transient.
+
+**Generated artifacts:**
+- Images, HTML, JSON, notebooks: only if (1) explicitly user-requested,
+  OR (2) they're the canonical output of a tool the user runs regularly
+  (`compile nfg`, `analyze-log`, `brian deploy --label`). Intermediate
+  outputs, screenshots, and demo results do not belong.
+
+**Directories:**
+- Don't create a directory unless you populate it with code + tests in the
+  same commit. No empty directories, no "reserved for future use."
+
+**Golden rule:**
+The default action when in doubt is **not to create the file**. Ask
+yourself: "Will a future developer reading this repo in 6 months
+understand why this file exists?" If the answer is "probably not," use
+the conversation instead.
 
 ---
 
@@ -244,3 +272,36 @@ Anti-patterns to refuse:
   ablation" backlog entry.
 - Recording a finding without the instance id — the raw log is the
   only thing that lets a future reader audit the claim.
+
+---
+
+## 11. No repository clutter — every file earns its place
+
+This is the meta-principle underlying rules 3–4. The repo must remain
+clean, navigable, and free of dead weight. Clutter compounds: each
+abandoned `.md`, each forgotten test artifact, each "temporary" script
+makes the repo harder to reason about and slower for the next person
+(often you, 3 months later).
+
+**Apply ruthlessly:**
+- Does this file have a clear, permanent purpose? If not, don't commit it.
+- Is it tracking a temporary state (session notes, investigation logs, in-progress
+  summaries)? Use `docs/archive/` with a dated filename, or delete it entirely.
+- Is it code that nobody will reuse (one-shot debug script, test output,
+  demo result)? Don't commit it. Use the conversation.
+- Are there multiple related files that should be consolidated? Do that
+  instead of adding more.
+
+**At task completion:**
+- `git status` — anything untracked? Delete it or commit it. No stragglers.
+- Any files you added: Can you articulate in one sentence why each one
+  belongs in the repo? If you hesitate, delete it.
+
+**The cost of clutter:**
+- Future maintainers waste time understanding what each file is for.
+- Stale docs become liabilities (wrong info is worse than no info).
+- The repo feels poorly maintained, which erodes confidence in the project.
+
+**When in doubt: ask the user.** If you're unsure whether a file belongs,
+mention it in conversation before committing. Prefer temporary artifacts
+(conversation, branches, local experiments) over repo clutter.
