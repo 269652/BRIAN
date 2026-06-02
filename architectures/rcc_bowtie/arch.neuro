@@ -83,14 +83,16 @@ training {
     # All zero-init: first forward is bit-identical to baseline; behaviour
     # emerges as the gates lift off zero under LM loss. Composable —
     # H19's surprise gates H15's writes when both are on.
+    # DISABLED for 30M baseline run — these add ~40M params + memory overhead.
+    # Enable for 100M+ scale experiments only.
     # H16: multi-scale grid-cell positions (Sargolini et al. 2006).
-    grid_positions: { enabled: true, n_scales: 8, scale_ratio: 1.6180339887 }
+    grid_positions: { enabled: false, n_scales: 8, scale_ratio: 1.6180339887 }
     # H19: local-context surprise head (Mismatch Negativity).
-    surprise_head:  { enabled: true, dim: 128, local_window: 64 }
+    surprise_head:  { enabled: false, dim: 128, local_window: 64 }
     # H15: episodic kNN memory (Memorizing Transformers / RETRO),
     # writes gated by H19's surprise score so we store informative
     # tokens, not noise. alpha_init=0 ⇒ ReZero start.
-    episodic_memory: { enabled: true, slots: 4096, k: 32, alpha_init: 0.0,
+    episodic_memory: { enabled: false, slots: 4096, k: 32, alpha_init: 0.0,
                        write_gate: "surprise", write_quantile: 0.8 }
     # batch 16 x ctx 2048 = 32k tokens/step (same as old 32x1024) but
     # ctx is 2x richer. The 32x2048 combo OOM'd on cross-entropy (13 GiB
