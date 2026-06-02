@@ -244,14 +244,28 @@ def _stream_iterator(tokenizer: Tokenizer, ctx_len: int, mode: str,
 def token_window_iterator(tokenizer: Tokenizer, ctx_len: int,
                           buffer_size: int = 8192, seed: int = 0,
                           mode: str = "text",
-                          chat_ratio: float = 0.75
-                          ) -> Iterator[list[int]]:
+                          chat_ratio: float = 0.75,
+                          ratio_ref: "Callable[[], float] | None" = None,
+                          with_labels: bool = False,
+                          ) -> Iterator:
     """Yield fixed-length token windows of size ctx_len + 1.
 
     mode:
       "text" - text-only chain (default, backwards-compatible)
       "chat" - chat-only chain
       "mix"  - probabilistically interleave; `chat_ratio` of windows from chat.
+
+    Adaptive mixture (PR2):
+      ratio_ref: optional callable returning the *current* chat ratio. When
+        provided AND mode=="mix", it overrides `chat_ratio` on every window
+        — enabling closed-loop control by AdaptiveMixtureController without
+        rebuilding the iterator.
+      with_labels: when True AND mode=="mix", yield `(window, source_id)`
+        tuples where source_id is 0 for text-stream windows and 1 for chat.
+        Required by DARReweighter for per-sample domain labels.
+
+    Non-mix modes are unchanged: `ratio_ref` is ignored, `with_labels` is
+    ignored (raw windows are yielded).
     """
     if mode in ("text", "chat", "qa"):
         yield from _stream_iterator(tokenizer, ctx_len, mode, buffer_size)
@@ -263,10 +277,13 @@ def token_window_iterator(tokenizer: Tokenizer, ctx_len: int,
     text_it = _stream_iterator(tokenizer, ctx_len, "text", buffer_size)
     chat_it = _stream_iterator(tokenizer, ctx_len, "chat", buffer_size)
     while True:
-        if rng.random() < chat_ratio:
-            yield next(chat_it)
+        r = ratio_ref() if ratio_ref is not None else chat_ratio
+        if rng.random() < r:
+            w = next(chat_it)
+            yield (w, 1) if with_labels else w
         else:
-            yield next(text_it)
+            w = next(text_it)
+            yield (w, 0) if with_labels else w
 
 
 def batch_iterator(tokenizer: Tokenizer, ctx_len: int, batch_size: int,
@@ -275,7 +292,9 @@ def batch_iterator(tokenizer: Tokenizer, ctx_len: int, batch_size: int,
                    curriculum: bool = False,
                    curriculum_start: float = 0.1,
                    curriculum_end_step: int = 5000,
-                   current_step: int = 0) -> Iterator[torch.Tensor]:
+                   current_step: int = 0,
+                   ratio_ref: "Callable[[], float] | None" = None,
+                   with_labels: bool = False) -> Iterator:
     """Yield (B, ctx_len+1) token windows.
 
     curriculum=True: start with short subsequences (ctx_len * curriculum_start
@@ -291,7 +310,8 @@ def batch_iterator(tokenizer: Tokenizer, ctx_len: int, batch_size: int,
         eff_len = ctx_len
 
     it = token_window_iterator(tokenizer, eff_len, seed=seed,
-                               mode=mode, chat_ratio=chat_ratio)
+                               mode=mode, chat_ratio=chat_ratio,
+                               ratio_ref=ratio_ref, with_labels=with_labels)
     step = current_step
     while True:
         batch = list(itertools.islice(it, batch_size))
@@ -305,16 +325,30 @@ def batch_iterator(tokenizer: Tokenizer, ctx_len: int, batch_size: int,
             if new_len != eff_len:
                 eff_len = new_len
                 it = token_window_iterator(tokenizer, eff_len, seed=seed + step,
-                                           mode=mode, chat_ratio=chat_ratio)
+                                           mode=mode, chat_ratio=chat_ratio,
+                                           ratio_ref=ratio_ref,
+                                           with_labels=with_labels)
+
+        # Split out labels if requested
+        if with_labels:
+            wins = [w for (w, _) in batch]
+            labs = [lab for (_, lab) in batch]
+        else:
+            wins = batch
+            labs = None
 
         # Pad or truncate each window to ctx_len+1 for consistent batch shape
         padded = []
-        for w in batch:
+        for w in wins:
             if len(w) < ctx_len + 1:
                 w = w + [tokenizer.eos_id] * (ctx_len + 1 - len(w))
             padded.append(w[:ctx_len + 1])
 
         t = torch.tensor(padded, dtype=torch.long)  # (B, ctx_len+1)
-        yield t
+        if with_labels:
+            lab_t = torch.tensor(labs, dtype=torch.long)
+            yield t, lab_t
+        else:
+            yield t
         step += 1
 

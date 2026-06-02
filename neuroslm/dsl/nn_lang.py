@@ -488,6 +488,11 @@ class DSLLanguageModel(nn.Module):
             h = blk(h)
             self._layer_acts.append(h.detach())
         h = nn_ops.rmsnorm(h, self.gamma_f)
+        # Stash the final pre-head hidden state *with gradient* so the
+        # BRIAN harness's regularization controller (PR2 — isotropy,
+        # PCC, CMD) can consume it. Detaching here would silently neuter
+        # those losses. Cleared at the next forward.
+        self._last_hidden = h
         return nn_ops.linear(h, self.lm_head)
 
 

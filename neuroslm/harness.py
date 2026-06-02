@@ -223,6 +223,17 @@ class BRIANHarness(nn.Module):
         # Updated once per compute_loss step.
         self._metrics: Dict[str, float] = {}
 
+        # ── PR2: OOD-intervention controller ──
+        # Reads cfg.regularization (set by parse_training_config). When all
+        # interventions are disabled the controller's aux loss is exactly
+        # zero so this is a no-op for legacy archs. Vocab/d_model are
+        # known here so the sub-modules (DAR discriminator, PCC projector,
+        # CMD narrative head) can be sized correctly.
+        self._build_reg_controller()
+        # Optional caller-supplied function ids → (B,) domain labels.
+        # When None, DAR self-disables with a one-time warning.
+        self._domain_id_fn = None
+
     @classmethod
     def from_language_model(cls, language_model: nn.Module,
                             vocab_size: int, d_sem: int,
@@ -264,6 +275,8 @@ class BRIANHarness(nn.Module):
         h._surprise_ema = 0.0
         h._last_orch_modulation = None
         h._metrics = {}
+        h._build_reg_controller()
+        h._domain_id_fn = None
         return h
 
     # ── Distributed training wrapping (DDP / FSDP) ────────────────────
@@ -302,6 +315,49 @@ class BRIANHarness(nn.Module):
             self.language_model = FSDP(self.language_model)
         else:
             raise ValueError(f"unknown dist_strategy {strategy!r}")
+
+    # ── PR2: regularization controller (5 OOD interventions) ─────────
+
+    def _build_reg_controller(self) -> None:
+        """Build the RegularizationController from cfg.regularization.
+
+        Safe to call multiple times — only the first call constructs.
+        When `cfg.regularization` is None or all-disabled, the controller
+        still exists but its `collect_aux` returns zero, so wiring into
+        `compute_loss` is unconditional.
+        """
+        from neuroslm.regularizers import RegularizationController
+        from neuroslm.dsl.regularization import RegularizationConfig
+        cfg = getattr(self.training_config, "regularization", None)
+        if cfg is None:
+            cfg = RegularizationConfig()
+            self.training_config.regularization = cfg
+        # Pick a default chat_ratio from training config if available
+        initial_chat_ratio = float(
+            getattr(self.training_config, "chat_ratio", 0.6))
+        self.reg_controller = RegularizationController(
+            cfg, d_model=self.d_sem, vocab_size=self.vocab_size,
+            initial_chat_ratio=initial_chat_ratio,
+        )
+
+    def set_domain_id_fn(self, fn) -> None:
+        """Register an `ids → (B,) long tensor of domain labels` callable.
+
+        DAR requires per-sample domain labels (0=text, 1=chat). The data
+        loader is the natural owner of that information; this hook lets
+        the training script install a labeling function without modifying
+        the harness's forward signature. When None (default), DAR
+        self-disables with a one-time warning.
+        """
+        self._domain_id_fn = fn
+
+    def current_chat_ratio(self) -> float:
+        """Public read of the adaptive mixture controller's current ratio.
+
+        The dataloader should call this on every batch when
+        `cfg.regularization.adaptive_mixture.enabled` is true.
+        """
+        return float(self.reg_controller.adaptive_mixture.ratio())
 
     # ── Runtime metric registry — usable anywhere in the control flow ──
     def metric(self, name: str, default: float = 0.0) -> float:
@@ -464,6 +520,47 @@ class BRIANHarness(nn.Module):
 
         total = self.total_loss_config.w_lm * loss_lm
         mat = self.maturity.value()
+
+        # ── PR2: OOD-intervention controller ──
+        # Pulls the final non-detached hidden state out of the language
+        # model (stashed during forward) and adds each enabled aux loss
+        # (DAR / PCC / Isotropy / CMD) to `total`. AdaptiveMixture
+        # observes the logits but contributes no loss term (the dataloader
+        # reads its ratio via `harness.current_chat_ratio()`).
+        reg_cfg = getattr(self.training_config, "regularization", None)
+        if (reg_cfg is not None and reg_cfg.any_enabled()
+                and self.language_model is not None):
+            h_last = getattr(self.language_model, "_last_hidden", None)
+            if h_last is not None:
+                # Per-sample CE for DAR's reweighting path. Computed
+                # cheaply here from the already-materialised logits.
+                with torch.no_grad():
+                    B = logits.shape[0]
+                    flat_l = logits.reshape(-1, logits.shape[-1])
+                    flat_t = targets.reshape(-1)
+                    per_tok = F.cross_entropy(flat_l, flat_t, reduction="none")
+                    per_sample_ce = per_tok.reshape(B, -1).mean(dim=1)
+                # Optional domain labels (DAR is no-op without them).
+                domain_labels = None
+                if self._domain_id_fn is not None:
+                    try:
+                        domain_labels = self._domain_id_fn(ids)
+                    except Exception:
+                        domain_labels = None
+                reg_out = self.reg_controller.collect_aux(
+                    h=h_last, lm_logits=logits,
+                    per_sample_ce=per_sample_ce,
+                    domain_labels=domain_labels,
+                )
+                total = total + reg_out["total"]
+                # Publish per-intervention metrics for logging / brian ps.
+                for key in ("dar", "pcc", "isotropy", "cmd"):
+                    self._metrics[f"reg_{key}"] = float(
+                        reg_out[key].detach().item())
+                self._metrics["reg_total"] = float(
+                    reg_out["total"].detach().item())
+                self._metrics["chat_ratio"] = self.current_chat_ratio()
+
         if self.language_model is not None:
             stash_map = {
                 "_last_pred_coding_loss": "pred_coding",

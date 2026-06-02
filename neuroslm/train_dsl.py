@@ -93,14 +93,18 @@ class RealDataSource:
     """
     def __init__(self, tokenizer, batch: int, seq_len: int,
                  device: str = "cpu", mode: str = "mix",
-                 chat_ratio: float = 0.6, seed: int = 0):
+                 chat_ratio: float = 0.6, seed: int = 0,
+                 ratio_ref=None, with_labels: bool = False):
         self.device = device
         self._fallback = None
+        self._with_labels = with_labels
+        self._last_labels = None  # set by next() when with_labels=True
         try:
             from neuroslm.data import batch_iterator
             self._it = batch_iterator(
                 tokenizer, ctx_len=seq_len, batch_size=batch,
                 seed=seed, mode=mode, chat_ratio=chat_ratio,
+                ratio_ref=ratio_ref, with_labels=with_labels,
             )
             # Prime one batch to surface failures early
             self._primed = next(self._it)
@@ -114,11 +118,25 @@ class RealDataSource:
         if self._fallback is not None:
             return self._fallback.next()
         if self._primed is not None:
-            window, self._primed = self._primed, None
+            item, self._primed = self._primed, None
         else:
-            window = next(self._it)
+            item = next(self._it)
+        if self._with_labels:
+            window, labels = item
+            self._last_labels = labels.to(self.device)
+        else:
+            window = item
         window = window.to(self.device)
         return window[:, :-1].contiguous(), window[:, 1:].contiguous()
+
+    def domain_id_fn(self, _ids):
+        """Return per-sample domain labels (0=text, 1=chat) for last batch.
+
+        DARReweighter calls this via harness.set_domain_id_fn(). The
+        contract: it's called *during* compute_loss for the same batch
+        that was just produced by next(), so we return self._last_labels.
+        """
+        return self._last_labels
 
 
 # ── Build the harness ────────────────────────────────────────────────
@@ -317,13 +335,27 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
     osc_str = ""
     if osc:
         osc_str = " | osc[" + " ".join(f"{k}={v:.3f}" for k, v in osc.items()) + "]"
+    # PR2: OOD-intervention telemetry (only printed if any is non-zero, so
+    # the per-step line is unchanged for runs that don't enable them).
+    reg_str = ""
+    reg_keys = ("reg_dar", "reg_pcc", "reg_isotropy", "reg_cmd",
+                "reg_total", "chat_ratio")
+    reg_vals = {k: m.get(k, 0.0) for k in reg_keys}
+    if any(abs(v) > 1e-9 for v in reg_vals.values()):
+        reg_str = (" | reg["
+                   f"dar={reg_vals['reg_dar']:.3f} "
+                   f"pcc={reg_vals['reg_pcc']:.3f} "
+                   f"iso={reg_vals['reg_isotropy']:.4f} "
+                   f"cmd={reg_vals['reg_cmd']:.3f} "
+                   f"Σ={reg_vals['reg_total']:.3f} "
+                   f"chat={reg_vals['chat_ratio']:.2f}]")
     return (f"step {step:5d} | loss {avg_loss:.4f} | lm {avg_lm:.4f} "
             f"| ppl {ppl:.1f} | gnorm {gnorm:.3f} | lr {lr:.2e} "
             f"| {tok_per_s:.0f} tok/s "
             f"| Φ {phi:.3f} | λ₁ {fid:.3f} | ign {ign:.2f} "
             f"| mesoLG {lg:.2f} "
             f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
-            f"| NT[{nt_str}]{osc_str}")
+            f"| NT[{nt_str}]{osc_str}{reg_str}")
 
 
 def _eval_pass_marks(rules, step: int,
@@ -533,6 +565,16 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
             gnorm = float(getattr(harness, "_last_gnorm", 0.0))
             lr = float(getattr(harness, "_last_lr", 0.0))
             metrics = getattr(harness, "last_metrics", None)
+            # PR2: merge harness._metrics (carries reg_dar/pcc/iso/cmd/total
+            # and chat_ratio published by the OOD-intervention controller)
+            # into the per-step display dict.
+            harness_metrics = getattr(harness, "_metrics", None)
+            if harness_metrics:
+                merged = dict(metrics) if metrics else {}
+                for k, v in harness_metrics.items():
+                    if k.startswith("reg_") or k == "chat_ratio":
+                        merged[k] = v
+                metrics = merged
             # avg_lm == avg total loss until auxiliary losses are added.
             print(_format_metrics_line(step, avg, avg, gnorm, lr,
                                         tok_per_s, metrics), flush=True)
@@ -827,10 +869,49 @@ def main():
         harness._global_step = start_step
 
     if args.data == "real":
+        # PR2: wire AdaptiveMixtureController + DARReweighter to the data
+        # source. Only activate when the corresponding intervention is
+        # enabled in the .neuro regularization {} block — otherwise default
+        # to plain batch_iterator (back-compat).
+        reg_cfg = getattr(harness.training_config, "regularization", None)
+        adaptive_on = (
+            reg_cfg is not None
+            and getattr(reg_cfg, "adaptive_mixture", None) is not None
+            and reg_cfg.adaptive_mixture.enabled
+            and args.mode == "mix"
+        )
+        dar_on = (
+            reg_cfg is not None
+            and getattr(reg_cfg, "dar", None) is not None
+            and reg_cfg.dar.enabled
+            and args.mode == "mix"
+        )
+        ratio_ref = harness.current_chat_ratio if adaptive_on else None
+        with_labels = bool(dar_on)
+
+        # Loud, unmissable PR2 banner — if the next training log doesn't
+        # show this exact line, the new code path is NOT active.
+        if reg_cfg is not None:
+            flags = []
+            for name in ("dar", "pcc", "isotropy", "cmd", "adaptive_mixture"):
+                sub = getattr(reg_cfg, name, None)
+                on = bool(sub and getattr(sub, "enabled", False))
+                flags.append(f"{name}={'ON' if on else 'off'}")
+            print("[train_dsl] ══════════════════════════════════════════════")
+            print(f"[train_dsl] PR2 OOD interventions: {' '.join(flags)}")
+            print("[train_dsl] ══════════════════════════════════════════════")
+        if adaptive_on:
+            print(f"[train_dsl] adaptive_mixture ON — ratio_ref → harness.current_chat_ratio()")
+        if dar_on:
+            print(f"[train_dsl] DAR domain labels ON — emitting (window, source_id) tuples")
+
         source = RealDataSource(
             tok, batch=args.batch, seq_len=args.seq_len, device=args.device,
             mode=args.mode, chat_ratio=args.chat_ratio, seed=args.seed,
+            ratio_ref=ratio_ref, with_labels=with_labels,
         )
+        if dar_on:
+            harness.set_domain_id_fn(source.domain_id_fn)
     else:
         source = SyntheticBatchSource(
             vocab_size=vocab_size, batch=args.batch, seq_len=args.seq_len,

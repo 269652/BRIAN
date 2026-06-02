@@ -189,6 +189,7 @@ _DECL_KEYWORDS_NAMED = (
     "neurotransmitter",
     "dynamics",
     "function",
+    "equation",
     "formal_spec",
     "sheaf",
     # §6.5 — genetic orchestrator declarations

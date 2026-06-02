@@ -239,14 +239,14 @@ exports.activate = function(context) {
             };
             action.diagnostics = [diagnostic];
             actions.push(action);
-          } else if (diagnostic.code === 'arch-move-equations') {
+          } else if (diagnostic.code === 'arch-move-equations' || diagnostic.code === 'equation-in-arch') {
             const action = new vscode.CodeAction(
-              'Move equations to lib/equations.neuro',
+              'Move equation to lib/equations.neuro',
               vscode.CodeActionKind.QuickFix
             );
             action.command = {
-              title: 'Move equations to lib/equations.neuro',
-              command: 'neuro-dsl.moveEquationsToLib',
+              title: 'Move equation to lib/equations.neuro',
+              command: 'neuro-dsl.extractEquationToLib',
               arguments: [document, diagnostic]
             };
             action.diagnostics = [diagnostic];
@@ -331,6 +331,94 @@ exports.activate = function(context) {
       await vscode.window.showTextDocument(libUri);
 
       vscode.window.showInformationMessage(`✓ Moved ${equationTexts.length} equation(s) to lib/equations.neuro`);
+    })
+  );
+
+  // Register command for extracting a single equation to lib (from diagnostic)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('neuro-dsl.extractEquationToLib', async (document, diagnostic) => {
+      const text = document.getText();
+      const line = document.lineAt(diagnostic.range.start.line);
+
+      // Extract equation definition from current line
+      const equationMatch = line.text.match(/\b(export\s+)?equation\s+(\w+)\s*\{/);
+      if (!equationMatch) {
+        vscode.window.showErrorMessage('Could not parse equation definition');
+        return;
+      }
+
+      const equationName = equationMatch[2];
+
+      // Find the full equation block (handle multi-line)
+      const startLine = diagnostic.range.start.line;
+      let endLine = startLine;
+      let braceCount = (line.text.match(/{/g) || []).length - (line.text.match(/}/g) || []).length;
+
+      while (braceCount > 0 && endLine < document.lineCount - 1) {
+        endLine++;
+        const nextLine = document.lineAt(endLine).text;
+        braceCount += (nextLine.match(/{/g) || []).length;
+        braceCount -= (nextLine.match(/}/g) || []).length;
+      }
+
+      // Extract full equation block
+      const equationStart = document.lineAt(startLine).range.start;
+      const equationEnd = document.lineAt(endLine).range.end;
+      const fullEquationText = document.getText(new vscode.Range(equationStart, equationEnd));
+
+      // Get or create lib/equations.neuro
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+      if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace folder found');
+        return;
+      }
+
+      const libDir = path.join(workspaceFolder.uri.fsPath, 'architectures', path.basename(path.dirname(document.uri.fsPath)), 'lib');
+      const equationsFile = path.join(libDir, 'equations.neuro');
+
+      // Ensure lib directory exists
+      if (!fs.existsSync(libDir)) {
+        fs.mkdirSync(libDir, { recursive: true });
+      }
+
+      // Append equation to lib file
+      let existingContent = '';
+      if (fs.existsSync(equationsFile)) {
+        existingContent = fs.readFileSync(equationsFile, 'utf8');
+      }
+
+      fs.writeFileSync(
+        equationsFile,
+        existingContent + (existingContent.trim() ? '\n\n' : '') + fullEquationText + '\n',
+        'utf8'
+      );
+
+      // Remove equation from current file and add import
+      const edit = new vscode.WorkspaceEdit();
+
+      // Delete equation from arch.neuro
+      edit.delete(document.uri, new vscode.Range(
+        new vscode.Position(startLine, 0),
+        new vscode.Position(endLine + 1, 0)
+      ));
+
+      // Add import at top (after architecture block)
+      const archMatch = text.match(/architecture\s+\w+\s*\{[^}]*\}/s);
+      let insertLine = 0;
+      if (archMatch) {
+        insertLine = text.substring(0, archMatch.index + archMatch[0].length).split('\n').length;
+      }
+
+      const importStatement = `import { ${equationName} } from "@/lib/equations"\n`;
+      edit.insert(document.uri, new vscode.Position(insertLine, 0), importStatement + '\n');
+
+      await vscode.workspace.applyEdit(edit);
+
+      // Open lib file
+      const libUri = vscode.Uri.file(equationsFile);
+      await vscode.window.showTextDocument(libUri);
+
+      vscode.window.showInformationMessage(`✓ Moved equation '${equationName}' to lib/equations.neuro`);
     })
   );
 

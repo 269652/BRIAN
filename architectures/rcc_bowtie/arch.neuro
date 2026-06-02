@@ -17,20 +17,9 @@
 # References — Dehaene (2011), Baars (2005), Doya (1999), Tononi (2016),
 # Mashour (2020).
 
-export equation standard_synapse {
-    params: [weight, x_pre, W],
-    formula: "y = weight * (x_pre @ W)"
-}
-
-export equation additive_modulation {
-    params: [output, c, gain],
-    formula: "y = output + (c * gain)"
-}
-
-export equation multiplicative_modulation {
-    params: [output, c, gain],
-    formula: "y = output * (c * gain)"
-}
+# Equations are imported from lib/equations.neuro (see MODULE IMPORTS below).
+# This keeps arch.neuro free of implementation details and focuses it on
+# high-level architecture + wiring + constraints.
 
 architecture rcc_bowtie {
     d_sem: 256,
@@ -399,6 +388,12 @@ neurotransmitter gaba {
 }
 
 # =============================================================================
+# LIBRARY IMPORTS — shared equations, constraints, regularization
+# =============================================================================
+
+import { standard_synapse, multiplicative_modulation, additive_modulation } from "@/lib/equations"
+
+# =============================================================================
 # MODULE IMPORTS — every brain region this architecture comprises
 # =============================================================================
 
@@ -632,20 +627,15 @@ modulation dopamine -> acc {
 }
 
 # =============================================================================
-# FORMAL CONSTRAINT SYSTEMS
+# FORMAL CONSTRAINT SYSTEMS — imported from lib/constraints.neuro
+# =============================================================================
+# Three core constraints that govern topology and ensure biological realism:
+#   1. Narrative Consistency (sheaf cohomology proxy for narrative coherence)
+#   2. Integrated Information (Φ > 0 per Tononi 4.0 formalism)
+#   3. Bowtie Topology (narrowing-widening structure with re-entry)
+#
+# Math-first definitions live in lib/constraints.neuro. The linter verifies
+# these at compile time; the harness applies them as auxiliary losses at runtime.
 # =============================================================================
 
-sheaf narrative_consistency {
-    contradiction_threshold: 0.7,
-    mechanism: "h1_cohomology_proxy"
-}
-
-formal_spec phi_integration {
-    rule: "integrated_information",
-    metric: "phi"
-}
-
-formal_spec bowtie_topology {
-    rule: "narrowing_widening",
-    metric: "structural_constraint"
-}
+import { sheaf_narrative_consistency, formal_phi_integration, formal_bowtie_topology } from "@/lib/constraints"

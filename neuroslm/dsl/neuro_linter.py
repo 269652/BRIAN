@@ -419,9 +419,12 @@ class NeuroLinter:
                     if len(enum_keys) >= 2:
                         self._warning(
                             enum_start_line, 0, "enum-style-declaration",
-                            f"Enum-style declaration '{enum_name}' with keys {{{', '.join(enum_keys[:3])}{'...' if len(enum_keys) > 3 else ''}}}. "
-                            f"Prefer DSL native mechanisms: use 'constants' block, 'mechanism' definitions, "
-                            f"or 'export dynamics' if this represents named states/modes."
+                            f"Enum-style declaration '{enum_name}' detected with keys: {{{', '.join(enum_keys[:3])}{'...' if len(enum_keys) > 3 else ''}}}. "
+                            f"Prefer DSL native mechanisms: (1) Use 'constants' block for immutable values, "
+                            f"(2) Use 'mechanism' for named computational modes with equations, "
+                            f"(3) Use 'export dynamics' for named state machines with ODEs, "
+                            f"(4) Use 'export constraint' for formal invariants. "
+                            f"Named DSL constructs are self-documenting and enable linting."
                         )
                     enum_keys = []
                     enum_name = None
@@ -432,9 +435,8 @@ class NeuroLinter:
         if self.file.name != "arch.neuro":
             return
 
-        equation_count = 0
+        equation_defs = []  # (line_no, name)
         synapse_count = 0
-        first_equation_line = None
         first_synapse_line = None
 
         for line_no, line in enumerate(self.lines, 1):
@@ -443,11 +445,11 @@ class NeuroLinter:
             if not stripped or stripped.startswith('#'):
                 continue
 
-            # Count equation definitions
-            if re.match(r'\b(export\s+)?equation\s+\w+\s*\{', stripped):
-                equation_count += 1
-                if first_equation_line is None:
-                    first_equation_line = line_no
+            # Find equation definitions (with name extraction)
+            m = re.match(r'\b(export\s+)?equation\s+(\w+)\s*\{', stripped)
+            if m:
+                eq_name = m.group(2)
+                equation_defs.append((line_no, eq_name))
 
             # Count synapse declarations
             if re.match(r'\b(export\s+)?synapse\s+', stripped):
@@ -455,12 +457,14 @@ class NeuroLinter:
                 if first_synapse_line is None:
                     first_synapse_line = line_no
 
-        # Warn once if equations should be extracted
-        if equation_count >= 3:
-            self._info(
-                first_equation_line or 1, 0, "arch-move-equations",
-                f"arch.neuro has {equation_count} equation definitions. "
-                "Consider moving to lib/equations.neuro for better organization."
+        # Warn for EACH equation defined in arch.neuro — equations belong in lib files
+        for line_no, eq_name in equation_defs:
+            self._warning(
+                line_no, 0, "equation-in-arch",
+                f"Equation '{eq_name}' defined in arch.neuro. "
+                f"Move to lib/equations.neuro and import: "
+                f"import {{ {eq_name} }} from \"@/lib/equations\". "
+                f"Auto-fix: Extract to lib/equations.neuro, replace with import."
             )
 
         # Warn once if synapses should be extracted
