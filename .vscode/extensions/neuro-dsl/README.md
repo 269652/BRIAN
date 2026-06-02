@@ -16,7 +16,22 @@ Syntax highlighting, semantic linting, and intellisense for `.neuro` architectur
 - Works across imported files via `import { ... } from "@/path"`
 - Navigates to the exact definition line
 
-### 3. Semantic Linter
+### 3. Hover Tooltips for References
+- **Hover over any `@reference`** to see a tooltip with:
+  - Reference type (equation, dynamics, function, etc.)
+  - Parameters list
+  - Equation formula (for equations)
+  - Import location (if from imported file)
+- Automatically resolves across imported files
+
+### 4. Code Actions (Quick Fixes)
+- **Extract repeated equations** as reusable definitions
+- **Move equations to lib** (automatic refactoring with import management)
+  - Right-click on the `arch-move-equations` hint and select "Move equations to lib/equations.neuro"
+  - Automatically creates `lib/equations.neuro` if it doesn't exist
+  - Extracts all equation definitions and creates proper import statement
+
+### 5. Semantic Linter
 The linter validates `.neuro` files for semantic correctness:
 
 #### Structural Checks
@@ -67,6 +82,26 @@ python neuroslm/dsl/neuro_linter.py architectures/ --json
 - Open any `.neuro` file
 - Syntax highlighting is automatic
 - Linting errors/warnings appear in the editor's Problems panel
+- Hover over `@references` to see tooltips with definition details
+- Press **Ctrl+Click** or **F12** on references to jump to definitions
+- Right-click on linting hints to access code actions (quick fixes)
+
+### Code Actions (Quick Fixes)
+
+**Extract repeated equations:**
+```
+Line 10: equation: "y = weight * (x_pre @ W)"
+...
+Line 25: equation: "y = weight * (x_pre @ W)"
+```
+→ Right-click → "Extract as equation definition" → auto-creates `export equation standard_synapse { ... }`
+
+**Move equations to lib:**
+```
+arch.neuro has 5 equation definitions. Consider moving to lib/equations.neuro...
+```
+→ Right-click → "Move equations to lib/equations.neuro"
+→ Auto-creates `lib/equations.neuro` and imports all equations
 
 ## Diagnostics
 
@@ -173,7 +208,8 @@ To extend the linter:
 
 - [ ] Real-time linting as you type (Language Server Protocol)
 - [x] Go-to-definition for references (`@equation`, `@population`, `@dynamics`, `@function`)
-- [ ] Hover tooltips with declaration info
+- [x] Hover tooltips with declaration info (parameters, formulas, import locations)
+- [x] Auto-fix for `arch-move-equations` hint (move equations to lib, manage imports)
 - [ ] Code formatting (prettier-style)
 - [ ] Recursive import checking for deep validation
 - [ ] Type inference for shape expressions

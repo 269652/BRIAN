@@ -118,6 +118,107 @@ exports.activate = function(context) {
     })
   );
 
+  // Register hover provider for @references
+  context.subscriptions.push(
+    vscode.languages.registerHoverProvider(LANGUAGE_ID, {
+      provideHover(document, position) {
+        const word = document.getWordRangeAtPosition(position, /@[\w]+/);
+        if (!word) return null;
+
+        const reference = document.getText(word); // includes @ prefix
+        const refName = reference.slice(1);
+        const text = document.getText();
+
+        // Search for the definition in current file
+        const patterns = [
+          { pattern: new RegExp(`export\\s+equation\\s+${refName}\\s*\\{([^}]*)\\}`, 's'), type: 'equation' },
+          { pattern: new RegExp(`equation\\s+${refName}\\s*\\{([^}]*)\\}`, 's'), type: 'equation' },
+          { pattern: new RegExp(`export\\s+dynamics\\s+${refName}\\s*\\{([^}]*)\\}`, 's'), type: 'dynamics' },
+          { pattern: new RegExp(`dynamics\\s+${refName}\\s*\\{([^}]*)\\}`, 's'), type: 'dynamics' },
+        ];
+
+        for (const { pattern, type } of patterns) {
+          const match = pattern.exec(text);
+          if (match) {
+            const content = match[1];
+            // Extract formula if it's an equation
+            let formula = '';
+            if (type === 'equation') {
+              const formulaMatch = content.match(/formula:\s*"([^"]*)"/);
+              if (formulaMatch) {
+                formula = formulaMatch[1];
+              }
+            }
+
+            // Extract params
+            const paramsMatch = content.match(/params:\s*\[([^\]]*)\]/);
+            const params = paramsMatch ? paramsMatch[1].trim() : '';
+
+            let hoverText = `**${type}** \`${refName}\`\n\n`;
+            if (params) {
+              hoverText += `**params:** ${params}\n\n`;
+            }
+            if (formula) {
+              hoverText += `**formula:** \`${formula}\``;
+            }
+
+            return new vscode.Hover(new vscode.MarkdownString(hoverText));
+          }
+        }
+
+        // If not found in current file, try imported files
+        const importMatches = [...text.matchAll(/import\s*\{[^}]*\}\s*from\s*["'](@?[^"']+)["']/g)];
+        for (const importMatch of importMatches) {
+          const importPath = importMatch[1].replace(/^@\//, '');
+          const baseDir = path.dirname(document.uri.fsPath);
+          const candidates = [
+            path.join(baseDir, `${importPath}.neuro`),
+            path.join(baseDir, importPath, 'index.neuro'),
+            path.join(baseDir, importPath)
+          ];
+
+          for (const candidate of candidates) {
+            if (fs.existsSync(candidate)) {
+              try {
+                const importedContent = fs.readFileSync(candidate, 'utf8');
+                for (const { pattern, type } of patterns) {
+                  const match = pattern.exec(importedContent);
+                  if (match) {
+                    const content = match[1];
+                    let formula = '';
+                    if (type === 'equation') {
+                      const formulaMatch = content.match(/formula:\s*"([^"]*)"/);
+                      if (formulaMatch) {
+                        formula = formulaMatch[1];
+                      }
+                    }
+
+                    const paramsMatch = content.match(/params:\s*\[([^\]]*)\]/);
+                    const params = paramsMatch ? paramsMatch[1].trim() : '';
+
+                    let hoverText = `**${type}** \`${refName}\` _(imported)_\n\n`;
+                    if (params) {
+                      hoverText += `**params:** ${params}\n\n`;
+                    }
+                    if (formula) {
+                      hoverText += `**formula:** \`${formula}\``;
+                    }
+
+                    return new vscode.Hover(new vscode.MarkdownString(hoverText));
+                  }
+                }
+              } catch (e) {
+                // Silently skip unreadable files
+              }
+            }
+          }
+        }
+
+        return null;
+      }
+    })
+  );
+
   // Register code action provider for autofix
   context.subscriptions.push(
     vscode.languages.registerCodeActionsProvider(LANGUAGE_ID, {
@@ -138,11 +239,98 @@ exports.activate = function(context) {
             };
             action.diagnostics = [diagnostic];
             actions.push(action);
+          } else if (diagnostic.code === 'arch-move-equations') {
+            const action = new vscode.CodeAction(
+              'Move equations to lib/equations.neuro',
+              vscode.CodeActionKind.QuickFix
+            );
+            action.command = {
+              title: 'Move equations to lib/equations.neuro',
+              command: 'neuro-dsl.moveEquationsToLib',
+              arguments: [document, diagnostic]
+            };
+            action.diagnostics = [diagnostic];
+            actions.push(action);
           }
         }
 
         return actions;
       }
+    })
+  );
+
+  // Register command for moving equations to lib
+  context.subscriptions.push(
+    vscode.commands.registerCommand('neuro-dsl.moveEquationsToLib', async (document) => {
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+      if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace folder found');
+        return;
+      }
+
+      const libDir = path.join(workspaceFolder.uri.fsPath, 'lib');
+      const equationsFile = path.join(libDir, 'equations.neuro');
+
+      // Ensure lib directory exists
+      if (!fs.existsSync(libDir)) {
+        fs.mkdirSync(libDir, { recursive: true });
+      }
+
+      // Extract all equation definitions from current file
+      const text = document.getText();
+      const equationMatches = [...text.matchAll(/^(export\s+)?equation\s+\w+\s*\{[^}]*\}/gm)];
+
+      if (equationMatches.length === 0) {
+        vscode.window.showInformationMessage('No equation definitions found in this file');
+        return;
+      }
+
+      // Get existing equations from lib file
+      let existingEquations = '';
+      if (fs.existsSync(equationsFile)) {
+        existingEquations = fs.readFileSync(equationsFile, 'utf8');
+      }
+
+      // Collect all equations to write
+      const equationTexts = equationMatches.map(m => m[0]);
+      const combinedEquations = existingEquations + (existingEquations.trim() ? '\n\n' : '') + equationTexts.join('\n\n') + '\n';
+
+      // Write to lib/equations.neuro
+      fs.writeFileSync(equationsFile, combinedEquations, 'utf8');
+
+      // Remove equations from current file and add import statement
+      let newText = text;
+
+      // Remove equation definitions
+      equationTexts.forEach(eq => {
+        newText = newText.replace(eq + '\n\n', '').replace(eq + '\n', '').replace(eq, '');
+      });
+
+      // Add import statement at the top (after architecture block if present)
+      const archMatch = newText.match(/architecture\s+\w+\s*\{[^}]*\}/s);
+      let insertPos = 0;
+      if (archMatch) {
+        insertPos = archMatch.index + archMatch[0].length + 1;
+      }
+
+      const importStatement = `import { ${equationMatches.map(m => {
+        const nameMatch = m[0].match(/equation\s+(\w+)/);
+        return nameMatch ? nameMatch[1] : '';
+      }).filter(Boolean).join(', ')} } from "@/lib/equations"\n\n`;
+
+      newText = newText.slice(0, insertPos) + importStatement + newText.slice(insertPos);
+
+      // Apply changes
+      const edit = new vscode.WorkspaceEdit();
+      const endPos = document.positionAt(text.length);
+      edit.replace(document.uri, new vscode.Range(new vscode.Position(0, 0), endPos), newText);
+      await vscode.workspace.applyEdit(edit);
+
+      // Open the lib/equations.neuro file
+      const libUri = vscode.Uri.file(equationsFile);
+      await vscode.window.showTextDocument(libUri);
+
+      vscode.window.showInformationMessage(`✓ Moved ${equationTexts.length} equation(s) to lib/equations.neuro`);
     })
   );
 
