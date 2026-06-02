@@ -76,41 +76,88 @@ function searchImportedFile(currentFileUri, importPath, reference) {
 exports.activate = function(context) {
   OUTPUT_CHANNEL.appendLine('NeuroSLM DSL extension activating...');
 
-  // Register definition provider for @references (Ctrl+Click, F12, Go to Definition)
+  // Register definition provider for @references and import specifiers (Ctrl+Click, F12, Go to Definition)
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider(LANGUAGE_ID, {
       provideDefinition(document, position) {
-        const word = document.getWordRangeAtPosition(position, /@[\w]+/);
-        if (!word) return null;
+        // Try to match @references first (e.g., @standard_synapse)
+        const refWord = document.getWordRangeAtPosition(position, /@[\w]+/);
+        if (refWord) {
+          const reference = document.getText(refWord); // includes @ prefix
+          const text = document.getText();
 
-        const reference = document.getText(word); // includes @ prefix
-        const text = document.getText();
+          // Search for definition: "export equation|dynamics|function|population NAME {" or similar
+          const patterns = [
+            new RegExp(`\\b(export\\s+)?(equation|dynamics|function|population|formal_spec|sheaf)\\s+${reference.slice(1)}\\s*[{:]`, 'g'),
+            new RegExp(`\\b(equation|dynamics|function)\\s+${reference.slice(1)}\\s*\\{`, 'g')
+          ];
 
-        // Search for definition: "export equation|dynamics|function|population NAME {" or similar
-        const patterns = [
-          new RegExp(`\\b(export\\s+)?(equation|dynamics|function|population)\\s+${reference.slice(1)}\\s*[{:]`, 'g'),
-          new RegExp(`\\b(equation|dynamics|function)\\s+${reference.slice(1)}\\s*\\{`, 'g')
-        ];
-
-        for (const pattern of patterns) {
-          const match = pattern.exec(text);
-          if (match) {
-            const matchPos = match.index;
-            const lineNum = document.positionAt(matchPos).line;
-            const charNum = document.positionAt(matchPos).character;
-            return new vscode.Location(
-              document.uri,
-              new vscode.Position(lineNum, charNum)
-            );
+          for (const pattern of patterns) {
+            const match = pattern.exec(text);
+            if (match) {
+              const matchPos = match.index;
+              const lineNum = document.positionAt(matchPos).line;
+              const charNum = document.positionAt(matchPos).character;
+              return new vscode.Location(
+                document.uri,
+                new vscode.Position(lineNum, charNum)
+              );
+            }
           }
+
+          // If not found in current file, search in imported files
+          const importMatches = [...text.matchAll(/import\s*\{[^}]*\}\s*from\s*["'](@?[^"']+)["']/g)];
+          for (const importMatch of importMatches) {
+            const importPath = importMatch[1].replace(/^@\//, '');
+            const importedDef = searchImportedFile(document.uri, importPath, reference);
+            if (importedDef) return importedDef;
+          }
+
+          return null;
         }
 
-        // If not found in current file, search in imported files
-        const importMatches = [...text.matchAll(/import\s*\{[^}]*\}\s*from\s*["'](@?[^"']+)["']/g)];
-        for (const importMatch of importMatches) {
-          const importPath = importMatch[1].replace(/^@\//, '');
-          const importedDef = searchImportedFile(document.uri, importPath, reference);
-          if (importedDef) return importedDef;
+        // Try to match import specifiers (e.g., @/lib/equations or ./modules/sensory)
+        const line = document.lineAt(position.line).text;
+        const importMatch = line.match(/import\s*\{[^}]*\}\s*from\s*["'](@?[^"']+)["']/);
+        if (importMatch) {
+          const importPath = importMatch[1];
+          const specifierStart = line.lastIndexOf(importPath, position.character);
+          const specifierEnd = specifierStart + importPath.length;
+
+          // Check if cursor is within the import specifier
+          if (position.character >= specifierStart && position.character <= specifierEnd) {
+            const baseDir = path.dirname(document.uri.fsPath);
+            let targetPath = importPath;
+
+            // Resolve @/... to arch root
+            if (importPath.startsWith("@/")) {
+              let archPath = baseDir;
+              // Walk up until we find arch.neuro
+              while (archPath !== path.dirname(archPath)) {
+                if (fs.existsSync(path.join(archPath, 'arch.neuro'))) {
+                  targetPath = importPath.slice(2);
+                  break;
+                }
+                archPath = path.dirname(archPath);
+              }
+            }
+
+            // Try candidate paths
+            const candidates = [
+              path.resolve(baseDir, `${targetPath}.neuro`),
+              path.resolve(baseDir, targetPath, 'index.neuro'),
+              path.resolve(baseDir, targetPath)
+            ];
+
+            for (const candidate of candidates) {
+              if (fs.existsSync(candidate)) {
+                return new vscode.Location(
+                  vscode.Uri.file(candidate),
+                  new vscode.Position(0, 0)
+                );
+              }
+            }
+          }
         }
 
         return null;
@@ -222,7 +269,7 @@ exports.activate = function(context) {
   // Register code action provider for autofix
   context.subscriptions.push(
     vscode.languages.registerCodeActionsProvider(LANGUAGE_ID, {
-      provideCodeActions(document, range, context) {
+      provideCodeActions(document, _range, context) {
         const actions = [];
 
         // Check diagnostics in this range
@@ -424,7 +471,7 @@ exports.activate = function(context) {
 
   // Register command for extracting equations
   context.subscriptions.push(
-    vscode.commands.registerCommand('neuro-dsl.extractEquation', async (document, diagnostic) => {
+    vscode.commands.registerCommand('neuro-dsl.extractEquation', async (document, _diagnostic) => {
       // Get equation name from user
       const equationName = await vscode.window.showInputBox({
         prompt: 'Enter equation name (e.g., standard_synapse)',
