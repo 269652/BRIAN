@@ -102,6 +102,7 @@ class NeuroLinter:
             self._extract_declarations()
             self._check_references()
             self._check_equations()
+            self._check_enum_style_declarations()
             self._check_architecture_organization()
 
         return self.diagnostics
@@ -368,6 +369,62 @@ class NeuroLinter:
                     f"Equation appears {len(occurrences)} times. Consider extracting as a definition: "
                     f'equation name {{ params: [...], formula: "{equation}" }}'
                 )
+
+    def _check_enum_style_declarations(self):
+        """Warn against enum-style value declarations, prefer DSL native mechanisms."""
+        in_potential_enum = False
+        enum_name = None
+        enum_start_line = None
+        enum_keys = []
+
+        for line_no, line in enumerate(self.lines, 1):
+            stripped = line.strip()
+
+            if not stripped or stripped.startswith('#'):
+                continue
+
+            # Check if this line opens a potential enum block
+            # Pattern: name { or name{ where name is NOT a DSL keyword
+            match = re.match(r'^(\w+)\s*\{', stripped)
+            if match:
+                potential_name = match.group(1)
+                # Skip if it's a DSL keyword block (use word boundary check)
+                is_keyword = any(re.match(f'^{kw}\\b', stripped) for kw in self.BLOCK_KEYWORDS)
+
+                if not is_keyword:
+                    # Check if the body has enum-like content (CONST: value)
+                    const_keys = re.findall(r'\b([A-Z_][A-Z0-9_]*)\s*:', stripped)
+                    if const_keys:
+                        in_potential_enum = True
+                        enum_name = potential_name
+                        enum_start_line = line_no
+                        enum_keys = const_keys
+                    else:
+                        # Still might be enum if no constants on this line
+                        in_potential_enum = True
+                        enum_name = potential_name
+                        enum_start_line = line_no
+                        enum_keys = []
+
+            # Continue tracking enum keys across lines
+            elif in_potential_enum:
+                const_keys = re.findall(r'\b([A-Z_][A-Z0-9_]*)\s*:', stripped)
+                if const_keys:
+                    enum_keys.extend(const_keys)
+
+                # Check if block ends
+                if '}' in stripped:
+                    in_potential_enum = False
+                    # Warn if we found multiple enum-like keys
+                    if len(enum_keys) >= 2:
+                        self._warning(
+                            enum_start_line, 0, "enum-style-declaration",
+                            f"Enum-style declaration '{enum_name}' with keys {{{', '.join(enum_keys[:3])}{'...' if len(enum_keys) > 3 else ''}}}. "
+                            f"Prefer DSL native mechanisms: use 'constants' block, 'mechanism' definitions, "
+                            f"or 'export dynamics' if this represents named states/modes."
+                        )
+                    enum_keys = []
+                    enum_name = None
 
     def _check_architecture_organization(self):
         """Check for declarations that should be moved to lib files."""

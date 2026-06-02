@@ -10,7 +10,13 @@ Syntax highlighting, semantic linting, and intellisense for `.neuro` architectur
 - **Block structure**: Automatic bracket matching and indentation
 - **Equations**: Math operators and functions highlighted within equation strings
 
-### 2. Semantic Linter
+### 2. Go-to-Definition for References
+- **Ctrl+Click** (or **F12**, **Go to Definition**) on `@reference` names to jump to their definition
+- Supports `@equation`, `@population`, `@dynamics`, `@function` references
+- Works across imported files via `import { ... } from "@/path"`
+- Navigates to the exact definition line
+
+### 3. Semantic Linter
 The linter validates `.neuro` files for semantic correctness:
 
 #### Structural Checks
@@ -28,6 +34,7 @@ The linter validates `.neuro` files for semantic correctness:
 - ✓ Equation variable binding (detects potentially undefined variables)
 - ✓ Math function recognition (sin, cos, exp, ReLU, etc.)
 - ✓ Built-in variable tracking (x, y, s, V, etc.)
+- ✓ Enum-style declaration detection (warns against manual enum-like blocks, suggests DSL native mechanisms)
 
 ## Installation
 
@@ -73,6 +80,7 @@ python neuroslm/dsl/neuro_linter.py architectures/ --json
 | `unclosed-brace` | Error | Opening brace with no closing match |
 | `undefined-population` | Warning | Population referenced but not declared |
 | `unresolved-import` | Warning | Import path cannot be resolved |
+| `enum-style-declaration` | Warning | Enum-style constant block detected; use DSL native mechanisms instead |
 | `potentially-undefined` | Info | Variable may be undefined in equation |
 
 ## Example: Valid `.neuro` File
@@ -164,9 +172,9 @@ To extend the linter:
 ## Future Enhancements
 
 - [ ] Real-time linting as you type (Language Server Protocol)
-- [ ] Autocomplete for population/import names
-- [ ] Go-to-definition for synapses/imports
+- [x] Go-to-definition for references (`@equation`, `@population`, `@dynamics`, `@function`)
 - [ ] Hover tooltips with declaration info
 - [ ] Code formatting (prettier-style)
 - [ ] Recursive import checking for deep validation
 - [ ] Type inference for shape expressions
+- [ ] Autocomplete for `@reference` names

@@ -290,3 +290,49 @@ population test {
         except NeuroMLError as e:
             # Error message should reference the problematic file
             assert "Linting failed" in str(e)
+
+
+class TestEnumStyleDetection:
+    """Test detection of enum-style declarations."""
+
+    def test_enum_style_warning(self, tmp_neuro_file):
+        """Enum-style constant block should trigger warning."""
+        content = """
+neurotransmitter_types {
+    DOPAMINE: 1,
+    SEROTONIN: 2,
+    ACETYLCHOLINE: 3
+}
+"""
+        f = tmp_neuro_file(content)
+        diags = lint_file(f)
+        warnings = [d for d in diags if d.code == "enum-style-declaration"]
+        assert len(warnings) == 1
+        assert "DOPAMINE" in warnings[0].message or "enum-style" in warnings[0].message
+
+    def test_dsl_native_no_warning(self, tmp_neuro_file):
+        """DSL native constants block should not trigger warning."""
+        content = """
+dynamics rate_code {
+    constants: {
+        tau: 0.01,
+        threshold: 1.0
+    }
+}
+"""
+        f = tmp_neuro_file(content)
+        diags = lint_file(f)
+        warnings = [d for d in diags if d.code == "enum-style-declaration"]
+        assert len(warnings) == 0
+
+    def test_enum_single_key_no_warning(self, tmp_neuro_file):
+        """Single-key object should not trigger enum warning."""
+        content = """
+config {
+    VALUE: 42
+}
+"""
+        f = tmp_neuro_file(content)
+        diags = lint_file(f)
+        warnings = [d for d in diags if d.code == "enum-style-declaration"]
+        assert len(warnings) == 0

@@ -27,8 +27,96 @@ const BUILTIN_VARS = [
   'x_pre', 'x_post', 'e', 'pi', 'nan', 'inf'
 ];
 
+/**
+ * Search for a reference (@name) in an imported file
+ */
+function searchImportedFile(currentFileUri, importPath, reference) {
+  const baseDir = path.dirname(currentFileUri.fsPath);
+  const refName = reference.slice(1); // remove @ prefix
+
+  // Try candidate paths
+  const candidates = [
+    path.join(baseDir, `${importPath}.neuro`),
+    path.join(baseDir, importPath, 'index.neuro'),
+    path.join(baseDir, importPath)
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      try {
+        const content = fs.readFileSync(candidate, 'utf8');
+        const patterns = [
+          new RegExp(`\\b(export\\s+)?(equation|dynamics|function|population)\\s+${refName}\\s*[{:]`),
+          new RegExp(`\\b(equation|dynamics|function)\\s+${refName}\\s*\\{`)
+        ];
+
+        for (const pattern of patterns) {
+          const match = pattern.exec(content);
+          if (match) {
+            const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === candidate);
+            if (doc) {
+              const matchPos = match.index;
+              const lineNum = doc.positionAt(matchPos).line;
+              return new vscode.Location(
+                vscode.Uri.file(candidate),
+                new vscode.Position(lineNum, 0)
+              );
+            }
+          }
+        }
+      } catch (e) {
+        // Silently skip unreadable files
+      }
+    }
+  }
+
+  return null;
+}
+
 exports.activate = function(context) {
   OUTPUT_CHANNEL.appendLine('NeuroSLM DSL extension activating...');
+
+  // Register definition provider for @references (Ctrl+Click, F12, Go to Definition)
+  context.subscriptions.push(
+    vscode.languages.registerDefinitionProvider(LANGUAGE_ID, {
+      provideDefinition(document, position) {
+        const word = document.getWordRangeAtPosition(position, /@[\w]+/);
+        if (!word) return null;
+
+        const reference = document.getText(word); // includes @ prefix
+        const text = document.getText();
+
+        // Search for definition: "export equation|dynamics|function|population NAME {" or similar
+        const patterns = [
+          new RegExp(`\\b(export\\s+)?(equation|dynamics|function|population)\\s+${reference.slice(1)}\\s*[{:]`, 'g'),
+          new RegExp(`\\b(equation|dynamics|function)\\s+${reference.slice(1)}\\s*\\{`, 'g')
+        ];
+
+        for (const pattern of patterns) {
+          const match = pattern.exec(text);
+          if (match) {
+            const matchPos = match.index;
+            const lineNum = document.positionAt(matchPos).line;
+            const charNum = document.positionAt(matchPos).character;
+            return new vscode.Location(
+              document.uri,
+              new vscode.Position(lineNum, charNum)
+            );
+          }
+        }
+
+        // If not found in current file, search in imported files
+        const importMatches = [...text.matchAll(/import\s*\{[^}]*\}\s*from\s*["'](@?[^"']+)["']/g)];
+        for (const importMatch of importMatches) {
+          const importPath = importMatch[1].replace(/^@\//, '');
+          const importedDef = searchImportedFile(document.uri, importPath, reference);
+          if (importedDef) return importedDef;
+        }
+
+        return null;
+      }
+    })
+  );
 
   // Register code action provider for autofix
   context.subscriptions.push(
