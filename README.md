@@ -65,6 +65,12 @@ BRIAN is an **11-stage bowtie** with two re-entry loops and five functional subs
 
 Every box is a learnable module. Every arrow is a documented tensor operation. Full spec: [`docs/architecture.md`](docs/architecture.md).
 
+**Visual blueprint:** The full bowtie with all 28 populations, 19 synapses, 7 neurotransmitter systems, and training config are rendered in the Neural Flow Graph (NFG):
+
+![Neural Flow Graph — rcc_bowtie architecture](architectures/rcc_bowtie/nfg.png)
+
+*Every node, edge, and modulation shown in the NFG is declared in `arch.neuro` and compiled to PyTorch. The diagram is the source of truth for wiring.*
+
 ---
 
 ## The `.neuro` DSL
