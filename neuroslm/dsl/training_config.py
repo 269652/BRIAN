@@ -409,6 +409,12 @@ class TrainingConfig:
     # metric and publish it at these node tags." Reduces data overhead by
     # not exposing every metric everywhere.
     metric_exposures: List[MetricExpose] = field(default_factory=list)
+    # OOD interventions (`regularization { ... }` block). Five composable
+    # losses declared math-first in lib/regularizers.neuro. All default
+    # disabled → zero behavioral change vs legacy arch.neuro. Parsed via
+    # neuroslm.dsl.regularization.parse_regularization_block; harness
+    # consumption lands in PR2.
+    regularization: Any = None  # filled with RegularizationConfig in parse_training_config
 
 
 # ── Constants for validation ───────────────────────────────────────────
@@ -519,6 +525,18 @@ def parse_training_config(body: str) -> TrainingConfig:
     # `metric <name> { ... }` blocks live at the same level as `mechanisms`
     # / `pass_marks`. Collect all of them.
     cfg.metric_exposures = _parse_metric_exposures(props)
+
+    # ── Five OOD interventions (regularization { ... }) ──
+    # Imported lazily to avoid a circular import at module load time.
+    from .regularization import (
+        RegularizationConfig, parse_regularization_block
+    )
+    if "regularization" in props:
+        cfg.regularization = parse_regularization_block(
+            _strip_braces(props["regularization"])
+        )
+    else:
+        cfg.regularization = RegularizationConfig()
     return cfg
 
 
