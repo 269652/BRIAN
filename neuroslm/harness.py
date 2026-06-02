@@ -528,6 +528,22 @@ class BRIANHarness(nn.Module):
         # observes the logits but contributes no loss term (the dataloader
         # reads its ratio via `harness.current_chat_ratio()`).
         reg_cfg = getattr(self.training_config, "regularization", None)
+        
+        # DEBUG: Print condition checks
+        import sys
+        if not hasattr(self, "_debug_reg_logged"):
+            print(f"[DEBUG harness.compute_loss] reg_cfg={reg_cfg}", file=sys.stderr)
+            if reg_cfg:
+                print(f"[DEBUG] reg_cfg.any_enabled()={reg_cfg.any_enabled()}", file=sys.stderr)
+            print(f"[DEBUG] self.language_model={self.language_model is not None}", file=sys.stderr)
+            if self.language_model:
+                h_last = getattr(self.language_model, "_last_hidden", None)
+                print(f"[DEBUG] _last_hidden exists={h_last is not None}", file=sys.stderr)
+                if h_last is not None:
+                    print(f"[DEBUG] _last_hidden.shape={h_last.shape}", file=sys.stderr)
+            print(f"[DEBUG] hasattr reg_controller={hasattr(self, 'reg_controller')}", file=sys.stderr)
+            self._debug_reg_logged = True
+        
         if (reg_cfg is not None and reg_cfg.any_enabled()
                 and self.language_model is not None):
             h_last = getattr(self.language_model, "_last_hidden", None)
