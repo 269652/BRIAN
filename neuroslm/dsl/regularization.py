@@ -41,9 +41,13 @@ class DARConfig:
         L_total  = E[w_i · L_ce_i] + L_disc
     """
     enabled: bool = False
-    lam: float = 1.0          # reweighting temperature (lambda)
+    lam: float = 1.0          # reweighting temperature (lambda, sample weighting)
     hidden: int = 64          # discriminator MLP hidden dim
     grl_alpha: float = 0.1    # GRL gradient flip scale
+    weight: float = 0.1       # global scale applied to the discriminator BCE
+                              # before it enters the total loss. 0.1 is the
+                              # standard adversarial-training default (Ganin
+                              # et al. 2015). 1.0 = legacy (drowns LM signal).
 
 
 # ── Intervention B: Predictive Contrastive Coding ────────────────────
@@ -67,6 +71,14 @@ class PCCConfig:
     n_negatives: int = 64            # cross-document negatives per anchor
     tau: float = 0.1                 # InfoNCE temperature
     layers: List[int] = field(default_factory=list)  # [] = all layers
+    weight: float = 0.1              # global scale on the InfoNCE term before
+                                     # it enters the total loss. Standard CPC
+                                     # value (Oord et al. 2018, He et al.
+                                     # 2020). Raw InfoNCE saturates near
+                                     # log(n_negatives+1) ≈ 4 when the model
+                                     # hasn't learned predictive features, so
+                                     # weight=1.0 dominates the LM gradient
+                                     # and freezes convergence.
 
 
 # ── Intervention C: Isotropy whitening ───────────────────────────────
@@ -217,6 +229,7 @@ def _parse_dar(raw: str) -> DARConfig:
     if "lam" in p:        out.lam = float(p["lam"])
     if "hidden" in p:     out.hidden = int(p["hidden"])
     if "grl_alpha" in p:  out.grl_alpha = float(p["grl_alpha"])
+    if "weight" in p:     out.weight = float(p["weight"])
     return out
 
 
@@ -228,6 +241,7 @@ def _parse_pcc(raw: str) -> PCCConfig:
     if "n_negatives" in p: out.n_negatives = int(p["n_negatives"])
     if "tau" in p:         out.tau = float(p["tau"])
     if "layers" in p:      out.layers = _parse_int_list(p["layers"])
+    if "weight" in p:      out.weight = float(p["weight"])
     return out
 
 

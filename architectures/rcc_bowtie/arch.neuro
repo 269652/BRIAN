@@ -306,13 +306,20 @@ training {
 
         # A. Distributional Adversarial Reweighting — punishes chat-attractor.
         #    Upweights minority-source samples via a GRL-trained discriminator.
-        dar: { enabled: true, lambda: 1.0, hidden: 64, grl_alpha: 0.1 }
+        #    `weight` gates the discriminator BCE contribution to total loss
+        #    (0.1 = Ganin et al. 2015 default; 1.0 drowns the LM signal).
+        dar: { enabled: true, lambda: 1.0, hidden: 64, grl_alpha: 0.1,
+               weight: 0.1 }
 
         # B. Predictive Contrastive Coding — replaces reconstructive PCT.
         #    InfoNCE over (h_t, h_{t+k}) with cross-document negatives.
         #    Forces deep layers toward features predictive of future context
         #    but invariant to document-specific surface form.
-        pcc: { enabled: true, k: 4, n_negatives: 64, tau: 0.1, layers: [] }
+        #    `weight` gates the InfoNCE contribution (CPC default 0.1; raw
+        #    InfoNCE saturates near log(n_negatives+1) ≈ 4 before features
+        #    form, so weight=1.0 freezes LM convergence).
+        pcc: { enabled: true, k: 4, n_negatives: 64, tau: 0.1, layers: [],
+               weight: 0.1 }
 
         # C. Isotropy whitening — pushes Gram(H) toward I, kills anisotropy.
         #    Cheapest intervention; biggest single expected lever on gap_ratio.

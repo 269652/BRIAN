@@ -488,9 +488,14 @@ class RegularizationController(nn.Module):
         # Linear warmup: scale the contribution but keep internal state
         # updates (e.g. PCC buffer, AdaptiveMixture entropy probe) running
         # at full rate so they're warm when the multiplier hits 1.0.
+        # Per-intervention `weight` knobs (cfg.dar.weight, cfg.pcc.weight)
+        # gate the raw loss BEFORE warmup: this is the architectural fix
+        # for "PCC InfoNCE saturates at log(N) and drowns the LM signal"
+        # — defaults are 0.1 (CPC literature standard, Oord et al. 2018).
+        # Isotropy and CMD already apply their `weight` internally.
         mult = self.warmup_multiplier()
-        scaled_dar = dar_out["total_aux"] * mult
-        scaled_pcc = pcc_loss * mult
+        scaled_dar = dar_out["total_aux"] * (mult * self.cfg.dar.weight)
+        scaled_pcc = pcc_loss * (mult * self.cfg.pcc.weight)
         scaled_iso = iso_loss * mult
         scaled_cmd = cmd_loss * mult
 
