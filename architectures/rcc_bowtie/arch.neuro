@@ -283,16 +283,21 @@ training {
 
     # =========================================================================
     # OOD INTERVENTIONS (regularization {})  — see docs/technical_report.md §3
-    # Math-first definitions live in lib/regularizers.neuro. All five
-    # interventions are ENABLED by default (this is the active research
-    # configuration targeting the gap_ratio regression). Disable individual
-    # entries by flipping `enabled: false` to ablate. Composes with the
-    # flat-strength regularizers (dropout, z_loss, llrd) above, but
-    # `pct_trunk` is forced to 0 above when `pcc.enabled = true` because
-    # PCC replaces the reconstructive PCT loss on overlapping layers.
+    # Math-first definitions live in lib/regularizers.neuro.
+    #
+    # 2026-06-03 GROUND-TRUTH BASELINE
+    # ────────────────────────────────────
+    # ALL interventions disabled. Four iterations of "fixes" (warmup ramp →
+    # PR-A1 direction flip → neuromechanical stabilisation) each closed one
+    # failure mode and opened another. We never measured what vanilla
+    # training looks like at this scale, so we have no baseline to fix
+    # against. This run establishes that baseline.
+    #
+    # Re-enable individual interventions ONLY after we know what
+    # `wikitext gap_ratio` looks like with no interventions at chat_ratio≈0.3.
     # =========================================================================
     regularization: {
-        # ── WARMUP RAMP (architectural stability fix) ──
+        # ── WARMUP RAMP (kept as no-op at this enabled set) ──
         # All aux loss contributions ramp linearly from 0 → 1× over
         # `warmup_steps`. Solves the "wild metrics" problem at startup:
         # at step 0, hidden states are random noise, so InfoNCE (PCC)
@@ -304,62 +309,28 @@ training {
         # probe) still updates every step so they're warm when ramp completes.
         warmup_steps: 2000
 
-        # A. Distributional Adversarial Reweighting — punishes chat-attractor.
-        #    Upweights minority-source samples via a GRL-trained discriminator.
-        #    `weight` gates the discriminator BCE contribution to total loss
-        #    (0.1 = Ganin et al. 2015 default; 1.0 drowns the LM signal).
-        dar: { enabled: true, lambda: 1.0, hidden: 64, grl_alpha: 0.1,
+        # A. Distributional Adversarial Reweighting — DISABLED for baseline.
+        dar: { enabled: false, lambda: 1.0, hidden: 64, grl_alpha: 0.1,
                weight: 0.1 }
 
-        # B. Predictive Contrastive Coding — replaces reconstructive PCT.
-        #    InfoNCE over (h_t, h_{t+k}) with cross-document negatives.
-        #    Forces deep layers toward features predictive of future context
-        #    but invariant to document-specific surface form.
-        #    `weight` gates the InfoNCE contribution (CPC default 0.1; raw
-        #    InfoNCE saturates near log(n_negatives+1) ≈ 4 before features
-        #    form, so weight=1.0 freezes LM convergence).
-        pcc: { enabled: true, k: 4, n_negatives: 64, tau: 0.1, layers: [],
+        # B. Predictive Contrastive Coding — DISABLED for baseline.
+        pcc: { enabled: false, k: 4, n_negatives: 64, tau: 0.1, layers: [],
                weight: 0.1 }
 
-        # C. Isotropy whitening — pushes Gram(H) toward I, kills anisotropy.
-        #    Cheapest intervention; biggest single expected lever on gap_ratio.
-        isotropy: { enabled: true, weight: 0.01, buffer: 4096, distance: "frobenius" }
+        # C. Isotropy whitening — DISABLED for baseline.
+        isotropy: { enabled: false, weight: 0.01, buffer: 4096, distance: "frobenius" }
 
-        # D. Cross-Module Disagreement — penalize JSD between LM and a
-        #    second read-out head (narrative). Flips the Phi pillar:
-        #    *disagreement* (not agreement) is the OOD-robust signal.
-        #    DISABLED: OOM at batch=4 seq=2048 (needs 6GB for dual softmax).
-        #    Re-enable for smaller batches or when using gradient checkpointing.
+        # D. Cross-Module Disagreement — DISABLED (OOM at this batch+seq).
         cmd: { enabled: false, weight: 0.05, divergence: "jsd",
                heads: ["lm", "narrative"] }
 
-        # E. Adaptive mixture controller — anneals chat_ratio to preserve
-        #    measured entropy on a held-out prose probe. Closed-loop.
-        #    `direction: "balance"` (default since 2026-06-03) makes the
-        #    controller OPPOSE the deviation: high prose entropy → SHRINK
-        #    chat (more prose exposure). Use "amplify" to restore the
-        #    legacy (buggy) direction for ablation.
-        #    `max_ratio: 0.50` (CHANGED 2026-06-03 from 0.80) prevents
-        #    the controller from starving the model of prose entirely;
-        #    the 2026-06-03 run had it pinned at 0.80 while gap_ratio
-        #    widened monotonically.
-        #
-        #    NEUROMECHANICAL STABILISATION (added 2026-06-03 second pass)
-        #    The first "balance" run *still* failed: the controller observes
-        #    the entropy of training-data logits, not a held-out probe.
-        #    At init H_t ≈ log(V) ≈ 10.5 regardless of input, so the first
-        #    update (step 100) slammed chat_ratio from 0.60 → 0.10 floor
-        #    in ONE update. Loss plateaued at ppl ~3000 for 500+ steps.
-        #
-        #    The three knobs below mirror biological gain controllers
-        #    (retinal adaptation, thalamic relay):
-        #      • controller_warmup_steps: 2000  — startup grace; no
-        #        ratio updates until the LM has formed baseline features.
-        #      • max_step_delta: 0.03           — slew-rate limit; one
-        #        probe can move the ratio by at most 0.03.
-        #      • entropy_ema_alpha: 0.1         — low-pass filter on H_t;
-        #        a single bad mini-batch cannot drive the controller.
-        adaptive_mixture: { enabled: true, target_entropy: 4.5,
+        # E. Adaptive mixture controller — DISABLED for baseline.
+        #    (The controller is architecturally blind to prose: it sees
+        #    entropy of the MIXED training batch, dominated by chat. It
+        #    cannot detect the prose-ppl collapse we observed at step
+        #    1000 of the previous run. Will be redesigned with a true
+        #    held-out probe before re-enabling.)
+        adaptive_mixture: { enabled: false, target_entropy: 4.5,
                             probe_interval: 100, gamma: 2.0,
                             direction: "balance",
                             min_ratio: 0.10, max_ratio: 0.50,
@@ -367,33 +338,13 @@ training {
                             max_step_delta: 0.03,
                             entropy_ema_alpha: 0.1 }
 
-        # F. Frequency-balanced cross-entropy — token-level inverse-
-        #    frequency reweighting toward the OOD target distribution.
-        #    Cheapest possible direction-aware OOD signal: it doesn't
-        #    add an aux loss; it RESHAPES the main LM CE so the
-        #    gradient itself biases toward the prose token distribution.
-        #    Requires `harness.reg_controller.freq_balance.set_frequencies(
-        #      freq_train, freq_target)` to be called once after a corpus
-        #    scan. Until then it's a pure no-op identity.
-        #    β = 0.5 = Mikolov 2013 sqrt-smoothing default.
-        #    Disabled by default — enable once corpus frequency cache
-        #    is plumbed through the data loader (TODO PR-C).
+        # F. Frequency-balanced cross-entropy — DISABLED (needs corpus scan).
         freq_balance: { enabled: false, beta: 0.5,
                         w_min: 0.2, w_max: 5.0 }
 
-        # G. Cross-Distribution Gradient Alignment (CDGA) — research-grade
-        #    gradient surgery against a frozen OOD anchor batch. After
-        #    the standard backward, runs a second forward+backward on a
-        #    held-out prose batch, computes the conflict coefficient
-        #    c = max(0, -<g_train, g_anchor>/<g_anchor, g_anchor>), and
-        #    writes g_aligned = g_train - α·c·g_anchor into .grad.
-        #    PCGrad (Yu et al. 2020) applied for the first time to a
-        #    single-task LM with an OOD proxy task as the "second task".
-        #    See architectures/rcc_bowtie/lib/cdga.neuro for the full
-        #    math + docs/CDGA.md for the design doc.
-        #    Requires `harness.set_cdga_anchor_fn(fn)` to register an
-        #    anchor batch loader. Disabled by default until that wiring
-        #    is in place.
+        # G. Cross-Distribution Gradient Alignment (CDGA) — DISABLED
+        #    (research-grade, kept off until ground-truth baseline is
+        #    established and an anchor batch loader is wired in).
         cdga: { enabled: false, alpha_max: 1.0,
                 warmup_steps: 2000, refresh_every: 4 }
     }
