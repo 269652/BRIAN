@@ -131,17 +131,91 @@ class AdaptiveMixtureConfig:
 
     Math (see lib/regularizers.neuro :: adaptive_mixture_update):
         H_t = -E_{x ∈ prose_probe} [ Σ_v p_θ(v|x) log p_θ(v|x) ]
-        chat_ratio_{t+1} = clip( chat_ratio_t · (H_t / H_target)^γ,
-                                 [min_ratio, max_ratio] )
 
-    When H_t < H_target (entropy collapsed on prose), chat_ratio shrinks.
+        direction = "balance" (default, CORRECTED — entropy-parity):
+            chat_ratio_{t+1} = clip( chat_ratio_t · (H_target / H_t)^γ,
+                                      [min_ratio, max_ratio] )
+          → high prose entropy (H_t > H_target) ⇒ SHRINK chat (the model
+            needs more prose exposure to bring H down to target).
+
+        direction = "amplify" (legacy bug — kept for ablation only):
+            chat_ratio_{t+1} = clip( chat_ratio_t · (H_t / H_target)^γ,
+                                      [min_ratio, max_ratio] )
+          → high prose entropy ⇒ GROW chat (the failure mode that
+            drove the 2026-06-03 gap_ratio regression: chat_ratio
+            ran from 0.60 to 0.80 max in <100 steps while wikitext
+            ppl barely improved).
+
+    Default max_ratio is now 0.50 (was 0.80) so prose always receives
+    at least half of the training tokens regardless of controller drift.
     """
     enabled: bool = False
     target_entropy: float = 4.5
     probe_interval: int = 100     # measure entropy every N training steps
     gamma: float = 2.0            # control gain exponent
     min_ratio: float = 0.10
-    max_ratio: float = 0.80
+    max_ratio: float = 0.50       # CHANGED 2026-06-03 from 0.80 (see docstring)
+    direction: str = "balance"    # NEW 2026-06-03 ("balance" | "amplify")
+
+
+# ── Intervention F: Frequency-balanced cross-entropy ─────────────────
+
+@dataclass
+class FreqBalanceConfig:
+    """Token-level inverse-frequency reweighting toward an OOD target.
+
+    Math (see lib/regularizers.neuro :: freq_balance_*):
+        freq_train[v]  = pre-computed unigram freq on training sample
+        freq_target[v] = pre-computed unigram freq on OOD probe sample
+        ratio[v]       = freq_target[v] / (freq_train[v] + ε)
+        w[v]           = clip( ratio[v]^β, w_min, w_max )
+        w[v]           = w[v] / mean(w[v])                  # mean-normalised
+        L_freq         = mean( w[targets] * CE_per_token )
+
+    Parameters mirror Mikolov 2013 / Cui et al. 2019 (class-balanced
+    loss): β = 0.5 is the square-root smoothing default; β = 1.0 is
+    exact inverse frequency; β = 0 is identity. The mean-normalisation
+    keeps the loss scale unchanged on average so the LR schedule
+    remains valid; only the per-token *direction* of the gradient is
+    biased toward the OOD distribution.
+    """
+    enabled: bool = False
+    beta: float = 0.5             # sqrt smoothing (Mikolov 2013)
+    w_min: float = 0.2            # clip floor (prevent zero-weight tokens)
+    w_max: float = 5.0            # clip ceiling (prevent loss explosion)
+
+
+# ── Intervention G: Cross-Distribution Gradient Alignment (CDGA) ─────
+
+@dataclass
+class CDGAConfig:
+    """Gradient-surgery against a frozen OOD anchor batch.
+
+    Math (see lib/cdga.neuro for full derivation + proofs):
+        g_train  = ∇L(x_train; θ)
+        g_anchor = ∇L(x_anchor; θ)   # on held-out prose, no weight update
+        c        = max(0, -<g_train, g_anchor> / <g_anchor, g_anchor>)
+        g_aligned = g_train - α · c · g_anchor
+
+    `c` is non-zero only when the training step would actively HURT
+    the anchor (dot product negative). The surgery projects out that
+    conflicting component — a single-task analogue of PCGrad (Yu et
+    al. 2020, NeurIPS) where the "second task" is the same LM loss
+    on the OOD distribution.
+
+    `alpha_max`: strength cap. 1.0 = full projection; 0 = telemetry only.
+    `warmup_steps`: linear ramp of α from 0 to alpha_max. CDGA only
+        makes sense after the LM has formed baseline features; before
+        warmup completes both gradients are noise and surgery is
+        a coin-flip.
+    `refresh_every`: re-sample the anchor batch every N optimizer
+        steps. Higher = cheaper. Default 4 → +25% step time when
+        anchor batch is 1/4 size of training batch.
+    """
+    enabled: bool = False
+    alpha_max: float = 1.0
+    warmup_steps: int = 2000      # mirrors outer warmup
+    refresh_every: int = 4
 
 
 # ── Top-level container ──────────────────────────────────────────────
@@ -168,6 +242,9 @@ class RegularizationConfig:
     cmd: CMDConfig = field(default_factory=CMDConfig)
     adaptive_mixture: AdaptiveMixtureConfig = field(
         default_factory=AdaptiveMixtureConfig)
+    freq_balance: FreqBalanceConfig = field(
+        default_factory=FreqBalanceConfig)
+    cdga: CDGAConfig = field(default_factory=CDGAConfig)
     warmup_steps: int = 2000
 
     def any_enabled(self) -> bool:
@@ -177,6 +254,8 @@ class RegularizationConfig:
             self.isotropy.enabled,
             self.cmd.enabled,
             self.adaptive_mixture.enabled,
+            self.freq_balance.enabled,
+            self.cdga.enabled,
         ])
 
 
@@ -187,6 +266,7 @@ class RegularizationConfig:
 
 _VALID_CMD_DIVERGENCES = {"jsd", "kl_sym", "l1"}
 _VALID_ISOTROPY_DISTANCES = {"frobenius", "log_det"}
+_VALID_MIXTURE_DIRECTIONS = {"balance", "amplify"}
 
 
 # ── Parser ───────────────────────────────────────────────────────────
@@ -215,6 +295,10 @@ def parse_regularization_block(body: str) -> RegularizationConfig:
         cfg.cmd = _parse_cmd(props["cmd"])
     if "adaptive_mixture" in props:
         cfg.adaptive_mixture = _parse_adaptive_mixture(props["adaptive_mixture"])
+    if "freq_balance" in props:
+        cfg.freq_balance = _parse_freq_balance(props["freq_balance"])
+    if "cdga" in props:
+        cfg.cdga = _parse_cdga(props["cdga"])
 
     return cfg
 
@@ -288,11 +372,47 @@ def _parse_adaptive_mixture(raw: str) -> AdaptiveMixtureConfig:
     if "gamma" in p:          out.gamma = float(p["gamma"])
     if "min_ratio" in p:      out.min_ratio = float(p["min_ratio"])
     if "max_ratio" in p:      out.max_ratio = float(p["max_ratio"])
+    if "direction" in p:
+        d = _strip_quotes(p["direction"])
+        if d not in _VALID_MIXTURE_DIRECTIONS:
+            raise ValueError(
+                f"adaptive_mixture.direction={d!r}; expected one of "
+                f"{sorted(_VALID_MIXTURE_DIRECTIONS)}"
+            )
+        out.direction = d
     if out.min_ratio > out.max_ratio:
         raise ValueError(
             f"adaptive_mixture.min_ratio={out.min_ratio} > "
             f"max_ratio={out.max_ratio}"
         )
+    return out
+
+
+def _parse_freq_balance(raw: str) -> FreqBalanceConfig:
+    p = _split_top_level_kv(_strip_braces(raw))
+    out = FreqBalanceConfig()
+    if "enabled" in p: out.enabled = _parse_bool(p["enabled"])
+    if "beta" in p:    out.beta = float(p["beta"])
+    if "w_min" in p:   out.w_min = float(p["w_min"])
+    if "w_max" in p:   out.w_max = float(p["w_max"])
+    if out.w_min > out.w_max:
+        raise ValueError(
+            f"freq_balance.w_min={out.w_min} > w_max={out.w_max}")
+    return out
+
+
+def _parse_cdga(raw: str) -> CDGAConfig:
+    p = _split_top_level_kv(_strip_braces(raw))
+    out = CDGAConfig()
+    if "enabled" in p:       out.enabled = _parse_bool(p["enabled"])
+    if "alpha_max" in p:     out.alpha_max = float(p["alpha_max"])
+    if "warmup_steps" in p:  out.warmup_steps = int(p["warmup_steps"])
+    if "refresh_every" in p: out.refresh_every = int(p["refresh_every"])
+    if out.alpha_max < 0.0:
+        raise ValueError(f"cdga.alpha_max={out.alpha_max} must be ≥ 0")
+    if out.refresh_every < 1:
+        raise ValueError(
+            f"cdga.refresh_every={out.refresh_every} must be ≥ 1")
     return out
 
 

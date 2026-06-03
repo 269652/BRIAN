@@ -233,6 +233,11 @@ class BRIANHarness(nn.Module):
         # Optional caller-supplied function ids → (B,) domain labels.
         # When None, DAR self-disables with a one-time warning.
         self._domain_id_fn = None
+        # Optional caller-supplied callable (harness → loss_tensor) that
+        # runs an OOD anchor forward on a held-out prose batch. Required
+        # by CDGA gradient surgery. When None, CDGA is dormant
+        # (telemetry-only, no surgery applied).
+        self._cdga_anchor_fn = None
 
     @classmethod
     def from_language_model(cls, language_model: nn.Module,
@@ -277,6 +282,7 @@ class BRIANHarness(nn.Module):
         h._metrics = {}
         h._build_reg_controller()
         h._domain_id_fn = None
+        h._cdga_anchor_fn = None
         return h
 
     # ── Distributed training wrapping (DDP / FSDP) ────────────────────
@@ -350,6 +356,25 @@ class BRIANHarness(nn.Module):
         self-disables with a one-time warning.
         """
         self._domain_id_fn = fn
+
+    def set_cdga_anchor_fn(self, fn) -> None:
+        """Register a CDGA anchor function `(harness) -> loss_tensor`.
+
+        The function is called inside `train_step` after the standard
+        backward. It MUST:
+
+          1. Sample / cache a held-out OOD prose batch (separate from
+             both the training mixture AND the OOD evaluation slice).
+          2. Run a forward through `harness.language_model` on that batch.
+          3. Return the scalar LM cross-entropy loss tensor (autograd-
+             traced — the controller will call `.backward()` on it after
+             zeroing the parameter grads).
+
+        When None (default), CDGA is dormant. Its config + telemetry
+        still exist but no surgery is applied. See docs/CDGA.md for
+        a worked example anchor function against WikiText-103.
+        """
+        self._cdga_anchor_fn = fn
 
     def current_chat_ratio(self) -> float:
         """Public read of the adaptive mixture controller's current ratio.
@@ -510,7 +535,29 @@ class BRIANHarness(nn.Module):
             pre_phi_loss = self._step_genetics_pre(ids.shape[0], ids.device)
 
         logits = self(ids, nt_levels=nt_levels)
-        loss_lm = self._compute_loss_from_logits(logits, targets)
+
+        # ── PR2-F: frequency-balanced CE replacement ──
+        # If freq_balance is enabled AND statistics have been loaded
+        # via reg_controller.freq_balance.set_frequencies(...), the
+        # standard mean-CE is replaced with a per-token-weighted CE
+        # that biases the gradient direction toward the OOD target.
+        # This is the cheapest possible direction-aware OOD signal:
+        # it acts on the LM gradient itself (not an aux loss), so it
+        # composes additively with the other interventions in `total`.
+        reg_cfg_early = getattr(self.training_config, "regularization", None)
+        use_freq_balance = (
+            reg_cfg_early is not None
+            and reg_cfg_early.freq_balance.enabled
+            and getattr(self.reg_controller.freq_balance, "_fitted", False)
+        )
+        if use_freq_balance:
+            B, T, V = logits.shape
+            flat_l = logits.reshape(-1, V)
+            flat_t = targets.reshape(-1)
+            per_tok = F.cross_entropy(flat_l, flat_t, reduction="none")
+            loss_lm = self.reg_controller.freq_balance(per_tok, flat_t)
+        else:
+            loss_lm = self._compute_loss_from_logits(logits, targets)
 
         # ── Stage 8 OOD push: flooding loss ──
         # |loss - b| + b prevents the model from memorizing below floor b.
@@ -923,6 +970,50 @@ class BRIANHarness(nn.Module):
 
         self._accum_step += 1
         if self._accum_step >= accum:
+            # ── PR2-G: CDGA gradient surgery ──
+            # Runs AFTER grad accumulation finishes (so .grad holds the
+            # summed g_train) and BEFORE clip + optimizer.step(). If
+            # CDGA is enabled and an anchor function is registered, the
+            # controller may overwrite .grad with the conflict-projected
+            # g_aligned. On non-refresh steps this is a no-op.
+            reg_cfg_late = getattr(self.training_config, "regularization", None)
+            cdga_enabled = (
+                reg_cfg_late is not None
+                and reg_cfg_late.cdga.enabled
+                and self._cdga_anchor_fn is not None
+            )
+            if cdga_enabled:
+                # Refuse to mix CDGA with fp16 grad-scaling (the anchor
+                # backward would interact poorly with .unscale_); emit
+                # a single warning and skip surgery in that case.
+                if self._grad_scaler is not None:
+                    if not getattr(self, "_warned_cdga_fp16", False):
+                        import sys
+                        print(
+                            "[harness] CDGA disabled: fp16 grad-scaling is "
+                            "active. Re-run with bf16 or fp32 to enable "
+                            "gradient surgery.",
+                            file=sys.stderr,
+                        )
+                        self._warned_cdga_fp16 = True
+                else:
+                    def _anchor_callable():
+                        # Clear g_train, run anchor forward+backward.
+                        optimizer.zero_grad(set_to_none=True)
+                        anchor_loss = self._cdga_anchor_fn(self)
+                        anchor_loss.backward()
+                        return anchor_loss
+
+                    cdga_out = self.reg_controller.cdga.apply_surgery(
+                        self, anchor_loss_fn=_anchor_callable)
+                    if cdga_out["applied"]:
+                        self._metrics["cdga_alpha"] = float(cdga_out["alpha"])
+                        self._metrics["cdga_cosine"] = float(cdga_out["cosine"])
+                        self._metrics["cdga_conflict"] = float(
+                            cdga_out["conflict_coef"])
+                    else:
+                        self._metrics["cdga_alpha"] = float(cdga_out["alpha"])
+
             clip = self.training_config.grad_clip
             # clip_grad_norm_ returns the total norm *before* clipping —
             # capture it for native-format logging (gnorm).

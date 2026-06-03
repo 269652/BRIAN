@@ -333,11 +333,20 @@ class TestCMDLoss:
 # ══════════════════════════════════════════════════════════════════════
 
 class TestAdaptiveMixtureController:
+    """Legacy direction (`direction="amplify"`) semantics.
+
+    These tests exercise the original (now-deprecated) control law
+    that *amplifies* the observed deviation. They're kept for
+    back-compat ablation. The corrected `direction="balance"` rule
+    (default since 2026-06-03) is exercised in
+    `tests/test_adaptive_mixture_direction.py`.
+    """
     def _make(self, enabled: bool = True, target_H: float = 4.5,
               gamma: float = 2.0):
         cfg = AdaptiveMixtureConfig(
             enabled=enabled, target_entropy=target_H,
-            probe_interval=1, gamma=gamma, min_ratio=0.05, max_ratio=0.95)
+            probe_interval=1, gamma=gamma, min_ratio=0.05, max_ratio=0.95,
+            direction="amplify")
         return AdaptiveMixtureController(cfg, initial_ratio=0.6), cfg
 
     def test_disabled_keeps_ratio_constant(self):
@@ -377,7 +386,8 @@ class TestAdaptiveMixtureController:
     def test_probe_interval_throttles_updates(self):
         cfg = AdaptiveMixtureConfig(
             enabled=True, target_entropy=10.0, probe_interval=5,
-            gamma=2.0, min_ratio=0.05, max_ratio=0.95)
+            gamma=2.0, min_ratio=0.05, max_ratio=0.95,
+            direction="amplify")
         m = AdaptiveMixtureController(cfg, initial_ratio=0.6)
         initial = m.ratio()
         # First 4 observations should NOT update the ratio

@@ -24,6 +24,7 @@ import torch.nn.functional as F
 
 from neuroslm.dsl.regularization import (
     DARConfig, PCCConfig, IsotropyConfig, CMDConfig, AdaptiveMixtureConfig,
+    FreqBalanceConfig, CDGAConfig,
     RegularizationConfig,
 )
 
@@ -409,11 +410,269 @@ class AdaptiveMixtureController(nn.Module):
             self._ent_sum, self._ent_n = 0.0, 0
 
     def _update_ratio(self, H_t: float) -> None:
-        gain = (H_t / max(1e-6, self.cfg.target_entropy)) ** self.cfg.gamma
+        # Direction "balance" (default, corrected): the controller
+        # *opposes* the observed deviation. If H_t > H_target the
+        # model is uncertain on prose → shrink chat. Sign-inverted
+        # form of the original control law.
+        # Direction "amplify" (legacy bug, kept for ablation):
+        # multiplies by (H_t/H_target)^γ — this *amplifies* whichever
+        # distribution is overfit and produced the 2026-06-03
+        # regression where chat_ratio ran to its max cap.
+        direction = getattr(self.cfg, "direction", "balance")
+        H_safe = max(1e-6, H_t)
+        H_tar = max(1e-6, self.cfg.target_entropy)
+        if direction == "amplify":
+            gain = (H_safe / H_tar) ** self.cfg.gamma
+        else:  # "balance"
+            gain = (H_tar / H_safe) ** self.cfg.gamma
         new_ratio = self._ratio * gain
         new_ratio = max(self.cfg.min_ratio,
                         min(self.cfg.max_ratio, new_ratio))
         self._ratio = float(new_ratio)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Intervention F — Frequency-balanced cross-entropy
+# ══════════════════════════════════════════════════════════════════════
+
+class FreqBalanceReweighter(nn.Module):
+    """Token-level inverse-frequency reweighting toward an OOD target.
+
+    Math (lib/regularizers.neuro :: freq_balance_*):
+        ratio[v] = freq_target[v] / (freq_train[v] + ε)
+        w[v]     = clip(ratio[v]^β, w_min, w_max)
+        w[v]     = w[v] / mean(w[v])                    # mean-normalised
+        L        = mean(w[targets] * per_token_CE)
+
+    Pre-computed frequencies are loaded via `set_frequencies(...)` at
+    setup time (the harness calls this once after a corpus scan). Until
+    then the reweighter is a pure identity (returns plain mean of
+    per_token_CE), so the module is safe to leave wired even before
+    statistics are available.
+    """
+    def __init__(self, cfg: FreqBalanceConfig, vocab_size: int):
+        super().__init__()
+        self.cfg = cfg
+        self.vocab_size = int(vocab_size)
+        # Per-vocab weight vector; identity until set_frequencies().
+        self.register_buffer(
+            "_w_norm", torch.ones(self.vocab_size), persistent=True)
+        self.register_buffer(
+            "_w_raw", torch.ones(self.vocab_size), persistent=False)
+        self._fitted = False
+
+    # -- Public statistics setter -------------------------------------
+
+    def set_frequencies(self, freq_train: torch.Tensor,
+                        freq_target: torch.Tensor,
+                        eps: float = 1e-8) -> None:
+        """Compute and store the mean-normalised weight vector.
+
+        Both inputs must be shape (vocab_size,) and sum to 1 (they're
+        probabilities, not counts). The caller is responsible for
+        precomputing them from corpus samples.
+        """
+        if freq_train.shape != (self.vocab_size,):
+            raise ValueError(
+                f"freq_train shape {tuple(freq_train.shape)} != "
+                f"expected ({self.vocab_size},); did you pass the wrong vocab?"
+            )
+        if freq_target.shape != (self.vocab_size,):
+            raise ValueError(
+                f"freq_target shape {tuple(freq_target.shape)} != "
+                f"expected ({self.vocab_size},)"
+            )
+        with torch.no_grad():
+            ratio = freq_target / (freq_train + eps)
+            w = ratio.clamp(min=eps) ** self.cfg.beta
+            w = w.clamp(min=self.cfg.w_min, max=self.cfg.w_max)
+            self._w_raw.copy_(w.to(self._w_raw))
+            w_norm = w / w.mean().clamp(min=eps)
+            self._w_norm.copy_(w_norm.to(self._w_norm))
+        self._fitted = True
+
+    # -- Inspection helpers (tests) -----------------------------------
+
+    def weight_vector(self) -> torch.Tensor:
+        """Mean-normalised, clipped weight vector (read-only view)."""
+        return self._w_norm.detach()
+
+    def _raw_weight_vector(self) -> torch.Tensor:
+        """Pre-normalisation, clipped weight vector — for tests only."""
+        return self._w_raw.detach()
+
+    # -- Forward ------------------------------------------------------
+
+    def forward(self, per_token_ce: torch.Tensor,
+                targets: torch.Tensor) -> torch.Tensor:
+        """Apply the per-vocab weighting.
+
+        Args:
+            per_token_ce: shape (N,) per-token CE losses
+            targets:      shape (N,) integer target token ids
+        Returns:
+            scalar weighted mean (or plain mean if disabled / unfitted)
+        """
+        if not self.cfg.enabled or not self._fitted:
+            return per_token_ce.mean()
+        # Gather the per-target weight, no grad through the weights.
+        w = self._w_norm.detach().to(per_token_ce.dtype).to(
+            per_token_ce.device)
+        w_per = w.index_select(0, targets.reshape(-1))
+        return (w_per * per_token_ce.reshape(-1)).mean()
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Intervention G — Cross-Distribution Gradient Alignment (CDGA)
+# ══════════════════════════════════════════════════════════════════════
+
+class CDGAController(nn.Module):
+    """Gradient surgery against a held-out OOD anchor batch.
+
+    Math (lib/cdga.neuro :: cdga_*):
+        c          = max(0, -<g_train, g_anchor> / <g_anchor, g_anchor>)
+        g_aligned  = g_train - α · c · g_anchor
+
+    Lifecycle (per training step):
+        1. Standard backward fills `p.grad` for every trainable p with
+           g_train.
+        2. The harness calls `apply_surgery(model, anchor_loss_fn)`.
+        3. CDGA snapshots g_train, zeros grads, calls anchor_loss_fn()
+           (which is expected to do its own forward+backward), reads
+           g_anchor from `p.grad`, computes scalars, and writes
+           g_aligned back into `p.grad`.
+        4. The harness clips & calls `optimizer.step()` normally.
+
+    `refresh_every` throttles step (3) so the extra forward+backward
+    only happens every Nth optimizer call. Between refreshes the
+    controller is a pure no-op (g_train stays in .grad).
+    """
+    def __init__(self, cfg: CDGAConfig):
+        super().__init__()
+        self.cfg = cfg
+        # Step counter (each apply_surgery call advances it by 1)
+        self.register_buffer(
+            "_cdga_step", torch.zeros(1, dtype=torch.long), persistent=True)
+        # Last computed telemetry
+        self._last_cosine: float = float("nan")
+        self._last_conflict: float = 0.0
+
+    # -- Schedule -----------------------------------------------------
+
+    def _tick(self) -> None:
+        self._cdga_step += 1
+
+    def current_alpha(self) -> float:
+        """Linear warmup of α from 0 → alpha_max over warmup_steps."""
+        w = int(self.cfg.warmup_steps)
+        a = float(self.cfg.alpha_max)
+        if w <= 0:
+            return a
+        s = int(self._cdga_step.item())
+        return min(a, a * s / float(w))
+
+    def _is_refresh_step(self) -> bool:
+        return int(self._cdga_step.item()) % max(1, self.cfg.refresh_every) == 0
+
+    # -- Math primitives (also exported for tests) --------------------
+
+    @staticmethod
+    def conflict_coefficient(g_train: torch.Tensor,
+                              g_anchor: torch.Tensor) -> torch.Tensor:
+        """c = max(0, -<g_train, g_anchor> / <g_anchor, g_anchor>)."""
+        dot = (g_train * g_anchor).sum()
+        g2 = (g_anchor * g_anchor).sum().clamp(min=1e-12)
+        return torch.clamp(-dot / g2, min=0.0)
+
+    @staticmethod
+    def cosine_similarity(g_train: torch.Tensor,
+                          g_anchor: torch.Tensor) -> torch.Tensor:
+        """cos_θ = <g_train, g_anchor> / (||g_train|| · ||g_anchor||)."""
+        n_t = g_train.norm().clamp(min=1e-12)
+        n_a = g_anchor.norm().clamp(min=1e-12)
+        return (g_train * g_anchor).sum() / (n_t * n_a)
+
+    # -- Per-parameter helpers ----------------------------------------
+
+    @staticmethod
+    def _flatten_grads(model: nn.Module) -> torch.Tensor:
+        chunks = []
+        for p in model.parameters():
+            if p.grad is None:
+                # Treat missing grads as zero so the flat shape is stable.
+                chunks.append(torch.zeros_like(p).flatten())
+            else:
+                chunks.append(p.grad.flatten())
+        return torch.cat(chunks) if chunks else torch.zeros(0)
+
+    @staticmethod
+    def _write_grads(model: nn.Module, flat: torch.Tensor) -> None:
+        offset = 0
+        for p in model.parameters():
+            n = p.numel()
+            if p.grad is None:
+                p.grad = torch.zeros_like(p)
+            p.grad.copy_(flat[offset:offset + n].view_as(p))
+            offset += n
+
+    # -- Main entry point ---------------------------------------------
+
+    def apply_surgery(self, model: nn.Module,
+                      anchor_loss_fn) -> Dict[str, float]:
+        """Perform gradient surgery in-place on `model.parameters()`.
+
+        Args:
+            model: the training module whose `.grad` slots currently
+                hold g_train.
+            anchor_loss_fn: zero-arg callable that runs an anchor
+                forward+backward (expected to zero grads itself and
+                leave g_anchor in `p.grad`).
+
+        Returns:
+            dict with keys: applied, alpha, conflict_coef, cosine,
+                refreshed.
+        """
+        out = {"applied": False, "alpha": 0.0, "conflict_coef": 0.0,
+               "cosine": float("nan"), "refreshed": False}
+        if not self.cfg.enabled:
+            return out
+
+        alpha = self.current_alpha()
+        # Always tick AFTER reading current_alpha so step 0 sees α=0
+        # under non-zero warmup_steps (consistent with reg controller).
+        do_refresh = self._is_refresh_step()
+        self._tick()
+
+        if alpha <= 0.0 or not do_refresh:
+            out["alpha"] = alpha
+            return out
+
+        # 1. Snapshot g_train
+        g_train = self._flatten_grads(model).detach().clone()
+
+        # 2. Run anchor pass (expected to overwrite .grad with g_anchor)
+        anchor_loss_fn()
+        g_anchor = self._flatten_grads(model).detach().clone()
+
+        # 3. Compute scalars
+        cos = float(self.cosine_similarity(g_train, g_anchor).item())
+        c = float(self.conflict_coefficient(g_train, g_anchor).item())
+
+        # 4. Write aligned grad
+        g_aligned = g_train - alpha * c * g_anchor
+        self._write_grads(model, g_aligned)
+
+        self._last_cosine = cos
+        self._last_conflict = c
+
+        out.update({
+            "applied": True,
+            "alpha": alpha,
+            "conflict_coef": c,
+            "cosine": cos,
+            "refreshed": True,
+        })
+        return out
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -447,6 +706,9 @@ class RegularizationController(nn.Module):
         self.cmd = CMDLoss(cfg.cmd, d_model, vocab_size)
         self.adaptive_mixture = AdaptiveMixtureController(
             cfg.adaptive_mixture, initial_chat_ratio)
+        self.freq_balance = FreqBalanceReweighter(
+            cfg.freq_balance, vocab_size)
+        self.cdga = CDGAController(cfg.cdga)
         # Step counter for warmup. Incremented every collect_aux call
         # (which is exactly once per optimizer step).
         self.register_buffer(

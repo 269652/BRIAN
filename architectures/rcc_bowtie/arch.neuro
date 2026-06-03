@@ -335,9 +335,48 @@ training {
 
         # E. Adaptive mixture controller — anneals chat_ratio to preserve
         #    measured entropy on a held-out prose probe. Closed-loop.
+        #    `direction: "balance"` (default since 2026-06-03) makes the
+        #    controller OPPOSE the deviation: high prose entropy → SHRINK
+        #    chat (more prose exposure). Use "amplify" to restore the
+        #    legacy (buggy) direction for ablation.
+        #    `max_ratio: 0.50` (CHANGED 2026-06-03 from 0.80) prevents
+        #    the controller from starving the model of prose entirely;
+        #    the 2026-06-03 run had it pinned at 0.80 while gap_ratio
+        #    widened monotonically.
         adaptive_mixture: { enabled: true, target_entropy: 4.5,
                             probe_interval: 100, gamma: 2.0,
-                            min_ratio: 0.10, max_ratio: 0.80 }
+                            direction: "balance",
+                            min_ratio: 0.10, max_ratio: 0.50 }
+
+        # F. Frequency-balanced cross-entropy — token-level inverse-
+        #    frequency reweighting toward the OOD target distribution.
+        #    Cheapest possible direction-aware OOD signal: it doesn't
+        #    add an aux loss; it RESHAPES the main LM CE so the
+        #    gradient itself biases toward the prose token distribution.
+        #    Requires `harness.reg_controller.freq_balance.set_frequencies(
+        #      freq_train, freq_target)` to be called once after a corpus
+        #    scan. Until then it's a pure no-op identity.
+        #    β = 0.5 = Mikolov 2013 sqrt-smoothing default.
+        #    Disabled by default — enable once corpus frequency cache
+        #    is plumbed through the data loader (TODO PR-C).
+        freq_balance: { enabled: false, beta: 0.5,
+                        w_min: 0.2, w_max: 5.0 }
+
+        # G. Cross-Distribution Gradient Alignment (CDGA) — research-grade
+        #    gradient surgery against a frozen OOD anchor batch. After
+        #    the standard backward, runs a second forward+backward on a
+        #    held-out prose batch, computes the conflict coefficient
+        #    c = max(0, -<g_train, g_anchor>/<g_anchor, g_anchor>), and
+        #    writes g_aligned = g_train - α·c·g_anchor into .grad.
+        #    PCGrad (Yu et al. 2020) applied for the first time to a
+        #    single-task LM with an OOD proxy task as the "second task".
+        #    See architectures/rcc_bowtie/lib/cdga.neuro for the full
+        #    math + docs/CDGA.md for the design doc.
+        #    Requires `harness.set_cdga_anchor_fn(fn)` to register an
+        #    anchor batch loader. Disabled by default until that wiring
+        #    is in place.
+        cdga: { enabled: false, alpha_max: 1.0,
+                warmup_steps: 2000, refresh_every: 4 }
     }
 }
 
@@ -415,6 +454,12 @@ neurotransmitter gaba {
 # =============================================================================
 
 import { standard_synapse, multiplicative_modulation, additive_modulation } from "@/lib/equations"
+# Regularizer & CDGA equation libraries — math-first declarative specs
+# for the OOD interventions (PR2 + PR-A + PR-B). The Python lowerings
+# live in neuroslm/regularizers.py and read their hyperparameters from
+# the `regularization { ... }` block above.
+import { adaptive_mixture_update, freq_balance_loss, freq_balance_weight } from "@/lib/regularizers"
+import { cdga_conflict_coef, cdga_aligned_gradient, cdga_strength_schedule } from "@/lib/cdga"
 
 # =============================================================================
 # MODULE IMPORTS — every brain region this architecture comprises

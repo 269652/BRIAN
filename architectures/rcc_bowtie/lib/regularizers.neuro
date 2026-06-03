@@ -104,9 +104,65 @@ export equation probe_entropy {
     formula: "H = -mean(sum(p_probe * log(p_probe)))"
 }
 
+# Adaptive mixture controller — corrected (entropy-parity) direction.
+#
+# Intuition: H_t is the measured entropy on a held-out PROSE probe.
+# If H_t > H_target the model is *uncertain* on prose → it has seen
+# too little of that distribution → the controller must dial CHAT
+# DOWN (more prose exposure). If H_t < H_target the model is fluent
+# on prose → it has spare capacity for chat → chat ratio can grow.
+#
+# The original `(H_t / H_target)^gamma` formula was BACKWARDS: it
+# *amplified* whichever distribution the model already overfit to,
+# producing the runaway 0.60 → 0.80 chat_ratio observed in the
+# 2026-06-03 trace where gap_ratio widened monotonically.
+#
+# The `direction` parameter selects the rule:
+#   direction = "balance"  →  (H_target / H_t)^gamma    (DEFAULT, correct)
+#   direction = "amplify"  →  (H_t / H_target)^gamma    (legacy bug — kept
+#                                                        for ablation only)
+
 export equation adaptive_mixture_update {
-    params: [chat_ratio_t, H_t, H_target, gamma, r_min, r_max],
-    formula: "chat_ratio_next = clip(chat_ratio_t * (H_t / H_target)^gamma, r_min, r_max)"
+    params: [chat_ratio_t, H_t, H_target, gamma, r_min, r_max, direction],
+    formula: "chat_ratio_next = clip(chat_ratio_t * (direction == \"balance\" ? (H_target / H_t)^gamma : (H_t / H_target)^gamma), r_min, r_max)"
+}
+
+# ── Intervention F — Frequency-balanced cross-entropy ────────────────
+# Token-level inverse-frequency reweighting toward an OOD target
+# corpus. Pre-computed unigram frequencies on both train and target
+# corpora produce a per-vocab weight vector that downweights tokens
+# the train corpus over-represents relative to the OOD target.
+#
+# Math (cf. focal loss, class-balanced loss [Cui et al. 2019]):
+#
+#   freq_train[v]   = count_v / Σ_v count_v       (over training sample)
+#   freq_target[v]  = count_v / Σ_v count_v       (over OOD probe sample)
+#   ratio[v]        = freq_target[v] / (freq_train[v] + ε)
+#   w[v]            = clip(ratio[v]^beta, w_min, w_max)
+#   w[v]            = w[v] / mean(w[v])           (mean-normalised so
+#                                                  the loss scale is
+#                                                  unchanged — only the
+#                                                  *direction* per token)
+#   L_freq          = mean( w[ targets ] * CE_per_token )
+#
+# β controls the strength: 0 = uniform (identity), 1 = exact inverse
+# frequency, 0.5 = square-root smoothing (Mikolov 2013-style).
+# Recommended β = 0.5, w_max = 5.0, w_min = 0.2 — keeps the loss
+# scale within 5× of the baseline so the LR schedule still works.
+
+export equation freq_balance_weight {
+    params: [freq_train, freq_target, beta, w_min, w_max],
+    formula: "w[v] = clip((freq_target[v] / (freq_train[v] + epsilon))^beta, w_min, w_max)"
+}
+
+export equation freq_balance_normalize {
+    params: [w],
+    formula: "w_norm[v] = w[v] / mean(w[v])"
+}
+
+export equation freq_balance_loss {
+    params: [CE_per_token, targets, w_norm],
+    formula: "L = mean( w_norm[ targets ] * CE_per_token )"
 }
 
 # ── PCT-IB (proposed, lands in PR3) — multi-scale predictive coding ──
