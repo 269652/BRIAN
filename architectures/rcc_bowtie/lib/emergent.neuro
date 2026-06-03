@@ -20,53 +20,50 @@
 #   <·,·>          — inner product
 
 # ─────────────────────────────────────────────────────────────────────
-# C1 — Driven neuromodulators (closed-loop)
+# C1 — Driven neuromodulators (homeostatic field)
 # ─────────────────────────────────────────────────────────────────────
-# The seven classical NT channels become functions of training state.
-# Each is bounded in [0,1] and reduces to a known constant when its
-# driver is silent (graceful baseline-recovery).
+# The seven classical NT channels are realised as ONE leaky-linear
+# (Ornstein–Uhlenbeck) dynamical system in unbounded logit space y∈ℝ⁷,
+# driven by standardised training-state scalars and read out through a
+# single sigmoid.  This formulation inherently prevents the rail-clip
+# (eCB, Glu, ACh), one-way ratchet (5HT) and stuck-at-zero (GABA)
+# pathologies of per-channel feedforward squashes:
+#   • drivers z-scored ⇒ σ stays in its responsive region;
+#   • α>0 leak ⇒ guaranteed recovery from any excursion;
+#   • single σ at readout ⇒ nt∈(0,1) open interval.
 
-export equation driven_nt_da {
-    # Phasic dopamine on negative surprise (loss below recent mean).
-    params: [L_t, mean_L_recent, std_L_recent],
-    formula: "DA = sigmoid((mean_L_recent - L_t) / std_L_recent)"
+export equation nt_driver_standardise {
+    # Per-driver z-score against running EMA mean/std (Welford-on-EMA).
+    # alpha_d ≈ 0.02 ⇒ ~50-step memory; warmup-suppressed (z=0 for n<5).
+    params: [d_k, mu_d_k, var_d_k, eps],
+    formula: "z_k = (d_k - mu_d_k) / sqrt(var_d_k + eps)"
 }
 
-export equation driven_nt_ne {
-    # Tonic norepinephrine = tanh(EMA(grad_norm) / tau_ne).
-    params: [g_t_ema, tau_ne],
-    formula: "NE = tanh(max(0, g_t_ema) / tau_ne)"
+export equation nt_homeostat_step {
+    # Leaky linear OU step.  W ∈ ℝ^{7×5} couples K=5 standardised
+    # drivers (surprise, gnorm, activation, ignition, attn_sharp) to
+    # the 7 channels (DA, NE, 5HT, ACh, eCB, Glu, GABA).  α ∈ ℝ^7 is
+    # the per-channel leak rate; μ = logit(baseline) is the tonic
+    # resting logit.
+    params: [y_prev, alpha, mu, W, z],
+    formula: "y_next = (1 - alpha) * y_prev + alpha * (mu + W @ clip(z, -5, 5))"
 }
 
-export equation driven_nt_5ht {
-    # Serotonin = sigmoid of long-term loss improvement against start ref.
-    params: [L_ref, L_slow_ema, scale],
-    formula: "5HT = sigmoid(3 * (L_ref - L_slow_ema) / scale)"
+export equation nt_homeostat_readout {
+    # Single squash at readout — the only place σ is applied, so it
+    # always operates in its responsive central region.
+    params: [y],
+    formula: "nt = sigmoid(y)"
 }
 
-export equation driven_nt_ach {
-    # Acetylcholine = inverse-normalised attention entropy
-    # (sharp attention → high ACh).
-    params: [H_attn_norm],
-    formula: "ACh = 1 - H_attn_norm"
+formal_spec nt_homeostat_stationarity {
+    statement: "For fixed driver statistics, the channel vector y is OU with stationary distribution N(mu + W*z_bar, alpha/(2-alpha) * W Sigma_z W^T); nt = sigma(y) is therefore in (0,1) almost surely",
+    proof_hint: "Standard linear-Gaussian SDE result; each channel is an independent leaky integrator of a bounded stationary input."
 }
 
-export equation driven_nt_ecb {
-    # Endocannabinoid (retrograde inhibition) = tanh(activation/τ_ecb).
-    params: [a_mean, tau_ecb],
-    formula: "eCB = tanh(max(0, a_mean) / tau_ecb)"
-}
-
-export equation driven_nt_glu {
-    # Glutamate = tanh(activation/τ_glu) — forward-magnitude proxy.
-    params: [a_mean, tau_glu],
-    formula: "Glu = tanh(max(0, a_mean) / tau_glu)"
-}
-
-export equation driven_nt_gaba {
-    # GABA = 1 − ignition_rate: inhibits when the workspace saturates.
-    params: [ignition_rate],
-    formula: "GABA = clip(1 - ignition_rate, 0, 1)"
+formal_spec nt_homeostat_recovery {
+    statement: "Each channel exponentially relaxes to sigma(mu_c) with time constant 1/alpha_c when its drivers vanish",
+    proof_hint: "Setting z=0 reduces the OU step to y_next = (1-alpha) y_prev + alpha mu, geometric convergence to mu in logit space."
 }
 
 # ─────────────────────────────────────────────────────────────────────

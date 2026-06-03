@@ -433,7 +433,7 @@ import { cdga_conflict_coef, cdga_aligned_gradient, cdga_strength_schedule } fro
 # lowering lives in neuroslm/emergent/ and is wired into the metric
 # observer by default. Telemetry-only in this PR; promotion of any
 # mechanism into a forward-pass aux loss is a future PR.
-import { driven_nt_da, driven_nt_ne, driven_nt_5ht, driven_nt_ach, driven_nt_ecb, driven_nt_glu, driven_nt_gaba } from "@/lib/emergent"
+import { nt_driver_standardise, nt_homeostat_step, nt_homeostat_readout } from "@/lib/emergent"
 import { metastable_ignition_gate, metastable_ignition_event, metastable_threshold_update } from "@/lib/emergent"
 import { pc_reentry_predict, pc_reentry_residual } from "@/lib/emergent"
 import { topological_unit_field, topological_complex_pair, topological_phase_increment, topological_charge_total, topological_wall_indicator } from "@/lib/emergent"

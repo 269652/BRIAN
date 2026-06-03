@@ -355,13 +355,38 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
                    f"Σ={reg_vals['reg_total']:.3f} "
                    f"w={reg_vals['reg_warmup']:.2f} "
                    f"chat={reg_vals['chat_ratio']:.2f}]")
+    # Emergent C1–C6 telemetry tail (printed only when those keys are
+    # present, so legacy runs without enable_emergent see no change).
+    em_str = ""
+    em_present = any(k in m for k in
+                     ("ign_rate", "Q_total", "pac", "pc_residual",
+                      "lattice_spec"))
+    if em_present:
+        em_parts = []
+        if "ign_rate" in m:
+            em_parts.append(
+                f"C2:ρ={m.get('ign_rate', 0.0):.2f}"
+                f"/τ={m.get('ign_threshold', 0.0):.2f}"
+                f"/s={m.get('ign_strength', 0.0):.2f}")
+        if "Q_total" in m:
+            em_parts.append(
+                f"C4:Q={m.get('Q_total', 0.0):.1f}"
+                f" W={int(m.get('Q_walls', 0))}"
+                f" pl={int(m.get('Q_plateau_len', 0))}")
+        if "pc_residual" in m:
+            em_parts.append(f"C3:pc={m.get('pc_residual', 0.0):.3f}")
+        if "lattice_spec" in m:
+            em_parts.append(f"C5:lat={m.get('lattice_spec', 0.0):.2f}")
+        if "pac" in m:
+            em_parts.append(f"C6:pac={m.get('pac', 0.0):.2f}")
+        em_str = " | em[" + " ".join(em_parts) + "]"
     return (f"step {step:5d} | loss {avg_loss:.4f} | lm {avg_lm:.4f} "
             f"| ppl {ppl:.1f} | gnorm {gnorm:.3f} | lr {lr:.2e} "
             f"| {tok_per_s:.0f} tok/s "
             f"| Φ {phi:.3f} | λ₁ {fid:.3f} | ign {ign:.2f} "
             f"| mesoLG {lg:.2f} "
             f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
-            f"| NT[{nt_str}]{osc_str}{reg_str}")
+            f"| NT[{nt_str}]{osc_str}{em_str}{reg_str}")
 
 
 def _eval_pass_marks(rules, step: int,

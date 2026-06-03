@@ -1,41 +1,77 @@
 # -*- coding: utf-8 -*-
 """C1 — Driven neuromodulators (closed-loop NT observability).
 
-Replaces the toy `metrics.NTSystem` drift-to-baseline ODE with a system
-whose seven channels are *functions of training state*. The intent is
-that the NT log column becomes informative — DA spikes on surprise, NE
-spikes on grad-norm shocks, GABA falls when the workspace saturates,
-etc. — so the bowtie's modulation matrix has real signal to act on once
-we promote this into the forward pass in a later PR.
+A *homeostatic neuromodulatory field* — the seven classical NT channels
+are realised as one leaky-linear (Ornstein–Uhlenbeck) dynamical system
+in unbounded logit space, driven by *standardised* training-state
+scalars and read out through a single sigmoid:
 
-All channels are bounded in [0,1] and update in O(7) per step.
+    z_k(t)   = (d_k(t) - μ̂_k(t)) / (σ̂_k(t) + ε)         # per-driver z-score
+    y(t+1)   = (1-α) ⊙ y(t) + α ⊙ (μ + W · z(t))         # OU step
+    nt(t)    = σ(y(t))                                     # single readout
 
-Drivers (each fed via `step(...)` by the metric observer):
+This replaces the previous per-channel feedforward squashes which were
+brittle by construction: the raw drivers had unknown training-time
+scale, so the per-channel tanh/sigmoid would either rail (eCB, Glu,
+ACh) or integrate monotonically with no leak (5HT) or hit a hard floor
+(GABA). The homeostatic formulation *inherently* prevents all three
+pathologies:
 
-    loss           per-step LM loss
-    grad_norm      pre-clip gradient L2
-    activation     mean |h| of the last layer (already computed)
-    ignition       most-recent ignition rate from MetastableIgnition
-    attn_entropy   optional, per-step mean attention entropy normalised to log T
+  - Drivers are z-scored → the linear map sees deviations, not raw
+    magnitudes; σ at the readout stays in its responsive region.
+  - α > 0 leak pulls y back to μ on timescale 1/α → no accumulation,
+    no monotonic drift, guaranteed recovery from any excursion.
+  - μ = logit(baseline) sets the tonic level; W rows encode biology
+    (DA loves +surprise, NE loves +gnorm, GABA loves +ignition…).
 
-The channel formulas are deliberately simple closed forms (see
-`docs/EMERGENT_TOPOLOGY.md §C1`). They are *not* learnable: the point of
-this layer is to test whether the modulation matrix in `arch.neuro` has
-been seeing dead constants. Learnable couplings are Phase 8.
+Drivers (K=5):
+
+    surprise        z-score of -loss against running stats   → DA, 5HT
+    grad_norm       z-score of gnorm                         → NE, GABA
+    activation      z-score of mean-|h|                      → Glu, eCB
+    ignition        z-score of ignition_rate                 → GABA, -ACh
+    attn_sharp      z-score of (1 - attn_entropy_norm)       → ACh
+
+API preserved (drop-in for legacy NTSystem):
+
+    DrivenNTSystem(baselines=...)            # baselines map kwarg
+    .step(activity=...)                      # legacy shim — activation only
+    .step_full(loss, grad_norm, activation, ignition_rate, attn_entropy_norm)
+    .levels()                                # 7-key dict in [0,1]
+    .baselines                               # property
 """
 from __future__ import annotations
 import math
-from collections import deque
 from typing import Dict, Optional
 
 
-# Default time constants — tuned so that NT values typically span
-# [0.1, 0.9] under realistic training-loop magnitudes (loss ~ 1–10,
-# gnorm ~ 0.3–3, activation ~ 0.1–1).
-_DEFAULT_TAUS = {
-    "NE":  1.0,    # gradient-norm scale
-    "eCB": 1.0,    # activation/√d scale
-    "Glu": 1.0,    # activation scale
+_CHANNELS = ("DA", "NE", "5HT", "ACh", "eCB", "Glu", "GABA")
+_DRIVERS = ("surprise", "grad_norm", "activation", "ignition", "attn_sharp")
+
+
+# Per-channel leak rate α (≈ 1/τ in steps).  Smaller = longer memory.
+_DEFAULT_ALPHA = {
+    "DA":   0.30,   # fast phasic
+    "NE":   0.20,
+    "5HT":  0.01,   # slow integrator (~100-step time constant)
+    "ACh":  0.15,
+    "eCB":  0.10,
+    "Glu":  0.20,
+    "GABA": 0.15,
+}
+
+# Driver-to-channel coupling W ∈ R^{7×5}.  Rows in order of _CHANNELS,
+# columns in order of _DRIVERS.  Magnitudes are O(1): a z=±2 driver
+# produces roughly a 0.10–0.20 deviation in nt-space after the squash.
+_DEFAULT_W = {
+    #         surprise  gnorm     act       ign       attn
+    "DA":   ( +1.20,    0.00,    0.00,    0.00,    0.00),
+    "NE":   (  0.00,   +1.20,    0.00,    0.00,    0.00),
+    "5HT":  ( +1.00,    0.00,    0.00,    0.00,    0.00),  # same dir as DA but slow
+    "ACh":  (  0.00,    0.00,    0.00,   -0.50,   +0.80),
+    "eCB":  (  0.00,    0.00,   +1.00,    0.00,    0.00),
+    "Glu":  (  0.00,    0.00,   +1.00,    0.00,    0.00),
+    "GABA": (  0.00,   +0.40,    0.00,   +0.80,    0.00),
 }
 
 
@@ -47,56 +83,78 @@ def _sigmoid(x: float) -> float:
     return z / (1.0 + z)
 
 
-class _EMA:
-    """Scalar EMA with explicit ``alpha`` (smaller alpha = longer memory)."""
+def _logit(p: float, eps: float = 1e-4) -> float:
+    p = max(eps, min(1.0 - eps, float(p)))
+    return math.log(p / (1.0 - p))
 
-    __slots__ = ("alpha", "value", "_initialised")
 
-    def __init__(self, alpha: float = 0.05, initial: float = 0.0):
+class _RunningStats:
+    """EMA mean and EMA variance of a scalar driver.
+
+    During warmup (n < 5) returns z=0 so channels remain at their tonic
+    baseline rather than being slammed by an ill-estimated mean.
+    """
+    __slots__ = ("alpha", "mean", "var", "n")
+
+    def __init__(self, alpha: float = 0.02):
         self.alpha = float(alpha)
-        self.value = float(initial)
-        self._initialised = False
+        self.mean = 0.0
+        self.var = 1.0    # safe divisor for the first sample
+        self.n = 0
 
     def update(self, x: float) -> float:
-        if not self._initialised:
-            self.value = float(x)
-            self._initialised = True
-        else:
-            self.value = (1.0 - self.alpha) * self.value + self.alpha * float(x)
-        return self.value
+        x = float(x)
+        self.n += 1
+        if self.n == 1:
+            self.mean = x
+            self.var = 1.0
+            return 0.0
+        # Coupled EMA update for mean and variance (Welford-on-EMA).
+        delta = x - self.mean
+        self.mean += self.alpha * delta
+        self.var = (1.0 - self.alpha) * self.var + self.alpha * delta * (x - self.mean)
+        if self.n < 5:
+            return 0.0
+        sd = math.sqrt(max(self.var, 1e-8))
+        return (x - self.mean) / sd
 
 
 class DrivenNTSystem:
-    """Seven-channel NT state, driven by training-state scalars.
+    """Seven-channel NT homeostat (OU in logit space, σ at readout).
 
-    Drop-in replacement for `dsl.metrics.NTSystem`: exposes the same
-    ``step(activity=...)`` shim (for compatibility with code paths that
-    only have access to the activation magnitude) and the same
-    ``levels()`` accessor returning a 7-key dict.
-
-    For the full closed-loop driving signal, call :meth:`step_full` with
-    keyword arguments. The shim ``step()`` populates only `Glu`, `eCB`,
-    and gradually decays the rest toward baseline — used as a fallback
-    when the richer drivers aren't available (eval-only contexts).
+    Drop-in replacement for ``dsl.metrics.NTSystem``: exposes the same
+    ``step(activity=...)`` shim and ``levels()`` accessor.  For the
+    full closed-loop driving signal, call :meth:`step_full` with the
+    keyword drivers; any missing driver contributes z=0 (so its only
+    effect that step is the natural OU leak toward the resting μ).
 
     Parameters
     ----------
     baselines : dict, optional
-        Per-channel resting concentrations; the system contracts toward
-        these when no driver signal is present. Defaults match the
-        NTSystem legacy values so the column starts in the same place.
-    taus : dict, optional
-        Scale constants for the saturating drivers (NE, eCB, Glu).
-    surprise_window : int
-        Window size for the rolling-mean loss used to compute the
-        per-step surprise that drives DA.
+        Per-channel resting concentrations in (0,1).  Default values
+        match the legacy NTSystem.  Used to set μ = logit(baseline).
+    alpha : dict, optional
+        Per-channel leak rate override.  Defaults in ``_DEFAULT_ALPHA``.
+    W : dict, optional
+        Per-channel coupling row override.  Each value is a 5-tuple
+        ordered (surprise, gnorm, activation, ignition, attn_sharp).
+    driver_alpha : float
+        EMA rate for the per-driver running mean/std.  Default 0.005
+        ⇒ ~200-step half-life: slow enough that a regime shift gives
+        sustained nonzero z for the channels to integrate, fast enough
+        to eventually re-baseline so the readout never ratchets.
+
+    Back-compat kwargs (``taus``, ``surprise_window``, ``slow_loss_alpha``,
+    ``fast_loss_alpha``, ``gnorm_alpha``, ``ignition_target``) are
+    accepted and ignored — the homeostatic formulation makes them
+    obsolete.
     """
 
     _DEFAULT_BASELINES = {
         "DA":   0.15,
         "NE":   0.20,
-        "5HT":  0.35,
-        "ACh":  0.25,
+        "5HT":  0.50,    # raised from 0.35 — 5HT now sits at neutral mood
+        "ACh":  0.30,    # raised from 0.25 — ACh responsive in both directions
         "eCB":  0.10,
         "Glu":  0.45,
         "GABA": 0.15,
@@ -104,47 +162,54 @@ class DrivenNTSystem:
 
     def __init__(self,
                  baselines: Optional[Dict[str, float]] = None,
+                 alpha: Optional[Dict[str, float]] = None,
+                 W: Optional[Dict[str, tuple]] = None,
+                 driver_alpha: float = 0.005,
+                 # accepted for back-compat with previous signature; ignored.
                  taus: Optional[Dict[str, float]] = None,
                  surprise_window: int = 32,
                  slow_loss_alpha: float = 0.005,
                  fast_loss_alpha: float = 0.1,
                  gnorm_alpha: float = 0.1,
                  ignition_target: float = 0.2):
+        # Baselines
         self._baselines = dict(self._DEFAULT_BASELINES)
         if baselines:
             for k, v in baselines.items():
                 if k in self._baselines:
                     self._baselines[k] = float(v)
-        self._taus = dict(_DEFAULT_TAUS)
-        if taus:
-            for k, v in taus.items():
-                self._taus[k] = float(v)
+        # Per-channel leak
+        self._alpha = dict(_DEFAULT_ALPHA)
+        if alpha:
+            for k, v in alpha.items():
+                if k in self._alpha:
+                    self._alpha[k] = float(v)
+        # Coupling matrix
+        self._W = {k: tuple(_DEFAULT_W[k]) for k in _CHANNELS}
+        if W:
+            for k, row in W.items():
+                if k in self._W and len(row) == len(_DRIVERS):
+                    self._W[k] = tuple(float(x) for x in row)
 
+        # State: y in logit space, initialised so σ(y) = baseline.
+        self._mu: Dict[str, float] = {k: _logit(self._baselines[k]) for k in _CHANNELS}
+        self._y: Dict[str, float] = dict(self._mu)
         self._level: Dict[str, float] = dict(self._baselines)
 
-        # Driver state.
-        self._loss_window: deque = deque(maxlen=int(surprise_window))
-        self._loss_fast = _EMA(alpha=fast_loss_alpha)
-        self._loss_slow = _EMA(alpha=slow_loss_alpha)
-        self._gnorm_ema = _EMA(alpha=gnorm_alpha)
-        # Reference loss for 5HT: the slow EMA tracks current loss; we
-        # compare against the first ever slow value (the "starting
-        # bar"). 5HT rises as long-term loss falls relative to start.
-        self._loss_ref: Optional[float] = None
+        # One running standardiser per driver.
+        self._stats: Dict[str, _RunningStats] = {
+            k: _RunningStats(alpha=driver_alpha) for k in _DRIVERS
+        }
+
+        # Retained for API-introspection (not used in dynamics).
         self._ignition_target = float(ignition_target)
 
     # ── Shim for legacy `metrics.NTSystem.step(activity=...)` ────────
 
     def step(self, activity: float = 0.0) -> None:
-        """Compat path: drives only `Glu`/`eCB` from a single activation
-        magnitude scalar; the other channels relax toward baseline."""
-        glu = math.tanh(max(0.0, float(activity)) / max(1e-8, self._taus["Glu"]))
-        ecb = math.tanh(max(0.0, float(activity)) / max(1e-8, self._taus["eCB"]))
-        self._level["Glu"] = glu
-        self._level["eCB"] = ecb
-        # Mild relaxation toward baseline for the un-driven channels.
-        for k in ("DA", "NE", "5HT", "ACh", "GABA"):
-            self._level[k] += 0.05 * (self._baselines[k] - self._level[k])
+        """Compat path: drives only `activation`; OU leak carries the
+        other channels back toward their baseline naturally."""
+        self.step_full(activation=float(activity))
 
     # ── Full closed-loop driver ──────────────────────────────────────
 
@@ -154,70 +219,41 @@ class DrivenNTSystem:
                   activation: Optional[float] = None,
                   ignition_rate: Optional[float] = None,
                   attn_entropy_norm: Optional[float] = None) -> None:
-        """Advance one training step with all available drivers.
+        """Advance one OU step with all available drivers.
 
-        Any argument left as ``None`` causes its channel to relax toward
-        the baseline. So eval-only contexts can pass just `activation`
-        and the other channels will gracefully fall back.
+        Any driver passed as ``None`` contributes z=0 to its column;
+        its corresponding NT channels experience pure leak toward μ.
         """
-        # ── DA: phasic on negative surprise (loss below recent mean) ─
+        # Standardise each driver.  Surprise = -loss (so +z = unusually
+        # good loss = drives DA/5HT up).  All others use their raw value.
+        z = {k: 0.0 for k in _DRIVERS}
         if loss is not None:
-            self._loss_window.append(float(loss))
-            self._loss_fast.update(loss)
-            self._loss_slow.update(loss)
-            if self._loss_ref is None and self._loss_slow._initialised:
-                self._loss_ref = self._loss_slow.value
-            if len(self._loss_window) >= 4:
-                recent = list(self._loss_window)
-                mean_l = sum(recent) / len(recent)
-                std_l = math.sqrt(
-                    sum((x - mean_l) ** 2 for x in recent) / len(recent)
-                ) + 1e-6
-                surprise = (mean_l - float(loss)) / std_l
-                self._level["DA"] = _sigmoid(surprise)
-            # ── 5HT: rises as long-term loss falls below the start bar
-            if self._loss_ref is not None:
-                rel = self._loss_ref - self._loss_slow.value
-                # Map to (0,1) via sigmoid; ref-scale = max(1, |ref|)
-                scale = max(1.0, abs(self._loss_ref))
-                self._level["5HT"] = _sigmoid(rel / scale * 3.0)
-        else:
-            self._level["DA"] += 0.05 * (self._baselines["DA"] - self._level["DA"])
-            self._level["5HT"] += 0.05 * (self._baselines["5HT"] - self._level["5HT"])
-
-        # ── NE: arousal — tanh of grad-norm EMA ──────────────────────
+            # Standardise the raw loss, then flip sign so that "loss
+            # below recent mean" gives a positive z.
+            z["surprise"] = -self._stats["surprise"].update(float(loss))
         if grad_norm is not None:
-            g = self._gnorm_ema.update(grad_norm)
-            self._level["NE"] = math.tanh(max(0.0, g) / max(1e-8, self._taus["NE"]))
-        else:
-            self._level["NE"] += 0.05 * (self._baselines["NE"] - self._level["NE"])
-
-        # ── eCB & Glu: from activation magnitude ─────────────────────
+            z["grad_norm"] = self._stats["grad_norm"].update(float(grad_norm))
         if activation is not None:
-            a = max(0.0, float(activation))
-            self._level["Glu"] = math.tanh(a / max(1e-8, self._taus["Glu"]))
-            self._level["eCB"] = math.tanh(a / max(1e-8, self._taus["eCB"]))
-        else:
-            self._level["Glu"] += 0.05 * (self._baselines["Glu"] - self._level["Glu"])
-            self._level["eCB"] += 0.05 * (self._baselines["eCB"] - self._level["eCB"])
-
-        # ── ACh: attention sharpness ─────────────────────────────────
-        if attn_entropy_norm is not None:
-            # attn_entropy_norm ∈ [0,1]; sharp attention = 0 entropy → ACh = 1
-            self._level["ACh"] = max(0.0, min(1.0, 1.0 - float(attn_entropy_norm)))
-        else:
-            self._level["ACh"] += 0.05 * (self._baselines["ACh"] - self._level["ACh"])
-
-        # ── GABA: inhibits when workspace saturates ──────────────────
+            z["activation"] = self._stats["activation"].update(float(activation))
         if ignition_rate is not None:
-            # GABA = 1 - ignition_rate, clamped
-            self._level["GABA"] = max(0.0, min(1.0, 1.0 - float(ignition_rate)))
-        else:
-            self._level["GABA"] += 0.05 * (self._baselines["GABA"] - self._level["GABA"])
+            z["ignition"] = self._stats["ignition"].update(float(ignition_rate))
+        if attn_entropy_norm is not None:
+            z["attn_sharp"] = self._stats["attn_sharp"].update(
+                1.0 - float(attn_entropy_norm))
 
-        # Final clamp (paranoia — every formula above is already bounded).
-        for k in self._level:
-            self._level[k] = max(0.0, min(1.0, self._level[k]))
+        # Saturate z to ±5 so a single training spike can't slam the
+        # logit; +5σ is already a once-in-a-million event after warmup.
+        zvec = tuple(max(-5.0, min(5.0, z[k])) for k in _DRIVERS)
+
+        # OU update per channel:  y ← (1-α) y + α (μ + W·z),  nt = σ(y).
+        for c in _CHANNELS:
+            a = self._alpha[c]
+            wz = sum(self._W[c][i] * zvec[i] for i in range(len(_DRIVERS)))
+            target = self._mu[c] + wz
+            self._y[c] = (1.0 - a) * self._y[c] + a * target
+            # Clamp logit just for paranoia (|y| > 20 makes σ flat).
+            self._y[c] = max(-20.0, min(20.0, self._y[c]))
+            self._level[c] = _sigmoid(self._y[c])
 
     # ── Accessors ────────────────────────────────────────────────────
 
