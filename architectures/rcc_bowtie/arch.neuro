@@ -297,17 +297,13 @@ training {
     # `wikitext gap_ratio` looks like with no interventions at chat_ratio≈0.3.
     # =========================================================================
     regularization: {
-        # ── WARMUP RAMP (kept as no-op at this enabled set) ──
-        # All aux loss contributions ramp linearly from 0 → 1× over
-        # `warmup_steps`. Solves the "wild metrics" problem at startup:
-        # at step 0, hidden states are random noise, so InfoNCE (PCC)
-        # explodes (loss ~10-100), Isotropy pushes Gram toward I
-        # prematurely, and DAR's gradient reversal disrupts feature
-        # formation. With warmup, the LM establishes baseline features
-        # (~2000 steps to reach ppl<500) BEFORE regularizers engage.
-        # Internal state (PCC negatives buffer, AdaptiveMixture entropy
-        # probe) still updates every step so they're warm when ramp completes.
-        warmup_steps: 2000
+        # ── WARMUP RAMP — REMOVED 2026-06-03 ──
+        # warmup_steps controlled a linear 0→1 ramp on all aux loss
+        # contributions. With every intervention disabled in this
+        # baseline config there is nothing to ramp, so the field has
+        # been removed to make the no-op explicit. When re-enabling
+        # any of (dar, pcc, isotropy, cmd, adaptive_mixture, cdga)
+        # restore `warmup_steps: 2000` here.
 
         # A. Distributional Adversarial Reweighting — DISABLED for baseline.
         dar: { enabled: false, lambda: 1.0, hidden: 64, grl_alpha: 0.1,

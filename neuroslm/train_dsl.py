@@ -775,7 +775,13 @@ def main():
                         help="real: stream tokenized corpus; synthetic: random")
     parser.add_argument("--mode", default="mix",
                         help="data mode for real loader (text/chat/mix)")
-    parser.add_argument("--chat_ratio", type=float, default=0.6)
+    # 2026-06-03: default lowered 0.6 → 0.3 after the ground-truth
+    # baseline run showed that at 0.6 the OOD gap_ratio holds steady
+    # around 5× and prose ppl still falls in lockstep with train. At
+    # 0.3 the model sees ~equal chat and prose tokens, which is the
+    # cleanest mix for tracking WikiText OOD without architectural
+    # interventions.
+    parser.add_argument("--chat_ratio", type=float, default=0.3)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
