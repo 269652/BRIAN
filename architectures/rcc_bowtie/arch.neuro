@@ -40,7 +40,9 @@ training {
     loss_clipping: { enabled: true, method: "per_sample", factor: 3.0 }
     quantization:  { enabled: false, bits: 8 }
     optimizer:     "adamw"
-    learning_rate: 0.0003
+    learning_rate: 0.0005      # was 3e-4 — pushed up after fair-fight run
+                                # showed lots of headroom (gnorm stable at
+                                # 1-2, no instability); 5e-4 is GPT-2-medium-class
     # ╔══════════════════════════════════════════════════════════════╗
     # ║  PRETRAIN-FRIENDLY RECIPE  (Jun 2026 surgery)                ║
     # ║                                                              ║
@@ -64,7 +66,12 @@ training {
     # ║  training. See docs/PRETRAIN_RECIPE.md.                      ║
     # ╚══════════════════════════════════════════════════════════════╝
     weight_decay:  0.01        # was 0.12 — GPT-2/LLaMA use 0.01–0.1
-    grad_accum:    1
+    grad_accum:    8           # was 1 — batch=4 × ctx=2048 × accum=8 = 65k
+                                # tok/step (~12% of GPT-2's 524k). Prior
+                                # 8k tok/step caused ±35% loss swings from
+                                # micro-batch noise; this kills the jitter
+                                # at zero VRAM cost (one extra fwd+bwd, no
+                                # extra activations stored).
     grad_clip:     1.0
     label_smoothing: 0.0       # was 0.05 — inflates raw PPL, off for pretrain
     dropout:       0.0         # was 0.12 — model is under-fit, no overfit yet
