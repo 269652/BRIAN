@@ -343,10 +343,29 @@ training {
         #    the controller from starving the model of prose entirely;
         #    the 2026-06-03 run had it pinned at 0.80 while gap_ratio
         #    widened monotonically.
+        #
+        #    NEUROMECHANICAL STABILISATION (added 2026-06-03 second pass)
+        #    The first "balance" run *still* failed: the controller observes
+        #    the entropy of training-data logits, not a held-out probe.
+        #    At init H_t ≈ log(V) ≈ 10.5 regardless of input, so the first
+        #    update (step 100) slammed chat_ratio from 0.60 → 0.10 floor
+        #    in ONE update. Loss plateaued at ppl ~3000 for 500+ steps.
+        #
+        #    The three knobs below mirror biological gain controllers
+        #    (retinal adaptation, thalamic relay):
+        #      • controller_warmup_steps: 2000  — startup grace; no
+        #        ratio updates until the LM has formed baseline features.
+        #      • max_step_delta: 0.03           — slew-rate limit; one
+        #        probe can move the ratio by at most 0.03.
+        #      • entropy_ema_alpha: 0.1         — low-pass filter on H_t;
+        #        a single bad mini-batch cannot drive the controller.
         adaptive_mixture: { enabled: true, target_entropy: 4.5,
                             probe_interval: 100, gamma: 2.0,
                             direction: "balance",
-                            min_ratio: 0.10, max_ratio: 0.50 }
+                            min_ratio: 0.10, max_ratio: 0.50,
+                            controller_warmup_steps: 2000,
+                            max_step_delta: 0.03,
+                            entropy_ema_alpha: 0.1 }
 
         # F. Frequency-balanced cross-entropy — token-level inverse-
         #    frequency reweighting toward the OOD target distribution.

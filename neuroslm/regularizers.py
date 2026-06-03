@@ -384,6 +384,9 @@ class AdaptiveMixtureController(nn.Module):
         self._step = 0
         self._ent_sum = 0.0
         self._ent_n = 0
+        # Low-pass filter state for the entropy observation. None until
+        # the first probe fires; thereafter holds the EMA of mean_H.
+        self._ent_ema: float | None = None
 
     def ratio(self) -> float:
         return self._ratio
@@ -406,8 +409,23 @@ class AdaptiveMixtureController(nn.Module):
         self._step += 1
         if self._step % max(1, self.cfg.probe_interval) == 0:
             mean_H = self._ent_sum / max(1, self._ent_n)
-            self._update_ratio(mean_H)
             self._ent_sum, self._ent_n = 0.0, 0
+            # ── Neuromechanical gain control ──────────────────────
+            # 1) Low-pass the raw observation (membrane integration).
+            alpha = float(getattr(self.cfg, "entropy_ema_alpha", 1.0))
+            alpha = max(0.0, min(1.0, alpha))
+            if self._ent_ema is None or alpha >= 1.0:
+                self._ent_ema = mean_H
+            else:
+                self._ent_ema = (1.0 - alpha) * self._ent_ema + alpha * mean_H
+            # 2) Startup grace — hold ratio constant until the LM has
+            #    had time to form baseline features. The probe still
+            #    runs (so the EMA is warm when grace ends) but no
+            #    ratio update is emitted.
+            warmup = int(getattr(self.cfg, "controller_warmup_steps", 0))
+            if self._step < warmup:
+                return
+            self._update_ratio(self._ent_ema)
 
     def _update_ratio(self, H_t: float) -> None:
         # Direction "balance" (default, corrected): the controller
@@ -425,7 +443,23 @@ class AdaptiveMixtureController(nn.Module):
             gain = (H_safe / H_tar) ** self.cfg.gamma
         else:  # "balance"
             gain = (H_tar / H_safe) ** self.cfg.gamma
-        new_ratio = self._ratio * gain
+        target = self._ratio * gain
+        target = max(self.cfg.min_ratio,
+                     min(self.cfg.max_ratio, target))
+        # 3) Slew-rate limit — cap |Δratio| per update. This converts
+        #    the bang-bang controller into a damped first-order
+        #    system: even an extreme gain estimate can only push the
+        #    ratio max_step_delta closer to its target each probe.
+        max_delta = float(getattr(self.cfg, "max_step_delta", 1.0))
+        if max_delta <= 0.0:
+            max_delta = 1.0
+        delta = target - self._ratio
+        if delta > max_delta:
+            delta = max_delta
+        elif delta < -max_delta:
+            delta = -max_delta
+        new_ratio = self._ratio + delta
+        # Final clip (in case delta=max_delta exactly hits the bound).
         new_ratio = max(self.cfg.min_ratio,
                         min(self.cfg.max_ratio, new_ratio))
         self._ratio = float(new_ratio)

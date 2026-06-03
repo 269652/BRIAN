@@ -157,6 +157,37 @@ class AdaptiveMixtureConfig:
     max_ratio: float = 0.50       # CHANGED 2026-06-03 from 0.80 (see docstring)
     direction: str = "balance"    # NEW 2026-06-03 ("balance" | "amplify")
 
+    # ── Neuromechanical stabilisation (added 2026-06-03 second pass) ──
+    # First "balance" run still failed because the controller observes
+    # the entropy of *training-data logits*, not a held-out prose probe.
+    # At init H_t ≈ log(V) ≈ 10.5 regardless of input — so the first
+    # update slams chat_ratio from 0.60 to the min_ratio floor in 20
+    # steps, before the LM has any features, then training stalls.
+    #
+    # Fix mirrors the three properties of biological gain controllers
+    # (retinal adaptation, thalamic relay neurons):
+    #   • controller_warmup_steps — startup grace; no updates fire until
+    #     the LM has had time to form baseline features (≥ ~2k steps).
+    #     Mirrors the "settling" time of retinal photoreceptors.
+    #   • max_step_delta — slew-rate limit on |Δratio| per update.
+    #     Mirrors the membrane time-constant: gain cannot change faster
+    #     than the integrator allows, even if the input demands it.
+    #   • entropy_ema_alpha — low-pass filter on the entropy observation.
+    #     A single bad mini-batch cannot drive the controller; the
+    #     signal must be sustained for ≈ 1/α probes to take full effect.
+    #
+    # Together these turn a single-update bang-bang controller into a
+    # damped first-order system with a well-defined time constant.
+    #
+    # NOTE on defaults: the dataclass defaults are intentionally
+    # *no-ops* (warmup=0, max_step_delta=1.0, ema_alpha=1.0) so the
+    # legacy/test behaviour is unchanged unless a caller opts in.
+    # The production arch.neuro config sets the protective values
+    # (warmup=2000, max_step_delta=0.03, ema_alpha=0.1).
+    controller_warmup_steps: int = 0       # 0 = updates fire immediately
+    max_step_delta: float = 1.0            # 1.0 = no slew limit
+    entropy_ema_alpha: float = 1.0         # 1.0 = no EMA smoothing
+
 
 # ── Intervention F: Frequency-balanced cross-entropy ─────────────────
 
@@ -380,6 +411,12 @@ def _parse_adaptive_mixture(raw: str) -> AdaptiveMixtureConfig:
                 f"{sorted(_VALID_MIXTURE_DIRECTIONS)}"
             )
         out.direction = d
+    if "controller_warmup_steps" in p:
+        out.controller_warmup_steps = int(p["controller_warmup_steps"])
+    if "max_step_delta" in p:
+        out.max_step_delta = float(p["max_step_delta"])
+    if "entropy_ema_alpha" in p:
+        out.entropy_ema_alpha = float(p["entropy_ema_alpha"])
     if out.min_ratio > out.max_ratio:
         raise ValueError(
             f"adaptive_mixture.min_ratio={out.min_ratio} > "
