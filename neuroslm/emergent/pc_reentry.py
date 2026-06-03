@@ -74,6 +74,26 @@ class PCReentryProbe:
         self._residual_ema: Optional[float] = None
         self._explained_ema: Optional[float] = None
 
+    # ── Device migration ─────────────────────────────────────────────
+
+    def _to_device(self, device: torch.device) -> None:
+        """Move probe state to ``device`` if it isn't already there.
+
+        Called lazily from :meth:`step` / :meth:`predict` /
+        :meth:`residual_diff` so callers don't have to know whether
+        the trunk lives on CPU or CUDA.
+        """
+        if self._diag.device == device:
+            return
+        self._diag = self._diag.to(device)
+        self._u = self._u.to(device)
+        self._v = self._v.to(device)
+        self._m_diag = self._m_diag.to(device)
+        self._m_u = self._m_u.to(device)
+        self._m_v = self._m_v.to(device)
+        if self._prev_motor is not None:
+            self._prev_motor = self._prev_motor.to(device)
+
     # ── Linear predictor ─────────────────────────────────────────────
 
     def predict(self, h_motor_prev: torch.Tensor) -> torch.Tensor:
@@ -82,7 +102,8 @@ class PCReentryProbe:
         The rank-1 correction lets the predictor capture a single
         dominant cross-channel direction beyond pure per-channel scale.
         """
-        x = h_motor_prev.to(self._diag.device)
+        self._to_device(h_motor_prev.device)
+        x = h_motor_prev
         diag_term = x * self._diag
         # (m · v) along last dim, broadcast onto u
         coeff = (x * self._v).sum(dim=-1, keepdim=True)
@@ -103,6 +124,9 @@ class PCReentryProbe:
             return self._stats()
 
         # Detach: we never want a gradient leaking into the trunk.
+        # Migrate probe state to the input device first so cross-device
+        # ops don't trigger a runtime error.
+        self._to_device(h_motor.device)
         m = h_motor.detach().float()
         s = h_sensory.detach().float()
         if m.shape != s.shape or m.shape[-1] != self.dim:
@@ -190,9 +214,12 @@ class PCReentryProbe:
             return None
         if h_motor.shape != h_sensory.shape or h_motor.shape[-1] != self.dim:
             return None
-        # Cast to predictor dtype/device but KEEP the autograd graph.
-        m = h_motor.to(device=self._diag.device, dtype=torch.float32)
-        s = h_sensory.to(device=self._diag.device, dtype=torch.float32)
+        # Migrate probe state to the trunk's device so the predictor
+        # parameters (diag/u/v) match the activation tensors.
+        self._to_device(h_motor.device)
+        # Cast to predictor dtype but KEEP the autograd graph + device.
+        m = h_motor.to(dtype=torch.float32)
+        s = h_sensory.to(dtype=torch.float32)
         # Frozen-W prediction (detach predictor params so only the
         # trunk receives gradient from this term).
         d_det = self._diag.detach()

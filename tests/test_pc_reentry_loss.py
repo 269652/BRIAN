@@ -122,3 +122,44 @@ def test_nt_gate_math():
     assert gate(0.0, 2.0) == 0.0
     # Mild reward floor.
     assert gate(0.0, 0.0) == pytest.approx(1.0)
+
+
+# ── 4. Device migration (CUDA <-> CPU) ───────────────────────────────
+
+def test_probe_auto_migrates_to_input_device_cpu():
+    """Probe constructed default (CPU) accepts CPU tensors with no error."""
+    probe = PCReentryProbe(dim=4)
+    h_m = torch.randn(2, 3, 4)
+    h_s = torch.randn(2, 3, 4)
+    # Prime + step (was the failing path on the trainer).
+    probe.step(h_m, h_s)
+    out = probe.step(h_m, h_s)
+    assert "pc_residual" in out
+    # residual_diff path also.
+    loss = probe.residual_diff(h_m, h_s)
+    assert loss is not None and loss.device.type == "cpu"
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(),
+                    reason="CUDA not available")
+def test_probe_auto_migrates_to_cuda_when_inputs_are_cuda():
+    """Reproduces the trainer crash: probe built on CPU, inputs on CUDA.
+
+    The fix is in PCReentryProbe._to_device — first call to step() /
+    residual_diff() with CUDA tensors silently migrates all probe state.
+    """
+    probe = PCReentryProbe(dim=4)               # default CPU
+    h_m = torch.randn(2, 3, 4, device="cuda")
+    h_s = torch.randn(2, 3, 4, device="cuda")
+    probe.step(h_m, h_s)                         # primes; was crashing
+    out = probe.step(h_m, h_s)
+    assert "pc_residual" in out
+    # All probe tensors must now be on cuda.
+    assert probe._diag.device.type == "cuda"
+    assert probe._u.device.type == "cuda"
+    assert probe._v.device.type == "cuda"
+    assert probe._prev_motor is not None
+    assert probe._prev_motor.device.type == "cuda"
+    # residual_diff path returns a CUDA scalar.
+    loss = probe.residual_diff(h_m, h_s)
+    assert loss is not None and loss.device.type == "cuda"
