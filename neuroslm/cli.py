@@ -129,6 +129,73 @@ def cmd_compile(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── bundle ─────────────────────────────────────────────────────────────
+
+def cmd_bundle_arch(args: argparse.Namespace) -> int:
+    """Bundle all .neuro files from an architecture into a single file for AI analysis."""
+    from pathlib import Path
+
+    arch = _resolve_arch(args.arch)
+    arch_path = Path(arch)
+
+    if not arch_path.is_dir():
+        print(f"error: {arch} is not a directory", file=sys.stderr)
+        return 1
+
+    if not (arch_path / "arch.neuro").is_file():
+        print(f"error: {arch}/arch.neuro not found", file=sys.stderr)
+        return 1
+
+    # Collect all .neuro files, sorted by path
+    neuro_files = sorted(arch_path.rglob("*.neuro"))
+
+    if not neuro_files:
+        print(f"error: no .neuro files found in {arch}", file=sys.stderr)
+        return 1
+
+    # Build the bundle
+    bundle = []
+    bundle.append("=" * 78)
+    bundle.append(f"ARCHITECTURE BUNDLE: {arch_path.name}")
+    bundle.append(f"Generated: {arch_path}")
+    bundle.append(f"Files: {len(neuro_files)}")
+    bundle.append("=" * 78)
+    bundle.append("")
+
+    # Include arch.neuro first, then other files alphabetically
+    arch_neuro = arch_path / "arch.neuro"
+    other_files = [f for f in neuro_files if f != arch_neuro]
+
+    for neuro_file in [arch_neuro] + other_files:
+        rel_path = neuro_file.relative_to(arch_path)
+        bundle.append("")
+        bundle.append("─" * 78)
+        bundle.append(f"FILE: {rel_path}")
+        bundle.append("─" * 78)
+        bundle.append("")
+
+        try:
+            content = neuro_file.read_text(encoding="utf-8")
+            bundle.append(content)
+        except Exception as e:
+            print(f"warning: could not read {rel_path}: {e}", file=sys.stderr)
+            bundle.append(f"[ERROR: could not read file: {e}]")
+
+    # Write or print
+    bundle_text = "\n".join(bundle)
+
+    if args.out:
+        Path(args.out).write_text(bundle_text, encoding="utf-8")
+        print(f"wrote {args.out}  ({len(bundle_text)} chars, {len(neuro_files)} files)")
+    else:
+        # Write to stdout with UTF-8 encoding handling
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        print(bundle_text)
+
+    return 0
+
+
 # ── wolfram ────────────────────────────────────────────────────────────
 
 def cmd_wolfram(args: argparse.Namespace) -> int:
@@ -1292,6 +1359,13 @@ def _build_parser() -> argparse.ArgumentParser:
         else cmd_compile(argparse.Namespace(
             arch=a.arch_or_subcmd, out=a.out, head=a.head))
     ))
+
+    # bundle
+    sb = sub.add_parser("bundle",
+                        help="Bundle all .neuro files for AI analysis")
+    sb.add_argument("arch", help="architecture name (e.g., rcc_bowtie)")
+    sb.add_argument("--out", help="write bundle to this file (default: stdout)")
+    sb.set_defaults(func=cmd_bundle_arch)
 
     # wolfram
     sw = sub.add_parser("wolfram",
