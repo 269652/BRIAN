@@ -134,6 +134,28 @@ training {
     # other parts of the homeostat).
     pc_reentry_weight:  0.1
     pc_reentry_nt_gate: true
+
+    # ── Variational Bowtie Bottleneck (VBB) — Jun 2026 surgery ──
+    # The plain C3 PC-reentry residual was acting as a self-distillation
+    # amplifier: by step 4000 train ppl had halved (738→426) while wiki
+    # ppl barely budged (3234→2899), pushing the gap ratio from 4.3 → 6.8.
+    # VBB upgrades the residual into a Friston-style variational free
+    # energy at the bowtie waist:
+    #     L = γ_NT · ( β·‖s − W·(μ + σ·ε)‖² − log β + α·KL[q ‖ N(0,I)] )
+    # with q(h_m|x) = N(μ, σ²I), μ = h_motor, log σ² = sigma_head(μ).
+    # Three coupled mechanisms emerge:
+    #   1. KL[q ‖ N(0,I)] is an Information Bottleneck at the narrowest
+    #      cross-section of the network — caps I(X; h_m), forbids
+    #      memorisation of training-distribution attractors.
+    #   2. β = softplus(log_beta) self-throttles at β* = 1/(2·E[r]) via
+    #      the −log β log-normaliser. The loop stops being an amplifier
+    #      and becomes a calibrated generative model.
+    #   3. Reparam noise at the C3 read-site is structurally placed
+    #      stochastic gradient Langevin — biases SGD toward flat minima.
+    # Param overhead at d_sem=512: one Linear (262k) + one scalar = 0.21%.
+    # See harness._compute_pc_reentry_loss for the full math derivation.
+    vbb_alpha:     0.001
+    vbb_beta_init: 1.0
     tonnetz_period: 0
     bema_rollback_window: 0
     bema_snapshot_every: 50

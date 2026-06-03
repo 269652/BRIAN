@@ -382,6 +382,46 @@ class TrainingConfig:
     # and weakens under cortical inhibition (GABA up). Other NTs are
     # left agnostic to avoid double-counting with the homeostat.
     pc_reentry_nt_gate: bool = False
+    # ── Variational Bowtie Bottleneck (VBB) — Jun 2026 ────────────────
+    # Upgrades the C3 PC-reentry from a plain squared residual into a
+    # *variational free-energy* term at the bowtie waist. When
+    # ``vbb_alpha > 0`` the harness:
+    #   1. Treats the motor pole ``h_m`` as the mean ``μ`` of a Gaussian
+    #      ``q(h_m|x) = N(μ, σ²I)`` whose log-variance is produced by a
+    #      tiny learned head ``log σ = sigma_head(μ)``  (one Linear,
+    #      d_sem→d_sem, ~262k params at d=512 — 0.2% overhead on 122M).
+    #   2. Reparameterises ``h_m_sample = μ + σ·ε`` with ``ε ~ N(0,I)``.
+    #   3. Computes the residual ``r = ‖s − W·h_m_sample‖²`` via the
+    #      frozen-W probe (same path as the legacy loss, just on the
+    #      noised motor).
+    #   4. Adds a single learnable confidence scalar ``β`` (via softplus
+    #      of ``log_beta``) and forms the free-energy term
+    #         ``L = γ_NT · ( β·r − log β + α·KL[q ‖ N(0,I)] )``
+    #      where the Gaussian-Gaussian KL has the closed form
+    #         ``KL = ½ · Σ (σ² + μ² − 1 − log σ²)``  (per-element mean).
+    # Why this matters
+    # ----------------
+    # • The KL is an *Information Bottleneck* (Tishby) placed exactly
+    #   at the bowtie waist — provably the right spot for it.
+    # • The ``β·r − log β`` pair is the precision-weighted prediction
+    #   error of the Free Energy Principle (Friston). ``β`` self-
+    #   throttles at the equilibrium ``β* = 1/(2·E[r])`` — the loop
+    #   stops being a self-distillation amplifier and starts being a
+    #   genuine generative model with calibrated confidence.
+    # • The reparam noise at the waist is structurally placed exactly
+    #   where the C3 loop reads, so the loop cannot memorise the
+    #   trunk's fingerprint — biases SGD toward flat minima.
+    # • Composes with ``pc_reentry_nt_gate``: the NT gate still
+    #   multiplies the whole free-energy term, so DA/GABA tone the
+    #   precision modulation just as before.
+    # ``vbb_alpha = 0`` (default) → exact legacy ``residual_diff`` path,
+    # bit-identical to pre-VBB behaviour. Recommended on-value: 1e-3.
+    vbb_alpha: float = 0.0
+    # Initial value of the learnable confidence scalar β (parameterised
+    # internally as ``β = softplus(log_beta)``). 1.0 is unit-Gaussian
+    # likelihood; the optimizer will move it toward the data's
+    # equilibrium within ~1k optimizer steps.
+    vbb_beta_init: float = 1.0
     # ── Novel-topology mechanisms (H15 / H16 / H19) ──────────────────
     # Each accepts a dict or `None` (= off). When all are None the
     # cortex is bit-identical to the legacy baseline (zero-init
@@ -517,6 +557,10 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.pc_reentry_weight = float(props["pc_reentry_weight"])
     if "pc_reentry_nt_gate" in props:
         cfg.pc_reentry_nt_gate = _parse_bool(props["pc_reentry_nt_gate"])
+    if "vbb_alpha" in props:
+        cfg.vbb_alpha = float(props["vbb_alpha"])
+    if "vbb_beta_init" in props:
+        cfg.vbb_beta_init = float(props["vbb_beta_init"])
     # Novel-topology mechanisms (H15/H16/H19) — parse as generic dicts.
     if "grid_positions" in props:
         cfg.grid_positions = _parse_novel_topology_dict(props["grid_positions"])

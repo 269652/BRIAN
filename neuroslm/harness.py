@@ -239,6 +239,13 @@ class BRIANHarness(nn.Module):
         # (telemetry-only, no surgery applied).
         self._cdga_anchor_fn = None
 
+        # ── VBB (Variational Bowtie Bottleneck) ──
+        # Eagerly construct the sigma-head + log-beta scalar so they're
+        # included by `self.parameters()` BEFORE _ensure_optimizer()
+        # builds the optimizer on the first train_step. See
+        # `_build_vbb_modules` for the math + rationale.
+        self._build_vbb_modules()
+
     @classmethod
     def from_language_model(cls, language_model: nn.Module,
                             vocab_size: int, d_sem: int,
@@ -283,6 +290,8 @@ class BRIANHarness(nn.Module):
         h._build_reg_controller()
         h._domain_id_fn = None
         h._cdga_anchor_fn = None
+        # VBB modules (see __init__ — same eager-construction discipline).
+        h._build_vbb_modules()
         return h
 
     # ── Distributed training wrapping (DDP / FSDP) ────────────────────
@@ -479,21 +488,121 @@ class BRIANHarness(nn.Module):
 
     # ── Loss ─────────────────────────────────────────────────────────
 
+    def _build_vbb_modules(self) -> None:
+        """Construct the Variational Bowtie Bottleneck (VBB) sub-modules.
+
+        Adds two attributes:
+
+        * ``self._vbb_sigma_head`` — an ``nn.Linear(d_sem, d_sem)`` that
+          maps the motor mean ``μ = h_motor`` to a per-element
+          log-variance ``log σ²``. Initialised to a constant
+          ``log σ² ≈ -8`` (σ ≈ 0.018) so the very first reparam sample
+          is near-deterministic and behaviour matches the legacy
+          (pre-VBB) loss up to a tiny stochastic perturbation. The
+          optimizer is free to grow σ as the KL term tightens.
+        * ``self._vbb_log_beta`` — a single learnable scalar
+          ``nn.Parameter`` whose softplus is the precision ``β`` of the
+          predictive-coding likelihood. Initialised from
+          ``training_config.vbb_beta_init`` (default 1.0) via the inverse
+          softplus ``log(exp(β) − 1)``.
+
+        Total parameter cost at ``d_sem = 512``: 512×512 + 512 + 1 =
+        262 657 params ≈ 0.21 % of a 122 M model — negligible.
+
+        When ``training_config.vbb_alpha <= 0`` we still construct both
+        attributes as ``None`` so the codepath in
+        ``_compute_pc_reentry_loss`` can detect the off-state cheaply.
+        Eager construction is required: ``_ensure_optimizer`` runs
+        before the first ``compute_loss``, so anything added lazily
+        from inside the loss would be missed by AdamW's param list.
+        """
+        alpha = float(getattr(self.training_config, "vbb_alpha", 0.0))
+        if alpha <= 0.0 or self.d_sem is None or int(self.d_sem) <= 0:
+            self._vbb_sigma_head = None
+            # Register as a plain attribute (not a Parameter) so it
+            # doesn't pollute the optimizer when VBB is off.
+            self._vbb_log_beta = None
+            return
+        d = int(self.d_sem)
+        head = nn.Linear(d, d)
+        # Zero-init the weight so log σ² = bias for the very first step
+        # (independent of μ); bias = -8 ⇒ σ ≈ 0.018 ⇒ near-deterministic
+        # encoder at init. The model picks up structure as the KL relaxes.
+        nn.init.zeros_(head.weight)
+        nn.init.constant_(head.bias, -8.0)
+        self._vbb_sigma_head = head
+        beta_init = float(getattr(self.training_config,
+                                  "vbb_beta_init", 1.0))
+        beta_init = max(beta_init, 1e-4)
+        # Inverse softplus: log_beta such that softplus(log_beta) = β₀.
+        # log(exp(x) − 1) is numerically fine for x ≥ ~1e-3; for very
+        # small x we'd hit -inf, hence the floor above.
+        raw = math.log(math.expm1(beta_init))
+        self._vbb_log_beta = nn.Parameter(torch.tensor(raw,
+                                                       dtype=torch.float32))
+
     def _compute_pc_reentry_loss(self, base_weight: float):
-        """Return the NT-gated PC-reentry trunk loss term (scalar tensor)
+        r"""Return the NT-gated PC-reentry trunk loss term (scalar tensor)
         or ``None`` if not applicable this step.
 
-        Reads ``_last_h_motor`` / ``_last_h_sensory`` (first/last block
-        outputs) from the language model and runs them through the
-        harness-owned :class:`PCReentryProbe` to obtain an autograd-
-        tracked residual. The probe parameters are *detached* inside
-        ``residual_diff`` so this loss only flows back into the trunk
-        activations, not the probe's W. The probe's own SGD on W
-        continues separately (driven by the metrics observer).
+        Two code paths:
 
-        Neuromodulator gating is computed from the latest observer
-        levels when ``pc_reentry_nt_gate=True`` and an observer with
-        an ``nt`` attribute is reachable; otherwise the gate is 1.0.
+        **Legacy path** (``vbb_alpha <= 0``) — bit-identical to the
+        Jun 2026 v1 surgery: lazily build a :class:`PCReentryProbe`,
+        run its internal SGD on detached activations for telemetry,
+        then form ``r = ‖s − W·m‖²`` via ``residual_diff`` (probe-W is
+        frozen, gradient flows into the trunk only), gate by
+        ``max(0, 1 + 0.5·DA − 0.7·GABA)``, scale by ``pc_reentry_weight``.
+
+        **VBB path** (``vbb_alpha > 0``) — the *Variational Bowtie
+        Bottleneck*. Mathematically:
+
+        .. math::
+
+            q(h_m \mid x) = \\mathcal{N}(\\mu_\\theta(x),
+                                          \\sigma_\\theta(x)^2 I), \\\\
+            \\hat h_m = \\mu + \\sigma \\cdot \\epsilon,
+            \\quad \\epsilon \\sim \\mathcal{N}(0, I), \\\\
+            r = \\| h_s - W \\hat h_m \\|^2, \\\\
+            \\beta = \\mathrm{softplus}(\\log\\beta), \\\\
+            \\mathrm{KL} = \\tfrac{1}{2}
+                \\sum_d (\\sigma_d^2 + \\mu_d^2 - 1 - \\log \\sigma_d^2), \\\\
+            \\mathcal{L}_{\\mathrm{VBB}} = \\gamma_{\\mathrm{NT}}
+                \\cdot \\bigl(\\beta r - \\log\\beta
+                              + \\alpha\\,\\mathrm{KL}\\bigr).
+
+        Why each term exists:
+
+        * ``β·r``  is the precision-weighted prediction error
+          (Friston). High β = confident predictor → loop demands a
+          tight residual; low β = uncertain → relaxed.
+        * ``−log β`` is the Gaussian normaliser; without it β would
+          collapse to 0 and the residual term would vanish. Together
+          they fix ``β`` at the closed-form equilibrium
+          ``β* = 1 / (2·E[r])``  — i.e. ``β`` auto-tracks the inverse
+          variance of the residual. This is what stops the C3 loop
+          from being a self-distillation amplifier.
+        * ``α·KL[q ‖ N(0,I)]`` is an Information Bottleneck (Tishby)
+          placed at the bowtie waist — the narrowest cross-section
+          of the network, so the IB has maximum leverage. It caps
+          ``I(X; h_m)`` and forces the motor pole to keep only
+          *generalisable* statistics, killing memorisation.
+
+        The reparam noise injection at the C3 read-site additionally
+        serves as stochastic gradient Langevin perturbation, biasing
+        SGD toward flat minima (Keskar et al.).
+
+        Composition with the NT gate is unchanged: the whole
+        free-energy term is multiplied by ``γ_NT`` so DA/GABA tone the
+        loop just as before.
+
+        Returns
+        -------
+        torch.Tensor (scalar) or ``None``
+            ``None`` when the motor / sensory stash is unavailable,
+            shapes don't match, or the effective weight collapses to
+            zero (e.g. high GABA quenches the gate). Else an
+            autograd-tracked scalar to be added to the LM loss.
         """
         h_m = getattr(self.language_model, "_last_h_motor", None)
         h_s = getattr(self.language_model, "_last_h_sensory", None)
@@ -512,15 +621,14 @@ class BRIANHarness(nn.Module):
             probe = PCReentryProbe(dim=dim, device=h_m.device)
             self._pc_reentry_probe = probe
         # Run probe's internal SGD on a detached copy (telemetry path).
+        # We always pass the deterministic μ here so the probe learns
+        # the noise-free mapping (cleaner W).
         try:
             probe.step(h_m.detach(), h_s.detach())
         except Exception:
             pass
-        # Autograd-tracked residual with frozen-W (trunk gradient only).
-        pc_diff = probe.residual_diff(h_m, h_s)
-        if pc_diff is None:
-            return None
-        # NT gating.
+
+        # ── NT gate (shared by both paths) ──────────────────────────
         gate_scalar = 1.0
         if getattr(self.training_config, "pc_reentry_nt_gate", False):
             obs = getattr(self, "_observer", None) \
@@ -536,17 +644,87 @@ class BRIANHarness(nn.Module):
                 da = float(nt.get("DA", 0.0))
                 gaba = float(nt.get("GABA", 0.0))
                 gate_scalar = max(0.0, 1.0 + 0.5 * da - 0.7 * gaba)
+
+        # ── Branch on VBB ────────────────────────────────────────────
+        alpha = float(getattr(self.training_config, "vbb_alpha", 0.0))
+        use_vbb = (alpha > 0.0
+                   and self._vbb_sigma_head is not None
+                   and self._vbb_log_beta is not None)
+
+        if not use_vbb:
+            # Legacy path: plain ‖s − W·m‖² with frozen W.
+            pc_diff = probe.residual_diff(h_m, h_s)
+            if pc_diff is None:
+                return None
+            eff_w = base_weight * gate_scalar
+            try:
+                self._metrics["pc_reentry_loss"] = float(pc_diff.detach())
+                self._metrics["pc_reentry_gate"] = float(gate_scalar)
+                self._metrics["pc_reentry_eff_weight"] = float(eff_w)
+            except Exception:
+                pass
+            if eff_w <= 0.0:
+                return None
+            return eff_w * pc_diff
+
+        # VBB path. We migrate the head + scalar to the trunk device
+        # lazily — the harness might be moved to CUDA after
+        # construction. .to() is a no-op when already there.
+        device = h_m.device
+        sigma_head = self._vbb_sigma_head.to(device)
+        log_beta_param = self._vbb_log_beta.to(device)
+
+        mu = h_m.to(dtype=torch.float32)                  # (B, T, D)
+        # Per-element log-variance from the head. We work in float32
+        # to keep the exp() stable under bf16 autocast.
+        log_var = sigma_head(mu)                          # (B, T, D)
+        # Clamp the log-variance to a safe range so exp() can't blow
+        # up under unlucky init / amp. log σ² ∈ [-12, 4] →
+        # σ ∈ [~2.5e-3, ~7.4].
+        log_var = log_var.clamp(-12.0, 4.0)
+        sigma = (0.5 * log_var).exp()
+
+        # Reparameterised sample (same shape as μ). The graph carries
+        # gradient through both μ and σ.
+        eps = torch.randn_like(mu)
+        mu_sample = mu + sigma * eps
+
+        # Residual using the frozen-W probe on the noised motor. The
+        # probe handles dtype/device internally and returns a scalar
+        # mean-squared residual. Gradient flows through `mu_sample`
+        # (→ μ and σ) and through `h_s`.
+        residual = probe.residual_diff(mu_sample, h_s)
+        if residual is None:
+            return None
+
+        # Precision β = softplus(log_beta) — strictly positive.
+        beta = F.softplus(log_beta_param) + 1e-6
+
+        # Closed-form KL[ N(μ, σ²) || N(0, I) ] per element, averaged
+        # over (B, T, D) so the term is intensive (scale-free in
+        # batch/seq/dim — matches the residual's reduction). Standard
+        # Kingma & Welling 2013 expression:
+        #   ½ Σ ( σ² + μ² − 1 − log σ² )
+        kl = 0.5 * (log_var.exp() + mu.pow(2) - 1.0 - log_var).mean()
+
+        # Free energy: β·r − log β + α·KL. The −log β term is the
+        # Gaussian log-normaliser; without it β would collapse to 0.
+        free_energy = beta * residual - torch.log(beta) + alpha * kl
+
         eff_w = base_weight * gate_scalar
-        # Surface telemetry for the per-step log line.
         try:
-            self._metrics["pc_reentry_loss"] = float(pc_diff.detach())
+            self._metrics["pc_reentry_loss"] = float(residual.detach())
             self._metrics["pc_reentry_gate"] = float(gate_scalar)
             self._metrics["pc_reentry_eff_weight"] = float(eff_w)
+            self._metrics["vbb_beta"] = float(beta.detach())
+            self._metrics["vbb_kl"] = float(kl.detach())
+            self._metrics["vbb_sigma_mean"] = float(sigma.detach().mean())
+            self._metrics["vbb_free_energy"] = float(free_energy.detach())
         except Exception:
             pass
         if eff_w <= 0.0:
             return None
-        return eff_w * pc_diff
+        return eff_w * free_energy
 
     def compute_loss(self, ids: torch.Tensor, targets: torch.Tensor,
                      nt_levels: Optional[Dict[str, float]] = None) -> torch.Tensor:
