@@ -62,13 +62,23 @@ class TopologicalChargeProbe:
         Last-axis dimensionality of the activations being analysed.
     seed : int
         RNG seed for the fixed skew operator R.
+    centred : bool
+        If True (default), subtract the per-sequence mean before unit-
+        normalising. This is essential for trunk activations after
+        LayerNorm: adjacent residual-stream vectors are dominated by a
+        large DC component that pins ⟨ĥ_t, ĥ_{t+1}⟩ near +1 (no walls,
+        no winding). Subtracting the mean exposes the deviation field,
+        which is where topological structure actually lives. Pass False
+        for synthetic structured fields whose absolute orientation
+        carries the signal (e.g. unit-test cases).
     """
 
-    def __init__(self, dim: int, seed: int = 1729):
+    def __init__(self, dim: int, seed: int = 1729, centred: bool = True):
         if dim <= 1:
             raise ValueError("dim must be >= 2 for skew-symmetric R")
         self.dim = int(dim)
         self.seed = int(seed)
+        self.centred = bool(centred)
         self._R = _seed_skew(self.dim, self.seed)
         # Stats accumulator
         self._last: Dict[str, float] = {
@@ -106,6 +116,12 @@ class TopologicalChargeProbe:
             }
 
         hf = h.float()
+        # Mean-subtract along the token axis so that the LayerNorm-
+        # induced DC component doesn't pin every adjacent inner product
+        # near +1. This is what makes Q go from "always 0 on a trained
+        # trunk" to "actually winds when structure exists".
+        if self.centred:
+            hf = hf - hf.mean(dim=1, keepdim=True)
         # Normalise to the unit sphere.
         norm = hf.norm(dim=-1, keepdim=True).clamp_min(1e-8)
         hn = hf / norm

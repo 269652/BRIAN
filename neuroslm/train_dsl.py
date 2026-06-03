@@ -590,17 +590,37 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
             if acts:
                 _gnorm = float(getattr(harness, "_last_gnorm", 0.0)) or None
                 _class = None
-                # In `mix` mode we know whether this batch was chat or
-                # prose — the `data_iter` exposes the most recent flag
-                # via `last_batch_kind` if available.
-                _kind = getattr(source, "last_batch_kind", None)
-                if _kind == "chat":
-                    _class = 0
-                elif _kind == "prose":
-                    _class = 1
+                # In `mix` mode the RealDataSource exposes the last
+                # batch's per-window labels via ``_last_labels`` (a
+                # 1-D tensor of length B with 0=text, 1=chat). Take
+                # the modal label for the batch — that's what the C5
+                # lattice probe wants as a single int.
+                _labels = getattr(source, "_last_labels", None)
+                if _labels is not None and getattr(_labels, "numel", lambda: 0)() > 0:
+                    try:
+                        _class = int(_labels.mode().values.item())
+                    except Exception:
+                        _class = int(_labels[0].item())
+                else:
+                    # Back-compat: synthetic sources may still publish
+                    # the older string flag.
+                    _kind = getattr(source, "last_batch_kind", None)
+                    if _kind == "chat":
+                        _class = 1
+                    elif _kind in ("prose", "text"):
+                        _class = 0
+                # C3 motor/sensory analogs: last block's output is the
+                # motor end of the cortical bow-tie; first block's
+                # output is the sensory end. Both are (B, T, D).
+                _h_motor = acts[-1] if len(acts) >= 1 else None
+                _h_sensory = acts[0] if len(acts) >= 2 else None
                 try:
                     harness.last_metrics = observer.observe(
-                        acts, loss, grad_norm=_gnorm, class_label=_class
+                        acts, loss,
+                        grad_norm=_gnorm,
+                        h_motor=_h_motor,
+                        h_sensory=_h_sensory,
+                        class_label=_class,
                     )
                 except TypeError:
                     # Back-compat: older observer signature (legacy
@@ -943,7 +963,10 @@ def main():
             and args.mode == "mix"
         )
         ratio_ref = harness.current_chat_ratio if adaptive_on else None
-        with_labels = bool(dar_on)
+        # Always emit per-sample class labels: the emergent C5 lattice
+        # probe consumes them via ``source._last_labels`` even when DAR
+        # is off. The cost is one int per window — negligible.
+        with_labels = True
 
         # Loud, unmissable PR2 banner — if the next training log doesn't
         # show this exact line, the new code path is NOT active.

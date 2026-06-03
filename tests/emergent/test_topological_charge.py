@@ -49,9 +49,13 @@ def test_walls_counted_on_antipodal_flip():
 
 def test_no_walls_for_smooth_rotation():
     """A slowly rotating field in the (e0, e1) plane has all inner
-    products ≥ cos(small angle) > 0 → no walls."""
+    products ≥ cos(small angle) > 0 → no walls.
+
+    Uses centred=False so the test signal (absolute orientation in the
+    e0/e1 plane) isn't washed out by the per-sequence mean.
+    """
     dim = 8
-    probe = TopologicalChargeProbe(dim=dim, seed=0)
+    probe = TopologicalChargeProbe(dim=dim, seed=0, centred=False)
     T = 64
     angles = torch.linspace(0.0, math.pi / 2, T)        # quarter turn
     h = torch.zeros(1, T, dim)
@@ -65,7 +69,7 @@ def test_rotation_produces_nonzero_winding():
     """Same smooth rotation as above — winding number should be non-zero
     in magnitude (sign depends on R's chirality, which is seeded)."""
     dim = 4
-    probe = TopologicalChargeProbe(dim=dim, seed=42)
+    probe = TopologicalChargeProbe(dim=dim, seed=42, centred=False)
     T = 128
     angles = torch.linspace(0.0, 4.0 * math.pi, T)
     h = torch.zeros(1, T, dim)
@@ -80,7 +84,7 @@ def test_rotation_produces_nonzero_winding():
 def test_plateau_length_correct_with_known_walls():
     """Sequence length T-1 transitions, W walls → expected plateau
     length T-1 / (W + 1)."""
-    probe = TopologicalChargeProbe(dim=4, seed=0)
+    probe = TopologicalChargeProbe(dim=4, seed=0, centred=False)
     v = torch.tensor([1.0, 0.0, 0.0, 0.0])
     # 8 transitions: smooth, smooth, FLIP, smooth, smooth, smooth, FLIP, smooth
     h_seq = [v, v, v, -v, -v, -v, -v, v, v]
@@ -89,6 +93,43 @@ def test_plateau_length_correct_with_known_walls():
     # walls = 2 ⟹ plateau_len = 8 / 3 ≈ 2.667
     assert s["Q_walls"] == 2.0
     assert abs(s["Q_plateau_len"] - 8.0 / 3.0) < 0.01
+
+
+def test_centred_mode_exposes_winding_in_high_dc_field():
+    """A trunk-like signal: large constant DC + small structured noise.
+
+    Without centring, the inner products of adjacent unit-vectors are
+    pinned near +1 (the DC dominates), so |Q| collapses toward zero
+    even though the underlying perturbation field has real structure.
+    With centring (the default), the DC is removed and the structure
+    becomes visible as a much larger winding magnitude.
+    """
+    dim = 32
+    T = 256
+    torch.manual_seed(0)
+    # Strong DC + weak structured oscillation in a 2-plane.
+    dc = torch.randn(dim) * 5.0
+    angles = torch.linspace(0.0, 6.0 * math.pi, T)
+    osc = torch.zeros(T, dim)
+    osc[:, 0] = torch.cos(angles)
+    osc[:, 1] = torch.sin(angles)
+    h = (dc.unsqueeze(0) + osc).unsqueeze(0)         # (1, T, D)
+
+    # Use the SAME R-seed for both so the comparison is fair.
+    plain = TopologicalChargeProbe(dim=dim, seed=0, centred=False)
+    s_plain = plain.step(h)
+    centred = TopologicalChargeProbe(dim=dim, seed=0, centred=True)
+    s_centred = centred.step(h)
+
+    # The DC pins re ≈ +1 in the un-centred view → walls suppressed
+    # AND |Q| compressed.  After centring both should grow.
+    assert s_centred["Q_abs"] > 5.0 * max(s_plain["Q_abs"], 1e-6), (
+        f"centring should amplify |Q| by ≥5×: plain={s_plain}, "
+        f"centred={s_centred}")
+    # Either the wall count rises, or |Q| itself crosses a sane floor.
+    assert (s_centred["Q_walls"] > s_plain["Q_walls"]
+            or s_centred["Q_abs"] > 0.2), (
+        f"centred probe should reveal structure: {s_centred}")
 
 
 def test_dim_mismatch_raises():
