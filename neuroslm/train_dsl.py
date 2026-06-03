@@ -339,15 +339,21 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
     # the per-step line is unchanged for runs that don't enable them).
     reg_str = ""
     reg_keys = ("reg_dar", "reg_pcc", "reg_isotropy", "reg_cmd",
-                "reg_total", "chat_ratio")
+                "reg_total", "chat_ratio", "reg_warmup")
     reg_vals = {k: m.get(k, 0.0) for k in reg_keys}
-    if any(abs(v) > 1e-9 for v in reg_vals.values()):
+    # Show row even during warmup-ramp (when total~0) so user sees
+    # interventions are running — gated on warmup multiplier being
+    # tracked (presence of reg_warmup key, even if 0) OR any non-zero
+    # contribution.
+    has_warmup_metric = "reg_warmup" in m
+    if has_warmup_metric or any(abs(v) > 1e-9 for v in reg_vals.values()):
         reg_str = (" | reg["
                    f"dar={reg_vals['reg_dar']:.3f} "
                    f"pcc={reg_vals['reg_pcc']:.3f} "
                    f"iso={reg_vals['reg_isotropy']:.4f} "
                    f"cmd={reg_vals['reg_cmd']:.3f} "
                    f"Σ={reg_vals['reg_total']:.3f} "
+                   f"w={reg_vals['reg_warmup']:.2f} "
                    f"chat={reg_vals['chat_ratio']:.2f}]")
     return (f"step {step:5d} | loss {avg_loss:.4f} | lm {avg_lm:.4f} "
             f"| ppl {ppl:.1f} | gnorm {gnorm:.3f} | lr {lr:.2e} "

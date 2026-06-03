@@ -136,13 +136,27 @@ class AdaptiveMixtureConfig:
 
 @dataclass
 class RegularizationConfig:
-    """Container for the five OOD interventions."""
+    """Container for the five OOD interventions.
+
+    `warmup_steps`: number of training steps over which the global
+    intervention strength ramps linearly from 0 → 1. This is the
+    architectural fix for training instability: at step 0, hidden
+    states are random noise, so InfoNCE (PCC) explodes, Isotropy
+    pushes toward identity prematurely, and DAR's gradient reversal
+    disrupts representation formation. The warmup lets the LM
+    establish baseline features before regularizers engage.
+
+    Recommended: 2000-5000 steps (≈ 5-15% of total training).
+    Set to 0 to disable warmup (full strength from step 0 — the
+    legacy behaviour that caused gnorm=10-200 instability).
+    """
     dar: DARConfig = field(default_factory=DARConfig)
     pcc: PCCConfig = field(default_factory=PCCConfig)
     isotropy: IsotropyConfig = field(default_factory=IsotropyConfig)
     cmd: CMDConfig = field(default_factory=CMDConfig)
     adaptive_mixture: AdaptiveMixtureConfig = field(
         default_factory=AdaptiveMixtureConfig)
+    warmup_steps: int = 2000
 
     def any_enabled(self) -> bool:
         return any([
@@ -177,6 +191,8 @@ def parse_regularization_block(body: str) -> RegularizationConfig:
 
     props = _split_top_level_kv(body)
 
+    if "warmup_steps" in props:
+        cfg.warmup_steps = int(props["warmup_steps"])
     if "dar" in props:
         cfg.dar = _parse_dar(props["dar"])
     if "pcc" in props:

@@ -405,7 +405,7 @@ class TestRegularizationController:
         assert out["total"].item() == 0.0
 
     def test_isotropy_only(self):
-        cfg = RegularizationConfig()
+        cfg = RegularizationConfig(warmup_steps=0)  # full strength immediately
         cfg.isotropy.enabled = True
         cfg.isotropy.weight = 1.0
         ctrl = RegularizationController(cfg, d_model=8, vocab_size=32)
@@ -418,7 +418,7 @@ class TestRegularizationController:
         assert out["isotropy"].item() > 0.0
 
     def test_combined_interventions_sum(self):
-        cfg = RegularizationConfig()
+        cfg = RegularizationConfig(warmup_steps=0)  # full strength immediately
         cfg.isotropy.enabled = True
         cfg.cmd.enabled = True
         cfg.cmd.weight = 0.5

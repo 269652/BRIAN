@@ -426,6 +426,15 @@ class RegularizationController(nn.Module):
     Wired into `BRIANHarness` via `harness.reg_controller`. The harness
     calls `collect_aux(...)` inside `compute_loss` and adds the returned
     `total` to the final scalar loss before backward.
+
+    **Warmup**: To prevent early-training instability (random hidden
+    states make InfoNCE explode, Isotropy push toward identity
+    prematurely, DAR's gradient reversal disrupt representations),
+    a linear warmup multiplier ramps the aux loss contribution from
+    0 → 1 over `cfg.warmup_steps`. The interventions still RUN every
+    step (so internal state like PCC negatives buffer and AdaptiveMixture
+    entropy probe accumulate correctly), but their contribution to the
+    training loss is scaled.
     """
     def __init__(self, cfg: RegularizationConfig,
                  d_model: int, vocab_size: int,
@@ -438,6 +447,18 @@ class RegularizationController(nn.Module):
         self.cmd = CMDLoss(cfg.cmd, d_model, vocab_size)
         self.adaptive_mixture = AdaptiveMixtureController(
             cfg.adaptive_mixture, initial_chat_ratio)
+        # Step counter for warmup. Incremented every collect_aux call
+        # (which is exactly once per optimizer step).
+        self.register_buffer(
+            "_reg_step", torch.zeros(1, dtype=torch.long), persistent=True)
+
+    def warmup_multiplier(self) -> float:
+        """Linear ramp 0 → 1 over cfg.warmup_steps. Returns 1.0 after."""
+        w = int(self.cfg.warmup_steps)
+        if w <= 0:
+            return 1.0
+        s = int(self._reg_step.item())
+        return min(1.0, s / float(w))
 
     def collect_aux(self,
                     h: torch.Tensor,
@@ -447,8 +468,12 @@ class RegularizationController(nn.Module):
                     ) -> Dict[str, torch.Tensor]:
         """Compute every enabled aux loss; return per-key dict + sum.
 
-        Returned keys: dar, pcc, isotropy, cmd, total, weighted_ce.
+        Returned keys: dar, pcc, isotropy, cmd, total, weighted_ce,
+        warmup_mult.
         Disabled interventions contribute exact zeros.
+        Warmup multiplier scales the aggregated `total` but per-key
+        values reported reflect the SCALED contribution (so logs show
+        what actually entered the gradient).
         """
         zero = lm_logits.new_zeros(())
         # DAR runs on h and CE; returns the *replacement* CE for the caller.
@@ -460,12 +485,26 @@ class RegularizationController(nn.Module):
         # Mixture controller observes the logits (no contribution to loss)
         self.adaptive_mixture.observe_logits(lm_logits)
 
-        total = pcc_loss + iso_loss + cmd_loss + dar_out["total_aux"]
+        # Linear warmup: scale the contribution but keep internal state
+        # updates (e.g. PCC buffer, AdaptiveMixture entropy probe) running
+        # at full rate so they're warm when the multiplier hits 1.0.
+        mult = self.warmup_multiplier()
+        scaled_dar = dar_out["total_aux"] * mult
+        scaled_pcc = pcc_loss * mult
+        scaled_iso = iso_loss * mult
+        scaled_cmd = cmd_loss * mult
+
+        total = scaled_pcc + scaled_iso + scaled_cmd + scaled_dar
+
+        # Advance the step counter (one tick per optimizer call).
+        self._reg_step += 1
+
         return {
-            "dar": dar_out["total_aux"],
+            "dar": scaled_dar,
             "weighted_ce": dar_out["weighted_ce"],
-            "pcc": pcc_loss,
-            "isotropy": iso_loss,
-            "cmd": cmd_loss,
+            "pcc": scaled_pcc,
+            "isotropy": scaled_iso,
+            "cmd": scaled_cmd,
             "total": total,
+            "warmup_mult": lm_logits.new_tensor(mult),
         }

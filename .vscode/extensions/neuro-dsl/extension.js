@@ -28,11 +28,50 @@ const BUILTIN_VARS = [
 ];
 
 /**
+ * Resolve an import path starting with @/ to the architecture root
+ */
+function resolveArchRoot(currentFileUri) {
+  let archPath = path.dirname(currentFileUri.fsPath);
+  // Walk up until we find arch.neuro
+  while (archPath !== path.dirname(archPath)) {
+    if (fs.existsSync(path.join(archPath, 'arch.neuro'))) {
+      return archPath;
+    }
+    archPath = path.dirname(archPath);
+  }
+  // Fallback: return the immediate parent directory
+  return path.dirname(currentFileUri.fsPath);
+}
+
+/**
+ * Find which import statement exports a given name
+ */
+function findImportForName(text, name) {
+  const importMatches = [...text.matchAll(/import\s*\{\s*([^}]+)\s*\}\s*from\s*["'](@?[^"']+)["']/g)];
+  for (const importMatch of importMatches) {
+    const imports = importMatch[1];
+    const importPath = importMatch[2];
+    // Split imports and check if our name is in the list
+    const importedNames = imports.split(',').map(n => n.trim().split(/\s+/)[0]); // handle "name as alias"
+    if (importedNames.includes(name)) {
+      return importPath;
+    }
+  }
+  return null;
+}
+
+/**
  * Search for a reference (@name) in an imported file
  */
 function searchImportedFile(currentFileUri, importPath, reference) {
-  const baseDir = path.dirname(currentFileUri.fsPath);
   const refName = reference.slice(1); // remove @ prefix
+  let baseDir = path.dirname(currentFileUri.fsPath);
+
+  // If import path starts with @/, resolve relative to architecture root
+  if (importPath.startsWith('@/')) {
+    baseDir = resolveArchRoot(currentFileUri);
+    importPath = importPath.slice(2); // remove @/
+  }
 
   // Try candidate paths
   const candidates = [
@@ -41,52 +80,67 @@ function searchImportedFile(currentFileUri, importPath, reference) {
     path.join(baseDir, importPath)
   ];
 
+  OUTPUT_CHANNEL.appendLine(`[searchImportedFile] Looking for @${refName} in ${importPath}`);
+  OUTPUT_CHANNEL.appendLine(`[searchImportedFile] Candidates: ${candidates.join(' | ')}`);
+
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
+      OUTPUT_CHANNEL.appendLine(`[searchImportedFile] Found file: ${candidate}`);
       try {
         const content = fs.readFileSync(candidate, 'utf8');
+
+        // Comprehensive patterns for all definition types
         const patterns = [
-          new RegExp(`\\b(export\\s+)?(equation|dynamics|function|population)\\s+${refName}\\s*[{:]`),
-          new RegExp(`\\b(equation|dynamics|function)\\s+${refName}\\s*\\{`)
+          // export equation|dynamics|function|population NAME { ... }
+          new RegExp(`\\b(export\\s+)?(equation|dynamics|function|population|formal_spec|sheaf)\\s+${refName}\\s*[{:]`),
+          // neurotransmitter NAME { ... }
+          new RegExp(`\\b(export\\s+)?neurotransmitter\\s+${refName}\\s*\\{`),
+          // synapse NAME or synapse A -> B
+          new RegExp(`\\bsynapse\\s+${refName}\\s*[{->]`),
+          // modulation NAME
+          new RegExp(`\\bmodulation\\s+\\w+\\s*->\\s*${refName}\\b`),
+          // param_scope NAME { ... }
+          new RegExp(`\\b(export\\s+)?param_scope\\s+${refName}\\s*\\{`)
         ];
 
         for (const pattern of patterns) {
           const match = pattern.exec(content);
           if (match) {
-            const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === candidate);
-            if (doc) {
-              const matchPos = match.index;
-              const lineNum = doc.positionAt(matchPos).line;
-              return new vscode.Location(
-                vscode.Uri.file(candidate),
-                new vscode.Position(lineNum, 0)
-              );
-            }
+            OUTPUT_CHANNEL.appendLine(`[searchImportedFile] Found definition of @${refName} at offset ${match.index}`);
+            const lineNum = content.substring(0, match.index).split('\n').length - 1;
+            return new vscode.Location(
+              vscode.Uri.file(candidate),
+              new vscode.Position(lineNum, 0)
+            );
           }
         }
       } catch (e) {
-        // Silently skip unreadable files
+        OUTPUT_CHANNEL.appendLine(`[searchImportedFile] Error reading file: ${e.message}`);
       }
     }
   }
 
+  OUTPUT_CHANNEL.appendLine(`[searchImportedFile] No definition found for @${refName}`);
   return null;
 }
 
 exports.activate = function(context) {
   OUTPUT_CHANNEL.appendLine('NeuroSLM DSL extension activating...');
 
-  // Register definition provider for @references and import specifiers (Ctrl+Click, F12, Go to Definition)
+  // Register definition provider for @references, imports, and all identifiers
   context.subscriptions.push(
     vscode.languages.registerDefinitionProvider(LANGUAGE_ID, {
       provideDefinition(document, position) {
+        OUTPUT_CHANNEL.appendLine(`[provideDefinition] Triggered at ${document.fileName}:${position.line}:${position.character}`);
+        const text = document.getText();
+
         // Try to match @references first (e.g., @standard_synapse)
         const refWord = document.getWordRangeAtPosition(position, /@[\w]+/);
         if (refWord) {
           const reference = document.getText(refWord); // includes @ prefix
-          const text = document.getText();
+          OUTPUT_CHANNEL.appendLine(`[provideDefinition] Found @reference: ${reference}`);
 
-          // Search for definition: "export equation|dynamics|function|population NAME {" or similar
+          // Search for definition in current file
           const patterns = [
             new RegExp(`\\b(export\\s+)?(equation|dynamics|function|population|formal_spec|sheaf)\\s+${reference.slice(1)}\\s*[{:]`, 'g'),
             new RegExp(`\\b(equation|dynamics|function)\\s+${reference.slice(1)}\\s*\\{`, 'g')
@@ -95,28 +149,70 @@ exports.activate = function(context) {
           for (const pattern of patterns) {
             const match = pattern.exec(text);
             if (match) {
-              const matchPos = match.index;
-              const lineNum = document.positionAt(matchPos).line;
-              const charNum = document.positionAt(matchPos).character;
-              return new vscode.Location(
-                document.uri,
-                new vscode.Position(lineNum, charNum)
-              );
+              const lineNum = text.substring(0, match.index).split('\n').length - 1;
+              OUTPUT_CHANNEL.appendLine(`[provideDefinition] Found in current file at line ${lineNum}`);
+              return new vscode.Location(document.uri, new vscode.Position(lineNum, 0));
             }
           }
 
-          // If not found in current file, search in imported files
+          // Search in imported files
+          OUTPUT_CHANNEL.appendLine(`[provideDefinition] Not found in current file, searching imports...`);
           const importMatches = [...text.matchAll(/import\s*\{[^}]*\}\s*from\s*["'](@?[^"']+)["']/g)];
           for (const importMatch of importMatches) {
-            const importPath = importMatch[1].replace(/^@\//, '');
+            const importPath = importMatch[1];
+            OUTPUT_CHANNEL.appendLine(`[provideDefinition] Searching in import: ${importPath}`);
             const importedDef = searchImportedFile(document.uri, importPath, reference);
             if (importedDef) return importedDef;
           }
 
+          OUTPUT_CHANNEL.appendLine(`[provideDefinition] Definition not found`);
           return null;
         }
 
-        // Try to match import specifiers (e.g., @/lib/equations or ./modules/sensory)
+        // Try to match bare words (populations, neurotransmitters, variables, etc.)
+        const bareWord = document.getWordRangeAtPosition(position, /[\w]+/);
+        if (bareWord) {
+          const word = document.getText(bareWord);
+          OUTPUT_CHANNEL.appendLine(`[provideDefinition] Found bare word: ${word}`);
+
+          // Patterns for various definition types
+          const defPatterns = [
+            // neurotransmitter dopamine { ... }
+            { pattern: new RegExp(`\\b(export\\s+)?neurotransmitter\\s+${word}\\s*\\{`), type: 'neurotransmitter' },
+            // population sensory { ... } or export population sensory { ... }
+            { pattern: new RegExp(`\\b(export\\s+)?population\\s+${word}\\s*\\{`), type: 'population' },
+            // param_scope trunk { ... }
+            { pattern: new RegExp(`\\b(export\\s+)?param_scope\\s+${word}\\s*\\{`), type: 'param_scope' },
+            // architecture rcc_bowtie { ... }
+            { pattern: new RegExp(`\\barchitecture\\s+${word}\\s*\\{`), type: 'architecture' },
+            // training { ... }
+            { pattern: new RegExp(`\\btraining\\s*\\{`), type: 'training' },
+            // regularization { ... }
+            { pattern: new RegExp(`\\bregularization\\s*\\{`), type: 'regularization' },
+            // equation/dynamics/function definitions
+            { pattern: new RegExp(`\\b(export\\s+)?(equation|dynamics|function)\\s+${word}\\s*\\{`), type: 'definition' }
+          ];
+
+          for (const { pattern, type } of defPatterns) {
+            const match = pattern.exec(text);
+            if (match) {
+              const lineNum = text.substring(0, match.index).split('\n').length - 1;
+              OUTPUT_CHANNEL.appendLine(`[provideDefinition] Found ${type} '${word}' at line ${lineNum}`);
+              return new vscode.Location(document.uri, new vscode.Position(lineNum, 0));
+            }
+          }
+
+          // Check if this word is imported from somewhere
+          const importPath = findImportForName(text, word);
+          if (importPath) {
+            OUTPUT_CHANNEL.appendLine(`[provideDefinition] '${word}' is imported from ${importPath}, searching...`);
+            // Convert the word to @-style reference for searching
+            const importedDef = searchImportedFile(document.uri, importPath, '@' + word);
+            if (importedDef) return importedDef;
+          }
+        }
+
+        // Try to match import specifiers on the current line
         const line = document.lineAt(position.line).text;
         const importMatch = line.match(/import\s*\{[^}]*\}\s*from\s*["'](@?[^"']+)["']/);
         if (importMatch) {
@@ -126,35 +222,38 @@ exports.activate = function(context) {
 
           // Check if cursor is within the import specifier
           if (position.character >= specifierStart && position.character <= specifierEnd) {
-            const baseDir = path.dirname(document.uri.fsPath);
-            let targetPath = importPath;
+            OUTPUT_CHANNEL.appendLine(`[provideDefinition] Following import path: ${importPath}`);
 
             // Resolve @/... to arch root
             if (importPath.startsWith("@/")) {
-              let archPath = baseDir;
-              // Walk up until we find arch.neuro
-              while (archPath !== path.dirname(archPath)) {
-                if (fs.existsSync(path.join(archPath, 'arch.neuro'))) {
-                  targetPath = importPath.slice(2);
-                  break;
+              const archRoot = resolveArchRoot(document.uri);
+              const targetPath = importPath.slice(2);
+              const candidates = [
+                path.join(archRoot, `${targetPath}.neuro`),
+                path.join(archRoot, targetPath, 'index.neuro'),
+                path.join(archRoot, targetPath)
+              ];
+
+              for (const candidate of candidates) {
+                if (fs.existsSync(candidate)) {
+                  OUTPUT_CHANNEL.appendLine(`[provideDefinition] Resolved import to: ${candidate}`);
+                  return new vscode.Location(vscode.Uri.file(candidate), new vscode.Position(0, 0));
                 }
-                archPath = path.dirname(archPath);
               }
-            }
+            } else {
+              // Relative import
+              const baseDir = path.dirname(document.uri.fsPath);
+              const candidates = [
+                path.resolve(baseDir, `${importPath}.neuro`),
+                path.resolve(baseDir, importPath, 'index.neuro'),
+                path.resolve(baseDir, importPath)
+              ];
 
-            // Try candidate paths
-            const candidates = [
-              path.resolve(baseDir, `${targetPath}.neuro`),
-              path.resolve(baseDir, targetPath, 'index.neuro'),
-              path.resolve(baseDir, targetPath)
-            ];
-
-            for (const candidate of candidates) {
-              if (fs.existsSync(candidate)) {
-                return new vscode.Location(
-                  vscode.Uri.file(candidate),
-                  new vscode.Position(0, 0)
-                );
+              for (const candidate of candidates) {
+                if (fs.existsSync(candidate)) {
+                  OUTPUT_CHANNEL.appendLine(`[provideDefinition] Resolved import to: ${candidate}`);
+                  return new vscode.Location(vscode.Uri.file(candidate), new vscode.Position(0, 0));
+                }
               }
             }
           }

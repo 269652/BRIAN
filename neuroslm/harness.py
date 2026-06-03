@@ -560,6 +560,8 @@ class BRIANHarness(nn.Module):
                         reg_out[key].detach().item())
                 self._metrics["reg_total"] = float(
                     reg_out["total"].detach().item())
+                self._metrics["reg_warmup"] = float(
+                    reg_out["warmup_mult"].detach().item())
                 self._metrics["chat_ratio"] = self.current_chat_ratio()
             elif not getattr(self, "_warned_missing_last_hidden", False):
                 import sys
