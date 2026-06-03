@@ -557,11 +557,30 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
 
         # Update the metric observers from the live model's activations
         # (Φ, λ₁, ignition, oscillations, NT, trophic, mesoLG).
+        # When the emergent layer is enabled (default), drive it with
+        # the live training-state scalars (grad_norm, class label).
         if observer is not None:
             lm = getattr(harness, "language_model", None)
             acts = getattr(lm, "_layer_acts", None) if lm is not None else None
             if acts:
-                harness.last_metrics = observer.observe(acts, loss)
+                _gnorm = float(getattr(harness, "_last_gnorm", 0.0)) or None
+                _class = None
+                # In `mix` mode we know whether this batch was chat or
+                # prose — the `data_iter` exposes the most recent flag
+                # via `last_batch_kind` if available.
+                _kind = getattr(source, "last_batch_kind", None)
+                if _kind == "chat":
+                    _class = 0
+                elif _kind == "prose":
+                    _class = 1
+                try:
+                    harness.last_metrics = observer.observe(
+                        acts, loss, grad_norm=_gnorm, class_label=_class
+                    )
+                except TypeError:
+                    # Back-compat: older observer signature (legacy
+                    # MetricObserver.observe(acts, loss) without kwargs).
+                    harness.last_metrics = observer.observe(acts, loss)
 
         if step % log_every == 0:
             now = time.time()

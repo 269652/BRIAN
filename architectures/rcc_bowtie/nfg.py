@@ -15,7 +15,7 @@ NFG = {
     }
   },
   "stats": {
-    "n_populations": 28,
+    "n_populations": 29,
     "n_neurotransmitters": 7,
     "n_synapses": 19,
     "n_modulations": 17
@@ -358,6 +358,18 @@ NFG = {
       }
     },
     {
+      "name": "reasoning_cortex",
+      "kind": "pop",
+      "op": "softmax_relu",
+      "equation": "y = softmax(x) * ReLU(x)",
+      "properties": {
+        "count": 256,
+        "dynamics": "attention_pool",
+        "timescale": 0.02,
+        "output_dim": null
+      }
+    },
+    {
       "name": "dopamine",
       "kind": "nt",
       "op": "nt_dynamics",
@@ -450,7 +462,7 @@ NFG = {
       "weight": 0.8,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "world",
@@ -459,7 +471,7 @@ NFG = {
       "weight": 0.6,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "self_m",
@@ -468,7 +480,7 @@ NFG = {
       "weight": 0.6,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "gws",
@@ -477,7 +489,7 @@ NFG = {
       "weight": 0.7,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "gws",
@@ -486,7 +498,7 @@ NFG = {
       "weight": 0.8,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "gws",
@@ -495,7 +507,7 @@ NFG = {
       "weight": 0.7,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "pfc",
@@ -504,7 +516,7 @@ NFG = {
       "weight": 0.6,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "bg",
@@ -513,7 +525,7 @@ NFG = {
       "weight": 0.8,
       "nt": "gaba",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "forward_m",
@@ -522,7 +534,7 @@ NFG = {
       "weight": 0.7,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "hippo",
@@ -531,7 +543,7 @@ NFG = {
       "weight": 0.5,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "entorhinal",
@@ -540,7 +552,7 @@ NFG = {
       "weight": 0.4,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "pfc",
@@ -549,7 +561,7 @@ NFG = {
       "weight": 0.3,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "dmn",
@@ -558,7 +570,7 @@ NFG = {
       "weight": 0.5,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "cerebellum",
@@ -567,7 +579,7 @@ NFG = {
       "weight": 0.6,
       "nt": "gaba",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "motor",
@@ -576,7 +588,7 @@ NFG = {
       "weight": 0.4,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "pfc",
@@ -585,7 +597,7 @@ NFG = {
       "weight": 0.5,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "reasoning_cortex",
@@ -594,7 +606,7 @@ NFG = {
       "weight": 0.5,
       "nt": "glutamate",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "dmn",
@@ -603,7 +615,7 @@ NFG = {
       "weight": 0.3,
       "nt": "gaba",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "reasoning_cortex",
@@ -612,7 +624,7 @@ NFG = {
       "weight": 0.3,
       "nt": "gaba",
       "effect": null,
-      "equation": "y = weight * (x_pre @ W)"
+      "equation": "@standard_synapse"
     },
     {
       "src": "dopamine",
@@ -621,7 +633,7 @@ NFG = {
       "weight": 0.6,
       "nt": "dopamine",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "serotonin",
@@ -630,7 +642,7 @@ NFG = {
       "weight": 0.3,
       "nt": "serotonin",
       "effect": "additive",
-      "equation": "y = output + (c * gain)"
+      "equation": "@additive_modulation"
     },
     {
       "src": "acetylcholine",
@@ -639,7 +651,7 @@ NFG = {
       "weight": 0.4,
       "nt": "acetylcholine",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "gaba",
@@ -648,7 +660,7 @@ NFG = {
       "weight": 0.4,
       "nt": "gaba",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "acetylcholine",
@@ -657,7 +669,7 @@ NFG = {
       "weight": 0.5,
       "nt": "acetylcholine",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "glutamate",
@@ -666,7 +678,7 @@ NFG = {
       "weight": 0.4,
       "nt": "glutamate",
       "effect": "additive",
-      "equation": "y = output + (c * gain)"
+      "equation": "@additive_modulation"
     },
     {
       "src": "dopamine",
@@ -675,7 +687,7 @@ NFG = {
       "weight": 0.7,
       "nt": "dopamine",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "gaba",
@@ -684,7 +696,7 @@ NFG = {
       "weight": 0.5,
       "nt": "gaba",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "norepinephrine",
@@ -693,7 +705,7 @@ NFG = {
       "weight": 0.5,
       "nt": "norepinephrine",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "gaba",
@@ -702,7 +714,7 @@ NFG = {
       "weight": 0.3,
       "nt": "gaba",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "acetylcholine",
@@ -711,7 +723,7 @@ NFG = {
       "weight": 0.3,
       "nt": "acetylcholine",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "endocannabinoid",
@@ -720,7 +732,7 @@ NFG = {
       "weight": 0.3,
       "nt": "endocannabinoid",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "serotonin",
@@ -729,7 +741,7 @@ NFG = {
       "weight": 0.6,
       "nt": "serotonin",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "acetylcholine",
@@ -738,7 +750,7 @@ NFG = {
       "weight": 0.2,
       "nt": "acetylcholine",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "dopamine",
@@ -747,7 +759,7 @@ NFG = {
       "weight": 0.5,
       "nt": "dopamine",
       "effect": "additive",
-      "equation": "y = output + (c * gain)"
+      "equation": "@additive_modulation"
     },
     {
       "src": "serotonin",
@@ -756,7 +768,7 @@ NFG = {
       "weight": 0.7,
       "nt": "serotonin",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     },
     {
       "src": "dopamine",
@@ -765,7 +777,7 @@ NFG = {
       "weight": 0.5,
       "nt": "dopamine",
       "effect": "multiplicative",
-      "equation": "y = output * (c * gain)"
+      "equation": "@multiplicative_modulation"
     }
   ],
   "nt_systems": [
@@ -846,7 +858,8 @@ NFG = {
         "dmn",
         "thought_transformer",
         "claustrum",
-        "motor"
+        "motor",
+        "reasoning_cortex"
       ],
       "gradient": "normal"
     },
@@ -870,25 +883,29 @@ NFG = {
   ],
   "formal_specs": [
     {
-      "name": "phi_integration",
+      "name": "formal_phi_integration",
       "spec_type": "integrated_information",
       "properties": {
         "rule": "\"integrated_information\"",
-        "metric": "\"phi\""
+        "metric": "\"phi\"",
+        "# Measure 1": "Non-zero gradient paths (each path = a degree of freedom)",
+        "causal_density": "{\n        formula: \"paths_active = count(|\u2207 synaptic_weight| > \u03b5)\",\n        target: \"paths_active > 80% of total synapses\"  # most pathways active"
       }
     },
     {
-      "name": "bowtie_topology",
+      "name": "formal_bowtie_topology",
       "spec_type": "narrowing_widening",
       "properties": {
         "rule": "\"narrowing_widening\"",
-        "metric": "\"structural_constraint\""
+        "metric": "\"structural_constraint\"",
+        "# Requirement 1": "Narrowing phase (all sensory \u2192 bowtie input)",
+        "narrowing_phase": "{\n        bowtie_inputs: [\"thalamus\", \"association\"],\n        constraint: \"All sensory synapses must target one of bowtie_inputs\",\n        verification: \"linter checks: sensory -> (thalamus | association) only\""
       }
     }
   ],
   "sheaves": [
     {
-      "name": "narrative_consistency",
+      "name": "sheaf_narrative_consistency",
       "contradiction_threshold": 0.7,
       "mechanism": "h1_cohomology_proxy",
       "action": "supersedes"

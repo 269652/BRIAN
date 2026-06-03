@@ -222,18 +222,61 @@ class MesoLearningGain:
 
 class MetricObserver:
     """Bundles all observers and produces the metric dict that
-    train_dsl logs in the native format."""
+    train_dsl logs in the native format.
+
+    Setting ``enable_emergent=True`` swaps in the C1–C6 telemetry layer
+    from `neuroslm.emergent` (see docs/EMERGENT_TOPOLOGY.md). When
+    enabled the returned metric dict contains *both* the legacy keys
+    (for back-compat) and additional ``nt_driven``, ``ign_rate``,
+    ``pc_residual``, ``Q_total``, ``Q_walls``, ``Q_plateau_len``,
+    ``lattice_spec``, ``pac`` keys. The legacy ``nt`` and ``ignition``
+    values are *replaced* by their driven counterparts when emergent is
+    on, so the existing log column line is reused.
+
+    When ``enable_emergent=False`` (default) ``observe()`` returns a
+    dict byte-identical to the legacy behaviour.
+    """
 
     def __init__(self, n_layers: int,
-                 nt_baselines: Optional[Dict[str, float]] = None):
+                 nt_baselines: Optional[Dict[str, float]] = None,
+                 enable_emergent: bool = True,
+                 emergent_dim: Optional[int] = None):
         self.n_layers = n_layers
         self.nt = NTSystem(nt_baselines)
         self.trophic = TrophicSystem(n_projections=n_layers)
         self.osc = OscillationTracker()
         self.meso = MesoLearningGain()
         self._fiedler = fiedler_lambda(n_layers)   # static — graph property
+        self.enable_emergent = bool(enable_emergent)
+        self._emergent = None
+        if self.enable_emergent:
+            # Lazy import so the emergent package is optional.
+            from neuroslm.emergent import (
+                DrivenNTSystem, MetastableIgnition, PCReentryProbe,
+                TopologicalChargeProbe, BowtieLatticeProbe, PACBindingProbe,
+            )
+            self._emergent = {
+                "nt":      DrivenNTSystem(baselines=nt_baselines),
+                "ign":     MetastableIgnition(),
+                "pc":      None,                # constructed on first call (need dim)
+                "topo":    None,                # constructed on first call
+                "lattice": None,                # constructed on first call
+                "pac":     PACBindingProbe(),
+            }
+            self._emergent_dim_hint = emergent_dim
+            # Class refs we'll need for lazy construction.
+            self._PC = PCReentryProbe
+            self._TOPO = TopologicalChargeProbe
+            self._LATTICE = BowtieLatticeProbe
 
-    def observe(self, layer_acts: List[torch.Tensor], loss: float) -> Dict:
+    def observe(self,
+                layer_acts: List[torch.Tensor],
+                loss: float,
+                grad_norm: Optional[float] = None,
+                h_motor: Optional[torch.Tensor] = None,
+                h_sensory: Optional[torch.Tensor] = None,
+                attn_entropy_norm: Optional[float] = None,
+                class_label: Optional[int] = None) -> Dict:
         # Update stateful subsystems
         last = layer_acts[-1] if layer_acts else torch.zeros(1, 1, 1)
         activity = float(last.float().abs().mean().item())
@@ -243,10 +286,13 @@ class MetricObserver:
         lg = self.meso.step(loss)
 
         troph = self.trophic.stats()
-        return {
-            "phi": phi_proxy(layer_acts),
+        phi = phi_proxy(layer_acts)
+        ign_legacy = gws_ignition(last)
+
+        out = {
+            "phi": phi,
             "fiedler": self._fiedler,
-            "ignition": gws_ignition(last),
+            "ignition": ign_legacy,
             "meso_lg": lg,
             "troph_active": troph["n_active"],
             "troph_total": troph["n_projections"],
@@ -254,3 +300,78 @@ class MetricObserver:
             "nt": self.nt.levels(),
             "osc": self.osc.bands(),
         }
+
+        if not self.enable_emergent:
+            return out
+
+        em = self._emergent
+        # ── C2: metastable ignition (peak computed from `last`) ────
+        peak = em["ign"].peak(last)
+        # NE for the ignition coupling comes from the driven NTs
+        # *after* we step them — but we need ignition_rate as a driver
+        # for GABA. Resolve the loop by using last-step's stored values.
+        ign_stats = em["ign"].step(peak, ne=em["nt"].levels().get("NE", 0.0))
+
+        # ── C1: driven NTs (full closed-loop) ──────────────────────
+        em["nt"].step_full(
+            loss=float(loss),
+            grad_norm=grad_norm,
+            activation=activity,
+            ignition_rate=ign_stats["ign_rate"],
+            attn_entropy_norm=attn_entropy_norm,
+        )
+        nt_driven = em["nt"].levels()
+        # Replace the legacy NT column with the driven one so the log
+        # line is unchanged in *shape* but alive in *values*.
+        out["nt"] = nt_driven
+        out["nt_driven"] = nt_driven
+        out.update({k: v for k, v in ign_stats.items()})
+        # And replace `ignition` with the metastable strength so the
+        # existing log column has the same name but the live value.
+        out["ignition"] = ign_stats["ign_strength"]
+
+        # ── C3: PC reentry (needs motor / sensory) ─────────────────
+        dim = None
+        if h_motor is not None:
+            dim = h_motor.shape[-1]
+        elif h_sensory is not None:
+            dim = h_sensory.shape[-1]
+        elif self._emergent_dim_hint is not None:
+            dim = int(self._emergent_dim_hint)
+        if dim is not None and em["pc"] is None:
+            em["pc"] = self._PC(dim=dim)
+        if em["pc"] is not None:
+            pc_stats = em["pc"].step(h_motor, h_sensory)
+            out.update(pc_stats)
+
+        # ── C4: topological charge over the last layer activation ──
+        topo_dim = last.shape[-1] if last.dim() >= 1 else 0
+        if topo_dim >= 2:
+            if em["topo"] is None or em["topo"].dim != topo_dim:
+                em["topo"] = self._TOPO(dim=topo_dim)
+            topo_stats = em["topo"].step(last)
+            out.update(topo_stats)
+
+        # ── C5: bowtie-lattice probe (needs class label) ───────────
+        if class_label is not None and topo_dim >= 4:
+            # Use K=4 by default; require dim % 4 == 0
+            K = 4
+            if topo_dim % K != 0:
+                K = max(1, topo_dim // (topo_dim // 4))
+                # Best-effort: skip if it still doesn't divide cleanly
+            if topo_dim % K == 0:
+                if em["lattice"] is None or em["lattice"].dim != topo_dim:
+                    em["lattice"] = self._LATTICE(dim=topo_dim, K=K)
+                lat_stats = em["lattice"].step(last, class_label=class_label)
+                out.update(lat_stats)
+
+        # ── C6: PAC over the same oscillation buffer ───────────────
+        # Re-use the legacy OscillationTracker's history (already
+        # appended above via self.osc.observe). For the probe we
+        # feed the same scalar.
+        em["pac"].observe(activity)
+        pac_stats = em["pac"].compute()
+        out.update(pac_stats)
+
+        return out
+

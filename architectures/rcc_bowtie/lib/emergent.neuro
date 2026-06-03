@@ -1,0 +1,226 @@
+# -*- coding: utf-8 -*-
+# lib/emergent.neuro — math-first declarations for the six mechanisms
+# (C1–C6) that turn the dead biology of the original RCC-Bowtie into
+# closed-loop, signal-bearing measurements.
+#
+# Each `equation` here is the *canonical* mathematical statement of one
+# mechanism. The Python lowering lives under `neuroslm/emergent/` and
+# is wired into `dsl.metrics.MetricObserver(enable_emergent=True)` by
+# default. See `docs/EMERGENT_TOPOLOGY.md` for the full design rationale
+# and falsifiable predictions per mechanism.
+#
+# Conventions (in addition to those of lib/regularizers.neuro):
+#   h, h_t         — per-token hidden states (tensor, last dim = d_model)
+#   ĥ_t            — unit-normalised hidden state, ĥ_t = h_t / ||h_t||
+#   L_t            — instantaneous LM loss at step t
+#   g_t            — instantaneous gradient L2 norm at step t
+#   E_w[·]         — EMA over window w
+#   σ              — sigmoid; atan2 — standard four-quadrant arctangent
+#   R ∈ so(d)      — fixed skew-symmetric chirality operator (seed-stable)
+#   <·,·>          — inner product
+
+# ─────────────────────────────────────────────────────────────────────
+# C1 — Driven neuromodulators (closed-loop)
+# ─────────────────────────────────────────────────────────────────────
+# The seven classical NT channels become functions of training state.
+# Each is bounded in [0,1] and reduces to a known constant when its
+# driver is silent (graceful baseline-recovery).
+
+export equation driven_nt_da {
+    # Phasic dopamine on negative surprise (loss below recent mean).
+    params: [L_t, mean_L_recent, std_L_recent],
+    formula: "DA = sigmoid((mean_L_recent - L_t) / std_L_recent)"
+}
+
+export equation driven_nt_ne {
+    # Tonic norepinephrine = tanh(EMA(grad_norm) / tau_ne).
+    params: [g_t_ema, tau_ne],
+    formula: "NE = tanh(max(0, g_t_ema) / tau_ne)"
+}
+
+export equation driven_nt_5ht {
+    # Serotonin = sigmoid of long-term loss improvement against start ref.
+    params: [L_ref, L_slow_ema, scale],
+    formula: "5HT = sigmoid(3 * (L_ref - L_slow_ema) / scale)"
+}
+
+export equation driven_nt_ach {
+    # Acetylcholine = inverse-normalised attention entropy
+    # (sharp attention → high ACh).
+    params: [H_attn_norm],
+    formula: "ACh = 1 - H_attn_norm"
+}
+
+export equation driven_nt_ecb {
+    # Endocannabinoid (retrograde inhibition) = tanh(activation/τ_ecb).
+    params: [a_mean, tau_ecb],
+    formula: "eCB = tanh(max(0, a_mean) / tau_ecb)"
+}
+
+export equation driven_nt_glu {
+    # Glutamate = tanh(activation/τ_glu) — forward-magnitude proxy.
+    params: [a_mean, tau_glu],
+    formula: "Glu = tanh(max(0, a_mean) / tau_glu)"
+}
+
+export equation driven_nt_gaba {
+    # GABA = 1 − ignition_rate: inhibits when the workspace saturates.
+    params: [ignition_rate],
+    formula: "GABA = clip(1 - ignition_rate, 0, 1)"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# C2 — Metastable ignition (event-detector with adaptive threshold)
+# ─────────────────────────────────────────────────────────────────────
+# Replaces the always-on `gws_ignition` peakiness metric with a true
+# event model: ignition fires only when the workspace peak crosses a
+# self-regulating threshold that targets ρ* = 0.2.
+
+export equation metastable_ignition_gate {
+    # Sigmoid-gated continuous strength; NE lowers the effective
+    # threshold (high arousal → easier to ignite).
+    params: [peak_t, theta_t, NE, beta, tau_soft],
+    formula: "g_t = sigmoid((peak_t - theta_t - beta * NE) / tau_soft)"
+}
+
+export equation metastable_ignition_event {
+    # Discrete event indicator.
+    params: [g_t, p_star],
+    formula: "e_t = step(g_t - p_star)"
+}
+
+export equation metastable_threshold_update {
+    # Proportional controller — drives mean event rate toward target ρ*.
+    params: [theta_t, e_recent_mean, rho_target, eta],
+    formula: "theta_{t+1} = clip(theta_t + eta * (e_recent_mean - rho_target), 0, 1)"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# C3 — Predictive-coding reentry residual (motor → sensory)
+# ─────────────────────────────────────────────────────────────────────
+# Tests Friston-style free-energy minimisation on the bowtie's existing
+# motor → sensory feedback synapse. The predictor is isolated (no
+# gradient leaks into the trunk in this phase) so the residual is a
+# pure observation; promotion to a `λ_pc · ‖e‖²` aux loss is Phase 8.
+
+export equation pc_reentry_predict {
+    # Diagonal + rank-1 predictor: ŝ_t = diag(d) · m_{t-1} + (m·v) u
+    params: [m_prev, d_diag, u, v],
+    formula: "s_hat = (m_prev * d_diag) + (<m_prev, v>) * u"
+}
+
+export equation pc_reentry_residual {
+    # Prediction error at sensory layer; we report its squared norm.
+    params: [s_t, s_hat],
+    formula: "e_t = s_t - s_hat"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# C4 — Topological charge Q (the skyrmion analog)
+# ─────────────────────────────────────────────────────────────────────
+# Discrete winding number of the unit-norm hidden field along the token
+# axis under a fixed skew operator R. Conserved-charge structure on top
+# of the residual stream; cannot be smoothly destroyed without crossing
+# a "domain wall" (a token where <h_t, h_{t+1}> < 0).
+#
+# This is the *core* of the RCC-Bowtie v2 phenomenology: plateaus of Q
+# correspond to discourse-coherent spans; walls align with semantic
+# boundaries.
+
+export equation topological_unit_field {
+    # Normalise to the unit sphere S^{d-1}.
+    params: [h_t],
+    formula: "h_hat_t = h_t / max(||h_t||, eps)"
+}
+
+export equation topological_complex_pair {
+    # Re + i·Im decomposition of adjacent unit-vectors under R.
+    params: [h_hat_t, h_hat_tp1, R],
+    formula: "z_t = <h_hat_t, h_hat_tp1> + i * <h_hat_t, R @ h_hat_tp1>"
+}
+
+export equation topological_phase_increment {
+    # Per-step phase via four-quadrant atan2.
+    params: [z_t],
+    formula: "d_phi_t = atan2(Im(z_t), Re(z_t))"
+}
+
+export equation topological_charge_total {
+    # Conserved winding number along the sequence; integer plateaus
+    # emerge naturally when the field is structured.
+    params: [d_phi],
+    formula: "Q = (1 / (2 * pi)) * sum_t(d_phi_t)"
+}
+
+export equation topological_wall_indicator {
+    # Domain-wall mask: a wall occurs where adjacent unit-vectors are
+    # anti-correlated. Wall count = discrete jumps in Q.
+    params: [h_hat_t, h_hat_tp1],
+    formula: "wall_t = step(-<h_hat_t, h_hat_tp1>)"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# C5 — Bowtie-lattice specialisation index (mixture-of-bowties probe)
+# ─────────────────────────────────────────────────────────────────────
+# Probe whether a single d-dim workspace already partitions latently
+# into K specialised lanes. Lift = max-class conditional probability
+# divided by marginal; averaged over slices. S = 1 ⇒ no specialisation;
+# S = #classes ⇒ perfect one-class-per-lane.
+
+export equation lattice_slice_winner {
+    # WTA across K equal-width slices of the workspace activation.
+    params: [h, K, slice_size],
+    formula: "k_star = argmax_k ||h[:, k*slice_size:(k+1)*slice_size]||"
+}
+
+export equation lattice_specialisation_index {
+    # Mean per-slice maximum class lift. Bounded below by 1.
+    params: [P_c_given_k, P_c],
+    formula: "S = (1/K) * sum_k max_c (P_c_given_k / P_c)"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# C6 — Phase-amplitude coupling (PAC) binding
+# ─────────────────────────────────────────────────────────────────────
+# The Tort modulation index over a rolling buffer of the same signal
+# that drives the legacy osc[δ/θ/γ] tracker. Quantifies how strongly
+# gamma-band envelope locks to theta-band phase — the canonical neural
+# correlate of feature binding (Lisman 2013).
+
+export equation pac_bandpass_analytic {
+    # Hilbert-style band-limited analytic signal via FFT mask.
+    params: [x, f_lo, f_hi],
+    formula: "z = ifft( fft(x) * H_analytic * mask(f_lo, f_hi) )"
+}
+
+export equation pac_phase_and_amplitude {
+    # Instantaneous phase from theta-band z_θ; amplitude from |z_γ|.
+    params: [z_theta, z_gamma],
+    formula: "(phi_t, A_t) = (atan2(Im(z_theta), Re(z_theta)), |z_gamma|)"
+}
+
+export equation pac_modulation_index {
+    # Tort MI: KL divergence between phase-binned amplitude distribution
+    # and the uniform, normalised to [0, 1]. P_j = mean A in phase bin j.
+    params: [P, n_bins],
+    formula: "PAC = (log(n_bins) - H(P)) / log(n_bins)"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# FORMAL SPECIFICATIONS — analyser hints
+# ─────────────────────────────────────────────────────────────────────
+
+formal_spec emergent_telemetry_purity {
+    statement: "C1-C6 mechanisms do not contribute to the trunk's gradient in this phase",
+    proof_hint: "All probes operate on .detach()'ed activations; PC predictor params are observer-local; no aux loss is registered"
+}
+
+formal_spec topological_charge_integer_plateaus {
+    statement: "Q is invariant to smooth deformations and changes only when a wall is crossed",
+    proof_hint: "Discrete analog of the Pontryagin index: Q ∈ Z for closed loops; wall crossings are the only sources of ±1 jumps"
+}
+
+formal_spec emergent_baseline_recovery {
+    statement: "Each driven NT channel relaxes to its baseline when its driver is silent",
+    proof_hint: "DrivenNTSystem.step_full with None drivers applies a 0.05 exponential relaxation toward baselines per channel"
+}
