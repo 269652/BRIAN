@@ -365,6 +365,23 @@ class TrainingConfig:
     # which prevents memorisation-style overfitting. 0 or 1.0 = off.
     # Typical values: 0.75–0.95. 0.85 is the ULMFiT default.
     llrd: float = 1.0
+    # ── C3 reentry as NT-gated trunk loss (Jun 2026) ─────────────────
+    # The PC reentry probe (predicting sensory hidden state from motor
+    # hidden state via a learned projection W) is no longer telemetry
+    # only — its residual `||s − W·m_prev||²` is added to the LM loss
+    # with gradient flowing through BOTH populations, so the trunk
+    # learns to make motor and sensory hidden states mutually
+    # predictive (soft cycle-consistency / internal world-model
+    # constraint). 0 = off (telemetry only). 0.1 is the from-scratch
+    # default — empirically small enough to not destabilise early LM
+    # learning, large enough to noticeably shape the trunk by ~5k steps.
+    pc_reentry_weight: float = 0.0
+    # When True, scale `pc_reentry_weight` by a neuromodulator gate:
+    #   gate = max(0, 1 + 0.5·DA − 0.7·GABA)
+    # so the auxiliary loss strengthens under curiosity/reward (DA up)
+    # and weakens under cortical inhibition (GABA up). Other NTs are
+    # left agnostic to avoid double-counting with the homeostat.
+    pc_reentry_nt_gate: bool = False
     # ── Novel-topology mechanisms (H15 / H16 / H19) ──────────────────
     # Each accepts a dict or `None` (= off). When all are None the
     # cortex is bit-identical to the legacy baseline (zero-init
@@ -496,6 +513,10 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.z_loss = float(props["z_loss"])
     if "llrd" in props:
         cfg.llrd = float(props["llrd"])
+    if "pc_reentry_weight" in props:
+        cfg.pc_reentry_weight = float(props["pc_reentry_weight"])
+    if "pc_reentry_nt_gate" in props:
+        cfg.pc_reentry_nt_gate = _parse_bool(props["pc_reentry_nt_gate"])
     # Novel-topology mechanisms (H15/H16/H19) — parse as generic dicts.
     if "grid_positions" in props:
         cfg.grid_positions = _parse_novel_topology_dict(props["grid_positions"])

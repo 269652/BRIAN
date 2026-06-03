@@ -41,42 +41,37 @@ training {
     quantization:  { enabled: false, bits: 8 }
     optimizer:     "adamw"
     learning_rate: 0.0003
-    weight_decay:  0.12
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║  PRETRAIN-FRIENDLY RECIPE  (Jun 2026 surgery)                ║
+    # ║                                                              ║
+    # ║  The previous values (wd=0.12 dropout=0.12 llrd=0.85         ║
+    # ║  flooding=4.0 label_smooth=0.05) were tuned to NARROW the    ║
+    # ║  train→WikiText OOD gap after ~10k steps of an already-      ║
+    # ║  pretrained checkpoint. Applied from-scratch they suppress   ║
+    # ║  early learning catastrophically:                            ║
+    # ║    • flooding=4.0 hard-caps train ppl at ≈55 — model is      ║
+    # ║      contractually forbidden from improving below ln(55)≈4   ║
+    # ║    • LLRD=0.85 over 8 depth + adapters (~170 groups) starves ║
+    # ║      bottom layers at 0.85^20 ≈ 4% of base LR                ║
+    # ║    • dropout=0.12 + wd=0.12 are anti-regularisers when the   ║
+    # ║      model is severely under-fit (train ppl 500+)            ║
+    # ║                                                              ║
+    # ║  New values are GPT-2 / LLaMA pretraining defaults. Once the ║
+    # ║  trunk reaches its capacity ceiling (train ppl < ~30), the   ║
+    # ║  OOD-narrowing knobs can be re-enabled via the PR2           ║
+    # ║  regularization controller (DAR/PCC/iso/CMD) which is        ║
+    # ║  designed to compose additively without poisoning early      ║
+    # ║  training. See docs/PRETRAIN_RECIPE.md.                      ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    weight_decay:  0.01        # was 0.12 — GPT-2/LLaMA use 0.01–0.1
     grad_accum:    1
     grad_clip:     1.0
-    label_smoothing: 0.05
-    # Regularisation — dropout is the single highest-impact OOD knob.
-    # P4 ran at 0.0 → OOD gap blew out to 13x.  0.12 balances capacity.
-    dropout:       0.12
-    # Flooding loss (Ishida et al. 2020): prevents train loss from
-    # collapsing below this floor. |loss - b| + b bounces loss off the
-    # floor, maintaining useful gradients while stopping memorization.
-    # Set to ~4.0 (approx where train loss plateaus on WikiText before
-    # overfitting begins). 0 = off.
-    flooding_level: 4.0
-    # Stochastic depth (Huang et al. 2016): linearly increasing block
-    # skip probability. Acts as implicit ensemble + regularizer. The
-    # deepest block is skipped with prob=stochastic_depth during train.
-    # Now skip-aware with PCT: dropped blocks excluded from PCT pairs.
-    # 0.1 is conservative; literature uses 0.1–0.5 for deep nets.
-    stochastic_depth: 0.1
-    # z-loss (PaLM / Gemma): α * logsumexp(logits)^2 penalty caps logit
-    # magnitudes. Direct fix for the logit-explosion that drives
-    # train↔OOD divergence. 1e-4 is the PaLM default (3-5% PPL drop
-    # AND 10-15% OOD gap drop simultaneously in published runs).
-    z_loss: 0.0001
-    # Layer-wise LR decay (ULMFiT / DeBERTa): lower transformer blocks
-    # learn fast (general features), top blocks learn slow (prevents
-    # memorization). lr_i = base_lr * llrd^(depth - 1 - i).
-    # 0.85 = ULMFiT default. 1.0 = off. Typical: 0.75–0.95.
-    llrd: 0.85
-    # Predictive-coding trunk loss (auxiliary next-token prediction at
-    # intermediate layers). Acts as implicit label smoothing + forces
-    # internal representations to stay predictive → strong OOD reg.
-    # ── DEPRECATED in favour of PCC (regularization.pcc below) ──
-    # PCT enforces *invertibility* (reconstruction); PCC enforces
-    # *invariance* (contrastive). The two objectives target overlapping
-    # layers and fight when both active. Forced to 0 because PCC is on.
+    label_smoothing: 0.0       # was 0.05 — inflates raw PPL, off for pretrain
+    dropout:       0.0         # was 0.12 — model is under-fit, no overfit yet
+    flooding_level: 0.0        # was 4.0 — DEATH SENTENCE for pretraining
+    stochastic_depth: 0.0      # was 0.1  — reduces effective depth
+    z_loss: 0.0001             # keep — cheap PaLM-style logit stabiliser
+    llrd: 1.0                  # was 0.85 — LLRD is for FINE-TUNING, not pretrain
     pct_trunk:     0.0
     pct_strength:  0.0
     # ── Novel-topology mechanisms (H15 / H16 / H19) ──
@@ -112,6 +107,21 @@ training {
     steps:        40000
     warmup_steps: 300
     min_lr_ratio: 0.1
+
+    # ── C3 reentry as NT-gated trunk loss (Jun 2026) ──
+    # The PC reentry probe (predicting sensory hidden state from motor
+    # hidden state via a learned projection W) is no longer telemetry
+    # only — its residual is added to the LM loss, gradient flowing
+    # through BOTH populations so the trunk learns to make motor and
+    # sensory hidden states mutually predictive (a soft cycle-consistency
+    # / world-model constraint). Gating by neuromodulators:
+    #   gate = clip(1 + 0.5·DA − 0.7·GABA, 0, ∞)
+    # so the loss strengthens when DA is high (curiosity / reward) and
+    # weakens under GABA (cortical inhibition). eCB/5HT/Glu/etc. are
+    # left agnostic to avoid double-counting (they already modulate
+    # other parts of the homeostat).
+    pc_reentry_weight:  0.1
+    pc_reentry_nt_gate: true
     tonnetz_period: 0
     bema_rollback_window: 0
     bema_snapshot_every: 50

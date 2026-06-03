@@ -57,7 +57,8 @@ class NeuroLinter:
             "flooding_level", "stochastic_depth", "z_loss", "llrd", "pct_trunk",
             "pct_strength", "batch_size", "seq_len", "steps", "warmup_steps",
             "min_lr_ratio", "tonnetz_period", "bema_rollback_window", "bema_snapshot_every",
-            "bema_cooldown", "nemori_floor", "mu_p_scaling", "curriculum", "crystallization_step"
+            "bema_cooldown", "nemori_floor", "mu_p_scaling", "curriculum", "crystallization_step",
+            "pc_reentry_weight", "pc_reentry_nt_gate"
         },
         "dynamics": {"equation", "ode", "params", "state", "constants"},
         "function": {"params", "return"}

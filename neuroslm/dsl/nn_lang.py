@@ -969,6 +969,17 @@ class DSLLanguageCortex(nn.Module):
         # PR2: expose the exact hidden state used by the LM head projection
         # so the harness regularization controller can consume it.
         self._last_hidden = h_for_head
+        # C3 trunk-loss: stash first/last block outputs so the harness
+        # can compute the NT-gated PC-reentry residual inline (gradient
+        # flows back through both populations into the trunk). These
+        # references hold a sub-graph until the next forward; cleared
+        # implicitly when reassigned.
+        if block_outs:
+            self._last_h_sensory = block_outs[0]
+            self._last_h_motor = block_outs[-1]
+        else:
+            self._last_h_sensory = None
+            self._last_h_motor = None
         return logits
 
 

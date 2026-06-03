@@ -479,6 +479,75 @@ class BRIANHarness(nn.Module):
 
     # ── Loss ─────────────────────────────────────────────────────────
 
+    def _compute_pc_reentry_loss(self, base_weight: float):
+        """Return the NT-gated PC-reentry trunk loss term (scalar tensor)
+        or ``None`` if not applicable this step.
+
+        Reads ``_last_h_motor`` / ``_last_h_sensory`` (first/last block
+        outputs) from the language model and runs them through the
+        harness-owned :class:`PCReentryProbe` to obtain an autograd-
+        tracked residual. The probe parameters are *detached* inside
+        ``residual_diff`` so this loss only flows back into the trunk
+        activations, not the probe's W. The probe's own SGD on W
+        continues separately (driven by the metrics observer).
+
+        Neuromodulator gating is computed from the latest observer
+        levels when ``pc_reentry_nt_gate=True`` and an observer with
+        an ``nt`` attribute is reachable; otherwise the gate is 1.0.
+        """
+        h_m = getattr(self.language_model, "_last_h_motor", None)
+        h_s = getattr(self.language_model, "_last_h_sensory", None)
+        if h_m is None or h_s is None:
+            return None
+        # Lazy-construct a probe sized to the population dim. The probe
+        # is sized once and reused; if d_model changes mid-run (it
+        # shouldn't) we drop and rebuild.
+        dim = int(h_m.shape[-1])
+        probe = getattr(self, "_pc_reentry_probe", None)
+        if probe is None or getattr(probe, "dim", -1) != dim:
+            try:
+                from neuroslm.emergent.pc_reentry import PCReentryProbe
+            except Exception:
+                return None
+            probe = PCReentryProbe(dim=dim, device=h_m.device)
+            self._pc_reentry_probe = probe
+        # Run probe's internal SGD on a detached copy (telemetry path).
+        try:
+            probe.step(h_m.detach(), h_s.detach())
+        except Exception:
+            pass
+        # Autograd-tracked residual with frozen-W (trunk gradient only).
+        pc_diff = probe.residual_diff(h_m, h_s)
+        if pc_diff is None:
+            return None
+        # NT gating.
+        gate_scalar = 1.0
+        if getattr(self.training_config, "pc_reentry_nt_gate", False):
+            obs = getattr(self, "_observer", None) \
+                or getattr(self, "observer", None) \
+                or getattr(self, "last_observer", None)
+            nt = None
+            if obs is not None and hasattr(obs, "nt"):
+                try:
+                    nt = obs.nt.levels()
+                except Exception:
+                    nt = None
+            if nt is not None:
+                da = float(nt.get("DA", 0.0))
+                gaba = float(nt.get("GABA", 0.0))
+                gate_scalar = max(0.0, 1.0 + 0.5 * da - 0.7 * gaba)
+        eff_w = base_weight * gate_scalar
+        # Surface telemetry for the per-step log line.
+        try:
+            self._metrics["pc_reentry_loss"] = float(pc_diff.detach())
+            self._metrics["pc_reentry_gate"] = float(gate_scalar)
+            self._metrics["pc_reentry_eff_weight"] = float(eff_w)
+        except Exception:
+            pass
+        if eff_w <= 0.0:
+            return None
+        return eff_w * pc_diff
+
     def compute_loss(self, ids: torch.Tensor, targets: torch.Tensor,
                      nt_levels: Optional[Dict[str, float]] = None) -> torch.Tensor:
         """Cross-entropy loss with optional per-sample clipping + aux losses.
@@ -637,6 +706,22 @@ class BRIANHarness(nn.Module):
                     continue
                 w = self.total_loss_config.aux.scaled(aux_key, mat)
                 total = total + w * aux
+
+            # ── C3 reentry: NT-gated trunk loss (Jun 2026 surgery) ──
+            # Predict the sensory hidden state from the motor hidden
+            # state via the PC reentry probe's frozen-W projection;
+            # add the residual to the LM loss so the trunk learns to
+            # make the two populations mutually predictable. Gating:
+            #   gate = max(0, 1 + 0.5·DA − 0.7·GABA)
+            # so curiosity/reward (DA) strengthens the constraint and
+            # cortical inhibition (GABA) relaxes it. Other NTs left
+            # agnostic — the homeostat already touches them.
+            pc_w = float(getattr(self.training_config,
+                                 "pc_reentry_weight", 0.0))
+            if pc_w > 0.0:
+                pc_diff = self._compute_pc_reentry_loss(pc_w)
+                if pc_diff is not None:
+                    total = total + pc_diff
         # Record the LM-portion so train_step can update MAT after the
         # backward pass without a second forward.
         self._last_lm_loss_value = float(loss_lm.detach().item())

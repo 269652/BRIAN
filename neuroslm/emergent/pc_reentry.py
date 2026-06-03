@@ -155,6 +155,56 @@ class PCReentryProbe:
         self._prev_motor = m
         return self._stats()
 
+    # ── Differentiable residual (Jun 2026 — C3 → trunk gradient) ─────
+
+    def residual_diff(self,
+                      h_motor: Optional[torch.Tensor],
+                      h_sensory: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+        """Return an autograd-tracked scalar ``||s − W·m||²`` *without*
+        disturbing the internal SGD path.
+
+        Design notes
+        ------------
+        - ``W`` (= diag + rank-1 (u,v)) is treated as **frozen** here:
+          we detach the predictor parameters so this loss only updates
+          the trunk's motor / sensory activations. The probe's own
+          SGD (in :meth:`step`) keeps learning W on the detached
+          tensors in parallel — clean separation of concerns.
+        - Same-step formulation (``s_t`` predicted from ``m_t``, not
+          ``m_{t-1}``) avoids holding a non-detached previous-motor
+          tensor across training steps (which would either leak
+          autograd graphs or require explicit retain_graph plumbing).
+          The lagged formulation in :meth:`step` is preserved for
+          telemetry because the lag-1 structure is what tells us
+          whether the loop carries genuine *predictive* information
+          (vs. mere copying).
+        - Returns ``None`` if shapes don't match or either input is
+          ``None`` — callers must guard.
+
+        The semantics: the trunk learns to make ``h_motor`` and
+        ``h_sensory`` mutually-predictable under the probe's current
+        world model. Soft cycle-consistency, no extra parameters in
+        the trunk, no autograd-graph accumulation.
+        """
+        if h_motor is None or h_sensory is None:
+            return None
+        if h_motor.shape != h_sensory.shape or h_motor.shape[-1] != self.dim:
+            return None
+        # Cast to predictor dtype/device but KEEP the autograd graph.
+        m = h_motor.to(device=self._diag.device, dtype=torch.float32)
+        s = h_sensory.to(device=self._diag.device, dtype=torch.float32)
+        # Frozen-W prediction (detach predictor params so only the
+        # trunk receives gradient from this term).
+        d_det = self._diag.detach()
+        u_det = self._u.detach()
+        v_det = self._v.detach()
+        diag_term = m * d_det
+        coeff = (m * v_det).sum(dim=-1, keepdim=True)
+        rank1_term = coeff * u_det
+        pred = diag_term + rank1_term
+        # Mean-squared residual (scalar, autograd-tracked through m & s).
+        return (s - pred).pow(2).mean()
+
     # ── Stats ────────────────────────────────────────────────────────
 
     def _stats(self) -> Dict[str, float]:

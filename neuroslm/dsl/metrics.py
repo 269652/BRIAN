@@ -249,6 +249,10 @@ class MetricObserver:
         self._fiedler = fiedler_lambda(n_layers)   # static — graph property
         self.enable_emergent = bool(enable_emergent)
         self._emergent = None
+        # Autograd-tracked PC residual stashed by observe(); read by
+        # harness.compute_loss() when training_config.pc_reentry_weight > 0.
+        # Tensor with requires_grad=True OR None.
+        self.last_pc_residual_diff = None
         if self.enable_emergent:
             # Lazy import so the emergent package is optional.
             from neuroslm.emergent import (
@@ -343,6 +347,19 @@ class MetricObserver:
         if em["pc"] is not None:
             pc_stats = em["pc"].step(h_motor, h_sensory)
             out.update(pc_stats)
+            # Autograd-tracked residual for the NT-gated trunk loss
+            # (TrainingConfig.pc_reentry_weight > 0). The probe keeps
+            # its internal SGD on a frozen-W copy; this term only
+            # touches the trunk activations. None when shapes/inputs
+            # are missing — harness guards.
+            try:
+                self.last_pc_residual_diff = em["pc"].residual_diff(
+                    h_motor, h_sensory
+                )
+            except Exception:  # pragma: no cover — best-effort
+                self.last_pc_residual_diff = None
+        else:
+            self.last_pc_residual_diff = None
 
         # ── C4: topological charge over the last layer activation ──
         topo_dim = last.shape[-1] if last.dim() >= 1 else 0
