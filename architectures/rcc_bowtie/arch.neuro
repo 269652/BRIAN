@@ -112,7 +112,12 @@ training {
     batch_size:   16
     seq_len:      2048
     steps:        40000
-    warmup_steps: 300
+    warmup_steps: 2400         # was 300 — scales with grad_accum=8 so we
+                                # still get 300 OPTIMIZER updates of warmup
+                                # (logged "step" counts micro-batches, not
+                                # opt updates). Prior 300 micro-batches =
+                                # 37 opt updates → too short, caused early
+                                # lurches at full LR.
     min_lr_ratio: 0.1
 
     # ── C3 reentry as NT-gated trunk loss (Jun 2026) ──

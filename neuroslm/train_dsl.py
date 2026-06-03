@@ -911,11 +911,34 @@ def main():
     # LR schedule — use the preset's exact warmup/peak/min_ratio so the
     # DSL run's learning-rate curve matches Brain's cosine_lr step-for-step
     # (validated in tests/dsl/test_lr_parity.py). Fall back to 10% warmup.
-    if preset_sched is not None:
+    #
+    # PRECEDENCE FIX (Jun 2026): when arch.neuro has an explicit `training {}`
+    # block, that block is the source of truth and the preset's lr/wd/warmup
+    # are NOT applied (preset still contributes trunk dims). Without this
+    # guard, lr=5e-4 / warmup=2400 in arch.neuro were silently clobbered
+    # back to the preset's lr=3e-4 / warmup=300 on every run.
+    _arch_src_for_training = (arch_root / "arch.neuro").read_text(encoding="utf-8")
+    _arch_has_training_block = (
+        "training {" in _arch_src_for_training
+        or "training{" in _arch_src_for_training
+    )
+    if preset_sched is not None and not _arch_has_training_block:
         harness.training_config.learning_rate = preset_sched["lr"]
         harness.training_config.weight_decay = preset_sched["weight_decay"]
         warmup = preset_sched["warmup_steps"]
         min_ratio = preset_sched["min_lr_ratio"]
+        print(f"[train_dsl] LR schedule from preset {args.preset}: "
+              f"lr={preset_sched['lr']} warmup={warmup} min_ratio={min_ratio}")
+    elif preset_sched is not None and _arch_has_training_block:
+        # arch.neuro wins; harness.training_config already carries its
+        # lr/wd/warmup_steps/min_lr_ratio from the training{} block.
+        warmup = harness.training_config.warmup_steps
+        min_ratio = harness.training_config.min_lr_ratio
+        print(f"[train_dsl] LR schedule from arch.neuro (preset "
+              f"{args.preset} suppressed): "
+              f"lr={harness.training_config.learning_rate} "
+              f"wd={harness.training_config.weight_decay} "
+              f"warmup={warmup} min_ratio={min_ratio}")
     else:
         warmup = max(1, args.steps // 10)
         min_ratio = 0.1
