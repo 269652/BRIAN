@@ -81,21 +81,47 @@ training {
     llrd: 1.0                  # was 0.85 — LLRD is for FINE-TUNING, not pretrain
     pct_trunk:     0.0
     pct_strength:  0.0
-    # ── Novel-topology mechanisms (H15 / H16 / H19) ──
+    # ── HPB Phases 1-5 — novel-topology mechanisms ACTIVATED ──
     # All zero-init: first forward is bit-identical to baseline; behaviour
     # emerges as the gates lift off zero under LM loss. Composable —
-    # H19's surprise gates H15's writes when both are on.
-    # DISABLED for 30M baseline run — these add ~40M params + memory overhead.
-    # Enable for 100M+ scale experiments only.
-    # H16: multi-scale grid-cell positions (Sargolini et al. 2006).
-    grid_positions: { enabled: false, n_scales: 8, scale_ratio: 1.6180339887 }
-    # H19: local-context surprise head (Mismatch Negativity).
-    surprise_head:  { enabled: false, dim: 128, local_window: 64 }
-    # H15: episodic kNN memory (Memorizing Transformers / RETRO),
-    # writes gated by H19's surprise score so we store informative
-    # tokens, not noise. alpha_init=0 ⇒ ReZero start.
-    episodic_memory: { enabled: false, slots: 4096, k: 32, alpha_init: 0.0,
-                       write_gate: "surprise", write_quantile: 0.8 }
+    # H19 monitors surprise (read by H15 for analytics when write_gate
+    # is "surprise"; currently "all" for the Phase-5 uniform-writes
+    # baseline before the wake/sleep replay loop (Phase 6) lands.
+    #
+    # HPB Phase 1 + Phase 2: H16 multi-scale grid-cell positions.
+    # K=4 scales at φ-ratio (Sargolini 2006; Stensola 2012) — provable
+    # length-OOD extrapolation. Activates the dormant code path; the
+    # 2K=8 raw features project to d_model via a zero-init head, so the
+    # first forward is bit-identical to baseline (Phase 1 contract).
+    grid_positions: { enabled: true, n_scales: 4, scale_ratio: 1.6180339887, base_period: 16.0 }
+    # HPB Phase 5: H19 local-context surprise head (Mismatch Negativity).
+    # Exposes per-token surprise = nll_local − nll_global on every
+    # train forward; harness logs it for diagnostics. Composes with
+    # H15's write gate when write_gate = "surprise".
+    surprise_head:  { enabled: true, dim: 128, local_window: 64 }
+    # HPB Phase 5: H15 episodic kNN memory (Memorizing Transformers /
+    # RETRO). Uniform writes (write_gate="all") for the Phase-5
+    # baseline; surprise-gating + wake/sleep replay come in Phase 6.
+    # alpha_init=0 ⇒ ReZero start: first forward bit-identical to
+    # baseline; the value blend only activates as α lifts off zero
+    # under LM gradient pressure.
+    episodic_memory: { enabled: true, slots: 4096, k: 32, alpha_init: 0.0,
+                       write_gate: "all", write_quantile: 0.8 }
+    # HPB Phase 3 — Multi-Scale Predictive Coding Cascade.  Applies the
+    # MDRV-VBB free-energy at every adjacent layer pair (ℓ, ℓ+1) of the
+    # trunk, with geometric weight decay λ_ℓ = base_weight · 0.5^((L-1)-ℓ)
+    # so the deepest (bowtie waist) pair dominates and the shallowest
+    # pair contributes a small but non-zero compositional regulariser.
+    # Shares all VBB hyperparameters (alpha / free_bits / beta_max / eta).
+    # Composes additively with the single-waist VBB above.
+    mspcc: { enabled: true, base_weight: 0.02, layer_weight_decay: 0.5 }
+    # HPB Phase 4 — Hyperbolic Bowtie Waist (HBW). Curvature c=1.0 of
+    # the Poincaré ball on which the VBB posterior is wrapped. The KL
+    # closed form picks up a Jacobian-log-det correction that strictly
+    # upper-bounds the Euclidean KL for any non-zero ‖μ‖ — making
+    # σ-collapse harder by the construction of the geometry itself.
+    # Composes with all MDRV stabilisers (free-bits, β-ceiling, PEC).
+    vbb_curvature: 1.0
     # batch 16 x ctx 2048 = 32k tokens/step (same as old 32x1024) but
     # ctx is 2x richer. The 32x2048 combo OOM'd on cross-entropy (13 GiB
     # logit tensor at fp32). If you want to push back to batch=32, also

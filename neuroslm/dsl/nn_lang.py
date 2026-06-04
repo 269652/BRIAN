@@ -980,6 +980,14 @@ class DSLLanguageCortex(nn.Module):
         else:
             self._last_h_sensory = None
             self._last_h_motor = None
+        # HPB Phase 3 — MSPCC stash: expose ALL post-block outputs so the
+        # harness can run the per-layer free-energy cascade. Each tensor
+        # carries gradient back through the trunk; the harness owns the
+        # decision to consume them (cfg.mspcc.enabled gates the loss).
+        # We pass the post-PCT outputs (block_outs above are mutated
+        # by PCT when active) so the cascade sees the same hidden state
+        # the LM head sees, layer by layer.
+        self._last_layer_outputs = list(block_outs) if block_outs else None
         return logits
 
 

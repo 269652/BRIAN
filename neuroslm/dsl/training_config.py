@@ -450,6 +450,23 @@ class TrainingConfig:
     # the degenerate channel regardless of batch noise.
     # 0.0 = off. Recommended: 0.001 (weak prior, leaves α·KL dominant).
     vbb_entropy_eta: float = 0.0
+    # ── HPB Phase 4 — Hyperbolic Bowtie Waist (HBW) ──────────────────
+    # Curvature parameter c > 0 of the Poincaré ball B^d_c on which the
+    # VBB posterior is wrapped. The KL closed-form picks up a Jacobian
+    # correction (d-1)·log(sinh(√c·‖μ‖)/(√c·‖μ‖)) ≥ 0 that strictly
+    # upper-bounds the Euclidean KL for any non-zero μ — making
+    # σ-collapse harder by the construction of the geometry itself.
+    # Composes with all MDRV stabilisers (free-bits, β-ceiling, PEC).
+    # 0.0 = off (Euclidean VBB, legacy path). Recommended: 1.0.
+    vbb_curvature: float = 0.0
+    # ── HPB Phase 3 — Multi-Scale Predictive Coding Cascade (MSPCC) ──
+    # When set to a dict with `enabled: true`, applies the VBB free-
+    # energy term to EVERY adjacent layer pair (ℓ, ℓ+1) of the trunk
+    # with geometric decay: λ_ℓ = base_weight · decay^((L-1)-ℓ).
+    # Shares vbb_alpha / vbb_free_bits / vbb_log_beta_max / vbb_entropy_eta
+    # with the single-waist VBB. Composes additively with it.
+    # `None` (default) ⇒ off; legacy single-waist VBB path is preserved.
+    mspcc: Optional[Dict[str, Any]] = None
     # ── Novel-topology mechanisms (H15 / H16 / H19) ──────────────────
     # Each accepts a dict or `None` (= off). When all are None the
     # cortex is bit-identical to the legacy baseline (zero-init
@@ -595,6 +612,12 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.vbb_log_beta_max = float(props["vbb_log_beta_max"])
     if "vbb_entropy_eta" in props:
         cfg.vbb_entropy_eta = float(props["vbb_entropy_eta"])
+    # HPB Phase 4 — Hyperbolic Bowtie Waist curvature.
+    if "vbb_curvature" in props:
+        cfg.vbb_curvature = float(props["vbb_curvature"])
+    # HPB Phase 3 — Multi-Scale Predictive Coding Cascade.
+    if "mspcc" in props:
+        cfg.mspcc = _parse_novel_topology_dict(props["mspcc"])
     # Novel-topology mechanisms (H15/H16/H19) — parse as generic dicts.
     if "grid_positions" in props:
         cfg.grid_positions = _parse_novel_topology_dict(props["grid_positions"])

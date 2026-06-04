@@ -727,6 +727,27 @@ class BRIANHarness(nn.Module):
             kl_per_dim = kl_per_dim.clamp(min=free_bits)
         kl = kl_per_dim.mean()
 
+        # ── HPB Phase 4 — Hyperbolic Bowtie Waist (HBW) ──────────────
+        # When vbb_curvature > 0, switch the posterior from Euclidean
+        # N(μ, σ²I) to a wrapped Gaussian on the Poincaré ball B^d_c.
+        # The KL acquires an extra Jacobian-log-det term (Skopek et al.
+        # 2020, eq. 12) which is ≥ 0 for any non-zero ‖μ‖ — strictly
+        # upper-bounding the Euclidean KL and making σ-collapse harder
+        # by the construction of the geometry alone. Free-bits is
+        # applied to the per-dim Euclidean part inside the helper.
+        vbb_curvature = float(getattr(self.training_config,
+                                      "vbb_curvature", 0.0))
+        if vbb_curvature > 0.0:
+            try:
+                from neuroslm.emergent.hyperbolic import wrapped_normal_kl
+                kl = wrapped_normal_kl(mu, log_var, c=vbb_curvature,
+                                       free_bits=free_bits)
+            except Exception:
+                # Fall back silently to the Euclidean KL on any
+                # numerical hiccup (e.g. ‖μ‖ at the boundary). The
+                # training loop must never crash on the math swap.
+                pass
+
         # ── Posterior Entropy Commitment — Jeffreys σ-prior (PEC) ────
         # Adds −η · ½ · 𝔼[log σ²] = +η · H_Gauss[q] + const to loss.
         # As σ→0 the term diverges to +∞, making σ=0 a Lyapunov-
@@ -761,6 +782,71 @@ class BRIANHarness(nn.Module):
         if eff_w <= 0.0:
             return None
         return eff_w * free_energy
+
+    def _compute_mspcc_loss(self, base_weight: float):
+        """HPB Phase 3 — Multi-Scale Predictive Coding Cascade loss.
+
+        When ``training_config.mspcc`` is a dict with ``enabled = True``
+        and the wrapped language model exposes ``_last_layer_outputs``
+        (a list of per-block hidden states), run the per-layer VBB
+        free-energy cascade (see :mod:`neuroslm.emergent.mspcc`) with
+        the shared MDRV stabiliser hyperparameters.
+
+        Returns ``None`` when MSPCC is disabled / the stash is missing /
+        there are fewer than two layers.  Designed to be **additive**
+        with the single-waist VBB at :meth:`_compute_pc_reentry_loss`.
+
+        Parameters
+        ----------
+        base_weight
+            Override for the MSPCC base λ_0. Falls back to
+            ``mspcc["base_weight"]`` when 0.
+
+        Returns
+        -------
+        torch.Tensor (scalar) or None
+        """
+        mspcc_cfg = getattr(self.training_config, "mspcc", None)
+        if mspcc_cfg is None or not bool(mspcc_cfg.get("enabled", False)):
+            return None
+        lm = self.language_model
+        if lm is None:
+            return None
+        layer_outs = getattr(lm, "_last_layer_outputs", None)
+        if not layer_outs or len(layer_outs) < 2:
+            return None
+        try:
+            from neuroslm.emergent.mspcc import compute_mspcc_loss
+        except Exception:
+            return None
+        # Resolve hyperparameters.
+        base_w = float(base_weight) if base_weight and float(base_weight) > 0 \
+            else float(mspcc_cfg.get("base_weight", 0.05))
+        decay = float(mspcc_cfg.get("layer_weight_decay", 0.5))
+        alpha = float(getattr(self.training_config, "vbb_alpha", 0.001))
+        free_bits = float(getattr(self.training_config, "vbb_free_bits", 0.0))
+        log_beta_max = float(getattr(self.training_config,
+                                     "vbb_log_beta_max", 0.0))
+        entropy_eta = float(getattr(self.training_config,
+                                    "vbb_entropy_eta", 0.0))
+        loss = compute_mspcc_loss(
+            layer_outs,
+            base_weight=base_w,
+            layer_weight_decay=decay,
+            alpha=alpha,
+            free_bits=free_bits,
+            log_beta_max=log_beta_max,
+            entropy_eta=entropy_eta,
+        )
+        if loss is None:
+            return None
+        try:
+            self._metrics["mspcc_loss"] = float(loss.detach())
+            self._metrics["mspcc_base_weight"] = float(base_w)
+            self._metrics["mspcc_n_pairs"] = int(len(layer_outs) - 1)
+        except Exception:
+            pass
+        return loss
 
     def compute_loss(self, ids: torch.Tensor, targets: torch.Tensor,
                      nt_levels: Optional[Dict[str, float]] = None) -> torch.Tensor:
@@ -936,6 +1022,21 @@ class BRIANHarness(nn.Module):
                 pc_diff = self._compute_pc_reentry_loss(pc_w)
                 if pc_diff is not None:
                     total = total + pc_diff
+
+            # ── HPB Phase 3 — MSPCC trunk cascade (additive) ──
+            # When training_config.mspcc is enabled, run a per-layer
+            # MDRV-VBB free-energy on the stash of post-block outputs.
+            # The deepest pair dominates the cascade by the geometric
+            # weight schedule λ_ℓ = λ_0 · decay^((L-1)-ℓ); shallow
+            # pairs contribute a smaller, decaying fraction. Composes
+            # with the single-waist VBB above — both terms add to
+            # `total`. NT-gating intentionally NOT applied here
+            # because each layer pair lives at a different depth in
+            # the cortical hierarchy and the NT gate is calibrated
+            # for the bowtie waist specifically.
+            mspcc_loss = self._compute_mspcc_loss(base_weight=0.0)
+            if mspcc_loss is not None:
+                total = total + mspcc_loss
         # Record the LM-portion so train_step can update MAT after the
         # backward pass without a second forward.
         self._last_lm_loss_value = float(loss_lm.detach().item())
