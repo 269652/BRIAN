@@ -1,0 +1,11 @@
+{
+  "step": 3000,
+  "run_id": "20260604-165617",
+  "ood_dataset": "wikitext-103-v1",
+  "ood_ppl": 3123.547316363441,
+  "train_ppl": 773.8257224957716,
+  "gap_ratio": 4.036499725402329,
+  "n_sequences": 50,
+  "n_tokens": 6430,
+  "kind": "mid-training"
+}
