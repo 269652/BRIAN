@@ -360,7 +360,7 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
     em_str = ""
     em_present = any(k in m for k in
                      ("ign_rate", "Q_total", "pac", "pc_residual",
-                      "lattice_spec"))
+                      "lattice_spec", "vbb_beta", "vbb_sigma_mean"))
     if em_present:
         em_parts = []
         if "ign_rate" in m:
@@ -375,6 +375,11 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
                 f" pl={int(m.get('Q_plateau_len', 0))}")
         if "pc_residual" in m:
             em_parts.append(f"C3:pc={m.get('pc_residual', 0.0):.3f}")
+        if "vbb_beta" in m:
+            em_parts.append(
+                f"VBB:β={m.get('vbb_beta', 0.0):.2f}"
+                f" σ={m.get('vbb_sigma_mean', 0.0):.4f}"
+                f" kl={m.get('vbb_kl', 0.0):.3f}")
         if "lattice_spec" in m:
             em_parts.append(f"C5:lat={m.get('lattice_spec', 0.0):.2f}")
         if "pac" in m:

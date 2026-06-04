@@ -156,6 +156,19 @@ training {
     # See harness._compute_pc_reentry_loss for the full math derivation.
     vbb_alpha:     0.001
     vbb_beta_init: 1.0
+    # ── MDRV-VBB anti-collapse stabilisers (VBB-v2, Jun 2026) ──────
+    # Three interlocking mechanisms that prevent the β↑/σ↓ co-collapse
+    # observed in the VBB-v1 run (gap 3.99→6.68 by step 4000):
+    #
+    #  1. Free-bits KL floor: guarantees ≥0.1 nats/dim of posterior
+    #     information — σ→0 becomes provably non-optimal.
+    #  2. β-ceiling: clamps log β ≤ 4.0 (β ≤ ~4.0) — breaks the
+    #     joint β↑/σ↓ equilibrium that erased the bottleneck.
+    #  3. PEC (Posterior Entropy Commitment): Jeffreys prior on each
+    #     σ_d — as σ→0, PEC→+∞, making collapse Lyapunov-unstable.
+    vbb_free_bits:    0.1
+    vbb_log_beta_max: 4.0
+    vbb_entropy_eta:  0.001
     tonnetz_period: 0
     bema_rollback_window: 0
     bema_snapshot_every: 50

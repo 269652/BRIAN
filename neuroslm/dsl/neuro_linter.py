@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Semantic linter for .neuro DSL files.
+"""Semantic linter for .neuro DSL fi            "vbb_alpha", "vbb_beta_init",
+            "vbb_free_bits", "vbb_log_beta_max", "vbb_entropy_eta",es.
 
 Validates:
   - Syntax: block structure, matching braces, required fields

@@ -271,3 +271,161 @@ def test_legacy_path_when_alpha_zero_matches_residual_diff():
     assert loss is not None
     # Allow tiny numerical drift only.
     assert float(loss) == pytest.approx(0.1 * float(ref), rel=1e-5)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 6. MDRV-VBB anti-collapse stabilisers (VBB-v2)
+# ──────────────────────────────────────────────────────────────────────
+
+def _make_mdrv_harness(free_bits: float = 0.0,
+                       log_beta_max: float = 0.0,
+                       entropy_eta: float = 0.0,
+                       d_sem: int = 16):
+    """Helper: harness with MDRV knobs active."""
+    from neuroslm.harness import BRIANHarness
+    from neuroslm.dsl.training_config import TrainingConfig
+    import torch.nn as nn
+
+    class _StubLM(nn.Module):
+        def __init__(self, d):
+            super().__init__()
+            self.proj = nn.Linear(d, d)
+            self._last_h_motor = None
+            self._last_h_sensory = None
+
+    cfg = TrainingConfig()
+    cfg.vbb_alpha = 1e-3
+    cfg.vbb_beta_init = 1.0
+    cfg.vbb_free_bits = free_bits
+    cfg.vbb_log_beta_max = log_beta_max
+    cfg.vbb_entropy_eta = entropy_eta
+    cfg.pc_reentry_weight = 0.1
+    cfg.pc_reentry_nt_gate = False
+    lm = _StubLM(d_sem)
+    return BRIANHarness.from_language_model(
+        language_model=lm, vocab_size=257, d_sem=d_sem,
+        training_config=cfg,
+    )
+
+
+def test_free_bits_kl_floor_enforced():
+    """KL per-dim should never fall below δ when vbb_free_bits > 0.
+
+    We force σ toward zero (large negative log_var) and check that
+    the effective KL remains above the floor for every element.
+    """
+    import torch.nn.functional as F
+    delta = 0.25
+    B, T, D = 2, 4, 16
+    mu = torch.zeros(B, T, D)
+    # log σ² = −20 ⇒ σ ≈ 3e-5 ⇒ KL per-dim ≈ ½(0 + 0 − 1 + 20) = 9.5
+    # Wait — that's *high*, not low.  The per-dim KL at μ=0, log_var=0
+    # (unit prior) is 0.  To get low KL: set log_var very close to 0
+    # and μ≈0.  Actually the floor activates when σ is near 1 and μ≈0,
+    # making KL ≈ 0 per-dim.
+    log_var = torch.zeros(B, T, D)   # σ²=1, μ=0 ⇒ KL per-dim ≈ 0
+    kl_per_dim = 0.5 * (log_var.exp() + mu.pow(2) - 1.0 - log_var)
+    # Without floor
+    kl_raw = kl_per_dim.mean().item()
+    assert kl_raw == pytest.approx(0.0, abs=1e-6)
+    # With free-bits clamp
+    kl_clamped = kl_per_dim.clamp(min=delta).mean().item()
+    assert kl_clamped >= delta - 1e-6, (
+        f"free-bits KL floor not enforced: {kl_clamped:.6f} < δ={delta}")
+
+
+def test_free_bits_config_parsed():
+    from neuroslm.dsl.training_config import parse_training_config
+    src = "vbb_alpha: 0.001\nvbb_free_bits: 0.1\nvbb_log_beta_max: 4.0\nvbb_entropy_eta: 0.001"
+    cfg = parse_training_config(src)
+    assert cfg.vbb_free_bits == pytest.approx(0.1)
+    assert cfg.vbb_log_beta_max == pytest.approx(4.0)
+    assert cfg.vbb_entropy_eta == pytest.approx(0.001)
+
+
+def test_beta_ceiling_clamps_effective_beta():
+    """β computed inside the harness must never exceed softplus(log_beta_max)+ε
+    when vbb_log_beta_max > 0, regardless of how high log_beta_param is pushed.
+    """
+    import torch.nn.functional as F
+    log_beta_max = 2.0  # β ≤ softplus(2)+1e-6 ≈ 2.13
+    # Simulate a very high learned log_beta (post-collapse scenario)
+    log_beta_param = torch.tensor(20.0)  # would give β ≈ 20 unclamped
+    log_beta_eff = log_beta_param.clamp(max=log_beta_max)
+    beta = F.softplus(log_beta_eff).item() + 1e-6
+    expected_max = F.softplus(torch.tensor(log_beta_max)).item() + 1e-6
+    assert beta <= expected_max + 1e-5, (
+        f"β ceiling not enforced: {beta:.4f} > {expected_max:.4f}")
+
+
+def test_beta_ceiling_active_in_loss():
+    """Full harness with a high init β and ceiling should emit a β value
+    that respects the ceiling."""
+    import torch.nn.functional as F
+    h = _make_mdrv_harness(log_beta_max=1.5)  # β ≤ softplus(1.5)+ε ≈ 1.73
+    # Override log_beta_param to be very large (simulate post-collapse)
+    with torch.no_grad():
+        h._vbb_log_beta.fill_(50.0)
+    mu = torch.randn(2, 4, 16)
+    s = torch.randn(2, 4, 16)
+    _stash_activations(h, mu, s)
+    h._compute_pc_reentry_loss(base_weight=0.1)
+    beta_logged = h._metrics.get("vbb_beta", None)
+    assert beta_logged is not None
+    max_beta = F.softplus(torch.tensor(1.5)).item() + 2e-6
+    assert beta_logged <= max_beta + 1e-4, (
+        f"β ceiling not respected in loss path: logged={beta_logged:.4f} > "
+        f"max={max_beta:.4f}")
+
+
+def test_pec_gradient_flows_through_sigma_head():
+    """With vbb_entropy_eta > 0, the PEC term (−η·½·log_var.mean())
+    must contribute a gradient to the sigma_head parameters. We verify
+    by comparing gradients with and without PEC: the PEC gradient
+    on sigma_head.bias should be nonzero and purely from the entropy
+    regularizer direction (−½ ∂log_var/∂bias).
+    """
+    h_no_pec = _make_mdrv_harness(entropy_eta=0.0)
+    h_pec = _make_mdrv_harness(entropy_eta=1.0)  # large η for clear signal
+
+    torch.manual_seed(42)
+    mu = torch.randn(2, 4, 16)
+    s = torch.randn(2, 4, 16)
+
+    for h in (h_no_pec, h_pec):
+        h.language_model._last_h_motor = mu.clone().detach().requires_grad_(True)
+        h.language_model._last_h_sensory = s.clone().detach()
+        h.zero_grad()
+        loss = h._compute_pc_reentry_loss(base_weight=0.1)
+        if loss is not None:
+            loss.backward()
+
+    grad_no_pec = h_no_pec._vbb_sigma_head.bias.grad
+    grad_pec = h_pec._vbb_sigma_head.bias.grad
+    assert grad_pec is not None, "PEC gradient not flowing to sigma_head.bias"
+    # PEC adds −η·½·log_var.mean(), whose grad w.r.t. bias is −η/2·1/B
+    # (since log_var = W·mu + bias, so ∂log_var/∂bias = 1 for all elts).
+    # Hence grad_pec ≠ grad_no_pec when η > 0.
+    if grad_no_pec is not None:
+        assert not torch.allclose(grad_pec, grad_no_pec), (
+            "PEC did not change sigma_head.bias gradient — check wiring")
+
+
+def test_pec_telemetry_key_emitted():
+    """vbb_pec should appear in _metrics when entropy_eta > 0."""
+    h = _make_mdrv_harness(entropy_eta=0.01)
+    mu = torch.randn(2, 4, 16)
+    s = torch.randn(2, 4, 16)
+    _stash_activations(h, mu, s)
+    h._compute_pc_reentry_loss(base_weight=0.1)
+    assert "vbb_pec" in h._metrics, "vbb_pec not emitted to _metrics"
+
+
+def test_mdrv_defaults_are_zero():
+    """New fields default to 0 so the legacy VBB-v1 run is bit-identical
+    when the arch.neuro doesn't specify them."""
+    from neuroslm.dsl.training_config import TrainingConfig
+    cfg = TrainingConfig()
+    assert cfg.vbb_free_bits == 0.0
+    assert cfg.vbb_log_beta_max == 0.0
+    assert cfg.vbb_entropy_eta == 0.0

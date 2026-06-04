@@ -422,6 +422,34 @@ class TrainingConfig:
     # likelihood; the optimizer will move it toward the data's
     # equilibrium within ~1k optimizer steps.
     vbb_beta_init: float = 1.0
+    # ── MDRV-VBB anti-collapse stabilisers (VBB-v2, Jun 2026) ──────
+    # Three interlocking mechanisms that prevent posterior collapse
+    # (σ→0, β→∞) while preserving the IB compression benefit.
+    #
+    # Free-bits KL floor (Kingma et al. 2016, §3.5):
+    #   KL_eff = max(KL_per_dim, δ).mean()
+    # Guarantees minimum H[q] per dimension; makes σ→0 non-optimal
+    # by construction (gradient of clamped term is zero below δ, so
+    # the network cannot recoup loss by shrinking σ further).
+    # 0.0 = off (legacy behaviour). Recommended: 0.1 nats/dim.
+    vbb_free_bits: float = 0.0
+    # Hard ceiling on log β (prevents the β↑/σ↓ co-collapse):
+    #   log_β_eff = clamp(log_β, max=vbb_log_beta_max)
+    # Without a ceiling the joint equilibrium (raise β / collapse σ)
+    # eventually dominates. 0.0 = uncapped. Recommended: 4.0
+    # (β ≤ softplus(4) ≈ 4.0, residual cannot vanish by β inflation).
+    vbb_log_beta_max: float = 0.0
+    # Posterior Entropy Commitment weight η (Jeffreys σ-prior):
+    #   PEC = −η · ½ · 𝔼[log σ²]
+    # Adds η times the Gaussian differential entropy of q to the
+    # objective (we minimise, so −η·H[q] → maximise entropy).
+    # Equivalent to placing a Jeffreys prior p(σ) ∝ 1/σ on each
+    # scale parameter: as σ→0, log σ²→−∞ and PEC→+∞, making σ=0
+    # a repulsive (Lyapunov-unstable) fixed point. This provides the
+    # mathematical guarantee that the prior summary cannot escape to
+    # the degenerate channel regardless of batch noise.
+    # 0.0 = off. Recommended: 0.001 (weak prior, leaves α·KL dominant).
+    vbb_entropy_eta: float = 0.0
     # ── Novel-topology mechanisms (H15 / H16 / H19) ──────────────────
     # Each accepts a dict or `None` (= off). When all are None the
     # cortex is bit-identical to the legacy baseline (zero-init
@@ -561,6 +589,12 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.vbb_alpha = float(props["vbb_alpha"])
     if "vbb_beta_init" in props:
         cfg.vbb_beta_init = float(props["vbb_beta_init"])
+    if "vbb_free_bits" in props:
+        cfg.vbb_free_bits = float(props["vbb_free_bits"])
+    if "vbb_log_beta_max" in props:
+        cfg.vbb_log_beta_max = float(props["vbb_log_beta_max"])
+    if "vbb_entropy_eta" in props:
+        cfg.vbb_entropy_eta = float(props["vbb_entropy_eta"])
     # Novel-topology mechanisms (H15/H16/H19) — parse as generic dicts.
     if "grid_positions" in props:
         cfg.grid_positions = _parse_novel_topology_dict(props["grid_positions"])

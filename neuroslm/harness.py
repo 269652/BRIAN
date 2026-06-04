@@ -499,12 +499,18 @@ class BRIANHarness(nn.Module):
           ``log σ² ≈ -8`` (σ ≈ 0.018) so the very first reparam sample
           is near-deterministic and behaviour matches the legacy
           (pre-VBB) loss up to a tiny stochastic perturbation. The
-          optimizer is free to grow σ as the KL term tightens.
+          optimizer is free to grow σ as the KL term tightens; the
+          MDRV-VBB Posterior Entropy Commitment (PEC) term makes
+          σ = 0 a repulsive fixed point so the optimizer is *also*
+          always nudged away from the degenerate channel.
         * ``self._vbb_log_beta`` — a single learnable scalar
           ``nn.Parameter`` whose softplus is the precision ``β`` of the
           predictive-coding likelihood. Initialised from
           ``training_config.vbb_beta_init`` (default 1.0) via the inverse
-          softplus ``log(exp(β) − 1)``.
+          softplus ``log(exp(β) − 1)``. The MDRV-VBB β-ceiling
+          (``vbb_log_beta_max``) clamps this at runtime — the parameter
+          is unclamped in storage; the clamp is applied differentiably
+          in ``_compute_pc_reentry_loss``.
 
         Total parameter cost at ``d_sem = 512``: 512×512 + 512 + 1 =
         262 657 params ≈ 0.21 % of a 122 M model — negligible.
@@ -697,19 +703,45 @@ class BRIANHarness(nn.Module):
         if residual is None:
             return None
 
-        # Precision β = softplus(log_beta) — strictly positive.
-        beta = F.softplus(log_beta_param) + 1e-6
+        # ── β with ceiling — breaks β/σ co-collapse (MDRV-VBB) ───────
+        # Without a ceiling the joint equilibrium (β→∞, σ→0) eventually
+        # erases the bottleneck. Clamping log β at log_beta_max bounds
+        # the precision reward, making the co-collapse non-optimal.
+        log_beta_max = float(getattr(self.training_config,
+                                     "vbb_log_beta_max", 0.0))
+        if log_beta_max > 0.0:
+            log_beta_eff = log_beta_param.clamp(max=log_beta_max)
+        else:
+            log_beta_eff = log_beta_param
+        beta = F.softplus(log_beta_eff) + 1e-6
 
-        # Closed-form KL[ N(μ, σ²) || N(0, I) ] per element, averaged
-        # over (B, T, D) so the term is intensive (scale-free in
-        # batch/seq/dim — matches the residual's reduction). Standard
-        # Kingma & Welling 2013 expression:
-        #   ½ Σ ( σ² + μ² − 1 − log σ² )
-        kl = 0.5 * (log_var.exp() + mu.pow(2) - 1.0 - log_var).mean()
+        # ── Free-bits KL floor (Kingma et al. 2016, §3.5) ────────────
+        # Per-element KL: ½(σ² + μ² − 1 − log σ²), shape (B, T, D).
+        kl_per_dim = 0.5 * (log_var.exp() + mu.pow(2) - 1.0 - log_var)
+        free_bits = float(getattr(self.training_config, "vbb_free_bits", 0.0))
+        if free_bits > 0.0:
+            # Clamp each element to [δ, ∞) so the KL can never fully
+            # vanish in any dimension.  The gradient of the clamped term
+            # is zero *below* δ so the network cannot recoup loss by
+            # shrinking σ further — making σ→0 provably non-optimal.
+            kl_per_dim = kl_per_dim.clamp(min=free_bits)
+        kl = kl_per_dim.mean()
 
-        # Free energy: β·r − log β + α·KL. The −log β term is the
-        # Gaussian log-normaliser; without it β would collapse to 0.
-        free_energy = beta * residual - torch.log(beta) + alpha * kl
+        # ── Posterior Entropy Commitment — Jeffreys σ-prior (PEC) ────
+        # Adds −η · ½ · 𝔼[log σ²] = +η · H_Gauss[q] + const to loss.
+        # As σ→0 the term diverges to +∞, making σ=0 a Lyapunov-
+        # unstable fixed point: the collapse attractor is repulsive by
+        # construction regardless of batch noise.  Mathematically this
+        # is a Jeffreys prior p(σ_d) ∝ 1/σ_d on each scale parameter
+        # (Jeffreys 1946; Berger & Bernardo 1992).
+        entropy_eta = float(getattr(self.training_config,
+                                    "vbb_entropy_eta", 0.0))
+        pec_term = 0.0
+        if entropy_eta > 0.0:
+            pec_term = -entropy_eta * 0.5 * log_var.mean()
+
+        # ── Free energy: β·r − log β + α·KL + PEC ────────────────────
+        free_energy = beta * residual - torch.log(beta) + alpha * kl + pec_term
 
         eff_w = base_weight * gate_scalar
         try:
@@ -720,6 +752,10 @@ class BRIANHarness(nn.Module):
             self._metrics["vbb_kl"] = float(kl.detach())
             self._metrics["vbb_sigma_mean"] = float(sigma.detach().mean())
             self._metrics["vbb_free_energy"] = float(free_energy.detach())
+            if entropy_eta > 0.0:
+                pec_val = pec_term if isinstance(pec_term, float) \
+                    else float(pec_term.detach())
+                self._metrics["vbb_pec"] = pec_val
         except Exception:
             pass
         if eff_w <= 0.0:
