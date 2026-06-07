@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Tuple
 import json
 import torch
 import base64
+from pathlib import Path
 
 from neuroslm.dsl.compiler import NeuroMLCompiler, ProgramIR
 from neuroslm.dsl.thg_ir import THGCheckpoint, THGNode, THGEdge
@@ -81,56 +82,54 @@ class LatentDNA:
         if "spectral_gap_min" in invariant:
             self.invariants["spectral_gap_min"] = invariant["spectral_gap_min"]
 
+    def save(self, path: str) -> None:
+        """Save DNA to file (binary format)."""
+        with open(path, 'wb') as f:
+            # Save as a simple binary format
+            data_bytes = bytes([int(x * 255) for x in self.data])
+            f.write(data_bytes)
+
+    @classmethod
+    def load(cls, path: str) -> LatentDNA:
+        """Load DNA from file."""
+        with open(path, 'rb') as f:
+            data_bytes = f.read()
+            dna_data = [b / 255.0 for b in data_bytes]
+        dna = cls(length=len(dna_data), data=dna_data)
+        return dna
+
 
 @dataclass
 class DNATranscriber:
     """Transcriber: DSL → Latent DNA."""
 
     def transcribe(self, dsl_code: str) -> LatentDNA:
-        """Convert DSL code into latent DNA bitstream.
-
-        Process:
-        1. Parse DSL to ProgramIR
-        2. Extract key parameters (populations, complexes, topologies)
-        3. Encode into bitstream with RAID-5 protection
-        """
-        # Parse DSL
+        """Convert DSL code into latent DNA bitstream."""
+        # Parse and validate DSL
         try:
             ir = NeuroMLCompiler.compile(dsl_code)
-        except Exception as e:
-            # Fallback: create a minimal DNA
+        except Exception:
             ir = None
 
-        # Encode IR into DNA
-        dna_length = 512
-        dna = LatentDNA(length=dna_length)
+        # Encode DSL code directly into DNA via base64
+        encoded = base64.b64encode(dsl_code.encode()).decode()
+        dna_data = [ord(c) / 256.0 for c in encoded]
+
+        # Pad or truncate to standard length
+        dna_length = max(512, len(dna_data) + 64)
+        while len(dna_data) < dna_length:
+            dna_data.append(0.0)
+        dna = LatentDNA(length=dna_length, data=dna_data[:dna_length])
 
         if ir:
-            # Store metadata in DNA invariants
             dna.add_invariant_check({"spectral_gap_min": 0.01})
-
-            # Encode population count and complex topology into DNA
-            metadata = {
-                "num_populations": len(ir.populations),
-                "num_complexes": len(ir.complexes),
-                "num_synapses": len(ir.synapses),
-            }
-            self._encode_metadata(dna, metadata)
 
         return dna
 
-    def _encode_metadata(self, dna: LatentDNA, metadata: Dict) -> None:
-        """Encode metadata into DNA data vector."""
-        # Simple encoding: scale counts to [0, 1] range
-        counts = [
-            metadata.get("num_populations", 0) / 1000.0,
-            metadata.get("num_complexes", 0) / 100.0,
-            metadata.get("num_synapses", 0) / 1000.0,
-        ]
-        # Place in first few positions
-        for i, count in enumerate(counts):
-            if i < len(dna.data):
-                dna.data[i] = min(count, 1.0)
+    def transcribe_to_file(self, dsl_code: str, output_path: str) -> None:
+        """Transcribe DSL to DNA file."""
+        dna = self.transcribe(dsl_code)
+        dna.save(output_path)
 
 
 @dataclass
@@ -138,27 +137,25 @@ class DNATranslator:
     """Translator: Latent DNA → DSL (backtranslation)."""
 
     def translate(self, dna: LatentDNA) -> str:
-        """Convert latent DNA back into equivalent DSL code.
+        """Convert latent DNA back into equivalent DSL code."""
+        # Decode DNA data from float back to base64
+        dna_data_int = [int(d * 256) % 256 for d in dna.data]
+        dna_str = "".join(
+            chr(d) if 32 <= d < 127 else "" for d in dna_data_int
+        ).rstrip()
 
-        Backtranslation is best-effort; some information may be lost.
-        """
-        # Reconstruct DSL skeleton from DNA
-        dsl_parts = [
-            'architecture reconstructed { d_sem: 256, dt: 0.01 }',
-            "",
-            "# Reconstructed from latent DNA",
-            "complex DynamicNet {",
-            '    topology: Tonnetz(dim: 256, spectral_gap: 0.05),',
-            '    trunk: "Linear()"',
-            "}",
-        ]
+        # Try to decode as base64
+        try:
+            dsl_code = base64.b64decode(dna_str).decode()
+            return dsl_code
+        except Exception:
+            # Fallback: skeleton DSL
+            return 'architecture reconstructed { d_sem: 256, dt: 0.01 }\npopulation default { count: 256, dynamics: "rate_code" }'
 
-        # Add population stubs based on DNA metadata
-        # (Simple: just create placeholder populations)
-        dsl_parts.append("")
-        dsl_parts.append("population default { count: 256, dynamics: \"rate_code\" }")
-
-        return "\n".join(dsl_parts)
+    def translate_from_file(self, dna_path: str) -> str:
+        """Translate DNA file to DSL code."""
+        dna = LatentDNA.load(dna_path)
+        return self.translate(dna)
 
 
 @dataclass
@@ -215,94 +212,58 @@ class RibosomeCompiler:
             thg.mutate_node(target, delta)
         return thg
 
-    def apply_rank_one_update(
-        self, thg: THGCheckpoint, node_id: str, delta: List[float]
-    ) -> THGCheckpoint:
-        """Apply rank-one update to a node embedding.
+    def compile_file(self, arch_root: str, output_dna: str) -> None:
+        """Compile architecture from arch.neuro to DNA file."""
+        from neuroslm.dsl.multifile import compile_folder
 
-        new_embedding = old_embedding + delta
-        """
-        thg.mutate_node(node_id, delta)
-        return thg
+        # Compile the architecture
+        ir = compile_folder(arch_root)
 
-    def update_edge_weight(
-        self, thg: THGCheckpoint, edge_id: str, delta_weight: float
-    ) -> THGCheckpoint:
-        """Update edge weight via rank-one-like update."""
-        if edge_id in thg.edges:
-            edge = thg.edges[edge_id]
-            edge.weight += delta_weight
-        return thg
+        # Read the original DSL file with UTF-8 encoding
+        arch_path = Path(arch_root) / "arch.neuro"
+        if arch_path.exists():
+            dsl_code = arch_path.read_text(encoding="utf-8")
+        else:
+            # Reconstruct from IR
+            dsl_code = self._ir_to_dsl(ir)
 
-    def thg_to_dna(self, thg: THGCheckpoint) -> LatentDNA:
-        """Convert THG-IR checkpoint to latent DNA."""
-        # Serialize THG-IR to JSON
-        thg_json = json.dumps(
-            {
-                "nodes": {
-                    nid: {
-                        "kind": node.kind,
-                        "embedding": node.operator_embedding[:16],  # First 16 dims
-                    }
-                    for nid, node in thg.nodes.items()
-                },
-                "edges": {
-                    eid: {"weight": edge.weight} for eid, edge in thg.edges.items()
-                },
-                "step": thg.step,
-            }
-        )
+        # Transcribe to DNA
+        self.dna_transcriber.transcribe_to_file(dsl_code, output_dna)
 
-        # Encode JSON as base64 and convert to float in [0, 1]
-        encoded = base64.b64encode(thg_json.encode()).decode()
-        # Map base64 characters to floats
-        dna_data = [ord(c) / 256.0 for c in encoded]
+    def unfold_file(self, dna_path: str, output_neuro: str) -> None:
+        """Unfold DNA file back to .neuro DSL."""
+        dsl_code = self.dna_translator.translate_from_file(dna_path)
 
-        dna = LatentDNA(length=max(256, len(dna_data)), data=dna_data)
-        return dna
+        # Write to output file with UTF-8 encoding
+        with open(output_neuro, 'w', encoding="utf-8") as f:
+            f.write(dsl_code)
 
-    def dna_to_thg(self, dna: LatentDNA) -> THGCheckpoint:
-        """Convert latent DNA back to THG-IR checkpoint."""
-        # Decode DNA data from float back to base64
-        dna_data_int = [int(d * 256) % 256 for d in dna.data]
-        dna_str = "".join(chr(d) if 32 <= d < 127 else "?" for d in dna_data_int)
+    def _ir_to_dsl(self, ir: ProgramIR) -> str:
+        """Convert ProgramIR back to approximate DSL (best-effort reconstruction)."""
+        parts = [f'architecture {ir.id} {{ d_sem: 256, dt: 0.01 }}', ""]
 
-        # Try to decode as base64 (may fail if corrupted)
-        try:
-            thg_json_str = base64.b64decode(dna_str).decode()
-            thg_dict = json.loads(thg_json_str)
-
-            # Reconstruct THG-IR
-            nodes = {
-                nid: THGNode(
-                    id=nid,
-                    kind=node_data.get("kind", "unknown"),
-                    operator_embedding=node_data.get("embedding", [0.0] * 16),
-                )
-                for nid, node_data in thg_dict.get("nodes", {}).items()
-            }
-            edges = {
-                eid: THGEdge(
-                    id=eid,
-                    src="unknown",
-                    dst="unknown",
-                    kind="synapse",
-                    weight=edge_data.get("weight", 1.0),
-                )
-                for eid, edge_data in thg_dict.get("edges", {}).items()
-            }
-
-            thg = THGCheckpoint(
-                version="2.0",
-                nodes=nodes,
-                edges=edges,
-                gene_state={},
-                step=thg_dict.get("step", 0),
-                metadata={},
+        # Add populations
+        for pop in ir.populations:
+            parts.append(
+                f'population {pop.name} {{ count: {pop.count}, dynamics: "{pop.dynamics}" }}'
             )
-            return thg
-        except Exception:
-            # Fallback: return minimal THG
-            return THGCheckpoint(
-                version="2.0", nodes={}, edges={}, gene_state={}, step=0, metadata={}
+
+        # Add synapses
+        parts.append("")
+        for syn in ir.synapses:
+            weight = syn.weight or 1.0
+            parts.append(
+                f'synapse {syn.source} -> {syn.target} {{ weight: {weight} }}'
             )
+
+        return "\n".join(parts)
+
+    def create_patch(self, delta_embedding: List[float], target_node: str) -> Dict:
+        """Create an incremental DNA patch."""
+        return {"type": "node_mutation", "target": target_node, "delta": delta_embedding}
+
+    def apply_patch(self, thg: THGCheckpoint, patch: Dict) -> THGCheckpoint:
+        """Apply an incremental DNA patch to THG-IR."""
+        if patch["type"] == "node_mutation":
+            thg.mutate_node(patch["target"], patch["delta"])
+        return thg

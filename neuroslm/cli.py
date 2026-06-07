@@ -131,6 +131,43 @@ def cmd_compile(args: argparse.Namespace) -> int:
 
 # ── bundle ─────────────────────────────────────────────────────────────
 
+def cmd_dna(args: argparse.Namespace) -> int:
+    """Dispatch DNA compile/unfold commands."""
+    from neuroslm.compiler.ribosome import RibosomeCompiler
+
+    if args.dna_cmd == "compile":
+        arch = _resolve_arch(args.arch)
+        output = args.output or str(Path(arch) / "evolution.dna")
+
+        try:
+            print(f"Compiling {arch} → {output}...")
+            compiler = RibosomeCompiler()
+            compiler.compile_file(arch, output)
+            print(f"✓ DNA written to {output}")
+            return 0
+        except Exception as e:
+            print(f"✗ Compilation failed: {e}", file=sys.stderr)
+            return 1
+
+    elif args.dna_cmd == "unfold":
+        dna_path = args.dna
+        output = args.output or str(Path(dna_path).with_suffix(".neuro"))
+
+        try:
+            print(f"Unfolding {dna_path} → {output}...")
+            compiler = RibosomeCompiler()
+            compiler.unfold_file(dna_path, output)
+            print(f"✓ DSL written to {output}")
+            return 0
+        except Exception as e:
+            print(f"✗ Unfold failed: {e}", file=sys.stderr)
+            return 1
+
+    else:
+        print(f"Unknown DNA command: {args.dna_cmd}", file=sys.stderr)
+        return 1
+
+
 def cmd_bundle_arch(args: argparse.Namespace) -> int:
     """Bundle all .neuro files from an architecture into a single file for AI analysis."""
     from pathlib import Path
@@ -1359,6 +1396,20 @@ def _build_parser() -> argparse.ArgumentParser:
         else cmd_compile(argparse.Namespace(
             arch=a.arch_or_subcmd, out=a.out, head=a.head))
     ))
+
+    # dna (DNA encoding/decoding)
+    sdna = sub.add_parser("dna", help="DNA encoding/decoding for evolutionary architecture")
+    sdna_sub = sdna.add_subparsers(dest="dna_cmd", required=True)
+
+    sdna_compile = sdna_sub.add_parser("compile", help="Compile arch.neuro to DNA binary")
+    sdna_compile.add_argument("arch", help="architecture name (e.g., rcc_bowtie)")
+    sdna_compile.add_argument("--output", "-o", help="DNA output file (default: architectures/<arch>/evolution.dna)")
+    sdna_compile.set_defaults(func=cmd_dna)
+
+    sdna_unfold = sdna_sub.add_parser("unfold", help="Unfold DNA binary back to .neuro DSL")
+    sdna_unfold.add_argument("dna", help="path to DNA binary file")
+    sdna_unfold.add_argument("--output", "-o", help="DSL output file (default: <dna>.neuro)")
+    sdna_unfold.set_defaults(func=cmd_dna)
 
     # bundle
     sb = sub.add_parser("bundle",
