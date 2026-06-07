@@ -52,7 +52,7 @@ class TestEvolutionaryInitialization:
             assert neuro_file.exists()
 
             # Neuro file should have content
-            content = neuro_file.read_text()
+            content = neuro_file.read_text(encoding='utf-8')
             assert len(content) > 0
 
     def test_init_with_patch_stack(self):

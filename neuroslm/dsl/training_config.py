@@ -329,6 +329,77 @@ class MultiCortexConfig:
     router_d_model: int = 256
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Multi-Objective Fitness — Phase A/F1 (central selection-pressure switch)
+# ──────────────────────────────────────────────────────────────────────
+
+@dataclass
+class FitnessObjective:
+    """A single objective in the `fitness.objectives { ... }` table.
+
+    Each row resolves at training time to a scalar loss contribution:
+
+        contribution = weight * schedule(maturity) * loss_value
+
+    `schedule` selects the time-modulation curve:
+      "constant" — weight stays fixed across training (default).
+      "gated"    — weight is multiplied by the maturity phase gate
+                    (matches the existing AuxWeights mechanism so the
+                    legacy phi/world/forward losses can be migrated
+                    into this table without behavioural drift).
+      "linear"   — weight ramps linearly from 0 at step 0 to the
+                    full value at the configured `warmup` step.
+    """
+    enabled: bool = False
+    weight: float = 0.0
+    schedule: str = "constant"
+
+
+@dataclass
+class FitnessConfig:
+    """`fitness { ... }` block — central Multi-Objective-Fitness switch.
+
+    Wires the existing aux-loss machinery + new objectives (symbolic,
+    metabolic, piso, nis_plus) into a single declarative table so a
+    single arch.neuro line per objective controls activation, weight
+    and schedule.
+
+    Master switch `enabled` keeps legacy archs bit-for-bit identical:
+    when False, the harness ignores this entire block and uses the
+    pre-existing `total_loss_config`.
+
+    Recognised objective names (`objectives` dict keys):
+      lm          — standard cross-entropy (matches `total_loss_config.w_lm`)
+      phi         — IIT integrated information (existing GeneticsConfig.phi_weight)
+      nis_plus    — NIS+ effective-information (NEW; wires existing NISPlus module)
+      symbolic    — SymbolicHyperNeuron extractable-formula loss (NEW)
+      piso        — Topological isomorphy loss (NEW; Procrustes-distance to Tonnetz)
+      metabolic   — NRCSTK metabolic-budget overflow loss (NEW)
+    """
+    # Master switch. False ⇒ legacy single-objective training.
+    enabled: bool = False
+
+    # Per-objective specifications. Empty default = no new objectives;
+    # the harness falls through to the pre-existing total_loss_config.
+    objectives: Dict[str, FitnessObjective] = field(default_factory=dict)
+
+    # ── Per-objective extras ──
+    # Symbolic (when objectives["symbolic"].enabled):
+    symbolic_n_units: int = 8
+    symbolic_n_features: int = 16
+    symbolic_tau_init: float = 1.0
+    symbolic_tau_final: float = 0.05
+    symbolic_sparsity_weight: float = 0.01
+
+    # Metabolic (when objectives["metabolic"].enabled):
+    metabolic_budget: float = 0.7       # fraction of mean activity allowed
+    metabolic_prune_threshold: float = 0.05   # EMA below this ⇒ pruned
+
+    # PIso (when objectives["piso"].enabled):
+    piso_topology: str = "tonnetz"
+    piso_target_dim: int = 256
+
+
 @dataclass
 class TrainingConfig:
     """Pipeline-level config the BRIAN harness consumes.
@@ -548,6 +619,11 @@ class TrainingConfig:
     # a thalamic mixture-of-experts gate. See architecture.md §5.7.
     # Disabled by default → legacy single-cortex behaviour unchanged.
     multi_cortex: MultiCortexConfig = field(default_factory=MultiCortexConfig)
+    # Multi-Objective-Fitness central switchboard — wires existing aux
+    # losses + new objectives (symbolic, metabolic, piso, nis_plus) into
+    # a single declarative table. Disabled by default → legacy single-
+    # objective training reproduces bit-for-bit.
+    fitness: FitnessConfig = field(default_factory=FitnessConfig)
     # Hardware envelope + multi-scale variants. The deploy script reads
     # `hardware` to filter vast.ai offers; the harness reads `scales` +
     # the SCALE env var to pick which variant to instantiate.
@@ -574,6 +650,16 @@ _VALID_OPTIMIZERS = {"adamw", "adafactor"}
 # (no network); "gpt2" = HF GPT-2 family ensemble (build_gpt2_ensemble).
 # Add new providers here as they're implemented in neuroslm/cortex.py.
 _VALID_MULTI_CORTEX_WEIGHTS = {"stub", "gpt2"}
+
+# Allowed `fitness.objectives` keys.  Adding a new objective here is the
+# *only* place the parser needs to learn about it — the FitnessComposer
+# discovers them by enumeration at runtime.  Each name maps to a concrete
+# loss source documented in `neuroslm/fitness.py`.
+_VALID_FITNESS_OBJECTIVES = {
+    "lm", "phi", "nis_plus", "symbolic", "piso", "metabolic",
+}
+# Allowed `FitnessObjective.schedule` values — see the dataclass docstring.
+_VALID_FITNESS_SCHEDULES = {"constant", "gated", "linear"}
 
 
 # ── Parser ─────────────────────────────────────────────────────────────
@@ -691,6 +777,8 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.genetics = _parse_genetics(props["genetics"])
     if "multi_cortex" in props:
         cfg.multi_cortex = _parse_multi_cortex(props["multi_cortex"])
+    if "fitness" in props:
+        cfg.fitness = _parse_fitness(props["fitness"])
     if "hardware" in props:
         cfg.hardware = _parse_hardware(props["hardware"])
     if "scales" in props:
@@ -915,6 +1003,136 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
             f"len(domains) ({len(m.domains)}); domains={m.domains}"
         )
     return m
+
+
+def _parse_fitness_objective(name: str, body: str) -> FitnessObjective:
+    """Parse a single entry of the `objectives { ... }` table.
+
+    Body shape: ``{ weight: 0.05, enabled: true, schedule: "gated" }``
+
+    Validates:
+      * weight >= 0       — negative weights flip the objective sign
+                              and would push the loss toward +∞.
+      * schedule in {"constant", "gated", "linear"} — typos like
+        "exponentail" must fail at parse time, not silently produce a
+        zero contribution.
+    """
+    body = _strip_braces(body)
+    props = _split_top_level_kv(body)
+    o = FitnessObjective()
+    if "enabled" in props:
+        o.enabled = _parse_bool(props["enabled"])
+    if "weight" in props:
+        w = float(props["weight"])
+        if w < 0:
+            raise ValueError(
+                f"fitness.objectives.{name}.weight must be >= 0, got {w}"
+            )
+        o.weight = w
+    if "schedule" in props:
+        sched = _strip_quotes(props["schedule"])
+        if sched not in _VALID_FITNESS_SCHEDULES:
+            raise ValueError(
+                f"fitness.objectives.{name}.schedule={sched!r} not in "
+                f"{sorted(_VALID_FITNESS_SCHEDULES)}"
+            )
+        o.schedule = sched
+    return o
+
+
+def _parse_fitness(body: str) -> FitnessConfig:
+    """Parse a `fitness { ... }` block.
+
+    Top-level keys:
+      enabled                 — master switch (bool)
+      objectives              — nested table of {name: {weight, enabled, schedule}}
+      symbolic                — nested table of symbolic-specific knobs
+      metabolic               — nested table of metabolic-specific knobs
+
+    Validation:
+      * objective names must be in _VALID_FITNESS_OBJECTIVES (catches typos)
+      * symbolic.n_units > 0
+      * 0 <= metabolic.budget <= 1
+    """
+    body = _strip_braces(body)
+    props = _split_top_level_kv(body)
+    f = FitnessConfig()
+
+    if "enabled" in props:
+        f.enabled = _parse_bool(props["enabled"])
+
+    # ── objectives sub-block ──
+    if "objectives" in props:
+        obj_body = _strip_braces(props["objectives"])
+        obj_props = _split_top_level_kv(obj_body)
+        for name, raw in obj_props.items():
+            if name not in _VALID_FITNESS_OBJECTIVES:
+                raise ValueError(
+                    f"unknown fitness objective {name!r}; "
+                    f"expected one of {sorted(_VALID_FITNESS_OBJECTIVES)}"
+                )
+            f.objectives[name] = _parse_fitness_objective(name, raw)
+
+    # ── symbolic sub-block (per-objective extras) ──
+    if "symbolic" in props:
+        sym_body = _strip_braces(props["symbolic"])
+        sp = _split_top_level_kv(sym_body)
+        if "n_units" in sp:
+            n = int(sp["n_units"])
+            if n <= 0:
+                raise ValueError(
+                    f"fitness.symbolic.n_units must be > 0, got {n}"
+                )
+            f.symbolic_n_units = n
+        if "n_features" in sp:
+            nf = int(sp["n_features"])
+            if nf <= 0:
+                raise ValueError(
+                    f"fitness.symbolic.n_features must be > 0, got {nf}"
+                )
+            f.symbolic_n_features = nf
+        if "tau_init" in sp:
+            f.symbolic_tau_init = float(sp["tau_init"])
+        if "tau_final" in sp:
+            f.symbolic_tau_final = float(sp["tau_final"])
+        if "sparsity_weight" in sp:
+            sw = float(sp["sparsity_weight"])
+            if sw < 0:
+                raise ValueError(
+                    f"fitness.symbolic.sparsity_weight must be >= 0, got {sw}"
+                )
+            f.symbolic_sparsity_weight = sw
+
+    # ── metabolic sub-block ──
+    if "metabolic" in props:
+        met_body = _strip_braces(props["metabolic"])
+        mp = _split_top_level_kv(met_body)
+        if "budget" in mp:
+            b = float(mp["budget"])
+            if not (0.0 <= b <= 1.0):
+                raise ValueError(
+                    f"fitness.metabolic.budget must be in [0.0, 1.0], got {b}"
+                )
+            f.metabolic_budget = b
+        if "prune_threshold" in mp:
+            pt = float(mp["prune_threshold"])
+            if not (0.0 <= pt < 1.0):
+                raise ValueError(
+                    f"fitness.metabolic.prune_threshold must be in [0.0, 1.0), "
+                    f"got {pt}"
+                )
+            f.metabolic_prune_threshold = pt
+
+    # ── piso sub-block ──
+    if "piso" in props:
+        piso_body = _strip_braces(props["piso"])
+        pp = _split_top_level_kv(piso_body)
+        if "topology" in pp:
+            f.piso_topology = _strip_quotes(pp["topology"])
+        if "target_dim" in pp:
+            f.piso_target_dim = int(pp["target_dim"])
+
+    return f
 
 
 def _parse_phase_gate(body: str) -> PhaseGate:
