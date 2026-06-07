@@ -1,9 +1,9 @@
 # NeuroSLM Technical Report — Project Overview & Current State
 
 > **Last Updated:** 2026-06-07  
-> **Reporting Period:** Inception through THSD Refactor (Tasks 1-4 algebraic foundation)  
-> **Status:** Active research; training stable to ~10k steps at 30M scale; THSD framework ready for deployment  
-> **Next Checkpoint:** THG-IR evolution integration, NFG-THSD visualization, Phase VII (hyper-nodes)  
+> **Reporting Period:** Inception through Real-Time Evolution System (incremental DNA + hypergraph)  
+> **Status:** Active research; training stable to ~10k steps at 30M scale; THSD + evolution ready for deployment  
+> **Next Checkpoint:** Integration with BRIANHarness, evolutionary search validation, Phase VII (hyper-nodes)  
 
 ---
 
@@ -112,6 +112,28 @@ These invariants can be formally verified during training, catching architectura
 
 ---
 
+## 2.5 Pillar 5: Real-Time Evolution via DNA Mutations
+
+**Claim:** The architecture can evolve during training via incremental DNA mutations (RAID-5 protected), enabling self-optimization without retraining from scratch.
+
+**Operationalization:**
+- Implement **incremental DNA patching**: base DNA + `.patch.dna` files
+- Track **path activity** (per-edge activation correlation)
+- Apply **structural plasticity**: HOT paths strengthen via BDNF, COLD paths prune
+- Emit **mutations as vesicles** during high-surprise windows
+- **Resume from checkpoints** via patch stacking (fault-tolerant evolution)
+
+**Current status:** ✅ CONFIRMED. Framework complete (43 new tests):
+- DNAPatch class: create, serialize, compose, apply
+- Activity tracking: HOT/COLD classification, mycelium effect
+- Epigenetic feedback: vesicles → mutations → DNA patches
+- Colab integration: `neuroslm.utils.init_evolution()` + checkpointing
+- Roundtrip testing: patch stacks preserve mutations across sessions
+
+**Evidence link:** `neuroslm/compiler/ribosome.py::DNAPatch`, `neuroslm/utils/colab.py`, tests/test_dna_patches.py, tests/test_hypergraph_evolution.py, tests/test_colab_integration.py [✅ CONFIRMED]
+
+---
+
 ## 3. Architecture Overview & DSL Compilation
 
 ### 3.1 The `.neuro` DSL — Declarative Neural Architecture
@@ -167,6 +189,53 @@ neuroslm.dsl.multifile.compile_folder()
 2. Compile modules via `CodeGenerator` → `nn.Module` + parameter scopes.
 3. Wrap in `BRIANHarness` → applies loss clipping, grad accumulation, aux-loss ramp, maturity gates.
 4. Standard PyTorch training: forward → loss → backward → optimizer.step().
+
+### 3.3 DNA Evolution System — Incremental Architecture Mutation
+
+The **Real-Time Evolution System** enables architectural self-optimization during training via RAID-5 protected DNA mutations and patch stacking.
+
+**Workflow:**
+```
+Base DNA (arch.neuro encoded)
+    ↓
+Training + Activity Tracking
+    ├─ HOT paths: ρ > 0.7 (fire together)
+    ├─ COLD paths: ρ < 0.1 (unused)
+    └─ Mutations emitted on high surprise
+        ↓
+    Vesicle payload → DNAPatch
+        ├─ kind: "node_mutation" | "edge_weight"
+        ├─ target: region/edge ID
+        ├─ delta: change vector
+        └─ metadata: {reason, confidence, φ_delta, ...}
+            ↓
+    step_XXXXX.patch.dna files (one per checkpoint)
+            ↓
+    Resumption: base DNA + patch stack → evolved architecture
+```
+
+**Key components:**
+- **DNAPatch** (`neuroslm/compiler/ribosome.py`): atomic mutation unit with versioning
+- **Activity tracker**: correlations per edge during forward pass
+- **Mycelium effect**: HOT paths accumulate weight via BDNF; COLD paths prune
+- **Epigenetic feedback**: mutations written back to DNA via vesicles
+- **Colab utils** (`neuroslm/utils/colab.py`):
+  - `init_evolution()`: load DNA + apply patch stack
+  - `EvolutionaryTrainingContext`: high-level session management
+  - Automatic checkpoint discovery and resumption
+
+**Fault tolerance:**
+- Base DNA saved with RAID-5 parity (3× redundancy)
+- Patches immutable (JSON serialization)
+- Resumption robust: patches applied in step order
+- Session interruption safe: Colab timeout → resume at last checkpoint
+
+**Evolutionary metrics logged:**
+- Φ trajectory (integrated information growth)
+- gap_ratio trend (generalization improvement)
+- Mutation acceptance rate (% of mutations improving metrics)
+- Hot/cold path statistics
+- Rank increases via BDNF (NGA rank growth on high-Φ edges)
 
 ---
 
