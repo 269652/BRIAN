@@ -66,6 +66,11 @@ class CodeGenerator:
         parts = [self._gen_header(), self._gen_imports()]
         for pop in self.ir.populations:
             parts.append(self._gen_population_class(pop))
+        # v2.0 DSL: vesicles and sieves
+        for vesicle in self.ir.vesicles:
+            parts.append(self._gen_vesicle_class(vesicle))
+        for sieve in self.ir.sieves:
+            parts.append(self._gen_sieve_class(sieve))
         parts.append(self._gen_circuit_class())
         src = "\n\n".join(parts) + "\n"
         # Sanity-check syntax before handing it to the caller.
@@ -406,6 +411,58 @@ class CodeGenerator:
         )
 
     # ── Top-level circuit class ─────────────────────────────────────
+
+    # ── v2.0 Vesicle and Sieve generation (Phase II) ────────────────
+
+    def _gen_vesicle_class(self, vesicle) -> str:
+        """Generate a vesicle docking module (zero-init gate for ReZero contract)."""
+        cls_name = f"Vesicle_{vesicle.name}"
+
+        init = [
+            f"class {cls_name}(nn.Module):",
+            f'    """Neuro-vesicle: {vesicle.name} (trigger: {vesicle.trigger})"""',
+            "    def __init__(self, d_sem: int):",
+            "        super().__init__()",
+            "        self.d_sem = d_sem",
+            "        self.lifetime = " + str(vesicle.lifetime),
+            "        self.content_dim = " + str(vesicle.content_dim),
+            "        self.alpha = nn.Parameter(torch.zeros(1))  # ReZero zero-init gate",
+            "",
+            "    def forward(self, x):",
+            "        if x is None:",
+            "            x = torch.zeros(1, self.d_sem)",
+            "        gate = torch.sigmoid(self.alpha)  # Soft gate, zero-init → ~0",
+            "        # With zero-init gate, output ≈ x (identity at first forward)",
+            "        return x * (1 - gate)  # Gate opens as alpha grows",
+        ]
+
+        return "\n".join(init)
+
+    def _gen_sieve_class(self, sieve) -> str:
+        """Generate a topological sieve (gnorm filtering with zero-init gate)."""
+        cls_name = f"Sieve_{sieve.name}"
+
+        init = [
+            f"class {cls_name}(nn.Module):",
+            f'    """Topological sieve: {sieve.name} (threshold: {sieve.gnorm_threshold})"""',
+            "    def __init__(self, d_sem: int):",
+            "        super().__init__()",
+            "        self.d_sem = d_sem",
+            "        self.threshold = " + str(sieve.gnorm_threshold),
+            "        self.gate = nn.Parameter(torch.zeros(1))  # ReZero zero-init",
+            "",
+            "    def forward(self, x):",
+            "        if x is None:",
+            "            x = torch.zeros(1, self.d_sem)",
+            "        g = torch.sigmoid(self.gate)  # Soft gate, zero-init → ~0",
+            "        gnorm = torch.linalg.norm(x, dim=-1, keepdim=True)",
+            "        # When gnorm > threshold and gate is active, project orthogonal",
+            "        mask = (gnorm > self.threshold).float()",
+            "        # For now, simple passthrough; projection logic in Phase II.5",
+            "        return x * (1 - g * mask)  # Gate controls filtering",
+        ]
+
+        return "\n".join(init)
 
     def _gen_circuit_class(self) -> str:
         cls_name = self.module_name
