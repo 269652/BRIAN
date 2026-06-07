@@ -149,15 +149,14 @@ class TestMultiCortexStubWiring:
     def test_ensemble_forward_smokes_through(
         self, trivial_circuit, stub_cfg
     ):
-        """The wired ensemble must accept the harness's standard
-        (input_ids, hidden_state) interface without crashing."""
+        """The wired ensemble must accept the standard ids → hidden
+        signature (per `MultiCortexEnsemble.forward`) without crashing."""
         from neuroslm.harness import BRIANHarness
         h = BRIANHarness(trivial_circuit, vocab_size=VOCAB,
                          d_sem=D_SEM, training_config=stub_cfg)
         B, T = 2, 8
         input_ids = torch.randint(0, VOCAB, (B, T))
-        hidden = torch.zeros(B, T, D_SEM)
-        out = h.multi_cortex(input_ids=input_ids, hidden=hidden)
+        out = h.multi_cortex(input_ids)
         # MultiCortexEnsemble returns a tensor (B, T, d_target)
         assert out.shape == (B, T, D_SEM), \
             f"expected (B, T, d_target)=(2,8,{D_SEM}), got {tuple(out.shape)}"
