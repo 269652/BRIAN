@@ -1286,11 +1286,12 @@ def cmd_ai(args: argparse.Namespace) -> int:
 
 
 def cmd_train(args: argparse.Namespace) -> int:
-    """Train from evol.dna or run minimal training.
+    """Train a model with configurable settings.
 
     Usage:
-        brian train --preset=tiny              # Run minimal CPU training
-        brian train --arch=rcc_bowtie --steps=100
+        brian train --preset=tiny              # Train tiny model for 40k steps on CPU
+        brian train --preset=tiny --steps=100  # Train tiny model for 100 steps
+        brian train --arch=rcc_bowtie --steps=10000
         brian train --dna=dna/evol/arch.dna    # Load from DNA with fitness config
     """
     # If tiny preset requested, run minimal training
@@ -1306,8 +1307,9 @@ def cmd_train(args: argparse.Namespace) -> int:
             )
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            # Run main without sys.exit
-            module.main()
+            # Run main with configurable steps (default 40k)
+            steps = args.steps if args.steps else 40000
+            module.main(steps=steps)
             return 0
         except SystemExit as e:
             return e.code if isinstance(e.code, int) else 1

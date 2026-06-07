@@ -54,7 +54,7 @@ def create_tiny_lm(vocab_size=256, d_model=64, depth=2, seq_len=128):
     return TinyLM(vocab_size, d_model, depth, seq_len)
 
 
-def main():
+def main(steps: int = 10):
     print("=" * 70)
     print("NeuroSLM Minimal CPU Training — Colab Demo")
     print("=" * 70)
@@ -91,14 +91,14 @@ def main():
     loss_fn = nn.CrossEntropyLoss()
 
     # Training loop
-    print(f"\n[3] Training for 10 steps (batch={batch_size}, seq_len={seq_len})...")
+    print(f"\n[3] Training for {steps} steps (batch={batch_size}, seq_len={seq_len})...")
     print(f"    Device: {device}")
     print(f"    Fitness objectives: {[obj.name for obj in fitness_cfg.objectives]}")
 
     model.train()
     start_time = time.time()
 
-    for step in range(1, 11):
+    for step in range(1, steps + 1):
         # Dummy batch
         input_ids = torch.randint(0, vocab_size, (batch_size, seq_len - 1)).to(device)
         target_ids = torch.randint(0, vocab_size, (batch_size, seq_len - 1)).to(device)
@@ -125,10 +125,11 @@ def main():
         total_loss.backward()
         optimizer.step()
 
-        if step % 5 == 0 or step == 1:
+        log_freq = max(1, steps // 10)  # Log ~10 times during training
+        if step % log_freq == 0 or step == 1:
             elapsed = time.time() - start_time
             print(
-                f"    step {step:3d}  lm_loss={lm_loss:.4f}  "
+                f"    step {step:5d}  lm_loss={lm_loss:.4f}  "
                 f"fitness_loss={fitness_loss:.4f}  "
                 f"total={total_loss:.4f}  ({elapsed:.1f}s)"
             )
