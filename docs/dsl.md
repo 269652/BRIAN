@@ -231,6 +231,71 @@ Constraint declarations recognised by the parser and stored in the IR;
 the larger BRIAN runtime consumes them for Φ scoring and contradiction
 detection. They don't participate in codegen.
 
+### `fitness` (training sub-block)
+
+```neuro
+training {
+    fitness: {
+        enabled: true,
+        objectives: {
+            lm:        { weight: 1.0,   enabled: true },
+            phi:       { weight: 0.02,  enabled: true, schedule: "gated" },
+            symbolic:  { weight: 0.05,  enabled: true, schedule: "gated" },
+            metabolic: { weight: 0.001, enabled: true, schedule: "gated" }
+        },
+
+        # SymbolicHyperNeuron (only read when `symbolic.enabled`):
+        symbolic_n_units:         8,
+        symbolic_n_features:      64,
+        symbolic_tau_init:        1.0,
+        symbolic_tau_final:       0.1,
+        symbolic_sparsity_weight: 0.01,
+
+        # NRCSTKController (only read when `metabolic.enabled`):
+        metabolic_budget:          0.7,
+        metabolic_prune_threshold: 0.05
+    }
+}
+```
+
+Lives **inside** `training { ... }`, not at top level. Parsed by
+`neuroslm.dsl.training_config.parse_training_config` into
+`TrainingConfig.fitness : FitnessConfig`; consumed at runtime by
+`neuroslm.fitness.FitnessComposer`.
+
+| Field                         | Type                 | Notes                                                                                    |
+|-------------------------------|----------------------|------------------------------------------------------------------------------------------|
+| `enabled`                     | bool                 | Master switch.  False ⇒ composer passes `bundle.lm` through unmodified.                  |
+| `objectives.<name>`           | `FitnessObjective`   | One entry per active objective.                                                          |
+| `objectives.<n>.enabled`      | bool, default `false`| Per-objective on/off; disabled objectives contribute zero and are omitted from telemetry.|
+| `objectives.<n>.weight`       | float, default `0.0` | Multiplier applied before the schedule factor.                                           |
+| `objectives.<n>.schedule`     | enum                 | `"constant"` (default), `"gated"` (phase-gate from `dsl.maturity`), or `"linear"`.       |
+| `symbolic_n_units` …          | int / float          | Construction args for `SymbolicHyperNeuron`; ignored when the `symbolic` objective is off.|
+| `metabolic_budget` …          | float                | Construction args for `NRCSTKController`; ignored when the `metabolic` objective is off. |
+
+**Valid objective names** (validated at parse time, source of truth in
+`_VALID_FITNESS_OBJECTIVES`):
+
+```python
+{"lm", "phi", "nis_plus", "symbolic", "piso", "metabolic"}
+```
+
+**Valid schedules** (`_VALID_FITNESS_SCHEDULES`):
+
+```python
+{"constant", "gated", "linear"}
+```
+
+The `"gated"` schedule multiplies each objective by a maturity-driven
+phase gate centred per-objective in `neuroslm.fitness._GATE_TABLE`
+(e.g., `metabolic` opens at maturity 0.65 to avoid pruning topology
+before it stabilises).  This matches the legacy `AuxWeights` curve so
+migrating an objective from the hard-coded `total_loss_config` into
+this block preserves its training-time activation bit-for-bit.
+
+See `architecture.md` §7.5 for the runtime composition pipeline and
+`tests/test_fitness_parser.py` for every supported field shape.
+
 ---
 
 ## 4. Imports and exports

@@ -31,6 +31,7 @@
    - 7.2 Neurotransmitter System
    - 7.3 TPU/XLA Backend + bf16 Safety Patches
    - 7.4 Optimizer Selection (Adafactor vs AdamW)
+   - 7.5 Multi-Objective Fitness Composition (FitnessComposer, SymbolicHyperNeuron, NRCSTKController)
 8. [Intelligence & Integration Metrics](#8-intelligence--integration-metrics)
 9. [Parameter Presets & Training Commands](#9-parameter-presets)
 10. [BRIAN — Narrative + Causal Memory Stack](#10-brian--narrative--causal-memory-stack)
@@ -2059,6 +2060,133 @@ v(t) = (mean log_ppl over last n/2 steps) − (mean log_ppl over first n/2 steps
 - end-to-end synth-v1 trace produces ≥1 collapse on the post-step-13 spikes
 - state_dict roundtrip preserves both shadows
 - scale-invariance: 50→500 and 500→5000 produce identical velocity (0.502)
+
+---
+
+### 7.5 Multi-Objective Fitness Composition
+
+*`neuroslm/dsl/training_config.py` — `FitnessConfig`, `FitnessObjective`,
+`parse_training_config`*
+*`neuroslm/fitness.py` — `LossBundle`, `FitnessComposer(nn.Module)`*
+*`neuroslm/modules/symbolic_unit.py` — `SymbolicHyperNeuron`, `OperatorBank`*
+*`neuroslm/modules/nrcstk.py` — `NRCSTKController`*
+
+The legacy `total_loss_config` formula hard-codes which auxiliary terms
+contribute to the gradient and how their weights ramp through training.
+The Multi-Objective Fitness stack replaces that with a single
+declarative pipeline: declare *what* matters in the DSL, let the
+composer handle the *how*.
+
+#### 7.5.1 The `fitness { ... }` DSL block
+
+Sits inside `training { }` (see `docs/dsl.md` § `fitness (training
+sub-block)` for the parser contract).  Six objective slots are
+recognised:
+
+| Slot       | Source of `LossBundle` field                                                       |
+|------------|------------------------------------------------------------------------------------|
+| `lm`       | Cross-entropy on language-model logits (always-on, gate centre 0.00).              |
+| `phi`      | `1 - ConsciousnessMetrics.phi`, integrated-information objective (gate 0.60).      |
+| `nis_plus` | `1 - EI_effective` from the NIS+ effective-information estimator (gate 0.55).      |
+| `symbolic` | `symbolic_sparsity_weight * SymbolicHyperNeuron.sparsity_loss()` (gate 0.40).      |
+| `piso`     | Mode-invariance penalty between trunk / motor / forward-model (gate 0.50).        |
+| `metabolic`| `NRCSTKController.metabolic_loss(activations)` hinge-squared budget (gate 0.65).   |
+
+Per-objective gate centres live in `neuroslm.fitness._GATE_TABLE` and
+match the legacy `AuxWeights` curve.  This is the migration guarantee:
+moving an objective from the hard-coded path into the DSL preserves its
+training-time activation curve bit-for-bit.
+
+#### 7.5.2 The `LossBundle` ↔ `FitnessComposer` contract
+
+```python
+@dataclass
+class LossBundle:
+    lm:        Optional[torch.Tensor] = None
+    phi:       Optional[torch.Tensor] = None
+    nis_plus:  Optional[torch.Tensor] = None
+    symbolic:  Optional[torch.Tensor] = None
+    piso:      Optional[torch.Tensor] = None
+    metabolic: Optional[torch.Tensor] = None
+```
+
+The harness fills whichever slots it computed this step (`None` ⇒ "not
+produced this step", treated as zero contribution and omitted from the
+gated-by-step `update_every=N` paths).  The composer then runs:
+
+$$
+\mathcal{L}_\text{total}
+  = \sum_{n \in \text{objectives}} w_n \cdot g_n(\text{maturity}) \cdot \mathcal{L}_n
+$$
+
+where $g_n$ is the per-objective schedule factor — `1.0` for
+`constant`, `phase_gate(maturity, center_n, width_n)` for `gated`, or
+`clip(maturity, 0, 1)` for `linear`.  The master-switch-off short-path
+returns `bundle.lm` unchanged so legacy reproducibility is preserved.
+
+#### 7.5.3 `SymbolicHyperNeuron` (Phase C / F5)
+
+A trainable layer that *invents* small mathematical expressions over
+its input features.  Each of the `n_units` units selects two inputs
+$a, b$ from `n_features` and one operator $\omega$ from `OperatorBank`
+via Gumbel-softmax on three logit matrices.  At eval time selection
+collapses to plain softmax for determinism.
+
+Default operator bank: `identity, add, sub, mul, exp, sin, tanh`
+(with `_safe_exp` clamping the argument to $\pm 20$ for numerical
+safety).  Sparsity is encouraged by an entropy penalty over the
+selection distribution, exposed as `unit.sparsity_loss()` and scaled
+by `cfg.symbolic_sparsity_weight` inside the composer.  The
+temperature is annealed via `composer.set_symbolic_tau(tau)` from
+`cfg.symbolic_tau_init` to `cfg.symbolic_tau_final` over a warm-up.
+
+`unit.expression_strings()` extracts the argmax selection as
+human-readable strings (e.g., `"sin(f3) * tanh(f7)"`) — the entry
+point for symbolic-regression style mathematical inspection of what
+the unit learnt.
+
+Tests: `tests/test_symbolic_unit.py` (36, 6 classes).
+
+#### 7.5.4 `NRCSTKController` (Phase B / F3)
+
+Implements the metabolic-market selection pressure:
+
+1. **Demand** (per-neuron mean activation magnitude, EMA-smoothed):
+
+   $$ d_i(t) = \overline{|a_{:,:,i}|}, \quad
+      \tilde d_i(t) = \alpha\, d_i(t) + (1-\alpha)\, \tilde d_i(t-1) $$
+
+2. **Budget loss** (hinge-squared overshoot of the population mean):
+
+   $$ \mathcal{L}_\text{met} =
+       \bigl[\mathrm{ReLU}\bigl(\tfrac{1}{D}\sum_i \tilde d_i - B\bigr)\bigr]^2 $$
+
+3. **Pruning mask** (hard one-hot kill, all-ones until first observation):
+
+   $$ m_i = \mathbb{1}[\tilde d_i > \tau_\text{prune}] $$
+
+4. **Live-neuron count** (telemetry): $N_\text{live} = \sum_i m_i$.
+
+The "all-ones until first `observe()`" semantic prevents the system
+from killing every neuron before training starts.  After that the EMA
+drives gating; neurons whose magnitude collapses below
+`prune_threshold` are zeroed in the forward pass, which itself kills
+their gradient — the metabolic loss only needs to *push* the weakest
+neurons toward zero, the mask completes the kill once the EMA crosses
+the threshold.
+
+Tests: `tests/test_nrcstk_metabolic.py` (24, 5 classes — construction,
+demand observation, metabolic loss, pruning mask, composer integration).
+
+#### 7.5.5 Evolutionary fitness (`neuroslm/fitness.py`)
+
+In parallel with the runtime composer, `neuroslm/fitness.py` ships a
+JSON-serialisable `FitnessConfig` / `FitnessObjective` /
+`FitnessAdaptation` triple plus a `create_fitness_mutation_vesicle()`
+factory.  Used by the real-time evolution loop (§ Pillar 5 in the
+technical report and `neuroslm/utils/colab.py`) to mutate the
+objective table mid-training during high-surprise windows.  This is a
+*meta-loop* over the composer, not a replacement for it.
 
 ---
 

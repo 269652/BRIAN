@@ -134,6 +134,62 @@ These invariants can be formally verified during training, catching architectura
 
 ---
 
+## 2.6 Pillar 6: Multi-Objective Fitness Composition
+
+**Claim:** A *declarative* fitness block in the training-config DSL,
+backed by a runtime composer over a typed `LossBundle`, is a more
+faithful and more evolvable substrate for "what should this network
+optimise" than a hard-coded `total_loss_config` formula.  It also opens
+the door for two new gradient sources — a symbolic-regression unit
+that *invents* mathematical expressions over its inputs, and a
+metabolic-market controller that *prunes* neurons that fail to earn
+their activation budget.
+
+**Operationalization:**
+- Add a `fitness { ... }` block to the training-config DSL with six
+  objective slots: `lm`, `phi`, `nis_plus`, `symbolic`, `piso`,
+  `metabolic`.  Validate names + schedules at parse time.
+- Implement `FitnessComposer(nn.Module)` consuming a typed `LossBundle`
+  and producing `(total_loss, telemetry)` so the harness can drop its
+  hard-coded weighting in favour of a single declarative call.
+- Implement `SymbolicHyperNeuron` — Gumbel-softmax selection over two
+  inputs and one operator (from
+  `{identity, add, sub, mul, exp, sin, tanh}`) per unit, exposing
+  `sparsity_loss()` and `expression_strings()`.
+- Implement `NRCSTKController` — EMA per-neuron demand,
+  hinge-squared budget loss, hard-zero pruning mask that starts
+  all-ones and tightens after first `observe()`.
+- Per-objective phase-gate centres in
+  `neuroslm.fitness._GATE_TABLE` mirror the legacy `AuxWeights` curve
+  for bit-for-bit migration compatibility.
+
+**Current status:** ✅ CONFIRMED at the mechanism level (Layer A).
+Framework complete (99 new tests, all green):
+
+- `tests/test_symbolic_unit.py`        (36 / 36) — operator bank,
+  forward, expression extraction, sparsity regularisation, temperature
+  annealing.
+- `tests/test_fitness_parser.py`       (20 / 20) — every documented
+  field shape; whitelist validation; defaults.
+- `tests/test_fitness_composer.py`     (19 / 19) — construction from
+  `FitnessConfig`, per-objective contribution, aggregation, schedule
+  resolution, symbolic-unit integration.
+- `tests/test_nrcstk_metabolic.py`     (24 / 24) — construction,
+  demand observation, metabolic loss, pruning mask, composer wiring.
+
+**Pending (Layer B):** wiring `FitnessComposer.compose()` into
+`BRIANHarness.compute_loss()` so the legacy `total_loss_config` becomes
+a fall-back path; OOD comparison of a `symbolic`-enabled run vs the
+current baseline.
+
+**Evidence link:** `neuroslm/dsl/training_config.py` (parser + dataclasses),
+`neuroslm/fitness.py` (`LossBundle`, `FitnessComposer`),
+`neuroslm/modules/symbolic_unit.py`, `neuroslm/modules/nrcstk.py`,
+`docs/architecture.md` §7.5, `docs/dsl.md` § `fitness (training sub-block)`
+[✅ CONFIRMED]
+
+---
+
 ## 3. Architecture Overview & DSL Compilation
 
 ### 3.1 The `.neuro` DSL — Declarative Neural Architecture
@@ -613,6 +669,11 @@ py -3 -m pytest tests/test_phi.py tests/test_brain_forward.py \
 - BDNF plasticity couples to Φ and reshapes the connectivity graph.
 - Narrative memory detects contradictions and learns causal rules.
 - The system can train cleanly to 10k+ steps at 30M scale.
+- **Multi-Objective Fitness stack (Phases C → A → B):** declarative
+  `fitness { ... }` DSL block, runtime `FitnessComposer` over typed
+  `LossBundle`, `SymbolicHyperNeuron` (Gumbel-softmax mathematical
+  invention) and `NRCSTKController` (metabolic-market neuron
+  pruning) — 99 / 99 tests green; see Pillar 6 above.
 
 ### 12.2 Partially Proven (🟡)
 
@@ -626,6 +687,10 @@ py -3 -m pytest tests/test_phi.py tests/test_brain_forward.py \
 - Baseline at step 7k (matched-compute comparison for H12).
 - Full SRC-TEH wall-clock benchmarks (H11).
 - ARC / reasoning benchmarks (non-PPL eval).
+- **Wire `FitnessComposer.compose()` into `BRIANHarness.compute_loss`**
+  so the hard-coded `total_loss_config` becomes a fall-back path.
+- **OOD eval with `symbolic` and `metabolic` objectives enabled**
+  (Pillar 6 Layer-B evidence).
 
 ### 12.4 Falsified (❌)
 

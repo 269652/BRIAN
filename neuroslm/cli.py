@@ -141,6 +141,19 @@ def cmd_dna(args: argparse.Namespace) -> int:
         output_path = Path(output)
 
         try:
+            # Same directory-vs-file detection as the `unfold` branch
+            # so `brian dna compile rcc_bowtie --output some/dir/` writes
+            # `some/dir/<arch_name>.dna` instead of crashing.
+            looks_like_dir = (
+                output.endswith(os.sep)
+                or output.endswith("/")
+                or output_path.is_dir()
+            )
+            if looks_like_dir:
+                arch_name = Path(arch).name or "evolution"
+                output_path = output_path / f"{arch_name}.dna"
+                output = str(output_path)
+
             # Create parent directory if needed
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -159,6 +172,21 @@ def cmd_dna(args: argparse.Namespace) -> int:
         output_path = Path(output)
 
         try:
+            # If `--output` looks like a directory destination (trailing
+            # separator, OR points to an existing directory), write the
+            # unfolded DSL inside it as `<dna_stem>.neuro`. This makes
+            # `brian dna unfold X.dna --output some/dir/` behave like
+            # the user expects on Windows (where a trailing `\` would
+            # otherwise fan out into `open()` with Errno 22).
+            looks_like_dir = (
+                output.endswith(os.sep)
+                or output.endswith("/")
+                or output_path.is_dir()
+            )
+            if looks_like_dir:
+                output_path = output_path / (Path(dna_path).stem + ".neuro")
+                output = str(output_path)
+
             # Create parent directory if needed
             output_path.parent.mkdir(parents=True, exist_ok=True)
 

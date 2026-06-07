@@ -2,7 +2,7 @@
 
 > *A 230M-parameter language model optimized for integrated information (Φ) and mechanistic consciousness-like properties. Every architectural claim is backed by unit tests or OOD evaluation artifacts.*
 
-[![tests](https://img.shields.io/badge/tests-1084%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-1233%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
@@ -118,8 +118,11 @@ All 15 core mechanisms confirmed to implement as specified:
 | **H6** — Personality persists across re-instantiation | `test_cognitive_closure.py::test_autobiographical_personality_consistency` | ✅ Identity vector survives weight reload |
 | **H6.5** — Embodied survival reshapes qualia & policy | `test_cognitive_closure.py::test_survival_*` | ✅ Energy drop produces latent-space warp; +RPE training works |
 | **H7** — Trunk gradient isolation prevents divergence | `test_stabilization.py` + `ood_recursive_*` | ✅ Detach prevents post-step-5k collapse; reaches step 5000 cleanly |
+| **H13** — SymbolicHyperNeuron invents expressions over its inputs | `test_symbolic_unit.py` (36 tests) | ✅ Gumbel-softmax over `{identity, add, sub, mul, exp, sin, tanh}` selects two inputs + one op per unit; `expression_strings()` extracts human-readable formulae |
+| **H14** — NRCSTKController prunes neurons that fail the metabolic budget | `test_nrcstk_metabolic.py` (24 tests) | ✅ Hinge-squared overshoot loss drives EMA below `prune_threshold` → hard-zero mask kills the neuron in forward + gradient |
+| **H15** — `FitnessComposer` aggregates a `LossBundle` under a maturity-gated schedule | `test_fitness_composer.py` (19) + `test_fitness_parser.py` (20) | ✅ Declarative `fitness { ... }` DSL block parses into `FitnessConfig`; composer produces `(total_loss, telemetry)` matching legacy `AuxWeights` curve bit-for-bit |
 
-**Run all:** `py -3 -m pytest tests/ -v` (~7 seconds on CPU)
+**Run all:** `py -3 -m pytest tests/ -v` (~55 seconds on CPU)
 
 ### Layer B — OOD Generalization (The Open Question) 🟡
 
@@ -141,7 +144,7 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: PCT variant achieves 4
 
 ### Implementation Status
 
-- **1084/1084 tests passing** (~55s on CPU; includes 43 new evolution tests)
+- **1233/1233 tests passing** (~55s on CPU; includes 43 evolution tests + 99 Multi-Objective-Fitness tests)
 - Training with optimizer-partitioned checkpoint streaming
 - DSL-based architecture specs compile to byte-equivalent PyTorch models
 - Real-time architecture evolution via RAID-5 protected DNA mutations
