@@ -270,8 +270,17 @@ class RibosomeCompiler:
         return thg
 
     def compile_file(self, arch_root: str, output_dna: str) -> None:
-        """Compile architecture from arch.neuro to DNA file."""
+        """Compile architecture from arch.neuro to DNA file.
+
+        Workflow:
+        1. Parse arch.neuro
+        2. Load fitness.neuro (if present)
+        3. Transcribe DSL to DNA
+        4. Store fitness config in DNA invariants
+        5. Save DNA with all metadata
+        """
         from neuroslm.dsl.multifile import compile_folder
+        from neuroslm.fitness import FitnessConfig
 
         # Compile the architecture
         ir = compile_folder(arch_root)
@@ -285,7 +294,22 @@ class RibosomeCompiler:
             dsl_code = self._ir_to_dsl(ir)
 
         # Transcribe to DNA
-        self.dna_transcriber.transcribe_to_file(dsl_code, output_dna)
+        dna = self.dna_transcriber.transcribe(dsl_code)
+
+        # Load fitness config from fitness.json or fitness.neuro (if present)
+        fitness_path = Path(arch_root) / "fitness.json"
+        if not fitness_path.exists():
+            fitness_path = Path(arch_root) / "fitness.neuro"
+
+        if fitness_path.exists() and fitness_path.suffix == ".json":
+            try:
+                fitness_config = FitnessConfig.load(str(fitness_path))
+                dna.invariants["fitness_config"] = fitness_config.to_dict()
+            except Exception as e:
+                pass  # Silently ignore fitness loading errors
+
+        # Save DNA to file
+        dna.save(output_dna)
 
     def unfold_file(self, dna_path: str, output_neuro: str) -> None:
         """Unfold DNA file back to .neuro DSL."""
