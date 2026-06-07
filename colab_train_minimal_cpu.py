@@ -19,8 +19,8 @@ import torch.optim as optim
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
-def create_tiny_lm(vocab_size=256, d_model=64, depth=2, seq_len=128):
-    """Create a minimal LM for CPU training."""
+def create_tiny_lm(vocab_size=4096, d_model=192, depth=3, seq_len=256):
+    """Create a ~5M parameter LM for CPU training."""
 
     class TinyLM(nn.Module):
         def __init__(self, vocab_size, d_model, depth, seq_len):
@@ -30,8 +30,8 @@ def create_tiny_lm(vocab_size=256, d_model=64, depth=2, seq_len=128):
             self.layers = nn.ModuleList([
                 nn.TransformerEncoderLayer(
                     d_model=d_model,
-                    nhead=2,
-                    dim_feedforward=d_model * 2,
+                    nhead=6,  # Appropriate for 192 dim
+                    dim_feedforward=d_model * 4,
                     batch_first=True,
                     dropout=0.0
                 )
@@ -73,14 +73,14 @@ def main(steps: int = 10, ood_every: int = 500):
         from neuroslm.fitness import FitnessConfig
         fitness_cfg = FitnessConfig.load_or_default("")
 
-    # Create tiny model
-    print("\n[2] Creating tiny model...")
+    # Create ~5M parameter model
+    print("\n[2] Creating ~5M parameter model...")
     device = "cpu"
-    vocab_size = 256
-    d_model = 64
-    depth = 2
-    seq_len = 128
-    batch_size = 4
+    vocab_size = 4096   # Reduced vocab (still large)
+    d_model = 192       # Tuned for 5M params
+    depth = 3           # 3 transformer layers
+    seq_len = 256
+    batch_size = 1      # Batch 1 for CPU memory
 
     model = create_tiny_lm(vocab_size, d_model, depth, seq_len).to(device)
     n_params = sum(p.numel() for p in model.parameters())
@@ -101,7 +101,7 @@ def main(steps: int = 10, ood_every: int = 500):
     ood_results = []
 
     for step in range(1, steps + 1):
-        # Dummy batch
+        # Dummy batch (using full vocab size)
         input_ids = torch.randint(0, vocab_size, (batch_size, seq_len - 1)).to(device)
         target_ids = torch.randint(0, vocab_size, (batch_size, seq_len - 1)).to(device)
 
@@ -139,7 +139,7 @@ def main(steps: int = 10, ood_every: int = 500):
         # OOD eval every N steps
         if step % ood_every == 0:
             with torch.no_grad():
-                # Simulate OOD eval on held-out data
+                # Simulate OOD eval on held-out data (using full vocab)
                 ood_input = torch.randint(0, vocab_size, (batch_size, seq_len - 1)).to(device)
                 ood_target = torch.randint(0, vocab_size, (batch_size, seq_len - 1)).to(device)
                 ood_logits = model(ood_input)
