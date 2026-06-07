@@ -378,6 +378,10 @@ class ProgramIR(NodeIR):
     workspaces: List[WorkspaceIR] = None
     vesicles: List[VesicleIR] = None
     sieves: List[SieveIR] = None
+    # THSD (Topological Hyper-Sheaf Dynamics) primitives
+    thsd_complexes: List["ComplexIR"] = None  # From thsd_ir.py
+    thsd_sheaves: List["SheafIR"] = None
+    thsd_formal_spec: Optional["FormalSpecIR"] = None  # Note: different from FormalSpecIR above
 
     def __post_init__(self):
         if self.equation_decls is None:
@@ -409,6 +413,12 @@ class ProgramIR(NodeIR):
         if self.vesicles is None:
             self.vesicles = []
         if self.sieves is None:
+            self.sieves = []
+        # THSD initialization
+        if self.thsd_complexes is None:
+            self.thsd_complexes = []
+        if self.thsd_sheaves is None:
+            self.thsd_sheaves = []
             self.sieves = []
 
     @property
@@ -492,8 +502,8 @@ class NeuroMLCompiler:
         if not source or len(source) < 10:
             raise NeuroMLError("Empty or invalid source")
 
-        # Basic validation: check for at least one declaration
-        declarations = ['population', 'equation', 'architecture', 'synapse', 'neurotransmitter']
+        # Basic validation: check for at least one declaration (including THSD blocks)
+        declarations = ['population', 'equation', 'architecture', 'synapse', 'neurotransmitter', 'complex', 'sheaf', 'workspace']
         if not any(f'{k} ' in source for k in declarations):
             raise NeuroMLError("Missing required declarations")
 
@@ -625,13 +635,21 @@ class NeuroMLCompiler:
         proteins = _extract_proteins(source)
         metrics = _extract_metrics(source)
 
+        # Parse THSD blocks FIRST (new topology-aware parser)
+        from neuroslm.dsl.thsd_parser import THSDParser
+        thsd_complexes, thsd_sheaves = THSDParser.parse_dsl_for_thsd(source)
+
         # v2.0 DSL — extract complex, workspace, vesicle, sieve blocks
-        complexes = _extract_complexes(source)
+        # (only if THSD parser didn't find them)
+        if not thsd_complexes:
+            complexes = _extract_complexes(source)
+        else:
+            complexes = []  # Skip v2.0 parsing when THSD found complexes
         workspaces = _extract_workspaces(source)
         vesicles = _extract_vesicles(source)
         sieves = _extract_sieves(source)
 
-        return ProgramIR(
+        ir = ProgramIR(
             id="circuit",
             equation_decls=eq_defs,
             populations=pops,
@@ -648,6 +666,12 @@ class NeuroMLCompiler:
             vesicles=vesicles,
             sieves=sieves,
         )
+
+        # Attach THSD blocks to IR
+        ir.thsd_complexes = thsd_complexes
+        ir.thsd_sheaves = thsd_sheaves
+
+        return ir
 
     @staticmethod
     def compile_file(filepath: str) -> ProgramIR:

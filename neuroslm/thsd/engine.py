@@ -267,3 +267,206 @@ class PhiDynamicsComputer:
         phi = abs(correlation) / denom if denom > 0 else 0.0
 
         return float(phi)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Discovery operator 1/4 — Symbolic Expression Units as 0-simplices
+# ──────────────────────────────────────────────────────────────────────
+#
+# Mathematical derivation (see docs/formal_framework.md §3):
+#
+#   A SymbolicHyperNeuron U_φ : R^{n_F} → R^{n_U} is a layer that
+#   learns one explicit equation per output unit, drawn from a fixed
+#   operator bank O = {identity, add, sub, mul, exp, sin, tanh} via
+#   Gumbel-softmax selection.  We embed it into the simplicial complex
+#   K by promoting U_φ to a *symbolic 0-simplex* σ_φ ∈ K_0.
+#
+#   The stalk F(σ_φ) = R^{n_U} is the output space of U_φ.  The unit's
+#   discovered expression e_i ∈ Expr(O, X) is exposed at the simplex
+#   level via σ_φ.symbolic_expression(), making the simplex a *carrier
+#   of an explicit mathematical fact* rather than an opaque cell.
+#
+#   When σ_φ participates in a higher simplex σ_d (d ≥ 1), the
+#   coboundary δ⁰ already enforces F(σ_φ) ⊕ F(σ_v) → F(σ_d) so the
+#   symbolic activation flows into the sheaf-cohomology check
+#   transparently — no special-casing in CoboundaryOperator required.
+#
+# The class below is intentionally a *facade*: every numeric op is
+# delegated to the underlying SymbolicHyperNeuron.  This keeps the
+# discovery surface (= the expression list) the single source of truth.
+
+from neuroslm.modules.symbolic_unit import (  # noqa: E402 — keeps engine.py self-contained
+    OperatorBank,
+    SymbolicHyperNeuron,
+)
+
+
+class SymbolicSimplex(nn.Module):
+    """A 0-simplex whose stalk is computed by a ``SymbolicHyperNeuron``.
+
+    The simplex carries an explicit, extractable algebraic expression
+    per output unit (see :py:meth:`symbolic_expression`).  This makes
+    the THSD engine a *discovery surface* rather than purely
+    descriptive bookkeeping: each ``SymbolicSimplex`` in K is a learnt
+    mathematical fact, and the sheaf cohomology guards (H¹) check
+    whether neighbouring facts are consistent.
+
+    Parameters
+    ----------
+    name : str
+        Unique identifier inside the :class:`SimplexComplex`.  Used as
+        the key in ``K.simplices[0]`` and (after :py:meth:`register`)
+        as the key in ``CellularSheaf.stalks``.
+    n_units : int
+        Output dimensionality.  Becomes the stalk dimension
+        ``dim F(σ_φ) = n_units``.
+    n_features : int
+        Input dimensionality of the underlying ``SymbolicHyperNeuron``.
+    operator_bank : OperatorBank, optional
+        Bank of binary operators.  Defaults to
+        :py:meth:`OperatorBank.default`.
+    tau_init : float, optional
+        Initial Gumbel-Softmax temperature, default ``1.0``.
+    feature_names : list[str], optional
+        Names used in the human-readable expressions.  Default
+        ``["x0", "x1", ...]``.
+
+    Invariants
+    ----------
+    * ``self.dim == 0`` — symbolic units are vertices.
+    * ``self.stalk_dim == n_units`` — the sheaf stalk has the unit's
+      output dimension, so the existing :class:`CellularSheaf`
+      restriction maps compose correctly without bespoke conversion.
+    * ``self.unit.n_features == n_features`` — the input contract is
+      preserved end-to-end.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        n_units: int,
+        n_features: int,
+        operator_bank: Optional[OperatorBank] = None,
+        tau_init: float = 1.0,
+        feature_names: Optional[List[str]] = None,
+    ) -> None:
+        super().__init__()
+        # The underlying SymbolicHyperNeuron already validates
+        # n_units > 0, n_features > 0, tau > 0, and feature_names
+        # length — delegate so the contract is owned in one place.
+        if n_units <= 0:
+            raise ValueError(f"n_units must be > 0, got {n_units}")
+        if n_features <= 0:
+            raise ValueError(f"n_features must be > 0, got {n_features}")
+
+        self.name = name
+        self.dim = 0  # Symbolic units are 0-simplices.
+        self.unit = SymbolicHyperNeuron(
+            n_units=n_units,
+            n_features=n_features,
+            operator_bank=operator_bank,
+            tau=tau_init,
+            feature_names=feature_names,
+        )
+
+    # ── geometric properties ────────────────────────────────────────
+
+    @property
+    def n_units(self) -> int:
+        return self.unit.n_units
+
+    @property
+    def n_features(self) -> int:
+        return self.unit.n_features
+
+    @property
+    def stalk_dim(self) -> int:
+        """Dimension of F(σ_φ).  Equals the underlying unit's output."""
+        return self.unit.n_units
+
+    @property
+    def operator_names(self) -> List[str]:
+        """Names of the operators in the bound :class:`OperatorBank`."""
+        return list(self.unit.operator_bank.names)
+
+    # ── simplex registration ────────────────────────────────────────
+
+    def register(self, complex: SimplexComplex) -> str:
+        """Register this symbolic simplex as a 0-simplex of ``complex``.
+
+        Adds an entry to ``complex.simplices[0][self.name]`` with
+        ``kind="symbolic"`` metadata so the verifier can locate
+        symbolic simplices and emit their equations into the H¹
+        consistency report.
+
+        Returns
+        -------
+        str
+            The registered simplex name (== ``self.name``).
+        """
+        if self.dim > complex.dim_max:
+            raise ValueError(
+                f"SymbolicSimplex dim {self.dim} exceeds K's dim_max "
+                f"{complex.dim_max}"
+            )
+        complex.simplices[self.dim][self.name] = {
+            "boundary": [],
+            "dim": self.dim,
+            "kind": "symbolic",
+            "n_units": self.n_units,
+            "n_features": self.n_features,
+        }
+        return self.name
+
+    # ── forward semantics ───────────────────────────────────────────
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Map ``(..., n_features) -> (..., n_units)``.
+
+        Identical contract to :py:meth:`SymbolicHyperNeuron.forward`;
+        this method exists so PyTorch's ``nn.Module.__call__`` triggers
+        hooks, train/eval-mode switching and gradient tracking
+        correctly for the simplex itself.
+        """
+        return self.unit(x)
+
+    # ── discovery surface ───────────────────────────────────────────
+
+    def symbolic_expression(self) -> List[str]:
+        """Return one printable algebraic expression per learnt unit.
+
+        Examples
+        --------
+        ``["(phi * surprise)", "exp(metabolic_demand)", "(x0 + x2)"]``
+
+        This is the *discovery output* — the human-readable algebraic
+        content the simplex has converged on.  Useful for both
+        verification reports (see ``THSDVerifier``) and for the
+        evolutionary search logs (each generation can persist the
+        equation set as part of the DNA snapshot).
+        """
+        return self.unit.expression_strings()
+
+    # ── regularisation / temperature ────────────────────────────────
+
+    def sparsity_loss(self) -> torch.Tensor:
+        """Forward to :py:meth:`SymbolicHyperNeuron.sparsity_loss`.
+
+        Returns the entropy of the Gumbel-softmax selections — driven
+        toward zero by an auxiliary loss term to harden each unit into
+        a discrete formula.  The :class:`FitnessComposer` collects
+        this under the ``"symbolic"`` objective.
+        """
+        return self.unit.sparsity_loss()
+
+    def set_tau(self, tau: float) -> None:
+        """Anneal the Gumbel-Softmax temperature in-place."""
+        self.unit.set_tau(tau)
+
+    # ── repr ────────────────────────────────────────────────────────
+
+    def extra_repr(self) -> str:
+        return (
+            f"name={self.name!r}, dim={self.dim}, "
+            f"n_units={self.n_units}, n_features={self.n_features}"
+        )

@@ -26,130 +26,230 @@ from neuroslm.dsl.thsd_ir import (
 
 
 class THSDParser:
-    """Parser for THSD DSL blocks."""
+    """Robust recursive-descent parser for THSD DSL blocks."""
 
     @staticmethod
-    def extract_balanced_braces(text: str, start_pos: int) -> Tuple[str, int]:
-        """Extract balanced brace block starting at position.
+    def tokenize(text: str) -> List[Tuple[str, str]]:
+        """Tokenize DSL text into (token_type, value) pairs.
 
-        Returns: (content, end_position)
+        Token types: 'IDENT', 'NUMBER', 'STRING', 'LBRACE', 'RBRACE', 'COLON', 'COMMA'
         """
-        depth = 0
-        start = text.find("{", start_pos)
-        if start == -1:
-            raise ValueError("No opening brace found")
-
-        for i in range(start, len(text)):
-            if text[i] == "{":
-                depth += 1
-            elif text[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[start + 1 : i].strip(), i + 1
-
-        raise ValueError("Unbalanced braces")
-
-    @staticmethod
-    def parse_key_value(line: str) -> Tuple[str, Any]:
-        """Parse key: value or key: {...} line.
-
-        Returns: (key, value)
-        """
-        match = re.match(r"(\w+)\s*:\s*(.*)", line.strip())
-        if not match:
-            raise ValueError(f"Invalid key-value syntax: {line}")
-
-        key = match.group(1)
-        value_str = match.group(2).strip()
-
-        # Try to parse as various types
-        if value_str == "true":
-            return key, True
-        elif value_str == "false":
-            return key, False
-        elif value_str.startswith('"') and value_str.endswith('"'):
-            return key, value_str[1:-1]
-        elif re.match(r"-?\d+(\.\d+)?", value_str):
-            if "." in value_str:
-                return key, float(value_str)
-            else:
-                return key, int(value_str)
-        elif value_str.endswith((",", "}")):
-            value_str = value_str.rstrip(",}")
-            if value_str.startswith("[") and value_str.endswith("]"):
-                # Parse array
-                items_str = value_str[1:-1]
-                items = [s.strip().strip('"') for s in items_str.split(",") if s.strip()]
-                return key, items
-            else:
-                # Single value
-                if value_str.startswith('"') and value_str.endswith('"'):
-                    return key, value_str[1:-1]
-                else:
-                    try:
-                        return key, float(value_str)
-                    except ValueError:
-                        try:
-                            return key, int(value_str)
-                        except ValueError:
-                            return key, value_str
-
-        return key, value_str
-
-    @staticmethod
-    def parse_nested_block(block_text: str, block_name: str) -> Dict[str, Any]:
-        """Parse a nested block like { ... } and return dict of fields."""
-        result = {}
-        # Remove outer braces if present
-        content = block_text.strip()
-        if content.startswith("{"):
-            content = content[1:]
-        if content.endswith("}"):
-            content = content[:-1]
-
-        lines = content.split("\n")
+        tokens = []
         i = 0
-        while i < len(lines):
-            line = lines[i].strip()
-            if not line or line.startswith("#"):
+        while i < len(text):
+            # Skip whitespace and comments
+            if text[i].isspace():
+                i += 1
+                continue
+            if text[i:i+1] == '#':
+                # Skip comment line
+                i = text.find('\n', i)
+                if i == -1:
+                    break
                 i += 1
                 continue
 
-            # Check if this line has a nested block
-            if "{" in line:
-                # Extract key and nested block
-                key_part = line[: line.index("{")].strip().rstrip(":")
-                if ":" in key_part:
-                    key = key_part.split(":")[-1].strip()
+            # String literals
+            if text[i] in ('"', "'"):
+                quote = text[i]
+                j = i + 1
+                while j < len(text) and text[j] != quote:
+                    if text[j] == '\\':
+                        j += 2
+                    else:
+                        j += 1
+                if j < len(text):
+                    tokens.append(('STRING', text[i+1:j]))
+                    i = j + 1
                 else:
-                    key = key_part
+                    raise ValueError(f"Unterminated string at position {i}")
+                continue
 
-                # Extract nested braces content - just get from { to matching }
-                start = line.index("{")
-                brace_content = line[start:]
-                depth = 0
-                end_pos = 0
-                for j, c in enumerate(brace_content):
-                    if c == "{":
-                        depth += 1
-                    elif c == "}":
-                        depth -= 1
-                        if depth == 0:
-                            end_pos = j
-                            break
-                nested_content = brace_content[1:end_pos]
-                result[key] = THSDParser.parse_nested_block(nested_content, key)
+            # Numbers (int and float)
+            if text[i].isdigit() or (text[i] == '-' and i+1 < len(text) and text[i+1].isdigit()):
+                j = i + (1 if text[i] == '-' else 0)
+                while j < len(text) and (text[j].isdigit() or text[j] == '.'):
+                    j += 1
+                tokens.append(('NUMBER', text[i:j]))
+                i = j
+                continue
+
+            # Identifiers and keywords
+            if text[i].isalpha() or text[i] == '_':
+                j = i
+                while j < len(text) and (text[j].isalnum() or text[j] == '_'):
+                    j += 1
+                tokens.append(('IDENT', text[i:j]))
+                i = j
+                continue
+
+            # Punctuation
+            if text[i:i+1] == '{':
+                tokens.append(('LBRACE', '{'))
+                i += 1
+            elif text[i:i+1] == '}':
+                tokens.append(('RBRACE', '}'))
+                i += 1
+            elif text[i:i+1] == ':':
+                tokens.append(('COLON', ':'))
+                i += 1
+            elif text[i:i+1] == ',':
+                tokens.append(('COMMA', ','))
+                i += 1
+            elif text[i:i+1] == '[':
+                tokens.append(('LBRACKET', '['))
+                i += 1
+            elif text[i:i+1] == ']':
+                tokens.append(('RBRACKET', ']'))
                 i += 1
             else:
-                # Regular key-value pair
-                try:
-                    key, value = THSDParser.parse_key_value(line)
-                    result[key] = value
-                except ValueError:
-                    pass
                 i += 1
 
-        return result
+        return tokens
+
+    @staticmethod
+    def parse_value(tokens: List[Tuple[str, str]], pos: int) -> Tuple[Any, int]:
+        """Parse a single value (string, number, array, or nested dict).
+
+        Returns: (value, new_position)
+        """
+        if pos >= len(tokens):
+            raise ValueError("Unexpected end of input")
+
+        token_type, token_value = tokens[pos]
+
+        if token_type == 'STRING':
+            return token_value, pos + 1
+        elif token_type == 'NUMBER':
+            if '.' in token_value:
+                return float(token_value), pos + 1
+            else:
+                return int(token_value), pos + 1
+        elif token_type == 'IDENT':
+            if token_value == 'true':
+                return True, pos + 1
+            elif token_value == 'false':
+                return False, pos + 1
+            else:
+                return token_value, pos + 1
+        elif token_type == 'LBRACKET':
+            # Parse array
+            items = []
+            pos += 1
+            while pos < len(tokens) and tokens[pos][0] != 'RBRACKET':
+                if tokens[pos][0] == 'COMMA':
+                    pos += 1
+                    continue
+                value, pos = THSDParser.parse_value(tokens, pos)
+                items.append(value)
+            if pos < len(tokens) and tokens[pos][0] == 'RBRACKET':
+                pos += 1
+            return items, pos
+        elif token_type == 'LBRACE':
+            # Parse nested dict
+            return THSDParser.parse_dict(tokens, pos)
+        else:
+            raise ValueError(f"Unexpected token: {token_type} = {token_value}")
+
+    @staticmethod
+    def parse_dict(tokens: List[Tuple[str, str]], pos: int) -> Tuple[Dict[str, Any], int]:
+        """Parse a dictionary from tokens.
+
+        Expected format: { key: value, key: value, ... } or { key { ... }, ... }
+        Returns: (dict, new_position)
+        """
+        result = {}
+
+        # Expect opening brace
+        if pos >= len(tokens) or tokens[pos][0] != 'LBRACE':
+            raise ValueError(f"Expected '{{', got {tokens[pos] if pos < len(tokens) else 'EOF'}")
+
+        pos += 1
+
+        while pos < len(tokens) and tokens[pos][0] != 'RBRACE':
+            # Parse key
+            if tokens[pos][0] != 'IDENT':
+                raise ValueError(f"Expected identifier for key, got {tokens[pos]}")
+
+            key = tokens[pos][1]
+            pos += 1
+
+            # Check for nested dict (no colon) or key-value (with colon)
+            if pos < len(tokens) and tokens[pos][0] == 'LBRACE':
+                # Nested dict without colon: key { ... }
+                value, pos = THSDParser.parse_dict(tokens, pos)
+            elif pos < len(tokens) and tokens[pos][0] == 'COLON':
+                # Key-value pair: key: value
+                pos += 1  # Skip colon
+                # Parse value
+                value, pos = THSDParser.parse_value(tokens, pos)
+            else:
+                raise ValueError(f"Expected ':' or '{{' after key, got {tokens[pos] if pos < len(tokens) else 'EOF'}")
+
+            result[key] = value
+
+            # Optional comma
+            if pos < len(tokens) and tokens[pos][0] == 'COMMA':
+                pos += 1
+
+        # Expect closing brace
+        if pos >= len(tokens) or tokens[pos][0] != 'RBRACE':
+            raise ValueError(f"Expected '}}', got {tokens[pos] if pos < len(tokens) else 'EOF'}")
+
+        pos += 1
+        return result, pos
+
+    @staticmethod
+    def extract_complex_blocks(dsl_code: str) -> List[Tuple[str, Dict[str, Any]]]:
+        """Extract all complex blocks from DSL code.
+
+        Returns: List of (name, parsed_dict) tuples
+        """
+        complexes = []
+        tokens = THSDParser.tokenize(dsl_code)
+
+        i = 0
+        while i < len(tokens):
+            if tokens[i] == ('IDENT', 'complex'):
+                i += 1
+                if i >= len(tokens) or tokens[i][0] != 'IDENT':
+                    raise ValueError("Expected complex name")
+                name = tokens[i][1]
+                i += 1
+
+                # Parse the block
+                block_dict, i = THSDParser.parse_dict(tokens, i)
+                complexes.append((name, block_dict))
+            else:
+                i += 1
+
+        return complexes
+
+    @staticmethod
+    def extract_sheaf_blocks(dsl_code: str) -> List[Tuple[str, Dict[str, Any]]]:
+        """Extract all sheaf blocks from DSL code.
+
+        Returns: List of (name, parsed_dict) tuples
+        """
+        sheaves = []
+        tokens = THSDParser.tokenize(dsl_code)
+
+        i = 0
+        while i < len(tokens):
+            if tokens[i] == ('IDENT', 'sheaf'):
+                i += 1
+                if i >= len(tokens) or tokens[i][0] != 'IDENT':
+                    raise ValueError("Expected sheaf name")
+                name = tokens[i][1]
+                i += 1
+
+                # Parse the block
+                block_dict, i = THSDParser.parse_dict(tokens, i)
+                sheaves.append((name, block_dict))
+            else:
+                i += 1
+
+        return sheaves
 
     @staticmethod
     def parse_stalk(stalk_dict: Dict[str, Any]) -> SheafStalkIR:
@@ -278,67 +378,49 @@ class THSDParser:
         return complex_ir
 
     @staticmethod
-    def extract_complex_blocks(dsl_code: str) -> List[Tuple[str, str]]:
-        """Extract all complex blocks from DSL code.
-
-        Returns: List of (name, block_content) tuples
-        """
-        complexes = []
-        pattern = r"complex\s+(\w+)\s*\{"
-        matches = list(re.finditer(pattern, dsl_code))
-
-        for match in matches:
-            name = match.group(1)
-            start_pos = match.start(0)
-            block_content, _ = THSDParser.extract_balanced_braces(dsl_code, start_pos)
-            complexes.append((name, block_content))
-
-        return complexes
-
-    @staticmethod
-    def extract_sheaf_blocks(dsl_code: str) -> List[Tuple[str, str]]:
-        """Extract all sheaf blocks from DSL code.
-
-        Returns: List of (name, block_content) tuples
-        """
-        sheaves = []
-        pattern = r"sheaf\s+(\w+)\s*\{"
-        matches = list(re.finditer(pattern, dsl_code))
-
-        for match in matches:
-            name = match.group(1)
-            start_pos = match.start(0)
-            block_content, _ = THSDParser.extract_balanced_braces(dsl_code, start_pos)
-            sheaves.append((name, block_content))
-
-        return sheaves
-
-    @staticmethod
     def parse_dsl_for_thsd(dsl_code: str) -> Tuple[List[ComplexIR], List[SheafIR]]:
-        """Parse DSL code and extract all THSD blocks.
+        """Parse DSL code and extract all THSD blocks using tokenization.
 
-        Returns: (complexes, sheaves)
+        Raises ValueError for invalid THSD blocks.
+        Returns empty lists on tokenization failures (falls back to v2.0).
         """
         complexes_list = []
         sheaves_list = []
 
-        # Parse complex blocks
-        complex_blocks = THSDParser.extract_complex_blocks(dsl_code)
-        for name, block_content in complex_blocks:
-            complex_dict = THSDParser.parse_nested_block(block_content, "complex")
-            complex_ir = THSDParser.parse_complex_block(complex_dict, name)
-            complexes_list.append(complex_ir)
+        try:
+            # Parse complex blocks
+            complex_blocks = THSDParser.extract_complex_blocks(dsl_code)
+        except Exception:
+            # If tokenization fails, return empty (fall back to v2.0 parser)
+            return complexes_list, sheaves_list
+
+        # Process complex blocks - THSD blocks must be valid
+        for name, block_dict in complex_blocks:
+            # Check if this is THSD syntax (has THSD-specific fields as dicts, not strings)
+            # v2.0 has topology:"Tonnetz" (string), THSD has topology { ... } (dict)
+            thsd_dict_fields = {"stalk", "topology", "formal_spec", "dynamics"}
+            is_thsd = any(isinstance(block_dict.get(field), dict) for field in thsd_dict_fields)
+
+            if is_thsd:
+                # This is THSD syntax - enforce full validation (raises on error)
+                complex_ir = THSDParser.parse_complex_block(block_dict, name)
+                complexes_list.append(complex_ir)
+            # else: skip v2.0-style complexes (no THSD dict fields)
 
         # Parse sheaf blocks
-        sheaf_blocks = THSDParser.extract_sheaf_blocks(dsl_code)
-        for name, block_content in sheaf_blocks:
-            sheaf_dict = THSDParser.parse_nested_block(block_content, "sheaf")
-            sheaf_ir = SheafIR(
-                name=name,
-                base_complex=sheaf_dict.get("base_complex", ""),
-                sections=sheaf_dict.get("sections", []),
-                consistency_check=sheaf_dict.get("consistency_check"),
-            )
-            sheaves_list.append(sheaf_ir)
+        try:
+            sheaf_blocks = THSDParser.extract_sheaf_blocks(dsl_code)
+            for name, block_dict in sheaf_blocks:
+                sheaf_ir = SheafIR(
+                    name=name,
+                    base_complex=block_dict.get("base_complex", ""),
+                    sections=block_dict.get("sections", []),
+                    consistency_check=block_dict.get("consistency_check"),
+                )
+                sheaves_list.append(sheaf_ir)
+        except Exception:
+            pass
+
+        return complexes_list, sheaves_list
 
         return complexes_list, sheaves_list
