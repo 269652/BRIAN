@@ -1,0 +1,730 @@
+# -*- coding: utf-8 -*-
+# RCC Bowtie — THSD (Topological Hyper-Sheaf-Dynamics) Refactor
+#
+# This refactored arch.neuro expresses the RCC Bowtie as a simplicial complex K,
+# with cellular sheaves F assigning representational spaces and Fisher metrics to
+# each simplex (brain region). The topology enforces Φ > 0 (integrated information)
+# and H¹(K;F) = 0 (narrative coherence) via sheaf cohomology.
+#
+# Mathematical foundation:
+#   - K: simplicial complex (0-simplices = local processing units,
+#         1-simplices = synaptic connections, 2-simplices = functional modules)
+#   - F: cellular sheaf (assigns stalk F(σ) = representational space + Fisher metric)
+#   - Tonnetz manifold: enforces constant spectral gap λ₁ to suppress hallucinations
+#   - Multi-trunk routing: four expert trunks (Math, Code, Chat, General) as
+#     parallel stalks in the Language Cortex, selected via sheaf global section
+#
+# References: Dehaene (2011), Tononi (2016), Mashour (2020), Petri & Ahn (2016)
+
+architecture rcc_bowtie_thsd {
+    d_sem: 256,
+    dt: 0.01
+}
+
+# =============================================================================
+# TRAINING CONFIGURATION (unchanged from standard arch.neuro, but wired through
+# sheaf consistency checks during evolution)
+# =============================================================================
+
+training {
+    preset:        "rcc_bowtie_30m_p4"
+    loss_clipping: { enabled: true, method: "per_sample", factor: 3.0 }
+    quantization:  { enabled: false, bits: 8 }
+    optimizer:     "adamw"
+    learning_rate: 0.0005
+    weight_decay:  0.01
+    grad_accum:    8
+    grad_clip:     1.0
+    label_smoothing: 0.0
+    dropout:       0.0
+    flooding_level: 0.0
+    stochastic_depth: 0.0
+    z_loss: 0.0001
+    llrd: 1.0
+    pct_trunk:     0.0
+    pct_strength:  0.0
+
+    # HPB Mechanisms (integrated into THSD via neuro-vesicles)
+    grid_positions: { enabled: true, n_scales: 4, scale_ratio: 1.6180339887, base_period: 16.0 }
+    surprise_head:  { enabled: true, dim: 128, local_window: 64 }
+    episodic_memory: { enabled: true, slots: 4096, k: 32, alpha_init: 0.0,
+                       write_gate: "all", write_quantile: 0.8 }
+    mspcc: { enabled: true, base_weight: 0.02, layer_weight_decay: 0.5 }
+    vbb_curvature: 1.0
+
+    # Multi-Trunk-v2: Sheaf-based thalamic routing
+    # The ThalamicRouter selects from the four expert cortex stalks via
+    # the sheaf global section Γ(K,F), using sheaf cohomology H¹ to detect
+    # contradictions between trunk outputs and amortize them via PFC.
+    multi_cortex: {
+        enabled:             true,
+        n_cortices:          4,
+        domains:             ["math", "code", "chat", "general"],
+        weights:             "gpt2",
+        freeze_weights:      true,
+        lexical_bias_weight: 2.0,
+        bema_tau:            0.5,
+        router_d_model:      256
+    }
+
+    batch_size:   16
+    seq_len:      2048
+    steps:        40000
+    warmup_steps: 2400
+    min_lr_ratio: 0.1
+
+    pc_reentry_weight:  0.1
+    pc_reentry_nt_gate: true
+
+    # VBB at the bowtie waist (narrowest simplex in the complex K)
+    vbb_alpha:     0.001
+    vbb_beta_init: 1.0
+    vbb_free_bits:    0.1
+    vbb_log_beta_max: 4.0
+    vbb_entropy_eta:  0.001
+
+    # Tonnetz period: enforces spectral gap λ₁ > λ_min on all stalks
+    # Lattice constant c = 2π/period; spacing Δf = c * harmonic number
+    # Zero means Tonnetz is off; nonzero activates topological stabilization.
+    tonnetz_period: 0
+
+    bema_rollback_window: 0
+    bema_snapshot_every: 50
+    bema_cooldown: 100
+    nemori_floor: 0.0       # Predictive Forgetting threshold (NEMORI)
+    mu_p_scaling: false
+    curriculum: "random"
+    crystallization_step: 0
+
+    mechanisms: {}
+
+    pass_marks: {
+        ppl_at_10k:   { metric: "train_ppl", at_step: 10000, max: 100 }
+        ood_not_falling: {
+            metric: "ood_ppl",
+            window: 4000,
+            trend: "falling",
+            tol: 0.02,
+            min_evals: 5
+        }
+    }
+
+    genetics: {
+        enabled:            true
+        n_genes:            32
+        d_pay:              16
+        optimize_for:       "lm_loss"
+        fixed_genes_preset: "default"
+        update_every:       4
+        diagnostics_every:  50
+    }
+
+    hardware: {
+        dist_strategy: "single"
+        device: "cuda"
+        dtype: "bfloat16"
+        min_gpu_mem_gib: 40
+        max_instances: 16
+    }
+}
+
+# =============================================================================
+# NEUROTRANSMITTER SYSTEMS (classical 7) — preserved from standard arch.neuro
+# =============================================================================
+
+neurotransmitter dopamine {
+    base_concentration: 0.10,
+    release_rate: 0.20,
+    reuptake_rate: 0.80,
+    diffusion_rate: 0.02
+}
+
+neurotransmitter norepinephrine {
+    base_concentration: 0.08,
+    release_rate: 0.15,
+    reuptake_rate: 0.75,
+    diffusion_rate: 0.015
+}
+
+neurotransmitter serotonin {
+    base_concentration: 0.06,
+    release_rate: 0.10,
+    reuptake_rate: 0.70,
+    diffusion_rate: 0.01
+}
+
+neurotransmitter acetylcholine {
+    base_concentration: 0.12,
+    release_rate: 0.18,
+    reuptake_rate: 0.85,
+    diffusion_rate: 0.025
+}
+
+neurotransmitter endocannabinoid {
+    base_concentration: 0.04,
+    release_rate: 0.08,
+    reuptake_rate: 0.60,
+    diffusion_rate: 0.008
+}
+
+neurotransmitter glutamate {
+    base_concentration: 0.20,
+    release_rate: 0.40,
+    reuptake_rate: 0.95,
+    diffusion_rate: 0.05
+}
+
+neurotransmitter gaba {
+    base_concentration: 0.15,
+    release_rate: 0.30,
+    reuptake_rate: 0.90,
+    diffusion_rate: 0.04
+}
+
+# =============================================================================
+# EQUATION & FUNCTION IMPORTS (from library)
+# =============================================================================
+
+import { standard_synapse, multiplicative_modulation, additive_modulation } from "@/lib/equations"
+import { adaptive_mixture_update, freq_balance_loss, freq_balance_weight } from "@/lib/regularizers"
+import { cdga_conflict_coef, cdga_aligned_gradient, cdga_strength_schedule } from "@/lib/cdga"
+import { nt_driver_standardise, nt_homeostat_step, nt_homeostat_readout } from "@/lib/emergent"
+import { metastable_ignition_gate, metastable_ignition_event, metastable_threshold_update } from "@/lib/emergent"
+import { pc_reentry_predict, pc_reentry_residual } from "@/lib/emergent"
+import { topological_unit_field, topological_complex_pair, topological_phase_increment, topological_charge_total, topological_wall_indicator } from "@/lib/emergent"
+import { lattice_slice_winner, lattice_specialisation_index } from "@/lib/emergent"
+import { pac_bandpass_analytic, pac_phase_and_amplitude, pac_modulation_index } from "@/lib/emergent"
+
+# =============================================================================
+# SIMPLICIAL COMPLEX K: Brain Region Modules as 0-Simplices (Vertices)
+# =============================================================================
+# Each imported module is re-declared as a complex 0-simplex (local processing unit).
+# The sheaf assigns to each 0-simplex a stalk F(region) containing:
+#   - activation space (d_sem dimensions)
+#   - Fisher information metric for cov-weighted retrieval
+#   - interaction kernels with adjacent simplices (synaptic connections)
+
+import { sensory, association }                          from "@/modules/sensory"
+import { thalamus }                                       from "@/modules/thalamus"
+import { world, self_m }                                  from "@/modules/world"
+import { amygdala, insula }                               from "@/modules/amygdala"
+import { qualia }                                         from "@/modules/qualia"
+import { gws, neural_geometry }                           from "@/modules/gws"
+import { hippo, entorhinal, cerebellum }                  from "@/modules/hippocampus"
+import { pfc, acc }                                       from "@/modules/pfc"
+import { bg, forward_m, evaluator }                       from "@/modules/bg"
+import { dmn, thought_transformer, claustrum }            from "@/modules/dmn"
+import { motor }                                          from "@/modules/motor"
+import { vta, nucleus_accumbens, locus_coeruleus, raphe_nuclei, nucleus_basalis, substantia_nigra } from "@/modules/nuclei"
+import { reasoning_cortex }                               from "@/modules/reasoning_cortex"
+import { cortex_math, cortex_code, cortex_chat, cortex_general } from "@/modules/cortex_specialists"
+
+# =============================================================================
+# SIMPLICIAL COMPLEX: Four Expert Language Cortices as Parallel Stalks
+# =============================================================================
+# The Language Cortex is the primary complex in this architecture. It has
+# four specialized sub-stalks (Math, Code, Chat, General), each carrying a
+# different expert language model (GPT-2 backbone). The sheaf global section
+# Γ(K,F) selects which stalk to activate on each token via the thalamic router.
+#
+# Sheaf Cohomology H¹(K;F) detects contradictions between expert outputs:
+# if two trunks agree on the next token, H¹ = 0; if they conflict, H¹ ≠ 0
+# and the PFC (Prefrontal Cortex) amortizes the discrepancy via meta-learning.
+
+complex LanguageCortex {
+    topology: Tonnetz(dim: 256, spectral_gap: 0.05),
+    trunk: "MultiSpecialist(n_experts=4, base_model=gpt2)",
+
+    sheaf {
+        # Stalk 1: Math Expert
+        stalk MathExpertTrunk {
+            operator_embedding: cortex_math,
+            fisher_metric: "variance_weighted",
+            compatibility: {
+                with_CodeExpert: 0.3,
+                with_ChatExpert: 0.2,
+                with_GeneralExpert: 0.4
+            }
+        },
+
+        # Stalk 2: Code Expert
+        stalk CodeExpertTrunk {
+            operator_embedding: cortex_code,
+            fisher_metric: "variance_weighted",
+            compatibility: {
+                with_MathExpert: 0.3,
+                with_ChatExpert: 0.25,
+                with_GeneralExpert: 0.5
+            }
+        },
+
+        # Stalk 3: Chat Expert
+        stalk ChatExpertTrunk {
+            operator_embedding: cortex_chat,
+            fisher_metric: "variance_weighted",
+            compatibility: {
+                with_MathExpert: 0.2,
+                with_CodeExpert: 0.25,
+                with_GeneralExpert: 0.6
+            }
+        },
+
+        # Stalk 4: General Expert
+        stalk GeneralExpertTrunk {
+            operator_embedding: cortex_general,
+            fisher_metric: "variance_weighted",
+            compatibility: {
+                with_MathExpert: 0.4,
+                with_CodeExpert: 0.5,
+                with_ChatExpert: 0.6
+            }
+        },
+
+        # Thalamic Router: global section selection Γ(K,F) → Γ^1
+        # Computes ρ: K → F such that each output is a coherent blend of stalks
+        global_section {
+            kind: "ThalamicRouter",
+            routing_rule: "lexical_bias + learned_blend",
+            cohomology_check: "H1_contradiction_amortization_via_PFC"
+        }
+    },
+
+    # Genetic library for the Language Cortex
+    genetic_library {
+        gene router_temperature {
+            target: "ThalamicRouter",
+            rate: 0.001
+        },
+        gene expert_specialization_pressure {
+            target: "AllExpertTrunks",
+            rate: 0.0005
+        }
+    },
+
+    # Mutation kernel: neuro-vesicles triggered by high surprise can rewrite
+    # the expert rankings or introduce new specialist trunks
+    mutation_kernel {
+        kind: "NeuroVesicle",
+        trigger: "Surprise_Head(threshold: 0.8)"
+    }
+}
+
+# =============================================================================
+# SENSORY & ASSOCIATION COMPLEXES (Visual/Auditory Processing)
+# =============================================================================
+
+complex SensoryComplex {
+    topology: Tonnetz(dim: 256, spectral_gap: 0.05),
+    trunk: "SensoryProcessing",
+
+    sheaf {
+        stalk VisualProcessing {
+            operator_embedding: sensory,
+            fisher_metric: "spatial_covariance"
+        },
+        stalk AssociativeLayer {
+            operator_embedding: association,
+            fisher_metric: "temporal_covariance"
+        }
+    }
+}
+
+# =============================================================================
+# THALAMIC RELAY COMPLEX (Gating, Reentry, & Attention)
+# =============================================================================
+# The thalamus is the critical gating hub. Its sheaf stalks manage:
+#   - Sensory relay (visual/auditory → cortex)
+#   - Motor planning relay (cortex → motor)
+#   - Reentry gating (PFC prediction fed back to sensory)
+
+complex ThalamicRelay {
+    topology: Tonnetz(dim: 256, spectral_gap: 0.05),
+    trunk: "ThalamicGating",
+
+    sheaf {
+        stalk SensoryRelay {
+            operator_embedding: thalamus,
+            fisher_metric: "attention_weighted"
+        }
+    }
+}
+
+# =============================================================================
+# GLOBAL WORKSPACE & NEURAL GEOMETRY COMPLEX
+# =============================================================================
+# The GWS is the "conscious" working memory — the widest simplex in K.
+# It has the highest integrated information Φ by design (Tononi, Dehaene).
+
+complex GlobalWorkspace {
+    topology: Tonnetz(dim: 512, spectral_gap: 0.05),
+    trunk: "GWSIntegration",
+
+    sheaf {
+        stalk ConsciousContent {
+            operator_embedding: gws,
+            fisher_metric: "integrated_information"
+        },
+        stalk NeuralGeometry {
+            operator_embedding: neural_geometry,
+            fisher_metric: "manifold_curvature"
+        }
+    }
+}
+
+# =============================================================================
+# PREFRONTAL CORTEX & ACC COMPLEX (Meta-Cognition, Conflict Amortization)
+# =============================================================================
+# The PFC resolves sheaf cohomology obstructions H¹ via meta-learning.
+# When two brain regions (or expert trunks) conflict, the PFC learns
+# to weight their outputs or reframe the problem.
+
+complex PrefrontalComplex {
+    topology: Tonnetz(dim: 256, spectral_gap: 0.05),
+    trunk: "MetaCognition",
+
+    sheaf {
+        stalk ExecutiveControl {
+            operator_embedding: pfc,
+            fisher_metric: "conflict_resolution"
+        },
+        stalk ConflictDetection {
+            operator_embedding: acc,
+            fisher_metric: "error_prediction"
+        }
+    },
+
+    genetic_library {
+        gene conflict_resolution_strength {
+            target: "ExecutiveControl",
+            rate: 0.001
+        }
+    }
+}
+
+# =============================================================================
+# HIPPOCAMPUS & ENTORHINAL CORTEX (Episodic Memory, Navigation)
+# =============================================================================
+
+complex EpisodicMemory {
+    topology: Tonnetz(dim: 256, spectral_gap: 0.05),
+    trunk: "EpisodicEncoding",
+
+    sheaf {
+        stalk HippocampalTM {
+            operator_embedding: hippo,
+            fisher_metric: "temporal_context"
+        },
+        stalk EntorhinalGrid {
+            operator_embedding: entorhinal,
+            fisher_metric: "spatial_navigation"
+        }
+    }
+}
+
+# =============================================================================
+# MOTOR PLANNING & CEREBELLAR LEARNING COMPLEX
+# =============================================================================
+
+complex MotorPlanning {
+    topology: Tonnetz(dim: 256, spectral_gap: 0.05),
+    trunk: "MotorControl",
+
+    sheaf {
+        stalk MotorCortex {
+            operator_embedding: motor,
+            fisher_metric: "kinematic_prediction"
+        },
+        stalk CerebellarLearning {
+            operator_embedding: cerebellum,
+            fisher_metric: "error_signal"
+        }
+    }
+}
+
+# =============================================================================
+# SUBCORTICAL NEUROMODULATION COMPLEXES
+# =============================================================================
+# These are specialized for releasing the 7 classical neurotransmitters.
+# Each is a small simplex (low d_sem) but has high functional importance.
+
+complex RewardSignaling {
+    topology: Tonnetz(dim: 64, spectral_gap: 0.05),
+    trunk: "DopamineVTA",
+
+    sheaf {
+        stalk VTA {
+            operator_embedding: vta,
+            fisher_metric: "reward_prediction_error"
+        },
+        stalk NucleusAccumbens {
+            operator_embedding: nucleus_accumbens,
+            fisher_metric: "hedonic_value"
+        }
+    }
+}
+
+complex AttentionModulation {
+    topology: Tonnetz(dim: 64, spectral_gap: 0.05),
+    trunk: "NorepinephrineLC",
+
+    sheaf {
+        stalk LocusCoeruleus {
+            operator_embedding: locus_coeruleus,
+            fisher_metric: "arousal_level"
+        }
+    }
+}
+
+complex MoodRegulation {
+    topology: Tonnetz(dim: 64, spectral_gap: 0.05),
+    trunk: "SerotoninRaphe",
+
+    sheaf {
+        stalk RapheNuclei {
+            operator_embedding: raphe_nuclei,
+            fisher_metric: "affect_tone"
+        }
+    }
+}
+
+complex CholinergicLearning {
+    topology: Tonnetz(dim: 64, spectral_gap: 0.05),
+    trunk: "AcetylcholineBN",
+
+    sheaf {
+        stalk NucleusBasalis {
+            operator_embedding: nucleus_basalis,
+            fisher_metric: "attention_gain"
+        }
+    }
+}
+
+# =============================================================================
+# EMOTIONAL & SALIENCE COMPLEXES
+# =============================================================================
+
+complex EmotionalProcessing {
+    topology: Tonnetz(dim: 256, spectral_gap: 0.05),
+    trunk: "SalienceDetection",
+
+    sheaf {
+        stalk Amygdala {
+            operator_embedding: amygdala,
+            fisher_metric: "threat_significance"
+        },
+        stalk Insula {
+            operator_embedding: insula,
+            fisher_metric: "interoceptive_awareness"
+        }
+    }
+}
+
+# =============================================================================
+# MEANING & QUALIA COMPLEX (Phenomenal Consciousness)
+# =============================================================================
+# This is the "what-it-is-like" simplex. Its stalk encodes the raw
+# phenomenal quality of experience before language strips it down.
+
+complex QualiaComplex {
+    topology: Tonnetz(dim: 256, spectral_gap: 0.05),
+    trunk: "PhenomenalQuality",
+
+    sheaf {
+        stalk PhenomenalContent {
+            operator_embedding: qualia,
+            fisher_metric: "subjective_intensity"
+        }
+    }
+}
+
+# =============================================================================
+# DEFAULT-MODE NETWORK COMPLEX (Self-Referential & Abstract Thought)
+# =============================================================================
+
+complex AbstractThinking {
+    topology: Tonnetz(dim: 256, spectral_gap: 0.05),
+    trunk: "SemanticProcessing",
+
+    sheaf {
+        stalk DMN {
+            operator_embedding: dmn,
+            fisher_metric: "self_referential_processing"
+        },
+        stalk ThoughtTransformer {
+            operator_embedding: thought_transformer,
+            fisher_metric: "reasoning_depth"
+        },
+        stalk Claustrum {
+            operator_embedding: claustrum,
+            fisher_metric: "binding_orchestration"
+        }
+    }
+}
+
+# =============================================================================
+# BASAL GANGLIA & ACTION SELECTION COMPLEX
+# =============================================================================
+
+complex ActionSelection {
+    topology: Tonnetz(dim: 256, spectral_gap: 0.05),
+    trunk: "DecisionMaking",
+
+    sheaf {
+        stalk BasalGanglia {
+            operator_embedding: bg,
+            fisher_metric: "action_value"
+        },
+        stalk ForwardModel {
+            operator_embedding: forward_m,
+            fisher_metric: "world_state_prediction"
+        },
+        stalk ValueEvaluator {
+            operator_embedding: evaluator,
+            fisher_metric: "expected_utility"
+        }
+    }
+}
+
+# =============================================================================
+# WORLD MODEL COMPLEX (Self + Environment Prediction)
+# =============================================================================
+
+complex WorldModel {
+    topology: Tonnetz(dim: 256, spectral_gap: 0.05),
+    trunk: "EnvironmentPrediction",
+
+    sheaf {
+        stalk EnvironmentModel {
+            operator_embedding: world,
+            fisher_metric: "environmental_surprise"
+        },
+        stalk SelfModel {
+            operator_embedding: self_m,
+            fisher_metric: "body_awareness"
+        }
+    }
+}
+
+# =============================================================================
+# REASONING & SYMBOLIC INTEGRATION COMPLEX
+# =============================================================================
+
+complex SymbolicReasoning {
+    topology: Tonnetz(dim: 256, spectral_gap: 0.05),
+    trunk: "LogicalInference",
+
+    sheaf {
+        stalk ReasoningCortex {
+            operator_embedding: reasoning_cortex,
+            fisher_metric: "logical_consistency"
+        }
+    }
+}
+
+# =============================================================================
+# SYNAPTIC WIRING (1-SIMPLICES): Connections Between Complexes
+# =============================================================================
+# Each synapse is a 1-simplex σ^1 in the complex K. The sheaf cohomology
+# checks coherence along synaptic paths.
+
+# Sensory → Thalamus → GWS (canonical reentry loop)
+synapse sensory.output -> thalamus.sensory_relay { weight: 1.0, neurotransmitter: "glutamate" }
+synapse thalamus.sensory_output -> gws.input { weight: 0.8, neurotransmitter: "glutamate" }
+
+# GWS → PFC (conscious control)
+synapse gws.output -> pfc.input { weight: 0.9, neurotransmitter: "glutamate" }
+
+# PFC → Motor (action planning)
+synapse pfc.output -> motor.input { weight: 0.8, neurotransmitter: "acetylcholine" }
+
+# Motor → Thalamus reentry
+synapse motor.output -> thalamus.motor_relay { weight: 0.6, neurotransmitter: "glutamate" }
+
+# Hippocampus ↔ PFC (memory consolidation)
+synapse hippo.output -> pfc.memory_integration { weight: 0.7, neurotransmitter: "acetylcholine" }
+synapse pfc.output -> hippo.input { weight: 0.6, neurotransmitter: "glutamate" }
+
+# Amygdala → GWS (salience integration)
+synapse amygdala.output -> gws.emotional_input { weight: 0.5, neurotransmitter: "glutamate" }
+
+# DMN ↔ GWS (abstract thought broadcast)
+synapse dmn.output -> gws.semantic_input { weight: 0.7, neurotransmitter: "glutamate" }
+synapse gws.output -> dmn.input { weight: 0.6, neurotransmitter: "glutamate" }
+
+# Basal Ganglia → Motor (action execution)
+synapse bg.output -> motor.action_input { weight: 0.8, neurotransmitter: "gaba" }
+
+# Cerebellar learning signal
+synapse cerebellum.error_signal -> motor.learning_input { weight: 0.5, neurotransmitter: "glutamate" }
+
+# Language Cortex ↔ GWS (linguistic integration)
+synapse language_cortex.output -> gws.linguistic_input { weight: 0.9, neurotransmitter: "glutamate" }
+synapse gws.output -> language_cortex.input { weight: 0.8, neurotransmitter: "glutamate" }
+
+# Neuromodulation: VTA (dopamine) broadcasts reward prediction error
+synapse vta.dopamine_signal -> pfc.dopamine_receptor {
+    weight: 0.7,
+    neurotransmitter: "dopamine",
+    neuromodulator_type: "multiplicative_modulation"
+}
+
+# LC (norepinephrine) gates attention globally
+synapse locus_coeruleus.norepinephrine_signal -> gws.attention_gate {
+    weight: 0.6,
+    neurotransmitter: "norepinephrine",
+    neuromodulator_type: "multiplicative_modulation"
+}
+
+# Raphe (serotonin) modulates mood/affect
+synapse raphe_nuclei.serotonin_signal -> amygdala.mood_modulation {
+    weight: 0.5,
+    neurotransmitter: "serotonin",
+    neuromodulator_type: "additive_modulation"
+}
+
+# =============================================================================
+# SHEAF CONSISTENCY CONSTRAINTS
+# =============================================================================
+# These are the formal algebraic constraints on the cellular sheaf F.
+# They are enforced during training by the THSD verifier.
+
+sheaf_constraints {
+    # H¹(K;F) = 0: no cohomological obstructions (contradictions between regions)
+    # Verified by neuroslm/verification/verifier.py::CohomologyValidator
+    h1_cohomology_must_vanish: true,
+
+    # Φ > 0: integrated information always positive (IIT 4.0 compliance)
+    # Verified by neuroslm/verification/verifier.py::CohomologyValidator::compute_phi
+    phi_must_be_positive: true,
+
+    # λ₁ > λ_min: spectral gap on all Tonnetz manifolds
+    # Enforces topological stability and suppresses hallucinations
+    spectral_gap_min: 0.01,
+
+    # Fisher-Rao metric constraint: variance-weighted similarity in stalk retrieval
+    fisher_metric_type: "variance_weighted",
+
+    # Global section consistency: Γ(K,F) must be coherent across all stalks
+    global_section_check: true
+}
+
+# =============================================================================
+# VERIFICATION & LINTING
+# =============================================================================
+# The THSD verifier automatically checks these constraints during training.
+# If any constraint is violated, a warning is issued and the mutation
+# (if from evolution) is rejected.
+
+verification {
+    # Run THSD verifier on every evolutionary mutation
+    verify_mutations: true,
+
+    # Threshold for hallucination detection (high-norm obstruction)
+    hallucination_threshold: 5.0,
+
+    # Emit a THG-IR checkpoint every N steps for archival
+    checkpoint_every: 5000,
+
+    # Compute and log Φ-score and H¹ residual every N steps
+    diagnostic_every: 100
+}
