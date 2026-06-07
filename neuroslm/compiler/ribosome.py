@@ -154,7 +154,11 @@ class DNATranscriber:
     """Transcriber: DSL → Latent DNA."""
 
     def transcribe(self, dsl_code: str) -> LatentDNA:
-        """Convert DSL code into latent DNA bitstream."""
+        """Convert DSL code into latent DNA bitstream.
+
+        Encodes DSL via base64 to bytes, then maps bytes [0,255] to floats [0,1].
+        This preserves all byte values without character filtering.
+        """
         # Parse and validate DSL
         try:
             ir = NeuroMLCompiler.compile(dsl_code)
@@ -162,8 +166,8 @@ class DNATranscriber:
             ir = None
 
         # Encode DSL code directly into DNA via base64
-        encoded = base64.b64encode(dsl_code.encode()).decode()
-        dna_data = [ord(c) / 256.0 for c in encoded]
+        dsl_bytes_b64 = base64.b64encode(dsl_code.encode('utf-8')).decode('latin1')
+        dna_data = [ord(c) / 256.0 for c in dsl_bytes_b64]
 
         # Pad or truncate to standard length
         dna_length = max(512, len(dna_data) + 64)
@@ -187,16 +191,19 @@ class DNATranslator:
     """Translator: Latent DNA → DSL (backtranslation)."""
 
     def translate(self, dna: LatentDNA) -> str:
-        """Convert latent DNA back into equivalent DSL code."""
-        # Decode DNA data from float back to base64
-        dna_data_int = [int(d * 256) % 256 for d in dna.data]
-        dna_str = "".join(
-            chr(d) if 32 <= d < 127 else "" for d in dna_data_int
-        ).rstrip()
+        """Convert latent DNA back into equivalent DSL code.
+
+        Decodes the base64-encoded DSL from the DNA floats.
+        All floats [0,1] are converted to bytes [0,255] preserving all byte values.
+        """
+        # Decode DNA data from float back to bytes (preserves all byte values 0-255)
+        dna_bytes = bytes([int(min(d * 256, 255)) for d in dna.data])
 
         # Try to decode as base64
         try:
-            dsl_code = base64.b64decode(dna_str).decode()
+            # Decode bytes → base64 string → decompress to DSL
+            dna_str = dna_bytes.decode('latin1')  # Use latin1 to preserve all byte values
+            dsl_code = base64.b64decode(dna_str).decode('utf-8')
             return dsl_code
         except Exception:
             # Fallback: skeleton DSL
