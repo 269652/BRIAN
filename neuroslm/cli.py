@@ -19,7 +19,9 @@ Commands (run `brian <cmd> -h` for per-command help):
     wolfram <arch> [--full]   Emit Mathematica/Wolfram code
     analyze <arch> [--all]    SymPy analysis (fixed points, Jacobian, ...)
 
-  Training
+  Training (local or remote)
+    train [--preset=tiny]     Local training (tiny=CPU minimal, default=30M DSL)
+    train --dna=path/to.dna   Train from evolved DNA with fitness config
     deploy [--steps N]        Launch DSL training run on vast (default 10k)
     deploy-100k               Long DSL run (100k steps)
     deploy-brain [...]        Launch a Brain (non-DSL) training run
@@ -91,13 +93,106 @@ def _bash() -> str:
 
 # ── compile ────────────────────────────────────────────────────────────
 
+def _resolve_nfg_arch(arg: str) -> str:
+    """Resolve an NFG-compile argument to an architecture root with arch.neuro.
+
+    The user can pass several shapes:
+
+      1. ``architectures/rcc_bowtie/`` — a regular folder with arch.neuro
+         (the legacy / canonical path).
+      2. ``some/path/evol.dna``        — a self-contained DNA snapshot.
+      3. ``some/path/evol/``           — a folder whose ``arch.neuro`` is
+         absent but which contains exactly one ``*.dna`` snapshot
+         (the result of ``brian dna unfold X.dna --output some/dir/``).
+
+    For (2) and (3) we unfold the DNA in-memory, extract the
+    ``architecture <name> { … }`` block from its embedded DSL, and
+    return the live ``REPO_ROOT/architectures/<name>/`` path (which
+    still has the ``modules/`` + ``lib/`` sub-trees needed to resolve
+    the snapshot's ``@/…`` imports).  This is the same routing pattern
+    ``init_evolution()`` in ``neuroslm/utils/colab.py`` already uses
+    for training-from-DNA.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the DNA references an architecture name that does not exist
+        in ``REPO_ROOT/architectures/``.
+    ValueError
+        If the DNA's embedded DSL has no parseable
+        ``architecture <name>`` declaration.
+    """
+    import re
+
+    p = Path(arg)
+
+    # ── (3) folder with no arch.neuro but exactly one .dna ─────────
+    if p.is_dir() and not (p / "arch.neuro").is_file():
+        dna_files = list(p.glob("*.dna"))
+        if len(dna_files) == 1:
+            return _resolve_nfg_arch(str(dna_files[0]))
+
+    # ── (2) explicit .dna file ─────────────────────────────────────
+    if p.is_file() and p.suffix == ".dna":
+        from neuroslm.compiler.ribosome import RibosomeCompiler
+
+        compiler = RibosomeCompiler()
+        dsl_code = compiler.dna_translator.translate_from_file(str(p))
+        match = re.search(r"\barchitecture\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{",
+                          dsl_code)
+        if not match:
+            raise ValueError(
+                f"DNA file {p}: cannot extract `architecture <name> {{ … }}` "
+                f"block from its embedded DSL"
+            )
+        arch_name = match.group(1)
+        arch_root = REPO_ROOT / "architectures" / arch_name
+        if not (arch_root / "arch.neuro").is_file():
+            raise FileNotFoundError(
+                f"DNA file {p} references architecture {arch_name!r} but "
+                f"{arch_root}/arch.neuro does not exist — cannot resolve "
+                f"the snapshot's @/... imports without the source tree"
+            )
+        return str(arch_root)
+
+    # ── (1) fall through to the canonical DSL path ─────────────────
+    return _resolve_arch(arg)
+
+
 def cmd_compile_nfg(args: argparse.Namespace) -> int:
-    """Compile arch to a Neural Flow Graph: dict-of-dicts .py + .png render."""
-    from neuroslm.dsl.nfg import compile_nfg, render_nfg, emit_python, RCC_BOWTIE_SPEC, SEMANTIC_SPEC
-    arch = _resolve_arch(args.arch)
+    """Compile arch to a Neural Flow Graph: dict-of-dicts .py + .png render.
+
+    Accepts:
+      * a normal architecture folder with ``arch.neuro``,
+      * a ``.dna`` snapshot file (auto-routed to its source arch),
+      * a folder containing exactly one ``.dna`` (ditto).
+    """
+    from neuroslm.dsl.nfg import (
+        compile_nfg, render_nfg, emit_python,
+        RCC_BOWTIE_SPEC, SEMANTIC_SPEC,
+    )
+    try:
+        arch = _resolve_nfg_arch(args.arch)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"✗ Cannot resolve architecture: {e}", file=sys.stderr)
+        return 1
+
+    # Output paths default to the SOURCE folder unless the caller passed
+    # a `.dna` file — in which case write next to the DNA, not next to
+    # the source arch (so we don't clobber the live architecture's
+    # nfg.py / nfg.png on a snapshot render).
+    src_path = Path(args.arch)
+    if src_path.is_file() and src_path.suffix == ".dna":
+        default_dir = src_path.parent
+    elif src_path.is_dir() and not (src_path / "arch.neuro").is_file() \
+            and list(src_path.glob("*.dna")):
+        default_dir = src_path
+    else:
+        default_dir = Path(arch)
+    out_py = args.out or str(default_dir / "nfg.py")
+    out_png = args.png or str(default_dir / "nfg.png")
+
     g = compile_nfg(arch)
-    out_py = args.out or os.path.join(arch, "nfg.py")
-    out_png = args.png or os.path.join(arch, "nfg.png")
     emit_python(g, out_py)
     print(f"wrote NFG definition  -> {out_py}")
     try:
@@ -1190,6 +1285,77 @@ def cmd_ai(args: argparse.Namespace) -> int:
         env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
+def cmd_train(args: argparse.Namespace) -> int:
+    """Train from evol.dna or run minimal training.
+
+    Usage:
+        brian train --preset=tiny              # Run minimal CPU training
+        brian train --arch=rcc_bowtie --steps=100
+        brian train --dna=dna/evol/arch.dna    # Load from DNA with fitness config
+    """
+    # If tiny preset requested, run minimal training
+    if args.preset == "tiny":
+        import importlib.util
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(REPO_ROOT)
+            # Import and run the minimal training
+            spec = importlib.util.spec_from_file_location(
+                "colab_train_minimal_cpu",
+                REPO_ROOT / "colab_train_minimal_cpu.py"
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            # Run main without sys.exit
+            module.main()
+            return 0
+        except SystemExit as e:
+            return e.code if isinstance(e.code, int) else 1
+        finally:
+            os.chdir(original_cwd)
+
+    # Build training command
+    cmd = [sys.executable, "-m", "neuroslm.train_dsl"]
+
+    if args.dna:
+        # Train from DNA with embedded fitness config
+        # This would require special handling in train_dsl
+        print(f"[INFO] Training from DNA: {args.dna}")
+        print("[TODO] DNA training not yet integrated into train_dsl")
+        print("       For now, use colab_train_minimal_cpu.py or full Colab workflow")
+        return 1
+
+    # Standard training
+    if args.arch:
+        arch = _resolve_arch(args.arch)
+        cmd.extend(["--arch", arch])
+    else:
+        cmd.extend(["--arch", "architectures/rcc_bowtie"])
+
+    if args.preset:
+        cmd.extend(["--preset", args.preset])
+    else:
+        cmd.extend(["--preset", "rcc_bowtie_30m_p4"])
+
+    if args.steps:
+        cmd.extend(["--steps", str(args.steps)])
+
+    if args.batch:
+        cmd.extend(["--batch", str(args.batch)])
+
+    if args.seq_len:
+        cmd.extend(["--seq_len", str(args.seq_len)])
+
+    if args.d_sem:
+        cmd.extend(["--d_sem", str(args.d_sem)])
+
+    # Add standard flags
+    cmd.extend(["--data", "real", "--device", "cpu", "--resume"])
+
+    print(f"[train] {' '.join(cmd)}")
+    return _run(cmd)
+
+
 def cmd_test(args: argparse.Namespace) -> int:
     path = args.pattern if args.pattern else "tests/dsl/"
     cli = [sys.executable, "-m", "pytest", path, "-q"]
@@ -1624,6 +1790,20 @@ def _build_parser() -> argparse.ArgumentParser:
                           "logs/vast/ + its matching OOD JSONs and analyze "
                           "them together")
     sal.set_defaults(func=cmd_analyze_log)
+
+    # train (run training from command line)
+    str_train = sub.add_parser("train",
+                               help="Train from evol.dna or run minimal CPU training")
+    str_train.add_argument("--preset", default="rcc_bowtie_30m_p4",
+                          help="training preset (default: rcc_bowtie_30m_p4). "
+                               "Use 'tiny' for minimal CPU training")
+    str_train.add_argument("--arch", help="architecture name (default: rcc_bowtie)")
+    str_train.add_argument("--dna", help="path to evolved DNA file (e.g., dna/evol/arch.dna)")
+    str_train.add_argument("--steps", type=int, help="number of training steps")
+    str_train.add_argument("--batch", type=int, help="batch size")
+    str_train.add_argument("--seq_len", type=int, help="sequence length")
+    str_train.add_argument("--d_sem", type=int, help="semantic dimension")
+    str_train.set_defaults(func=cmd_train)
 
     # test
     st = sub.add_parser("test", help="Run the DSL test suite (or a subset)")
