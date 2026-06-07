@@ -267,3 +267,92 @@ class RibosomeCompiler:
         if patch["type"] == "node_mutation":
             thg.mutate_node(patch["target"], patch["delta"])
         return thg
+
+    def apply_rank_one_update(
+        self, thg: THGCheckpoint, node_id: str, delta: List[float]
+    ) -> THGCheckpoint:
+        """Apply rank-one update to a node embedding."""
+        thg.mutate_node(node_id, delta)
+        return thg
+
+    def update_edge_weight(
+        self, thg: THGCheckpoint, edge_id: str, delta_weight: float
+    ) -> THGCheckpoint:
+        """Update edge weight via rank-one-like update."""
+        if edge_id in thg.edges:
+            edge = thg.edges[edge_id]
+            edge.weight += delta_weight
+        return thg
+
+    def thg_to_dna(self, thg: THGCheckpoint) -> LatentDNA:
+        """Convert THG-IR checkpoint to latent DNA."""
+        # Serialize THG-IR to JSON
+        thg_json = json.dumps(
+            {
+                "nodes": {
+                    nid: {
+                        "kind": node.kind,
+                        "embedding": node.operator_embedding[:16],  # First 16 dims
+                    }
+                    for nid, node in thg.nodes.items()
+                },
+                "edges": {
+                    eid: {"weight": edge.weight} for eid, edge in thg.edges.items()
+                },
+                "step": thg.step,
+            }
+        )
+
+        # Encode JSON as base64 and convert to float in [0, 1]
+        encoded = base64.b64encode(thg_json.encode()).decode()
+        # Map base64 characters to floats
+        dna_data = [ord(c) / 256.0 for c in encoded]
+
+        dna = LatentDNA(length=max(256, len(dna_data)), data=dna_data)
+        return dna
+
+    def dna_to_thg(self, dna: LatentDNA) -> THGCheckpoint:
+        """Convert latent DNA back to THG-IR checkpoint."""
+        # Decode DNA data from float back to base64
+        dna_data_int = [int(d * 256) % 256 for d in dna.data]
+        dna_str = "".join(chr(d) if 32 <= d < 127 else "?" for d in dna_data_int)
+
+        # Try to decode as base64 (may fail if corrupted)
+        try:
+            thg_json_str = base64.b64decode(dna_str).decode()
+            thg_dict = json.loads(thg_json_str)
+
+            # Reconstruct THG-IR
+            nodes = {
+                nid: THGNode(
+                    id=nid,
+                    kind=node_data.get("kind", "unknown"),
+                    operator_embedding=node_data.get("embedding", [0.0] * 16),
+                )
+                for nid, node_data in thg_dict.get("nodes", {}).items()
+            }
+            edges = {
+                eid: THGEdge(
+                    id=eid,
+                    src="unknown",
+                    dst="unknown",
+                    kind="synapse",
+                    weight=edge_data.get("weight", 1.0),
+                )
+                for eid, edge_data in thg_dict.get("edges", {}).items()
+            }
+
+            thg = THGCheckpoint(
+                version="2.0",
+                nodes=nodes,
+                edges=edges,
+                gene_state={},
+                step=thg_dict.get("step", 0),
+                metadata={},
+            )
+            return thg
+        except Exception:
+            # Fallback: return minimal THG
+            return THGCheckpoint(
+                version="2.0", nodes={}, edges={}, gene_state={}, step=0, metadata={}
+            )
