@@ -381,33 +381,46 @@ class THSDParser:
     def parse_dsl_for_thsd(dsl_code: str) -> Tuple[List[ComplexIR], List[SheafIR]]:
         """Parse DSL code and extract all THSD blocks using tokenization.
 
-        Raises ValueError for invalid THSD blocks.
-        Returns empty lists on tokenization failures (falls back to v2.0).
+        Raises ValueError for invalid THSD blocks (missing stalk, out-of-range
+        spectral_gap, out-of-range phi_target, etc.).  Returns empty lists
+        only on tokenization / extraction failures (falls back to v2.0).
         """
         complexes_list = []
         sheaves_list = []
 
+        # Try to tokenize - if it fails, fall back to v2.0 parser entirely
         try:
-            # Parse complex blocks
-            complex_blocks = THSDParser.extract_complex_blocks(dsl_code)
+            tokens = THSDParser.tokenize(dsl_code)
         except Exception:
-            # If tokenization fails, return empty (fall back to v2.0 parser)
+            # If tokenization fails completely, return empty (fall back to v2.0)
             return complexes_list, sheaves_list
 
-        # Process complex blocks - THSD blocks must be valid
-        for name, block_dict in complex_blocks:
-            # Check if this is THSD syntax (has THSD-specific fields as dicts, not strings)
-            # v2.0 has topology:"Tonnetz" (string), THSD has topology { ... } (dict)
-            thsd_dict_fields = {"stalk", "topology", "formal_spec", "dynamics"}
-            is_thsd = any(isinstance(block_dict.get(field), dict) for field in thsd_dict_fields)
+        # Extract complex blocks — extraction failure ⇒ fall back to v2.0.
+        # Once extracted, however, validation errors MUST propagate so that
+        # malformed THSD blocks (missing stalk, negative spectral_gap,
+        # phi_target out of [0,1], …) surface to the caller as ValueError.
+        try:
+            complex_blocks = THSDParser.extract_complex_blocks(dsl_code)
+        except Exception:
+            complex_blocks = []
 
+        for name, block_dict in complex_blocks:
+            # Check if this is THSD syntax (has THSD-specific fields as
+            # dicts, not strings).  v2.0 has topology:"Tonnetz" (string),
+            # THSD has topology { ... } (dict).
+            thsd_dict_fields = {"stalk", "topology", "formal_spec", "dynamics"}
+            is_thsd = any(
+                isinstance(block_dict.get(field), dict)
+                for field in thsd_dict_fields
+            )
             if is_thsd:
-                # This is THSD syntax - enforce full validation (raises on error)
+                # THSD syntax — full validation, ValueError propagates.
                 complex_ir = THSDParser.parse_complex_block(block_dict, name)
                 complexes_list.append(complex_ir)
-            # else: skip v2.0-style complexes (no THSD dict fields)
+            # else: v2.0-style complexes are handled by the legacy
+            # _extract_complexes path in compiler.py.
 
-        # Parse sheaf blocks
+        # Parse sheaf blocks (independent of complex blocks).
         try:
             sheaf_blocks = THSDParser.extract_sheaf_blocks(dsl_code)
             for name, block_dict in sheaf_blocks:
@@ -420,7 +433,5 @@ class THSDParser:
                 sheaves_list.append(sheaf_ir)
         except Exception:
             pass
-
-        return complexes_list, sheaves_list
 
         return complexes_list, sheaves_list

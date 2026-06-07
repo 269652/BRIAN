@@ -333,6 +333,7 @@ Each test is a claim from [Layer A](#layer-a--mechanism-verification-unit-tests-
 |----------|----------|----------|
 | **[`findings.md`](docs/findings.md)** | Everyone | Hypothesis ledger: H1–H12 with links to test files, result JSONs, and raw logs. The source of truth for what's proven vs. open. |
 | **[`architecture.md`](docs/architecture.md)** | Researchers, implementers | Full spec: 11-stage forward pass, tensor shapes, equations, module diagrams, IIT 4.0 theory. Reproducible to the line number. |
+| **[`formal_framework.md`](docs/formal_framework.md)** | Theorists, evolutionary loop | **Normative** mathematical contract for the THSD discovery substrate: simpliziale ontology, $H^1$ guard, symbolic-simplex discovery operator, Φ guard, Tonnetz filter, Fisher-Rao retrieval, RAID-5 DNA. Source of Truth for evolutionary mutations. |
 | **[`technical_report.md`](docs/technical_report.md)** | External AI, new contributors | Executive summary: proven claims, current model state, evidence, open questions. Synced with findings.md. |
 | **[`dsl.md`](docs/dsl.md)** | DSL users | NeuroML-like syntax, macro system, symbol resolution, compile pipeline. |
 | **[`BRAIN.md`](docs/BRAIN.md)** | Diving deep | NeuralOrchestrator architecture, why re-entry loops work, design rationale. |

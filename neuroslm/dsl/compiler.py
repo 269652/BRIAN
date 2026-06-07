@@ -419,7 +419,6 @@ class ProgramIR(NodeIR):
             self.thsd_complexes = []
         if self.thsd_sheaves is None:
             self.thsd_sheaves = []
-            self.sieves = []
 
     @property
     def nodes(self):

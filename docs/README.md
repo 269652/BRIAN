@@ -22,6 +22,7 @@ This directory contains all technical and reference documentation for the BRIAN 
 |----------|--------|----------|
 | **[`architecture.md`](architecture.md)** | Researchers, reproducers | Full spec: tensor shapes, mathematical formulas, all modules (§0–12), 1300+ lines. Every claim is citable to a line or test. |
 | **[`technical_report.md`](technical_report.md)** | External AIs, new contributors | Executive summary: project charter, current state, proven claims, evidence artifacts, open questions. Designed for NotebookLM/ChatGPT. |
+| **[`formal_framework.md`](formal_framework.md)** | Theorists, evolutionary loop | **Normative** mathematical contract for THSD (simpliziale ontology, $H^1$ guard, symbolic-simplex discovery operator, Φ guard, Tonnetz filter, Fisher-Rao retrieval, RAID-5 DNA). Source of Truth for evolutionary mutations. |
 | **[`BRAIN.md`](BRAIN.md)** | Architects, designers | Why BRIAN exists: the 11-stage forward pass explained, each design decision with rationale and evidence. |
 | **[`harness.md`](harness.md)** | Training engineers | How BRIANHarness works: loss clipping, gradient accumulation, maturity phasing, OOD evaluation, metrics. |
 
@@ -86,6 +87,7 @@ Stale documentation is moved to `archive/` with a date prefix (e.g., `2026-06-01
 | `CONTRIBUTING.md` | Implementation | Builders | 8 sections | Stable |
 | `BRIAN.md` | Architecture | Designers | 10 sections | Stable |
 | `architecture.md` | Full spec | Researchers | 1300+ lines | Primary source |
+| `formal_framework.md` | THSD theory | Theorists / evo loop | 9 sections + glossary | Normative (v0.1) |
 | `technical_report.md` | Executive | External AIs | 16 sections | Auto-maintained |
 | `findings.md` | Evidence | Verifiers | 15 hypotheses | Live |
 | `harness.md` | Training | Engineers | 10 sections | Stable |
