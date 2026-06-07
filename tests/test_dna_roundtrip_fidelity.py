@@ -31,8 +31,8 @@ class TestDNARoundtripFidelity:
             compiler.unfold_file(str(dna_file), str(neuro_file))
             assert neuro_file.exists()
 
-            # Check content
-            content = neuro_file.read_text()
+            # Check content (read with UTF-8 encoding for non-ASCII characters)
+            content = neuro_file.read_text(encoding='utf-8')
             assert "architecture" in content.lower()
 
     def test_roundtrip_preserves_training_block(self):
@@ -47,7 +47,7 @@ class TestDNARoundtripFidelity:
             compiler.compile_file(arch_root, str(dna_file))
             compiler.unfold_file(str(dna_file), str(neuro_file))
 
-            content = neuro_file.read_text()
+            content = neuro_file.read_text(encoding='utf-8')
             # Should have training block or similar configuration
             assert len(content) > 100  # Substantial content
 
@@ -64,7 +64,7 @@ class TestDNARoundtripFidelity:
             neuro_1 = tmpdir / "round1.neuro"
             compiler.compile_file(arch_root, str(dna_1))
             compiler.unfold_file(str(dna_1), str(neuro_1))
-            content_1 = neuro_1.read_text()
+            content_1 = neuro_1.read_text(encoding='utf-8')
 
             # Second roundtrip: neuro1 (via compiler) → DNA → neuro2
             # (In practice, you'd re-compile neuro_1, but for testing we'll
@@ -84,7 +84,7 @@ class TestDNARoundtripFidelity:
             compiler.compile_file(arch_root, str(dna_file))
             compiler.unfold_file(str(dna_file), str(neuro_file))
 
-            content = neuro_file.read_text()
+            content = neuro_file.read_text(encoding='utf-8')
 
             # Should have characteristic DSL syntax
             dsl_markers = [
@@ -117,7 +117,7 @@ class TestDNARoundtripFidelity:
 
             # Verify neuro file created and readable
             assert neuro_file.exists()
-            content = neuro_file.read_text()
+            content = neuro_file.read_text(encoding='utf-8')
 
             # Must have minimum viable structure
             assert len(content) > 50
@@ -135,7 +135,7 @@ class TestDNARoundtripFidelity:
             compiler.compile_file(arch_root, str(dna_file))
             compiler.unfold_file(str(dna_file), str(neuro_file))
 
-            content = neuro_file.read_text()
+            content = neuro_file.read_text(encoding='utf-8')
 
             # Should mention d_sem (semantic dimension)
             # The exact value isn't critical, but the parameter should be there

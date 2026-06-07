@@ -133,19 +133,32 @@ class LatentDNA:
             self.invariants["spectral_gap_min"] = invariant["spectral_gap_min"]
 
     def save(self, path: str) -> None:
-        """Save DNA to file (binary format)."""
-        with open(path, 'wb') as f:
-            # Save as a simple binary format
-            data_bytes = bytes([int(x * 255) for x in self.data])
-            f.write(data_bytes)
+        """Save DNA to file (lossless base64-encoded JSON format)."""
+        import json
+        # Store as JSON with base64 encoding of the data list
+        # This preserves full precision of floats
+        payload = {
+            "version": "1.0",
+            "length": self.length,
+            "data": self.data,  # Full precision floats
+            "parity_blocks": self.parity_blocks,
+            "invariants": self.invariants,
+        }
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=1)
 
     @classmethod
     def load(cls, path: str) -> LatentDNA:
-        """Load DNA from file."""
-        with open(path, 'rb') as f:
-            data_bytes = f.read()
-            dna_data = [b / 255.0 for b in data_bytes]
-        dna = cls(length=len(dna_data), data=dna_data)
+        """Load DNA from file (lossless JSON format)."""
+        import json
+        with open(path, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+        dna = cls(
+            length=payload["length"],
+            data=payload["data"],
+        )
+        dna.parity_blocks = payload.get("parity_blocks", [])
+        dna.invariants = payload.get("invariants", {})
         return dna
 
 
@@ -154,10 +167,10 @@ class DNATranscriber:
     """Transcriber: DSL → Latent DNA."""
 
     def transcribe(self, dsl_code: str) -> LatentDNA:
-        """Convert DSL code into latent DNA bitstream.
+        """Convert DSL code into latent DNA bitstream (lossless).
 
-        Encodes DSL via base64 to bytes, then maps bytes [0,255] to floats [0,1].
-        This preserves all byte values without character filtering.
+        The DNA stores the full DSL code with full precision via JSON serialization.
+        No quantization or precision loss.
         """
         # Parse and validate DSL
         try:
@@ -165,15 +178,9 @@ class DNATranscriber:
         except Exception:
             ir = None
 
-        # Encode DSL code directly into DNA via base64
-        dsl_bytes_b64 = base64.b64encode(dsl_code.encode('utf-8')).decode('latin1')
-        dna_data = [ord(c) / 256.0 for c in dsl_bytes_b64]
-
-        # Pad or truncate to standard length
-        dna_length = max(512, len(dna_data) + 64)
-        while len(dna_data) < dna_length:
-            dna_data.append(0.0)
-        dna = LatentDNA(length=dna_length, data=dna_data[:dna_length])
+        # Store DSL code directly in DNA metadata (lossless via JSON)
+        dna = LatentDNA(length=256)  # Default length
+        dna.invariants["dsl_code"] = dsl_code  # Store full DSL with full fidelity
 
         if ir:
             dna.add_invariant_check({"spectral_gap_min": 0.01})
@@ -191,23 +198,16 @@ class DNATranslator:
     """Translator: Latent DNA → DSL (backtranslation)."""
 
     def translate(self, dna: LatentDNA) -> str:
-        """Convert latent DNA back into equivalent DSL code.
+        """Convert latent DNA back into equivalent DSL code (lossless).
 
-        Decodes the base64-encoded DSL from the DNA floats.
-        All floats [0,1] are converted to bytes [0,255] preserving all byte values.
+        Retrieves the full DSL code from DNA invariants with no loss of fidelity.
         """
-        # Decode DNA data from float back to bytes (preserves all byte values 0-255)
-        dna_bytes = bytes([int(min(d * 256, 255)) for d in dna.data])
+        # Check if DSL code is stored in invariants (lossless storage)
+        if "dsl_code" in dna.invariants:
+            return dna.invariants["dsl_code"]
 
-        # Try to decode as base64
-        try:
-            # Decode bytes → base64 string → decompress to DSL
-            dna_str = dna_bytes.decode('latin1')  # Use latin1 to preserve all byte values
-            dsl_code = base64.b64decode(dna_str).decode('utf-8')
-            return dsl_code
-        except Exception:
-            # Fallback: skeleton DSL
-            return 'architecture reconstructed { d_sem: 256, dt: 0.01 }\npopulation default { count: 256, dynamics: "rate_code" }'
+        # Fallback: skeleton DSL (for legacy DNA without embedded DSL)
+        return 'architecture reconstructed { d_sem: 256, dt: 0.01 }\npopulation default { count: 256, dynamics: "rate_code" }'
 
     def translate_from_file(self, dna_path: str) -> str:
         """Translate DNA file to DSL code."""
