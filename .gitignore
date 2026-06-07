@@ -64,3 +64,7 @@ temp/
 
 # Local secrets — never commit
 .env
+
+# DNA compilation artifacts
+dna/
+architectures/evol/
