@@ -138,11 +138,15 @@ def cmd_dna(args: argparse.Namespace) -> int:
     if args.dna_cmd == "compile":
         arch = _resolve_arch(args.arch)
         output = args.output or str(Path(arch) / "evolution.dna")
+        output_path = Path(output)
 
         try:
+            # Create parent directory if needed
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
             print(f"Compiling {arch} → {output}...")
             compiler = RibosomeCompiler()
-            compiler.compile_file(arch, output)
+            compiler.compile_file(arch, str(output_path))
             print(f"✓ DNA written to {output}")
             return 0
         except Exception as e:
@@ -152,8 +156,12 @@ def cmd_dna(args: argparse.Namespace) -> int:
     elif args.dna_cmd == "unfold":
         dna_path = args.dna
         output = args.output or str(Path(dna_path).with_suffix(".neuro"))
+        output_path = Path(output)
 
         try:
+            # Create parent directory if needed
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
             print(f"Unfolding {dna_path} → {output}...")
             compiler = RibosomeCompiler()
             compiler.unfold_file(dna_path, output)
