@@ -11,7 +11,7 @@ RAID-5-style parity encoding protects topological invariants.
 Incremental patching via rank-one updates for efficient evolution.
 """
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Tuple
 import json
 import torch
@@ -20,6 +20,56 @@ from pathlib import Path
 
 from neuroslm.dsl.compiler import NeuroMLCompiler, ProgramIR
 from neuroslm.dsl.thg_ir import THGCheckpoint, THGNode, THGEdge
+
+
+@dataclass
+class DNAPatch:
+    """Incremental DNA patch for evolutionary mutations.
+
+    Represents a single mutation applied to the base DNA at a specific step.
+    Patches compose via sequential application (step ordering).
+    """
+    version: str  # Version of patch format
+    step: int  # Training step when patch was created
+    kind: str  # "node_mutation" | "edge_weight" | "topology_change"
+    target: str  # Target node/edge ID (e.g., "gws", "language_trunk")
+    delta: List[float]  # Change vector (additive)
+    metadata: Dict = field(default_factory=dict)  # {reason, confidence, phi_delta, ...}
+
+    def to_dict(self) -> Dict:
+        """Serialize patch to dictionary."""
+        return {
+            "version": self.version,
+            "step": self.step,
+            "kind": self.kind,
+            "target": self.target,
+            "delta": self.delta,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "DNAPatch":
+        """Deserialize patch from dictionary."""
+        return cls(
+            version=data["version"],
+            step=data["step"],
+            kind=data["kind"],
+            target=data["target"],
+            delta=data["delta"],
+            metadata=data.get("metadata", {}),
+        )
+
+    def save(self, path: str) -> None:
+        """Save patch to JSON file."""
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(self.to_dict(), f, indent=2)
+
+    @classmethod
+    def load(cls, path: str) -> "DNAPatch":
+        """Load patch from JSON file."""
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return cls.from_dict(data)
 
 
 @dataclass
