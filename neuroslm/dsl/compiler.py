@@ -7,7 +7,7 @@ is implemented separately in phase 1.
 """
 import re
 from dataclasses import dataclass
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 
 
 @dataclass
@@ -226,6 +226,104 @@ class SheetIR(NodeIR):
             self.properties = {}
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# DSL v2.0 — Complex, Workspace, Vesicle, Sieve, Manifold, MutationKernel
+# ═════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class ManifoldIR(NodeIR):
+    """Topological constraint on a complex's latent space (e.g., Tonnetz)."""
+    kind: str                    # "Tonnetz" | "flat"
+    dim: int
+    spectral_gap: float
+    properties: Dict = None
+
+    def __post_init__(self):
+        if self.properties is None:
+            self.properties = {}
+
+
+@dataclass
+class ComplexSubstrateIR(NodeIR):
+    """A Maximal Substrate — the primary computational unit of v2.0."""
+    name: str
+    id: str = ""
+    topology: Optional["ManifoldIR"] = None
+    trunk: str = ""              # e.g. "PredictiveCoding(layers: 12)"
+    sieve: Optional[str] = None  # e.g. "MotifRejection(gnorm_threshold: 3.0)"
+    evolution_policy: Optional[str] = None
+    geometric_priors: List[str] = None
+    genetic_library: List["GeneIR"] = None
+    mutation_kernel: Optional["MutationKernelIR"] = None
+    properties: Dict = None
+
+    def __post_init__(self):
+        if self.geometric_priors is None:
+            self.geometric_priors = []
+        if self.genetic_library is None:
+            self.genetic_library = []
+        if self.properties is None:
+            self.properties = {}
+
+
+@dataclass
+class WorkspaceIR(NodeIR):
+    """Global Workspace — three-stage partitioned dynamics (Gatekeeping, Integration, Broadcasting)."""
+    name: str
+    id: str = ""
+    dynamics: str = ""           # e.g. "SAPHIRE(synergy_ratio: 0.8)"
+    ignition: str = ""           # e.g. "Adaptive(ema_window: 100)"
+    sheaf: Optional[str] = None  # e.g. "ConsistencyChecker(cohomology: H1)"
+    properties: Dict = None
+
+    def __post_init__(self):
+        if self.properties is None:
+            self.properties = {}
+
+
+@dataclass
+class VesicleIR(NodeIR):
+    """Mobile neuro-vesicle with content vector and lifetime."""
+    name: str
+    id: str = ""
+    trigger: str = "always"      # "Surprise_Head(threshold: 0.8)" | "always"
+    lifetime: int = 16
+    content_dim: int = 16
+    payload: str = "structural_edit"
+    properties: Dict = None
+
+    def __post_init__(self):
+        if self.properties is None:
+            self.properties = {}
+
+
+@dataclass
+class SieveIR(NodeIR):
+    """Topological filter — extracts divergence motifs and projects them orthogonal."""
+    name: str
+    id: str = ""
+    kind: str = "MotifRejection"
+    gnorm_threshold: float = 3.0
+    properties: Dict = None
+
+    def __post_init__(self):
+        if self.properties is None:
+            self.properties = {}
+
+
+@dataclass
+class MutationKernelIR(NodeIR):
+    """Event-based graph editing engine (mobile evolutionary agents)."""
+    kind: str = "NeuroVesicle"    # "NeuroVesicle" | "GradientPatch"
+    trigger: str = "always"       # "Surprise_Head(threshold: 0.8)" | "always"
+    id: str = ""
+    properties: Dict = None
+
+    def __post_init__(self):
+        if self.properties is None:
+            self.properties = {}
+
+
 @dataclass
 class CircuitIR(NodeIR):
     name: str
@@ -275,6 +373,11 @@ class ProgramIR(NodeIR):
     genes: List["GeneIR"] = None
     proteins: List["ProteinIR"] = None
     metrics: List["MetricIR"] = None
+    # v2.0 DSL primitives
+    complexes: List[ComplexSubstrateIR] = None
+    workspaces: List[WorkspaceIR] = None
+    vesicles: List[VesicleIR] = None
+    sieves: List[SieveIR] = None
 
     def __post_init__(self):
         if self.equation_decls is None:
@@ -299,12 +402,21 @@ class ProgramIR(NodeIR):
             self.proteins = []
         if self.metrics is None:
             self.metrics = []
+        if self.complexes is None:
+            self.complexes = []
+        if self.workspaces is None:
+            self.workspaces = []
+        if self.vesicles is None:
+            self.vesicles = []
+        if self.sieves is None:
+            self.sieves = []
 
     @property
     def nodes(self):
         return (self.equation_decls + self.populations + self.neurotransmitter_systems + self.synapses +
                 self.modulations + self.formal_specs + self.sheaf_specs +
-                self.genes + self.proteins + self.metrics)
+                self.genes + self.proteins + self.metrics +
+                self.complexes + self.workspaces + self.vesicles + self.sieves)
 
 
 class NeuroMLError(Exception):
@@ -513,6 +625,12 @@ class NeuroMLCompiler:
         proteins = _extract_proteins(source)
         metrics = _extract_metrics(source)
 
+        # v2.0 DSL — extract complex, workspace, vesicle, sieve blocks
+        complexes = _extract_complexes(source)
+        workspaces = _extract_workspaces(source)
+        vesicles = _extract_vesicles(source)
+        sieves = _extract_sieves(source)
+
         return ProgramIR(
             id="circuit",
             equation_decls=eq_defs,
@@ -525,6 +643,10 @@ class NeuroMLCompiler:
             genes=genes,
             proteins=proteins,
             metrics=metrics,
+            complexes=complexes,
+            workspaces=workspaces,
+            vesicles=vesicles,
+            sieves=sieves,
         )
 
     @staticmethod
@@ -742,3 +864,116 @@ def _extract_subblock(body: str, key: str) -> str:
     except NeuroMLError:
         return ""
     return "{" + sub + "}"
+
+
+# ── v2.0 DSL extractors (complex, workspace, vesicle, sieve) ──────────────
+
+def _extract_complexes(source: str) -> List[ComplexSubstrateIR]:
+    """Extract all `complex Name { ... }` blocks."""
+    out: List[ComplexSubstrateIR] = []
+    for name, body in _iter_named_blocks(source, "complex"):
+        props = _parse_properties(body)
+
+        # Parse topology (Tonnetz or flat)
+        topology_str = props.get("topology", "").strip().strip('"\'')
+        topology = None
+        if topology_str:
+            # Simple parsing: "Tonnetz(dim: 256, spectral_gap: 0.05)"
+            if topology_str.startswith("Tonnetz"):
+                # Extract params from Tonnetz(...)
+                m = re.search(r'Tonnetz\s*\(\s*dim\s*:\s*(\d+)\s*,\s*spectral_gap\s*:\s*([\d.]+)', topology_str)
+                if m:
+                    topology = ManifoldIR(
+                        kind="Tonnetz",
+                        dim=int(m.group(1)),
+                        spectral_gap=float(m.group(2))
+                    )
+
+        trunk = props.get("trunk", "").strip().strip('"\'')
+        sieve = props.get("sieve", "").strip().strip('"\'') or None
+        evolution_policy = props.get("evolution_policy", "").strip().strip('"\'') or None
+
+        # Parse genetic_library (nested gene blocks)
+        genetic_library = []
+        genetic_lib_block = _extract_subblock(body, "genetic_library")
+        if genetic_lib_block:
+            # Extract genes from the genetic_library body
+            lib_body = genetic_lib_block.strip("{}").strip()
+            for gene_name, gene_body in _iter_named_blocks(lib_body, "gene"):
+                gene_props = _parse_properties(gene_body)
+                target = (gene_props.get("target") or "").strip().strip('"\'')
+                rate = float(gene_props.get("rate", 0.0))
+                genetic_library.append(GeneIR(
+                    name=gene_name,
+                    id=gene_name,
+                    target=target,
+                    effects={"rate": rate}
+                ))
+
+        out.append(ComplexSubstrateIR(
+            name=name,
+            id=name,
+            topology=topology,
+            trunk=trunk,
+            sieve=sieve,
+            evolution_policy=evolution_policy,
+            genetic_library=genetic_library
+        ))
+    return out
+
+
+def _extract_workspaces(source: str) -> List[WorkspaceIR]:
+    """Extract all `workspace Name { ... }` blocks."""
+    out: List[WorkspaceIR] = []
+    for name, body in _iter_named_blocks(source, "workspace"):
+        props = _parse_properties(body)
+        dynamics = props.get("dynamics", "").strip().strip('"\'')
+        ignition = props.get("ignition", "").strip().strip('"\'')
+        sheaf = props.get("sheaf", "").strip().strip('"\'') or None
+
+        out.append(WorkspaceIR(
+            name=name,
+            id=name,
+            dynamics=dynamics,
+            ignition=ignition,
+            sheaf=sheaf
+        ))
+    return out
+
+
+def _extract_vesicles(source: str) -> List[VesicleIR]:
+    """Extract all `vesicle Name { ... }` blocks."""
+    out: List[VesicleIR] = []
+    for name, body in _iter_named_blocks(source, "vesicle"):
+        props = _parse_properties(body)
+        trigger = props.get("trigger", "always").strip().strip('"\'')
+        lifetime = int(props.get("lifetime", 16))
+        content_dim = int(props.get("content_dim", 16))
+        payload = props.get("payload", "structural_edit").strip().strip('"\'')
+
+        out.append(VesicleIR(
+            name=name,
+            id=name,
+            trigger=trigger,
+            lifetime=lifetime,
+            content_dim=content_dim,
+            payload=payload
+        ))
+    return out
+
+
+def _extract_sieves(source: str) -> List[SieveIR]:
+    """Extract all `sieve Name { ... }` blocks."""
+    out: List[SieveIR] = []
+    for name, body in _iter_named_blocks(source, "sieve"):
+        props = _parse_properties(body)
+        kind = props.get("kind", "MotifRejection").strip().strip('"\'')
+        gnorm_threshold = float(props.get("gnorm_threshold", 3.0))
+
+        out.append(SieveIR(
+            name=name,
+            id=name,
+            kind=kind,
+            gnorm_threshold=gnorm_threshold
+        ))
+    return out
