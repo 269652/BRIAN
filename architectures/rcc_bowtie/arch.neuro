@@ -122,6 +122,43 @@ training {
     # σ-collapse harder by the construction of the geometry itself.
     # Composes with all MDRV stabilisers (free-bits, β-ceiling, PEC).
     vbb_curvature: 1.0
+    # ── Multi-Trunk-v2: thalamic multi-cortex routing (see §5.7) ──
+    # Four specialist language cortices (math / code / chat / general)
+    # mixed per token by neuroslm.cortex.ThalamicRouter.  The router
+    # combines a deterministic lexical-bias prior (`lexical_bias_weight`
+    # added to logits for the matching domain) with a zero-init
+    # learnable head (ReZero contract — at step 0, routing = pure
+    # lexical), and optionally damps per-batch oscillations through
+    # a BEMA running mean (`bema_tau`).
+    #
+    # Math (per token t in batch sample i, N = #cortices):
+    #     L_{ti} = beta * 1[x_{ti} in D] + W @ phi(x_{ti})
+    #     p_{ti} = softmax(L_{ti})                 in Delta^N
+    #     h_{ti} = sum_n p_{ti,n} * P_n(C_n(x))_{ti}
+    #
+    # At beta = lexical_bias_weight = 2.0 and N = 4 a token in domain
+    # d routes to cortex d with probability  e^2 / (e^2 + 3) ~ 0.730
+    # before any LM gradient lands (verified analytically in
+    # tests/test_ensemble_routing.py::test_pure_math_sequence_*).
+    #
+    # `weights` selects the production sub-cortex backend:
+    #     "stub" — random-init StubSubCortex (cold-start, no download)
+    #     "gpt2" — HuggingFace GPT-2 family, see DEFAULT_GPT2_VARIANTS
+    #              in neuroslm/cortex.py (gpt2-medium for math,
+    #              distilgpt2 for code, gpt2 for chat + general).
+    # `freeze_weights = true` keeps the GPT-2 backbones frozen and
+    # trains only the router + per-cortex projections in the cold-start
+    # phase.  Set to false to fine-tune all cortices end-to-end.
+    multi_cortex: {
+        enabled:             true,
+        n_cortices:          4,
+        domains:             ["math", "code", "chat", "general"],
+        weights:             "gpt2",
+        freeze_weights:      true,
+        lexical_bias_weight: 2.0,
+        bema_tau:            0.5,
+        router_d_model:      256
+    }
     # batch 16 x ctx 2048 = 32k tokens/step (same as old 32x1024) but
     # ctx is 2x richer. The 32x2048 combo OOM'd on cross-entropy (13 GiB
     # logit tensor at fp32). If you want to push back to batch=32, also
@@ -437,7 +474,7 @@ training {
 # =============================================================================
 
 param_scope trunk {
-    populations: [sensory, association, thalamus, world, self_m, qualia, gws, neural_geometry, entorhinal, pfc, acc, forward_m, evaluator, dmn, thought_transformer, claustrum, motor, reasoning_cortex]
+    populations: [sensory, association, thalamus, world, self_m, qualia, gws, neural_geometry, entorhinal, pfc, acc, forward_m, evaluator, dmn, thought_transformer, claustrum, motor, reasoning_cortex, cortex_math, cortex_code, cortex_chat, cortex_general]
 }
 
 param_scope bio {
@@ -540,6 +577,12 @@ import { dmn, thought_transformer, claustrum }            from "@/modules/dmn"
 import { motor }                                          from "@/modules/motor"
 import { vta, nucleus_accumbens, locus_coeruleus, raphe_nuclei, nucleus_basalis, substantia_nigra } from "@/modules/nuclei"
 import { reasoning_cortex }                               from "@/modules/reasoning_cortex"
+# Multi-Trunk-v2 specialist language cortices — see Section 5.7 of
+# docs/architecture.md.  The dynamic per-token routing lives in
+# neuroslm/cortex.py (ThalamicRouter); the DSL declarations below
+# expose the four cortices to the analyser, the param_scope, and the
+# bowtie's synaptic wiring.
+import { cortex_math, cortex_code, cortex_chat, cortex_general } from "@/modules/cortex_specialists"
 
 # =============================================================================
 # ANATOMICAL PROJECTIONS (cross-module synaptic wiring)
@@ -549,6 +592,35 @@ import { reasoning_cortex }                               from "@/modules/reason
 # Thalamic gating (sensory bottleneck control)
 synapse thalamus -> gws {
     weight: 0.8, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+
+# ── Multi-Trunk-v2 thalamic routing (see §5.7 of docs/architecture.md) ──
+# Four parallel projections from the thalamus to the specialist
+# language cortices.  Static `weight: 0.25` declares a uniform Δ^4 prior
+# at the DSL level; the per-token, content-dependent weights are
+# computed at run-time by `neuroslm.cortex.ThalamicRouter` (lexical
+# bias + zero-init learnable head + optional BEMA biological damping)
+# and override these static priors during the forward pass.
+#
+# Mathematical contract (cf. Sherman & Guillery 2002, Halassa & Kastner
+# 2017): the thalamus is the brain's central gating bus; one synapse
+# per cortical specialist makes the gradient routing explicit, and
+# `param_scope trunk` keeps all four cortices on the language gradient.
+synapse thalamus -> cortex_math {
+    weight: 0.25, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+synapse thalamus -> cortex_code {
+    weight: 0.25, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+synapse thalamus -> cortex_chat {
+    weight: 0.25, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+synapse thalamus -> cortex_general {
+    weight: 0.25, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 

@@ -246,6 +246,14 @@ class BRIANHarness(nn.Module):
         # `_build_vbb_modules` for the math + rationale.
         self._build_vbb_modules()
 
+        # ── Multi-Trunk-V2: specialist language cortex ensemble ──
+        # Eagerly construct (same rationale as VBB) so its parameters
+        # are visible to the optimizer.  Disabled-config ⇒ attribute set
+        # to None, never built — preserves bit-for-bit reproducibility
+        # of legacy single-cortex runs.  See architecture.md §5.7.
+        self.multi_cortex = None
+        self._build_multi_cortex()
+
     @classmethod
     def from_language_model(cls, language_model: nn.Module,
                             vocab_size: int, d_sem: int,
@@ -292,6 +300,9 @@ class BRIANHarness(nn.Module):
         h._cdga_anchor_fn = None
         # VBB modules (see __init__ — same eager-construction discipline).
         h._build_vbb_modules()
+        # Multi-Trunk-V2 ensemble (see __init__).
+        h.multi_cortex = None
+        h._build_multi_cortex()
         return h
 
     # ── Distributed training wrapping (DDP / FSDP) ────────────────────
@@ -354,6 +365,86 @@ class BRIANHarness(nn.Module):
             cfg, d_model=self.d_sem, vocab_size=self.vocab_size,
             initial_chat_ratio=initial_chat_ratio,
         )
+
+    # ── Multi-Trunk-V2: specialist language cortex ensemble ─────────
+    def _build_multi_cortex(self) -> None:
+        """Build a `MultiCortexEnsemble` from `cfg.multi_cortex`.
+
+        Behaviour:
+          * `cfg.multi_cortex` missing OR `.enabled = False`
+              → `self.multi_cortex = None`.  Legacy single-cortex
+                runs reproduce bit-for-bit.
+          * `.enabled = True, weights = "stub"`
+              → builds a `StubSubCortex` ensemble via
+                `build_default_ensemble`.  No network, no HF download.
+                Used by tests and offline CI.
+          * `.enabled = True, weights = "gpt2"`
+              → calls `build_gpt2_ensemble` which lazy-imports
+                `transformers` and downloads GPT-2 family checkpoints
+                (`gpt2`, `gpt2-medium`, `distilgpt2`) the first time.
+                Subsequent runs reuse the HF cache.
+
+        The ensemble's parameters are registered as a child module
+        (`self.multi_cortex = ensemble`) so they appear in
+        `self.parameters()` and the lazy optimizer picks them up on
+        the first `train_step`.
+
+        Safe to call multiple times — idempotent when ensemble already
+        built. Re-running with a different config is NOT supported
+        (would orphan the previous optimizer's param refs).
+        """
+        cfg = getattr(self.training_config, "multi_cortex", None)
+        if cfg is None or not cfg.enabled:
+            self.multi_cortex = None
+            return
+        if self.multi_cortex is not None:
+            return  # already built — idempotent
+
+        # Lazy import so legacy runs that never enable multi_cortex
+        # never pay the import cost (cortex.py loads torch.nn extras
+        # + sets up the DomainLexicon BPE table).
+        from neuroslm.cortex import (
+            build_default_ensemble, build_gpt2_ensemble,
+            DEFAULT_GPT2_VARIANTS,
+        )
+
+        if cfg.weights == "stub":
+            self.multi_cortex = build_default_ensemble(
+                vocab=self.vocab_size,
+                d_model=cfg.router_d_model,
+                domains=tuple(cfg.domains),
+                lexical_bias_weight=cfg.lexical_bias_weight,
+                bema_tau=cfg.bema_tau,
+            )
+        elif cfg.weights == "gpt2":
+            # The default variants are keyed by the 4 standard domain
+            # names. If the user customised `domains`, fall back to
+            # mapping every domain to "gpt2" rather than failing — a
+            # warning makes the substitution visible.
+            if set(cfg.domains) <= set(DEFAULT_GPT2_VARIANTS.keys()):
+                variants = {d: DEFAULT_GPT2_VARIANTS[d] for d in cfg.domains}
+            else:
+                import warnings
+                warnings.warn(
+                    f"multi_cortex.domains={cfg.domains} not in "
+                    f"DEFAULT_GPT2_VARIANTS={list(DEFAULT_GPT2_VARIANTS)}; "
+                    "mapping all to 'gpt2'. Customise weights:variants in "
+                    "code if a different mapping is needed.",
+                    RuntimeWarning,
+                )
+                variants = {d: "gpt2" for d in cfg.domains}
+            self.multi_cortex = build_gpt2_ensemble(
+                d_target=cfg.router_d_model,
+                variants=variants,
+                freeze_weights=cfg.freeze_weights,
+                lexical_bias_weight=cfg.lexical_bias_weight,
+                bema_tau=cfg.bema_tau,
+            )
+        else:  # pragma: no cover — parser already rejects this
+            raise ValueError(
+                f"unknown multi_cortex.weights {cfg.weights!r} "
+                "(parser should have rejected this)"
+            )
 
     def set_domain_id_fn(self, fn) -> None:
         """Register an `ids → (B,) long tensor of domain labels` callable.

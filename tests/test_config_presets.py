@@ -25,5 +25,8 @@ def test_phi_threshold_in_range():
 
 
 def test_preset_names_match():
-    expected = {"tiny", "small", "medium", "large", "xl", "xxl"}
-    assert set(PRESETS) == expected
+    # Standard presets must exist
+    required = {"tiny", "small", "medium", "large", "xl", "xxl"}
+    assert required.issubset(set(PRESETS)), f"Missing standard presets: {required - set(PRESETS)}"
+    # Additional experiment presets may exist (e.g., rcc_bowtie_30m_p*, synth_30m, pct_30m)
+    assert len(PRESETS) >= len(required)
