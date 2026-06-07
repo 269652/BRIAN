@@ -1,0 +1,2 @@
+[console_scripts]
+brian = neuroslm.cli:main

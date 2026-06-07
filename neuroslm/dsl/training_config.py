@@ -288,6 +288,48 @@ class GeneticsConfig:
 
 
 @dataclass
+class MultiCortexConfig:
+    """`multi_cortex { ... }` block — wires the Multi-Trunk-V2 ensemble.
+
+    When `enabled`, the harness builds a `MultiCortexEnsemble`
+    (`neuroslm.cortex`) at construction time and routes the trunk's
+    semantic state through it. With `weights="gpt2"` each sub-cortex
+    loads a HuggingFace GPT-2 family checkpoint (general:gpt2,
+    math:gpt2-medium, code:distilgpt2, chat:gpt2 by default). With
+    `weights="stub"` random `StubSubCortex`s are built — used for unit
+    tests and offline CI runs that must not hit the HF Hub.
+
+    Fields:
+      enabled              — master switch.  False ⇒ ensemble never built.
+      n_cortices           — must equal `len(domains)` (validated).
+      domains              — ordered list of cortex names (the keys the
+                              router gates over).
+      weights              — "stub" or "gpt2".  "gpt2" triggers HF
+                              download via `build_gpt2_ensemble`.
+      freeze_weights       — when True, GPT-2 backbone params have
+                              requires_grad=False; only the projection
+                              adapters + router train.
+      lexical_bias_weight  — multiplier on the DomainLexicon prior added
+                              to router logits before softmax.
+      bema_tau             — Bregman-EMA smoothing constant on routing
+                              weights (0.0 = no smoothing, 1.0 = frozen).
+      router_d_model       — hidden width of the ThalamicRouter MLP.
+    """
+    enabled: bool = False
+    n_cortices: int = 4
+    domains: List[str] = field(
+        default_factory=lambda: ["math", "code", "chat", "general"]
+    )
+    # "stub" is the safe default — no network access, no HF download.
+    # arch.neuro must explicitly opt-in to "gpt2" to pull weights.
+    weights: str = "stub"
+    freeze_weights: bool = True
+    lexical_bias_weight: float = 2.0
+    bema_tau: float = 0.5
+    router_d_model: int = 256
+
+
+@dataclass
 class TrainingConfig:
     """Pipeline-level config the BRIAN harness consumes.
 
@@ -502,6 +544,10 @@ class TrainingConfig:
     # GeneticOrchestrator — latent gene expression with Phi-loss coupling.
     # See architecture.md §6.5. Disabled by default.
     genetics: GeneticsConfig = field(default_factory=GeneticsConfig)
+    # Multi-Trunk-V2 ensemble — 4 specialist language cortices routed by
+    # a thalamic mixture-of-experts gate. See architecture.md §5.7.
+    # Disabled by default → legacy single-cortex behaviour unchanged.
+    multi_cortex: MultiCortexConfig = field(default_factory=MultiCortexConfig)
     # Hardware envelope + multi-scale variants. The deploy script reads
     # `hardware` to filter vast.ai offers; the harness reads `scales` +
     # the SCALE env var to pick which variant to instantiate.
@@ -524,6 +570,10 @@ class TrainingConfig:
 _VALID_LOSS_METHODS = {"per_sample"}
 _VALID_QUANT_BITS = {4, 8, 16}
 _VALID_OPTIMIZERS = {"adamw", "adafactor"}
+# Allowed values for `multi_cortex.weights`. "stub" = unit-test/CI safe
+# (no network); "gpt2" = HF GPT-2 family ensemble (build_gpt2_ensemble).
+# Add new providers here as they're implemented in neuroslm/cortex.py.
+_VALID_MULTI_CORTEX_WEIGHTS = {"stub", "gpt2"}
 
 
 # ── Parser ─────────────────────────────────────────────────────────────
@@ -639,6 +689,8 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.pass_marks = _parse_pass_marks(props["pass_marks"])
     if "genetics" in props:
         cfg.genetics = _parse_genetics(props["genetics"])
+    if "multi_cortex" in props:
+        cfg.multi_cortex = _parse_multi_cortex(props["multi_cortex"])
     if "hardware" in props:
         cfg.hardware = _parse_hardware(props["hardware"])
     if "scales" in props:
@@ -796,6 +848,73 @@ def _parse_genetics(body: str) -> GeneticsConfig:
         if g.optimize_for in ("lm_loss", "ppl"):
             g.phi_weight = 0.0
     return g
+
+
+def _parse_multi_cortex(body: str) -> MultiCortexConfig:
+    """Parse a `multi_cortex { ... }` block.
+
+    Keys: enabled, n_cortices, domains: [a, b, ...], weights,
+          freeze_weights, lexical_bias_weight, bema_tau, router_d_model
+
+    Validates:
+      * weights ∈ {"stub", "gpt2"}     — fail loudly on typos like "gtp2"
+                                          so we don't trigger an HF
+                                          download with a bad checkpoint
+                                          name.
+      * n_cortices == len(domains)     — mismatch is a guaranteed crash
+                                          inside ThalamicRouter; catching
+                                          it here surfaces a clear error
+                                          at parse time.
+      * 0.0 ≤ bema_tau < 1.0           — Bregman-EMA stability bound.
+      * lexical_bias_weight ≥ 0        — softmax temperature must not
+                                          flip sign.
+    """
+    body = _strip_braces(body)
+    props = _split_top_level_kv(body)
+    m = MultiCortexConfig()
+
+    if "enabled" in props:
+        m.enabled = _parse_bool(props["enabled"])
+    if "n_cortices" in props:
+        m.n_cortices = int(props["n_cortices"])
+    if "domains" in props:
+        raw = props["domains"].strip()
+        if raw.startswith("[") and raw.endswith("]"):
+            raw = raw[1:-1]
+        m.domains = [_strip_quotes(x.strip()) for x in raw.split(",") if x.strip()]
+    if "weights" in props:
+        w = _strip_quotes(props["weights"])
+        if w not in _VALID_MULTI_CORTEX_WEIGHTS:
+            raise ValueError(
+                f"unknown multi_cortex weights {w!r}; "
+                f"expected one of {sorted(_VALID_MULTI_CORTEX_WEIGHTS)}"
+            )
+        m.weights = w
+    if "freeze_weights" in props:
+        m.freeze_weights = _parse_bool(props["freeze_weights"])
+    if "lexical_bias_weight" in props:
+        m.lexical_bias_weight = float(props["lexical_bias_weight"])
+    if "bema_tau" in props:
+        m.bema_tau = float(props["bema_tau"])
+    if "router_d_model" in props:
+        m.router_d_model = int(props["router_d_model"])
+
+    # ── Cross-field validation ──
+    if m.lexical_bias_weight < 0:
+        raise ValueError(
+            f"multi_cortex.lexical_bias_weight must be >= 0, "
+            f"got {m.lexical_bias_weight}"
+        )
+    if not (0.0 <= m.bema_tau < 1.0):
+        raise ValueError(
+            f"multi_cortex.bema_tau must be in [0.0, 1.0), got {m.bema_tau}"
+        )
+    if m.n_cortices != len(m.domains):
+        raise ValueError(
+            f"multi_cortex.n_cortices ({m.n_cortices}) must equal "
+            f"len(domains) ({len(m.domains)}); domains={m.domains}"
+        )
+    return m
 
 
 def _parse_phase_gate(body: str) -> PhaseGate:

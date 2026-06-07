@@ -8,3 +8,8 @@ tqdm>=4.66
 einops>=0.7
 networkx>=3.0
 accelerate>=0.27
+# transformers — needed by neuroslm.cortex.GPT2SubCortex to download the
+# GPT-2 family checkpoints (gpt2, gpt2-medium, distilgpt2) when an
+# arch.neuro declares `multi_cortex { weights: "gpt2" }`. Imported lazily
+# inside build_gpt2_ensemble so stub-weight runs never load it.
+transformers>=4.30

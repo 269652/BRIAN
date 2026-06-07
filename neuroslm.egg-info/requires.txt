@@ -1,0 +1,15 @@
+sympy>=1.12
+matplotlib>=3.7
+networkx>=3.0
+vastai>=0.1
+pytest>=7.0
+
+[dev]
+pytest-cov>=4.0
+
+[ml]
+torch>=2.0
+transformers>=4.30
+datasets>=2.10
+tiktoken>=0.5
+einops>=0.7
