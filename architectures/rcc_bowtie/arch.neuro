@@ -992,4 +992,40 @@ complex MotorCortex {
     }
 }
 
+# =============================================================================
+# TRIPLE GUARD — live admission gate for auto-evolution
+# =============================================================================
+# Normative reference: docs/formal_framework.md §7.
+#
+# Every mutation proposed during training (rank-one DNA patches, structural
+# rewires, gene drifts) is gated by the (Φ ∧ H¹ ∧ λ₁) admission criteria
+# below.  Mutations that *would* drive any of the three scores out-of-band
+# are dropped before they reach disk; rejected mutations are persisted to
+# a sibling `step_<N>.rejected.json` audit file so the human + the
+# evolutionary loop can both see what the architecture refused to become.
+#
+# The thresholds below are intentionally PERMISSIVE for pretraining (see
+# the "PRETRAIN-FRIENDLY RECIPE" note further up — early infancy must be
+# allowed to wander).  They are the *safety net*, not yet the *fitness
+# pressure*; tighten them after the trunk reaches its capacity ceiling.
+#
+#   phi_min     — minimum admissible Φ after mutation; 0.0 disables.
+#   h1_max      — maximum admissible ‖H¹(K;F)‖ proxy; matches the default
+#                 hallucination_threshold in CohomologyValidator (5.0).
+#   lambda_min  — minimum admissible spectral-gap proxy λ₁; 0.0 disables
+#                 until the §4.2 Tonnetz Resonance Filter lands as a real
+#                 Laplacian computation.
+#
+# Code path: TripleGuard.from_arch_neuro(arch_path) reads this block;
+# EvolutionaryTrainingContext.set_triple_guard(guard) installs it; the
+# harness's mutation step then calls ctx.save_checkpoint(step, muts, pairs)
+# which routes through the guard.  See tests/training/test_rcc_bowtie_triple_guard.py
+# for the full contract.
+export formal_spec triple_guard_admission {
+    rule: "triple_guard",
+    phi_min: 0.0,
+    h1_max: 5.0,
+    lambda_min: 0.0
+}
+
 import { sheaf_narrative_consistency, formal_phi_integration, formal_bowtie_topology } from "@/lib/constraints"
