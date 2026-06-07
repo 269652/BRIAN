@@ -71,7 +71,10 @@ def main(steps: int = 10, ood_every: int = 500):
     except FileNotFoundError:
         print("    [SKIP] evol.dna not found — using default fitness")
         from neuroslm.fitness import FitnessConfig
-        fitness_cfg = FitnessConfig.load_or_default("")
+        # `dna/` is .gitignored, so on a fresh Colab clone the DNA file
+        # legitimately doesn't exist.  Recover with the built-in default
+        # fitness config (no path required).
+        fitness_cfg = FitnessConfig.load_or_default()
 
     # Create ~5M parameter model
     print("\n[2] Creating ~5M parameter model...")

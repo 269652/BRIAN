@@ -156,10 +156,26 @@ class FitnessConfig:
         return cls.from_dict(data)
 
     @classmethod
-    def load_or_default(cls, path: str) -> "FitnessConfig":
-        """Load fitness config, return default if file doesn't exist."""
-        if Path(path).exists():
-            return cls.load(path)
+    def load_or_default(cls, path: Optional[str] = None) -> "FitnessConfig":
+        """Load fitness config from ``path``, or return the default.
+
+        Returns the default config (3 baseline objectives + adaptation)
+        when any of the following hold:
+
+          * ``path`` is ``None`` or falsy (e.g. ``""``)
+          * ``path`` does not exist on disk
+          * ``path`` exists but is not a regular file (e.g. a directory)
+
+        This is intentionally permissive — callers like
+        ``colab_train_minimal_cpu.main()`` use this method as a
+        *graceful fallback* when their preferred source (e.g. a DNA
+        snapshot) is unavailable, and must not crash on the recovery
+        path.
+        """
+        if path:
+            p = Path(path)
+            if p.is_file():
+                return cls.load(str(p))
         # Default: minimize OOD PPL, maximize Phi
         return cls(
             objectives=[
