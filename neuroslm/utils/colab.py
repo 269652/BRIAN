@@ -20,7 +20,8 @@ def init_evolution(dna_path: str, patch_dir: Optional[str] = None) -> dict:
     1. Load base DNA from dna_path
     2. If patch_dir provided, discover and apply all patches in order
     3. Unfold DNA to architecture.neuro
-    4. Return config dict for harness initialization
+    4. Load fitness config from DNA or fitness.neuro
+    5. Return config dict for harness initialization
 
     Args:
         dna_path: Path to base.dna file
@@ -29,10 +30,15 @@ def init_evolution(dna_path: str, patch_dir: Optional[str] = None) -> dict:
     Returns:
         dict with keys:
         - "arch_path": path to unfolded architecture
+        - "arch_neuro": path to unfolded arch.neuro
         - "dna_path": path to base DNA
         - "patches_applied": list of DNAPatch objects
         - "resume_step": last training step from patches
+        - "fitness_config": FitnessConfig object (from DNA or fitness.neuro)
+        - "base_dna": the evolved LatentDNA after applying patches
     """
+    from neuroslm.fitness import FitnessConfig
+
     dna_path = Path(dna_path)
     if not dna_path.exists():
         raise FileNotFoundError(f"DNA file not found: {dna_path}")
@@ -67,12 +73,27 @@ def init_evolution(dna_path: str, patch_dir: Optional[str] = None) -> dict:
     dsl_code = compiler.dna_translator.translate(base_dna)
     arch_neuro_path.write_text(dsl_code, encoding='utf-8')
 
+    # Load fitness config: from DNA if present, else from fitness.neuro sidefile
+    fitness_config = None
+    if "fitness_config" in base_dna.invariants:
+        fitness_config = FitnessConfig.from_dict(base_dna.invariants["fitness_config"])
+    else:
+        # Try to load fitness.neuro from the architecture's parent
+        fitness_neuro = dna_path.parent / "fitness.neuro"
+        if fitness_neuro.exists():
+            fitness_config = FitnessConfig.load(str(fitness_neuro))
+
+    # Fallback to default fitness config
+    if fitness_config is None:
+        fitness_config = FitnessConfig.load_or_default("")
+
     return {
         "arch_path": str(arch_root),
         "arch_neuro": str(arch_neuro_path),
         "dna_path": str(dna_path),
         "patches_applied": patches_applied,
         "resume_step": resume_step,
+        "fitness_config": fitness_config,
         "base_dna": base_dna,
     }
 

@@ -1,61 +1,192 @@
 # -*- coding: utf-8 -*-
-"""Multi-Objective Fitness Composer — Phase A/F2 of the work order.
+"""Fitness configuration system for evolutionary training.
 
-`FitnessComposer` is the runtime counterpart to the `FitnessConfig` DSL
-block.  Given a config and a per-step `LossBundle` produced by the
-harness, it returns
+This module provides:
+1. FitnessObjective: single metric (minimize OOD PPL, maximize Phi, etc.)
+2. FitnessConfig: collection of objectives with adaptation settings
+3. FitnessComposer: runtime loss composition from a LossBundle
 
-    (total_loss : torch.Tensor,  # scalar autograd-traced
-     telemetry  : Dict[str, float])
+Fitness configs can be:
+- Defined in fitness.neuro per-architecture
+- Stored in DNA for self-improvement
+- Applied during training via epigenetic mutations
 
-so the harness can replace its hard-coded `total_loss_config` formula
-with a single declarative pipeline.
-
-Math
-----
-For each enabled objective ``o`` with weight ``w_o`` and schedule ``S_o``:
-
-.. math::
-    \\mathcal{L}_{\\text{total}}
-        = \\sum_{o \\in \\text{enabled}} w_o \\cdot S_o(\\text{mat}) \\cdot \\mathcal{L}_o
-
-where :math:`\\text{mat} \\in [0, 1]` is the MaturityTracker value and
-:math:`S_o(\\cdot)` is one of:
-
-    constant — :math:`S(m) = 1`                                   (no modulation)
-    gated    — :math:`S(m) = \\tfrac{1}{2}\\bigl(1 + \\tanh\\bigl((m - c)/w\\bigr)\\bigr)`   (per `phase_gate`)
-    linear   — :math:`S(m) = \\max(0, \\min(1, m))`                  (warmup ramp)
-
-Symbolic objective integration
-------------------------------
-When the `symbolic` objective is enabled, the composer owns a
-`SymbolicHyperNeuron` sized per `cfg.symbolic_n_units / n_features`.
-The harness feeds it a feature vector via ``compute_symbolic_loss(x)``;
-the returned scalar is the unit's sparsity loss (entropy of the
-operator + input selections) scaled by ``cfg.symbolic_sparsity_weight``.
-The objective weight ``w_symbolic`` is then applied on top by
-``compose``.
-
-Legacy reproducibility
-----------------------
-When ``cfg.enabled == False`` the composer becomes a no-op pass-through:
-``compose`` returns ``(bundle.lm, {"lm": float(bundle.lm)})`` so any
-existing arch.neuro without a `fitness { ... }` block trains exactly
-as before.
+The FitnessComposer is the runtime counterpart to the `FitnessConfig` DSL
+block. Given a config and a per-step `LossBundle` produced by the
+harness, it returns (total_loss, telemetry) so the harness can replace
+its hard-coded `total_loss_config` formula with a single declarative pipeline.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, Optional, Tuple, List
+from pathlib import Path
+import json
 
 import torch
 import torch.nn as nn
 
 from neuroslm.dsl.maturity import phase_gate
-from neuroslm.dsl.training_config import (
-    FitnessConfig,
-    FitnessObjective,
-)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Fitness Objective & Configuration — stored per-architecture or in DNA
+# ──────────────────────────────────────────────────────────────────────
+
+@dataclass
+class FitnessObjective:
+    """Single fitness objective (e.g., minimize OOD PPL, maximize Φ)."""
+    name: str  # Unique identifier
+    metric: str  # Metric name to track (e.g., "ood_ppl", "phi", "gap_ratio")
+    direction: str  # "minimize" or "maximize"
+    weight: float  # Relative importance (normalized to sum=1.0)
+    target: Optional[float] = None  # Ideal value for the metric
+    metadata: Dict = field(default_factory=dict)
+
+    def to_dict(self) -> Dict:
+        """Serialize to dict."""
+        return {
+            "name": self.name,
+            "metric": self.metric,
+            "direction": self.direction,
+            "weight": self.weight,
+            "target": self.target,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "FitnessObjective":
+        """Deserialize from dict."""
+        return cls(**data)
+
+
+@dataclass
+class FitnessAdaptation:
+    """Parameters for adaptive fitness mutation."""
+    enabled: bool = True
+    mutation_rate: float = 0.01  # Probability per step
+    target_adjustment_rate: float = 0.001
+    weight_adjustment_rate: float = 0.01
+    metadata: Dict = field(default_factory=dict)
+
+    def to_dict(self) -> Dict:
+        return {
+            "enabled": self.enabled,
+            "mutation_rate": self.mutation_rate,
+            "target_adjustment_rate": self.target_adjustment_rate,
+            "weight_adjustment_rate": self.weight_adjustment_rate,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "FitnessAdaptation":
+        return cls(**data)
+
+
+@dataclass
+class FitnessConfig:
+    """Complete fitness configuration for an architecture."""
+    version: str = "1.0"
+    objectives: List[FitnessObjective] = field(default_factory=list)
+    adaptation: Optional[FitnessAdaptation] = None
+    metadata: Dict = field(default_factory=dict)
+    enabled: bool = True  # Master on/off switch
+
+    def __post_init__(self):
+        """Normalize weights to sum to 1.0."""
+        if self.objectives:
+            total_weight = sum(obj.weight for obj in self.objectives)
+            if total_weight > 0:
+                for obj in self.objectives:
+                    obj.weight /= total_weight
+
+    def to_dict(self) -> Dict:
+        """Serialize to dict."""
+        return {
+            "version": self.version,
+            "enabled": self.enabled,
+            "objectives": [obj.to_dict() for obj in self.objectives],
+            "adaptation": self.adaptation.to_dict() if self.adaptation else None,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "FitnessConfig":
+        """Deserialize from dict."""
+        objectives = [FitnessObjective.from_dict(o) for o in data.get("objectives", [])]
+        adaptation = FitnessAdaptation.from_dict(data["adaptation"]) if data.get("adaptation") else None
+        return cls(
+            version=data.get("version", "1.0"),
+            enabled=data.get("enabled", True),
+            objectives=objectives,
+            adaptation=adaptation,
+            metadata=data.get("metadata", {}),
+        )
+
+    def compute_loss(self, metrics: Dict[str, float]) -> float:
+        """Compute multi-objective loss from metrics."""
+        if not self.objectives:
+            return 0.0
+
+        total_loss = 0.0
+        for obj in self.objectives:
+            metric_value = metrics.get(obj.metric)
+            if metric_value is None:
+                continue
+
+            target_value = obj.target if obj.target is not None else 0
+            if obj.direction == "minimize":
+                obj_loss = (metric_value - target_value) * obj.weight
+            else:  # maximize
+                obj_loss = (target_value - metric_value) * obj.weight
+            total_loss += obj_loss
+
+        return total_loss
+
+    def save(self, path: str) -> None:
+        """Save fitness config to JSON."""
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(self.to_dict(), f, indent=2)
+
+    @classmethod
+    def load(cls, path: str) -> "FitnessConfig":
+        """Load fitness config from JSON."""
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return cls.from_dict(data)
+
+    @classmethod
+    def load_or_default(cls, path: str) -> "FitnessConfig":
+        """Load fitness config, return default if file doesn't exist."""
+        if Path(path).exists():
+            return cls.load(path)
+        # Default: minimize OOD PPL, maximize Phi
+        return cls(
+            objectives=[
+                FitnessObjective(
+                    name="minimize_ood_ppl",
+                    metric="ood_ppl",
+                    direction="minimize",
+                    weight=0.5,
+                    target=180.0
+                ),
+                FitnessObjective(
+                    name="maximize_phi",
+                    metric="phi",
+                    direction="maximize",
+                    weight=0.3,
+                    target=0.15
+                ),
+                FitnessObjective(
+                    name="minimize_gap_ratio",
+                    metric="gap_ratio",
+                    direction="minimize",
+                    weight=0.2,
+                    target=2.0
+                ),
+            ],
+            adaptation=FitnessAdaptation(enabled=True)
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -257,7 +388,43 @@ class FitnessComposer(nn.Module):
     # ── repr ───────────────────────────────────────────────────────
 
     def extra_repr(self) -> str:
-        enabled = sorted(
-            n for n, s in self.config.objectives.items() if s.enabled
-        )
+        enabled = [obj.name for obj in self.config.objectives]
         return f"enabled={self.config.enabled}, objectives={enabled}"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Fitness Mutation Helpers
+# ──────────────────────────────────────────────────────────────────────
+
+def create_fitness_mutation_vesicle(
+    target_objective: str,
+    delta_weight: Optional[float] = None,
+    delta_target: Optional[float] = None,
+    reason: str = "adaptive_improvement"
+) -> Dict:
+    """Create a vesicle payload for fitness mutation.
+
+    This vesicle can be emitted during high-surprise windows to
+    self-improve the fitness objectives.
+
+    Args:
+        target_objective: Name of objective to mutate
+        delta_weight: Change to weight (e.g., +0.1, -0.05)
+        delta_target: Change to target value (e.g., -20.0)
+        reason: Why this mutation was emitted
+
+    Returns:
+        Vesicle payload dict ready to be saved as a mutation
+    """
+    delta = {}
+    if delta_weight is not None:
+        delta["weight"] = delta_weight
+    if delta_target is not None:
+        delta["target"] = delta_target
+
+    return {
+        "kind": "fitness_mutation",
+        "target_objective": target_objective,
+        "delta": delta,
+        "reason": reason,
+    }
