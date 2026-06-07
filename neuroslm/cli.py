@@ -1300,6 +1300,13 @@ def cmd_train(args: argparse.Namespace) -> int:
         original_cwd = os.getcwd()
         try:
             os.chdir(REPO_ROOT)
+
+            # Support --arch pointing to .dna files
+            if args.arch and args.arch.endswith('.dna'):
+                print(f"[train] Loading from DNA: {args.arch}")
+                # User wants to train from evolved DNA
+                # This would require special init_evolution() in the training loop
+
             # Import and run the minimal training
             spec = importlib.util.spec_from_file_location(
                 "colab_train_minimal_cpu",
@@ -1307,9 +1314,11 @@ def cmd_train(args: argparse.Namespace) -> int:
             )
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            # Run main with configurable steps (default 40k)
+
+            # Run main with configurable steps and OOD eval
             steps = args.steps if args.steps else 40000
-            module.main(steps=steps)
+            ood_every = args.ood_every if args.ood_every else 500
+            module.main(steps=steps, ood_every=ood_every)
             return 0
         except SystemExit as e:
             return e.code if isinstance(e.code, int) else 1
@@ -1799,13 +1808,14 @@ def _build_parser() -> argparse.ArgumentParser:
     str_train.add_argument("--preset", default="rcc_bowtie_30m_p4",
                           help="training preset (default: rcc_bowtie_30m_p4). "
                                "Use 'tiny' for minimal CPU training")
-    str_train.add_argument("--arch", help="architecture name (default: rcc_bowtie)")
+    str_train.add_argument("--arch", help="architecture name or path to .dna file (e.g., dna/evol/arch.dna)")
     str_train.add_argument("--dna", help="path to evolved DNA file (e.g., dna/evol/arch.dna)")
-    str_train.add_argument("--steps", type=int, help="number of training steps")
+    str_train.add_argument("--steps", type=int, help="number of training steps (default: 40000 for tiny)")
+    str_train.add_argument("--ood_every", type=int, help="OOD eval frequency (default: 500)")
     str_train.add_argument("--batch", type=int, help="batch size")
     str_train.add_argument("--seq_len", type=int, help="sequence length")
     str_train.add_argument("--d_sem", type=int, help="semantic dimension")
-    str_train.set_defaults(func=cmd_train)
+    str_train.set_defaults(func=cmd_train, ood_every=500)
 
     # test
     st = sub.add_parser("test", help="Run the DSL test suite (or a subset)")

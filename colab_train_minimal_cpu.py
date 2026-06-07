@@ -54,7 +54,7 @@ def create_tiny_lm(vocab_size=256, d_model=64, depth=2, seq_len=128):
     return TinyLM(vocab_size, d_model, depth, seq_len)
 
 
-def main(steps: int = 10):
+def main(steps: int = 10, ood_every: int = 500):
     print("=" * 70)
     print("NeuroSLM Minimal CPU Training — Colab Demo")
     print("=" * 70)
@@ -94,9 +94,11 @@ def main(steps: int = 10):
     print(f"\n[3] Training for {steps} steps (batch={batch_size}, seq_len={seq_len})...")
     print(f"    Device: {device}")
     print(f"    Fitness objectives: {[obj.name for obj in fitness_cfg.objectives]}")
+    print(f"    OOD eval every {ood_every} steps")
 
     model.train()
     start_time = time.time()
+    ood_results = []
 
     for step in range(1, steps + 1):
         # Dummy batch
@@ -125,14 +127,27 @@ def main(steps: int = 10):
         total_loss.backward()
         optimizer.step()
 
-        log_freq = max(1, steps // 10)  # Log ~10 times during training
-        if step % log_freq == 0 or step == 1:
+        # Log every 100 steps
+        if step % 100 == 0 or step == 1:
             elapsed = time.time() - start_time
             print(
                 f"    step {step:5d}  lm_loss={lm_loss:.4f}  "
                 f"fitness_loss={fitness_loss:.4f}  "
                 f"total={total_loss:.4f}  ({elapsed:.1f}s)"
             )
+
+        # OOD eval every N steps
+        if step % ood_every == 0:
+            with torch.no_grad():
+                # Simulate OOD eval on held-out data
+                ood_input = torch.randint(0, vocab_size, (batch_size, seq_len - 1)).to(device)
+                ood_target = torch.randint(0, vocab_size, (batch_size, seq_len - 1)).to(device)
+                ood_logits = model(ood_input)
+                ood_loss = loss_fn(ood_logits.reshape(-1, vocab_size), ood_target.reshape(-1))
+                ood_ppl = torch.exp(ood_loss).item()
+
+                ood_results.append({"step": step, "ood_ppl": ood_ppl})
+                print(f"    [OOD] step {step:5d}  ood_ppl={ood_ppl:.2f}")
 
     print("\n[4] Verification:")
     print(f"    [OK] Training completed in {time.time() - start_time:.1f}s")
