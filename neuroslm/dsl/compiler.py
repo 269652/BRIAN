@@ -895,20 +895,42 @@ def _extract_complexes(source: str) -> List[ComplexSubstrateIR]:
 
         # Parse genetic_library (nested gene blocks)
         genetic_library = []
-        genetic_lib_block = _extract_subblock(body, "genetic_library")
-        if genetic_lib_block:
-            # Extract genes from the genetic_library body
-            lib_body = genetic_lib_block.strip("{}").strip()
-            for gene_name, gene_body in _iter_named_blocks(lib_body, "gene"):
-                gene_props = _parse_properties(gene_body)
-                target = (gene_props.get("target") or "").strip().strip('"\'')
-                rate = float(gene_props.get("rate", 0.0))
-                genetic_library.append(GeneIR(
-                    name=gene_name,
-                    id=gene_name,
-                    target=target,
-                    effects={"rate": rate}
-                ))
+        # Try to find genetic_library { ... } block
+        gl_match = re.search(r'genetic_library\s*\{', body)
+        if gl_match:
+            open_idx = gl_match.end() - 1
+            try:
+                gl_body, _ = _slice_balanced_brace(body, open_idx)
+                for gene_name, gene_body in _iter_named_blocks(gl_body, "gene"):
+                    gene_props = _parse_properties(gene_body)
+                    target = (gene_props.get("target") or "").strip().strip('"\'')
+                    rate = float(gene_props.get("rate", 0.0))
+                    genetic_library.append(GeneIR(
+                        name=gene_name,
+                        id=gene_name,
+                        target=target,
+                        effects={"rate": rate}
+                    ))
+            except NeuroMLError:
+                pass
+
+        # Parse mutation_kernel (nested block)
+        mutation_kernel = None
+        mk_match = re.search(r'mutation_kernel\s*\{', body)
+        if mk_match:
+            open_idx = mk_match.end() - 1
+            try:
+                mk_body, _ = _slice_balanced_brace(body, open_idx)
+                mk_props = _parse_properties(mk_body)
+                mk_kind = mk_props.get("kind", "NeuroVesicle").strip().strip('"\'')
+                mk_trigger = mk_props.get("trigger", "always").strip().strip('"\'')
+                mutation_kernel = MutationKernelIR(
+                    kind=mk_kind,
+                    trigger=mk_trigger,
+                    id=f"mk_{name}"
+                )
+            except NeuroMLError:
+                pass
 
         out.append(ComplexSubstrateIR(
             name=name,
@@ -917,7 +939,8 @@ def _extract_complexes(source: str) -> List[ComplexSubstrateIR]:
             trunk=trunk,
             sieve=sieve,
             evolution_policy=evolution_policy,
-            genetic_library=genetic_library
+            genetic_library=genetic_library,
+            mutation_kernel=mutation_kernel
         ))
     return out
 
