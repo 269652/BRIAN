@@ -7,7 +7,7 @@ is implemented separately in phase 1.
 """
 import re
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 
 
 @dataclass
@@ -361,6 +361,8 @@ class CircuitIR(NodeIR):
 @dataclass
 class ProgramIR(NodeIR):
     id: str = ""
+    # Architecture metadata (from architecture { ... } block in arch.neuro)
+    architecture: Optional[Dict[str, Any]] = None
     equation_decls: List[EquationDefnIR] = None
     populations: List[PopulationIR] = None
     neurotransmitter_systems: List[NeurotransmitterSystemIR] = None
@@ -892,9 +894,27 @@ def _extract_subblock(body: str, key: str) -> str:
 # ── v2.0 DSL extractors (complex, workspace, vesicle, sieve) ──────────────
 
 def _extract_complexes(source: str) -> List[ComplexSubstrateIR]:
-    """Extract all `complex Name { ... }` blocks."""
+    """Extract all `complex Name { ... }` blocks (v2.0 style only).
+
+    Skip THSD-style complexes (those with dict-type fields like
+    stalk { ... }, topology { ... }) — those are handled by THSDParser.
+    """
     out: List[ComplexSubstrateIR] = []
     for name, body in _iter_named_blocks(source, "complex"):
+        # Check if this is THSD syntax by looking for nested block patterns
+        # THSD blocks have: stalk { ... }, topology { ... }, formal_spec { ... }, etc.
+        # v2.0 blocks have: topology: "...", trunk: "...", etc. (key: value pairs)
+        # Simple heuristic: if body contains "stalk {" or "topology {", it's THSD
+        is_thsd = (
+            'stalk {' in body or
+            'topology {' in body or
+            'formal_spec {' in body or
+            'dynamics {' in body
+        )
+        if is_thsd:
+            # This is THSD syntax — skip it, let THSDParser handle it
+            continue
+
         props = _parse_properties(body)
 
         # Parse topology (Tonnetz or flat)

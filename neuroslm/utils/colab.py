@@ -7,6 +7,7 @@ Provides high-level API for:
 - Train-and-evolve workflow integration
 """
 from __future__ import annotations
+import json
 from pathlib import Path
 from typing import Optional, List
 
@@ -175,6 +176,11 @@ class EvolutionaryTrainingContext:
             # harness = BRIANHarness(ctx.arch_path, ...)
             # harness.train_and_evolve(steps=10000)
             # Checkpoints saved to ctx.checkpoint_dir automatically
+            #
+            # Optional: attach a TripleGuard to gate mutations against
+            # the formal_framework.md §7 admission criteria:
+            #     from neuroslm.verification.triple_guard import TripleGuard
+            #     ctx.set_triple_guard(TripleGuard.from_arch_neuro(ctx.arch_neuro))
     """
 
     def __init__(self, dna_path: str, checkpoint_dir: Optional[str] = None):
@@ -187,6 +193,12 @@ class EvolutionaryTrainingContext:
         self.dna = None
         self.patches = None
         self.resume_step = None
+
+        # Triple Guard — None until set_triple_guard() is called.  When
+        # set, every mutation passed to save_checkpoint is gated by
+        # the (Φ ∧ H¹ ∧ λ₁) admission criteria from
+        # docs/formal_framework.md §7.
+        self.triple_guard = None
 
     def __enter__(self):
         """Load DNA and patches on context entry."""
@@ -201,21 +213,116 @@ class EvolutionaryTrainingContext:
         """Clean up on context exit."""
         pass
 
-    def save_checkpoint(self, step: int, mutations: List[dict]) -> None:
-        """Save mutations as a checkpoint patch.
+    # ── Triple Guard wiring ────────────────────────────────────────
+
+    def set_triple_guard(self, guard) -> None:
+        """Attach a ``TripleGuard`` (or any object with the same
+        ``admit(before, after, mutation) -> Verdict`` interface) to
+        gate mutations before they reach disk.
+
+        Once set, :py:meth:`save_checkpoint` will:
+
+        * filter out any mutation whose verdict has ``admitted is False``
+        * embed the verdict in the persisted patch's
+          ``metadata.triple_guard``
+        * write a ``step_<N>.rejected.json`` audit file listing every
+          rejected mutation together with its verdict
+        """
+        self.triple_guard = guard
+
+    # ── Persistence ────────────────────────────────────────────────
+
+    def save_checkpoint(
+        self,
+        step: int,
+        mutations: List[dict],
+        thg_pairs: Optional[List[tuple]] = None,
+    ) -> None:
+        """Save mutations as checkpoint patches, optionally gated by
+        the attached :class:`TripleGuard`.
 
         Args:
-            step: Training step
-            mutations: List of mutation dicts (with kind, target, delta, metadata)
+            step: Training step.
+            mutations: List of mutation dicts (with kind, target, delta,
+                metadata).
+            thg_pairs: Optional list of ``(thg_before, thg_after)``
+                pairs, one per mutation.  Required when ``triple_guard``
+                is attached; if ``None`` or shorter than ``mutations``
+                the gate is *skipped* for the un-paired mutations and
+                they are persisted unconditionally (backward-compat).
+
+        Patches are written as ``step_<NNNNN>_<target>.patch.dna`` so
+        multiple mutations per step do not overwrite one another.  The
+        legacy ``step_<NNNNN>.patch.dna`` form is preserved when there
+        is exactly one mutation, so existing tooling that globs the
+        old pattern keeps finding the patch.
         """
-        for mutation in mutations:
+        accepted_records: List[dict] = []
+        rejected_records: List[dict] = []
+
+        guard = self.triple_guard
+        pairs = thg_pairs or []
+
+        for idx, mutation in enumerate(mutations):
+            verdict_dict: Optional[dict] = None
+            admitted = True
+
+            if guard is not None and idx < len(pairs):
+                before, after = pairs[idx]
+                verdict = guard.admit(before, after, mutation)
+                verdict_dict = verdict.to_dict()
+                admitted = bool(verdict.admitted)
+
+            if admitted:
+                accepted_records.append(
+                    {"mutation": mutation, "verdict": verdict_dict}
+                )
+            else:
+                rejected_records.append(
+                    {
+                        "kind": mutation.get("kind", "node_mutation"),
+                        "target": mutation.get("target", "unknown"),
+                        "delta": list(mutation.get("delta", [])),
+                        "metadata": dict(mutation.get("metadata", {})),
+                        "verdict": verdict_dict,
+                    }
+                )
+
+        # Write accepted patches.
+        for rec in accepted_records:
+            mutation = rec["mutation"]
+            verdict_dict = rec["verdict"]
+            metadata = dict(mutation.get("metadata", {}))
+            if verdict_dict is not None:
+                # Inject the verdict so downstream tooling and the
+                # next training run can audit *why* this mutation
+                # survived the gate.
+                metadata["triple_guard"] = verdict_dict
+
             patch = DNAPatch(
                 version="1.0",
                 step=step,
                 kind=mutation.get("kind", "node_mutation"),
                 target=mutation.get("target", "unknown"),
                 delta=mutation.get("delta", []),
-                metadata=mutation.get("metadata", {}),
+                metadata=metadata,
             )
-            patch_file = self.checkpoint_dir / f"step_{step:05d}.patch.dna"
+            # Per-target filename when there's more than one mutation;
+            # legacy filename when there's exactly one, so tooling
+            # that globs `step_NNNNN.patch.dna` keeps finding it.
+            target = mutation.get("target", "unknown")
+            if len(accepted_records) == 1:
+                patch_file = self.checkpoint_dir / f"step_{step:05d}.patch.dna"
+            else:
+                # Sanitise target for filesystem.
+                safe = "".join(c if c.isalnum() or c in "._-" else "_"
+                               for c in str(target))
+                patch_file = self.checkpoint_dir / f"step_{step:05d}_{safe}.patch.dna"
             patch.save(str(patch_file))
+
+        # Audit log for rejected mutations.
+        if rejected_records:
+            reject_file = self.checkpoint_dir / f"step_{step:05d}.rejected.json"
+            payload = {"step": step, "rejected": rejected_records}
+            with open(reject_file, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)

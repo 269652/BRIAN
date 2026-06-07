@@ -840,4 +840,156 @@ modulation dopamine -> acc {
 # these at compile time; the harness applies them as auxiliary losses at runtime.
 # =============================================================================
 
+# =============================================================================
+# THSD (Topological Hyper-Sheaf Dynamics) — Brain Regions as Simplicial Complexes
+# =============================================================================
+# Each brain region is formalized as a simplicial complex σᵈᵢ with:
+#   - SheafStalk: local representation space with Fisher information metric
+#   - Topology: Tonnetz manifold with spectral gap λ₁ > 0.3
+#   - FormalSpec: cohomological constraints H¹(K;F), Φ maximization
+#   - Dynamics: vesicle-based mutations, NEMORI consolidation
+
+# Sensory input layer — thalamic gateway to conscious access
+complex Thalamus {
+    stalk {
+        representation_dim: 256,
+        fisher_information_metric: "information_geometry",
+        local_constraints: ["predictive_consistency"]
+    },
+    topology {
+        kind: "Tonnetz",
+        spectral_gap: 0.32,
+        dimension: 6,
+        coherence_threshold: 0.95
+    },
+    formal_spec {
+        cohomology_floor: 0.005,
+        phi_target: 0.80,
+        phi_method: "geometric_IIT4",
+        information_bottleneck: {
+            enabled: true,
+            compression_ratio: 0.7,
+            prediction_lower_bound: 0.92
+        }
+    },
+    dynamics {
+        emission {
+            trigger: "surprise_head(threshold=0.8)",
+            payload_dim: 64,
+            lifetime_steps: 100
+        },
+        nemori {
+            enabled: true,
+            consolidation_interval: 1000,
+            forgetting_floor: 0.01
+        }
+    }
+}
+
+# Global workspace (conscious space) — recurrent amplification & integration
+complex GlobalWorkspace {
+    stalk {
+        representation_dim: 512,
+        fisher_information_metric: "information_geometry",
+        local_constraints: ["narrative_consistency", "gradient_stability"]
+    },
+    topology {
+        kind: "Tonnetz",
+        spectral_gap: 0.35,
+        dimension: 8,
+        coherence_threshold: 0.98
+    },
+    formal_spec {
+        cohomology_floor: 0.008,
+        phi_target: 0.85,
+        phi_method: "geometric_IIT4",
+        information_bottleneck: {
+            enabled: true,
+            compression_ratio: 0.65,
+            prediction_lower_bound: 0.94
+        }
+    },
+    dynamics {
+        emission {
+            trigger: "always",
+            payload_dim: 96,
+            lifetime_steps: 150
+        },
+        release {
+            rule: "rank_one_update",
+            learning_rate: 0.001,
+            target: "parameter_counts"
+        },
+        nemori {
+            enabled: true,
+            consolidation_interval: 800,
+            forgetting_floor: 0.005
+        }
+    }
+}
+
+# Prefrontal cortex (executive control) — planning & decision-making
+complex PrefrontalCortex {
+    stalk {
+        representation_dim: 384,
+        fisher_information_metric: "information_geometry",
+        local_constraints: ["planning_consistency", "value_alignment"]
+    },
+    topology {
+        kind: "Tonnetz",
+        spectral_gap: 0.33,
+        dimension: 7,
+        coherence_threshold: 0.96
+    },
+    formal_spec {
+        cohomology_floor: 0.006,
+        phi_target: 0.82,
+        phi_method: "geometric_IIT4",
+        information_bottleneck: {
+            enabled: true,
+            compression_ratio: 0.72,
+            prediction_lower_bound: 0.93
+        }
+    },
+    dynamics {
+        emission {
+            trigger: "surprise_head(threshold=0.7)",
+            payload_dim: 80,
+            lifetime_steps: 120
+        },
+        nemori {
+            enabled: true,
+            consolidation_interval: 900,
+            forgetting_floor: 0.008
+        }
+    }
+}
+
+# Motor output layer — action generation
+complex MotorCortex {
+    stalk {
+        representation_dim: 192,
+        fisher_information_metric: "information_geometry",
+        local_constraints: ["motor_smoothness"]
+    },
+    topology {
+        kind: "Tonnetz",
+        spectral_gap: 0.30,
+        dimension: 5,
+        coherence_threshold: 0.94
+    },
+    formal_spec {
+        cohomology_floor: 0.004,
+        phi_target: 0.75,
+        phi_method: "geometric_IIT4"
+    },
+    dynamics {
+        nemori {
+            enabled: true,
+            consolidation_interval: 1200,
+            forgetting_floor: 0.012
+        }
+    }
+}
+
 import { sheaf_narrative_consistency, formal_phi_integration, formal_bowtie_topology } from "@/lib/constraints"

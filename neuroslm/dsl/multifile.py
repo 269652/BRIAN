@@ -192,6 +192,7 @@ _DECL_KEYWORDS_NAMED = (
     "equation",
     "formal_spec",
     "sheaf",
+    "complex",  # THSD simplicial complexes (Phase 6+)
     # §6.5 — genetic orchestrator declarations
     "gene",
     "protein",
@@ -455,7 +456,15 @@ def _parse_simple_props(body: str) -> Dict[str, str]:
 
 def _record(ast: ModuleAST, name: str, decl_text: str,
             is_export: bool, path: Path) -> None:
-    """Store the decl under exports or private, rejecting duplicates."""
+    """Store the decl under exports or private, rejecting duplicates.
+
+    Skip empty names (typically THSD blocks like 'complex' that don't
+    parse as v2.0 declarations and are handled separately).
+    """
+    # Skip empty names (THSD blocks, etc.)
+    if not name or not name.strip():
+        return
+
     bucket = ast.exports if is_export else ast.private
     other = ast.exports if not is_export else ast.private
     if name in bucket or name in other:
@@ -977,4 +986,27 @@ def compile_folder(arch_root):
             parts.append(decl_text)
 
     combined = "\n".join(parts)
-    return NeuroMLCompiler.compile(combined)
+
+    # THSD Phase 6+: Include full arch.neuro content for THSD parser context
+    # The THSD parser needs the full file content to properly recognize THSD blocks
+    # because it relies on surrounding declarations for validation
+    architecture_metadata = None
+    try:
+        with open(arch_path, 'r', encoding='utf-8') as f:
+            arch_content = f.read()
+        # Add the full arch.neuro content so THSD parser can see THSD blocks
+        # in their full context
+        combined += "\n" + arch_content
+
+        # Extract architecture metadata for ProgramIR
+        if arch_ast and arch_ast.architecture:
+            architecture_metadata = arch_ast.architecture
+    except Exception:
+        pass  # If reading fails, continue with partial combined DSL
+
+    # Compile and attach architecture metadata
+    ir = NeuroMLCompiler.compile(combined)
+    if architecture_metadata:
+        ir.architecture = architecture_metadata
+
+    return ir
