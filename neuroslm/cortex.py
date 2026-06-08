@@ -176,6 +176,22 @@ class GPT2SubCortex(SubCortex):
     Loads any model exposing the GPT-2 architecture (``gpt2``,
     ``gpt2-medium``, ``gpt2-large``, ``gpt2-xl``, ``distilgpt2``, or any
     HF Hub fine-tune of those).
+
+    Long-context handling
+    ---------------------
+    GPT-2's positional embedding ``wpe`` has exactly
+    ``config.n_positions`` rows (1024 for the entire gpt2 family).
+    Feeding a ``(B, T)`` tensor with ``T > n_positions`` would trigger
+    an out-of-bounds gather on the position-id lookup deep inside the
+    GPT-2 forward. To support arbitrary ``T`` (the training pipeline
+    runs at ``seq_len=2048``), :meth:`forward` chunks the input into
+    non-overlapping windows of size ``n_positions`` and concatenates
+    the per-window hidden states along the time axis. Within each
+    chunk GPT-2 sees an in-distribution position layout
+    (``0..n_positions-1``).
+
+    For ``T <= n_positions`` the call is a no-op pass-through —
+    bit-identical to the raw ``self.gpt2(input_ids=ids)`` forward.
     """
 
     def __init__(self, name: str, domain: str, hf_model_id: str,
@@ -197,10 +213,86 @@ class GPT2SubCortex(SubCortex):
             for p in self.gpt2.parameters():
                 p.requires_grad = False
 
-    def forward(self, ids: torch.Tensor) -> torch.Tensor:  # pragma: no cover
-        out = self.gpt2(input_ids=ids, output_hidden_states=False,
-                        return_dict=True)
-        return out.last_hidden_state    # (B, T, d_native)
+    @classmethod
+    def from_module(cls, name: str, domain: str, gpt2,
+                    hf_model_id: str = "<custom>",
+                    freeze_weights: bool = True) -> "GPT2SubCortex":
+        """Build a ``GPT2SubCortex`` from a pre-constructed ``GPT2Model``
+        instance — bypassing ``from_pretrained``.
+
+        Use cases
+        ---------
+        * **Testing** — supply a small in-memory ``GPT2Model(GPT2Config(...))``
+          to exercise the wrapper without downloading hundreds of MB.
+        * **Custom checkpoints** — load weights from a local file or
+          a custom HF Hub repo with non-standard tokenisation and pass
+          the already-built module here.
+        * **Shared backbones** — register one GPT-2 module across
+          multiple wrappers (e.g. an ensemble where every cortex
+          shares storage) without re-instantiating per-cortex.
+
+        Parameters
+        ----------
+        name : str
+            Cortex name (e.g. ``"chat_cortex"``).
+        domain : str
+            Domain tag (e.g. ``"math"``, ``"code"``, ``"chat"``,
+            ``"general"``) — must be one of the keys the
+            :class:`ThalamicRouter` is configured for.
+        gpt2 : transformers.GPT2Model
+            A pre-built GPT-2 backbone. Must expose
+            ``config.n_embd``, ``config.n_positions``, and a
+            ``forward(input_ids, ...)`` returning
+            ``last_hidden_state``.
+        hf_model_id : str, optional
+            Identifier recorded on the wrapper for logging /
+            checkpoint provenance. Default ``"<custom>"``.
+        freeze_weights : bool, optional
+            Whether to set ``requires_grad = False`` on all GPT-2
+            parameters. Defaults to ``True`` to match the
+            :meth:`__init__` behaviour (frozen pre-trained features
+            is the default ensemble mode).
+        """
+        sc = cls.__new__(cls)
+        d_native = int(gpt2.config.n_embd)
+        SubCortex.__init__(sc, name=name, domain=domain, d_model=d_native)
+        sc.gpt2 = gpt2
+        sc.hf_model_id = str(hf_model_id)
+        if freeze_weights:
+            for p in sc.gpt2.parameters():
+                p.requires_grad = False
+        return sc
+
+    def forward(self, ids: torch.Tensor) -> torch.Tensor:
+        if ids.dim() != 2:
+            raise ValueError(
+                f"expected (B, T) ids, got shape {tuple(ids.shape)}")
+        n_pos = int(self.gpt2.config.n_positions)
+        T = int(ids.shape[1])
+
+        # Short-path: no chunking needed, bit-identical to raw GPT-2.
+        if T <= n_pos:
+            out = self.gpt2(input_ids=ids, output_hidden_states=False,
+                            return_dict=True)
+            return out.last_hidden_state    # (B, T, d_native)
+
+        # Long-path: non-overlapping windows of size <= n_pos.
+        # Each chunk gets a fresh position layout 0..len-1 — in-
+        # distribution for GPT-2's wpe. The output for token t in
+        # window w depends only on tokens [w*n_pos .. t] within that
+        # window (causal attention truncated at window boundaries),
+        # which is the standard "windowed attention" approximation
+        # used by every long-context transformer that re-uses a
+        # short-context backbone (e.g. block-recurrent transformers,
+        # the original Reformer, and Longformer's local attention).
+        parts: List[torch.Tensor] = []
+        for start in range(0, T, n_pos):
+            end = min(start + n_pos, T)
+            chunk = ids[:, start:end]
+            out = self.gpt2(input_ids=chunk, output_hidden_states=False,
+                            return_dict=True)
+            parts.append(out.last_hidden_state)
+        return torch.cat(parts, dim=1)      # (B, T, d_native)
 
 
 # ──────────────────────────────────────────────────────────────────────
