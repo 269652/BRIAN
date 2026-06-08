@@ -10,6 +10,7 @@ neuroslm/config.py
 neuroslm/cortex.py
 neuroslm/data.py
 neuroslm/dpo.py
+neuroslm/fitness.py
 neuroslm/generate.py
 neuroslm/genome.py
 neuroslm/genomes.py
@@ -22,6 +23,7 @@ neuroslm/regularizers.py
 neuroslm/tokenizer.py
 neuroslm/train.py
 neuroslm/train_dsl.py
+neuroslm/training_thsd.py
 neuroslm/xla_utils.py
 neuroslm.egg-info/PKG-INFO
 neuroslm.egg-info/SOURCES.txt
@@ -48,6 +50,7 @@ neuroslm/dsl/equations.py
 neuroslm/dsl/evolutionary.py
 neuroslm/dsl/fast_weights.py
 neuroslm/dsl/fitness.py
+neuroslm/dsl/hypergraph_ir.py
 neuroslm/dsl/hypershape.py
 neuroslm/dsl/layout_intent.py
 neuroslm/dsl/maturity.py
@@ -66,6 +69,11 @@ neuroslm/dsl/preset_bridge.py
 neuroslm/dsl/regularization.py
 neuroslm/dsl/submechanics.py
 neuroslm/dsl/thg_ir.py
+neuroslm/dsl/thsd_codegen.py
+neuroslm/dsl/thsd_evolution.py
+neuroslm/dsl/thsd_ir.py
+neuroslm/dsl/thsd_parser.py
+neuroslm/dsl/thsd_plasticity.py
 neuroslm/dsl/training_config.py
 neuroslm/dsl/wolfram.py
 neuroslm/dsl/subsystems/__init__.py
@@ -151,6 +159,7 @@ neuroslm/modules/neural_geometry.py
 neuroslm/modules/neuro_attention.py
 neuroslm/modules/neurogenesis.py
 neuroslm/modules/neuromods.py
+neuroslm/modules/nrcstk.py
 neuroslm/modules/pfc.py
 neuroslm/modules/phase_modulated_attention.py
 neuroslm/modules/predictive_coding_loss.py
@@ -163,6 +172,7 @@ neuroslm/modules/self_model.py
 neuroslm/modules/sensory.py
 neuroslm/modules/smooth_gated_bus.py
 neuroslm/modules/survival_causal.py
+neuroslm/modules/symbolic_unit.py
 neuroslm/modules/text_input.py
 neuroslm/modules/thalamus.py
 neuroslm/modules/theory_of_mind.py
@@ -191,7 +201,10 @@ neuroslm/thsd/engine.py
 neuroslm/tools/compare_ckpts.py
 neuroslm/tools/model_selector.py
 neuroslm/tools/prune_ckpts.py
+neuroslm/utils/__init__.py
+neuroslm/utils/colab.py
 neuroslm/verification/__init__.py
+neuroslm/verification/triple_guard.py
 neuroslm/verification/verifier.py
 tests/test_adaptive_mixture_direction.py
 tests/test_adaptive_mixture_stability.py
@@ -200,11 +213,19 @@ tests/test_branching_ema.py
 tests/test_brian_harness.py
 tests/test_cdga.py
 tests/test_cognitive_closure.py
+tests/test_colab_integration.py
 tests/test_config_presets.py
 tests/test_consciousness.py
 tests/test_data_adaptive_mixture.py
+tests/test_dna_cli.py
+tests/test_dna_patches.py
+tests/test_dna_roundtrip_fidelity.py
 tests/test_ensemble_routing.py
 tests/test_environments.py
+tests/test_fitness_composer.py
+tests/test_fitness_configuration.py
+tests/test_fitness_load_or_default.py
+tests/test_fitness_parser.py
 tests/test_freq_balance.py
 tests/test_harness_schedule.py
 tests/test_hpb_phase1_grid.py
@@ -212,13 +233,18 @@ tests/test_hpb_phase2_msgra.py
 tests/test_hpb_phase3_mspcc.py
 tests/test_hpb_phase4_hbw.py
 tests/test_hpb_phase5_episodic.py
+tests/test_hypergraph_evolution.py
 tests/test_intelligence_modules.py
 tests/test_maturation.py
 tests/test_memory.py
 tests/test_modules.py
+tests/test_multi_cortex_integration.py
 tests/test_multi_cortex_parser.py
+tests/test_multi_cortex_wiring.py
 tests/test_narrative_memory.py
 tests/test_neurochem.py
+tests/test_nfg_cli_dna.py
+tests/test_nrcstk_metabolic.py
 tests/test_ood_optimizations.py
 tests/test_orchestrator.py
 tests/test_pc_reentry_loss.py
@@ -228,4 +254,5 @@ tests/test_recursive_reasoning.py
 tests/test_regularizer_warmup.py
 tests/test_regularizers.py
 tests/test_stabilization.py
+tests/test_symbolic_unit.py
 tests/test_vbb.py

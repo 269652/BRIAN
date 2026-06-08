@@ -1301,11 +1301,18 @@ def cmd_train(args: argparse.Namespace) -> int:
         try:
             os.chdir(REPO_ROOT)
 
+            dna_path = None
+
+            # Explicit --dna takes precedence.
+            if args.dna:
+                dna_path = args.dna
+                print(f"[train] Loading from DNA: {dna_path}")
+
             # Support --arch pointing to .dna files
             if args.arch and args.arch.endswith('.dna'):
+                if dna_path is None:
+                    dna_path = args.arch
                 print(f"[train] Loading from DNA: {args.arch}")
-                # User wants to train from evolved DNA
-                # This would require special init_evolution() in the training loop
 
             # Import and run the minimal training
             spec = importlib.util.spec_from_file_location(
@@ -1318,7 +1325,8 @@ def cmd_train(args: argparse.Namespace) -> int:
             # Run main with configurable steps and OOD eval
             steps = args.steps if args.steps else 40000
             ood_every = args.ood_every if args.ood_every else 500
-            module.main(steps=steps, ood_every=ood_every)
+            module.main(steps=steps, ood_every=ood_every,
+                        dna_path=dna_path or "dna/evol/arch.dna")
             return 0
         except SystemExit as e:
             return e.code if isinstance(e.code, int) else 1

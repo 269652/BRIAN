@@ -1,0 +1,111 @@
+Brian is a small language model that grows.
+Architecture lives in DSL files called arch.neuro.
+Every checkpoint carries DNA: weights, fitness scores, and topology.
+
+A simplicial complex describes the architecture as a labelled set.
+Each vertex is a population; each edge is a projection.
+Triangles encode composition. Tetrahedra encode resonance.
+A cellular sheaf assigns a vector space to every simplex.
+Restriction maps glue local data into a global state.
+
+The first sheaf cohomology measures contradiction.
+When two restrictions disagree on an overlap, the cocycle does not vanish.
+A small obstruction is healthy; a large one is a contradiction in the model.
+The cohomology guard rejects checkpoints whose H one norm exceeds the tolerance.
+
+Integrated information measures wholeness.
+A model that factors into independent components has zero phi.
+The phi guard rejects bags of mlp layers that pretend to be a brain.
+Phi is computed via a minimum information partition over the active complex.
+
+The spectral gap of the sheaf Laplacian measures connectivity.
+A connected complex has lambda one greater than zero.
+A disconnected complex collapses lambda one to zero and is rejected.
+The Tonnetz filter keeps the spectrum on a torus of admissible configurations.
+
+Three guards together form the triple guard.
+Phi greater than zero. H one near zero. Lambda one above the minimum.
+An evolutionary mutation that fails any guard is written to the rejection log.
+A mutation that passes all three is admitted into the next DNA snapshot.
+
+Symbolic units learn algebraic expressions during training.
+Each unit chooses two inputs and an operator from a small bank.
+Operators include identity, add, subtract, multiply, exponentiate, sine, and hyperbolic tangent.
+A Gumbel softmax selects one operator per unit.
+Sparsity loss collapses the distribution to a single hard choice.
+
+A symbolic simplex sits in the zero-dimensional skeleton of the complex.
+Its stalk has dimension equal to the number of symbolic units.
+The sheaf treats it identically to any other vertex.
+Cohomology operations work without bespoke restriction maps.
+
+Causal emergence searches for the coarse graining that maximises effective information.
+The macroscopic random variable at dimension one is the conscious variable.
+Effective information at the macro scale must exceed effective information at the micro scale.
+Otherwise the coarsening did not gain anything.
+
+Fisher Rao distance weights similar means but different variances by their distinguishability.
+It is the natural metric on a statistical manifold.
+Cosine similarity ignores variance. Fisher Rao does not.
+Memory retrieval that uses Fisher Rao recovers what you actually meant, not what you literally said.
+
+DNA snapshots use raid five parity.
+A full snapshot is regenerable from any four of five patches in a stripe.
+The mycelium effect propagates discoveries through the genealogy.
+A patch that improves fitness on three siblings is promoted to the ancestor.
+
+Training begins with a small architecture and grows through evolution.
+At every checkpoint the triple guard runs.
+A rejected mutation never enters the DNA.
+An accepted mutation becomes the new baseline.
+
+Real datasets feed the training loop.
+Tiny stories teach narrative structure.
+Wikitext teaches encyclopedic prose.
+FineWeb edu teaches structured argument.
+Open Hermes teaches conversation and instruction following.
+
+Cross entropy loss measures how well the next token is predicted.
+A uniform random model has loss equal to the logarithm of the vocabulary size.
+A model that learns linguistic structure beats that baseline by several nats.
+A model that learns nothing stays at the logarithm forever.
+
+The harness wraps the architecture and runs the optimiser.
+Label smoothing softens hard targets and improves generalisation.
+Weight decay shrinks unused parameters and frees capacity.
+Gradient clipping bounds the step size when activations explode.
+
+A scheduler warms the learning rate up over a few hundred steps.
+Then it decays the rate linearly or with a cosine curve.
+The peak rate depends on batch size and model dimension.
+Too high and training diverges. Too low and progress is glacial.
+
+Checkpoints are written every few hundred steps to a folder.
+Each checkpoint contains the model state, the optimiser state, and the verifier report.
+The verifier report contains phi, H one, and lambda one at that step.
+A reviewer can diff two reports to see how the architecture evolved.
+
+The discovery surface of a symbolic simplex is the set of expressions its units learn.
+After training the operator distribution at each unit collapses to one choice.
+The argmax over the choices yields a deterministic algebraic formula.
+That formula is the discovery for that unit at that checkpoint.
+
+A composition simplex is a triangle whose three edges satisfy a cocycle.
+The cocycle says that restricting along any path through the triangle gives the same answer.
+A composition that fails the cocycle test is a hallucinated relation.
+A composition that passes is a verified structural fact.
+
+The Tonnetz torus has the property that consonant intervals are short geodesics.
+Forcing the spectral signature onto the Tonnetz prevents disconnected configurations.
+Disconnected configurations produce relations between simplices with no information path.
+That kind of relation is hallucination, not discovery.
+
+A research grade architecture is one whose normative contract is auditable.
+Auditable means a human reviewer can diff the spec across generations.
+Mutations that change the spec must be tracked.
+Mutations that fail the triple guard must be visible in the rejection log.
+
+The framework is normative: when code and document disagree, the document wins.
+Either the code is fixed or the document is updated first with a TDD acceptance suite.
+The evolutionary loop reads this contract as the spec it may mutate against.
+A human reviewer audits its mutations by diffing the contract.

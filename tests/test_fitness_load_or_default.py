@@ -143,3 +143,87 @@ class TestColabMinimalCPUFallback:
                 f"main() crashed on missing DNA fallback: {e!r} — "
                 "the load_or_default('') anti-pattern is back"
             )
+
+    def test_main_forwards_custom_dna_path(self, monkeypatch):
+        """`main(dna_path=...)` must forward the supplied DNA path to
+        init_evolution instead of always hard-coding dna/evol/arch.dna.
+        """
+        import colab_train_minimal_cpu as ccpu
+
+        called = {}
+
+        def _fake_init_evolution(path):
+            called["path"] = path
+            raise FileNotFoundError(path)
+
+        monkeypatch.setattr("neuroslm.utils.init_evolution", _fake_init_evolution)
+
+        # Keep execution fast: zero steps means setup-only.
+        ccpu.main(steps=0, ood_every=1, dna_path="dna/custom/arch.dna")
+        assert called["path"] == "dna/custom/arch.dna"
+
+
+class TestTinyCliDnaRouting:
+    """`brian train --preset=tiny` must actually honor --dna / --arch .dna.
+
+    Regression target: command printed "Loading from DNA" but still ran
+    the hardcoded evol.dna path in colab_train_minimal_cpu.
+    """
+
+    def _run_cmd_train(self, monkeypatch, args):
+        from neuroslm import cli
+
+        captured = {}
+
+        class _Loader:
+            def exec_module(self, module):
+                def _main(**kwargs):
+                    captured.update(kwargs)
+
+                module.main = _main
+
+        class _Spec:
+            loader = _Loader()
+
+        monkeypatch.setattr("importlib.util.spec_from_file_location",
+                            lambda *a, **k: _Spec())
+        monkeypatch.setattr("importlib.util.module_from_spec",
+                            lambda spec: type("_M", (), {})())
+
+        rc = cli.cmd_train(args)
+        assert rc == 0
+        return captured
+
+    def test_tiny_cli_uses_arch_when_arch_is_dna(self, monkeypatch):
+        import argparse
+
+        args = argparse.Namespace(
+            preset="tiny",
+            arch="dna/evol/arch.dna",
+            dna=None,
+            steps=12,
+            ood_every=34,
+            batch=None,
+            seq_len=None,
+            d_sem=None,
+        )
+        captured = self._run_cmd_train(monkeypatch, args)
+        assert captured["steps"] == 12
+        assert captured["ood_every"] == 34
+        assert captured["dna_path"] == "dna/evol/arch.dna"
+
+    def test_tiny_cli_prefers_explicit_dna_over_arch(self, monkeypatch):
+        import argparse
+
+        args = argparse.Namespace(
+            preset="tiny",
+            arch="dna/wrong/arch.dna",
+            dna="dna/right/arch.dna",
+            steps=2,
+            ood_every=3,
+            batch=None,
+            seq_len=None,
+            d_sem=None,
+        )
+        captured = self._run_cmd_train(monkeypatch, args)
+        assert captured["dna_path"] == "dna/right/arch.dna"

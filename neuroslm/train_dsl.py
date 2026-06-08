@@ -87,9 +87,20 @@ class RealDataSource:
     """Streams real tokenized batches via neuroslm.data.batch_iterator.
 
     Yields next-token-prediction (ids, targets) from a `(B, ctx_len+1)`
-    window: ids = window[:, :-1], targets = window[:, 1:]. Falls back to
-    SyntheticBatchSource if the data pipeline can't initialise (e.g. no
-    network in a local run).
+    window: ids = window[:, :-1], targets = window[:, 1:].
+
+    Fallback chain (in order):
+      1. HuggingFace streaming (FineWeb-Edu / SmolLM / TinyStories /
+         wikitext) via :func:`neuroslm.data.batch_iterator`.
+      2. Bundled local corpus (no network needed) via
+         :func:`neuroslm.data.local_corpus_batch_iterator`.
+      3. ``SyntheticBatchSource`` as a last resort with a LOUD warning,
+         because random batches produce the ``log(V)`` loss plateau.
+
+    HF priming uses ``max_open_attempts=1`` so an unreachable network
+    fails *fast* (within seconds) instead of hanging in the iterator's
+    exponential-backoff reconnect loop. The fallback chain then runs
+    immediately so the training run starts on real text either way.
     """
     def __init__(self, tokenizer, batch: int, seq_len: int,
                  device: str = "cpu", mode: str = "mix",
@@ -97,26 +108,76 @@ class RealDataSource:
                  ratio_ref=None, with_labels: bool = False):
         self.device = device
         self._fallback = None
+        self._local_it = None        # ``local_corpus_batch_iterator`` handle
         self._with_labels = with_labels
         self._last_labels = None  # set by next() when with_labels=True
+        self.source_label = "real-hf"
+
+        # ── Step 1: try real HF stream (fail fast on offline) ───────
         try:
             from neuroslm.data import batch_iterator
             self._it = batch_iterator(
                 tokenizer, ctx_len=seq_len, batch_size=batch,
                 seed=seed, mode=mode, chat_ratio=chat_ratio,
                 ratio_ref=ratio_ref, with_labels=with_labels,
+                max_open_attempts=1,
             )
-            # Prime one batch to surface failures early
+            # Prime one batch to surface failures early.
             self._primed = next(self._it)
-        except Exception as e:
-            print(f"[train_dsl] real data unavailable ({e!r}); using synthetic")
-            self._fallback = SyntheticBatchSource(
-                tokenizer.vocab_size, batch, seq_len, device, seed)
+            return
+        except Exception as e:  # noqa: BLE001
+            print(f"[train_dsl] HF stream unavailable "
+                  f"({type(e).__name__}: {e}); trying local corpus...")
+            self._it = None
             self._primed = None
+
+        # ── Step 2: bundled local corpus ───────────────────────────
+        try:
+            from neuroslm.data import local_corpus_batch_iterator
+            self._local_it = local_corpus_batch_iterator(
+                tokenizer, ctx_len=seq_len, batch_size=batch,
+            )
+            # Prime once so failures surface here.
+            self._primed = next(self._local_it)
+            self.source_label = "local-corpus"
+            print("[train_dsl] using bundled local corpus "
+                  "(neuroslm/assets/local_corpus.txt) — no network needed")
+            return
+        except Exception as e:  # noqa: BLE001
+            print(f"[train_dsl] local corpus unavailable "
+                  f"({type(e).__name__}: {e}); falling back to synthetic")
+
+        # ── Step 3: synthetic last resort (with WARNING) ───────────
+        print("=" * 70)
+        print("[train_dsl] WARNING: all real-data sources failed — using "
+              "synthetic torch.randint batches.")
+        print("[train_dsl] WARNING: lm_loss will plateau at log(vocab_size) "
+              "and the model will NOT learn linguistic structure.")
+        print("[train_dsl] Fix: provide network access OR restore "
+              "neuroslm/assets/local_corpus.txt.")
+        print("=" * 70)
+        self._fallback = SyntheticBatchSource(
+            tokenizer.vocab_size, batch, seq_len, device, seed)
+        self.source_label = "synthetic-random"
 
     def next(self):
         if self._fallback is not None:
             return self._fallback.next()
+        if self._local_it is not None:
+            if self._primed is not None:
+                window, self._primed = self._primed, None
+            else:
+                window = next(self._local_it)
+            window = window.to(self.device)
+            # Local corpus iterator never emits per-sample domain
+            # labels — synthesize all-zeros so DAR (when on) still has
+            # a tensor to consume.
+            if self._with_labels:
+                import torch as _torch
+                self._last_labels = _torch.zeros(
+                    window.shape[0], dtype=_torch.long, device=self.device)
+            return (window[:, :-1].contiguous(),
+                    window[:, 1:].contiguous())
         if self._primed is not None:
             item, self._primed = self._primed, None
         else:

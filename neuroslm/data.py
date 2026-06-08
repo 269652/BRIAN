@@ -209,13 +209,31 @@ def open_stream(mode: str = "text"):
 # Single-stream tokenized window iterator (infinite + self-healing).
 # ----------------------------------------------------------------------
 def _stream_iterator(tokenizer: Tokenizer, ctx_len: int, mode: str,
-                     buffer_size: int = 8192) -> Iterator[list[int]]:
+                     buffer_size: int = 8192,
+                     max_open_attempts: int | None = None,
+                     ) -> Iterator[list[int]]:
+    """Yield (ctx_len+1)-token windows from a streaming dataset.
+
+    The iterator is infinite and self-healing by default: transient
+    stream failures trigger an exponential-backoff reconnect so a
+    multi-hour training run doesn't die on a hiccup.
+
+    ``max_open_attempts``
+      When ``None`` (default), reconnects forever. When set to a
+      positive int N, the iterator raises ``RuntimeError`` after N
+      consecutive failures to *open* the stream — this is the
+      "priming" mode used at training-startup, where hanging in a
+      retry loop forever is worse than admitting failure and falling
+      back to a local corpus or synthetic source.
+    """
     buf: list[int] = []
     eos = tokenizer.eos_id
     reconnects = 0
+    open_failures_in_a_row = 0
     while True:
         try:
             ds, formatter, _ = open_stream(mode=mode)
+            open_failures_in_a_row = 0  # successful open resets the counter
             for ex in ds:
                 text = formatter(ex)
                 if not text:
@@ -234,6 +252,15 @@ def _stream_iterator(tokenizer: Tokenizer, ctx_len: int, mode: str,
                   f"(reconnect #{reconnects})")
         except Exception as e:  # noqa: BLE001
             reconnects += 1
+            open_failures_in_a_row += 1
+            # Fail-fast for priming callers: don't hang at startup.
+            if (max_open_attempts is not None
+                    and open_failures_in_a_row >= max_open_attempts):
+                raise RuntimeError(
+                    f"[data:{mode}] failed to open stream after "
+                    f"{open_failures_in_a_row} attempt(s); last error: "
+                    f"{type(e).__name__}: {e}"
+                ) from e
             wait = min(60, 5 * reconnects)
             print(f"[data:{mode}] stream error: {type(e).__name__}: {e} — "
                   f"reconnecting in {wait}s (reconnect #{reconnects})")
@@ -247,6 +274,7 @@ def token_window_iterator(tokenizer: Tokenizer, ctx_len: int,
                           chat_ratio: float = 0.75,
                           ratio_ref: "Callable[[], float] | None" = None,
                           with_labels: bool = False,
+                          max_open_attempts: int | None = None,
                           ) -> Iterator:
     """Yield fixed-length token windows of size ctx_len + 1.
 
@@ -266,16 +294,35 @@ def token_window_iterator(tokenizer: Tokenizer, ctx_len: int,
 
     Non-mix modes are unchanged: `ratio_ref` is ignored, `with_labels` is
     ignored (raw windows are yielded).
+
+    ``max_open_attempts``
+      Forwarded to :func:`_stream_iterator`. When set, the iterator
+      gives up after N consecutive open failures instead of looping
+      forever — used by training scripts that want a fast fallback
+      to a local corpus rather than an indefinite hang on a missing
+      network.
     """
     if mode in ("text", "chat", "qa"):
-        yield from _stream_iterator(tokenizer, ctx_len, mode, buffer_size)
+        if max_open_attempts is None:
+            yield from _stream_iterator(tokenizer, ctx_len, mode, buffer_size)
+        else:
+            yield from _stream_iterator(
+                tokenizer, ctx_len, mode, buffer_size,
+                max_open_attempts=max_open_attempts,
+            )
         return
     if mode != "mix":
         raise ValueError(f"unknown mode: {mode}")
     # Mix mode: pull from both streams, choose per-window by ratio.
     rng = random.Random(seed)
-    text_it = _stream_iterator(tokenizer, ctx_len, "text", buffer_size)
-    chat_it = _stream_iterator(tokenizer, ctx_len, "chat", buffer_size)
+    if max_open_attempts is None:
+        text_it = _stream_iterator(tokenizer, ctx_len, "text", buffer_size)
+        chat_it = _stream_iterator(tokenizer, ctx_len, "chat", buffer_size)
+    else:
+        text_it = _stream_iterator(tokenizer, ctx_len, "text", buffer_size,
+                                   max_open_attempts=max_open_attempts)
+        chat_it = _stream_iterator(tokenizer, ctx_len, "chat", buffer_size,
+                                   max_open_attempts=max_open_attempts)
     while True:
         r = ratio_ref() if ratio_ref is not None else chat_ratio
         if rng.random() < r:
@@ -294,13 +341,20 @@ def batch_iterator(tokenizer: Tokenizer, ctx_len: int, batch_size: int,
                    curriculum_end_step: int = 5000,
                    current_step: int = 0,
                    ratio_ref: "Callable[[], float] | None" = None,
-                   with_labels: bool = False) -> Iterator:
+                   with_labels: bool = False,
+                   max_open_attempts: int | None = None) -> Iterator:
     """Yield (B, ctx_len+1) token windows.
 
     curriculum=True: start with short subsequences (ctx_len * curriculum_start
     tokens) and linearly grow to full ctx_len over curriculum_end_step steps.
     This is critical for structured memory systems (DNC) whose gradients diverge
     on long sequences before the memory pointer is well-calibrated.
+
+    ``max_open_attempts``
+      Forwarded down to :func:`_stream_iterator` so that priming
+      callers (training-script constructors) fail fast and fall back
+      to a local corpus when the HF stream is unreachable instead of
+      hanging in the reconnect loop.
     """
     if curriculum and current_step < curriculum_end_step:
         # Linear schedule: effective_len grows from start_frac*ctx_len → ctx_len
@@ -311,7 +365,8 @@ def batch_iterator(tokenizer: Tokenizer, ctx_len: int, batch_size: int,
 
     it = token_window_iterator(tokenizer, eff_len, seed=seed,
                                mode=mode, chat_ratio=chat_ratio,
-                               ratio_ref=ratio_ref, with_labels=with_labels)
+                               ratio_ref=ratio_ref, with_labels=with_labels,
+                               max_open_attempts=max_open_attempts)
     step = current_step
     while True:
         batch = list(itertools.islice(it, batch_size))
@@ -324,10 +379,13 @@ def batch_iterator(tokenizer: Tokenizer, ctx_len: int, batch_size: int,
             new_len = max(32, int(ctx_len * (curriculum_start + (1.0 - curriculum_start) * frac)))
             if new_len != eff_len:
                 eff_len = new_len
-                it = token_window_iterator(tokenizer, eff_len, seed=seed + step,
-                                           mode=mode, chat_ratio=chat_ratio,
-                                           ratio_ref=ratio_ref,
-                                           with_labels=with_labels)
+                it = token_window_iterator(
+                    tokenizer, eff_len, seed=seed + step,
+                    mode=mode, chat_ratio=chat_ratio,
+                    ratio_ref=ratio_ref,
+                    with_labels=with_labels,
+                    max_open_attempts=max_open_attempts,
+                )
 
         # Split out labels if requested
         if with_labels:
@@ -351,4 +409,90 @@ def batch_iterator(tokenizer: Tokenizer, ctx_len: int, batch_size: int,
         else:
             yield t
         step += 1
+
+
+# ----------------------------------------------------------------------
+# Offline / bundled-corpus fallback.
+#
+# When no network is available (CI, CPU smoke runs, Colab without HF
+# tokens), the streaming chains above fail. To keep training real-data
+# (and not silently fall back to torch.randint, which produces the
+# infamous log(V) plateau), we ship a small natural-text corpus inside
+# the package and stream tokens from it on a loop.
+#
+# The corpus lives at ``neuroslm/assets/local_corpus.txt``. It is
+# written by the project (so licensing is clean) and is intentionally
+# small (~5 KB) so it ships in the wheel without bloat.
+# ----------------------------------------------------------------------
+
+import os as _os
+from pathlib import Path as _Path
+
+
+def _bundled_corpus_path() -> _Path:
+    """Resolve the path to the bundled local corpus.
+
+    Importable by both ``neuroslm.data.local_corpus_iterator`` and
+    by training scripts that want to log which file is in use.
+    """
+    return _Path(__file__).resolve().parent / "assets" / "local_corpus.txt"
+
+
+def local_corpus_iterator(tokenizer, ctx_len: int) -> Iterator[list[int]]:
+    """Stream tokenized windows from the bundled local corpus.
+
+    Infinite iterator: when the corpus is exhausted, it loops back to
+    the start. Used as the "offline" fallback when the HuggingFace
+    streaming chain can't be opened.
+
+    The corpus is small (a few thousand tokens), so a model trained
+    only on this will overfit quickly — but that overfitting is
+    exactly what makes the smoke test informative: it proves the
+    trainer is actually consuming text, not random noise.
+    """
+    path = _bundled_corpus_path()
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Bundled local corpus missing: {path}. The package install "
+            f"is incomplete; reinstall neuroslm or restore the file."
+        )
+    text = path.read_text(encoding="utf-8")
+    # Tokenize once; loop forever.
+    base_ids = tokenizer.encode(text)
+    if not base_ids:
+        raise RuntimeError(
+            f"Local corpus tokenized to empty stream — tokenizer or "
+            f"corpus is malformed (corpus path: {path})."
+        )
+    # Add eos between full sweeps so the model sees a hard boundary.
+    eos = getattr(tokenizer, "eos_id", 0)
+    cursor = 0
+    while True:
+        # Build one (ctx_len+1)-token window via modular indexing —
+        # extends the corpus by looping.
+        window = []
+        for i in range(ctx_len + 1):
+            idx = (cursor + i) % (len(base_ids) + 1)
+            if idx == len(base_ids):
+                window.append(eos)
+            else:
+                window.append(base_ids[idx])
+        cursor = (cursor + 1) % (len(base_ids) + 1)
+        yield window
+
+
+def local_corpus_batch_iterator(tokenizer, ctx_len: int,
+                                batch_size: int) -> Iterator[torch.Tensor]:
+    """Same shape as :func:`batch_iterator` but backed by the bundled
+    local corpus. Always available — no network required.
+
+    Yields ``(B, ctx_len+1)`` long tensors.
+    """
+    it = local_corpus_iterator(tokenizer, ctx_len)
+    while True:
+        batch = list(itertools.islice(it, batch_size))
+        if len(batch) < batch_size:
+            return
+        yield torch.tensor(batch, dtype=torch.long)
+
 
