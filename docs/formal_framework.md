@@ -339,7 +339,336 @@ These three guards together are what makes the framework *normative*: the evolut
 
 ---
 
-## 9. How to mutate this document
+## 7. Theory of Mind — Belief-Stalk Operator
+
+The first six sections cover *the architecture's view of itself* (Φ,
+H¹, λ₁, symbolic invention, NIS+). Real cognition also requires *the
+architecture's view of other agents* — first-order beliefs ("Sally
+believes the marble is in the basket"), second-order ("X believes Y
+believes Z"), false-belief inference (Wimmer & Perner 1983).
+
+### 7.1 Definition (ToM stalk)
+
+For a finite agent set $\mathcal{A} = \{a_1, \dots, a_{N_{\max}}\}$
+of size $N_{\max} = \text{max\_agents}$ and belief dimension
+$d_b = \text{d\_belief}$:
+
+$$
+F\bigl(\sigma_{\text{ToM}}(a_i)\bigr) \;=\; \mathbb{R}^{d_b \cdot (N_{\max}+1)^{\,\text{order}-1}}.
+$$
+
+The exponent encodes *recursive depth*: at order 1 the stalk is
+$\mathbb{R}^{d_b}$ ("what does $a_i$ believe?"); at order 2 it is
+$\mathbb{R}^{d_b(N_{\max}+1)}$ (one $d_b$-slot per agent
+$a_i$-believes-about, plus a self slot). The implementation
+formula is
+
+$$
+\dim F\bigl(\sigma_{\text{ToM}}(a_i)\bigr) \;=\; d_b \cdot (N_{\max}+1)^{\text{order}-1}
+$$
+
+(`TheoryOfMindIR.stalk_dim()` in `neuroslm/dsl/thsd_ir.py`).
+
+### 7.2 Definition (Belief decay)
+
+The temporal dynamics of belief stalks follow
+
+$$
+F\bigl(\sigma_{\text{ToM}}(a_i)\bigr)_{t+1} \;=\; \gamma \cdot F\bigl(\sigma_{\text{ToM}}(a_i)\bigr)_t \;+\; (1 - \gamma) \cdot \mathrm{obs}_t(a_i)
+$$
+
+with decay $\gamma = \text{belief\_decay} \in (0, 1]$. The endpoint
+$\gamma = 1$ is "never forget" (admitted); $\gamma = 0$ is "forget
+instantly" (rejected as degenerate by `__post_init__`).
+
+### 7.3 Invariant (False-belief separation)
+
+When `false_belief_enabled = True`, the architecture must maintain
+*two* sections over the ToM agent set:
+
+* $s_{\text{world}}$ — the model's belief about ground truth.
+* $s_{\text{agent}}(a_i)$ — the model's belief about what $a_i$
+  believes about the world.
+
+The Sally-Anne contract is
+
+$$
+\bigl\|\, s_{\text{world}} - s_{\text{agent}}(a_i)\, \bigr\| \;\ge\; \theta_{\text{fb}}
+$$
+
+for at least one agent during the false-belief probe, where
+$\theta_{\text{fb}} = \text{false\_belief\_threshold} \in [0, 1]$.
+Architectures that collapse $s_{\text{agent}} \equiv s_{\text{world}}$
+fail the Sally-Anne probe (cannot represent the divergence) and are
+flagged by the linter.
+
+### 7.4 Cohomology interaction
+
+ToM stalks share the same sheaf-cohomology machinery as everything
+else: contradictions between $s_{\text{world}}$ and
+$s_{\text{agent}}(a_i)$ produce a non-trivial $\delta^0$ residual on
+edges connecting the two stalks. This is the *desired* behaviour —
+the residual *encodes* the false-belief gap; the H¹ guard's
+threshold $\varepsilon_{H^1}$ is relaxed for ToM-tagged edges so a
+healthy false-belief representation is not mistaken for a
+hallucination.
+
+### 7.5 Current implementation status
+
+* ✅ `TheoryOfMindIR` dataclass + validation (`neuroslm/dsl/thsd_ir.py`)
+* ✅ TDD pin: `tests/thsd/test_theory_of_mind_ir.py` (7 tests)
+* ✅ Behavioural test: `tests/test_narrative_memory.py::test_theory_of_mind_consistency`
+* ⏳ Parser hook in `thsd_parser.py` (Phase P3)
+* ⏳ `ToMOperator` forward-pass module (Phase P3)
+* ⏳ Sally-Anne probe in OOD eval (Phase P3)
+
+---
+
+## 8. General-Language-Model Semantics in THSD Notation
+
+The framework's claim is that **any** language model can be
+expressed as a labelled simplicial complex $(K, F)$ with the
+appropriate operator bank. This section enumerates the canonical
+families and their THSD encoding so the discovery loop has explicit
+templates to specialise from.
+
+### 8.1 Decoder-only transformer (GPT family)
+
+For an $L$-layer, $H$-head transformer over $d$-dim residual stream
+with vocab $V$ and context $T$:
+
+* **Vertices** $K_0$: $\{\text{embed}, \text{block}_1, \dots, \text{block}_L, \text{norm}, \text{lm\_head}\}$.
+  Each $\text{block}_\ell$ is itself a 2-simplex with three
+  0-faces $\{\text{attn}_\ell, \text{ffn}_\ell, \text{residual}_\ell\}$.
+* **Stalks**: $F(\text{block}_\ell) = \mathbb{R}^d$ (the residual
+  stream slice), $F(\text{lm\_head}) = \mathbb{R}^V$.
+* **Restriction maps**: identity on the residual stream
+  ($\rho_{\ell+1, \ell} = I_d$), softmax-attention for cross-token
+  $\rho_{t, s}$ inside each block.
+* **Φ minimum**: any partition that bisects a block has
+  $\Phi(\text{block}_\ell) > 0$ because attention defines a
+  full-rank coupling between halves; the framework correctly
+  identifies a transformer block as IIT-conscious at the
+  per-block scale. (This is what `multi_cortex.fusion` exploits —
+  see `docs/architecture.md` §12 and recent commit `90b233d`.)
+
+### 8.2 Mixture-of-Experts (MoE)
+
+For $E$ experts with router top-$k$ activation:
+
+* **Vertices** $K_0$: a "router" 0-simplex plus $E$ "expert"
+  0-simplices. The active subset $S \subseteq \{1, \dots, E\}$ with
+  $|S| = k$ is selected per-token by the router.
+* **Edges** $K_1$: $\{(\text{router}, \text{expert}_i)\}_{i=1}^E$
+  carry the routing probability as their stalk content;
+  $\rho_{\text{expert}_i, \text{router}} = $ scaled by $p_i$.
+* **Sparsity invariant**: the H¹ guard enforces *exactly* one
+  consistent 1-cochain among the $k$ selected experts — if two
+  selected experts disagree by more than $\varepsilon_{H^1}$, the
+  router is mis-routing.
+
+This is the framework's encoding of the architecture in
+`neuroslm.cortex::MultiCortexEnsemble` (4 sub-cortices,
+`ThalamicRouter` for routing, GPT-2 family experts).
+
+### 8.3 State-Space Models (Mamba / S4 / RWKV)
+
+Linear recurrence $h_t = A h_{t-1} + B x_t$, $y_t = C h_t$:
+
+* **Single vertex** $\sigma_{\text{ssm}}$ with stalk
+  $F(\sigma_{\text{ssm}}) = \mathbb{R}^{d_{\text{state}}}$.
+* **Self-loop edge** $e_{\text{rec}} = [\sigma_{\text{ssm}}, \sigma_{\text{ssm}}]$
+  with $\rho_{e, \sigma}(h) = A h$ — the recurrence is the
+  restriction map of the self-loop.
+* **Φ via recurrence rank**: $\Phi \approx \log_2 \det(I - A^\top A + \varepsilon)$
+  for the diagonalisable SSM; selective-scan variants (Mamba)
+  have data-dependent $A$ so $\Phi$ becomes input-conditional —
+  computed via MIP at each time step.
+
+### 8.4 Retrieval-augmented LMs (RAG, kNN-LM)
+
+Memory bank $\mathcal{M} = \{(k_i, v_i)\}_{i=1}^N$ as a stalk
+sieve:
+
+* **Vertices** $K_0$: query 0-simplex $\sigma_q$ + retrieval
+  0-simplex $\sigma_r$ + generator vertices as in §8.1.
+* **Edges** $K_1$: $\sigma_q \to \sigma_r$ with stalk
+  $F = \mathbb{R}^N$ (one slot per memory) and restriction
+  $\rho_{q,r}$ = top-$k$ softmax of inner products in the chosen
+  metric.
+* **Fisher-Rao retrieval**: when the retrieval metric is
+  Fisher-Rao (Operator 4/4, §4.3) rather than cosine, the
+  $\rho$-restriction respects the statistical manifold structure
+  of the key embeddings.
+
+### 8.5 Diffusion LM
+
+Score-matching over the discrete simplex of token distributions:
+
+* **Stalks**: $F(\sigma_t) = \Delta^{V-1}$ (the probability
+  simplex over the vocab) at each diffusion step $t$.
+* **Coboundary** $\delta^0$: the discrete-time backward
+  Kolmogorov equation; the cocycle condition is the
+  reverse-diffusion consistency. A model that violates the
+  cocycle has $\delta^1 \neq 0$ and produces inconsistent
+  multi-step rollouts.
+* **Φ across timesteps**: integrated information of the joint
+  $(x_0, \dots, x_T)$ stream — diffusion models have natively
+  high Φ because every step couples to every previous step
+  through the noise schedule.
+
+### 8.6 Mixture (BRIAN itself)
+
+The `rcc_bowtie` architecture combines §8.1 (DSL language trunk),
+§8.2 (multi-cortex MoE), and ToM stalks from §7 over a shared
+sheaf-cohomology substrate — the canonical reference instantiation
+in this repo. See `architectures/rcc_bowtie/arch.neuro`.
+
+### 8.7 Universality claim
+
+**Proposition (informal).** Every neural language model can be
+expressed as a labelled simplicial complex $(K, F)$ over the
+operator bank $\mathcal{O}$ extended with the appropriate
+arithmetic primitives (matrix multiplication, softmax, element-
+wise non-linearities). The Φ and H¹ guards apply uniformly.
+
+A *constructive* proof — *"give me any PyTorch model and I will
+emit its $(K, F)$"* — is the Phase P5 deliverable; until then the
+framework supports the families above by hand-written templates.
+
+---
+
+## 9. Improvement Gate — Statistical Admission Criterion
+
+Sections §2.3 (H¹ Guard), §6.3 (Φ Guard), and §4.2 (λ₁ Guard)
+define **invariant** guards: necessary structural properties a
+mutation must not break. They are insufficient to *promote* a
+mutation, because a mutation that preserves Φ and H¹ but does not
+improve the model's behaviour is still useless evolutionary noise.
+
+### 9.1 Definition (Improvement evidence)
+
+For a target metric $\mu : \Theta \to \mathbb{R}$ (cross-entropy
+on a held-out batch, OOD perplexity, intelligence density,
+gap-ratio, …) and a candidate mutation $\theta \to \theta'$:
+
+$$
+\mathrm{evidence}_\mu(\theta, \theta') \;=\; \bigl(\mu_b^{(1)}, \dots, \mu_b^{(n)};\; \mu_a^{(1)}, \dots, \mu_a^{(m)}\bigr)
+$$
+
+where each $\mu_b^{(i)} = \mu(\theta; x^{(i)})$ and
+$\mu_a^{(i)} = \mu(\theta'; x^{(i)})$ for a fixed held-out
+sample family $\{x^{(i)}\}$.
+
+### 9.2 Definition (Direction)
+
+The caller supplies $\mathrm{dir} \in \{\downarrow, \uparrow\}$:
+$\downarrow$ for metrics where smaller is better (ppl, loss,
+gap-ratio), $\uparrow$ for larger-is-better (Φ, accuracy,
+intelligence-density).
+
+### 9.3 Invariant (Improvement Gate)
+
+A candidate mutation $\theta'$ is **improvement-admitted** for
+metric $\mu$ at significance $\alpha$ and minimum effect
+$\varepsilon_{\text{eff}}$ iff **all three** hold:
+
+1. **Direction.** $\mathrm{sgn}(\bar\mu_a - \bar\mu_b) = -1$ for
+   $\mathrm{dir} = \downarrow$, $+1$ for $\mathrm{dir} = \uparrow$.
+2. **Statistical significance.** The one-sided Welch's $t$-test
+   $p$-value satisfies $p < \alpha$ (default $\alpha = 0.05$).
+3. **Practical significance.**
+   $|\bar\mu_a - \bar\mu_b| / \max(|\bar\mu_b|, 10^{-12}) > \varepsilon_{\text{eff}}$
+   (default $\varepsilon_{\text{eff}} = 0.01$).
+
+### 9.4 Composition (Full admission)
+
+A mutation is **persisted** to the DNA iff
+$\mathrm{TripleGuard} \wedge \mathrm{ImprovementGate}$ both admit:
+
+$$
+\theta' \text{ persisted} \quad\Longleftrightarrow\quad
+\bigl(\Phi(\theta') \ge \Phi_{\min}\bigr) \wedge
+\bigl(\|H^1\|(\theta') \le H^1_{\max}\bigr) \wedge
+\bigl(\lambda_1(\theta') \ge \lambda_{\min}\bigr) \wedge
+\bigl(\text{improvement-admitted for } \mu\bigr).
+$$
+
+The composite is realised by `neuroslm.verification.improvement_gate.CompositeGate`
+chaining `TripleGuard` (§6.3, §2.3, §4.2) with `ImprovementGate`
+(this section).
+
+### 9.5 Current implementation status
+
+* ✅ `ImprovementGate` + `ImprovementVerdict` with Welch's t-test
+  (pure-Python, no scipy dependency) — `neuroslm/verification/improvement_gate.py`
+* ✅ `CompositeGate` chains multiple gates with AND semantics
+* ✅ TDD pin: `tests/verification/test_improvement_gate.py` (16 tests)
+* ⏳ Wire `CompositeGate` into `EvolutionaryTrainingContext.set_admission_gate()` (Phase P2)
+* ⏳ Lean-proof backend (Phase P4) — replaces the statistical test
+  for mutations whose source admits a formal monotonicity proof
+
+---
+
+## 10. Lean Backend — Formal Proof of Improvement
+
+The statistical Improvement Gate (§9) is the *general* admission
+criterion: it works for any opaque PyTorch model. But for *some*
+mutations the improvement is *provable* in a closed mathematical
+sense — e.g. adding a non-negative regularisation term to a loss
+cannot increase the gradient norm, or replacing a softmax with its
+straight-through estimator preserves the argmax. For those
+mutations a formal proof can replace the costly empirical
+evaluation.
+
+### 10.1 Backend interface
+
+```python
+class ProofBackend(Protocol):
+    def can_prove(self, mutation: Mutation, metric: str,
+                  direction: str) -> bool: ...
+    def prove(self, mutation: Mutation, metric: str,
+              direction: str) -> ProofVerdict: ...
+```
+
+The `LeanProofBackend` implementation (Phase P4) shells out to
+`lean --json` against `.lean` proof files autogenerated from the
+mutation's algebraic form. Returns `ProofVerdict(admitted=True)`
+when the Lean kernel checks the monotonicity theorem, otherwise
+falls through to the statistical gate.
+
+### 10.2 Lean theorem library (planned)
+
+Each proven invariant lives in `lean/Brian/`:
+
+| File | Theorem |
+|---|---|
+| `lean/Brian/PhiMonotone.lean` | $\Phi(\theta') \ge \Phi(\theta)$ when the mutation adds a non-negative coupling |
+| `lean/Brian/OodGapDecrease.lean` | Adding $\lambda \cdot \mathrm{CDGA}$ to the loss cannot increase the OOD gap (P1 from `docs/CDGA.md`) |
+| `lean/Brian/SymbolicSparsity.lean` | Driving Gumbel-Softmax temperature $\tau \to 0$ collapses every symbolic unit to a discrete expression |
+| `lean/Brian/TripleGuardSound.lean` | `TripleGuard.admit` returns `admitted = True` iff all three guards pass (soundness) |
+
+### 10.3 Current implementation status
+
+* ❌ Not yet started — Phase P4
+* The interface (§10.1) is normative now so the empirical gate
+  (§9) can be swapped without API churn.
+
+---
+
+## 11. Phased delivery roadmap
+
+| Phase | Deliverable | Status |
+|---|---|---|
+| P1 | ImprovementGate + ToM IR + this §7-§11; repo cleanup | ✅ This commit |
+| P2 | Real $\lambda_1(L_F)$ Tonnetz Laplacian; real $\|H^1\|$ kernel/image SVD; wire `CompositeGate` into evolution loop | ⏳ |
+| P3 | Fisher-Rao retrieval (Op 4/4); `ToMOperator` forward module; `theory_of_mind` parser block; Sally-Anne probe | ⏳ |
+| P4 | Lean toolchain integration; `LeanProofBackend`; theorems in `lean/Brian/` | ⏳ |
+| P5 | General-LM round-trip — emit $(K, F)$ from arbitrary PyTorch nn.Modules per §8.7 | ⏳ |
+
+---
+
+## 12. How to mutate this document
 
 This file is the contract. Updating it follows the protocol:
 
@@ -365,6 +694,9 @@ The evolutionary loop is expected to be able to follow steps 1–5 unattended on
 | Operator bank $\mathcal{O}$ | `neuroslm.modules.symbolic_unit::OperatorBank` |
 | `SymbolicHyperNeuron` $U_\varphi$ | `neuroslm.modules.symbolic_unit::SymbolicHyperNeuron` |
 | Triple Guard verifier | `neuroslm.verification.verifier::THSDVerifier` |
+| Composite admission gate | `neuroslm.verification.improvement_gate::CompositeGate` |
+| Statistical improvement gate | `neuroslm.verification.improvement_gate::ImprovementGate` |
+| ToM belief stalk IR | `neuroslm.dsl.thsd_ir::TheoryOfMindIR` |
 | Fitness composer | `neuroslm.fitness::FitnessComposer` |
 | Metabolic pruning | `neuroslm.modules.nrcstk::NRCSTKController` |
 
@@ -374,4 +706,5 @@ The evolutionary loop is expected to be able to follow steps 1–5 unattended on
 
 | Version | Date | Change |
 |---|---|---|
-| v0.1 | _this commit_ | Initial draft; THSD-1/4 (SymbolicSimplex) shipped; §1, §2, §3, §5–§7 normative; §4 spec-only |
+| v0.1 | 2026-06-07 | Initial draft; THSD-1/4 (SymbolicSimplex) shipped; §1, §2, §3, §5–§7 normative; §4 spec-only |
+| v0.2 | 2026-06-08 | P1: added §7 (ToM stalks), §8 (general-LM coverage), §9 (ImprovementGate), §10 (Lean backend interface), §11 (roadmap); renumbered "how to mutate" → §12; added `TheoryOfMindIR` + `ImprovementGate` + `CompositeGate` to Appendix A |

@@ -204,3 +204,81 @@ class TopologicalInvariantsIR:
     cohomology_errors: Dict[str, float] = field(default_factory=dict)  # complex_name -> ‖H¹‖
     phi_values: Dict[str, float] = field(default_factory=dict)  # complex_name -> Φ
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TheoryOfMindIR:
+    """Theory-of-Mind formal IR — per-agent belief stalks over a
+    finite, indexed agent set.
+
+    The ToM stalk ``F(σ_ToM(a))`` for agent ``a`` is a vector in
+    ``ℝ^{d_belief}`` encoding the model's belief state about ``a``:
+    what ``a`` is believed to know, want, and feel. The sheaf over
+    the indexed family ``{a_1, …, a_{max_agents}}`` is the model's
+    full first-order belief model.
+
+    Order
+    -----
+    * ``order=1`` — first-order ToM: "what does X believe?"
+      ``stalk_dim() == d_belief``.
+    * ``order=2`` — second-order: "what does X believe Y believes?"
+      ``stalk_dim() == d_belief * (max_agents + 1)`` so the
+      per-agent belief carries one slot per believed-about agent
+      plus a self slot.
+    * ``order=k`` — k-th order; ``stalk_dim()`` grows polynomially
+      (``d_belief * (max_agents + 1)^(order - 1)``). The linter
+      warns above order 3 because the compute cost explodes.
+
+    False-belief task
+    -----------------
+    The Sally-Anne / Smarties task is a standard ToM benchmark
+    (Wimmer & Perner 1983). Enabling ``false_belief_enabled`` adds
+    a gating threshold above which the model maintains the
+    *agent's* outdated belief separately from the *world's* current
+    state — required to predict where Sally will look for the marble.
+
+    See also: ``docs/formal_framework.md`` §7 (added P1).
+    """
+
+    d_belief: int = 64
+    max_agents: int = 16
+    belief_decay: float = 0.95
+    order: int = 1
+    false_belief_enabled: bool = False
+    false_belief_threshold: float = 0.5
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.d_belief <= 0:
+            raise ValueError(
+                f"d_belief must be > 0, got {self.d_belief!r}"
+            )
+        if self.max_agents <= 0:
+            raise ValueError(
+                f"max_agents must be > 0, got {self.max_agents!r}"
+            )
+        if not (0.0 < self.belief_decay <= 1.0):
+            raise ValueError(
+                f"belief_decay must be in (0, 1], got {self.belief_decay!r}"
+            )
+        if self.order < 1:
+            raise ValueError(
+                f"order must be >= 1 (use no theory_of_mind block to "
+                f"disable ToM), got {self.order!r}"
+            )
+        if self.false_belief_enabled and not (
+                0.0 <= self.false_belief_threshold <= 1.0):
+            raise ValueError(
+                f"false_belief_threshold must be in [0, 1], "
+                f"got {self.false_belief_threshold!r}"
+            )
+
+    def stalk_dim(self) -> int:
+        """Per-agent belief stalk dimension.
+
+        Polynomial growth in order so second-order ToM allocates
+        ``(max_agents + 1)`` belief slots per agent (one per
+        believed-about agent plus a self slot), and higher orders
+        chain that. Codegen uses this to size buffers.
+        """
+        return self.d_belief * (self.max_agents + 1) ** (self.order - 1)

@@ -192,7 +192,14 @@ class ThsdMutationOperator:
             checkpoint: ThgCheckpoint to mutate
             delta: Change in spectral gap (can be positive or negative)
         """
-        current = checkpoint.metadata.get("spectral_gap", 0.3)
+        # Use `or default` semantics: `.get(k, d)` only returns `d` when
+        # the key is *absent* — but the parser may store an explicit
+        # `None` when a `formal_spec` block omits the field. Treat
+        # `None` as "use the default" so unspecified constraints get
+        # mutated from a sane starting point rather than crashing.
+        current = checkpoint.metadata.get("spectral_gap")
+        if current is None:
+            current = 0.3
         new_gap = max(0.01, min(0.5, current + delta))
         checkpoint.metadata["spectral_gap"] = new_gap
 
@@ -205,7 +212,10 @@ class ThsdMutationOperator:
             checkpoint: ThgCheckpoint to mutate
             delta: Change in Phi target
         """
-        current = checkpoint.metadata.get("phi_target", 0.75)
+        # See ``mutate_spectral_gap`` for the None-handling rationale.
+        current = checkpoint.metadata.get("phi_target")
+        if current is None:
+            current = 0.75
         new_phi = max(0.0, min(1.0, current + delta))
         checkpoint.metadata["phi_target"] = new_phi
 
