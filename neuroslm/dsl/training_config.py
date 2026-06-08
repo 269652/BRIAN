@@ -314,6 +314,20 @@ class MultiCortexConfig:
       bema_tau             — Bregman-EMA smoothing constant on routing
                               weights (0.0 = no smoothing, 1.0 = frozen).
       router_d_model       — hidden width of the ThalamicRouter MLP.
+      fusion_mode          — how the ensemble feeds the LM head:
+                              * "logits_mixture" (default when enabled):
+                                  final_logits = (1-α) · lm_logits + α · (cortex_h @ embed.T)
+                                where α = sigmoid(learnable mix scalar).
+                                This makes the pretrained cortex features
+                                actually drive the loss from step 0.
+                              * "off": build the ensemble (for routing
+                                telemetry / aux objectives) but do NOT
+                                touch the LM head. Legacy behaviour.
+      fusion_init          — initial value of α (the mixing weight).
+                              Defaults to 0.5. Set to 0.0 to ramp the
+                              cortex in over training (start unchanged
+                              from the LM-only baseline). Set higher to
+                              trust the pretrained features more.
     """
     enabled: bool = False
     n_cortices: int = 4
@@ -327,6 +341,9 @@ class MultiCortexConfig:
     lexical_bias_weight: float = 2.0
     bema_tau: float = 0.5
     router_d_model: int = 256
+    # Logits-fusion mode + initial mixing weight. See class docstring.
+    fusion_mode: str = "logits_mixture"
+    fusion_init: float = 0.5
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -650,6 +667,13 @@ _VALID_OPTIMIZERS = {"adamw", "adafactor"}
 # (no network); "gpt2" = HF GPT-2 family ensemble (build_gpt2_ensemble).
 # Add new providers here as they're implemented in neuroslm/cortex.py.
 _VALID_MULTI_CORTEX_WEIGHTS = {"stub", "gpt2"}
+
+# Allowed values for `multi_cortex.fusion_mode`. Controls how the
+# ensemble feeds the LM head — see MultiCortexConfig docstring.
+#   "logits_mixture": late fusion via tied cortex_lm_head + sigmoid mix.
+#   "off":            build the ensemble but do not touch LM logits
+#                     (legacy "telemetry-only" semantics).
+_VALID_MULTI_CORTEX_FUSION_MODES = {"logits_mixture", "off"}
 
 # Allowed `fitness.objectives` keys.  Adding a new objective here is the
 # *only* place the parser needs to learn about it — the FitnessComposer
@@ -986,6 +1010,16 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
         m.bema_tau = float(props["bema_tau"])
     if "router_d_model" in props:
         m.router_d_model = int(props["router_d_model"])
+    if "fusion_mode" in props:
+        fm = _strip_quotes(props["fusion_mode"])
+        if fm not in _VALID_MULTI_CORTEX_FUSION_MODES:
+            raise ValueError(
+                f"unknown multi_cortex fusion_mode {fm!r}; "
+                f"expected one of {sorted(_VALID_MULTI_CORTEX_FUSION_MODES)}"
+            )
+        m.fusion_mode = fm
+    if "fusion_init" in props:
+        m.fusion_init = float(props["fusion_init"])
 
     # ── Cross-field validation ──
     if m.lexical_bias_weight < 0:
@@ -1001,6 +1035,11 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
         raise ValueError(
             f"multi_cortex.n_cortices ({m.n_cortices}) must equal "
             f"len(domains) ({len(m.domains)}); domains={m.domains}"
+        )
+    if not (0.0 <= m.fusion_init <= 1.0):
+        raise ValueError(
+            f"multi_cortex.fusion_init must be in [0.0, 1.0], "
+            f"got {m.fusion_init}"
         )
     return m
 

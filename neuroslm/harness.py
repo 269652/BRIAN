@@ -396,6 +396,8 @@ class BRIANHarness(nn.Module):
         cfg = getattr(self.training_config, "multi_cortex", None)
         if cfg is None or not cfg.enabled:
             self.multi_cortex = None
+            self.cortex_lm_head = None
+            self.cortex_mix_logit = None
             return
         if self.multi_cortex is not None:
             return  # already built — idempotent
@@ -408,10 +410,25 @@ class BRIANHarness(nn.Module):
             DEFAULT_GPT2_VARIANTS,
         )
 
+        # The ensemble's d_target must equal d_sem so its (B, T, d_target)
+        # output is dimensionally compatible with the fusion head. The
+        # config's `router_d_model` is reinterpreted here as the d_target;
+        # if it doesn't match d_sem we override it and warn (so fusion
+        # works without the operator hand-tuning two related numbers).
+        d_target = self.d_sem
+        if cfg.router_d_model != d_target:
+            import warnings
+            warnings.warn(
+                f"multi_cortex.router_d_model={cfg.router_d_model} != "
+                f"harness.d_sem={d_target}; overriding to d_sem so the "
+                f"fusion path lines up dimensionally.",
+                RuntimeWarning,
+            )
+
         if cfg.weights == "stub":
             self.multi_cortex = build_default_ensemble(
                 vocab=self.vocab_size,
-                d_model=cfg.router_d_model,
+                d_model=d_target,
                 domains=tuple(cfg.domains),
                 lexical_bias_weight=cfg.lexical_bias_weight,
                 bema_tau=cfg.bema_tau,
@@ -434,7 +451,7 @@ class BRIANHarness(nn.Module):
                 )
                 variants = {d: "gpt2" for d in cfg.domains}
             self.multi_cortex = build_gpt2_ensemble(
-                d_target=cfg.router_d_model,
+                d_target=d_target,
                 variants=variants,
                 freeze_weights=cfg.freeze_weights,
                 lexical_bias_weight=cfg.lexical_bias_weight,
@@ -445,6 +462,69 @@ class BRIANHarness(nn.Module):
                 f"unknown multi_cortex.weights {cfg.weights!r} "
                 "(parser should have rejected this)"
             )
+
+        # ── Fusion head: makes the ensemble's output actually reach
+        #    the LM head, so the pretrained cortex features (frozen or
+        #    fine-tuned) contribute to the loss from step 0. ────────
+        fusion_mode = getattr(cfg, "fusion_mode", "logits_mixture")
+        if fusion_mode == "off":
+            self.cortex_lm_head = None
+            self.cortex_mix_logit = None
+            return
+
+        # cortex_lm_head: (vocab_size, d_sem)
+        # The Linear stores its weight as (out=vocab, in=d_sem), the
+        # same shape as the LM's input embedding — required for tied-
+        # weights init below.
+        self.cortex_lm_head = nn.Linear(self.d_sem, self.vocab_size,
+                                        bias=False)
+
+        # ── Tied-weights init ───────────────────────────────────────
+        # Standard transformer trick: share storage with the LM's input
+        # embedding so the cortex's initial logits are geometrically
+        # aligned with the model's token space (instead of being random
+        # Xavier noise that gives "confidently wrong" predictions and
+        # pushes initial CE above log(vocab_size)).
+        #
+        # We try, in order:
+        #   1. self.language_model.embed (DSLLanguageModel — from
+        #      neuroslm/dsl/nn_lang.py — exposes .embed as
+        #      nn.Parameter(vocab, d_model)).
+        #   2. self.embedding.weight (legacy BRIANHarness path with the
+        #      hand-built per-token embedding).
+        # If neither is available, fall back to Xavier init — safer
+        # than Linear's default kaiming_uniform_ for an LM head.
+        tied = False
+        if (getattr(self, "language_model", None) is not None
+                and hasattr(self.language_model, "embed")
+                and isinstance(self.language_model.embed, nn.Parameter)
+                and tuple(self.language_model.embed.shape)
+                    == (self.vocab_size, self.d_sem)):
+            # Hard tie — share the same parameter. Gradients flowing
+            # through cortex_lm_head also update the LM's input embed,
+            # which is the standard GPT-style weight-tying setup.
+            self.cortex_lm_head.weight = self.language_model.embed
+            tied = True
+        elif (getattr(self, "embedding", None) is not None
+                and tuple(self.embedding.weight.shape)
+                    == (self.vocab_size, self.d_sem)):
+            self.cortex_lm_head.weight = self.embedding.weight
+            tied = True
+
+        if not tied:
+            # Xavier-normal init — at least centred, with std controlled,
+            # so initial logits aren't catastrophic.
+            nn.init.xavier_normal_(self.cortex_lm_head.weight)
+
+        # cortex_mix_logit: learnable scalar; sigmoid → α ∈ (0, 1).
+        # Init at logit(fusion_init) so the initial α matches the
+        # configured value. Default fusion_init=0.5 ⇒ logit=0.
+        fusion_init = float(getattr(cfg, "fusion_init", 0.5))
+        fusion_init = min(max(fusion_init, 1e-6), 1.0 - 1e-6)
+        init_logit = math.log(fusion_init / (1.0 - fusion_init))
+        self.cortex_mix_logit = nn.Parameter(
+            torch.tensor([init_logit], dtype=torch.float32)
+        )
 
     def set_domain_id_fn(self, fn) -> None:
         """Register an `ids → (B,) long tensor of domain labels` callable.
@@ -560,6 +640,28 @@ class BRIANHarness(nn.Module):
                 sink = self._pick_sink_output(outputs)
                 sink = sink.reshape(batch, seq_len, self.d_sem)
                 logits = self.lm_head(sink)
+
+            # ── Multi-Trunk-V2 logits-mixture fusion ───────────────
+            # When the cortex ensemble + fusion head are both built,
+            # late-fuse the ensemble's predictions into the LM logits.
+            # This is what makes the pretrained cortex weights actually
+            # contribute to the loss — without it, the ensemble is
+            # constructed but never invoked, and ~700M GPT-2 parameters
+            # sit dormant while a Xavier-init LM head guesses badly.
+            #
+            # final_logits = (1 - α) · lm_logits + α · cortex_logits
+            # where α = sigmoid(self.cortex_mix_logit) ∈ (0, 1) is a
+            # single learnable scalar that the optimizer can adjust to
+            # decide how much to trust the cortex vs the trunk.
+            if (self.multi_cortex is not None
+                    and getattr(self, "cortex_lm_head", None) is not None):
+                cortex_h = self.multi_cortex(ids)             # (B, T, d_sem)
+                cortex_logits = self.cortex_lm_head(cortex_h) # (B, T, vocab)
+                alpha = torch.sigmoid(self.cortex_mix_logit)  # (1,)
+                # Cast cortex_logits to match logits dtype/device (autocast
+                # may place them in bf16/fp16, but tied embed is fp32).
+                cortex_logits = cortex_logits.to(logits.dtype)
+                logits = (1.0 - alpha) * logits + alpha * cortex_logits
         # Return float32 logits regardless of autocast dtype, so loss math
         # downstream is numerically stable.
         return logits.float()
