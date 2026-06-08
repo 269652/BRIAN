@@ -319,9 +319,9 @@ training {
             depth:         8
             n_heads:       8
             max_ctx:       2048
-            batch_size:    2       # reduced from 16 → memory constraint
-            seq_len:       2048
-            grad_accum:    1       # keep optimizer update rate intact
+            batch_size:    1       # T4 GPU memory: 16 GiB fits 1×512 ctx comfortably
+            seq_len:       512     # reduces attn memory (O(T²) per head); was 2048
+            grad_accum:    4       # compensates for batch=1; maintains training signal
             approx_params: "30M"
         }
 

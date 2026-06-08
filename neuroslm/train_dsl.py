@@ -21,7 +21,7 @@ import argparse
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -31,7 +31,7 @@ from typing import Optional
 # DSL_RUN_ID env var (vast_train_dsl_loop sets it when resuming); falls
 # back to current UTC time at import.
 _RUN_ID = os.environ.get(
-    "DSL_RUN_ID", datetime.utcnow().strftime("%Y%m%d-%H%M%S"))
+    "DSL_RUN_ID", datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
 
 import torch
 
