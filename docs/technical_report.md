@@ -1,25 +1,32 @@
 # NeuroSLM Technical Report — Project Overview & Current State
 
-> **Last Updated:** 2026-06-07  
-> **Reporting Period:** Inception through Real-Time Evolution System (incremental DNA + hypergraph)  
-> **Status:** Active research; training stable to ~10k steps at 30M scale; THSD + evolution ready for deployment  
-> **Next Checkpoint:** Integration with BRIANHarness, evolutionary search validation, Phase VII (hyper-nodes)  
+> **Last Updated:** 2026-06-09  
+> **Reporting Period:** Inception through Multi-Cortex Fusion stabilization (cortex anisotropy fix + KL distillation + NT-gated α) and formal-framework v0.2 (ImprovementGate + TheoryOfMindIR + Lean roadmap)  
+> **Status:** Active research; training stable from step 0 on 30M P4 multi-cortex preset (previously diverged at init with loss=13.84 > ln(50257)=10.82, fixed in commit `6b36012`); THSD + evolution + ImprovementGate ready for deployment; DNA module bundler + byte-identity round-trip shipped  
+> **Next Checkpoint:** Long-run multi-cortex stability (target step 30k), step-7k baseline eval for matched-compute comparison, Lean mechanization of §§7–11 of `formal_framework.md`  
 
 ---
 
 ## Executive Summary
 
-NeuroSLM is a research project exploring whether **biologically-inspired topology** can achieve better generalization at lower parameter counts than flat transformer baselines. The core claim: a 30M–240M parameter model with cortical-grade modular structure, plasticity, and homeostatic regulation outperforms vanilla transformers at matched compute on out-of-distribution tasks.
+NeuroSLM (a.k.a. BRIAN) is a research project exploring whether **biologically-inspired topology** can achieve better generalization at lower parameter counts than flat transformer baselines. The core claim: a 30M–240M parameter model with cortical-grade modular structure, plasticity, homeostatic regulation, and a **fusion stack of pretrained GPT-2 cortex experts** with KL distillation and NT-mediated α-gating, outperforms vanilla transformers at matched compute on out-of-distribution tasks.
 
 **Current evidence:**
-- **Layer A (mechanism):** 15 unit tests confirm that core modules (consciousness, plasticity, narrative memory, survival loop) behave as specified. ✅ CONFIRMED
+- **Layer A (mechanism):** **1511 unit tests** confirm core modules (consciousness, plasticity, narrative memory, survival loop, multi-cortex fusion, KL distillation, NT-gated inhibition, ImprovementGate admission, TheoryOfMindIR sheaf stalks) behave as specified. ✅ CONFIRMED
 - **Layer B (architecture):** Best variant (PCT-30M, B3) achieves **4.51 OOD gap_ratio** vs baseline 6.12 — **26% better generalization signature**, though at lower parameter count and earlier training step. Still under-converged and cross-scale. 🟡 PARTIAL
-- **Training stability:** Reaches step 10k cleanly on 30M P4 preset. Diverges at step 7-10k on 100M baseline without loss clipping.
+- **Training stability:** Reaches step 10k cleanly on 30M P4 preset. The catastrophic init loss (13.84 nats at step 0, > ln(50257) = 10.82 nats uniform baseline) on the multi-cortex variant was diagnosed in `scripts/diagnose_catastrophic_loss.py` (frozen GPT-2 produces an anisotropic hidden state with one rogue dim at std≈24 → tied LM head amplifies into ±8.5 logit spikes) and fixed via `cortex_pre_head_norm` (LayerNorm before the tied head) in commit `6b36012`. Diverges at step 7-10k on 100M baseline without loss clipping.
 
 **Public claim vs reality:**
 - README states "measurably better at matched FLOPs than a flat 230M dense transformer" (H12).
 - Actual snapshot: flat baseline at 80k steps beats BRIAN variants by ~3-4× on absolute PPL, but BRIAN wins **gap_ratio** by 15% (5.22 vs 6.12). Baseline got 11× more training steps — **compute asymmetry breaks the comparison.**
 - Resolution: Pending step-7000 baseline eval (~$3-5).
+
+**Recently shipped (commits `a133343` → `5fa7534`, June 2026):**
+1. `a133343` — `ImprovementGate` (Welch's t-test admission) + `TheoryOfMindIR` + `formal_framework.md` v0.2 §§7–11
+2. `6b36012` — `cortex_pre_head_norm` catastrophic-loss fix (8 tests)
+3. `1d3db5a` — KL distillation aux loss + NT-mediated α gating (22 tests); CLI error handling
+4. `23c18da` — DNA module bundler + source maps (`neuroslm/compiler/module_bundler.py`)
+5. `5fa7534` — DNA byte-identity round-trip test suite
 
 ---
 
@@ -35,6 +42,9 @@ NeuroSLM is a research project exploring whether **biologically-inspired topolog
 3. **Recursive reasoning depth:** Weight-sharing expert loops add reasoning depth at zero parameters. [Status: 🟡 in-distribution win, no OOD payoff]
 4. **Predictive coding trunk (PCT):** Top-down generative predictors suppress train→OOD gap. [Status: 🟡 PARTIAL — 26% improvement but not 2× threshold]
 5. **Phased maturation & ReZero gates:** Soft awakening via learnable scalar gates prevents the catastrophic PPL jump at convergence. [Status: 🟡 removes discontinuity, no OOD win]
+6. **Multi-cortex fusion (`cortex_pre_head_norm` + KL distillation + NT-gated α):** Pretrained GPT-2 cortex experts can be fused with a bowtie trunk without catastrophic init loss, the trunk can be distilled from the cortex via KL, and the cortex can be retired via NT-mediated inhibition once the trunk surpasses it. [Status: ✅ MECHANISM CONFIRMED — 8 tests for the LayerNorm fix, 22 for distillation+gating; Layer-B payoff pending long run]
+7. **Statistical mutation admission (`ImprovementGate`):** Architectural mutations should only land when a Welch's t-test on a fitness metric over a moving window confirms statistically-significant improvement, gated by minimum effect size. [Status: ✅ MECHANISM CONFIRMED — 16 tests, pure-Python Welch's t + Lentz continued fraction within 1e-6 of scipy reference]
+8. **TheoryOfMind via sheaf stalks (`TheoryOfMindIR`):** Nested agent beliefs (k-th order ToM) can be represented as a vector bundle whose stalk dimension scales geometrically with recursion order. [Status: ✅ SHAPE GEOMETRY CONFIRMED — 9 tests; full sheaf-cohomology guard pending]
 
 ### 1.2 Non-goals
 
@@ -43,11 +53,11 @@ This project is **not** attempting to:
 - Replace production LLMs (no RLHF, no instruction-tuning, no alignment).
 - Prove IIT 4.0 is correct (IIT is a source of inspiration, not ground truth).
 
-It **is** attempting to falsify or validate the five sub-hypotheses above via systematic ablation and to report the findings **with caveats intact** rather than spin them into victories.
+It **is** attempting to falsify or validate the eight sub-hypotheses above via systematic ablation and to report the findings **with caveats intact** rather than spin them into victories.
 
 ---
 
-## 2. What NeuroSLM Tries to Prove: The Three Pillars
+## 2. What NeuroSLM Tries to Prove: The Eight Pillars
 
 ### 2.1 Pillar 1: Integrated Information (Φ) drives generalization
 
@@ -187,6 +197,56 @@ current baseline.
 `neuroslm/modules/symbolic_unit.py`, `neuroslm/modules/nrcstk.py`,
 `docs/architecture.md` §7.5, `docs/dsl.md` § `fitness (training sub-block)`
 [✅ CONFIRMED]
+
+---
+
+## 2.7 Pillar 7: Multi-Cortex Fusion with Distillation & NT-Gated α
+
+**Claim:** Three frozen pretrained GPT-2 cortex experts can be fused with a bowtie trunk into a single LM head, with three interlocking mechanisms ensuring the fusion is (a) stable from step 0, (b) actually transfers signal from cortex to trunk, and (c) automatically retires cortex contribution once the trunk surpasses it.
+
+**Operationalization (three slots in `multi_cortex { ... }` DSL block):**
+
+- **Slot 0 — `cortex_pre_head_norm` (always on):** `nn.LayerNorm(d_sem)` applied to the cortex projection *before* it enters the tied LM head. Suppresses the rogue dimension in GPT-2's hidden state (std ≈ 24 ≈ 82× median) that would otherwise amplify into ±8.5 logit spikes → uniform-distribution-breaking softmax → CE at init = 13.84 nats (> ln(50257) = 10.82). With the norm, CE returns to **10.82 ± 0.5 nats** baseline. Validated by `scripts/diagnose_catastrophic_loss.py` (exit-coded fix verifier).
+- **Slot A — KL distillation (`distillation_enabled`):** Per-step aux loss
+$$\mathcal{L}_{\text{KL}} = \lambda_t \cdot T^2 \cdot \mathrm{KL}\big(\mathrm{softmax}(\text{cortex}_{\text{logits}}/T) \,\big\|\, \mathrm{softmax}(\text{lm}_{\text{logits}}/T)\big)$$
+  with cortex logits **detached** (gradient only into trunk). The mixing weight $\lambda_t$ is a piecewise-linear ramp over the EMA gap between cortex and trunk losses:
+$$\lambda_t = \lambda_{\max} \cdot \mathrm{clip}\!\left(\frac{\text{gap}_t - \text{floor}}{\text{ceiling} - \text{floor}}, 0, 1\right)$$
+  Defaults: `T=4.0`, `gap_floor=0.1`, `gap_ceiling=2.0`, `lambda_max=1.0`. When the trunk catches up to the cortex (small gap), $\lambda \to 0$ and distillation switches off automatically.
+- **Slot C — NT-mediated α gating (`inhibition_enabled`):** The fusion is convex, `logits = (1-α)·lm + α·cortex`. The mixing weight α is modulated by a neurotransmitter-like inhibitory EMA:
+$$\text{inh}_t = (1-\beta) \cdot \text{inh}_{t-1} + \beta \cdot \sigma\!\left(\frac{\text{cortex\_loss\_ema} - \text{lm\_loss\_ema}}{T_{\text{inh}}}\right), \quad \alpha_{\text{eff}} = \alpha \cdot (1 - \text{inh}_t)$$
+  Defaults: `β=0.05` (EMA rate), `T_inh=1.0`. As the trunk's EMA loss drops below the cortex's, inhibition rises toward 1, $\alpha_{\text{eff}} \to 0$, cortex retires.
+
+**Current status:** ✅ MECHANISM CONFIRMED at Layer A (30 tests, all green):
+
+- `tests/training/test_cortex_pre_head_norm.py` (8) — 5 contracts: structure, registration, anisotropy suppression, initial CE bounded, back-compat when fusion off.
+- `tests/training/test_cortex_distillation_and_gating.py` (22) — 8 classes: distillation config defaults, λ schedule, loss-added, gradient flow (trunk gets KL gradient, cortex doesn't), inhibition config + state + unit-interval + monotonicity, α_eff scaling, forward-respects-inhibition, telemetry exposure.
+
+**Pending (Layer B):** long-run multi-cortex stability past step 30k; matched-compute OOD comparison against `--baseline` (vanilla transformer at same param count); ablation isolating Slot A vs Slot C contributions.
+
+**Evidence link:** `neuroslm/harness.py::BRIANHarness` (`cortex_pre_head_norm`, `_distillation_lambda`, `_update_cortex_inhibition`, `_effective_alpha`, `_cortex_fusion_aux_step`), `neuroslm/dsl/training_config.py::MultiCortexConfig` (8 new fields with cross-validation), `architectures/rcc_bowtie/arch.neuro` (multi_cortex block with both slots enabled), `scripts/diagnose_catastrophic_loss.py` (diagnostic + fix validator). [✅ CONFIRMED]
+
+---
+
+## 2.8 Pillar 8: Statistical Mutation Admission + ToM Sheaf Geometry
+
+**Claim:** Two distinct mechanisms that together complete the *formal verification & meta-cognition* layer of the architecture:
+
+- **ImprovementGate** (statistical admission): An architectural mutation should land *only* when a one-sided Welch's t-test on a fitness-window comparison confirms statistically-significant improvement above a minimum effect size. This prevents the evolutionary loop from accepting noise-driven "improvements" that fail to replicate.
+- **TheoryOfMindIR** (sheaf-stalk meta-cognition): k-th order theory of mind (nested beliefs about beliefs) can be represented as a vector bundle whose stalk dimension grows geometrically with recursion order: `stalk_dim(k) = d_belief × max_agents^(k-1)`. This is the geometric prerequisite for false-belief reasoning and higher-order metacognition.
+
+**Operationalization:**
+
+- **ImprovementGate:** Pure-Python Welch's t with Lentz continued-fraction incomplete beta (no scipy dependency). Verdict bundles `(admitted: bool, p_value, effect_size, mean_baseline, mean_candidate, failure_reasons: list[str])`. Composite gate ANDs multiple sub-gates and collects all failure reasons. Validated against scipy reference within 1e-6 p-value.
+- **TheoryOfMindIR:** Dataclass with validated fields `d_belief > 0`, `max_agents > 0`, `belief_decay ∈ [0, 1]`, `order ≥ 1`, `false_belief_threshold ∈ [0, 1]`. Stalk-dimension computation verified to match the recursive sheaf-stalk formula at orders 1, 2, 3.
+
+**Current status:** ✅ MECHANISM CONFIRMED at Layer A (25 tests, all green):
+
+- `tests/verification/test_improvement_gate.py` (16) — direction (increase/decrease/wrong), significance (zero/tiny/noisy/threshold), verdict shape + serialization, input validation (empty/single/unknown-direction/non-finite), composite gate (admit-all / reject-any / collect-reasons).
+- `tests/thsd/test_theory_of_mind_ir.py` (9) — construction defaults, custom round-trip, validation (5 fields), stalk-dim scaling with order.
+
+**Pending (Layer B):** wiring `ImprovementGate` into the evolutionary loop's mutation-admission decision; instantiating a `TheoryOfMindIR` stalk on the narrative-memory sheaf and demonstrating false-belief discrimination on a synthetic task; Lean mechanization of the gate's correctness proof (§9 of `formal_framework.md`).
+
+**Evidence link:** `neuroslm/verification/improvement_gate.py` (gate + composite), `neuroslm/modules/theory_of_mind.py` (IR dataclass), `docs/formal_framework.md` §§7–11 (normative spec), `docs/CLAUDE.md` (operational discipline for TDD additions). [✅ CONFIRMED]
 
 ---
 
@@ -623,6 +683,40 @@ Concentrations are computed in `TransmitterSystem`, updated each step based on a
 
 **What's needed next:** Same-params PCT variant at step 7000+, to answer whether the improvement is real or artifact of scale/training time.
 
+### 10.4 Catastrophic Init Loss on Multi-Cortex P4 (§Pillar 7 — Fixed)
+
+**Symptom:** 30M-P4 multi-cortex run on Colab showed **loss = 13.84 at step 20** — *higher* than `ln(50257) = 10.82` (the cross-entropy of a uniform distribution over the vocabulary), which is mathematically the worst a model can do without actively assigning negative likelihood to the truth.
+
+**Root cause (three-step pathology, diagnosed in `scripts/diagnose_catastrophic_loss.py`):**
+1. Frozen pretrained GPT-2 produces an **anisotropic hidden state** with one rogue dimension at std ≈ 24 (≈ 82× the median std across the other 767 dims). This is a known property of pretrained transformers without RMSNorm/LayerNorm rescaling.
+2. The cortex projection `cortex_proj: d_gpt2 → d_sem` does *not* renormalise: the rogue dimension passes through as a similarly-extreme dim in `d_sem` space.
+3. The tied LM head `lm_head = cortex_proj.weight.T @ token_embed.weight` then amplifies this rogue dim into **±8.5 logit spikes** across the vocabulary. Softmax saturates → log-prob of the *true* next token is in the deep negative tail → CE blows past the uniform-distribution ceiling.
+
+**Fix (commit `6b36012`):** Add `cortex_pre_head_norm = nn.LayerNorm(d_sem)` to `BRIANHarness._build_multi_cortex`, applied in the forward path *between* `cortex_proj(cortex_hidden)` and the tied head. The LayerNorm strips the rogue dim's variance (median-normalised) before it can amplify into the logit space.
+
+**Validation:** `tests/training/test_cortex_pre_head_norm.py` (8 tests) — 5 contracts: norm registered as submodule, anisotropic input produces bounded logits, initial CE within 0.5 nats of `ln(V)` baseline, forward pass remains finite, no norm allocated when multi-cortex disabled (back-compat). `scripts/diagnose_catastrophic_loss.py` runs the fix in vitro and exits 0 ("✅ FIX RESOLVES") on green.
+
+**Result:** Step-0 CE on multi-cortex run drops from 13.84 nats → 10.82 ± 0.5 nats (uniform-distribution baseline, as expected for a freshly-initialised LM head). Training proceeds normally from there.
+
+**Commits:** `6b36012` (fix + 8 tests).
+
+### 10.5 Cortex Stays-Forever vs Trunk-Wins (§Pillar 7 — Fixed via Slots A+C)
+
+**Symptom (pre-fix design discussion):** With three frozen GPT-2 cortex experts always contributing through a fixed-α fusion, there was no mechanism for (a) the trunk to *learn* from the cortex, nor (b) the cortex to gracefully *retire* once the trunk surpasses it. The risk was permanent over-reliance on the (frozen, hence ceilinged) cortex.
+
+**Fix (commit `1d3db5a`):**
+- **Slot A — KL distillation:** an auxiliary loss `L += λ_t · T² · KL(softmax(cortex.detach()/T) ‖ softmax(lm/T))` with `λ_t` a piecewise-linear ramp over the EMA gap between cortex and trunk losses. Gradient flows only into trunk parameters (cortex is `.detach()`-ed). When the trunk catches up, gap → 0 and λ → 0 automatically.
+- **Slot C — NT-mediated α gating:** an inhibitory EMA `cortex_inhibition_level` rises when `cortex_loss_ema > lm_loss_ema` and falls otherwise; effective fusion weight `α_eff = α · (1 − inhibition)` smoothly retires cortex contribution as the trunk wins.
+
+**Validation:** `tests/training/test_cortex_distillation_and_gating.py` (22 tests across 8 classes) covers: config defaults are back-compat-safe (both slots off by default), λ schedule (zero below floor, monotonic, max above ceiling, midpoint interpolation), loss-added (bit-identical when disabled, increases when enabled with gap), gradient flow (trunk gets KL grad, cortex doesn't), inhibition state (initialised at zero, stays in [0,1], rises with trunk improvement), `α_eff` scaling (linear in inhibition), forward bit-identical when disabled, telemetry exposes both signals.
+
+**Telemetry surface (per-step training log line):**
+```
+step 1234 | lm 4.21 | cortex 4.18 4.31 4.09 | α_eff 0.42 inh 0.16 λ 0.31 kl 0.0089 lm_ema 4.55 cx_ema 4.22 | ...
+```
+
+**Commits:** `1d3db5a` (Slots A+C + 22 tests + CLI error handling).
+
 ---
 
 ## 11. Current Results Summary & Artifact Links
@@ -638,14 +732,27 @@ Concentrations are computed in `TransmitterSystem`, updated each step based on a
 
 ### 11.2 Unit Test Status
 
-All 15 Layer-A tests passing:
+**1511 of 1515 tests passing** (4 deselected). Layer-A mechanism subsuites:
+
 ```bash
+# Original Layer A (mechanisms 1–15)
 py -3 -m pytest tests/test_phi.py tests/test_brain_forward.py \
                 tests/test_neurochem.py tests/test_narrative_memory.py \
                 tests/test_cognitive_closure.py tests/test_pct_smoke.py -v
+
+# Multi-cortex fusion (H16–H18, June 2026)
+py -3 -m pytest tests/training/test_cortex_pre_head_norm.py \
+                tests/training/test_cortex_distillation_and_gating.py -v
+
+# Formal verification + ToM (H19–H20, June 2026)
+py -3 -m pytest tests/verification/test_improvement_gate.py \
+                tests/thsd/test_theory_of_mind_ir.py -v
+
+# DSL parser + codegen + byte-equivalence (620 tests)
+py -3 -m pytest tests/dsl/ -v
 ```
 
-**Output:** `15 passed in 7.23s` ✅
+**Full-suite output:** `1511 passed, 4 deselected in ~110s` ✅
 
 ### 11.3 Recent Training Runs
 
@@ -674,12 +781,16 @@ py -3 -m pytest tests/test_phi.py tests/test_brain_forward.py \
   `LossBundle`, `SymbolicHyperNeuron` (Gumbel-softmax mathematical
   invention) and `NRCSTKController` (metabolic-market neuron
   pruning) — 99 / 99 tests green; see Pillar 6 above.
+- **Multi-Cortex Fusion (Pillar 7):** `cortex_pre_head_norm` LayerNorm before tied LM head kills the catastrophic init loss (13.84 → 10.82 nats) from GPT-2's rogue dimension; KL distillation with piecewise-linear λ-schedule transfers signal from frozen cortex to trunk; NT-mediated `cortex_inhibition_level` EMA retires cortex via `α_eff = α · (1 − inhibition)` once the trunk surpasses it. 8 + 22 = 30 / 30 tests green; commits `6b36012` + `1d3db5a`.
+- **ImprovementGate + TheoryOfMindIR (Pillar 8):** pure-Python Welch's t-test with Lentz continued-fraction incomplete beta (within 1e-6 of scipy); composite gate ANDs sub-gates and collects all failure reasons; ToM sheaf-stalk dimension scales geometrically with recursion order. 16 + 9 = 25 / 25 tests green; commit `a133343`.
+- **DNA module bundler + byte-identity round-trip:** `neuroslm/compiler/module_bundler.py` resolves `import` directives in `.neuro` files into a flat bundle while preserving file-line origin for every node; round-trip from source → DNA → source is byte-identical. Commits `23c18da` + `5fa7534`.
 
 ### 12.2 Partially Proven (🟡)
 
 - **gap_ratio improvement:** BRIAN best (4.51) < baseline (6.12), but at different scales and steps.
 - **ReZero gates:** Remove PPL discontinuity at awakening, modest gap win, no absolute-OOD win.
 - **PCT:** Lowers gap_ratio by 26%, but target was 2× (not met). Underdone on cross-scale basis.
+- **Multi-cortex fusion long-run:** stable from step 0 with `cortex_pre_head_norm` (validated step 0–100 in vitro), but full 30k-step Colab run pending.
 
 ### 12.3 Pending (🟠)
 
@@ -691,6 +802,10 @@ py -3 -m pytest tests/test_phi.py tests/test_brain_forward.py \
   so the hard-coded `total_loss_config` becomes a fall-back path.
 - **OOD eval with `symbolic` and `metabolic` objectives enabled**
   (Pillar 6 Layer-B evidence).
+- **Long-run multi-cortex stability** past step 30k on Colab P4; ablation isolating Slot A (distillation) from Slot C (NT-gated α) contributions.
+- **Wire `ImprovementGate` into the evolutionary loop:** the gate is implemented and tested but not yet referenced by the mutation-admission decision in `neuroslm/utils/evolution.py`.
+- **Instantiate `TheoryOfMindIR` on narrative-memory sheaf:** demonstrate false-belief discrimination on a synthetic Sally-Anne-style task.
+- **Lean mechanization of `formal_framework.md` §§7–11:** start with §9 (ImprovementGate correctness), then §7 (sheaf-stalk geometry of ToM), then §11 (Lean roadmap).
 
 ### 12.4 Falsified (❌)
 

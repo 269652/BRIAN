@@ -307,7 +307,9 @@ This is the **anti-bag-of-MLP guarantee**: a model that has factored into indepe
 
 ---
 
-## 7. The Triple Guard (Linter Specification)
+## 6.4 The Triple Guard (Linter Specification)
+
+> **Numbering note (v0.2):** This section was originally `## 7` in v0.1. The `a133343` patch introduced new §§7-12 covering ToM stalks, general-LM semantics, ImprovementGate, Lean backend, and the phased roadmap. To preserve content while honouring the new numbering, the original Triple Guard spec is now §6.4 (a refinement of §6.3 Φ Guard). The Triple Guard is the algebraic, structural admission criterion; §9 ImprovementGate is the statistical complement.
 
 The verifier `neuroslm/verification/verifier.py` will, after Phase THSD-3, enforce three guards in series. A checkpoint must clear all three:
 
@@ -327,13 +329,15 @@ These three guards together are what makes the framework *normative*: the evolut
 
 ---
 
-## 8. Roadmap (Phases bound to this document)
+## 6.5 Pre-v0.2 THSD Roadmap (superseded by §11)
+
+> **Numbering note (v0.2):** This section was originally `## 8 Roadmap (Phases bound to this document)` in v0.1. The active forward-looking roadmap is now §11 "Phased delivery roadmap" which covers P1–P5 across `ImprovementGate`, Lean integration, and the full discovery-operator buildout. The pre-v0.2 THSD-internal phases below are preserved for historical traceability of the THSD subsystem only.
 
 | Phase | Scope | Status | Tests |
 |---|---|---|---|
 | **THSD-1/4 — Symbolic Expression Units** | `SymbolicSimplex` in engine.py; sheaf integration; discovery surface | ✅ **Shipped** (this commit) | `tests/thsd/test_symbolic_simplex.py` (15) |
 | THSD-2/4 — Causal Emergence | `CausalEmergenceOperator`; NIS+ EI search; $y_{d=1}$ conscious variable | ⏳ Spec frozen here §4.1 | TBD `tests/thsd/test_causal_emergence.py` |
-| THSD-3/4 — Tonnetz Filter & Triple-Guard Linter | `TonnetzResonanceFilter`; harden `verifier.py` to enforce §7 strictly | ⏳ Spec frozen here §4.2, §7 | TBD `tests/thsd/test_tonnetz_filter.py`, `tests/verification/test_triple_guard.py` |
+| THSD-3/4 — Tonnetz Filter & Triple-Guard Linter | `TonnetzResonanceFilter`; harden `verifier.py` to enforce §6.4 strictly | ⏳ Spec frozen here §4.2, §6.4 | TBD `tests/thsd/test_tonnetz_filter.py`, `tests/verification/test_triple_guard.py` |
 | THSD-4/4 — Fisher-Rao Retrieval | `FisherRaoRetrieval`; replace cosine in retrieval stalks | ⏳ Spec frozen here §4.3 | TBD `tests/thsd/test_fisher_rao.py` |
 | THSD-5 — DSL wiring | Wire `thsd_parser.py` so `complex`/`sheaf` blocks compile end-to-end (resolves the 17 RED tests left by the parallel session) | ⏳ Blocked on compiler.py race resolution | `tests/dsl/test_thsd_parser_complex.py`, `tests/dsl/test_dsl_v2_vesicle_sieve.py` |
 
@@ -708,3 +712,4 @@ The evolutionary loop is expected to be able to follow steps 1–5 unattended on
 |---|---|---|
 | v0.1 | 2026-06-07 | Initial draft; THSD-1/4 (SymbolicSimplex) shipped; §1, §2, §3, §5–§7 normative; §4 spec-only |
 | v0.2 | 2026-06-08 | P1: added §7 (ToM stalks), §8 (general-LM coverage), §9 (ImprovementGate), §10 (Lean backend interface), §11 (roadmap); renumbered "how to mutate" → §12; added `TheoryOfMindIR` + `ImprovementGate` + `CompositeGate` to Appendix A |
+| v0.2.1 | 2026-06-09 | Bug-fix: the v0.2 patch added new §§7-12 but failed to renumber the pre-existing §7 (Triple Guard) and §8 (Roadmap), producing a numbering collision. The pre-existing sections have been renumbered to §6.4 (Triple Guard, now a refinement of §6.3 Φ Guard) and §6.5 (pre-v0.2 THSD-internal roadmap, now superseded by §11). No content lost; numbering now linear. |

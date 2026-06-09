@@ -2,18 +2,20 @@
 
 > *A 230M-parameter language model optimized for integrated information (Φ) and mechanistic consciousness-like properties. Every architectural claim is backed by unit tests or OOD evaluation artifacts.*
 
-[![tests](https://img.shields.io/badge/tests-1233%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-1511%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
 [![evolution](https://img.shields.io/badge/evolution-real--time%20DNA-9cf)]()
 [![thsd](https://img.shields.io/badge/thsd-verified-9cf)]()
+[![cortex-fusion](https://img.shields.io/badge/cortex--fusion-KL%20+%20NT--gated-blueviolet)]()
+[![formal-gate](https://img.shields.io/badge/improvement--gate-Welch's%20t-9cf)]()
 
-BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, and **embodied survival loops** in a closed-world grid environment.
+BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained GPT-2 cortex experts.
 
 **Current status:**
-- ✅ **Layer A (mechanisms):** 15 core properties verified via 126 unit tests. All mechanisms compute as specified.
-- 🟡 **Layer B (generalization):** PCT variant achieves **4.51 gap_ratio** on WikiText-103-v1 OOD (26% better than flat-transformer baseline at 6.12), but baseline still wins absolute PPL 3–4× due to 11× more training compute. Matched-compute comparison pending.
+- ✅ **Layer A (mechanisms):** 20+ core properties verified via 1511 unit tests across `tests/` (`tests/dsl/` alone runs 620). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
+- 🟡 **Layer B (generalization):** PCT variant achieves **4.51 gap_ratio** on WikiText-103-v1 OOD (26% better than flat-transformer baseline at 6.12), but baseline still wins absolute PPL 3–4× due to 11× more training compute. Matched-compute comparison pending. 30M-P4 multi-cortex run now trains stably from step 0 (previously diverged with loss=13.84 > ln(50257)=10.82 at init due to GPT-2 anisotropy in the tied LM head — fixed in `6b36012`).
 
 Code, math, and tensor shapes: [`docs/architecture.md`](docs/architecture.md). Full evidence ledger: [`docs/findings.md`](docs/findings.md).
 
@@ -94,7 +96,7 @@ modulation dopamine -> pfc {
 }
 ```
 
-**Why?** Hand-written PyTorch is error-prone for biologically-plausible models; math specs are checkable. The DSL codegen produces torch modules with **byte-equivalent forward passes** (verified by 215 DSL tests) and enables symbolic analysis (fixed-point, stability, sensitivity).
+**Why?** Hand-written PyTorch is error-prone for biologically-plausible models; math specs are checkable. The DSL codegen produces torch modules with **byte-equivalent forward passes** (verified by 620 DSL tests in `tests/dsl/`) and enables symbolic analysis (fixed-point, stability, sensitivity). The DNA layer (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) supports **module bundling with source maps** and **byte-identity round-trip** verification (`tests/test_dna_roundtrip_byte_identity.py`).
 
 **Folder layout:** `arch.neuro` (package config + wiring), `modules/*.neuro` (per-region specs), `lib/` (shared mechanics). Import paths: `@/` = absolute, `./` = relative.
 
@@ -121,8 +123,13 @@ All 15 core mechanisms confirmed to implement as specified:
 | **H13** — SymbolicHyperNeuron invents expressions over its inputs | `test_symbolic_unit.py` (36 tests) | ✅ Gumbel-softmax over `{identity, add, sub, mul, exp, sin, tanh}` selects two inputs + one op per unit; `expression_strings()` extracts human-readable formulae |
 | **H14** — NRCSTKController prunes neurons that fail the metabolic budget | `test_nrcstk_metabolic.py` (24 tests) | ✅ Hinge-squared overshoot loss drives EMA below `prune_threshold` → hard-zero mask kills the neuron in forward + gradient |
 | **H15** — `FitnessComposer` aggregates a `LossBundle` under a maturity-gated schedule | `test_fitness_composer.py` (19) + `test_fitness_parser.py` (20) | ✅ Declarative `fitness { ... }` DSL block parses into `FitnessConfig`; composer produces `(total_loss, telemetry)` matching legacy `AuxWeights` curve bit-for-bit |
+| **H16** — `cortex_pre_head_norm` kills catastrophic init loss from GPT-2 anisotropy | `tests/training/test_cortex_pre_head_norm.py` (8) | ✅ Without the LayerNorm before the tied head, GPT-2's rogue dim (std≈24, 82× median) gets amplified into ±8.5 logit spikes → CE at step 0 = 13.84 (> ln(50257)=10.82). With the norm, CE = 10.82 ± 0.5 nats. |
+| **H17** — Cortex-trunk KL distillation transfers signal from frozen GPT-2 cortices to bowtie trunk | `tests/training/test_cortex_distillation_and_gating.py::TestDistillation*` (11) | ✅ `L_total += λ_t · T² · KL(softmax(cortex.detach()/T) ‖ softmax(lm/T))` with piecewise-linear λ ramp over EMA gap; gradient flows only into trunk (cortex frozen). |
+| **H18** — NT-mediated α gating retires cortex experts once trunk surpasses them | `tests/training/test_cortex_distillation_and_gating.py::Test*Inhibition* + TestEffectiveAlpha` (11) | ✅ `cortex_inhibition_level` EMA rises when `cortex_loss_ema > lm_loss_ema`; effective fusion weight `α_eff = α · (1 − inhibition)` → 0 as trunk wins. Telemetry exposes both. |
+| **H19** — `ImprovementGate` admits mutations only when Welch's t-test confirms metric improvement | `tests/verification/test_improvement_gate.py` (16) | ✅ Pure-Python Welch's t + Lentz continued-fraction incomplete beta produces p-values within 1e-6 of scipy reference; mutation accepted iff `p < α ∧ effect_size > min_effect`. Composite gate collects all failure reasons. |
+| **H20** — `TheoryOfMindIR` represents nested agent beliefs as stalk vectors over a sheaf | `tests/thsd/test_theory_of_mind_ir.py` (9) | ✅ `d_belief`, `max_agents`, `belief_decay ∈ [0,1]`, `order ≥ 1`, `false_belief_threshold ∈ [0,1]` all validated; stalk dimension scales with recursion `order` (k-th order ToM has `stalk_dim = d_belief × max_agents^(k-1)`). |
 
-**Run all:** `py -3 -m pytest tests/ -v` (~55 seconds on CPU)
+**Run all:** `py -3 -m pytest tests/ -v` (1511 tests, ~110 seconds on CPU)
 
 ### Layer B — OOD Generalization (The Open Question) 🟡
 
@@ -144,10 +151,69 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: PCT variant achieves 4
 
 ### Implementation Status
 
-- **1233/1233 tests passing** (~55s on CPU; includes 43 evolution tests + 99 Multi-Objective-Fitness tests)
+- **1511/1515 tests passing** in `tests/` (4 deselected; ~110s on CPU); breakdown: **620 in `tests/dsl/`** (DSL parsing + codegen + byte-equivalence), **65 in `tests/training/`** (harness, multi-cortex, distillation, gating), plus verification, THSD, evolution, narrative, qualia, neurochem subsuites.
 - Training with optimizer-partitioned checkpoint streaming
-- DSL-based architecture specs compile to byte-equivalent PyTorch models
-- Real-time architecture evolution via RAID-5 protected DNA mutations
+- DSL-based architecture specs compile to byte-equivalent PyTorch models with **source maps** (`neuroslm/compiler/module_bundler.py`) and **byte-identity round-trip** verification
+- Real-time architecture evolution via RAID-5 protected DNA mutations, gated by **`ImprovementGate`** (Welch's t-test) — no mutation lands without statistically significant fitness gain
+- **Multi-cortex fusion** (3 pretrained GPT-2 experts + bowtie trunk) with **LayerNorm pre-head anisotropy suppression**, **KL distillation** (trunk learns from cortex), and **NT-mediated α gating** (cortex retires when trunk surpasses it)
+
+---
+
+## Multi-Cortex Fusion (Pretrained GPT-2 Experts + Bowtie Trunk)
+
+BRIAN's 30M-P4 preset stacks three frozen GPT-2 "cortex" experts above the bowtie trunk and fuses their logits with the trunk's at the LM head. This pillar is governed by three interlocking mechanisms (all configurable in `arch.neuro` and parsed into `MultiCortexConfig` in `neuroslm/dsl/training_config.py`):
+
+### 1. `cortex_pre_head_norm` — catastrophic-loss prophylaxis
+
+Frozen GPT-2 hidden states have a **rogue dimension** with std ≈ 24 (82× median). When projected through the tied LM head, this amplifies into ±8.5 logit spikes → softmax saturates → CE at step 0 = **13.84** (which is *higher* than `ln(50257) = 10.82`, the uniform-distribution baseline). 
+
+The fix: `nn.LayerNorm(d_sem)` applied to the cortex projection before the tied head. With it, initial CE returns to **10.82 ± 0.5 nats** — i.e. cortex starts at uniform-distribution baseline, not catastrophically below it. Validated by `scripts/diagnose_catastrophic_loss.py` (exit-coded fix verifier) and `tests/training/test_cortex_pre_head_norm.py` (8 tests).
+
+### 2. Slot A — KL distillation from cortex to trunk
+
+The trunk should learn from the cortex experts, not just be averaged with them. Each step:
+
+$$\mathcal{L}_{\text{KL}} = T^2 \cdot \mathrm{KL}\big(\mathrm{softmax}(\text{cortex}_{\text{logits}}/T) \,\big\|\, \mathrm{softmax}(\text{lm}_{\text{logits}}/T)\big)$$
+
+with cortex logits **detached** (gradient only into trunk). The mixing weight is a piecewise-linear ramp over the EMA gap between cortex and trunk losses:
+
+$$\lambda_t = \lambda_{\max} \cdot \mathrm{clip}\big(\tfrac{\text{gap}_t - \text{floor}}{\text{ceiling} - \text{floor}}, 0, 1\big)$$
+
+When the trunk is much worse than the cortex (large positive gap), λ saturates at `lambda_max` (default 1.0) and distillation kicks in hard. When the gap is small or negative, λ → 0 and distillation switches off automatically. Defaults: `T=4.0`, `gap_floor=0.1`, `gap_ceiling=2.0`. Code: `BRIANHarness._distillation_lambda` and `_cortex_fusion_aux_step` in `neuroslm/harness.py`.
+
+### 3. Slot C — NT-mediated α gating
+
+Fusion uses convex combination `logits = (1−α)·lm_logits + α·cortex_logits`. But once the trunk surpasses the cortex, holding cortex contribution constant becomes a drag. So we modulate α through a **neurotransmitter-like inhibitory signal**:
+
+$$\text{inhibition}_t = (1-\beta) \cdot \text{inhibition}_{t-1} + \beta \cdot \sigma\big((\text{cortex\_loss\_ema} - \text{lm\_loss\_ema}) / T_{\text{inh}}\big)$$
+
+$$\alpha_{\text{eff}} = \alpha \cdot (1 - \text{inhibition}_t)$$
+
+with `β = 0.05` (EMA rate), `T_inh = 1.0`. As the trunk's EMA loss drops below the cortex's, inhibition rises toward 1, and α_eff → 0 — cortex effectively retires and the bowtie trunk takes over LM duty. The reverse is also true: if the trunk regresses, inhibition falls and cortex contribution returns. Code: `BRIANHarness._update_cortex_inhibition` and `_effective_alpha`.
+
+### Telemetry
+
+Per-step training log line now exposes the fusion state:
+
+```
+step 1234 | lm_loss 4.21 | cortex 4.18 4.31 4.09 | α_eff 0.42 inh 0.16 λ 0.31 kl 0.0089 lm_ema 4.55 cx_ema 4.22 | ...
+```
+
+— so you can see in real time when distillation engages, when the trunk starts winning, and when cortex retires. Code: `_format_metrics_line` in `neuroslm/train_dsl.py`.
+
+### Round-trip evidence
+
+```python
+from neuroslm.dsl.training_config import parse_dsl_training_config
+cfg = parse_dsl_training_config("architectures/rcc_bowtie/arch.neuro")
+print(f"distill={cfg.multi_cortex.distillation_enabled} "
+      f"inh={cfg.multi_cortex.inhibition_enabled} "
+      f"λmax={cfg.multi_cortex.distillation_lambda_max} "
+      f"T={cfg.multi_cortex.distillation_temperature}")
+# → distill=True inh=True λmax=1.0 T=4.0
+```
+
+Both slots are **back-compat-safe** (defaults `False`); existing DSL files without `distillation { ... }` or `inhibition { ... }` blocks compile and train identically to before.
 
 ---
 
@@ -184,6 +250,8 @@ with EvolutionaryTrainingContext("dna/base.dna", "checkpoints/") as ctx:
 - ✅ **Hot/Cold path mechanics** (activity-driven, not random)
 - ✅ **Fault-tolerant resumption** (patch stack replayed from checkpoint)
 - ✅ **Evolutionary metrics** (Φ trajectory, gap_ratio improvement tracking)
+- ✅ **`ImprovementGate` admission** — mutations only land when Welch's t-test confirms statistically-significant fitness gain over baseline window (`tests/verification/test_improvement_gate.py`, 16 tests)
+- ✅ **Module bundler + source maps** — `neuroslm/compiler/module_bundler.py` resolves DSL imports into a flat bundle while preserving file-line origin for every node; **byte-identity round-trip** verified by `tests/test_dna_roundtrip_byte_identity.py`
 
 See [`docs/technical_report.md` §2.5](docs/technical_report.md) and [`neuroslm/utils/colab.py`](neuroslm/utils/colab.py) for details.
 
@@ -293,6 +361,7 @@ Pass `--baseline` for vanilla-transformer ablation at matched parameter count.
 | `cpc_loss`          | (optional) contrastive predictive coding    | `w_cpc = 0.05` | × `_aux_w_scale` |
 | **`phi_loss`**      | **`-tanh(Φ/3)·3` from real MIP estimator**  | **`w_phi = 0.02`** | × `_aux_w_scale` |
 | `novel_aux_loss`    | aggregate of opt-in novel-module aux losses | 0.05         | × `_aux_w_scale` |
+| **`cortex_kl_loss`** | **`T²·KL(softmax(cortex.detach()/T)‖softmax(lm/T))` distillation** | **`λ_t` (gap-ramped, max 1.0)** | only when `distillation_enabled` AND gap > floor |
 
 `_aux_w_scale ∈ [0.001, 1.0]` is the **topological maturation** gate (§6.4 in `architecture.md`). During infancy (`step < 5000`) every aux loss is suppressed so the LM gradient dominates while the network forms its first language-level representations. At awakening (`step ≥ 5000 AND lm_loss < 7.5`) all aux losses ramp linearly to full strength.
 
@@ -316,11 +385,16 @@ These enable Layer-A capability probing without needing to run language-model ev
 ## Running Tests
 
 ```bash
-py -3 -m pytest tests/                    # full suite, ~7s on CPU
-py -3 -m pytest tests/test_phi.py -v      # H1–H3: integrated information
+py -3 -m pytest tests/                              # full suite (1511 tests, ~110s on CPU)
+py -3 -m pytest tests/test_phi.py -v                # H1–H3: integrated information
 py -3 -m pytest tests/test_narrative_memory.py -v   # H4–H5: memory & causation
 py -3 -m pytest tests/test_cognitive_closure.py -v  # H6–H6.5: identity & embodiment
 py -3 -m pytest tests/test_stabilization.py -v      # H7: convergence guarantee
+py -3 -m pytest tests/training/test_cortex_pre_head_norm.py -v               # H16: catastrophic-loss fix
+py -3 -m pytest tests/training/test_cortex_distillation_and_gating.py -v     # H17–H18: KL distillation + NT-gated α
+py -3 -m pytest tests/verification/test_improvement_gate.py -v               # H19: Welch's t-test admission gate
+py -3 -m pytest tests/thsd/test_theory_of_mind_ir.py -v                      # H20: TheoryOfMindIR sheaf stalks
+py -3 -m pytest tests/dsl/ -v                       # 620 DSL parser + codegen + byte-equivalence tests
 ```
 
 Each test is a claim from [Layer A](#layer-a--mechanism-verification-unit-tests-) in this README — e.g. `test_phi.py::test_phi_higher_for_coupled_outputs` verifies H1.
@@ -331,11 +405,11 @@ Each test is a claim from [Layer A](#layer-a--mechanism-verification-unit-tests-
 
 | Document | Audience | Contents |
 |----------|----------|----------|
-| **[`findings.md`](docs/findings.md)** | Everyone | Hypothesis ledger: H1–H12 with links to test files, result JSONs, and raw logs. The source of truth for what's proven vs. open. |
+| **[`findings.md`](docs/findings.md)** | Everyone | Hypothesis ledger: H1–H20 with links to test files, result JSONs, and raw logs. The source of truth for what's proven vs. open. |
 | **[`architecture.md`](docs/architecture.md)** | Researchers, implementers | Full spec: 11-stage forward pass, tensor shapes, equations, module diagrams, IIT 4.0 theory. Reproducible to the line number. |
-| **[`formal_framework.md`](docs/formal_framework.md)** | Theorists, evolutionary loop | **Normative** mathematical contract for the THSD discovery substrate: simpliziale ontology, $H^1$ guard, symbolic-simplex discovery operator, Φ guard, Tonnetz filter, Fisher-Rao retrieval, RAID-5 DNA. Source of Truth for evolutionary mutations. |
-| **[`technical_report.md`](docs/technical_report.md)** | External AI, new contributors | Executive summary: proven claims, current model state, evidence, open questions. Synced with findings.md. |
-| **[`dsl.md`](docs/dsl.md)** | DSL users | NeuroML-like syntax, macro system, symbol resolution, compile pipeline. |
+| **[`formal_framework.md`](docs/formal_framework.md)** | Theorists, evolutionary loop | **v0.2** (§§7–11): normative mathematical contract for the THSD discovery substrate: simpliziale ontology, $H^1$ guard, symbolic-simplex discovery operator, Φ guard, Tonnetz filter, Fisher-Rao retrieval, RAID-5 DNA, **ImprovementGate** admission spec, **TheoryOfMindIR** stalk geometry, **Lean roadmap** for mechanised proofs. Source of Truth for evolutionary mutations. |
+| **[`technical_report.md`](docs/technical_report.md)** | External AI, new contributors | Executive summary: proven claims, current model state, evidence, open questions. Synced with findings.md. Now covers all 7 Pillars including Multi-Cortex Fusion. |
+| **[`dsl.md`](docs/dsl.md)** | DSL users | NeuroML-like syntax, macro system, symbol resolution, compile pipeline, **module bundling**, source maps. |
 | **[`BRAIN.md`](docs/BRAIN.md)** | Diving deep | NeuralOrchestrator architecture, why re-entry loops work, design rationale. |
 | **[`CONTRIBUTING.md`](CONTRIBUTING.md)** | Future contributors | TDD workflow, testing patterns, documentation sync. |
 
