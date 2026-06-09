@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HypothesisRecord",
+  "description": "Front-matter schema for a formal hypothesis under hypothesis/. Authoritative dataclass: neuroslm.discoveries.records.HypothesisRecord.",
+  "type": "object",
+  "required": ["id", "title", "theorem_name"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^H\\d{3,}$",
+      "description": "Stable identifier (e.g. H001). Sortable + git-stable."
+    },
+    "title": {
+      "type": "string",
+      "description": "Short human title."
+    },
+    "theorem_name": {
+      "type": "string",
+      "description": "Lean-canonical theorem name (e.g. Brian.PhiMonotone)."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "stated", "proven", "refuted"],
+      "default": "draft"
+    },
+    "references": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Pointers into docs/ (e.g. 'formal_framework.md §6.1')."
+    },
+    "code_refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Source files realising the mechanism."
+    },
+    "test_refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Tests exercising the claim empirically."
+    },
+    "proof_path": {
+      "type": ["string", "null"],
+      "description": "Relative path to the .lean file."
+    },
+    "proof_status": {
+      "type": "string",
+      "enum": ["missing", "stub", "compiles", "verified"],
+      "default": "missing"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

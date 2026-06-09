@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DiscoveryRecord",
+  "description": "Front-matter schema for an autodiscovered mutation under discoveries/. Authoritative dataclass: neuroslm.discoveries.records.DiscoveryRecord.",
+  "type": "object",
+  "required": ["id", "title", "mutation_chain", "parent_dna_id",
+               "fitness_before", "fitness_after", "generation",
+               "theorem_name"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^D\\d{3,}$"
+    },
+    "title": { "type": "string" },
+    "mutation_chain": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "mutation_args_json": {
+      "type": "string",
+      "description": "JSON-encoded list of mutation-op argument dicts. Consumed by neuroslm.discoveries.splice.splice_discovery_into_dna."
+    },
+    "parent_dna_id": { "type": "string" },
+    "fitness_before": {
+      "type": "object",
+      "additionalProperties": { "type": "number" }
+    },
+    "fitness_after": {
+      "type": "object",
+      "additionalProperties": { "type": "number" }
+    },
+    "fitness_delta": {
+      "type": "object",
+      "additionalProperties": { "type": "number" }
+    },
+    "generation": { "type": "integer", "minimum": 0 },
+    "theorem_name": { "type": "string" },
+    "proof_path": { "type": ["string", "null"] },
+    "proof_status": {
+      "type": "string",
+      "enum": ["missing", "stub", "compiles", "verified"],
+      "default": "missing"
+    },
+    "dna_integrated": { "type": "boolean", "default": false },
+    "dna_integrated_at": { "type": ["string", "null"] },
+    "hypergraph_delta_json": { "type": "string" },
+    "discovered_at": { "type": "string", "format": "date-time" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

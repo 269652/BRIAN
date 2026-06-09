@@ -1,0 +1,3 @@
+# Keep `discoveries/proofs/` in git so the layout is self-documenting
+# even before the engine has discovered anything. The folder is
+# populated by `neuroslm.discoveries.lean.emit_discovery_proof`.

@@ -162,17 +162,26 @@ def _resolve_nfg_arch(arg: str) -> str:
 
 
 def cmd_compile_nfg(args: argparse.Namespace) -> int:
-    """Compile arch to a Neural Flow Graph: dict-of-dicts .py + .png render.
+    """Compile arch to a Neural Flow Graph.
+
+    Default pipeline (since v0.10):
+        Lift arch.neuro + all imported modules into the
+        :class:`HypergraphIR` (single source of truth), then render via
+        Graphviz with a layered ``dot`` layout. PNG/SVG/PDF output uses
+        the ``dot`` binary on ``$PATH``; ``--format dot`` writes the DOT
+        source verbatim and needs no external tool.
+
+    Legacy pipeline (``--legacy``):
+        Falls back to the older ``neuroslm.dsl.nfg`` matplotlib
+        renderer plus its ``nfg.py`` dict-of-dicts emission. Kept for
+        operators who have the old visual grammar baked into their
+        workflow.
 
     Accepts:
       * a normal architecture folder with ``arch.neuro``,
       * a ``.dna`` snapshot file (auto-routed to its source arch),
       * a folder containing exactly one ``.dna`` (ditto).
     """
-    from neuroslm.dsl.nfg import (
-        compile_nfg, render_nfg, emit_python,
-        RCC_BOWTIE_SPEC, SEMANTIC_SPEC,
-    )
     try:
         arch = _resolve_nfg_arch(args.arch)
     except (FileNotFoundError, ValueError) as e:
@@ -191,6 +200,86 @@ def cmd_compile_nfg(args: argparse.Namespace) -> int:
         default_dir = src_path
     else:
         default_dir = Path(arch)
+
+    use_legacy = getattr(args, "legacy", False)
+    if use_legacy:
+        return _cmd_compile_nfg_legacy(args, arch, default_dir)
+    return _cmd_compile_nfg_graphviz(args, arch, default_dir)
+
+
+def _cmd_compile_nfg_graphviz(args: argparse.Namespace,
+                              arch: str,
+                              default_dir: Path) -> int:
+    """New default: hypergraph IR → Graphviz."""
+    try:
+        from neuroslm.compiler.hypergraph_ir import lift_arch_to_hypergraph
+        from neuroslm.compiler.nfg_graphviz import render_hypergraph
+    except ImportError as e:
+        print(f"✗ Graphviz pipeline unavailable: {e}", file=sys.stderr)
+        print("  Install the 'graphviz' Python package: pip install graphviz",
+              file=sys.stderr)
+        print("  Or fall back to the legacy renderer with --legacy",
+              file=sys.stderr)
+        return 1
+
+    out_format = getattr(args, "format", "png") or "png"
+    engine = getattr(args, "engine", "dot") or "dot"
+
+    # --png overrides --format implicitly to png
+    if args.png:
+        out_path = args.png
+        out_format = "png"
+    elif args.out and args.out.lower().endswith(
+            (".png", ".svg", ".pdf", ".dot")):
+        out_path = args.out
+        out_format = Path(args.out).suffix[1:].lower()
+    elif args.out:
+        # caller passed --out with a non-image extension → treat as a
+        # render target with the requested --format
+        out_path = args.out
+    else:
+        out_path = str(default_dir / f"nfg.{out_format}")
+
+    ir = lift_arch_to_hypergraph(arch)
+
+    try:
+        title = f"NFG · {Path(arch).name}"
+        written = render_hypergraph(
+            ir, out_path, format=out_format, engine=engine, title=title,
+        )
+    except Exception as e:
+        # Most likely the `dot` binary isn't installed; tell the user
+        # exactly how to fix it.
+        print(f"✗ Graphviz render failed: {e}", file=sys.stderr)
+        print("  Make sure the Graphviz 'dot' binary is on your PATH.",
+              file=sys.stderr)
+        print("  Windows: winget install Graphviz.Graphviz", file=sys.stderr)
+        print("  Linux:   sudo apt install graphviz", file=sys.stderr)
+        print("  macOS:   brew install graphviz", file=sys.stderr)
+        print("  Or fall back to the legacy renderer with --legacy",
+              file=sys.stderr)
+        return 1
+
+    pops = sum(1 for n in ir.nodes if n.kind == "population")
+    nts = sum(1 for n in ir.nodes if n.kind == "neurotransmitter")
+    syns = sum(1 for e in ir.hyperedges if e.kind == "synapse")
+    mods = sum(1 for e in ir.hyperedges if e.kind == "modulation")
+    print(f"wrote NFG render      -> {written}  "
+          f"(engine: {engine}, format: {out_format})")
+    print(f"  hypergraph: {pops} populations · {nts} NT systems · "
+          f"{syns} synapses · {mods} modulations")
+    return 0
+
+
+def _cmd_compile_nfg_legacy(args: argparse.Namespace,
+                            arch: str,
+                            default_dir: Path) -> int:
+    """Legacy matplotlib NFG renderer (preserved for back-compat)."""
+    from neuroslm.dsl.nfg import (
+        compile_nfg, render_nfg, emit_python,
+        RCC_BOWTIE_SPEC, SEMANTIC_SPEC,
+    )
+
     out_py = args.out or str(default_dir / "nfg.py")
     out_png = args.png or str(default_dir / "nfg.png")
 
@@ -235,6 +324,193 @@ def cmd_compile(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
+
+
+# ── hypothesis / discovery ledgers ────────────────────────────────────
+
+
+def _hypothesis_root() -> Path:
+    """Resolve ``hypothesis/`` under the repo root."""
+    return REPO_ROOT / "hypothesis"
+
+
+def _discovery_root() -> Path:
+    """Resolve ``discoveries/`` under the repo root."""
+    return REPO_ROOT / "discoveries"
+
+
+def cmd_hypothesis(args: argparse.Namespace) -> int:
+    """Manage the formal hypothesis ledger under ``hypothesis/``.
+
+    Subcommands:
+        list                  — print every hypothesis as a table row
+        show <id>             — dump a single hypothesis file
+        emit-proofs           — regenerate any missing ``.lean`` stubs
+        verify <id>|--all     — run ``lean --json`` against the .lean file(s)
+    """
+    from neuroslm.discoveries import (
+        HypothesisStore, emit_hypothesis_proof, verify_lean_proof,
+    )
+    sub = args.hyp_cmd
+    store = HypothesisStore(_hypothesis_root())
+
+    if sub == "list":
+        records = store.list_all()
+        if not records:
+            print("(no hypotheses yet — see hypothesis/README.md)")
+            return 0
+        print(f"{'ID':5s}  {'STATUS':10s} {'PROOF':10s}  TITLE")
+        for r in records:
+            print(f"{r.id:5s}  {r.status:10s} {r.proof_status:10s}  {r.title}")
+        return 0
+
+    if sub == "show":
+        try:
+            rec = store.get(args.id)
+        except KeyError:
+            print(f"Error: no hypothesis with id {args.id}", file=sys.stderr)
+            return 1
+        # Print the on-disk markdown verbatim (front-matter + body).
+        md_path = _hypothesis_root() / rec.filename()
+        print(md_path.read_text(encoding="utf-8"))
+        return 0
+
+    if sub == "emit-proofs":
+        records = store.list_all()
+        wrote = 0
+        for r in records:
+            if r.proof_status == "verified":
+                continue                # don't clobber a verified proof
+            out = emit_hypothesis_proof(r, _hypothesis_root())
+            store.save(r)
+            print(f"  emitted {Path(out).name}")
+            wrote += 1
+        print(f"emit-proofs: {wrote} file(s) written")
+        return 0
+
+    if sub == "verify":
+        ids = ([args.id] if args.id else [r.id for r in store.list_all()]
+               if args.all else [])
+        if not ids:
+            print("Usage: brian hypothesis verify <id> | --all", file=sys.stderr)
+            return 1
+        any_error = False
+        for hid in ids:
+            try:
+                rec = store.get(hid)
+            except KeyError:
+                print(f"  {hid}: NOT FOUND", file=sys.stderr)
+                any_error = True
+                continue
+            if not rec.proof_path:
+                print(f"  {hid}: no proof file emitted yet")
+                any_error = True
+                continue
+            lean_path = REPO_ROOT / rec.proof_path
+            verdict = verify_lean_proof(str(lean_path))
+            new_status = verdict.proof_status_for_record()
+            rec.proof_status = new_status
+            store.save(rec)
+            print(f"  {hid}: lean={verdict.status:8s} "
+                  f"→ proof_status={new_status:8s} "
+                  f"({len(verdict.errors)} errors, {verdict.n_sorry} sorry)")
+            if verdict.status == "error":
+                any_error = True
+        return 1 if any_error else 0
+
+    print(f"Unknown hypothesis subcommand: {sub}", file=sys.stderr)
+    return 1
+
+
+def cmd_discovery(args: argparse.Namespace) -> int:
+    """Manage the autodiscovered-mutation ledger under ``discoveries/``.
+
+    Subcommands:
+        list                       — print every discovery as a table row
+        show <id>                  — dump a single discovery file
+        verify <id>|--all          — run lean against the discovery's proof
+        promote <id> <arch>        — splice a verified discovery into the
+                                     genome under ``architectures/<arch>``
+    """
+    from neuroslm.discoveries import (
+        DiscoveryStore, verify_lean_proof, splice_discovery_into_dna,
+    )
+    sub = args.disc_cmd
+    store = DiscoveryStore(_discovery_root())
+
+    if sub == "list":
+        records = store.list_all()
+        if not records:
+            print("(no discoveries yet — see discoveries/README.md)")
+            return 0
+        print(f"{'ID':5s}  {'GEN':4s}  {'PROOF':10s}  {'INTEGRATED':10s}  TITLE")
+        for r in records:
+            integ = "yes" if r.dna_integrated else "no"
+            print(f"{r.id:5s}  {r.generation:4d}  {r.proof_status:10s}  "
+                  f"{integ:10s}  {r.title}")
+        return 0
+
+    if sub == "show":
+        try:
+            rec = store.get(args.id)
+        except KeyError:
+            print(f"Error: no discovery with id {args.id}", file=sys.stderr)
+            return 1
+        md_path = _discovery_root() / rec.filename()
+        print(md_path.read_text(encoding="utf-8"))
+        return 0
+
+    if sub == "verify":
+        ids = ([args.id] if args.id else [r.id for r in store.list_all()]
+               if args.all else [])
+        if not ids:
+            print("Usage: brian discovery verify <id> | --all", file=sys.stderr)
+            return 1
+        any_error = False
+        for did in ids:
+            try:
+                rec = store.get(did)
+            except KeyError:
+                print(f"  {did}: NOT FOUND", file=sys.stderr)
+                any_error = True
+                continue
+            if not rec.proof_path:
+                print(f"  {did}: no proof file emitted yet")
+                any_error = True
+                continue
+            lean_path = REPO_ROOT / rec.proof_path
+            verdict = verify_lean_proof(str(lean_path))
+            new_status = verdict.proof_status_for_record()
+            rec.proof_status = new_status
+            store.save(rec)
+            print(f"  {did}: lean={verdict.status:8s} "
+                  f"→ proof_status={new_status:8s}")
+            if verdict.status == "error":
+                any_error = True
+        return 1 if any_error else 0
+
+    if sub == "promote":
+        try:
+            rec = store.get(args.id)
+        except KeyError:
+            print(f"Error: no discovery with id {args.id}", file=sys.stderr)
+            return 1
+        arch_root = Path(_resolve_arch(args.arch))
+        try:
+            result = splice_discovery_into_dna(rec, arch_root)
+        except RuntimeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        store.save(rec)         # persist dna_integrated bit
+        if result.success:
+            print(f"promoted {rec.id} → {result.touched_files[0]}")
+            return 0
+        else:
+            print(f"no-op: {result.reason}")
+            return 0
+
+    print(f"Unknown discovery subcommand: {sub}", file=sys.stderr)
+    return 1
 
 
 # ── bundle ─────────────────────────────────────────────────────────────
@@ -1672,7 +1948,15 @@ def _build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--out", help="write generated .py to this path")
     sc.add_argument("--png", help="(nfg only) write PNG render to this path")
     sc.add_argument("--semantic", action="store_true",
-                    help="(nfg only) use semantic layout inference (data-driven)")
+                    help="(nfg only, legacy) use semantic layout inference (data-driven)")
+    sc.add_argument("--legacy", action="store_true",
+                    help="(nfg only) use the legacy matplotlib renderer instead of Graphviz")
+    sc.add_argument("--engine", default="dot",
+                    choices=["dot", "neato", "sfdp", "fdp", "circo"],
+                    help="(nfg only) Graphviz layout engine (default: dot)")
+    sc.add_argument("--format", default="png",
+                    choices=["png", "svg", "pdf", "dot"],
+                    help="(nfg only) output format for the Graphviz render (default: png)")
     sc.add_argument("--head", type=int, default=2000,
                     help="when printing to stdout, truncate after N chars")
     def _dispatch_compile(a):
@@ -1687,7 +1971,8 @@ def _build_parser() -> argparse.ArgumentParser:
                 print("Usage: brian compile nfg <arch> [--out FILE] [--png FILE]", file=sys.stderr)
                 return 1
             return cmd_compile_nfg(argparse.Namespace(
-                arch=a.arch, out=a.out, png=a.png, semantic=a.semantic))
+                arch=a.arch, out=a.out, png=a.png, semantic=a.semantic,
+                legacy=a.legacy, engine=a.engine, format=a.format))
         else:
             return cmd_compile(argparse.Namespace(
                 arch=a.arch_or_subcmd, out=a.out, head=a.head))
@@ -1707,6 +1992,60 @@ def _build_parser() -> argparse.ArgumentParser:
     sdna_unfold.add_argument("dna", help="path to DNA binary file")
     sdna_unfold.add_argument("--output", "-o", help="DSL output file (default: <dna>.neuro)")
     sdna_unfold.set_defaults(func=cmd_dna)
+
+    # hypothesis (human-authored formal ledger)
+    shyp = sub.add_parser(
+        "hypothesis",
+        help="Manage hypothesis/ formal-claim ledger (with Lean proofs)")
+    shyp_sub = shyp.add_subparsers(dest="hyp_cmd", required=True)
+
+    shyp_list = shyp_sub.add_parser("list", help="List every hypothesis")
+    shyp_list.set_defaults(func=cmd_hypothesis)
+
+    shyp_show = shyp_sub.add_parser("show", help="Show one hypothesis by id")
+    shyp_show.add_argument("id", help="hypothesis id (e.g. H001)")
+    shyp_show.set_defaults(func=cmd_hypothesis)
+
+    shyp_emit = shyp_sub.add_parser(
+        "emit-proofs",
+        help="(Re)generate Lean proof stubs for every hypothesis missing one")
+    shyp_emit.set_defaults(func=cmd_hypothesis)
+
+    shyp_verify = shyp_sub.add_parser(
+        "verify",
+        help="Run lean against a hypothesis's proof file and update its "
+             "proof_status")
+    shyp_verify.add_argument("id", nargs="?",
+                             help="hypothesis id (omit + --all to verify every record)")
+    shyp_verify.add_argument("--all", action="store_true")
+    shyp_verify.set_defaults(func=cmd_hypothesis)
+
+    # discovery (engine-authored ledger + DNA splice)
+    sdisc = sub.add_parser(
+        "discovery",
+        help="Manage discoveries/ autodiscovered-mutation ledger + DNA splice")
+    sdisc_sub = sdisc.add_subparsers(dest="disc_cmd", required=True)
+
+    sdisc_list = sdisc_sub.add_parser("list", help="List every discovery")
+    sdisc_list.set_defaults(func=cmd_discovery)
+
+    sdisc_show = sdisc_sub.add_parser("show", help="Show one discovery by id")
+    sdisc_show.add_argument("id", help="discovery id (e.g. D001)")
+    sdisc_show.set_defaults(func=cmd_discovery)
+
+    sdisc_verify = sdisc_sub.add_parser(
+        "verify",
+        help="Run lean against a discovery's proof file")
+    sdisc_verify.add_argument("id", nargs="?")
+    sdisc_verify.add_argument("--all", action="store_true")
+    sdisc_verify.set_defaults(func=cmd_discovery)
+
+    sdisc_prom = sdisc_sub.add_parser(
+        "promote",
+        help="Splice a verified discovery into the architecture's DNA")
+    sdisc_prom.add_argument("id", help="discovery id (e.g. D001)")
+    sdisc_prom.add_argument("arch", help="architecture name (e.g. rcc_bowtie)")
+    sdisc_prom.set_defaults(func=cmd_discovery)
 
     # bundle
     sb = sub.add_parser("bundle",
