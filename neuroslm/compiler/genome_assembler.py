@@ -29,7 +29,7 @@ region; everything else still round-trips exactly.
 from __future__ import annotations
 import json
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from neuroslm.compiler.nucleotide_codec import NucleotideCodec
 from neuroslm.compiler.dna_error_correction import DNAErrorCorrection
@@ -122,6 +122,58 @@ class GenomeAssembler:
         payload_json = self._codec.decode_bytes(payload_bases)
         ir = HypergraphIR.from_dict(json.loads(payload_json.decode("utf-8")))
         return ir.source_map.render()
+
+    # ── multi-file bundle (each file is a chromosome) ────────────────────
+
+    def assemble_bundle(self, files: Dict[str, str], main: str) -> Genome:
+        """Assemble an entire modular architecture into one genome.
+
+        ``files`` maps a relative path (e.g. "lib/equations.neuro") to its
+        source. Every file is lifted to a HypergraphIR; their genes form a
+        single coding region, and the per-file IRs (which carry each file's
+        SourceMap) are the error-corrected payload — so the whole modular
+        arch disassembles back byte-for-byte.
+        """
+        file_irs = {rel: lift_dsl_to_hypergraph(src)
+                    for rel, src in files.items()}
+
+        symbols: List[str] = []
+        for rel in sorted(file_irs):  # deterministic gene order
+            symbols += ["START", "DATA"]            # chromosome (file) marker
+            symbols += self._symbol_stream(file_irs[rel])
+            symbols += ["SEP"]
+        coding_region = self._table.encode_symbols(symbols) if symbols else ""
+
+        payload = {
+            "main": main,
+            "files": {rel: ir.to_dict() for rel, ir in file_irs.items()},
+        }
+        payload_json = json.dumps(payload).encode("utf-8")
+        payload_bases = self._codec.encode_bytes(payload_json)
+        protected = self._ec.protect(payload_bases)
+        sense, antisense = self._ec.make_duplex(protected)
+
+        meta = {
+            "n_files": len(files),
+            "main": main,
+            "n_nodes": sum(len(ir.nodes) for ir in file_irs.values()),
+            "n_edges": sum(len(ir.hyperedges) for ir in file_irs.values()),
+        }
+        return Genome(coding_region, sense, antisense, meta)
+
+    def disassemble_bundle(self, genome: Genome) -> Tuple[str, Dict[str, str]]:
+        """Disassemble a bundle genome back to (main_path, {relpath: source})."""
+        protected = self._ec.read_duplex(genome.payload_sense,
+                                         genome.payload_antisense)
+        payload_bases = self._ec.recover(protected)
+        payload = json.loads(self._codec.decode_bytes(payload_bases).decode("utf-8"))
+        if "files" not in payload:
+            raise ValueError("genome payload is not a multi-file bundle")
+        files = {
+            rel: HypergraphIR.from_dict(d).source_map.render()
+            for rel, d in payload["files"].items()
+        }
+        return payload.get("main", "arch.neuro"), files
 
     def disassemble_with_overrides(self, genome: Genome,
                                    overrides: Dict[str, str]) -> str:

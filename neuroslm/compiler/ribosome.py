@@ -25,6 +25,24 @@ from neuroslm.compiler.dsl_minifier import DSLMinifier, PrettifyPolicy
 from neuroslm.compiler.genome_assembler import GenomeAssembler, Genome
 
 
+def _spec_to_relpath(spec: str) -> str:
+    """Map an import specifier to a relative file path under the arch root.
+
+    "@/lib/equations" -> "lib/equations.neuro"
+    "@/modules/cortex" -> "modules/cortex.neuro"
+    """
+    s = spec
+    if s.startswith("@/"):
+        s = s[2:]
+    elif s.startswith("./"):
+        s = s[2:]
+    elif s.startswith("../"):
+        s = s.lstrip("./")
+    if not s.endswith(".neuro"):
+        s += ".neuro"
+    return s
+
+
 @dataclass
 class DNAPatch:
     """Incremental DNA patch for evolutionary mutations.
@@ -323,13 +341,30 @@ class RibosomeCompiler:
         # Store module metadata so unfold can preserve structure
         dna.invariants["bundled_dsl"] = modules_dict
 
-        # Assemble the biologically-faithful genome: HypergraphIR + SourceMap
-        # -> codon coding region + Hamming/duplex error-corrected payload.
-        # This is the canonical, evolvable, error-correcting representation;
-        # unfold reconstructs the DSL from it (bit-identically). Additive —
-        # never block compilation if assembly fails on an exotic source.
+        # Assemble the biologically-faithful genome over the WHOLE modular
+        # architecture (arch.neuro + every imported module/lib file — each
+        # file is a chromosome): HypergraphIR + SourceMap -> codon coding
+        # region + Hamming/duplex error-corrected payload. This is the
+        # canonical, evolvable, error-correcting representation; unfold
+        # reconstructs the full modular tree from it (bit-identically).
+        # Additive — never block compilation if assembly fails.
         try:
-            genome = GenomeAssembler().assemble(dsl_code)
+            # Read EXACT bytes (no newline translation) so reconstruction is
+            # bit-identical regardless of CRLF/LF line endings.
+            files = {}
+            arch_neuro_path = arch_root / "arch.neuro"
+            if arch_neuro_path.exists():
+                files["arch.neuro"] = arch_neuro_path.read_bytes().decode("utf-8")
+            else:
+                files["arch.neuro"] = dsl_code
+            for spec, module in modules_dict.get("modules", {}).items():
+                rel = _spec_to_relpath(spec)
+                mpath = module.get("path")
+                if mpath and Path(mpath).exists():
+                    files[rel] = Path(mpath).read_bytes().decode("utf-8")
+                else:
+                    files[rel] = module["source"]
+            genome = GenomeAssembler().assemble_bundle(files, main="arch.neuro")
             dna.invariants["genome"] = genome.to_dict()
         except Exception:
             pass
@@ -380,10 +415,26 @@ class RibosomeCompiler:
 
         # Prefer reconstruction from the nucleotide genome (the canonical,
         # error-correcting representation): error-correct the duplex, decode
-        # the HypergraphIR, render its SourceMap -> bit-identical DSL.
+        # the HypergraphIR(s), render SourceMaps -> bit-identical DSL. For a
+        # multi-file bundle genome, reconstruct the FULL modular tree
+        # (arch.neuro + modules/*.neuro + lib/*.neuro) on disk.
         if "genome" in dna.invariants:
             genome = Genome.from_dict(dna.invariants["genome"])
-            dsl_code = GenomeAssembler().disassemble(genome)
+            asm = GenomeAssembler()
+            try:
+                main_rel, files = asm.disassemble_bundle(genome)
+                dsl_code = files.get(main_rel, "")
+                out_root = Path(output_neuro).parent
+                for rel, src in files.items():
+                    if rel == main_rel:
+                        continue
+                    mod_path = out_root / rel
+                    mod_path.parent.mkdir(parents=True, exist_ok=True)
+                    # Write exact bytes — no newline translation.
+                    mod_path.write_bytes(src.encode("utf-8"))
+            except Exception:
+                # Legacy single-source genome.
+                dsl_code = asm.disassemble(genome)
         elif "bundled_dsl" in dna.invariants:
             # Legacy DNA: reconstruct from bundled modules (imports preserved).
             bundled = BundledDSL.from_dict(dna.invariants["bundled_dsl"])
@@ -405,9 +456,10 @@ class RibosomeCompiler:
                 minifier = DSLMinifier()
                 dsl_code = minifier.prettify(dsl_code)
 
-        # Write to output file with UTF-8 encoding
-        with open(output_neuro, 'w', encoding="utf-8") as f:
-            f.write(dsl_code)
+        # Write exact bytes (no newline translation) for bit-identity.
+        out_path = Path(output_neuro)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(dsl_code.encode("utf-8"))
 
     def _ir_to_dsl(self, ir: ProgramIR) -> str:
         """Convert ProgramIR back to approximate DSL (best-effort reconstruction)."""
