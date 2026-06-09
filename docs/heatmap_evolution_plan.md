@@ -102,12 +102,26 @@ edges by normalized heat.                                    [L6]
       `results/` or `dna/evol/`) for commits to include it — suggest
       `results/heatmaps/<arch>.heatmap.json` with a `!results/heatmaps/`
       un-ignore, or a dedicated tracked dir.
-- [ ] **L2 — gradient heat collector + harness hook.** Map
-      `named_parameters()` → IR element id (module-name prefix → node id;
-      synapse params → edge id). `collect_grad_signals(model, ir) ->
-      {id: grad_norm}`. Harness calls `heatmap.update(...)` + `save()`
-      every N steps. Tests: param-name→id mapping; aggregation of L2 norms
-      per element; a tiny nn.Module fixture; hook writes JSON each N.
+- [x] **L2 — gradient heat collector** (`neuroslm/evolution/grad_heat.py`,
+      `tests/test_grad_heat.py`, 8/8). `parameter_grad_norms(named_params)`
+      → name→‖grad‖₂; `signals_from_grad_norms(grad_norms, ir, alias)` →
+      node signal = L2 aggregate of params whose top-level token matches a
+      node name (alias-able, e.g. `hippo`→`hippocampus`), edge signal =
+      mean of endpoint node signals; `update_heatmap(hm, grad_norms, ir,
+      step, publisher, alias)` folds in + triggers publisher cadence.
+      Model submodules are named by region in `brain.py` (`self.gws`,
+      `self.pfc`, `self.hippo`, …) so the token match works; supply an
+      `alias` for the handful of mismatches.
+- [ ] **L2-wire — harness loop hook.** In `neuroslm/harness.py` training
+      loop: build the IR once (`lift_arch_to_hypergraph(arch_root)`),
+      construct `TrainingHeatmap` + `HeatmapPublisher` from training-config
+      knobs, and every `heatmap_update_every_n` steps call
+      `gn = parameter_grad_norms(model.named_parameters());
+      update_heatmap(hm, gn, ir, step, publisher, alias)`. Guard the whole
+      thing behind a `heatmap_enabled` flag; wrap in try/except so it can
+      never break training. Add the `alias` map for region-name mismatches.
+      Test with a tiny model + a couple of steps (or a harness unit if one
+      exists).
 - [ ] **L3 — propose mutations from hot/cold.** `propose_mutations(
       heatmap, ir) -> list[DNAPatch]`: hot node → `node_mutation` patch
       (delta scaled by heat, reason="hot_path"); cold edge → prune/weaken
@@ -136,12 +150,13 @@ edges by normalized heat.                                    [L6]
 
 ## Current state (update me)
 
-- **Done:** L1 (heatmap core) + L2b (publisher / auto commit-push), committed.
-- **Next:** L2 (gradient collector + harness hook), then wire the
-  `HeatmapPublisher.maybe_publish(heatmap, step)` call right after each
-  `heatmap.update(...)` in the harness loop; read cadence/push from the
-  training config; default the artifact to a tracked
-  `results/heatmaps/<arch>.heatmap.json`.
+- **Done:** L1 (heatmap core) + L2b (publisher) + L2 (grad collector),
+  all committed.
+- **Next:** L2-wire (harness loop hook), then L3 (propose mutations).
+  The collector + publisher are ready; wiring is just: build IR once,
+  make `TrainingHeatmap`+`HeatmapPublisher` from config, call
+  `update_heatmap(...)` every N steps in the loop (guarded). Default the
+  artifact to a tracked `results/heatmaps/<arch>.heatmap.json`.
 - **Open questions / watch-outs:**
   - param-name → IR id mapping is the crux of L2; module names in the
     model may not match IR node names 1:1 — may need a small alias map
