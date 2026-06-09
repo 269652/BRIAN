@@ -1,12 +1,19 @@
-"""Direct deploy of a DSL training run with OOD mid-eval enabled.
+"""Direct deploy of DSL or DNA training runs with OOD mid-eval enabled.
 
-Reads hardware + scale variants from arch.neuro:
+For DSL training, reads hardware + scale variants from arch.neuro:
   - `hardware { gpu_name, num_gpus, min_reliability, min_inet_mbps,
                 dist_strategy, precision }`
   - `scales { <variant>: { d_model, depth, ..., hardware? } }`
 
-Pick a scale with SCALE=<name> (e.g. SCALE=300m, SCALE=1b, SCALE=7b).
-The default scale is the one named in `scales { default: "..." }`.
+For DNA training, unfolds the DNA and reads the same config from its
+embedded arch.neuro block.
+
+Environment variables:
+  DNA=<path>              path to .dna file (e.g., dna/evol/arch.dna)
+  ARCH=<name>             architecture folder name (if DNA not set)
+  SCALE=<name>            scale variant from arch.neuro (e.g., 300m, 1b, 7b)
+  STEPS=10000             training steps (default: 40000)
+  OOD_EVERY=500           OOD eval frequency (default: 500)
 """
 import json
 import os
@@ -29,17 +36,53 @@ REPO_SLUG = "269652/BRIAN"
 VAST_IMAGE = "pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime"
 OOD_EVERY = int(os.environ.get("OOD_EVERY", "500"))
 STEPS = int(os.environ.get("STEPS", "40000"))
+DNA = os.environ.get("DNA", "")
 ARCH = os.environ.get("ARCH", "rcc_bowtie")
 SCALE = os.environ.get("SCALE", "")
 LABEL_SUFFIX = os.environ.get("LABEL_SUFFIX", "")
+
+# ── Detect mode: DNA vs DSL ──
+USE_DNA = bool(DNA)
+if USE_DNA:
+    mode_label = f"-dna-{Path(DNA).stem}"
+else:
+    mode_label = ""
+
 LABEL = "neuroslm-full" + (f"-{LABEL_SUFFIX}" if LABEL_SUFFIX else "") \
-    + (f"-{SCALE}" if SCALE else "")
+    + mode_label + (f"-{SCALE}" if SCALE else "")
 
 # ── Read hardware + scale from arch.neuro ──
 sys.path.insert(0, str(Path(__file__).parent))
 from neuroslm.dsl.training_config import load_training_config_from_arch
-ARCH_ROOT = Path("architectures") / ARCH
-tc = load_training_config_from_arch(ARCH_ROOT)
+
+if USE_DNA:
+    # DNA mode: read training config from embedded arch.neuro in the DNA
+    from neuroslm.compiler.ribosome import RibosomeCompiler
+    print(f"DNA mode: {DNA}")
+    try:
+        compiler = RibosomeCompiler()
+        dsl_code = compiler.dna_translator.translate_from_file(str(DNA))
+        import re as _re
+        m = _re.search(r"\barchitecture\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{",
+                      dsl_code)
+        if not m:
+            raise ValueError(f"Cannot extract `architecture <name>` from {DNA}")
+        arch_name = m.group(1)
+        ARCH_ROOT = Path("architectures") / arch_name
+        if not (ARCH_ROOT / "arch.neuro").is_file():
+            raise FileNotFoundError(
+                f"DNA references {arch_name} but "
+                f"{ARCH_ROOT}/arch.neuro not found")
+        tc = load_training_config_from_arch(ARCH_ROOT)
+        dna_arch_name = arch_name
+    except Exception as e:
+        print(f"✗ Failed to load DNA {DNA}: {e}", file=sys.stderr)
+        sys.exit(1)
+else:
+    # DSL mode: read from architecture folder
+    ARCH_ROOT = Path("architectures") / ARCH
+    tc = load_training_config_from_arch(ARCH_ROOT)
+    dna_arch_name = None
 
 scale_name = SCALE or tc.scales.default
 if scale_name and scale_name in tc.scales.variants:
@@ -84,6 +127,14 @@ launch_cmd = ("torchrun --nproc_per_node=" + str(hw.num_gpus)
                if hw.num_gpus > 1 and hw.dist_strategy != "single"
                else "python")
 
+# ── Build training command (DNA or DSL mode) ──
+if USE_DNA:
+    training_cmd = f"DNA={DNA} STEPS={STEPS} OOD_EVERY={OOD_EVERY} FRESH=1 \\\n    bash scripts/vast_train_dna_loop.sh 2>&1 | tee /workspace/train.log"
+    arch_name_for_log = dna_arch_name or Path(DNA).stem
+else:
+    training_cmd = f"ARCH={ARCH} STEPS={STEPS} OOD_EVERY={OOD_EVERY} FRESH=1 \\\n    bash scripts/vast_train_dsl_loop.sh 2>&1 | tee /workspace/train.log"
+    arch_name_for_log = ARCH
+
 ONSTART = f"""set -e
 export DEBIAN_FRONTEND=noninteractive
 export GITHUB='{GITHUB}' HF_TOKEN='' VAST_API_KEY='{VAST_API_KEY}'
@@ -116,13 +167,12 @@ SKIP_LFS_RESUME=1 bash scripts/vast_bootstrap.sh
 echo "── starting log-pusher (background) ──"
 INSTANCE_ID="$(hostname)" PUSH_INTERVAL=300 \\
     BRANCH='{BRANCH}' REPO_SLUG='{REPO_SLUG}' \\
-    ARCH_NAME='{ARCH}' LABEL='{LABEL}' TOTAL_STEPS='{STEPS}' \\
+    ARCH_NAME='{arch_name_for_log}' LABEL='{LABEL}' TOTAL_STEPS='{STEPS}' \\
     nohup bash scripts/log_pusher.sh > /workspace/log_pusher.log 2>&1 &
 LOG_PUSHER_PID=$!
 
-echo "── starting DSL training (scale={scale_name}, dist={hw.dist_strategy}, {STEPS} steps, mid-OOD every {OOD_EVERY}) ──"
-ARCH={ARCH} STEPS={STEPS} OOD_EVERY={OOD_EVERY} FRESH=1 \\
-    bash scripts/vast_train_dsl_loop.sh 2>&1 | tee /workspace/train.log
+echo "── starting {'DNA' if USE_DNA else 'DSL'} training (scale={scale_name}, dist={hw.dist_strategy}, {STEPS} steps, mid-OOD every {OOD_EVERY}) ──"
+{training_cmd}
 
 echo "── stopping log-pusher ──"
 kill $LOG_PUSHER_PID 2>/dev/null || true

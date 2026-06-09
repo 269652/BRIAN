@@ -204,6 +204,7 @@ neuroslm/tools/prune_ckpts.py
 neuroslm/utils/__init__.py
 neuroslm/utils/colab.py
 neuroslm/verification/__init__.py
+neuroslm/verification/improvement_gate.py
 neuroslm/verification/triple_guard.py
 neuroslm/verification/verifier.py
 tests/test_adaptive_mixture_direction.py
@@ -227,6 +228,7 @@ tests/test_fitness_configuration.py
 tests/test_fitness_load_or_default.py
 tests/test_fitness_parser.py
 tests/test_freq_balance.py
+tests/test_gpt2_subcortex_long_context.py
 tests/test_harness_schedule.py
 tests/test_hpb_phase1_grid.py
 tests/test_hpb_phase2_msgra.py

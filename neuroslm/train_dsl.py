@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""DSL-driven training entrypoint.
+"""DSL-driven training entrypoint (supports both DSL architectures and DNA).
 
 Parallel to `neuroslm.train` (which trains the hand-written `Brain`):
-this module loads an architecture from `architectures/<name>/`,
-compiles it via the DSL pipeline, wraps it in a `BRIANHarness`, and
-runs a language-model training loop.
+this module loads an architecture from `architectures/<name>/` OR from
+a DNA file, compiles it via the DSL pipeline, wraps it in a `BRIANHarness`,
+and runs a language-model training loop.
 
 The harness reads `training { ... }` from the architecture's
 `arch.neuro` for loss clipping, optimizer choice, label smoothing,
@@ -12,8 +12,12 @@ grad accumulation, and grad clipping. Per-step model behavior is
 otherwise determined entirely by the .neuro files — no Python
 architecture code path involved.
 
-Usage:
+Usage (DSL):
     python -m neuroslm.train_dsl --arch architectures/rcc_bowtie \\
+        --steps 10000 --batch 4 --seq_len 256 --d_sem 256
+
+Usage (DNA):
+    python -m neuroslm.train_dsl --dna dna/evol/arch.dna \\
         --steps 10000 --batch 4 --seq_len 256 --d_sem 256
 """
 from __future__ import annotations
@@ -866,8 +870,12 @@ def _final_ood_eval(harness, step: int, ckpt_dir: Optional[Path],
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--arch", required=True,
-                        help="path to architecture folder (containing arch.neuro)")
+    parser.add_argument("--arch",
+                        help="path to architecture folder (containing arch.neuro); "
+                             "required if --dna not provided")
+    parser.add_argument("--dna",
+                        help="path to evolved DNA file (e.g., dna/evol/arch.dna); "
+                             "alternative to --arch for training from DNA")
     parser.add_argument("--steps", type=int, default=1000)
     parser.add_argument("--batch", type=int, default=4)
     parser.add_argument("--seq_len", type=int, default=128)
@@ -915,10 +923,42 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
+    # Validate that either --arch or --dna is provided
+    if not args.arch and not args.dna:
+        parser.error("either --arch or --dna must be provided")
+    if args.arch and args.dna:
+        parser.error("--arch and --dna are mutually exclusive")
+
     torch.manual_seed(args.seed)
-    arch_root = Path(args.arch).resolve()
-    if not (arch_root / "arch.neuro").is_file():
-        parser.error(f"missing {arch_root}/arch.neuro")
+
+    # ── DNA mode: resolve architecture from DNA file ──
+    if args.dna:
+        from neuroslm.compiler.ribosome import RibosomeCompiler
+        dna_path = Path(args.dna).resolve()
+        if not dna_path.is_file():
+            parser.error(f"missing DNA file: {dna_path}")
+        try:
+            compiler = RibosomeCompiler()
+            dsl_code = compiler.dna_translator.translate_from_file(str(dna_path))
+            arch_match = re.search(r"\barchitecture\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{",
+                                  dsl_code)
+            if not arch_match:
+                parser.error(
+                    f"cannot extract `architecture <name>` block from {dna_path}")
+            arch_name = arch_match.group(1)
+            arch_root = Path("architectures") / arch_name
+            if not (arch_root / "arch.neuro").is_file():
+                parser.error(
+                    f"DNA references architecture {arch_name!r} but "
+                    f"{arch_root}/arch.neuro not found")
+            print(f"[train_dsl] DNA mode: {dna_path} → {arch_name}", flush=True)
+        except Exception as e:
+            parser.error(f"failed to load DNA {dna_path}: {e}")
+    else:
+        # ── DSL mode: use provided architecture folder ──
+        arch_root = Path(args.arch).resolve()
+        if not (arch_root / "arch.neuro").is_file():
+            parser.error(f"missing {arch_root}/arch.neuro")
 
     tok = _load_tokenizer()
     vocab_size = args.vocab_size or tok.vocab_size

@@ -20,6 +20,7 @@ from pathlib import Path
 
 from neuroslm.dsl.compiler import NeuroMLCompiler, ProgramIR
 from neuroslm.dsl.thg_ir import THGCheckpoint, THGNode, THGEdge
+from neuroslm.compiler.module_bundler import ModuleBundler, BundledDSL
 
 
 @dataclass
@@ -273,47 +274,85 @@ class RibosomeCompiler:
         """Compile architecture from arch.neuro to DNA file.
 
         Workflow:
-        1. Parse arch.neuro
+        1. Parse arch.neuro and bundle all imports
         2. Load fitness.neuro (if present)
-        3. Transcribe DSL to DNA
-        4. Store fitness config in DNA invariants
-        5. Save DNA with all metadata
+        3. Transcribe bundled DSL to DNA
+        4. Store module metadata in DNA invariants
+        5. Store fitness config in DNA invariants
+        6. Save DNA with all metadata
         """
         from neuroslm.dsl.multifile import compile_folder
         from neuroslm.fitness import FitnessConfig
 
-        # Compile the architecture
-        ir = compile_folder(arch_root)
+        arch_root = Path(arch_root).resolve()
 
-        # Read the original DSL file with UTF-8 encoding
-        arch_path = Path(arch_root) / "arch.neuro"
+        # Compile the architecture
+        ir = compile_folder(str(arch_root))
+
+        # Bundle all modules (including imports)
+        arch_path = arch_root / "arch.neuro"
         if arch_path.exists():
-            dsl_code = arch_path.read_text(encoding="utf-8")
+            bundler = ModuleBundler(arch_root)
+            bundled = bundler.bundle(arch_path)
+            dsl_code = bundled.main_source
+            modules_dict = bundled.to_dict()
         else:
             # Reconstruct from IR
             dsl_code = self._ir_to_dsl(ir)
+            modules_dict = {
+                "main_source": dsl_code,
+                "modules": {},
+                "import_graph": {},
+            }
 
         # Transcribe to DNA
         dna = self.dna_transcriber.transcribe(dsl_code)
 
+        # Store module metadata so unfold can preserve structure
+        dna.invariants["bundled_dsl"] = modules_dict
+
+        # Save source map alongside DNA for evolved attribution
+        source_map_path = str(output_dna).replace('.dna', '.sourcemap.json')
+        if 'bundled_dsl' in modules_dict and 'source_map' in modules_dict['bundled_dsl']:
+            source_map = modules_dict['bundled_dsl']['source_map']
+            with open(source_map_path, 'w', encoding='utf-8') as f:
+                json.dump(source_map, f, indent=2)
+
         # Load fitness config from fitness.json or fitness.neuro (if present)
-        fitness_path = Path(arch_root) / "fitness.json"
+        fitness_path = arch_root / "fitness.json"
         if not fitness_path.exists():
-            fitness_path = Path(arch_root) / "fitness.neuro"
+            fitness_path = arch_root / "fitness.neuro"
 
         if fitness_path.exists() and fitness_path.suffix == ".json":
             try:
                 fitness_config = FitnessConfig.load(str(fitness_path))
                 dna.invariants["fitness_config"] = fitness_config.to_dict()
-            except Exception as e:
+            except Exception:
                 pass  # Silently ignore fitness loading errors
 
         # Save DNA to file
         dna.save(output_dna)
 
     def unfold_file(self, dna_path: str, output_neuro: str) -> None:
-        """Unfold DNA file back to .neuro DSL."""
-        dsl_code = self.dna_translator.translate_from_file(dna_path)
+        """Unfold DNA file back to .neuro DSL with modules preserved.
+
+        If the DNA contains bundled module metadata, reconstructs the
+        modularized structure. Otherwise falls back to single-file DSL.
+        """
+        dna = LatentDNA.load(dna_path)
+
+        # Check if bundled DSL metadata is available
+        if "bundled_dsl" in dna.invariants:
+            # Reconstruct from bundled modules
+            bundled_dict = dna.invariants["bundled_dsl"]
+            bundled = BundledDSL.from_dict(bundled_dict)
+
+            # Unfold with imports preserved (not inlined)
+            # This maintains the modular structure for evolution
+            dsl_code = bundled.preserve_imports()
+        else:
+            # Fallback: use direct translation
+            dsl_code = self.dna_translator.translate_from_file(dna_path)
 
         # Write to output file with UTF-8 encoding
         with open(output_neuro, 'w', encoding="utf-8") as f:
@@ -355,6 +394,64 @@ class RibosomeCompiler:
         """Apply rank-one update to a node embedding."""
         thg.mutate_node(node_id, delta)
         return thg
+
+    def load_source_map(self, dna_path: str) -> Optional[Dict]:
+        """Load source map that tracks module origins.
+
+        The source map enables attribution of evolved changes back to
+        the modules that contributed them.
+
+        Args:
+            dna_path: Path to .dna file.
+
+        Returns:
+            Source map dict with module attribution, or None if not available.
+        """
+        from neuroslm.compiler.module_bundler import SourceMap
+
+        source_map_path = str(dna_path).replace('.dna', '.sourcemap.json')
+        try:
+            with open(source_map_path, 'r', encoding='utf-8') as f:
+                source_map_dict = json.load(f)
+            return source_map_dict
+        except FileNotFoundError:
+            # Fallback: try to extract from DNA invariants
+            dna = LatentDNA.load(dna_path)
+            if 'bundled_dsl' in dna.invariants:
+                bundled_dict = dna.invariants['bundled_dsl']
+                if 'source_map' in bundled_dict:
+                    return bundled_dict['source_map']
+            return None
+
+    def get_module_for_change(self, dna_path: str, line_number: int) -> Optional[str]:
+        """Get the module name responsible for a given line.
+
+        Useful for tracking where evolved improvements came from.
+
+        Args:
+            dna_path: Path to .dna file.
+            line_number: Line number in the unfolded DSL.
+
+        Returns:
+            Module specifier (e.g., '@/lib/cortex'), or None if not mapped.
+        """
+        source_map_dict = self.load_source_map(dna_path)
+        if not source_map_dict:
+            return None
+
+        # Check line_to_module mapping
+        line_to_module = source_map_dict.get('line_to_module', {})
+        for range_str, module in line_to_module.items():
+            try:
+                # Parse "(start, end)" format
+                range_str = range_str.strip('()')
+                start, end = map(int, range_str.split(','))
+                if start <= line_number <= end:
+                    return module
+            except (ValueError, AttributeError):
+                pass
+
+        return None
 
     def update_edge_weight(
         self, thg: THGCheckpoint, edge_id: str, delta_weight: float
