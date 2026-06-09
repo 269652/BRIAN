@@ -192,14 +192,25 @@ neurotransmitter serotonin {
             compiler.compile_file(str(arch_dir), str(dna_file))
             assert dna_file.exists()
 
-            # Unfold from DNA
+            # The nested module (utils, reached only via core) must be
+            # bundled into the DNA — that is what "bundle all imports" means.
+            # We assert it on the DNA itself, not on the unfolded main file,
+            # because unfold must stay BIT-IDENTICAL to the original arch.neuro
+            # (which imports core, not utils inline).
+            import json as _json
+            dna_json = _json.loads(dna_file.read_text())
+            modules = dna_json["invariants"]["bundled_dsl"]["modules"]
+            assert "@/lib/core" in modules
+            assert "@/lib/utils" in modules, "nested import must be bundled"
+            assert "serotonin" in modules["@/lib/utils"]["source"]
+
+            # Unfold from DNA — must reproduce the original main source exactly.
             unfolded = tmpdir / "unfolded.neuro"
             compiler.unfold_file(str(dna_file), str(unfolded))
             assert unfolded.exists()
 
-            unfolded_text = unfolded.read_text()
-            # Should mention serotonin from utils, proving nested import was bundled
-            assert "serotonin" in unfolded_text or "utils" in unfolded_text
+            unfolded_text = unfolded.read_text(encoding="utf-8")
+            assert unfolded_text == main.read_text(encoding="utf-8")
 
     def test_dna_tracks_module_origin_for_evolution(self):
         """DNA should track which parts came from which module.
