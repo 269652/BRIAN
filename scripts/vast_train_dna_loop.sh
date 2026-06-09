@@ -7,8 +7,14 @@
 # Ribosome compiler + BRIAN harness, with loss clipping and other pipeline
 # behavior read from the DNA's embedded arch.neuro block.
 #
+# Source of truth for DNA (highest priority first):
+#   1. DNA env var (legacy / CI overrides)
+#   2. brian.toml [current].dna   (workspace config)
+#   3. hardcoded fallback: "dna/evol/arch.dna"
+#
 # Tunable env vars (with defaults):
-#   DNA=dna/evol/arch.dna               path to evolved DNA file
+#   DNA=<path>                          path to evolved DNA file
+#                                        (auto-resolved from brian.toml if unset)
 #   STEPS=10000                         target step count
 #   BATCH=4 SEQ_LEN=256 D_SEM=256
 #   LOG_EVERY=20 SAVE_EVERY=1000
@@ -24,6 +30,15 @@ set -uo pipefail
 REPO_DIR="${REPO_DIR:-$(pwd)}"
 cd "$REPO_DIR"
 
+# Resolve DNA from brian.toml if not set in the environment.
+if [ -z "${DNA:-}" ]; then
+    DNA="$(python3 - <<'PY' 2>/dev/null || echo dna/evol/arch.dna
+from neuroslm.project_config import load_project_config
+cfg = load_project_config()
+print(cfg.dna if cfg.dna else "dna/evol/arch.dna")
+PY
+)"
+fi
 DNA="${DNA:-dna/evol/arch.dna}"
 PRESET="${PRESET:-rcc_bowtie_30m_p4}"   # sizes the DSL LM trunk to match P4
 

@@ -71,9 +71,18 @@ Every box is a learnable module. Every arrow is a documented tensor operation. F
 
 **Visual blueprint:** The full bowtie with all 28 populations, 19 synapses, 7 neurotransmitter systems, and training config are rendered in the Neural Flow Graph (NFG):
 
-![Neural Flow Graph — rcc_bowtie architecture](architectures/rcc_bowtie/nfg.png)
+![Neural Flow Graph — current architecture](.neuro/nfg.png)
 
 *Every node, edge, and modulation shown in the NFG is declared in `arch.neuro` and compiled to PyTorch. The diagram is the source of truth for wiring.*
+
+Re-render after editing `arch.neuro` with:
+
+```powershell
+brian compile nfg --current          # writes to .neuro/nfg.png
+brian compile nfg --current --heat heatmap.json   # writes .neuro/nfg.heat.png
+```
+
+The `--current` flag reads the active architecture from [`brian.toml`](brian.toml) (see *Project Configuration* below).
 
 ---
 
@@ -254,6 +263,36 @@ with EvolutionaryTrainingContext("dna/base.dna", "checkpoints/") as ctx:
 - ✅ **Module bundler + source maps** — `neuroslm/compiler/module_bundler.py` resolves DSL imports into a flat bundle while preserving file-line origin for every node; **byte-identity round-trip** verified by `tests/test_dna_roundtrip_byte_identity.py`
 
 See [`docs/technical_report.md` §2.5](docs/technical_report.md) and [`neuroslm/utils/colab.py`](neuroslm/utils/colab.py) for details.
+
+---
+
+## Project Configuration (`brian.toml`)
+
+A tiny TOML file at the repo root is the **single source of truth** for which architecture / DNA every training, deploy, and Colab script targets:
+
+```toml
+# brian.toml
+[current]
+arch = "architectures/rcc_bowtie"   # active architecture
+dna  = ""                            # set to a .dna path for DNA-loop training
+
+[nfg]
+output = ".neuro/nfg.png"            # where `brian compile nfg --current` writes
+format = "png"                       # png | svg | pdf | dot
+engine = "dot"                       # dot | neato | sfdp | fdp | circo
+```
+
+| Script / command | Reads from |
+|---|---|
+| `scripts/vast_train_dsl_loop.sh` | `[current].arch` (env `ARCH` overrides) |
+| `scripts/vast_train_dna_loop.sh` | `[current].dna`  (env `DNA` overrides) |
+| `_deploy_train.py` | `[current].dna` if set, else `[current].arch` (env wins) |
+| `colab_run.ipynb` cell 4 | `[current].arch` + `[current].dna` |
+| `brian compile nfg --current` | `[current].arch` (or `[current].dna`), `[nfg].output` |
+
+**Env-var overrides** (for CI / one-off runs): `BRIAN_ARCH`, `BRIAN_DNA`, `BRIAN_NFG_OUTPUT`, `BRIAN_NFG_FORMAT`, `BRIAN_NFG_ENGINE`. Legacy `ARCH=…` / `DNA=…` env vars still work in the shell scripts.
+
+Contract is locked by 27 tests in [`tests/test_project_config.py`](tests/test_project_config.py).
 
 ---
 

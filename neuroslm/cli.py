@@ -180,26 +180,85 @@ def cmd_compile_nfg(args: argparse.Namespace) -> int:
     Accepts:
       * a normal architecture folder with ``arch.neuro``,
       * a ``.dna`` snapshot file (auto-routed to its source arch),
-      * a folder containing exactly one ``.dna`` (ditto).
-    """
-    try:
-        arch = _resolve_nfg_arch(args.arch)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"✗ Cannot resolve architecture: {e}", file=sys.stderr)
-        return 1
+      * a folder containing exactly one ``.dna`` (ditto),
+      * no positional arg + ``--current`` — reads the configured
+        arch / DNA from ``brian.toml`` and writes to the configured
+        ``[nfg].output`` (with a ``.heat`` infix when ``--heat`` is
+        *also* passed: ``.neuro/nfg.png`` → ``.neuro/nfg.heat.png``).
 
-    # Output paths default to the SOURCE folder unless the caller passed
-    # a `.dna` file — in which case write next to the DNA, not next to
-    # the source arch (so we don't clobber the live architecture's
-    # nfg.py / nfg.png on a snapshot render).
-    src_path = Path(args.arch)
-    if src_path.is_file() and src_path.suffix == ".dna":
-        default_dir = src_path.parent
-    elif src_path.is_dir() and not (src_path / "arch.neuro").is_file() \
-            and list(src_path.glob("*.dna")):
-        default_dir = src_path
-    else:
+    ``--heat <heatmap.json>`` works with any input mode — it just
+    passes the heatmap payload through to the renderer. The
+    ``.heat`` filename infix is *only* applied when ``--heat`` is
+    combined with ``--current`` (so the README's plain NFG and the
+    operator's heat-overlay NFG live side by side without colliding).
+    """
+    use_current = getattr(args, "current", False)
+    heat = getattr(args, "heat", None)  # str path or None
+
+    # ── --current path: source from brian.toml ─────────────────────
+    if use_current:
+        if args.arch:
+            print(
+                "✗ --current and a positional arch are mutually exclusive "
+                "(brian.toml owns the source in --current mode).",
+                file=sys.stderr,
+            )
+            return 1
+        from neuroslm.project_config import load_project_config
+        cfg = load_project_config()
+        # In DNA-mode point the renderer at the DNA file (it auto-routes
+        # back to the source arch via _resolve_nfg_arch); otherwise the
+        # arch folder.
+        if cfg.is_dna_mode:
+            source = str(cfg.resolve_dna_path())
+            source_label = f"DNA {cfg.dna}"
+        else:
+            source = str(cfg.resolve_arch_path())
+            source_label = f"arch {cfg.arch}"
+        try:
+            arch = _resolve_nfg_arch(source)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"✗ Cannot resolve {source_label}: {e}", file=sys.stderr)
+            return 1
+        # `default_dir` is unused in this branch — we pass the resolved
+        # output path explicitly via args.out below — but the renderer
+        # still receives a reasonable fallback.
         default_dir = Path(arch)
+        # Override the output path + format from brian.toml. CLI args
+        # (--out / --format) win if the operator explicitly sets them.
+        resolved_out = str(cfg.nfg_output_path(heat=bool(heat)))
+        if not args.out and not args.png:
+            args.out = resolved_out
+        if not getattr(args, "format", None) or args.format == "png":
+            args.format = cfg.nfg_format
+        if not getattr(args, "engine", None) or args.engine == "dot":
+            args.engine = cfg.nfg_engine
+        print(
+            f"current: {source_label}  ->  {resolved_out}"
+            + (" (heat overlay)" if heat else "")
+        )
+    else:
+        # Positional-arch path. ``--heat`` may also be set here — it
+        # just propagates to the renderer; no filename rewriting (only
+        # the --current branch owns the .heat. infix convention).
+        try:
+            arch = _resolve_nfg_arch(args.arch)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"✗ Cannot resolve architecture: {e}", file=sys.stderr)
+            return 1
+
+        # Output paths default to the SOURCE folder unless the caller passed
+        # a `.dna` file — in which case write next to the DNA, not next to
+        # the source arch (so we don't clobber the live architecture's
+        # nfg.py / nfg.png on a snapshot render).
+        src_path = Path(args.arch)
+        if src_path.is_file() and src_path.suffix == ".dna":
+            default_dir = src_path.parent
+        elif src_path.is_dir() and not (src_path / "arch.neuro").is_file() \
+                and list(src_path.glob("*.dna")):
+            default_dir = src_path
+        else:
+            default_dir = Path(arch)
 
     use_legacy = getattr(args, "legacy", False)
     if use_legacy:
@@ -246,6 +305,7 @@ def _cmd_compile_nfg_graphviz(args: argparse.Namespace,
         title = f"NFG · {Path(arch).name}"
         written = render_hypergraph(
             ir, out_path, format=out_format, engine=engine, title=title,
+            heat=getattr(args, "heat", None),
         )
     except Exception as e:
         # Most likely the `dot` binary isn't installed; tell the user
@@ -1957,22 +2017,40 @@ def _build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--format", default="png",
                     choices=["png", "svg", "pdf", "dot"],
                     help="(nfg only) output format for the Graphviz render (default: png)")
+    sc.add_argument("--heat",
+                    help="(nfg only) overlay training-heatmap colors; "
+                         "accepts a JSON file produced by HeatmapPublisher. "
+                         "When combined with --current, output filename gets a "
+                         "`.heat` infix (e.g. .neuro/nfg.heat.png).")
+    sc.add_argument("--current", action="store_true",
+                    help="(nfg only) read arch/DNA from brian.toml's [current] "
+                         "section and write to its [nfg].output path. Allows "
+                         "`brian compile nfg --current` with no positional arg.")
     sc.add_argument("--head", type=int, default=2000,
                     help="when printing to stdout, truncate after N chars")
     def _dispatch_compile(a):
-        if a.arch_or_subcmd is None:
+        # The 'nfg' sub-command can be invoked two ways:
+        #   brian compile nfg <arch>     → first positional is "nfg"
+        #   brian compile nfg --current  → first positional is "nfg", arch=None
+        is_nfg = (a.arch_or_subcmd == "nfg")
+        if a.arch_or_subcmd is None and not (is_nfg or a.current):
             print("Error: architecture name required", file=sys.stderr)
             print("Usage: brian compile <arch> [--out FILE]", file=sys.stderr)
             print("       brian compile nfg <arch> [--out FILE] [--png FILE]", file=sys.stderr)
+            print("       brian compile nfg --current [--heat HEATMAP.json]", file=sys.stderr)
             return 1
-        if a.arch_or_subcmd == "nfg":
-            if a.arch is None:
-                print("Error: architecture name required after 'nfg'", file=sys.stderr)
+        if is_nfg:
+            if a.arch is None and not a.current:
+                print("Error: architecture name required after 'nfg' "
+                      "(or pass --current to read from brian.toml)",
+                      file=sys.stderr)
                 print("Usage: brian compile nfg <arch> [--out FILE] [--png FILE]", file=sys.stderr)
+                print("       brian compile nfg --current [--heat HEATMAP.json]", file=sys.stderr)
                 return 1
             return cmd_compile_nfg(argparse.Namespace(
                 arch=a.arch, out=a.out, png=a.png, semantic=a.semantic,
-                legacy=a.legacy, engine=a.engine, format=a.format))
+                legacy=a.legacy, engine=a.engine, format=a.format,
+                heat=a.heat, current=a.current))
         else:
             return cmd_compile(argparse.Namespace(
                 arch=a.arch_or_subcmd, out=a.out, head=a.head))

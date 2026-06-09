@@ -7,8 +7,14 @@
 # the DSL compiler + BRIAN harness, with loss clipping and other
 # pipeline behavior read from arch.neuro's `training { ... }` block.
 #
+# Source of truth for ARCH (highest priority first):
+#   1. ARCH env var (legacy / CI overrides)
+#   2. brian.toml [current].arch  (workspace config)
+#   3. hardcoded fallback: "rcc_bowtie"
+#
 # Tunable env vars (with defaults):
-#   ARCH=rcc_bowtie                  architecture folder name under architectures/
+#   ARCH=<name>                      architecture folder under architectures/
+#                                     (auto-resolved from brian.toml if unset)
 #   STEPS=10000                      target step count
 #   BATCH=4 SEQ_LEN=256 D_SEM=256
 #   LOG_EVERY=20 SAVE_EVERY=1000
@@ -24,6 +30,16 @@ set -uo pipefail
 REPO_DIR="${REPO_DIR:-$(pwd)}"
 cd "$REPO_DIR"
 
+# Resolve ARCH from brian.toml if not set in the environment.
+if [ -z "${ARCH:-}" ]; then
+    ARCH="$(python3 - <<'PY' 2>/dev/null || echo rcc_bowtie
+from neuroslm.project_config import load_project_config
+cfg = load_project_config()
+# arch field is "architectures/<name>" — extract the leaf
+print(cfg.arch.split("/")[-1] if "/" in cfg.arch else cfg.arch)
+PY
+)"
+fi
 ARCH="${ARCH:-rcc_bowtie}"
 PRESET="${PRESET:-rcc_bowtie_30m_p4}"   # sizes the DSL LM trunk to match P4
 

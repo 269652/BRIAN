@@ -1,0 +1,58 @@
+# ─────────────────────────────────────────────────────────────────────
+# brian.toml — project configuration for BRIAN / NeuroSLM
+#
+# Single source of truth for "which architecture / DNA every training
+# / deploy / colab script targets". Edit one field here and the whole
+# training pipeline retargets:
+#
+#   • scripts/vast_train_dsl_loop.sh   (DSL training loop)
+#   • scripts/vast_train_dna_loop.sh   (DNA training loop)
+#   • _deploy_train.py                  (vast.ai deploy launcher)
+#   • colab_run.ipynb                   (Colab notebook training cell)
+#   • brian compile nfg --current       (re-renders the README diagram)
+#
+# Schema (also locked by tests/test_project_config.py):
+#
+#   [current]
+#   arch  : string   — path to architecture folder
+#                       (default: "architectures/rcc_bowtie")
+#   dna   : string   — path to .dna snapshot file; non-empty enables
+#                       DNA-mode training (default: "")
+#
+#   [nfg]
+#   output : string  — where `brian compile nfg --current` writes
+#                       (default: ".neuro/nfg.png")
+#   format : string  — png | svg | pdf | dot (default: "png")
+#   engine : string  — dot | neato | sfdp | fdp | circo (default: "dot")
+#
+# Env-var overrides (for CI / vast.ai pipelines):
+#   BRIAN_ARCH, BRIAN_DNA, BRIAN_NFG_OUTPUT, BRIAN_NFG_FORMAT,
+#   BRIAN_NFG_ENGINE
+# ─────────────────────────────────────────────────────────────────────
+
+[current]
+# The architecture the training scripts compile + train from.
+# Set to a folder under architectures/ containing arch.neuro + modules/.
+arch = "architectures/rcc_bowtie"
+
+# Set to a .dna path to switch every script into DNA-loop training
+# (vast_train_dna_loop.sh instead of vast_train_dsl_loop.sh).
+# Leave empty for plain DSL-mode training from the arch folder above.
+dna = ""
+
+[nfg]
+# `brian compile nfg --current` reads the arch above, renders the
+# Neural Flow Graph, and writes the result here. This file is what
+# README.md embeds — re-run the command after editing arch.neuro to
+# keep the README diagram in sync.
+output = ".neuro/nfg.png"
+
+# Render format. GitHub renders both .png and .svg inline in
+# READMEs; .svg has crisper labels at any zoom level but no
+# transparency. Default to .png for max compatibility.
+format = "png"
+
+# Graphviz layout engine. `dot` (default) is best for the bowtie
+# topology — its layered placement matches the
+# sensory → thalamus → ... → motor flow.
+engine = "dot"

@@ -8,9 +8,20 @@ For DSL training, reads hardware + scale variants from arch.neuro:
 For DNA training, unfolds the DNA and reads the same config from its
 embedded arch.neuro block.
 
+Source of truth (precedence, highest wins):
+  1. Explicit env vars: ``DNA=...`` or ``ARCH=...``
+  2. ``brian.toml`` (``[current].dna`` if set, else ``[current].arch``)
+  3. Built-in fallback ``ARCH=rcc_bowtie``
+
+This means a one-line edit to ``brian.toml`` retargets every deploy —
+without touching this file. The env vars stay supported for CI / one-
+off overrides.
+
 Environment variables:
   DNA=<path>              path to .dna file (e.g., dna/evol/arch.dna)
-  ARCH=<name>             architecture folder name (if DNA not set)
+                          — overrides brian.toml
+  ARCH=<name>             architecture folder name
+                          — overrides brian.toml
   SCALE=<name>            scale variant from arch.neuro (e.g., 300m, 1b, 7b)
   STEPS=10000             training steps (default: 40000)
   OOD_EVERY=500           OOD eval frequency (default: 500)
@@ -36,8 +47,32 @@ REPO_SLUG = "269652/BRIAN"
 VAST_IMAGE = "pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime"
 OOD_EVERY = int(os.environ.get("OOD_EVERY", "500"))
 STEPS = int(os.environ.get("STEPS", "40000"))
-DNA = os.environ.get("DNA", "")
-ARCH = os.environ.get("ARCH", "rcc_bowtie")
+
+# ── Resolve current arch/DNA from brian.toml (env vars still win) ──
+sys.path.insert(0, str(Path(__file__).parent))
+from neuroslm.project_config import load_project_config
+
+_proj = load_project_config()
+_env_dna = os.environ.get("DNA", "")
+_env_arch = os.environ.get("ARCH", "")
+
+if _env_dna:
+    DNA = _env_dna
+    ARCH = _env_arch or _proj.arch.split("/")[-1]
+elif _env_arch:
+    DNA = ""
+    ARCH = _env_arch
+elif _proj.is_dna_mode:
+    DNA = _proj.dna
+    ARCH = _proj.arch.split("/")[-1]  # purely informational in DNA mode
+    print(f"[brian.toml] DNA mode: DNA={DNA}")
+else:
+    DNA = ""
+    # arch field is "architectures/<name>"; the legacy ARCH env var
+    # expects just the leaf name (the scripts join "architectures/$ARCH").
+    ARCH = _proj.arch.split("/")[-1] if "/" in _proj.arch else _proj.arch
+    print(f"[brian.toml] DSL mode: ARCH={ARCH}")
+
 SCALE = os.environ.get("SCALE", "")
 LABEL_SUFFIX = os.environ.get("LABEL_SUFFIX", "")
 
@@ -52,7 +87,6 @@ LABEL = "neuroslm-full" + (f"-{LABEL_SUFFIX}" if LABEL_SUFFIX else "") \
     + mode_label + (f"-{SCALE}" if SCALE else "")
 
 # ── Read hardware + scale from arch.neuro ──
-sys.path.insert(0, str(Path(__file__).parent))
 from neuroslm.dsl.training_config import load_training_config_from_arch
 
 if USE_DNA:
