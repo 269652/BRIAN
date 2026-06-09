@@ -124,21 +124,31 @@ def _annotate_admitted(
     *,
     improvement_verdict: Optional[ImprovementVerdict] = None,
     triple_guard_verdict: Optional[Any] = None,
+    lean_verdict: Optional[Any] = None,
 ) -> DNAPatch:
     md = dict(patch.metadata)
     if improvement_verdict is not None:
         md["gate_verdict"] = improvement_verdict.to_dict()
     if triple_guard_verdict is not None:
         md["triple_guard_verdict"] = _verdict_to_dict(triple_guard_verdict)
+    if lean_verdict is not None:
+        md["lean_verdict"] = _lean_verdict_to_dict(lean_verdict)
     return DNAPatch(
         version=patch.version, step=patch.step, kind=patch.kind,
         target=patch.target, delta=list(patch.delta), metadata=md,
     )
 
 
-def _annotate_rejected(patch: DNAPatch, reasons: List[str]) -> DNAPatch:
+def _annotate_rejected(
+    patch: DNAPatch,
+    reasons: List[str],
+    *,
+    lean_verdict: Optional[Any] = None,
+) -> DNAPatch:
     md = dict(patch.metadata)
     md["rejection_reasons"] = list(reasons)
+    if lean_verdict is not None:
+        md["lean_verdict"] = _lean_verdict_to_dict(lean_verdict)
     return DNAPatch(
         version=patch.version, step=patch.step, kind=patch.kind,
         target=patch.target, delta=list(patch.delta), metadata=md,
@@ -157,6 +167,17 @@ def _verdict_to_dict(verdict: Any) -> Dict[str, Any]:
     }
 
 
+def _lean_verdict_to_dict(verdict: Any) -> Dict[str, Any]:
+    """Coerce a LeanVerdict to a dict for metadata embedding."""
+    return {
+        "status":   str(getattr(verdict, "status", "unknown")),
+        "file":     str(getattr(verdict, "file", "")),
+        "errors":   list(getattr(verdict, "errors", [])),
+        "warnings": list(getattr(verdict, "warnings", [])),
+        "n_sorry":  int(getattr(verdict, "n_sorry", 0)),
+    }
+
+
 # ── public API ────────────────────────────────────────────────────
 
 
@@ -168,6 +189,7 @@ def gate_proposals(
     triple_guard: Optional[_TripleGuardLike] = None,
     structural_by_target: Optional[Dict[str, Tuple[Any, Any]]] = None,
     default_direction: Optional[str] = None,
+    lean_backend: Optional[Any] = None,
 ) -> Tuple[List[DNAPatch], List[DNAPatch]]:
     """Admit/reject proposals via Improvement (+ optional TripleGuard) gates.
 
@@ -179,7 +201,8 @@ def gate_proposals(
     evidence_by_target
         ``{patch.target: ImprovementEvidence}`` map. A proposal whose
         target is missing from this dict is rejected with the
-        ``no_evidence`` reason (never silently admitted).
+        ``no_evidence`` reason (never silently admitted) — *unless* a
+        ``lean_backend`` admits it first.
     improvement_gate
         Optional pre-configured gate; defaults to
         ``ImprovementGate()``.
@@ -196,12 +219,24 @@ def gate_proposals(
     default_direction
         Fallback direction if neither the per-evidence override nor
         the per-kind default applies (rare; only used for custom kinds).
+    lean_backend
+        Optional Lean proof backend (typically
+        :class:`neuroslm.evolution.lean_gate.LeanProofBackend`).
+        Must expose ``admit_proposal(patch) -> Optional[LeanVerdict]``.
+        When provided and the verdict is ``status='verified'``, the
+        proposal is admitted **without** consulting the empirical or
+        structural gates — a formal proof strictly dominates a
+        statistical signal. Any other Lean status falls through to
+        the empirical gate. This kwarg is purely additive: it can
+        only admit proposals the empirical gate would have rejected;
+        it can never reject one the empirical gate would have admitted.
 
     Returns
     -------
     (admitted, rejected) — disjoint partition of ``proposals``.
-    Every patch carries either a ``gate_verdict`` (admitted) or a
-    ``rejection_reasons`` list (rejected) in its ``metadata``.
+    Every patch carries either a ``gate_verdict`` (admitted via
+    empirical gate), a ``lean_verdict`` (admitted via Lean, or
+    consulted-but-fell-through), or a ``rejection_reasons`` list.
     """
     gate = improvement_gate or ImprovementGate()
     structural_by_target = structural_by_target or {}
@@ -210,16 +245,41 @@ def gate_proposals(
     rejected: List[DNAPatch] = []
 
     for patch in proposals:
+        # ── Lean short-circuit (only if backend supplied) ──────────
+        lean_verdict = None
+        if lean_backend is not None:
+            try:
+                lean_verdict = lean_backend.admit_proposal(patch)
+            except Exception as exc:
+                lean_verdict = None
+                # We swallow backend exceptions; the Lean kwarg is
+                # purely additive (see docstring). Surface via metadata
+                # so the auditor can see we tried.
+                # (No reject; we just fall through.)
+                lean_verdict_meta_extra = {"lean_backend_error": str(exc)}
+            else:
+                lean_verdict_meta_extra = {}
+
+            if (lean_verdict is not None
+                    and getattr(lean_verdict, "status", "") == "verified"):
+                admitted.append(_annotate_admitted(
+                    patch, lean_verdict=lean_verdict,
+                ))
+                continue
+        else:
+            lean_verdict_meta_extra = {}
+
+        # ── empirical (Improvement) gate ───────────────────────────
         evidence = evidence_by_target.get(patch.target)
         if evidence is None:
             rejected.append(_annotate_rejected(
                 patch,
                 [f"no_evidence for target {patch.target!r} — proposal "
                  f"cannot be admitted without before/after samples"],
+                lean_verdict=lean_verdict,
             ))
             continue
 
-        # ── empirical (Improvement) gate ───────────────────────────
         try:
             direction = _resolve_direction(
                 evidence=evidence, patch=patch,
@@ -229,11 +289,16 @@ def gate_proposals(
                 evidence.before, evidence.after, direction=direction,
             )
         except ValueError as exc:
-            rejected.append(_annotate_rejected(patch, [str(exc)]))
+            rejected.append(_annotate_rejected(
+                patch, [str(exc)], lean_verdict=lean_verdict,
+            ))
             continue
 
         if not improvement_verdict.admitted:
-            rejected.append(_annotate_rejected(patch, improvement_verdict.reasons))
+            rejected.append(_annotate_rejected(
+                patch, improvement_verdict.reasons,
+                lean_verdict=lean_verdict,
+            ))
             continue
 
         # ── optional structural (TripleGuard) gate ─────────────────
@@ -260,6 +325,7 @@ def gate_proposals(
                         + [f"[improvement] (admitted) effect="
                            f"{improvement_verdict.effect:+.6g}, "
                            f"p={improvement_verdict.p_value:.4g}"],
+                        lean_verdict=lean_verdict,
                     ))
                     continue
 
@@ -267,6 +333,7 @@ def gate_proposals(
             patch,
             improvement_verdict=improvement_verdict,
             triple_guard_verdict=triple_verdict,
+            lean_verdict=lean_verdict,
         ))
 
     return admitted, rejected

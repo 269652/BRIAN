@@ -38,7 +38,7 @@ from neuroslm.discoveries.records import HypothesisRecord, DiscoveryRecord
 from neuroslm.discoveries.store import HypothesisStore, DiscoveryStore
 from neuroslm.discoveries.lean import (
     LeanVerdict, emit_hypothesis_proof, emit_discovery_proof,
-    verify_lean_proof,
+    verify_lean_proof, static_lint_lean_proof, UNIMPLEMENTED_MARKER,
 )
 from neuroslm.discoveries.splice import SpliceResult, splice_discovery_into_dna
 
@@ -46,6 +46,6 @@ __all__ = [
     "HypothesisRecord", "DiscoveryRecord",
     "HypothesisStore", "DiscoveryStore",
     "LeanVerdict", "emit_hypothesis_proof", "emit_discovery_proof",
-    "verify_lean_proof",
+    "verify_lean_proof", "static_lint_lean_proof", "UNIMPLEMENTED_MARKER",
     "SpliceResult", "splice_discovery_into_dna",
 ]

@@ -68,3 +68,17 @@ temp/
 # DNA compilation artifacts
 dna/
 architectures/evol/
+
+# Lean / Lake build artifacts (lean/Brian/** source IS tracked)
+lean/.lake/
+lean/build/
+*.olean
+*.olean.trace
+*.ilean
+*.hash
+
+# Ad-hoc NFG demo renders (large PNGs from
+# `brian nfg render --out ...`). `.neuro/` is intentionally tracked
+# (sample_heatmap.json etc.) — only top-level demo PNGs are noise.
+/nfg_rcc_*.png
+/results/nfg_*.png

@@ -1,0 +1,10 @@
+{
+  "step": 1234,
+  "populations": {
+    "pfc": 0.9,
+    "amygdala": 0.7,
+    "hippo": 0.5,
+    "motor": 0.85
+  },
+  "synapses": {}
+}

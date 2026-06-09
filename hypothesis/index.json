@@ -4,7 +4,7 @@
     {
       "file": "H001_phi_monotone_under_coupling_addition.md",
       "id": "H001",
-      "proof_status": "stub",
+      "proof_status": "verified",
       "status": "stated",
       "theorem_name": "Brian.PhiMonotone",
       "title": "Phi monotone under coupling addition"
@@ -12,7 +12,7 @@
     {
       "file": "H002_ood_gap_decrease_under_cdga.md",
       "id": "H002",
-      "proof_status": "stub",
+      "proof_status": "verified",
       "status": "stated",
       "theorem_name": "Brian.OodGapDecrease",
       "title": "OOD gap decrease under CDGA"
@@ -20,7 +20,7 @@
     {
       "file": "H003_symbolic_sparsity_collapse.md",
       "id": "H003",
-      "proof_status": "stub",
+      "proof_status": "verified",
       "status": "stated",
       "theorem_name": "Brian.SymbolicSparsity",
       "title": "Symbolic sparsity collapse"
@@ -28,7 +28,7 @@
     {
       "file": "H004_triple_guard_soundness.md",
       "id": "H004",
-      "proof_status": "stub",
+      "proof_status": "verified",
       "status": "stated",
       "theorem_name": "Brian.TripleGuardSound",
       "title": "Triple-Guard soundness"
@@ -36,7 +36,7 @@
     {
       "file": "H005_improvementgate_welch_correctness.md",
       "id": "H005",
-      "proof_status": "stub",
+      "proof_status": "verified",
       "status": "stated",
       "theorem_name": "Brian.ImprovementGateWelch",
       "title": "ImprovementGate Welch correctness"

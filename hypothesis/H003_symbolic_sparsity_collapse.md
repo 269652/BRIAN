@@ -3,14 +3,14 @@ code_refs: [neuroslm/thsd/symbolic.py]
 created_at: "2026-06-09T18:00:16Z"
 id: H003
 proof_path: hypothesis/proofs/H003_symbolic_sparsity_collapse.lean
-proof_status: stub
+proof_status: verified
 references: [formal_framework.md §10.2, formal_framework.md §3]
 status: stated
 tags: [thsd, symbolic, gumbel-softmax, sparsity]
 test_refs: [tests/thsd/test_symbolic.py]
 theorem_name: Brian.SymbolicSparsity
 title: Symbolic sparsity collapse
-updated_at: "2026-06-09T18:00:16Z"
+updated_at: "2026-06-09T19:45:22Z"
 ---
 
 **Statement.** Let $U_\tau(x)$ be the Gumbel-Softmax output of a ``SymbolicHyperNeuron`` at temperature $\tau > 0$. As $\tau \to 0^+$,

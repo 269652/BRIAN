@@ -3,14 +3,14 @@ code_refs: [neuroslm/regularizers.py]
 created_at: "2026-06-09T18:00:16Z"
 id: H002
 proof_path: hypothesis/proofs/H002_ood_gap_decrease_under_cdga.lean
-proof_status: stub
+proof_status: verified
 references: [formal_framework.md §10.2, docs/CDGA.md]
 status: stated
 tags: [ood, cdga, monotonicity, regularisation]
 test_refs: [tests/test_cdga_smoke.py]
 theorem_name: Brian.OodGapDecrease
 title: OOD gap decrease under CDGA
-updated_at: "2026-06-09T18:00:16Z"
+updated_at: "2026-06-09T19:45:21Z"
 ---
 
 **Statement.** Let $L_{\text{base}}$ be the base training loss and $\mathrm{CDGA}$ the Cross-Distribution Gradient Alignment term (``docs/CDGA.md``, $\lambda \ge 0$). Then

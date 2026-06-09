@@ -223,6 +223,12 @@ class BRIANHarness(nn.Module):
         # Updated once per compute_loss step.
         self._metrics: Dict[str, float] = {}
 
+        # Evolution heatmap hook — see neuroslm/evolution/harness_hook.py.
+        # Attached lazily via :py:meth:`attach_heatmap_hook` so importing
+        # the harness doesn't pull in the evolution subsystem until a run
+        # actually wants incremental heat collection.
+        self._heatmap_hook = None
+
         # ── Cortex fusion: distillation + NT-gated α state ──
         # Slot A (KL-distillation) and slot C (NT-mediated gating) are
         # both controlled by `training_config.multi_cortex` flags; the
@@ -317,6 +323,10 @@ class BRIANHarness(nn.Module):
         h._surprise_ema = 0.0
         h._last_orch_modulation = None
         h._metrics = {}
+        # Evolution heatmap hook — see neuroslm/evolution/harness_hook.py.
+        # Mirror __init__ so the L6 NFG overlay path is safe to query
+        # from this alternate constructor (DSL LM training).
+        h._heatmap_hook = None
         # Cortex fusion state (slot A + slot C) — mirror __init__
         # so this alternate constructor doesn't crash the fusion path.
         h._last_pre_fusion_lm_logits = None
@@ -1949,7 +1959,27 @@ class BRIANHarness(nn.Module):
         # Matches Brain's pattern: update_maturity() is called by train.py
         # AFTER the backward, with the (un-scaled, batch-level) LM loss.
         self.maturity.update(self._last_lm_loss_value)
+
+        # ── Evolution heatmap hook (L2-wire) ─────────────────────
+        # Fire AFTER optimizer.step() so .grad still holds the
+        # backward we just ran. The hook is a no-op when disabled,
+        # off-cadence, or never attached; failures are swallowed.
+        if self._heatmap_hook is not None:
+            self._heatmap_hook.step(self._global_step)
+
         return float(loss.detach().item())
+
+    def attach_heatmap_hook(self, hook) -> None:
+        """Attach an :class:`HeatmapHook` to fire after every train_step.
+
+        The hook is invoked with the current global step *after* the
+        backward + optimizer step have completed. The hook itself owns
+        its cadence, alias map, publisher, and ``enabled`` flag — the
+        harness side is purely a forward call.
+
+        Pass ``None`` to detach.
+        """
+        self._heatmap_hook = hook
 
     def eval_step(self, ids: torch.Tensor, targets: torch.Tensor,
                   nt_levels: Optional[Dict[str, float]] = None) -> float:

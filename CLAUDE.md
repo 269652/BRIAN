@@ -305,3 +305,110 @@ makes the repo harder to reason about and slower for the next person
 **When in doubt: ask the user.** If you're unsure whether a file belongs,
 mention it in conversation before committing. Prefer temporary artifacts
 (conversation, branches, local experiments) over repo clutter.
+
+---
+
+## 12. Lean proofs — THSD-annotated, zero `sorry`s, load-bearing
+
+Every `.lean` file in this repo is a **load-bearing proof obligation**, not a
+placeholder. Lean is what turns our claims from "passes tests in this
+configuration" into "is true under the THSD axioms." The autogen scaffold
+emitted by `neuroslm/discoveries/lean.py` is exactly that — a scaffold; it is
+**never the committed state**. The committed state is a complete proof.
+
+### 12.1 The THSD Lean library is the only vocabulary allowed
+
+`docs/formal_framework.md` defines the Topological Hyper-Sheaf-Dynamics
+annotation framework. Its executable counterpart is `neuroslm/thsd/engine.py`
+(`SimplexComplex`, `CellularSheaf`, `CoboundaryOperator`, `PhiDynamicsComputer`,
+`SymbolicSimplex`). Its formal counterpart **must** be a Lean library at
+`lean/Brian/` (mirror layout: `Brian/Thsd/Simplex.lean`, `Brian/Thsd/Sheaf.lean`,
+`Brian/Thsd/Coboundary.lean`, `Brian/Thsd/Phi.lean`, `Brian/Thsd/Symbolic.lean`,
+plus `Brian/Core.lean` as the top-level import surface).
+
+Every hypothesis proof under `hypothesis/proofs/H###_*.lean`:
+
+- **must** `import Brian.Core` (or a narrower `Brian.Thsd.*` submodule);
+- **must** state its theorem using THSD types (`Sheaf`, `Coboundary`, `Φ`,
+  `SymbolicSimplex`) — never ad-hoc redeclarations of the same objects;
+- **must** cite, in the file's header docstring, the corresponding
+  `docs/formal_framework.md` section number AND the
+  `neuroslm/thsd/engine.py` symbol whose behaviour the theorem pins down;
+- **must** type-check against the same Mathlib + `Brian.Core` pin recorded in
+  `lean/lean-toolchain` and `lean/lakefile.lean`.
+
+### 12.2 `sorry` is banned. So is `: True`.
+
+No committed `.lean` file may contain the token `sorry`, nor may any theorem
+have the trivial obligation `theorem X ... : True := by trivial`. The CI gate
+(`brian hypothesis verify --all` once the Lean toolchain is provisioned)
+fails the build on either pattern. The autogen stub in
+`neuroslm/discoveries/lean.py` currently produces both — **that file is a
+template, not a destination**. Replacing the `sorry` with the real proof,
+and the `: True` with the real obligation in THSD types, is part of
+delivering the hypothesis, not a follow-up.
+
+Allowed escape hatches (rare, must be justified):
+
+- `axiom`  — only for genuinely axiomatic THSD facts that the framework
+  posits (e.g. "$\partial \circ \partial = 0$" if we choose to take it as
+  axiom rather than derive it from `Brian.Thsd.Simplex`). Every `axiom`
+  declaration in `lean/Brian/` requires a one-line comment naming the
+  source (paper, formal_framework.md §, or "design choice") and a
+  matching entry in `docs/formal_framework.md` §10.2's axiom table.
+- `Brian.Postulate` namespace — wrap empirical conjectures we have not
+  yet derived. Must be referenced by exactly one hypothesis and tagged
+  `@[brian_postulate]` so a future audit pass can list every unproven
+  link. A `Brian.Postulate` is a *named admission of incompleteness*; it
+  is not a `sorry` in disguise — it must have a precise type signature
+  in THSD vocabulary.
+
+Nothing else. No `admit`, no `sorry`, no `_ : True`, no `Classical.choice`
+inside a proof body without a comment naming the lemma it discharges.
+
+### 12.3 What "complete description" means per `.lean` file
+
+A `.lean` file is complete when, reading top-to-bottom, a stranger fluent in
+Lean + the THSD framework can:
+
+1. **Identify the obligation** — the file header docstring states the claim
+   in prose, cites `formal_framework.md §X`, and names the
+   `neuroslm/thsd/engine.py` symbol.
+2. **Read the THSD context** — every imported name resolves to either
+   Mathlib or `Brian.*`; no opaque external constants.
+3. **Verify each step** — every `theorem`, `lemma`, `def`, and `axiom`
+   has either a complete proof body OR a single-line comment naming the
+   `Brian.Postulate` / `Mathlib` lemma it relies on.
+4. **Check the closure** — the final `theorem H###_*` discharges its goal
+   with zero open obligations (`lean --json` reports `messages: []` and
+   `n_sorry: 0`).
+
+### 12.4 Building out the THSD Lean library is part of the work
+
+The first hypothesis whose proof needs a THSD construct that doesn't yet
+exist in `lean/Brian/` is responsible for **landing that construct** in the
+same commit. Examples:
+
+- H001 (`PhiMonotone`) needs `Brian.Thsd.Phi.Phi`, `Brian.Thsd.Sheaf.add_coupling`,
+  and a `Phi_monotone_under_add` lemma. The H001 commit ships all three +
+  the proof that consumes them, with TDD-style Lean test files under
+  `lean/test/` exercising the new lemmas in isolation.
+- H002 (`OodGapDecrease`) needs `Brian.Cdga` + the gap-non-increase lemma.
+  Same rule: land them in the H002 commit.
+
+No "stub now, prove later" — that pattern is what produced today's five
+`sorry`-laden files. A hypothesis without a complete `.lean` proof is
+**unverified** and may not be cited as evidence in `docs/findings.md`,
+`docs/technical_report.md`, or any commit message claiming "[VERIFIED]".
+
+### 12.5 Until the Lean toolchain is on the CI host
+
+The local + CI fallback `LeanVerdict(status="skipped")` is acceptable **only**
+as a transient state. The moment the Lean toolchain (`lean`, `lake`,
+`Mathlib`) lands in the CI image, the gate hardens: `status="skipped"`
+becomes a build failure. Every existing `hypothesis/proofs/*.lean` must
+have been promoted to `status="verified"` by that point or the hypothesis
+gets demoted in the ledger.
+
+The corresponding tracking row lives in `docs/formal_framework.md` §10.2;
+update it in the same commit that lands a Lean proof, never separately.
