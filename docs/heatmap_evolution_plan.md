@@ -89,6 +89,19 @@ edges by normalized heat.                                    [L6]
       `tests/test_training_heatmap.py`, 13/13). EMA heat per element;
       `update`, `normalized`, `rank`, `hot_paths`, `cold_paths`,
       `to_dict`/`from_dict`/`save`/`load`.
+- [x] **L2b — `HeatmapPublisher`** (`neuroslm/evolution/publisher.py`,
+      `tests/test_heatmap_publisher.py`, 8/8). Saves the heatmap and
+      best-effort `git add`/`commit`/`push` every `commit_every` steps
+      (configurable); injectable git runner; failures swallowed so it
+      never crashes training. Works for vast + Colab (push auth = the
+      run env's tokenized remote / credential helper). Config knobs to
+      surface in the training block: `heatmap_update_every_n`,
+      `heatmap_commit_every_n`, `heatmap_push`, `heatmap_path`,
+      `heatmap_remote`, `heatmap_branch`. **Watch-out:** the heatmap
+      artifact must live at a **tracked** path (NOT under gitignored
+      `results/` or `dna/evol/`) for commits to include it — suggest
+      `results/heatmaps/<arch>.heatmap.json` with a `!results/heatmaps/`
+      un-ignore, or a dedicated tracked dir.
 - [ ] **L2 — gradient heat collector + harness hook.** Map
       `named_parameters()` → IR element id (module-name prefix → node id;
       synapse params → edge id). `collect_grad_signals(model, ir) ->
@@ -123,8 +136,12 @@ edges by normalized heat.                                    [L6]
 
 ## Current state (update me)
 
-- **Done:** L1 (heatmap core), committed.
-- **Next:** L2 (gradient collector + harness hook).
+- **Done:** L1 (heatmap core) + L2b (publisher / auto commit-push), committed.
+- **Next:** L2 (gradient collector + harness hook), then wire the
+  `HeatmapPublisher.maybe_publish(heatmap, step)` call right after each
+  `heatmap.update(...)` in the harness loop; read cadence/push from the
+  training config; default the artifact to a tracked
+  `results/heatmaps/<arch>.heatmap.json`.
 - **Open questions / watch-outs:**
   - param-name → IR id mapping is the crux of L2; module names in the
     model may not match IR node names 1:1 — may need a small alias map
