@@ -65,8 +65,23 @@ temp/
 # Local secrets — never commit
 .env
 
-# DNA compilation artifacts
-dna/
+# DNA compilation artifacts (intermediate snapshots, patches, heatmaps).
+# The canonical evolved genome dna/evol/arch.dna IS source-of-truth and
+# is whitelisted below — without it, Colab/vast clones can't train in
+# DNA mode (brian.toml points at this path; train_dsl.py refuses to
+# start when missing). See README "DNA mode" and tests/test_project_config.py.
+#
+# Pattern shape: ignore directory *contents* (not the dir itself) so the
+# re-include rule for arch.dna can take effect — git can't un-ignore a
+# file whose parent directory has been ignored wholesale.
+#
+# Heatmaps written by the evolution loop live in results/heatmaps/
+# (HeatmapPublisher default) or in <checkpoint_dir>/live_heatmap.json
+# (runtime artifact), so they don't need allowlisting under dna/.
+dna/*
+!dna/evol/
+dna/evol/*
+!dna/evol/arch.dna
 architectures/evol/
 
 # Lean / Lake build artifacts (lean/Brian/** source IS tracked)
