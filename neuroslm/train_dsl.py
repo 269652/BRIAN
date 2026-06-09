@@ -437,6 +437,19 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
                       f"kl={m.get('distill_kl', 0.0):.3f} "
                       f"lm_ema={m.get('lm_loss_ema', 0.0):.2f} "
                       f"cx_ema={m.get('cortex_loss_ema', 0.0):.2f}]")
+    # Allostasis (synthetic HPA axis) telemetry — surfaces ONLY when
+    # the controller is active so legacy runs without the block see no
+    # change to the log format. `load` is the fast stress integrator
+    # (acute); `cort` is the slow integrator (chronic); the three
+    # multipliers show how strongly each effector is damping.
+    allostasis_str = ""
+    if "allostasis_cort" in m:
+        allostasis_str = (" | hpa["
+            f"load={m.get('allostasis_load', 0.0):.2f} "
+            f"cort={m.get('allostasis_cort', 0.0):.2f} "
+            f"NE×{m.get('allostasis_ne_mult', 1.0):.2f} "
+            f"T×{m.get('allostasis_trophic_mult', 1.0):.2f} "
+            f"LR×{m.get('allostasis_lr_mult', 1.0):.2f}]")
     # Emergent C1–C6 telemetry tail (printed only when those keys are
     # present, so legacy runs without enable_emergent see no change).
     em_str = ""
@@ -473,7 +486,8 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
             f"| Φ {phi:.3f} | λ₁ {fid:.3f} | ign {ign:.2f} "
             f"| mesoLG {lg:.2f} "
             f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
-            f"| NT[{nt_str}]{osc_str}{em_str}{reg_str}{cortex_str}")
+            f"| NT[{nt_str}]{osc_str}{em_str}{reg_str}"
+            f"{cortex_str}{allostasis_str}")
 
 
 def _eval_pass_marks(rules, step: int,
@@ -634,7 +648,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
           steps: int, log_every: int = 20, save_every: int = 1000,
           ckpt_dir: Optional[Path] = None, start_step: int = 0,
           tokens_per_step: int = 0,
-          ood_every: int = 0) -> None:
+          ood_every: int = 0,
+          evolution_loop: Optional[object] = None) -> None:
     """Run train_steps from `start_step+1` to `steps`. Emits the native
     train.py metric format; saves checkpoints.
 
@@ -644,6 +659,12 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
     ood_mid_<RUN_ID>_step{N}.json so it lands in the same per-step
     metrics ledger as the final OOD eval. Lets you SEE generalization
     improving (or not) while training is still running.
+
+    If `evolution_loop` is non-None, its ``tick(step, loss)`` is called
+    after every train_step. A firing cycle (returns a non-None dict)
+    is logged inline with the ``evolution`` tag; below-cadence calls
+    are no-ops. The loop itself is defensive — failures are swallowed
+    and surfaced via the result dict, never raised.
     """
     if ckpt_dir is not None:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -651,6 +672,12 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
     t0 = time.time()
     last_log = t0
     log_buf = []
+    # Separate LM-only buffer so the `lm` column reports the bare
+    # cross-entropy, not the aux-inflated total. Without this the user
+    # sees ``loss 13.7 | lm 13.7`` even when the true LM CE is 10.8
+    # nats (the spread comes from VBB + PC-reentry + MSPCC + distill).
+    # That cosmetic equality masks a 3-nat-wide aux contribution.
+    lm_log_buf = []
 
     observer = getattr(harness, "_observer", None)
 
@@ -666,6 +693,29 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
             tokens_per_step = ids.numel()
         loss = harness.train_step(ids, targets)
         log_buf.append(loss)
+        # `harness._last_lm_loss_value` is the LM-only CE (set inside
+        # compute_loss before aux terms are added). When aux losses are
+        # active (VBB, PC reentry, MSPCC, distillation) this lags below
+        # the total by 2-4 nats — surfaced as the `lm` column below.
+        lm_only = float(getattr(harness, "_last_lm_loss_value", loss))
+        lm_log_buf.append(lm_only)
+
+        # ── Evolutionary tick ─────────────────────────────────────
+        # The HeatmapHook attached by ``EvolutionLoop`` has already
+        # fired inside ``harness.train_step`` on its own cadence
+        # (it's the post-step hook the harness owns). The ``tick``
+        # call here is the higher-level orchestrator: it feeds the
+        # loss into its sliding window, saves the live heatmap on
+        # ``save_heatmap_every``, and on ``mutate_every`` proposes /
+        # gates / persists DNA patches. Below-cadence calls are
+        # no-ops; failures are swallowed and surfaced via the
+        # returned dict's ``error`` key.
+        if evolution_loop is not None:
+            cycle = evolution_loop.tick(step, loss)
+            if cycle is not None and (cycle.get("n_admitted", 0) > 0
+                                       or "error" in cycle):
+                print(f"[train_dsl] evolution @ step {step}: {cycle}",
+                      flush=True)
 
         # Update the metric observers from the live model's activations
         # (Φ, λ₁, ignition, oscillations, NT, trophic, mesoLG).
@@ -717,7 +767,9 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
         if step % log_every == 0:
             now = time.time()
             avg = sum(log_buf) / len(log_buf)
+            avg_lm = sum(lm_log_buf) / len(lm_log_buf) if lm_log_buf else avg
             log_buf.clear()
+            lm_log_buf.clear()
             tok_per_s = tokens_per_step * log_every / max(now - last_log, 1e-6)
             gnorm = float(getattr(harness, "_last_gnorm", 0.0))
             lr = float(getattr(harness, "_last_lr", 0.0))
@@ -729,11 +781,17 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
             if harness_metrics:
                 merged = dict(metrics) if metrics else {}
                 for k, v in harness_metrics.items():
-                    if k.startswith("reg_") or k == "chat_ratio":
-                        merged[k] = v
+                    # Forward every key the harness publishes (PR2 reg_*,
+                    # chat_ratio, cortex fusion telemetry, allostasis HPA
+                    # state). `_format_metrics_line` decides which of
+                    # these to render.
+                    merged[k] = v
                 metrics = merged
-            # avg_lm == avg total loss until auxiliary losses are added.
-            print(_format_metrics_line(step, avg, avg, gnorm, lr,
+            # `avg` = total loss (LM + aux); `avg_lm` = LM-only CE.
+            # When aux losses are off they're equal; when on, the
+            # `loss` column shows the optimization target and the `lm`
+            # column shows the bare language-modeling cross-entropy.
+            print(_format_metrics_line(step, avg, avg_lm, gnorm, lr,
                                         tok_per_s, metrics), flush=True)
             last_log = now
             # Record train PPL for pass-mark checks
@@ -938,6 +996,39 @@ def main():
     # interventions.
     parser.add_argument("--chat_ratio", type=float, default=0.3)
     parser.add_argument("--seed", type=int, default=0)
+
+    # ── Evolutionary training (DNA mode) ────────────────────────────
+    # ``--evolve`` switches on the HeatmapHook + propose/gate/persist
+    # cycle in ``train_dsl``. It is meaningful only with ``--dna`` set:
+    # the patch stack needs a DNA file to anchor against. Defaults
+    # below match the cadences in ``EvolutionLoop`` so the flag flips
+    # behaviour without needing every cadence specified.
+    parser.add_argument("--evolve", action="store_true",
+                        help="(DNA mode only) enable per-step hypergraph "
+                             "IR heatmap, mutation proposal, gating, and "
+                             "DNA-patch persistence — the full epigenetic "
+                             "evolution / discovery pipeline.")
+    parser.add_argument("--heatmap_every", type=int, default=50,
+                        help="(--evolve) grad-norm rollup cadence into "
+                             "the hypergraph-IR heatmap.")
+    parser.add_argument("--mutate_every", type=int, default=500,
+                        help="(--evolve) cadence of propose → gate → "
+                             "persist cycles (0 disables the cycle but "
+                             "keeps the heatmap collecting).")
+    parser.add_argument("--save_heatmap_every", type=int, default=500,
+                        help="(--evolve) cadence for writing the live "
+                             "heatmap to <ckpt_dir>/evolution/live_"
+                             "heatmap.json so `brian compile nfg "
+                             "--current --heat` can pick it up.")
+    parser.add_argument("--hot_threshold", type=float, default=0.7,
+                        help="(--evolve) normalized-heat threshold "
+                             "above which a node/edge is HOT and "
+                             "triggers a mutation proposal.")
+    parser.add_argument("--cold_threshold", type=float, default=0.1,
+                        help="(--evolve) normalized-heat threshold "
+                             "below which an edge is COLD and gets a "
+                             "prune-proposal.")
+
     args = parser.parse_args()
 
     # Validate that either --arch or --dna is provided
@@ -1143,11 +1234,62 @@ def main():
             device=args.device, seed=args.seed,
         )
 
+    # ── Evolutionary loop (DNA mode only) ──────────────────────────
+    # Wires HeatmapHook + propose_mutations + gate_proposals +
+    # EvolutionaryTrainingContext.save_checkpoint into the per-step
+    # path. Hard requirement: ``--evolve`` AND ``--dna`` must both be
+    # set. With ``--evolve`` and no DNA we print a warning and skip
+    # the loop instead of crashing (so existing DSL-mode workflows
+    # don't break when the flag is left on in a shared config).
+    evolution_loop = None
+    if args.evolve:
+        if not args.dna:
+            print("[train_dsl] --evolve given without --dna; the "
+                  "epigenetic loop needs a DNA file to anchor against. "
+                  "Skipping evolution wiring (training continues "
+                  "without it).", flush=True)
+        else:
+            from neuroslm.evolution.training_loop import EvolutionLoop
+            evo_ckpt_dir = (ckpt_dir or Path("lfs_checkpoints")) / "evolution"
+            evolution_loop = EvolutionLoop(
+                harness=harness,
+                arch_root=arch_root,
+                dna_path=Path(args.dna).resolve(),
+                checkpoint_dir=evo_ckpt_dir,
+                heatmap_every=args.heatmap_every,
+                mutate_every=args.mutate_every,
+                save_heatmap_every=args.save_heatmap_every,
+                hot_threshold=args.hot_threshold,
+                cold_threshold=args.cold_threshold,
+            )
+            es = evolution_loop.stats
+            if es["enabled"]:
+                print("[train_dsl] ══════════════════════════════════════════════")
+                print(f"[train_dsl] evolution loop ENABLED")
+                print(f"[train_dsl]   IR: {es['ir_nodes']} nodes, "
+                      f"{es['ir_edges']} edges from {arch_root}")
+                print(f"[train_dsl]   DNA: {args.dna} "
+                      f"(resume_step={es['resume_step']}, "
+                      f"patches_loaded={es['patches_loaded']})")
+                print(f"[train_dsl]   cadence: heatmap every "
+                      f"{args.heatmap_every}, mutate every "
+                      f"{args.mutate_every}, save_heatmap every "
+                      f"{args.save_heatmap_every}")
+                print(f"[train_dsl]   thresholds: hot>{args.hot_threshold} "
+                      f"cold<{args.cold_threshold}")
+                print(f"[train_dsl]   patches → {evo_ckpt_dir}")
+                print("[train_dsl] ══════════════════════════════════════════════")
+            else:
+                print(f"[train_dsl] --evolve requested but disabled: "
+                      f"{es.get('reason', 'unknown')}", flush=True)
+                evolution_loop = None  # avoid passing a no-op object
+
     train(
         harness=harness, source=source,
         steps=args.steps, log_every=args.log_every,
         save_every=args.save_every, ckpt_dir=ckpt_dir,
         start_step=start_step, ood_every=args.ood_every,
+        evolution_loop=evolution_loop,
     )
 
     print("[train_dsl] done.")

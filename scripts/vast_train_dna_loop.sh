@@ -21,6 +21,23 @@
 #   CKPT_DIR=$REPO_DIR/lfs_checkpoints
 #   MAX_RESTARTS=1000
 #
+# Evolutionary inner loop (DNA-mode only, all optional):
+#   EVOLVE=1                            enable HeatmapHook + propose →
+#                                        gate → save_checkpoint cycle
+#                                        in-process during training
+#                                        (set to 0 to disable; default 1)
+#   HEATMAP_EVERY=50                    grad-norm rollup cadence into
+#                                        the hypergraph-IR heatmap
+#   MUTATE_EVERY=500                    cadence of propose / gate /
+#                                        persist cycles
+#   SAVE_HEATMAP_EVERY=500              cadence for writing the live
+#                                        heatmap to CKPT_DIR/evolution/
+#                                        live_heatmap.json
+#   HOT_THRESHOLD=0.7                   normalised-heat threshold for
+#                                        HOT (triggers a mutation)
+#   COLD_THRESHOLD=0.1                  normalised-heat threshold for
+#                                        COLD (triggers a prune proposal)
+#
 # Resume semantics: the harness's checkpoint format is independent of
 # Brain's. On restart we load the most recent dsl_arch_step*.pt from
 # CKPT_DIR if present (same as DSL training).
@@ -81,6 +98,29 @@ OOD_EVERY="${OOD_EVERY:-0}"
 CKPT_DIR="${CKPT_DIR:-$REPO_DIR/lfs_checkpoints}"
 MAX_RESTARTS="${MAX_RESTARTS:-1000}"
 
+# Evolutionary inner-loop knobs (defaults documented in the header).
+# Set EVOLVE=0 to disable epigenetic evolution for this run.
+EVOLVE="${EVOLVE:-1}"
+HEATMAP_EVERY="${HEATMAP_EVERY:-50}"
+MUTATE_EVERY="${MUTATE_EVERY:-500}"
+SAVE_HEATMAP_EVERY="${SAVE_HEATMAP_EVERY:-500}"
+HOT_THRESHOLD="${HOT_THRESHOLD:-0.7}"
+COLD_THRESHOLD="${COLD_THRESHOLD:-0.1}"
+
+# Build the evolve-flag block as a single argument list so it expands
+# correctly under set -u.
+EVOLVE_ARGS=()
+if [ "$EVOLVE" = "1" ]; then
+    EVOLVE_ARGS=(
+        --evolve
+        --heatmap_every       "$HEATMAP_EVERY"
+        --mutate_every        "$MUTATE_EVERY"
+        --save_heatmap_every  "$SAVE_HEATMAP_EVERY"
+        --hot_threshold       "$HOT_THRESHOLD"
+        --cold_threshold      "$COLD_THRESHOLD"
+    )
+fi
+
 mkdir -p "$CKPT_DIR"
 
 if [ ! -f "$DNA" ]; then
@@ -107,6 +147,13 @@ echo "  DNA-driven training loop"
 echo "  dna=$DNA (arch=$ARCH_NAME)"
 echo "  steps=$STEPS batch=$BATCH seq_len=$SEQ_LEN d_sem=$D_SEM"
 echo "  ckpt_dir=$CKPT_DIR"
+if [ "$EVOLVE" = "1" ]; then
+    echo "  evolution: ENABLED  heatmap_every=$HEATMAP_EVERY"
+    echo "             mutate_every=$MUTATE_EVERY save_heatmap_every=$SAVE_HEATMAP_EVERY"
+    echo "             hot>$HOT_THRESHOLD cold<$COLD_THRESHOLD"
+else
+    echo "  evolution: disabled  (set EVOLVE=1 to enable)"
+fi
 echo "════════════════════════════════════════════════════════════════"
 
 restart=0
@@ -130,7 +177,8 @@ while [ "$restart" -lt "$MAX_RESTARTS" ]; do
         --save_every "$SAVE_EVERY" \
         --ood_every "$OOD_EVERY" \
         --ckpt_dir "$CKPT_DIR" \
-        --resume
+        --resume \
+        "${EVOLVE_ARGS[@]}"
     rc=$?
 
     if [ "$rc" -eq 0 ]; then

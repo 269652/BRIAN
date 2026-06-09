@@ -38,7 +38,12 @@ arch = "architectures/rcc_bowtie"
 # Set to a .dna path to switch every script into DNA-loop training
 # (vast_train_dna_loop.sh instead of vast_train_dsl_loop.sh).
 # Leave empty for plain DSL-mode training from the arch folder above.
-dna = ""
+#
+# Currently active: the evolved arch.dna snapshot. The DNA-mode
+# training loop (`scripts/vast_train_dna_loop.sh`) and the
+# evolutionary inner loop in `neuroslm.train_dsl --evolve` both
+# anchor against this file.
+dna = "dna/evol/arch.dna"
 
 [nfg]
 # `brian compile nfg --current` reads the arch above, renders the
