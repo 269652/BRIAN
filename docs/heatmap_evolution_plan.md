@@ -122,22 +122,37 @@ edges by normalized heat.                                    [L6]
       never break training. Add the `alias` map for region-name mismatches.
       Test with a tiny model + a couple of steps (or a harness unit if one
       exists).
-- [ ] **L3 — propose mutations from hot/cold.** `propose_mutations(
-      heatmap, ir) -> list[DNAPatch]`: hot node → `node_mutation` patch
-      (delta scaled by heat, reason="hot_path"); cold edge → prune/weaken
-      patch. Reuse `GeneticEpigenetics`. Tests: hot node→patch target/id;
-      cold edge→prune; thresholds.
+- [x] **L3 — propose mutations** (`neuroslm/evolution/mutator.py`,
+      `tests/test_hotpath_mutator.py`, 6/6). `propose_mutations(heatmap,
+      ir, *, hot_threshold, cold_threshold, step, delta_dim, delta_scale)`
+      → `list[DNAPatch]`: HOT node → `node_mutation` (target=node name,
+      delta scaled by heat); HOT edge → `edge_strengthen`; COLD edge →
+      `edge_prune`. Pure data; not applied here — flows to L4/L5.
 - [ ] **L4 — gate proposals.** `gate_proposals(proposals, evidence) ->
       (admitted, rejected)` via `ImprovementGate` (+ optional
       `TripleGuard`). Tests: admit on real improvement evidence, reject on
       noise/wrong-direction.
-- [ ] **L5 — `LeanProofBackend` (full).** `neuroslm/verification/
-      lean_backend.py` + `lean/Brian/*.lean`. Generate a theorem file for
-      a mutation invariant (start with Φ-monotonicity: mutation adds a
-      non-negative coupling ⇒ Φ non-decreasing), run `lean --json`, parse,
-      return verdict. Tests: lean-source generation (string asserts),
-      JSON-output parsing, verdict mapping; `@skipif(no lean)` for the
-      real kernel run. Wire into `CompositeGate` as the P4 proof step.
+- [ ] **L5 — Lean proof gate (INTEGRATE, do not rebuild).**
+      ⚠️ The parallel session already shipped the Lean backend in commit
+      `41df700` — **reuse it, don't write a new one:**
+        * `neuroslm/discoveries/lean.py` — `find_lean()` (`shutil.which`),
+          `verify_lean_proof(lean_file, …)` shells out to `lean --json`,
+          parses obligations → verdict; plus autogeneration helpers.
+        * `hypothesis/proofs/H001…H005.lean` — real theorems incl.
+          `H001_phi_monotone_under_coupling_addition.lean` (Φ-monotone),
+          `H004_triple_guard_soundness.lean`, `H005_improvementgate_*`.
+        * `neuroslm/discoveries/{records,store,splice}.py` — discovery
+          ledger + DNA splice; `tests/test_discoveries_lean.py`
+          (`@skipif(not shutil.which("lean"))` for the kernel run).
+      L5 task = wire the evolution gate (L4) to call
+      `neuroslm.discoveries.lean.verify_lean_proof` on the proof matching
+      a proposal's invariant (e.g. a `node_mutation` adding non-negative
+      coupling → H001 Φ-monotone), and fold the verdict into the composite
+      admission. Tests: proposal→hypothesis-id mapping; gate consults Lean
+      verdict when `lean` present, falls back to ImprovementGate/TripleGuard
+      when absent. **`lean` is NOT installed here** → to actually *run*
+      verification, install Lean 4 (elan + `lake`); otherwise the kernel
+      test skips (the backend + .lean files are real, not stubs).
 - [ ] **L6 — NFG heat overlay.** `compile nfg --heat <heatmap.json>`
       colors nodes/edges by normalized heat. Coordinate with parallel
       session's `nfg_graphviz.py`/`cli.py` (check their committed state
@@ -148,20 +163,73 @@ edges by normalized heat.                                    [L6]
       with evidence links) and `docs/architecture.md` if a mechanism is
       added; per CLAUDE.md §9.
 
-## Current state (update me)
+## Current state (HANDOVER — 2026-06-09)
 
-- **Done:** L1 (heatmap core) + L2b (publisher) + L2 (grad collector),
-  all committed.
-- **Next:** L2-wire (harness loop hook), then L3 (propose mutations).
-  The collector + publisher are ready; wiring is just: build IR once,
-  make `TrainingHeatmap`+`HeatmapPublisher` from config, call
-  `update_heatmap(...)` every N steps in the loop (guarded). Default the
-  artifact to a tracked `results/heatmaps/<arch>.heatmap.json`.
-- **Open questions / watch-outs:**
-  - param-name → IR id mapping is the crux of L2; module names in the
-    model may not match IR node names 1:1 — may need a small alias map
-    or a registry from the codegen/harness. Inspect how modules are named
-    in the built model (`harness.py` build + `CodeGenerator`).
-  - L5: confirm the exact Φ-monotonicity statement to encode in Lean with
-    the user before writing the theorem; keep the first theorem minimal
-    and kernel-checkable.
+### Committed (in git, hook-green at the time)
+- `a27f160` L1 TrainingHeatmap, `8f11f20` L2b HeatmapPublisher,
+  `2cc7a29` L2 grad collector. All under `neuroslm/evolution/` with tests.
+
+### Done on disk but NOT committed (DO THIS FIRST)
+- **L3 hot-path mutator** is implemented + green (6/6) but **uncommitted**
+  — the parallel session's git ops reset the index. Files:
+    * `neuroslm/evolution/mutator.py`            (untracked)
+    * `tests/test_hotpath_mutator.py`            (untracked)
+    * `neuroslm/evolution/__init__.py`           (modified: exports `propose_mutations`)
+    * `docs/heatmap_evolution_plan.md`           (this file, modified)
+  **Resume step 1:** re-stage *only these* and commit (do NOT stage the
+  parallel session's files):
+    ```
+    git add neuroslm/evolution/mutator.py tests/test_hotpath_mutator.py \
+            neuroslm/evolution/__init__.py docs/heatmap_evolution_plan.md
+    git commit -m "feat(evolution): L3 hot-path mutator -> DNAPatch proposals (TDD 6/6)"
+    ```
+  (The earlier L3 commit was rejected only because the parallel NFG/
+  graphviz tests were red in the hook; user has since confirmed "green".)
+
+### Remaining (strict TDD, commit each layer)
+1. **L4 — gate proposals** (`neuroslm/evolution/gate.py`). Wrap
+   `neuroslm/verification/improvement_gate.py::ImprovementGate.admit(
+   before, after, *, direction)` (+ optional `TripleGuard`). Signature
+   idea: `gate_proposals(proposals, evidence_by_target) -> (admitted,
+   rejected)`. Tests: admit on real improvement evidence (Φ increase /
+   ppl decrease), reject on noise / wrong-direction / sub-threshold.
+2. **L5 — Lean proof gate (INTEGRATE 41df700, see L5 above).** Reuse
+   `neuroslm.discoveries.lean.verify_lean_proof` + `hypothesis/proofs/
+   *.lean`. Map each proposal kind to a hypothesis id (node_mutation→H001
+   Φ-monotone, etc.), call the verifier, fold verdict into admission.
+   Install Lean 4 (elan/lake) to actually run kernel verification; else
+   the kernel test skips. User explicitly wants Lean verification *run*.
+3. **L2-wire — harness hook** (see L2-wire item). Build IR once, make
+   `TrainingHeatmap`+`HeatmapPublisher` from training-config knobs, call
+   `update_heatmap(...)` every N steps, guarded by `heatmap_enabled` +
+   try/except. Default artifact to a **tracked** `results/heatmaps/
+   <arch>.heatmap.json` (add `!results/heatmaps/` to .gitignore so the
+   publisher's commits include it).
+4. **L6 — NFG `--heat` overlay.** Parallel session owns
+   `neuroslm/compiler/nfg_graphviz.py` + `neuroslm/cli.py` (now committed).
+   Add an additive helper that reads `heatmap.json` → normalized heat →
+   node/edge fill colors, and a thin `compile nfg --heat <path>` flag.
+   Re-check those files' current state before editing; keep edits minimal.
+5. **L7 — end-to-end + docs.** Integration test: tiny arch → few steps →
+   heatmap grows → propose → gate → (lean if available) → admitted patch
+   spliced via `neuroslm/discoveries/splice.py`. Then per CLAUDE.md §9
+   update `docs/findings.md` (new Hxx + evidence links) and
+   `docs/architecture.md` if a mechanism was added.
+
+### Env / process notes (read before running)
+- Tests: `./.venv-9/Scripts/python.exe -m pytest <file> -q`. `.venv-9`
+  has torch (+ the graphviz *package*); the `dot` binary may be off PATH
+  locally so some `tests/test_nfg_*` fail **only locally** — that's
+  environmental, not a code regression. The pre-commit hook runs the full
+  suite in an env that has `dot`.
+- `lean` binary is **not installed** locally → discovery Lean kernel tests
+  skip. Install Lean 4 to run real verification.
+- The pre-commit hook runs the FULL suite and blocks the commit on any
+  red. If a parallel session's WIP is red, hold and coordinate (this has
+  happened twice; the user pings "green").
+- `architectures/evol/` and `dna/evol/` are gitignored regenerable
+  artifacts. Regenerate with:
+  `python -m neuroslm.cli dna compile rcc_bowtie --output dna/evol/arch.dna`
+  then `... dna unfold dna/evol/arch.dna --output architectures/evol/arch.neuro`.
+- Element id conventions: node `"<kind>:<name>"` (e.g. `population:gws`),
+  edge `"<kind>:<src>-><dst>"` (e.g. `synapse:cortex->striatum`).
