@@ -21,6 +21,7 @@ from pathlib import Path
 from neuroslm.dsl.compiler import NeuroMLCompiler, ProgramIR
 from neuroslm.dsl.thg_ir import THGCheckpoint, THGNode, THGEdge
 from neuroslm.compiler.module_bundler import ModuleBundler, BundledDSL
+from neuroslm.compiler.dsl_minifier import DSLMinifier, PrettifyPolicy
 
 
 @dataclass
@@ -305,18 +306,42 @@ class RibosomeCompiler:
                 "import_graph": {},
             }
 
-        # Transcribe to DNA
-        dna = self.dna_transcriber.transcribe(dsl_code)
+        # Extract and apply minify setting
+        minify_setting = PrettifyPolicy.extract_minify_flag(dsl_code)
+        dsl_to_store = dsl_code
+        minification_map = None
+
+        if minify_setting is True:
+            # Minify before storing in DNA
+            minifier = DSLMinifier()
+            dsl_to_store, minification_map = minifier.minify_with_map(dsl_code)
+
+        # Transcribe to DNA (using minified or original)
+        dna = self.dna_transcriber.transcribe(dsl_to_store)
 
         # Store module metadata so unfold can preserve structure
         dna.invariants["bundled_dsl"] = modules_dict
 
-        # Save source map alongside DNA for evolved attribution
+        # Store minify setting and map in DNA for evolution compatibility
+        dna.invariants["minify"] = minify_setting
+        if minification_map:
+            dna.invariants["minification_map"] = minification_map.to_dict()
+
+        # Save source maps alongside DNA for evolved attribution
         source_map_path = str(output_dna).replace('.dna', '.sourcemap.json')
+        combined_map = {}
+
+        # Include module source map
         if 'bundled_dsl' in modules_dict and 'source_map' in modules_dict['bundled_dsl']:
-            source_map = modules_dict['bundled_dsl']['source_map']
+            combined_map['module_source_map'] = modules_dict['bundled_dsl']['source_map']
+
+        # Include minification map
+        if minification_map:
+            combined_map['minification_map'] = minification_map.to_dict()
+
+        if combined_map:
             with open(source_map_path, 'w', encoding='utf-8') as f:
-                json.dump(source_map, f, indent=2)
+                json.dump(combined_map, f, indent=2)
 
         # Load fitness config from fitness.json or fitness.neuro (if present)
         fitness_path = arch_root / "fitness.json"
@@ -337,7 +362,7 @@ class RibosomeCompiler:
         """Unfold DNA file back to .neuro DSL with modules preserved.
 
         If the DNA contains bundled module metadata, reconstructs the
-        modularized structure. Otherwise falls back to single-file DSL.
+        modularized structure. Respects minify setting for pretty-printing.
         """
         dna = LatentDNA.load(dna_path)
 
@@ -353,6 +378,19 @@ class RibosomeCompiler:
         else:
             # Fallback: use direct translation
             dsl_code = self.dna_translator.translate_from_file(dna_path)
+
+        # Check if minification was applied, and pretty-print if needed
+        minify_setting = dna.invariants.get("minify")
+        if minify_setting is False:
+            # minify: false, so pretty-print for readability
+            minifier = DSLMinifier()
+            dsl_code = minifier.prettify(dsl_code)
+        elif minify_setting is None:
+            # No explicit setting, check if code looks minified
+            # (if it's all on few lines, it's probably minified)
+            if '\n' not in dsl_code[:200]:  # First 200 chars have no newlines
+                minifier = DSLMinifier()
+                dsl_code = minifier.prettify(dsl_code)
 
         # Write to output file with UTF-8 encoding
         with open(output_neuro, 'w', encoding="utf-8") as f:
