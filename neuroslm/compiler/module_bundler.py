@@ -278,6 +278,10 @@ class ModuleBundler:
     ) -> None:
         """Recursively collect all imports from a source file.
 
+        Supports both traditional DSL and ES6-style imports:
+        - Traditional: import "@/lib/cortex"
+        - ES6: import { x, y } from "@/lib/cortex"
+
         Args:
             source: DSL source code to parse.
             from_file: File being parsed (for relative path resolution).
@@ -291,11 +295,25 @@ class ModuleBundler:
             return
         visited.add(from_file_str)
 
-        # Find all import statements
-        import_pattern = r'import\s+"([^"]+)"'
-        imports = re.findall(import_pattern, source)
+        # Find all import statements (both traditional and ES6)
+        # Traditional: import "@/path"
+        # ES6: import { ... } from "@/path"
+        traditional_pattern = r'import\s+"([^"]+)"'
+        es6_pattern = r'from\s+"([^"]+)"'
 
-        for spec in imports:
+        traditional_imports = re.findall(traditional_pattern, source)
+        es6_imports = re.findall(es6_pattern, source)
+        imports = traditional_imports + es6_imports
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_imports = []
+        for imp in imports:
+            if imp not in seen:
+                seen.add(imp)
+                unique_imports.append(imp)
+
+        for spec in unique_imports:
             resolved = self.resolve_import(spec, from_file)
             if resolved is None:
                 continue
@@ -336,13 +354,24 @@ class ModuleBundler:
         lines = main_source.split('\n')
 
         current_line = 0
-        import_pattern = r'import\s+"([^"]+)"'
+        traditional_pattern = r'import\s+"([^"]+)"'
+        es6_pattern = r'from\s+"([^"]+)"'
 
         for line_idx, line in enumerate(lines, start=1):
-            match = re.search(import_pattern, line)
+            # Check for traditional imports
+            match = re.search(traditional_pattern, line)
             if match:
                 spec = match.group(1)
-                # Mark this import line as belonging to the specified module
+                source_map.line_to_module[(line_idx, line_idx)] = spec
+                if spec not in source_map.module_to_lines:
+                    source_map.module_to_lines[spec] = []
+                source_map.module_to_lines[spec].append((line_idx, line_idx))
+                continue
+
+            # Check for ES6 imports
+            match = re.search(es6_pattern, line)
+            if match:
+                spec = match.group(1)
                 source_map.line_to_module[(line_idx, line_idx)] = spec
 
                 if spec not in source_map.module_to_lines:
