@@ -128,10 +128,19 @@ edges by normalized heat.                                    [L6]
       → `list[DNAPatch]`: HOT node → `node_mutation` (target=node name,
       delta scaled by heat); HOT edge → `edge_strengthen`; COLD edge →
       `edge_prune`. Pure data; not applied here — flows to L4/L5.
-- [ ] **L4 — gate proposals.** `gate_proposals(proposals, evidence) ->
-      (admitted, rejected)` via `ImprovementGate` (+ optional
-      `TripleGuard`). Tests: admit on real improvement evidence, reject on
-      noise/wrong-direction.
+- [x] **L4 — gate proposals** (`neuroslm/evolution/gate.py`,
+      `tests/test_proposal_gate.py`, 16/16). `gate_proposals(proposals,
+      evidence_by_target, *, improvement_gate=None, triple_guard=None,
+      structural_by_target=None, default_direction=None) -> (admitted,
+      rejected)`. Wraps `ImprovementGate.admit(before, after, *,
+      direction)` and (optionally) any TripleGuard-shaped object with
+      AND-composition semantics. Per-kind direction defaults: node_mutation
+      →"increase" (Φ-style), edge_strengthen/edge_prune→"decrease"
+      (ppl-style); per-evidence override via `ImprovementEvidence.direction`.
+      Returned patches carry `metadata["gate_verdict"]` (admitted) or
+      `metadata["rejection_reasons"]` (rejected) — full audit trail in-band,
+      no sidecar log. Missing evidence → reject with `no_evidence` reason
+      (never silently admitted).
 - [ ] **L5 — Lean proof gate (INTEGRATE, do not rebuild).**
       ⚠️ The parallel session already shipped the Lean backend in commit
       `41df700` — **reuse it, don't write a new one:**
@@ -167,53 +176,42 @@ edges by normalized heat.                                    [L6]
 
 ### Committed (in git, hook-green at the time)
 - `a27f160` L1 TrainingHeatmap, `8f11f20` L2b HeatmapPublisher,
-  `2cc7a29` L2 grad collector. All under `neuroslm/evolution/` with tests.
+  `2cc7a29` L2 grad collector, `7cfa29f` L3 hot-path mutator.
+  `41df700` (parallel session) shipped the discoveries/Lean ledger
+  the L5 task will reuse.
+- L4 proposal gate landing in the next commit below (16/16 green).
 
-### Done on disk but NOT committed (DO THIS FIRST)
-- **L3 hot-path mutator** is implemented + green (6/6) but **uncommitted**
-  — the parallel session's git ops reset the index. Files:
-    * `neuroslm/evolution/mutator.py`            (untracked)
-    * `tests/test_hotpath_mutator.py`            (untracked)
-    * `neuroslm/evolution/__init__.py`           (modified: exports `propose_mutations`)
-    * `docs/heatmap_evolution_plan.md`           (this file, modified)
-  **Resume step 1:** re-stage *only these* and commit (do NOT stage the
-  parallel session's files):
-    ```
-    git add neuroslm/evolution/mutator.py tests/test_hotpath_mutator.py \
-            neuroslm/evolution/__init__.py docs/heatmap_evolution_plan.md
-    git commit -m "feat(evolution): L3 hot-path mutator -> DNAPatch proposals (TDD 6/6)"
-    ```
-  (The earlier L3 commit was rejected only because the parallel NFG/
-  graphviz tests were red in the hook; user has since confirmed "green".)
+### Done on disk but NOT committed (commit next)
+- **L4 proposal gate** (`neuroslm/evolution/gate.py`,
+  `tests/test_proposal_gate.py`, `neuroslm/evolution/__init__.py`,
+  this file). 16/16 green via `./.venv-9/Scripts/python.exe -m pytest
+  tests/test_proposal_gate.py`.
 
 ### Remaining (strict TDD, commit each layer)
-1. **L4 — gate proposals** (`neuroslm/evolution/gate.py`). Wrap
-   `neuroslm/verification/improvement_gate.py::ImprovementGate.admit(
-   before, after, *, direction)` (+ optional `TripleGuard`). Signature
-   idea: `gate_proposals(proposals, evidence_by_target) -> (admitted,
-   rejected)`. Tests: admit on real improvement evidence (Φ increase /
-   ppl decrease), reject on noise / wrong-direction / sub-threshold.
-2. **L5 — Lean proof gate (INTEGRATE 41df700, see L5 above).** Reuse
+1. **L5 — Lean proof gate (INTEGRATE 41df700, see L5 above).** Reuse
    `neuroslm.discoveries.lean.verify_lean_proof` + `hypothesis/proofs/
    *.lean`. Map each proposal kind to a hypothesis id (node_mutation→H001
-   Φ-monotone, etc.), call the verifier, fold verdict into admission.
-   Install Lean 4 (elan/lake) to actually run kernel verification; else
-   the kernel test skips. User explicitly wants Lean verification *run*.
-3. **L2-wire — harness hook** (see L2-wire item). Build IR once, make
+   Φ-monotone, edge_strengthen/prune→H002 OOD-gap, etc.), call the
+   verifier, fold verdict into admission via a `lean_backend` kwarg on
+   `gate_proposals` that short-circuits empirical evaluation when Lean
+   admits. Install Lean 4 (elan/lake) to actually run kernel verification;
+   else the kernel test skips. User explicitly wants Lean verification
+   *run*.
+2. **L2-wire — harness hook** (see L2-wire item). Build IR once, make
    `TrainingHeatmap`+`HeatmapPublisher` from training-config knobs, call
    `update_heatmap(...)` every N steps, guarded by `heatmap_enabled` +
    try/except. Default artifact to a **tracked** `results/heatmaps/
    <arch>.heatmap.json` (add `!results/heatmaps/` to .gitignore so the
    publisher's commits include it).
-4. **L6 — NFG `--heat` overlay.** Parallel session owns
+3. **L6 — NFG `--heat` overlay.** Parallel session owns
    `neuroslm/compiler/nfg_graphviz.py` + `neuroslm/cli.py` (now committed).
    Add an additive helper that reads `heatmap.json` → normalized heat →
    node/edge fill colors, and a thin `compile nfg --heat <path>` flag.
    Re-check those files' current state before editing; keep edits minimal.
-5. **L7 — end-to-end + docs.** Integration test: tiny arch → few steps →
-   heatmap grows → propose → gate → (lean if available) → admitted patch
-   spliced via `neuroslm/discoveries/splice.py`. Then per CLAUDE.md §9
-   update `docs/findings.md` (new Hxx + evidence links) and
+4. **L7 — end-to-end + docs.** Integration test: tiny arch → few steps →
+   heatmap grows → propose → gate (L4) → (lean if available, L5) →
+   admitted patch spliced via `neuroslm/discoveries/splice.py`. Then per
+   CLAUDE.md §9 update `docs/findings.md` (new Hxx + evidence links) and
    `docs/architecture.md` if a mechanism was added.
 
 ### Env / process notes (read before running)

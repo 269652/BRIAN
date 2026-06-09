@@ -8,9 +8,13 @@ from neuroslm.evolution.grad_heat import (
     parameter_grad_norms, signals_from_grad_norms, update_heatmap,
 )
 from neuroslm.evolution.mutator import propose_mutations
+from neuroslm.evolution.gate import (
+    gate_proposals, ImprovementEvidence, DEFAULT_DIRECTION_BY_KIND,
+)
 
 __all__ = [
     "TrainingHeatmap", "HeatEntry", "HeatmapPublisher",
     "parameter_grad_norms", "signals_from_grad_norms", "update_heatmap",
     "propose_mutations",
+    "gate_proposals", "ImprovementEvidence", "DEFAULT_DIRECTION_BY_KIND",
 ]
