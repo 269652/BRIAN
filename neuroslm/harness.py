@@ -223,6 +223,28 @@ class BRIANHarness(nn.Module):
         # Updated once per compute_loss step.
         self._metrics: Dict[str, float] = {}
 
+        # ── Cortex fusion: distillation + NT-gated α state ──
+        # Slot A (KL-distillation) and slot C (NT-mediated gating) are
+        # both controlled by `training_config.multi_cortex` flags; the
+        # state lives on the harness so it persists across train_step
+        # calls without re-entering compute_loss with stale EMAs.
+        #
+        # Stash of pre-fusion logits — set inside forward() when the
+        # fusion path is active, consumed in compute_loss() by the KL
+        # term. None when fusion is off (back-compat).
+        self._last_pre_fusion_lm_logits: Optional[torch.Tensor] = None
+        self._last_pre_fusion_cortex_logits: Optional[torch.Tensor] = None
+        # EMAs of cortex-only and trunk-only CE losses (both nats).
+        # Used by:
+        #   * `_distillation_lambda` for the λ_t ramp schedule
+        #   * `_update_cortex_inhibition` for the NT-gating drive signal
+        self._lm_loss_ema: float = 0.0
+        self._cortex_loss_ema: float = 0.0
+        # Inhibition level ∈ [0, 1]: 0 = cortex fully active (default at
+        # init), 1 = cortex fully gated off. Driven up as trunk surpasses
+        # cortex; saturates near 1 once the gap is large for long enough.
+        self._cortex_inhibition_level: float = 0.0
+
         # ── PR2: OOD-intervention controller ──
         # Reads cfg.regularization (set by parse_training_config). When all
         # interventions are disabled the controller's aux loss is exactly
@@ -295,6 +317,13 @@ class BRIANHarness(nn.Module):
         h._surprise_ema = 0.0
         h._last_orch_modulation = None
         h._metrics = {}
+        # Cortex fusion state (slot A + slot C) — mirror __init__
+        # so this alternate constructor doesn't crash the fusion path.
+        h._last_pre_fusion_lm_logits = None
+        h._last_pre_fusion_cortex_logits = None
+        h._lm_loss_ema = 0.0
+        h._cortex_loss_ema = 0.0
+        h._cortex_inhibition_level = 0.0
         h._build_reg_controller()
         h._domain_id_fn = None
         h._cdga_anchor_fn = None
@@ -551,6 +580,195 @@ class BRIANHarness(nn.Module):
             torch.tensor([init_logit], dtype=torch.float32)
         )
 
+    # ── Cortex fusion helpers (slot A + slot C) ──────────────────────
+
+    def _distillation_lambda(self, gap_nats: float) -> float:
+        """λ_t for the KL-distillation aux loss.
+
+        Piecewise-linear ramp in `gap_nats = lm_loss_ema - cortex_loss_ema`:
+            gap ≤ floor         → 0.0           (trunk has caught up)
+            floor < gap < ceil  → linear interp
+            gap ≥ ceiling       → lambda_max    (trunk much worse)
+
+        Returns 0.0 unconditionally when `multi_cortex.distillation_enabled`
+        is False, so the entire term collapses to a no-op for back-compat.
+        """
+        cfg = getattr(self.training_config, "multi_cortex", None)
+        if cfg is None or not getattr(cfg, "distillation_enabled", False):
+            return 0.0
+        floor = float(cfg.distillation_gap_floor)
+        ceiling = float(cfg.distillation_gap_ceiling)
+        lam_max = float(cfg.distillation_lambda_max)
+        if gap_nats <= floor:
+            return 0.0
+        if gap_nats >= ceiling:
+            return lam_max
+        # Linear interpolation
+        return lam_max * (gap_nats - floor) / (ceiling - floor)
+
+    def _update_cortex_inhibition(
+        self, lm_loss: float, cortex_loss: float,
+    ) -> None:
+        """Update `_cortex_inhibition_level` toward a [0, 1] target.
+
+        Drive signal: `gap = cortex_loss - lm_loss` (positive when the
+        trunk has *outperformed* the cortex). The target is
+            target = clip(gap / inhibition_temperature, 0, 1)
+        — so a gap equal to `inhibition_temperature` (1 nat by default)
+        means "fully gate the cortex off". A negative gap (trunk worse)
+        gives target=0, which pulls inhibition back toward 0 if it had
+        previously risen.
+
+        Update rule: `level ← (1-α) · level + α · target`. The unit-
+        interval clamp on the target plus convex-combination dynamics
+        keep `_cortex_inhibition_level ∈ [0, 1]` for all inputs.
+
+        No-op when `inhibition_enabled` is False — the level stays at
+        whatever it was (default 0 ⇒ no effect on α_eff).
+        """
+        cfg = getattr(self.training_config, "multi_cortex", None)
+        if cfg is None or not getattr(cfg, "inhibition_enabled", False):
+            return
+        temperature = float(cfg.inhibition_temperature)
+        ema_alpha = float(cfg.inhibition_ema_alpha)
+        gap = cortex_loss - lm_loss
+        target = max(0.0, min(1.0, gap / max(temperature, 1e-6)))
+        self._cortex_inhibition_level = (
+            (1.0 - ema_alpha) * self._cortex_inhibition_level
+            + ema_alpha * target
+        )
+        # Defensive clamp (floats can drift on long runs)
+        self._cortex_inhibition_level = max(
+            0.0, min(1.0, self._cortex_inhibition_level)
+        )
+
+    def _effective_alpha(self) -> float:
+        """`α_eff = sigmoid(cortex_mix_logit) · (1 - cortex_inhibition)`.
+
+        Returns just `α` when inhibition is disabled (back-compat).
+        Returns 0.0 when the fusion head isn't built (no cortex to mix).
+        """
+        if getattr(self, "cortex_mix_logit", None) is None:
+            return 0.0
+        alpha = float(torch.sigmoid(self.cortex_mix_logit).detach().item())
+        cfg = getattr(self.training_config, "multi_cortex", None)
+        if cfg is None or not getattr(cfg, "inhibition_enabled", False):
+            return alpha
+        return alpha * (1.0 - self._cortex_inhibition_level)
+
+    def _reset_stashes_for_test(self) -> None:
+        """Test-only: clear the pre-fusion logit stashes between
+        intentionally-replayed forward passes (used to isolate the KL
+        term in the gradient-flow contract)."""
+        self._last_pre_fusion_lm_logits = None
+        self._last_pre_fusion_cortex_logits = None
+
+    def _cortex_fusion_aux_step(
+        self,
+        total: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> torch.Tensor:
+        """Add KL-distillation (slot A) and advance the inhibition EMA
+        (slot C). Returns the new total loss.
+
+        Behaviour matrix:
+
+          fusion off   → unchanged total; metrics dict gets no fusion keys.
+          fusion on,
+          A & C off    → unchanged total; α_eff metric updated for log.
+          A on         → total += λ_t · T² · KL(softmax(cortex.detach()/T)
+                                              || softmax(lm/T));
+                          KL is built from the pre-fusion logit stashes
+                          set by forward(). `lm_loss_ema` and
+                          `cortex_loss_ema` are advanced from per-token
+                          CE of the respective pre-fusion logits.
+          C on         → `cortex_inhibition_level` advances toward
+                          clip((cortex - lm) / temperature, 0, 1).
+
+        The EMAs (`_lm_loss_ema`, `_cortex_loss_ema`) and the inhibition
+        state are advanced UNCONDITIONALLY when fusion is active —
+        useful even with distillation off, because tests sometimes set
+        the EMAs manually to drive λ_t without running an extra step.
+        """
+        cfg = getattr(self.training_config, "multi_cortex", None)
+        if cfg is None or not getattr(cfg, "enabled", False):
+            return total
+        if (self._last_pre_fusion_lm_logits is None
+                or self._last_pre_fusion_cortex_logits is None):
+            # Fusion config says on, but the forward path didn't stash
+            # (e.g. fusion_mode="off" or cortex_lm_head not built).
+            # Still expose alpha_effective for the telemetry contract.
+            self._metrics["alpha_effective"] = self._effective_alpha()
+            self._metrics["cortex_inhibition"] = float(self._cortex_inhibition_level)
+            return total
+
+        lm_logits = self._last_pre_fusion_lm_logits
+        cortex_logits = self._last_pre_fusion_cortex_logits
+
+        # ── Per-pathway CE for EMA driving signal ──
+        # Both are honest cross-entropies on the same targets, computed
+        # in float32 for numerical stability.
+        with torch.no_grad():
+            B, T, V = lm_logits.shape
+            flat_t = targets.reshape(-1)
+            ce_lm = F.cross_entropy(
+                lm_logits.detach().float().reshape(-1, V), flat_t
+            ).item()
+            ce_cx = F.cross_entropy(
+                cortex_logits.detach().float().reshape(-1, V), flat_t
+            ).item()
+        # EMA bootstrap: first observation seeds the EMA so we don't
+        # have a "warming up from 0" artefact that lets λ saturate
+        # immediately on step 1.
+        if self._lm_loss_ema == 0.0:
+            self._lm_loss_ema = ce_lm
+        if self._cortex_loss_ema == 0.0:
+            self._cortex_loss_ema = ce_cx
+        ema_a = 0.1  # responsive enough to track training progress
+        self._lm_loss_ema = (1 - ema_a) * self._lm_loss_ema + ema_a * ce_lm
+        self._cortex_loss_ema = (
+            (1 - ema_a) * self._cortex_loss_ema + ema_a * ce_cx
+        )
+
+        # ── Slot A: KL distillation ──
+        # Hinton 2015: scale by T² so the gradient magnitude is
+        # comparable to the CE term across different temperatures.
+        gap_for_lambda = self._lm_loss_ema - self._cortex_loss_ema
+        lam = self._distillation_lambda(gap_for_lambda)
+        if lam > 0.0 and getattr(cfg, "distillation_enabled", False):
+            T_dist = float(cfg.distillation_temperature)
+            # KL(softmax(teacher/T) || softmax(student/T))
+            # F.kl_div expects student as log-probs, teacher as probs.
+            teacher = cortex_logits.detach()
+            student = lm_logits
+            log_student = F.log_softmax(student / T_dist, dim=-1)
+            soft_teacher = F.softmax(teacher / T_dist, dim=-1)
+            kl = F.kl_div(
+                log_student, soft_teacher, reduction="batchmean"
+            ) * (T_dist ** 2)
+            total = total + lam * kl
+            self._metrics["distill_kl"] = float(kl.detach().item())
+            self._metrics["distill_lambda"] = float(lam)
+        else:
+            self._metrics["distill_kl"] = 0.0
+            self._metrics["distill_lambda"] = float(lam)
+
+        # ── Slot C: NT-mediated inhibition update ──
+        # Drive signal: gap = cortex - lm (positive ⇒ trunk overtook
+        # cortex ⇒ inhibition should rise). Update is a no-op when
+        # inhibition_enabled=False (back-compat).
+        self._update_cortex_inhibition(
+            lm_loss=ce_lm, cortex_loss=ce_cx,
+        )
+
+        # ── Telemetry ──
+        self._metrics["lm_loss_ema"] = float(self._lm_loss_ema)
+        self._metrics["cortex_loss_ema"] = float(self._cortex_loss_ema)
+        self._metrics["cortex_inhibition"] = float(self._cortex_inhibition_level)
+        self._metrics["alpha_effective"] = self._effective_alpha()
+
+        return total
+
     def set_domain_id_fn(self, fn) -> None:
         """Register an `ids → (B,) long tensor of domain labels` callable.
 
@@ -674,10 +892,15 @@ class BRIANHarness(nn.Module):
             # constructed but never invoked, and ~700M GPT-2 parameters
             # sit dormant while a Xavier-init LM head guesses badly.
             #
-            # final_logits = (1 - α) · lm_logits + α · cortex_logits
-            # where α = sigmoid(self.cortex_mix_logit) ∈ (0, 1) is a
-            # single learnable scalar that the optimizer can adjust to
-            # decide how much to trust the cortex vs the trunk.
+            # final_logits = (1 - α_eff) · lm_logits + α_eff · cortex_logits
+            # where:
+            #   α     = sigmoid(self.cortex_mix_logit) ∈ (0, 1) — the
+            #           learnable mixing scalar the optimizer trains.
+            #   α_eff = α · (1 - inhibition_level) — NT-gated effective
+            #           weight, where `inhibition_level ∈ [0, 1]` rises
+            #           as the trunk surpasses the cortex (see
+            #           `_update_cortex_inhibition`). When inhibition is
+            #           disabled (default), α_eff = α (back-compat).
             #
             # NOTE: cortex_h is passed through cortex_pre_head_norm
             # FIRST. This LayerNorm kills GPT-2's rogue-dimension
@@ -687,6 +910,10 @@ class BRIANHarness(nn.Module):
             # (vs ln(50257) = 10.82 baseline) — see
             # scripts/diagnose_catastrophic_loss.py for the in-vitro
             # repro.
+            #
+            # The pre-fusion lm_logits and cortex_logits are stashed on
+            # the harness so compute_loss can build the KL-distillation
+            # aux loss without redoing the forward pass.
             if (self.multi_cortex is not None
                     and getattr(self, "cortex_lm_head", None) is not None):
                 cortex_h = self.multi_cortex(ids)             # (B, T, d_sem)
@@ -694,11 +921,46 @@ class BRIANHarness(nn.Module):
                 if getattr(self, "cortex_pre_head_norm", None) is not None:
                     cortex_h = self.cortex_pre_head_norm(cortex_h)
                 cortex_logits = self.cortex_lm_head(cortex_h) # (B, T, vocab)
-                alpha = torch.sigmoid(self.cortex_mix_logit)  # (1,)
                 # Cast cortex_logits to match logits dtype/device (autocast
                 # may place them in bf16/fp16, but tied embed is fp32).
                 cortex_logits = cortex_logits.to(logits.dtype)
-                logits = (1.0 - alpha) * logits + alpha * cortex_logits
+
+                # Stash pre-fusion logits for the KL-distillation aux
+                # loss in compute_loss(). Both tensors are still in the
+                # autograd graph — KL backward will follow them into
+                # the trunk (student) and stop at .detach() on the
+                # teacher (cortex). See _distillation_lambda for the
+                # admission schedule.
+                self._last_pre_fusion_lm_logits = logits
+                self._last_pre_fusion_cortex_logits = cortex_logits
+
+                # NT-gated effective α (slot C). When inhibition is
+                # disabled the cfg path returns plain `α`, preserving
+                # bit-for-bit equivalence with the pre-NT-gate behaviour.
+                cfg_mc = getattr(self.training_config, "multi_cortex", None)
+                inhibition_on = (
+                    cfg_mc is not None
+                    and getattr(cfg_mc, "inhibition_enabled", False)
+                )
+                alpha = torch.sigmoid(self.cortex_mix_logit)  # (1,)
+                if inhibition_on:
+                    # Inhibition is a non-trainable scalar (updated by
+                    # the loss EMA loop). Multiply in autograd-graph so
+                    # the optimizer still sees the gradient on α.
+                    inhibition = torch.tensor(
+                        self._cortex_inhibition_level,
+                        dtype=alpha.dtype, device=alpha.device,
+                    )
+                    alpha_eff = alpha * (1.0 - inhibition)
+                else:
+                    alpha_eff = alpha
+                logits = (1.0 - alpha_eff) * logits + alpha_eff * cortex_logits
+            else:
+                # Fusion path inactive — clear any stale stashes so a
+                # later distillation lookup can't pick them up across a
+                # config change.
+                self._last_pre_fusion_lm_logits = None
+                self._last_pre_fusion_cortex_logits = None
         # Return float32 logits regardless of autocast dtype, so loss math
         # downstream is numerically stable.
         return logits.float()
@@ -1270,6 +1532,16 @@ class BRIANHarness(nn.Module):
         # Record the LM-portion so train_step can update MAT after the
         # backward pass without a second forward.
         self._last_lm_loss_value = float(loss_lm.detach().item())
+
+        # ── Cortex fusion: distillation (slot A) + NT gating (slot C) ──
+        # When the fusion path is active AND we stashed pre-fusion logits
+        # during forward(), this is where:
+        #   * the cortex teaches the trunk via KL distillation (A), and
+        #   * the inhibition EMA is advanced toward the trunk-vs-cortex
+        #     PPL gap (C — drives the *next* forward's α_eff).
+        # All telemetry (kl, lambda, inhibition, alpha_eff) lands in
+        # `_metrics` so the training-log line displays it.
+        total = self._cortex_fusion_aux_step(total, targets)
 
         # ── Runtime metric registry update ──
         # Cheap runtime Phi proxy: per-token softmax entropy normalised

@@ -420,6 +420,23 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
                    f"Σ={reg_vals['reg_total']:.3f} "
                    f"w={reg_vals['reg_warmup']:.2f} "
                    f"chat={reg_vals['chat_ratio']:.2f}]")
+    # Cortex fusion telemetry — appears only when fusion is active
+    # (any of alpha_effective / cortex_inhibition / distill_* present).
+    # Reports α_eff (the actual mixing weight after NT-gating), the
+    # inhibition level (0=cortex active, 1=cortex gated off), and the
+    # KL-distillation strength λ (0 ⇒ distillation idle).
+    cortex_str = ""
+    cortex_keys = ("alpha_effective", "cortex_inhibition",
+                   "distill_lambda", "distill_kl",
+                   "lm_loss_ema", "cortex_loss_ema")
+    if any(k in m for k in cortex_keys):
+        cortex_str = (" | cortex["
+                      f"α_eff={m.get('alpha_effective', 0.0):.3f} "
+                      f"inh={m.get('cortex_inhibition', 0.0):.3f} "
+                      f"λ={m.get('distill_lambda', 0.0):.3f} "
+                      f"kl={m.get('distill_kl', 0.0):.3f} "
+                      f"lm_ema={m.get('lm_loss_ema', 0.0):.2f} "
+                      f"cx_ema={m.get('cortex_loss_ema', 0.0):.2f}]")
     # Emergent C1–C6 telemetry tail (printed only when those keys are
     # present, so legacy runs without enable_emergent see no change).
     em_str = ""
@@ -456,7 +473,7 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
             f"| Φ {phi:.3f} | λ₁ {fid:.3f} | ign {ign:.2f} "
             f"| mesoLG {lg:.2f} "
             f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
-            f"| NT[{nt_str}]{osc_str}{em_str}{reg_str}")
+            f"| NT[{nt_str}]{osc_str}{em_str}{reg_str}{cortex_str}")
 
 
 def _eval_pass_marks(rules, step: int,

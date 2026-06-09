@@ -157,7 +157,32 @@ training {
         freeze_weights:      true,
         lexical_bias_weight: 2.0,
         bema_tau:            0.5,
-        router_d_model:      256
+        router_d_model:      256,
+
+        # ── Slot A: KL-distillation aux loss ──
+        # The trunk learns FROM the cortex by matching its full output
+        # distribution, not just argmax targets. λ_t is a piecewise-
+        # linear ramp in the EMA gap (lm_loss - cortex_loss); when the
+        # trunk has caught up (gap ≤ floor) distillation goes idle.
+        # See docs/formal_framework.md §9 (admission criterion) and
+        # tests/training/test_cortex_distillation_and_gating.py.
+        distillation_enabled:      true,
+        distillation_lambda_max:   1.0,
+        distillation_temperature:  4.0,
+        distillation_gap_floor:    0.1,
+        distillation_gap_ceiling:  2.0,
+
+        # ── Slot C: NT-mediated α gating ──
+        # α_eff = α · (1 - cortex_inhibition_level). The inhibition
+        # level rises smoothly as the trunk outperforms the cortex
+        # (acts like a GABA-inhibitory NT released by the trunk into
+        # the cortex region). Once saturated near 1 the cortex
+        # contributes ~nothing and inference can skip the cortex
+        # forward entirely (~20× FLOP savings at the rcc_bowtie_30m_p4
+        # scale).
+        inhibition_enabled:        true,
+        inhibition_ema_alpha:      0.05,
+        inhibition_temperature:    1.0
     }
     # batch 16 x ctx 2048 = 32k tokens/step (same as old 32x1024) but
     # ctx is 2x richer. The 32x2048 combo OOM'd on cross-entropy (13 GiB

@@ -345,6 +345,36 @@ class MultiCortexConfig:
     fusion_mode: str = "logits_mixture"
     fusion_init: float = 0.5
 
+    # ── A: KL-distillation aux loss (trunk learns FROM cortex) ──
+    # Hinton 2015 style: L_total += λ_t · T² · KL(softmax(cortex.detach()/T)
+    # || softmax(lm/T)). The trunk distills the cortex's full output
+    # distribution, not just argmax targets, so the ~500M of pretrained
+    # GPT-2 knowledge actually transfers into the trunk's parameters.
+    # `.detach()` on the teacher means the KL term contributes NO gradient
+    # to the cortex — it's a one-way teacher. λ_t is a piecewise-linear
+    # ramp in the EMA `gap = lm_loss_ema - cortex_loss_ema`:
+    #   gap ≤ floor                → λ = 0           (trunk has caught up)
+    #   floor < gap < ceiling      → linear interp
+    #   gap ≥ ceiling              → λ = lambda_max  (trunk much worse)
+    distillation_enabled: bool = False
+    distillation_lambda_max: float = 1.0
+    distillation_temperature: float = 4.0
+    distillation_gap_floor: float = 0.1     # nats: below = no distill
+    distillation_gap_ceiling: float = 2.0   # nats: above = full distill
+
+    # ── C: NT-mediated α-gating (cortex retires as trunk improves) ──
+    # The harness tracks `cortex_inhibition_level ∈ [0, 1]` as a slow
+    # EMA driven by `cortex_loss_ema - lm_loss_ema` (positive when trunk
+    # has overtaken cortex). The forward path uses
+    #   α_eff = sigmoid(cortex_mix_logit) · (1 - cortex_inhibition_level)
+    # so the cortex's contribution shrinks smoothly as the trunk outgrows
+    # it. Once inhibition saturates near 1, the cortex contributes ~0 and
+    # inference can skip the cortex forward entirely (~20× FLOP savings
+    # on the rcc_bowtie_30m_p4 configuration).
+    inhibition_enabled: bool = False
+    inhibition_ema_alpha: float = 0.05
+    inhibition_temperature: float = 1.0     # nats of gap → full inhibition
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Multi-Objective Fitness — Phase A/F1 (central selection-pressure switch)
@@ -1021,6 +1051,26 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
     if "fusion_init" in props:
         m.fusion_init = float(props["fusion_init"])
 
+    # ── A: distillation parameters ──
+    if "distillation_enabled" in props:
+        m.distillation_enabled = _parse_bool(props["distillation_enabled"])
+    if "distillation_lambda_max" in props:
+        m.distillation_lambda_max = float(props["distillation_lambda_max"])
+    if "distillation_temperature" in props:
+        m.distillation_temperature = float(props["distillation_temperature"])
+    if "distillation_gap_floor" in props:
+        m.distillation_gap_floor = float(props["distillation_gap_floor"])
+    if "distillation_gap_ceiling" in props:
+        m.distillation_gap_ceiling = float(props["distillation_gap_ceiling"])
+
+    # ── C: inhibition / NT-gated α ──
+    if "inhibition_enabled" in props:
+        m.inhibition_enabled = _parse_bool(props["inhibition_enabled"])
+    if "inhibition_ema_alpha" in props:
+        m.inhibition_ema_alpha = float(props["inhibition_ema_alpha"])
+    if "inhibition_temperature" in props:
+        m.inhibition_temperature = float(props["inhibition_temperature"])
+
     # ── Cross-field validation ──
     if m.lexical_bias_weight < 0:
         raise ValueError(
@@ -1040,6 +1090,32 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
         raise ValueError(
             f"multi_cortex.fusion_init must be in [0.0, 1.0], "
             f"got {m.fusion_init}"
+        )
+    if m.distillation_lambda_max < 0:
+        raise ValueError(
+            f"multi_cortex.distillation_lambda_max must be >= 0, "
+            f"got {m.distillation_lambda_max}"
+        )
+    if m.distillation_temperature <= 0:
+        raise ValueError(
+            f"multi_cortex.distillation_temperature must be > 0, "
+            f"got {m.distillation_temperature}"
+        )
+    if not (m.distillation_gap_floor < m.distillation_gap_ceiling):
+        raise ValueError(
+            f"multi_cortex.distillation_gap_floor "
+            f"({m.distillation_gap_floor}) must be < "
+            f"distillation_gap_ceiling ({m.distillation_gap_ceiling})"
+        )
+    if not (0.0 < m.inhibition_ema_alpha <= 1.0):
+        raise ValueError(
+            f"multi_cortex.inhibition_ema_alpha must be in (0.0, 1.0], "
+            f"got {m.inhibition_ema_alpha}"
+        )
+    if m.inhibition_temperature <= 0:
+        raise ValueError(
+            f"multi_cortex.inhibition_temperature must be > 0, "
+            f"got {m.inhibition_temperature}"
         )
     return m
 

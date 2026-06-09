@@ -63,6 +63,8 @@ def _resolve_arch(arg: str) -> str:
       2. `architectures/<arg>` under the repo root.
       3. The raw `<arg>` (lets the caller see the resolver error directly).
     """
+    if arg is None:
+        raise ValueError("Architecture argument is required")
     p = Path(arg)
     if p.is_dir() and (p / "arch.neuro").is_file():
         return str(p)
@@ -211,17 +213,28 @@ def cmd_compile(args: argparse.Namespace) -> int:
     """Compile an architecture .neuro folder to a runnable nn.Module class."""
     from neuroslm.dsl.codegen import CodeGenerator
     from neuroslm.dsl.multifile import compile_folder
-    arch = _resolve_arch(args.arch)
-    ir = compile_folder(Path(arch))
-    g = CodeGenerator(ir)
-    src = g.generate_module_source()
-    if args.out:
-        Path(args.out).write_text(src, encoding="utf-8")
-        print(f"wrote {args.out}  ({len(src)} chars)")
-    else:
-        print(f"--- generated nn.Module source ({len(src)} chars) ---")
-        print(src[: args.head] if args.head else src)
-    return 0
+
+    if args.arch is None:
+        print("Error: architecture argument required", file=sys.stderr)
+        print("Usage: brian compile <arch> [--out FILE]", file=sys.stderr)
+        print("       brian compile nfg <arch> [--out FILE] [--png FILE]", file=sys.stderr)
+        return 1
+
+    try:
+        arch = _resolve_arch(args.arch)
+        ir = compile_folder(Path(arch))
+        g = CodeGenerator(ir)
+        src = g.generate()
+        if args.out:
+            Path(args.out).write_text(src, encoding="utf-8")
+            print(f"wrote {args.out}  ({len(src)} chars)")
+        else:
+            print(f"--- generated nn.Module source ({len(src)} chars) ---")
+            print(src[: args.head] if args.head else src)
+        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
 
 # ── bundle ─────────────────────────────────────────────────────────────
@@ -230,7 +243,18 @@ def cmd_dna(args: argparse.Namespace) -> int:
     """Dispatch DNA compile/unfold commands."""
     from neuroslm.compiler.ribosome import RibosomeCompiler
 
+    if args.dna_cmd is None:
+        print("Error: dna subcommand required (compile or unfold)", file=sys.stderr)
+        print("Usage: brian dna compile <arch> [--output FILE]", file=sys.stderr)
+        print("       brian dna unfold <dna_file> [--output FILE]", file=sys.stderr)
+        return 1
+
     if args.dna_cmd == "compile":
+        if not hasattr(args, 'arch') or args.arch is None:
+            print("Error: architecture name required for 'brian dna compile'", file=sys.stderr)
+            print("Usage: brian dna compile <arch> [--output FILE]", file=sys.stderr)
+            return 1
+
         arch = _resolve_arch(args.arch)
         output = args.output or str(Path(arch) / "evolution.dna")
         output_path = Path(output)
@@ -252,16 +276,21 @@ def cmd_dna(args: argparse.Namespace) -> int:
             # Create parent directory if needed
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            print(f"Compiling {arch} → {output}...")
+            print(f"Compiling {arch} -> {output}...")
             compiler = RibosomeCompiler()
             compiler.compile_file(arch, str(output_path))
-            print(f"✓ DNA written to {output}")
+            print(f"[OK] DNA written to {output}")
             return 0
         except Exception as e:
-            print(f"✗ Compilation failed: {e}", file=sys.stderr)
+            print(f"[ERROR] Compilation failed: {e}", file=sys.stderr)
             return 1
 
     elif args.dna_cmd == "unfold":
+        if not hasattr(args, 'dna') or args.dna is None:
+            print("Error: DNA file path required for 'brian dna unfold'", file=sys.stderr)
+            print("Usage: brian dna unfold <dna_file> [--output FILE]", file=sys.stderr)
+            return 1
+
         dna_path = args.dna
         output = args.output or str(Path(dna_path).with_suffix(".neuro"))
         output_path = Path(output)
@@ -285,13 +314,13 @@ def cmd_dna(args: argparse.Namespace) -> int:
             # Create parent directory if needed
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            print(f"Unfolding {dna_path} → {output}...")
+            print(f"Unfolding {dna_path} -> {output}...")
             compiler = RibosomeCompiler()
             compiler.unfold_file(dna_path, output)
-            print(f"✓ DSL written to {output}")
+            print(f"[OK] DSL written to {output}")
             return 0
         except Exception as e:
-            print(f"✗ Unfold failed: {e}", file=sys.stderr)
+            print(f"[ERROR] Unfold failed: {e}", file=sys.stderr)
             return 1
 
     else:
@@ -1646,13 +1675,24 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="(nfg only) use semantic layout inference (data-driven)")
     sc.add_argument("--head", type=int, default=2000,
                     help="when printing to stdout, truncate after N chars")
-    sc.set_defaults(func=lambda a: (
-        cmd_compile_nfg(argparse.Namespace(
-            arch=a.arch, out=a.out, png=a.png, semantic=a.semantic))
-        if a.arch_or_subcmd == "nfg"
-        else cmd_compile(argparse.Namespace(
-            arch=a.arch_or_subcmd, out=a.out, head=a.head))
-    ))
+    def _dispatch_compile(a):
+        if a.arch_or_subcmd is None:
+            print("Error: architecture name required", file=sys.stderr)
+            print("Usage: brian compile <arch> [--out FILE]", file=sys.stderr)
+            print("       brian compile nfg <arch> [--out FILE] [--png FILE]", file=sys.stderr)
+            return 1
+        if a.arch_or_subcmd == "nfg":
+            if a.arch is None:
+                print("Error: architecture name required after 'nfg'", file=sys.stderr)
+                print("Usage: brian compile nfg <arch> [--out FILE] [--png FILE]", file=sys.stderr)
+                return 1
+            return cmd_compile_nfg(argparse.Namespace(
+                arch=a.arch, out=a.out, png=a.png, semantic=a.semantic))
+        else:
+            return cmd_compile(argparse.Namespace(
+                arch=a.arch_or_subcmd, out=a.out, head=a.head))
+
+    sc.set_defaults(func=_dispatch_compile)
 
     # dna (DNA encoding/decoding)
     sdna = sub.add_parser("dna", help="DNA encoding/decoding for evolutionary architecture")
