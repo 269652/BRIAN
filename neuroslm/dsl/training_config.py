@@ -288,6 +288,91 @@ class GeneticsConfig:
 
 
 @dataclass
+class AllostasisConfig:
+    """`allostasis { ... }` block — synthetic HPA axis (slow homeostat).
+
+    Adds two slow state variables to the neuromod stack:
+
+      * ``load(t)`` — fast EMA (τ ≈ ``1/load_ema_alpha``) of multi-modal
+        stress signals (NE/GABA above tonic baseline, loss volatility,
+        grad-norm spikes), saturated in ``[0, 1]``.
+
+      * ``cort(t)`` — slow EMA (τ ≈ ``1/cort_ema_alpha``) of ``load``.
+        This is the "cortisol" integrator that distinguishes **acute**
+        stress (a single bad batch — load spikes briefly, cort barely
+        moves) from **chronic** stress (sustained — cort climbs and
+        dampers engage).
+
+    and three multiplicative effectors, each ``mult = 1 − γ_* · cort``
+    clamped to ``[0, 1]``:
+
+      * ``ne_multiplier()``      — clips NE released by the genetic
+        orchestrator (closes the LC positive-feedback loop).
+      * ``trophic_multiplier()`` — multiplies BDNF growth signal
+        (suppresses sprouting during sustained stress).
+      * ``lr_multiplier()``      — multiplies optimizer LR right
+        before ``optimizer.step()`` (consolidate, don't update).
+
+    The 10× ratio between ``load_ema_alpha`` and ``cort_ema_alpha`` is a
+    textbook stress-physiology default: LC noradrenergic responses are
+    ~10× faster than HPA cortisol responses.
+
+    Disabled by default — ``enabled=False`` ⇒ no controller built, no
+    multipliers applied, no telemetry published. Back-compat with every
+    pre-allostasis arch.neuro is bit-identical.
+    """
+    enabled: bool = False
+
+    # ── EMA time constants ──
+    # load_ema_alpha = 0.10 ⇒ ~10-step memory.
+    # cort_ema_alpha = 0.02 ⇒ ~34-step half-life (the ~5× HPA rule).
+    # Physiological LC-NE vs HPA-cortisol time-scale ratio is ~5-15×;
+    # 0.02 sits at the responsive end of that range and matches the
+    # integration window we need to damp the kind of runaway observed
+    # in the rcc_bowtie_30m_p4 run: NE saturated over ~40 steps after
+    # ~400 steps of mild stress building up. Cort integrates enough
+    # of that history (by ~step 460) to bite when it matters.
+    load_ema_alpha: float = 0.10
+    cort_ema_alpha: float = 0.02
+
+    # ── Stress-source weights ──
+    # Mixed additively into a saturating sum ∈ [0, 1]. Weights need
+    # not sum to 1 (the sum is clipped). Tune to expose the channels
+    # most informative for your run.
+    w_ne:   float = 0.30
+    w_gaba: float = 0.20
+    w_loss: float = 0.30
+    w_grad: float = 0.20
+
+    # ── Stress thresholds ──
+    # Baselines above which a transmitter level counts as "stressed."
+    # ne_baseline=0.25 sits just above NE_DEFAULTS baseline (0.15) so
+    # tonic firing does NOT register as stress; gaba_baseline=0.20
+    # similarly clears the GABA tonic baseline (0.10).
+    ne_baseline:       float = 0.25
+    gaba_baseline:     float = 0.20
+    # Grad-norm above this is a "spike". Matches the threshold the
+    # existing `Homeostasis` uses to boost GABA bias (5.0).
+    grad_norm_ceiling: float = 5.0
+
+    # ── Effector kill switches ──
+    # Lets operators engage individual dampers without touching the
+    # others (e.g. enable LR damping but leave NE alone for ablation).
+    suppress_ne:      bool = True
+    suppress_trophic: bool = True
+    suppress_lr:      bool = True
+
+    # ── Effector damping strengths ──
+    # mult = 1 - γ · cort. At cort=1: ne ⇒ 30%, trophic ⇒ 0%, lr ⇒ 50%.
+    # gamma_trophic=1.0 is intentional: during sustained crisis the
+    # network should STOP growing entirely (BDNF is downregulated by
+    # chronic cortisol in real brains — Smith & Vale 2006).
+    gamma_ne:      float = 0.7
+    gamma_trophic: float = 1.0
+    gamma_lr:      float = 0.5
+
+
+@dataclass
 class MultiCortexConfig:
     """`multi_cortex { ... }` block — wires the Multi-Trunk-V2 ensemble.
 
@@ -666,6 +751,13 @@ class TrainingConfig:
     # a thalamic mixture-of-experts gate. See architecture.md §5.7.
     # Disabled by default → legacy single-cortex behaviour unchanged.
     multi_cortex: MultiCortexConfig = field(default_factory=MultiCortexConfig)
+    # Synthetic HPA axis — slow homeostatic stress damping (allostasis).
+    # Tracks `load` (fast EMA of multi-modal stress) and `cort` (slow
+    # EMA of load). When cort climbs, it multiplicatively damps NE
+    # release, trophic growth, and learning rate — the negative-feedback
+    # loop that's missing in the existing neuromod stack.
+    # Disabled by default → legacy behaviour preserved bit-for-bit.
+    allostasis: AllostasisConfig = field(default_factory=AllostasisConfig)
     # Multi-Objective-Fitness central switchboard — wires existing aux
     # losses + new objectives (symbolic, metabolic, piso, nis_plus) into
     # a single declarative table. Disabled by default → legacy single-
@@ -831,6 +923,8 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.genetics = _parse_genetics(props["genetics"])
     if "multi_cortex" in props:
         cfg.multi_cortex = _parse_multi_cortex(props["multi_cortex"])
+    if "allostasis" in props:
+        cfg.allostasis = _parse_allostasis(props["allostasis"])
     if "fitness" in props:
         cfg.fitness = _parse_fitness(props["fitness"])
     if "hardware" in props:
@@ -1118,6 +1212,109 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
             f"got {m.inhibition_temperature}"
         )
     return m
+
+
+def _parse_allostasis(body: str) -> AllostasisConfig:
+    """Parse an `allostasis { ... }` block into an `AllostasisConfig`.
+
+    All keys are optional — anything omitted keeps the dataclass default
+    (back-compat). Unknown keys are silently ignored (forward-compat,
+    same contract as every other DSL sub-block parser).
+
+    Validates:
+      * 0 < load_ema_alpha ≤ 1, 0 < cort_ema_alpha ≤ 1 — bounded EMAs.
+      * load_ema_alpha ≥ cort_ema_alpha — the time-scale-separation
+        invariant. Equal alphas would erase the acute-vs-chronic
+        distinction the controller is built on.
+      * w_* ≥ 0 — negative weights would invert the stress signal.
+      * gamma_* ≥ 0 — negative gammas would AMPLIFY rather than damp.
+      * grad_norm_ceiling > 0.
+    """
+    body = _strip_braces(body)
+    props = _split_top_level_kv(body)
+    a = AllostasisConfig()
+
+    if "enabled" in props:
+        a.enabled = _parse_bool(props["enabled"])
+
+    # EMA constants
+    if "load_ema_alpha" in props:
+        a.load_ema_alpha = float(props["load_ema_alpha"])
+    if "cort_ema_alpha" in props:
+        a.cort_ema_alpha = float(props["cort_ema_alpha"])
+
+    # Stress weights
+    if "w_ne" in props:
+        a.w_ne = float(props["w_ne"])
+    if "w_gaba" in props:
+        a.w_gaba = float(props["w_gaba"])
+    if "w_loss" in props:
+        a.w_loss = float(props["w_loss"])
+    if "w_grad" in props:
+        a.w_grad = float(props["w_grad"])
+
+    # Stress baselines
+    if "ne_baseline" in props:
+        a.ne_baseline = float(props["ne_baseline"])
+    if "gaba_baseline" in props:
+        a.gaba_baseline = float(props["gaba_baseline"])
+    if "grad_norm_ceiling" in props:
+        a.grad_norm_ceiling = float(props["grad_norm_ceiling"])
+
+    # Effector kill switches
+    if "suppress_ne" in props:
+        a.suppress_ne = _parse_bool(props["suppress_ne"])
+    if "suppress_trophic" in props:
+        a.suppress_trophic = _parse_bool(props["suppress_trophic"])
+    if "suppress_lr" in props:
+        a.suppress_lr = _parse_bool(props["suppress_lr"])
+
+    # Effector damping strengths
+    if "gamma_ne" in props:
+        a.gamma_ne = float(props["gamma_ne"])
+    if "gamma_trophic" in props:
+        a.gamma_trophic = float(props["gamma_trophic"])
+    if "gamma_lr" in props:
+        a.gamma_lr = float(props["gamma_lr"])
+
+    # Cross-field validation
+    if not (0.0 < a.load_ema_alpha <= 1.0):
+        raise ValueError(
+            f"allostasis.load_ema_alpha must be in (0.0, 1.0], "
+            f"got {a.load_ema_alpha}"
+        )
+    if not (0.0 < a.cort_ema_alpha <= 1.0):
+        raise ValueError(
+            f"allostasis.cort_ema_alpha must be in (0.0, 1.0], "
+            f"got {a.cort_ema_alpha}"
+        )
+    if a.load_ema_alpha < a.cort_ema_alpha:
+        raise ValueError(
+            f"allostasis.load_ema_alpha ({a.load_ema_alpha}) must be >= "
+            f"cort_ema_alpha ({a.cort_ema_alpha}) — the slow `cort` "
+            "integrator must lag the fast `load` signal (10× ratio is "
+            "physiological default; equal would erase the controller's "
+            "acute-vs-chronic distinction)."
+        )
+    for nm, v in (("w_ne", a.w_ne), ("w_gaba", a.w_gaba),
+                   ("w_loss", a.w_loss), ("w_grad", a.w_grad)):
+        if v < 0:
+            raise ValueError(
+                f"allostasis.{nm} must be >= 0, got {v}"
+            )
+    for nm, v in (("gamma_ne", a.gamma_ne),
+                   ("gamma_trophic", a.gamma_trophic),
+                   ("gamma_lr", a.gamma_lr)):
+        if v < 0:
+            raise ValueError(
+                f"allostasis.{nm} must be >= 0, got {v}"
+            )
+    if a.grad_norm_ceiling <= 0:
+        raise ValueError(
+            f"allostasis.grad_norm_ceiling must be > 0, "
+            f"got {a.grad_norm_ceiling}"
+        )
+    return a
 
 
 def _parse_fitness_objective(name: str, body: str) -> FitnessObjective:

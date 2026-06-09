@@ -184,6 +184,62 @@ training {
         inhibition_ema_alpha:      0.05,
         inhibition_temperature:    1.0
     }
+    # ── Synthetic HPA axis — slow homeostatic stress damping ──────
+    # The existing neuromod stack has fast feedback (Homeostasis bumps
+    # GABA on grad spikes) but NO slow integrator. Result: NE can run
+    # away unchecked over ~40 steps (run 38470012: NE 0.20→0.93,
+    # gnorm 10→24, loss 12.6→15.4 between steps 460-500).
+    #
+    # `allostasis { ... }` adds the missing piece — a synthetic HPA
+    # axis with two state vars:
+    #   load(t) — fast EMA (τ≈10) of multi-modal stress (NE/GABA
+    #             excess, loss volatility, grad spikes), saturating.
+    #   cort(t) — slow EMA (τ≈34) of `load` — the cortisol integrator
+    #             that separates acute (single bad batch — leave alone)
+    #             from chronic (sustained — engage dampers).
+    #
+    # Three downstream multipliers, all in [0, 1] and applied each step:
+    #   ne_mult  = 1 - γ_NE  · cort  → caps NE release (closes the
+    #                                   LC positive-feedback loop)
+    #   troph_mult = 1 - γ_T · cort  → halts BDNF growth during crisis
+    #                                   (consolidate, don't sprout)
+    #   lr_mult  = 1 - γ_LR · cort   → damps optimizer LR (don't keep
+    #                                   updating chaotically)
+    #
+    # The 5× HPA ratio (α_load=0.10, α_cort=0.02) makes brief spikes
+    # (1 bad batch + 99 calm) leave cort ≈ 0 — no damping for transient
+    # surprise — while sustained 200-step stress patterns drive cort
+    # past 0.25 where dampers begin to bite.
+    #
+    # See docs/findings.md H21 + tests/training/test_allostasis.py
+    # (38 contracts pinned including the smoking-gun replay of the
+    # actual 460→500 runaway trajectory).
+    allostasis: {
+        enabled:           true,
+        load_ema_alpha:    0.10,
+        cort_ema_alpha:    0.02,
+        # Stress-source weights (sum to 1.0; the controller saturates
+        # the sum at 1 so this is bounded regardless).
+        w_ne:              0.30,
+        w_gaba:            0.20,
+        w_loss:            0.30,
+        w_grad:            0.20,
+        # Above-baseline thresholds (below these levels the channel
+        # contributes ZERO stress — tonic NT firing isn't pathological).
+        ne_baseline:       0.25,
+        gaba_baseline:     0.20,
+        grad_norm_ceiling: 5.0,
+        # All three effectors engaged. NE cap closes the runaway loop,
+        # trophic suppression stops growth during crisis, LR damping
+        # forces conservative updates instead of aggressive crisis-
+        # response weight changes (which is what diverged the run).
+        suppress_ne:       true,
+        suppress_trophic:  true,
+        suppress_lr:       true,
+        gamma_ne:          0.7,
+        gamma_trophic:     1.0,
+        gamma_lr:          0.5
+    }
     # batch 16 x ctx 2048 = 32k tokens/step (same as old 32x1024) but
     # ctx is 2x richer. The 32x2048 combo OOM'd on cross-entropy (13 GiB
     # logit tensor at fp32). If you want to push back to batch=32, also

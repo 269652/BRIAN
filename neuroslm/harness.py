@@ -282,6 +282,16 @@ class BRIANHarness(nn.Module):
         self.multi_cortex = None
         self._build_multi_cortex()
 
+        # ── Synthetic HPA axis (allostasis) ──
+        # Slow homeostatic damper that distinguishes acute stress
+        # (single bad batch — leave alone) from chronic stress
+        # (positive-feedback runaway — damp NE / trophic growth / LR).
+        # Disabled-config ⇒ attribute set to None, no metrics added,
+        # bit-identical to legacy behaviour. See
+        # neuroslm/neurochem/allostasis.py for the full math + cites.
+        self.allostasis = None
+        self._build_allostasis()
+
     @classmethod
     def from_language_model(cls, language_model: nn.Module,
                             vocab_size: int, d_sem: int,
@@ -342,6 +352,9 @@ class BRIANHarness(nn.Module):
         # Multi-Trunk-V2 ensemble (see __init__).
         h.multi_cortex = None
         h._build_multi_cortex()
+        # Synthetic HPA axis (allostasis) — see __init__.
+        h.allostasis = None
+        h._build_allostasis()
         return h
 
     # ── Distributed training wrapping (DDP / FSDP) ────────────────────
@@ -589,6 +602,99 @@ class BRIANHarness(nn.Module):
         self.cortex_mix_logit = nn.Parameter(
             torch.tensor([init_logit], dtype=torch.float32)
         )
+
+    # ── Synthetic HPA axis (allostasis) ───────────────────────────────
+
+    def _build_allostasis(self) -> None:
+        """Construct the AllostaticController if enabled in the config.
+
+        When ``cfg.allostasis.enabled = False`` (default), the attribute
+        stays ``None`` and every later check (``allostasis_step``,
+        ``_apply_lr_damping``, telemetry) short-circuits. So this is the
+        only place "is allostasis on?" is decided.
+
+        Safe to call multiple times — idempotent.
+        """
+        cfg = getattr(self.training_config, "allostasis", None)
+        if cfg is None or not cfg.enabled:
+            self.allostasis = None
+            return
+        if self.allostasis is not None:
+            return  # already built — idempotent
+        # Lazy import keeps legacy runs (allostasis disabled) free of
+        # the neurochem.allostasis import cost.
+        from neuroslm.neurochem.allostasis import AllostaticController
+        self.allostasis = AllostaticController(cfg)
+
+    def _read_ne_gaba_levels(self) -> tuple[float, float]:
+        """Sample current per-batch-mean NE and GABA levels.
+
+        Reads from ``self._transmitter_sys`` if it has been built (the
+        genetics pathway constructs it lazily). Returns ``(0, 0)`` when
+        the transmitter system isn't available — the controller treats
+        zeros as ``below baseline`` so no spurious stress is registered.
+
+        Wrapped in try/except because the lazy genetics path may set
+        ``level`` to a non-standard shape during reset; we never want
+        an allostasis telemetry read to crash a training step.
+        """
+        ts = getattr(self, "_transmitter_sys", None)
+        if ts is None or getattr(ts, "level", None) is None:
+            return 0.0, 0.0
+        try:
+            from neuroslm.neurochem.transmitters import NT_INDEX
+            level = ts.level  # (B, N_NT)
+            if level.numel() == 0:
+                return 0.0, 0.0
+            mean = level.detach().mean(dim=0)  # (N_NT,)
+            return (float(mean[NT_INDEX["NE"]].item()),
+                    float(mean[NT_INDEX["GABA"]].item()))
+        except Exception:  # pragma: no cover - telemetry must never crash a step
+            return 0.0, 0.0
+
+    def _allostasis_step(self, loss: float, grad_norm: float) -> None:
+        """Advance the allostatic controller by one step, then publish
+        telemetry to ``self._metrics``.
+
+        Called from ``train_step`` after the forward + backward and
+        before ``optimizer.step()``. Order matters:
+          1. Read current NE/GABA (set by the most recent genetics-orch step).
+          2. Update load/cort using those + ``loss`` + ``grad_norm``.
+          3. Apply the LR multiplier to the optimizer's param groups (in
+             ``_apply_lr_damping``, called right before ``optimizer.step``).
+
+        No-op when ``self.allostasis is None``.
+        """
+        if self.allostasis is None:
+            return
+        ne_level, gaba_level = self._read_ne_gaba_levels()
+        self.allostasis.step(
+            ne_level=ne_level, gaba_level=gaba_level,
+            loss=float(loss), grad_norm=float(grad_norm),
+        )
+        # Publish telemetry to the runtime metric registry (surfaces on
+        # the per-step train log line via train_dsl._format_metrics_line).
+        self._metrics.update(self.allostasis.telemetry())
+
+    def _apply_lr_damping(self, optimizer: torch.optim.Optimizer) -> None:
+        """Multiply every param-group's LR by ``allostasis.lr_multiplier()``.
+
+        Called from ``train_step`` immediately before ``optimizer.step()``.
+        The scheduler in ``train_step`` re-bases each param-group's LR
+        from the SCHEDULED value (``self._last_lr``) on every step, so
+        this damping is per-step (never compounds). Applies a uniform
+        scalar multiplier to all groups, preserving any per-group LLRD
+        ratios.
+
+        No-op when allostasis is disabled or its lr_multiplier is 1.0.
+        """
+        if self.allostasis is None:
+            return
+        mult = self.allostasis.lr_multiplier()
+        if mult >= 1.0 - 1e-9:
+            return  # no damping ⇒ skip the param-group walk
+        for group in optimizer.param_groups:
+            group["lr"] = float(group["lr"]) * mult
 
     # ── Cortex fusion helpers (slot A + slot C) ──────────────────────
 
@@ -1933,6 +2039,12 @@ class BRIANHarness(nn.Module):
                 self._grad_scaler.unscale_(optimizer)
                 gnorm = torch.nn.utils.clip_grad_norm_(
                     self.parameters(), clip if (clip and clip > 0) else 1e9)
+                # ── Allostasis: advance HPA controller + damp LR ──
+                # Read this step's loss + grad-norm into the load/cort
+                # EMAs; multiply optimizer LR by lr_multiplier() to brake
+                # under chronic stress. No-op when allostasis disabled.
+                self._allostasis_step(loss=loss_f, grad_norm=float(gnorm))
+                self._apply_lr_damping(optimizer)
                 # BEMA wraps optimizer.step() with rollback detection.
                 if self._bema is not None and self._bema.cfg.enabled:
                     self._grad_scaler.unscale_(optimizer)  # already done
@@ -1945,6 +2057,11 @@ class BRIANHarness(nn.Module):
             else:
                 gnorm = torch.nn.utils.clip_grad_norm_(
                     self.parameters(), clip if (clip and clip > 0) else 1e9)
+                # ── Allostasis: advance HPA controller + damp LR ──
+                # Same hook as the fp16 branch above — see _allostasis_step
+                # and _apply_lr_damping for the math.
+                self._allostasis_step(loss=loss_f, grad_norm=float(gnorm))
+                self._apply_lr_damping(optimizer)
                 if self._bema is not None and self._bema.cfg.enabled:
                     info = self._bema.maybe_step(loss_f)
                     self._last_bema_info = info
