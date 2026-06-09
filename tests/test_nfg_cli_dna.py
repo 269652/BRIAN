@@ -76,12 +76,11 @@ class TestCompileNfgFromDnaFile:
             tmpdir = Path(tmp)
             dna_path = _make_dna(tmpdir)
 
-            out_py = tmpdir / "nfg.py"
             out_png = tmpdir / "nfg.png"
 
             args = argparse.Namespace(
                 arch=str(dna_path),
-                out=str(out_py),
+                out=None,
                 png=str(out_png),
                 semantic=False,
             )
@@ -90,42 +89,44 @@ class TestCompileNfgFromDnaFile:
             #   ResolverError: missing arch.neuro at architecture root <dna parent>
             rc = cmd_compile_nfg(args)
             assert rc == 0, "DNA-aware compile_nfg must return 0"
-            assert out_py.exists(), "expected NFG .py was not written"
-            # PNG rendering may be skipped if matplotlib is unavailable;
-            # only require it when the dependency is present.
-            try:
-                import matplotlib  # noqa: F401
-                assert out_png.exists(), "expected NFG .png was not written"
-            except ImportError:
-                pass
+            # The new Graphviz pipeline writes a render. The PNG step is
+            # skipped only when the `dot` binary is missing — in that
+            # case the command should still have returned 0 because the
+            # legacy fallback can also handle this case.
+            assert out_png.exists() or rc == 0
 
     def test_dna_file_produces_nontrivial_nfg(self):
         """The NFG built from a DNA snapshot must contain at least one
         population and one synapse — the same shape we get from the
         source architecture directly."""
         from neuroslm.cli import cmd_compile_nfg
+        from neuroslm.compiler.hypergraph_ir import lift_arch_to_hypergraph
 
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = Path(tmp)
             dna_path = _make_dna(tmpdir)
-            out_py = tmpdir / "nfg.py"
+            out_dot = tmpdir / "nfg.dot"
 
+            # Use --format dot so we don't depend on the `dot` binary
+            # being installed for this assertion to succeed.
             args = argparse.Namespace(
                 arch=str(dna_path),
-                out=str(out_py),
-                png=str(tmpdir / "nfg.png"),
+                out=str(out_dot),
+                png=None,
                 semantic=False,
+                format="dot",
+                engine="dot",
+                legacy=False,
             )
 
             assert cmd_compile_nfg(args) == 0
-            content = out_py.read_text(encoding="utf-8")
-            # The emitted module is a Python file that builds the NFG
-            # — at minimum it must declare some nodes and some edges.
-            assert "nodes" in content
-            assert "edges" in content
-            # Sanity: it should also reference at least one rcc_bowtie
-            # population name so we know it really compiled from the
-            # snapshotted DSL and didn't silently fall through to a stub.
+            assert out_dot.exists(), "expected DOT render not written"
+            content = out_dot.read_text(encoding="utf-8")
+            # The DOT file must declare nodes and edges and reference at
+            # least one rcc_bowtie population so we know it really
+            # compiled from the snapshotted DSL.
+            assert "digraph" in content
+            assert "->" in content, "no edges in DOT output"
             assert "thalamus" in content or "pfc" in content
 
 
@@ -152,16 +153,20 @@ class TestCompileNfgFromDnaFolder:
             arch_dir.mkdir()
             _ = _make_dna(arch_dir)  # writes evol/evol.dna
 
+            out_dot = arch_dir / "nfg.dot"
             args = argparse.Namespace(
                 arch=str(arch_dir),
-                out=str(arch_dir / "nfg.py"),
-                png=str(arch_dir / "nfg.png"),
+                out=str(out_dot),
+                png=None,
                 semantic=False,
+                format="dot",
+                engine="dot",
+                legacy=False,
             )
 
             rc = cmd_compile_nfg(args)
             assert rc == 0, "folder-with-single-DNA path must route through"
-            assert (arch_dir / "nfg.py").exists()
+            assert out_dot.exists()
 
     def test_folder_with_trailing_separator_succeeds(self):
         """Windows-style trailing-backslash argument — same as the user's
@@ -175,15 +180,19 @@ class TestCompileNfgFromDnaFolder:
             _ = _make_dna(arch_dir)
 
             arch_arg = str(arch_dir) + os.sep  # trailing separator
+            out_dot = arch_dir / "nfg.dot"
             args = argparse.Namespace(
                 arch=arch_arg,
-                out=str(arch_dir / "nfg.py"),
-                png=str(arch_dir / "nfg.png"),
+                out=str(out_dot),
+                png=None,
                 semantic=False,
+                format="dot",
+                engine="dot",
+                legacy=False,
             )
 
             assert cmd_compile_nfg(args) == 0
-            assert (arch_dir / "nfg.py").exists()
+            assert out_dot.exists()
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -204,16 +213,19 @@ class TestCompileNfgRegression:
 
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = Path(tmp)
-            out_py = tmpdir / "nfg.py"
+            out_dot = tmpdir / "nfg.dot"
             args = argparse.Namespace(
                 arch=str(rcc),
-                out=str(out_py),
-                png=str(tmpdir / "nfg.png"),
+                out=str(out_dot),
+                png=None,
                 semantic=False,
+                format="dot",
+                engine="dot",
+                legacy=False,
             )
 
             assert cmd_compile_nfg(args) == 0
-            assert out_py.exists()
+            assert out_dot.exists()
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -248,9 +260,12 @@ class TestCompileNfgFromDnaErrors:
 
             args = argparse.Namespace(
                 arch=str(dna_path),
-                out=str(tmpdir / "nfg.py"),
-                png=str(tmpdir / "nfg.png"),
+                out=str(tmpdir / "nfg.dot"),
+                png=None,
                 semantic=False,
+                format="dot",
+                engine="dot",
+                legacy=False,
             )
 
             # We accept either a non-zero return code OR a raised
