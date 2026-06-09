@@ -22,6 +22,7 @@ from neuroslm.dsl.compiler import NeuroMLCompiler, ProgramIR
 from neuroslm.dsl.thg_ir import THGCheckpoint, THGNode, THGEdge
 from neuroslm.compiler.module_bundler import ModuleBundler, BundledDSL
 from neuroslm.compiler.dsl_minifier import DSLMinifier, PrettifyPolicy
+from neuroslm.compiler.genome_assembler import GenomeAssembler, Genome
 
 
 @dataclass
@@ -322,6 +323,17 @@ class RibosomeCompiler:
         # Store module metadata so unfold can preserve structure
         dna.invariants["bundled_dsl"] = modules_dict
 
+        # Assemble the biologically-faithful genome: HypergraphIR + SourceMap
+        # -> codon coding region + Hamming/duplex error-corrected payload.
+        # This is the canonical, evolvable, error-correcting representation;
+        # unfold reconstructs the DSL from it (bit-identically). Additive —
+        # never block compilation if assembly fails on an exotic source.
+        try:
+            genome = GenomeAssembler().assemble(dsl_code)
+            dna.invariants["genome"] = genome.to_dict()
+        except Exception:
+            pass
+
         # Store minify setting and map in DNA for evolution compatibility
         dna.invariants["minify"] = minify_setting
         if minification_map:
@@ -366,17 +378,18 @@ class RibosomeCompiler:
         """
         dna = LatentDNA.load(dna_path)
 
-        # Check if bundled DSL metadata is available
-        if "bundled_dsl" in dna.invariants:
-            # Reconstruct from bundled modules
-            bundled_dict = dna.invariants["bundled_dsl"]
-            bundled = BundledDSL.from_dict(bundled_dict)
-
-            # Unfold with imports preserved (not inlined)
-            # This maintains the modular structure for evolution
+        # Prefer reconstruction from the nucleotide genome (the canonical,
+        # error-correcting representation): error-correct the duplex, decode
+        # the HypergraphIR, render its SourceMap -> bit-identical DSL.
+        if "genome" in dna.invariants:
+            genome = Genome.from_dict(dna.invariants["genome"])
+            dsl_code = GenomeAssembler().disassemble(genome)
+        elif "bundled_dsl" in dna.invariants:
+            # Legacy DNA: reconstruct from bundled modules (imports preserved).
+            bundled = BundledDSL.from_dict(dna.invariants["bundled_dsl"])
             dsl_code = bundled.preserve_imports()
         else:
-            # Fallback: use direct translation
+            # Oldest DNA: direct text translation.
             dsl_code = self.dna_translator.translate_from_file(dna_path)
 
         # Check if minification was applied, and pretty-print if needed
