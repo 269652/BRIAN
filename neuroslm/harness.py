@@ -398,6 +398,7 @@ class BRIANHarness(nn.Module):
             self.multi_cortex = None
             self.cortex_lm_head = None
             self.cortex_mix_logit = None
+            self.cortex_pre_head_norm = None
             return
         if self.multi_cortex is not None:
             return  # already built — idempotent
@@ -470,7 +471,31 @@ class BRIANHarness(nn.Module):
         if fusion_mode == "off":
             self.cortex_lm_head = None
             self.cortex_mix_logit = None
+            self.cortex_pre_head_norm = None
             return
+
+        # cortex_pre_head_norm: LayerNorm before the tied head.
+        # ────────────────────────────────────────────────────────────
+        # GPT-2's residual stream has a single rogue dimension with
+        # standard deviation ~80× the median per-dim std (Timkey &
+        # van Schijndel 2021, "All Bark and No Bite"). Even after
+        # the model's own `ln_f`, `last_hidden_state.std()` is
+        # dominated by that one direction. `cortex_proj` is a plain
+        # `nn.Linear(768, d_sem)` that preserves the anisotropy, and
+        # the tied head `cortex_h @ embed.T` then translates it into
+        # logit-spikes of magnitude 5-10 on whichever vocab tokens
+        # happen to align with the rogue direction in embed-space.
+        # Softmax interprets that as "I'm 99% sure of token X" and
+        # gets it wrong nearly every time, producing the observed
+        # `loss ≈ 13.84 > ln(50257) = 10.82` catastrophic init.
+        #
+        # LayerNorm normalises per-token across the feature axis,
+        # rescaling the rogue dimension to be commensurate with the
+        # rest. With this in place, initial CE matches the LM-trunk
+        # baseline (≈ ln(vocab_size)) and training begins from a
+        # sensible loss instead of recovering from a 3-nat deficit.
+        # Validated by `scripts/diagnose_catastrophic_loss.py`.
+        self.cortex_pre_head_norm = nn.LayerNorm(self.d_sem)
 
         # cortex_lm_head: (vocab_size, d_sem)
         # The Linear stores its weight as (out=vocab, in=d_sem), the
@@ -653,9 +678,21 @@ class BRIANHarness(nn.Module):
             # where α = sigmoid(self.cortex_mix_logit) ∈ (0, 1) is a
             # single learnable scalar that the optimizer can adjust to
             # decide how much to trust the cortex vs the trunk.
+            #
+            # NOTE: cortex_h is passed through cortex_pre_head_norm
+            # FIRST. This LayerNorm kills GPT-2's rogue-dimension
+            # anisotropy (Timkey & van Schijndel 2021) before the
+            # tied head amplifies it into logit-spikes. Without this
+            # normalisation, initial CE blows up to ~13.8 nats
+            # (vs ln(50257) = 10.82 baseline) — see
+            # scripts/diagnose_catastrophic_loss.py for the in-vitro
+            # repro.
             if (self.multi_cortex is not None
                     and getattr(self, "cortex_lm_head", None) is not None):
                 cortex_h = self.multi_cortex(ids)             # (B, T, d_sem)
+                # Anisotropy-suppression LayerNorm (see _build_multi_cortex).
+                if getattr(self, "cortex_pre_head_norm", None) is not None:
+                    cortex_h = self.cortex_pre_head_norm(cortex_h)
                 cortex_logits = self.cortex_lm_head(cortex_h) # (B, T, vocab)
                 alpha = torch.sigmoid(self.cortex_mix_logit)  # (1,)
                 # Cast cortex_logits to match logits dtype/device (autocast
