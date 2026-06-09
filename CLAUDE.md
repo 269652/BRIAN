@@ -412,3 +412,115 @@ gets demoted in the ledger.
 
 The corresponding tracking row lives in `docs/formal_framework.md` §10.2;
 update it in the same commit that lands a Lean proof, never separately.
+
+---
+
+## 13. No overclaiming in README, docs, or commit messages
+
+This is the documentation analogue of rules 2 (no sycophancy) and 12.4
+(no `[VERIFIED]` without a complete proof). Every claim in `README.md`,
+`docs/*.md`, and commit messages must be one of:
+
+1. **Code-derived and reproducible.** The claim refers to a value
+   produced by code in this repo, and a reader can re-run that code to
+   obtain the same value. Examples: "45.7 M parameters" (from
+   `sum(p.numel() for p in build_lm_from_preset(...).parameters())`),
+   "1825 tests collected" (from `pytest --collect-only`), "23 synapses"
+   (from `brian compile nfg --current` output).
+2. **Pinned by a passing test.** The claim is "this code path computes
+   this value / has this shape / produces this telemetry field", and a
+   specific test under `tests/` enforces it. Cite the test path inline.
+3. **Recorded in `docs/findings.md`** as an experiment with a verdict
+   (`✅` / `🟡` / `🟠` / `❌`) and a run artifact (instance id, JSON
+   path, or log). Cite the artifact inline.
+
+Anything else — speculation, aspirational descriptions, marketing
+adjectives, comparisons to flat-transformer baselines that have not been
+run at matched compute — does not belong in the README or docs.
+
+### 13.1 Banned phrases (in `README.md`, `docs/*.md`, commit messages)
+
+These phrases are banned unless paired in the same sentence with a
+specific, citable artifact (test name, JSON path, log line, or
+`findings.md` Hxx row):
+
+- "consciousness-like", "consciousness", "sentience", "sentient",
+  "self-aware", "self-awareness", "subjective experience", "qualia"
+  used as capability claims (the *code name* `qualia` for a module is
+  fine; "the model has qualia" is not).
+- "verified", "proven", "demonstrated", "shows that", "establishes"
+  applied to anything beyond what a single test or recorded experiment
+  pins down. A unit test verifies *that named code path produces that
+  value*; it does not verify a downstream cognitive or generalization
+  claim.
+- "state of the art", "SOTA", "best in class", "breakthrough",
+  "revolutionary", "world-class", "outperforms", "beats", "crushes",
+  "industry-leading", "cutting-edge".
+- "strategically designed N-parameter model outgeneralizes M-parameter
+  baseline" or any variant that compares to an unrun or unrecorded
+  baseline.
+- "Every architectural claim is backed by …" — too strong; replace with
+  the actual scope (e.g. "Mechanism-level behaviour is pinned by N
+  tests under `tests/`; system-level OOD claims are still open.").
+- Round capability claims without a unit and a source: "85% accuracy",
+  "9/11 tasks solved", "92.3% lower X", "26% better" — only if the
+  number is reproducible from a JSON in `results/` or a recorded log,
+  cited inline.
+
+### 13.2 Banned framings
+
+- **Promoting mechanism tests to capability claims.** "BRIAN
+  demonstrates causal reasoning" is wrong if the only evidence is
+  `tests/test_narrative_memory.py::test_causal_generalization` (which
+  pins that *one specific code path* produces an above-threshold value
+  on a synthetic input). The correct framing is "the narrative-store
+  causal-rule path produces P(B|A) > 0.8 on the synthetic gift→joy
+  test pair (`tests/...`)".
+- **Conflating "is implemented" with "improves the model".** Many
+  mechanisms in this repo are implemented and unit-tested but have not
+  been shown to improve perplexity, OOD generalization, or any
+  downstream task. The README must distinguish the two layers.
+- **Using biologically-evocative names as capability claims.** Code
+  contains `mesolimbic_gain`, `personality_vector`, `consciousness_metrics`,
+  `awakening`, `infancy`. These are *names of code paths*. Stating that
+  the model "has a personality" or "experiences awakening" is an
+  overclaim; "the `personality_vector` tensor survives checkpoint
+  reload (`tests/...`)" is fine.
+- **Comparisons to baselines that have not been run at matched
+  compute.** Gap-ratio differences at unmatched training step counts
+  are *not* evidence of architectural superiority. State the compute
+  mismatch explicitly every time the number is cited.
+
+### 13.3 Required framings
+
+- **Distinguish *mechanism* from *system* claims.** A pass in `tests/`
+  is a mechanism claim. A change in train_ppl / OOD_ppl / gap_ratio /
+  task accuracy is a system claim and must cite an artifact in
+  `results/` or `logs/`.
+- **State what is *not* known.** If the README cites a positive number,
+  the same paragraph should state the unrun comparison or the open
+  follow-up. Honest scope statements ("compute is not matched", "this
+  is an initialization fix, not a generalization claim", "the loop is
+  wired but no surviving mutation has yet improved OOD") are required,
+  not optional.
+- **Prefer "is implemented", "is wired", "is tested" over "works",
+  "succeeds", "achieves".** The first set describes the codebase; the
+  second set describes outcomes that mostly haven't been measured.
+- **All numbers reproducible.** Every parameter count, test count,
+  population count, perplexity, and percentage in the README must come
+  from a command or artifact a reader can re-run. If a number is in
+  doubt, run the command and update the README in the same commit.
+
+### 13.4 What to do when a previous claim turns out to be wrong
+
+Do not silently edit it out. Either:
+
+1. **Correct it in place** with a one-line "previously stated X; actual
+   value Y per `<command>`" footnote in the same commit, OR
+2. **Move the old framing to `docs/archive/YYYY-MM-DD_*.md`** with a
+   pointer from the new text, preserving the citation trail.
+
+Negative-result discipline (rule 10.7) applies to documentation as well
+as to experiments. The repo's value depends on a reader being able to
+trust that what is *not* claimed is, in fact, not true.
+
