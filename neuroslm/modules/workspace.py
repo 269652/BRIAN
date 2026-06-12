@@ -224,3 +224,165 @@ class GlobalWorkspace(nn.Module):
             return torch.utils.checkpoint.checkpoint(
                 self._forward, candidates, ne_temp, use_reentrant=False)
         return self._forward(candidates, ne_temp)
+
+
+class TopologicalDifferentialWorkspace(nn.Module):
+    """Differential GWS kernel — two Hopfield retrievals minus each other.
+
+    Shape contract matches :class:`GlobalWorkspace` so it is a drop-in
+    at the call-sites in ``brain.py`` (forward signature
+    ``(candidates, ne_temp=None) -> (B, n_slots, d_sem)``). This class
+    is **opt-in** — nothing in ``brain.py`` constructs it by default; a
+    user wires it in by replacing ``self.gws = GlobalWorkspace(...)``
+    with ``self.gws = TopologicalDifferentialWorkspace(...)`` and
+    re-running training as a separate experiment (CLAUDE.md §10).
+
+    Math::
+
+        beta_1   = softplus(log_beta_1) + 0.5          # sharp retrieval
+        beta_2   = softplus(log_beta_2)                # blurry retrieval
+        Gamma_1  = HopfieldStep(slots_init, candidates, beta_1)
+        Gamma_2  = HopfieldStep(slots_init, candidates, beta_2)
+        lambda_  = softplus(log_lambda)
+        Gamma_d  = Gamma_1 - lambda_ * Gamma_2         # differential gate
+
+        if synergy_gate:
+            mask     = clamp(||Gamma_d||^2 / (||Gamma_1||^2 + eps), 0, 1)
+            Gamma_d  = Gamma_d * mask                  # per-slot scalar
+
+        if tonnetz:
+            U_orth   = QR(basis)                       # (d_sem, n_slots)
+            Gamma_d  = Gamma_d @ U_orth @ U_orth^T     # rank-n_slots projector
+
+        return LayerNorm(Gamma_d)
+
+    Notes
+    -----
+    * The synergy mask is a scalar per slot, *not* a soft mask over
+      features. It measures *what fraction of the sharp retrieval
+      survives cancellation by the blurry retrieval* and lies in [0, 1]
+      by construction.
+    * The Tonnetz basis is orthonormalised via QR each forward, so its
+      minimum singular value is exactly 1 (up to QR roundoff). The
+      "spectral gap to zero" is therefore 1 by construction; the gap
+      becomes informative only when an external loss pushes the basis
+      toward rank deficiency, at which point QR clamps it back.
+    * Forward populates four telemetry attributes — ``_last_diff``,
+      ``_last_synergy_mask``, ``_last_basis_orth``, ``_last_basis_smin``
+      — that the algebraic-contract tests + the verifier read. They are
+      detached so they do not retain the autograd graph.
+    """
+
+    def __init__(self, d_sem: int, n_slots: int, n_heads: int = 4,
+                 synergy_gate: bool = True, tonnetz: bool = True):
+        super().__init__()
+        self.d_sem = d_sem
+        self.n_slots = n_slots
+        self.synergy_gate = synergy_gate
+        self.tonnetz = tonnetz
+
+        # Shared slot queries — both pathways see the same init.
+        self.slot_queries = nn.Parameter(torch.randn(n_slots, d_sem) * 0.02)
+
+        # Two inverse temperatures. beta_1 inherits GWS's `+ 0.5` floor
+        # (keeps the sharp pathway above the "rounded uniform" regime);
+        # beta_2 starts noticeably blurrier (softplus(-1.0) ~= 0.31).
+        self.log_beta_1 = nn.Parameter(torch.zeros(1))
+        self.log_beta_2 = nn.Parameter(torch.full((1,), -1.0))
+
+        # Differential gain. init 0 -> softplus(0) = ln(2) ~= 0.69 so
+        # the gate cancels ~70% of Gamma_2 at step 0 (the DiffAttn
+        # "moderate noise cancellation at init" convention).
+        self.log_lambda = nn.Parameter(torch.zeros(1))
+
+        # Tonnetz basis — only if enabled, to keep the disabled path
+        # cheap and to leave ``basis`` out of state_dict in that case.
+        if self.tonnetz:
+            self.basis = nn.Parameter(torch.randn(d_sem, n_slots) * 0.1)
+        else:
+            self.register_parameter("basis", None)
+
+        self.norm = nn.LayerNorm(d_sem)
+
+        # Telemetry (set by forward; read by tests + the verifier).
+        self._last_diff: torch.Tensor | None = None
+        self._last_synergy_mask: torch.Tensor | None = None
+        self._last_basis_orth: torch.Tensor | None = None
+        self._last_basis_smin: float = 0.0
+
+    @staticmethod
+    def _hopfield_step(slots: torch.Tensor, candidates: torch.Tensor,
+                       beta: torch.Tensor) -> torch.Tensor:
+        """One energy-minimising attention step (matches GlobalWorkspace
+        with normalised queries/keys for bf16 stability)."""
+        s = F.normalize(slots, dim=-1)
+        c = F.normalize(candidates, dim=-1)
+        logits = torch.bmm(s, c.transpose(1, 2)) * beta
+        weights = F.softmax(logits, dim=-1)
+        return torch.bmm(weights, candidates)
+
+    def spectral_gap(self) -> float:
+        """Minimum singular value of the last QR-orthonormalised basis.
+
+        Returns ``1.0`` (modulo QR roundoff) when ``tonnetz=True`` and
+        forward has been called at least once; ``0.0`` otherwise. The
+        verifier reads this to check the
+        ``triple_guard_admission.lambda_min`` constraint when this
+        kernel is wired into a complex.
+        """
+        return float(self._last_basis_smin)
+
+    def forward(self, candidates: torch.Tensor,
+                ne_temp: torch.Tensor | None = None) -> torch.Tensor:
+        B = candidates.size(0)
+        act_dtype = candidates.dtype
+
+        slots_init = self.slot_queries.unsqueeze(0).expand(B, -1, -1).to(
+            dtype=act_dtype)
+        if ne_temp is not None:
+            slots_init = slots_init * ne_temp.to(act_dtype).view(B, 1, 1)
+
+        beta_1 = F.softplus(self.log_beta_1) + 0.5
+        beta_2 = F.softplus(self.log_beta_2)
+        gamma_1 = self._hopfield_step(slots_init, candidates, beta_1)
+        gamma_2 = self._hopfield_step(slots_init, candidates, beta_2)
+
+        lam = F.softplus(self.log_lambda)
+        diff = gamma_1 - lam * gamma_2
+        # Pre-norm tensor captured BEFORE the synergy mask + tonnetz
+        # projector so the algebraic tests can probe the raw subtraction.
+        self._last_diff = diff.detach()
+
+        if self.synergy_gate:
+            # Per-slot synergy proxy: fraction of Gamma_1's L2-energy
+            # that survives cancellation by lambda * Gamma_2. Bounded in
+            # [0, 1] because both sides of the ratio are non-negative
+            # and we clamp the result; the eps guards a zero-input
+            # candidate batch (Gamma_1 == 0 -> mask = 0, no NaN).
+            n1_sq  = gamma_1.norm(dim=-1) ** 2           # (B, n_slots)
+            nd_sq  = diff.norm(dim=-1)    ** 2
+            mask = (nd_sq / (n1_sq + 1e-8)).clamp(0.0, 1.0)
+            self._last_synergy_mask = mask.detach()
+            diff = diff * mask.unsqueeze(-1)
+        else:
+            self._last_synergy_mask = None
+
+        if self.tonnetz:
+            # QR each forward — keeps the basis column-orthonormal even
+            # when the underlying parameter drifts. ``reduced=True``
+            # makes U the same shape as ``basis``: (d_sem, n_slots).
+            u_orth, _ = torch.linalg.qr(self.basis, mode="reduced")
+            self._last_basis_orth = u_orth.detach()
+            # sigma_min of an orthonormal-column matrix is 1 by
+            # construction — surface as a Python float for the verifier.
+            self._last_basis_smin = 1.0
+            # Rank-n_slots projector. Cast to incoming dtype so bf16
+            # forwards don't silently up-cast through the projector.
+            proj = (u_orth @ u_orth.T).to(diff.dtype)
+            diff = diff @ proj
+        else:
+            self._last_basis_orth = None
+            self._last_basis_smin = 0.0
+
+        return self.norm(diff.float()).to(act_dtype)
+
