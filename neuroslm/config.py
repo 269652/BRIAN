@@ -150,6 +150,43 @@ class BrainConfig:
     sgb_default_center: float = 2000.0
     sgb_default_width: float = 500.0
 
+    # ---- Ablation-knob feature flags (default False, opt-in) ──────────
+    # These four flags exist purely to give clean A/B comparisons; each one
+    # toggles a single mechanism without touching any other moving part.
+    # Per CLAUDE.md §10, flipping any of them creates a new experimental
+    # condition that should be run as its own short eval, not silently
+    # merged into the default config.
+    #
+    # use_tdw — swap the Hopfield/ignition GlobalWorkspace for the
+    #   TopologicalDifferentialWorkspace defined in modules/workspace.py.
+    #   Same forward signature, so brain.py:1366/2340 call sites are
+    #   untouched. The TDW kernel subtracts a blurry Hopfield retrieval
+    #   from a sharp one and (optionally) projects the result onto an
+    #   orthonormalised Tonnetz basis; this replaces ignition, it does
+    #   not add anything on top.
+    use_tdw: bool = False
+    # use_diff_attn — DifferentialAttention is already in the cortex via
+    #   DiffTransformerBlock at the every-3rd-layer slot of the
+    #   interleaved [Std, Diff, MoD] pattern. When this flag is True the
+    #   cortex is rebuilt with EVERY non-baseline block as
+    #   DiffTransformerBlock (uniform DiffAttn cortex). Default False
+    #   keeps today's interleaved pattern bit-identical.
+    use_diff_attn: bool = False
+    # use_tonnetz_prior — instantiate the TonnetzPrior adjacency-loss
+    #   regulariser (modules/tonnetz_prior.py). Penalises the per-batch
+    #   token-cooccurrence Laplacian when its algebraic-connectivity
+    #   eigenvalue λ_1 falls below `tonnetz_gap_threshold`. Adds a single
+    #   scalar loss term, zero new parameters at the trunk.
+    use_tonnetz_prior: bool = False
+    tonnetz_gap_threshold: float = 0.3
+    w_tonnetz: float = 0.01
+    # use_expert_ensemble — wired no-op reservation for the in-flight
+    #   neuroslm/experts.py module (unstaged at time of writing). The
+    #   flag is checked at Brain construction but no expert ensemble is
+    #   built yet; once experts.py is committed its plumbing slots in
+    #   behind this same flag without a schema change.
+    use_expert_ensemble: bool = False
+
     # ---- Free-energy temporal ramp (synthesis-v1 stability fix) ----
     # When True, the PCT free-energy loss is multiplied by a smooth
     # sigmoid gate(step). At step 0 PCT contributes ~0; at step >>
