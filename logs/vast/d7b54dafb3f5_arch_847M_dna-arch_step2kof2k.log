@@ -124,3 +124,322 @@ step  1360 | loss 14.6985 | lm 7.4970 | ppl 1802.6 | gnorm 61.556 | lr 2.51e-04 
 step  1380 | loss 14.6665 | lm 7.7399 | ppl 2298.3 | gnorm 7.679 | lr 2.87e-04 | 3567 tok/s | Φ 0.822 | λ₁ 0.075 | ign 0.73 | mesoLG 0.57 | troph 8/8 μ1.66 | NT[DA=0.17 NE=0.12 5HT=0.30 ACh=0.10 eCB=0.10 Glu=0.60 GABA=0.28] | osc[δ=0.456 θ=0.235 γ=0.309] | em[C2:ρ=0.50/τ=0.10/s=0.73 C4:Q=-0.5 W=1 pl=255 C3:pc=0.250 VBB:β=1.01 σ=0.0753 kl=10222.747 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.506 inh=0.000 λ=0.159 kl=18.625 lm_ema=8.08 cx_ema=7.68] | hpa[load=0.23 cort=0.23 NE×0.84 T×0.77 LR×0.88]
 step  1400 | loss 13.4142 | lm 7.6718 | ppl 2146.9 | gnorm 111.984 | lr 2.58e-04 | 3513 tok/s | Φ 0.855 | λ₁ 0.075 | ign 0.73 | mesoLG 0.47 | troph 8/8 μ1.63 | NT[DA=0.07 NE=0.17 5HT=0.31 ACh=0.10 eCB=0.04 Glu=0.25 GABA=0.27] | osc[δ=0.639 θ=0.166 γ=0.195] | em[C2:ρ=0.50/τ=0.16/s=0.73 C4:Q=0.5 W=1 pl=255 C3:pc=0.256 VBB:β=1.01 σ=0.0459 kl=7500.088 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.506 inh=0.000 λ=0.254 kl=30.875 lm_ema=7.90 cx_ema=7.32] | hpa[load=0.24 cort=0.23 NE×0.84 T×0.77 LR×0.88]
 step  1420 | loss 17.6228 | lm 7.3507 | ppl 1557.3 | gnorm 29.496 | lr 2.96e-04 | 3620 tok/s | Φ 0.840 | λ₁ 0.075 | ign 0.70 | mesoLG 0.51 | troph 8/8 μ1.60 | NT[DA=0.06 NE=0.34 5HT=0.27 ACh=0.12 eCB=0.05 Glu=0.50 GABA=0.32] | osc[δ=0.521 θ=0.192 γ=0.288] | em[C2:ρ=0.48/τ=0.22/s=0.70 C4:Q=0.7 W=1 pl=255 C3:pc=0.310 VBB:β=1.01 σ=0.0767 kl=11213.576 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.506 inh=0.000 λ=0.320 kl=31.000 lm_ema=7.66 cx_ema=6.95] | hpa[load=0.24 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1440 | loss 19.1197 | lm 6.8586 | ppl 952.1 | gnorm 34.303 | lr 2.65e-04 | 3573 tok/s | Φ 0.844 | λ₁ 0.075 | ign 0.70 | mesoLG 0.48 | troph 8/8 μ1.64 | NT[DA=0.02 NE=0.19 5HT=0.23 ACh=0.17 eCB=0.21 Glu=0.84 GABA=0.14] | osc[δ=0.533 θ=0.222 γ=0.245] | em[C2:ρ=0.23/τ=0.25/s=0.70 C4:Q=0.5 W=1 pl=255 C3:pc=0.366 VBB:β=1.01 σ=0.0873 kl=12237.374 C5:lat=1.50 C6:pac=0.03] | cortex[α_eff=0.506 inh=0.000 λ=0.478 kl=23.000 lm_ema=7.25 cx_ema=6.24] | hpa[load=0.24 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1460 | loss 18.7674 | lm 7.0146 | ppl 1112.8 | gnorm 17.053 | lr 3.04e-04 | 3620 tok/s | Φ 0.854 | λ₁ 0.075 | ign 0.70 | mesoLG 0.47 | troph 8/8 μ1.69 | NT[DA=0.03 NE=0.09 5HT=0.21 ACh=0.21 eCB=0.18 Glu=0.72 GABA=0.08] | osc[δ=0.500 θ=0.246 γ=0.255] | em[C2:ρ=0.22/τ=0.25/s=0.70 C4:Q=0.4 W=1 pl=255 C3:pc=0.305 VBB:β=1.01 σ=0.1055 kl=13775.153 C5:lat=1.77 C6:pac=0.02] | cortex[α_eff=0.507 inh=0.000 λ=0.313 kl=43.000 lm_ema=7.47 cx_ema=6.78] | hpa[load=0.24 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1480 | loss 17.9086 | lm 7.1879 | ppl 1323.3 | gnorm 23.858 | lr 2.73e-04 | 3618 tok/s | Φ 0.790 | λ₁ 0.075 | ign 0.70 | mesoLG 0.49 | troph 8/8 μ1.73 | NT[DA=0.06 NE=0.15 5HT=0.21 ACh=0.27 eCB=0.18 Glu=0.76 GABA=0.05] | osc[δ=0.380 θ=0.324 γ=0.296] | em[C2:ρ=0.02/τ=0.24/s=0.70 C4:Q=-2.2 W=6 pl=73 C3:pc=0.312 VBB:β=1.01 σ=0.1322 kl=16192.945 C5:lat=1.00 C6:pac=0.02] | cortex[α_eff=0.507 inh=0.000 λ=0.319 kl=32.000 lm_ema=7.44 cx_ema=6.73] | hpa[load=0.23 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1500 | loss 19.5691 | lm 7.1346 | ppl 1254.7 | gnorm 76.881 | lr 3.13e-04 | 3589 tok/s | Φ 0.838 | λ₁ 0.075 | ign 0.70 | mesoLG 0.50 | troph 8/8 μ1.73 | NT[DA=0.02 NE=0.32 5HT=0.19 ACh=0.31 eCB=0.19 Glu=0.75 GABA=0.05] | osc[δ=0.414 θ=0.306 γ=0.280] | em[C2:ρ=0.00/τ=0.20/s=0.70 C4:Q=0.3 W=6 pl=73 C3:pc=0.325 VBB:β=1.01 σ=0.1202 kl=14996.596 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.507 inh=0.000 λ=0.422 kl=30.875 lm_ema=7.56 cx_ema=6.66] | hpa[load=0.23 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+[mid-ood] step 1500: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 1500: wikitext ppl=4271.3 gap_ratio=0.00 (train_ppl=315309178.9) (50 seq, 6430 tok)
+step  1520 | loss 20.4370 | lm 6.9655 | ppl 1059.4 | gnorm 19.240 | lr 2.80e-04 | 1400 tok/s | Φ 0.806 | λ₁ 0.075 | ign 0.71 | mesoLG 0.54 | troph 8/8 μ1.75 | NT[DA=0.05 NE=0.12 5HT=0.18 ACh=0.27 eCB=0.18 Glu=0.73 GABA=0.06] | osc[δ=0.472 θ=0.282 γ=0.246] | em[C2:ρ=0.08/τ=0.17/s=0.71 C4:Q=0.5 W=1 pl=255 C3:pc=0.301 VBB:β=1.01 σ=0.1280 kl=13035.790 C5:lat=1.70 C6:pac=0.02] | cortex[α_eff=0.507 inh=0.000 λ=0.308 kl=29.000 lm_ema=7.49 cx_ema=6.80] | hpa[load=0.23 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1540 | loss 19.7570 | lm 6.8287 | ppl 924.0 | gnorm 42.868 | lr 3.21e-04 | 3613 tok/s | Φ 0.813 | λ₁ 0.075 | ign 0.71 | mesoLG 0.55 | troph 8/8 μ1.76 | NT[DA=0.07 NE=0.20 5HT=0.17 ACh=0.26 eCB=0.18 Glu=0.73 GABA=0.07] | osc[δ=0.413 θ=0.283 γ=0.303] | em[C2:ρ=0.08/τ=0.15/s=0.71 C4:Q=1.6 W=18 pl=26 C3:pc=0.301 VBB:β=1.01 σ=0.1339 kl=13944.999 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.507 inh=0.000 λ=0.370 kl=25.375 lm_ema=7.31 cx_ema=6.50] | hpa[load=0.24 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1560 | loss 17.6351 | lm 7.3855 | ppl 1612.5 | gnorm 14.278 | lr 2.87e-04 | 3586 tok/s | Φ 0.745 | λ₁ 0.075 | ign 0.71 | mesoLG 0.53 | troph 8/8 μ1.74 | NT[DA=0.14 NE=0.09 5HT=0.19 ACh=0.25 eCB=0.12 Glu=0.60 GABA=0.05] | osc[δ=0.401 θ=0.267 γ=0.332] | em[C2:ρ=0.08/τ=0.12/s=0.71 C4:Q=-1.1 W=23 pl=21 C3:pc=0.283 VBB:β=1.01 σ=0.1275 kl=15452.791 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.507 inh=0.000 λ=0.289 kl=22.250 lm_ema=7.71 cx_ema=7.07] | hpa[load=0.24 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1580 | loss 16.6185 | lm 7.3243 | ppl 1516.7 | gnorm 23.031 | lr 3.29e-04 | 3587 tok/s | Φ 0.815 | λ₁ 0.075 | ign 0.71 | mesoLG 0.53 | troph 8/8 μ1.69 | NT[DA=0.12 NE=0.10 5HT=0.21 ACh=0.28 eCB=0.05 Glu=0.34 GABA=0.05] | osc[δ=0.506 θ=0.232 γ=0.262] | em[C2:ρ=0.00/τ=0.09/s=0.71 C4:Q=1.4 W=3 pl=127 C3:pc=0.256 VBB:β=1.01 σ=0.0745 kl=10021.995 C5:lat=1.34 C6:pac=0.02] | cortex[α_eff=0.508 inh=0.000 λ=0.251 kl=28.000 lm_ema=7.76 cx_ema=7.18] | hpa[load=0.25 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1600 | loss 17.0991 | lm 6.7904 | ppl 889.3 | gnorm 28.226 | lr 2.94e-04 | 3576 tok/s | Φ 0.809 | λ₁ 0.075 | ign 0.71 | mesoLG 0.55 | troph 8/8 μ1.64 | NT[DA=0.06 NE=0.08 5HT=0.22 ACh=0.28 eCB=0.04 Glu=0.30 GABA=0.04] | osc[δ=0.478 θ=0.241 γ=0.281] | em[C2:ρ=0.00/τ=0.05/s=0.71 C4:Q=0.5 W=5 pl=85 C3:pc=0.301 VBB:β=1.01 σ=0.0671 kl=8759.208 C5:lat=1.42 C6:pac=0.02] | cortex[α_eff=0.508 inh=0.000 λ=0.315 kl=30.250 lm_ema=7.36 cx_ema=6.66] | hpa[load=0.24 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1620 | loss 19.1790 | lm 7.3043 | ppl 1486.7 | gnorm 26.243 | lr 3.38e-04 | 3611 tok/s | Φ 0.801 | λ₁ 0.075 | ign 0.68 | mesoLG 0.51 | troph 8/8 μ1.62 | NT[DA=0.05 NE=0.18 5HT=0.21 ACh=0.19 eCB=0.03 Glu=0.27 GABA=0.12] | osc[δ=0.412 θ=0.258 γ=0.330] | em[C2:ρ=0.25/τ=0.04/s=0.68 C4:Q=-0.1 W=3 pl=127 C3:pc=0.270 VBB:β=1.01 σ=0.0771 kl=9224.232 C5:lat=1.67 C6:pac=0.02] | cortex[α_eff=0.508 inh=0.000 λ=0.277 kl=39.000 lm_ema=7.74 cx_ema=7.11] | hpa[load=0.25 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1640 | loss 19.7474 | lm 7.0836 | ppl 1192.2 | gnorm 35.434 | lr 3.02e-04 | 3597 tok/s | Φ 0.810 | λ₁ 0.075 | ign 0.68 | mesoLG 0.51 | troph 8/8 μ1.64 | NT[DA=0.03 NE=0.22 5HT=0.20 ACh=0.09 eCB=0.07 Glu=0.52 GABA=0.36] | osc[δ=0.470 θ=0.175 γ=0.355] | em[C2:ρ=0.56/τ=0.08/s=0.68 C4:Q=-0.7 W=1 pl=255 C3:pc=0.300 VBB:β=1.01 σ=0.1117 kl=12965.589 C5:lat=1.50 C6:pac=0.02] | cortex[α_eff=0.508 inh=0.000 λ=0.339 kl=40.000 lm_ema=7.74 cx_ema=6.99] | hpa[load=0.24 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1660 | loss 18.3984 | lm 7.3438 | ppl 1546.6 | gnorm 13.190 | lr 3.46e-04 | 3596 tok/s | Φ 0.850 | λ₁ 0.075 | ign 0.68 | mesoLG 0.49 | troph 8/8 μ1.67 | NT[DA=0.05 NE=0.08 5HT=0.21 ACh=0.09 eCB=0.07 Glu=0.48 GABA=0.29] | osc[δ=0.612 θ=0.177 γ=0.211] | em[C2:ρ=0.58/τ=0.15/s=0.68 C4:Q=-0.1 W=0 pl=511 C3:pc=0.270 VBB:β=1.01 σ=0.0947 kl=11632.151 C5:lat=1.00 C6:pac=0.02] | cortex[α_eff=0.509 inh=0.000 λ=0.297 kl=39.750 lm_ema=7.80 cx_ema=7.14] | hpa[load=0.24 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1680 | loss 20.1826 | lm 6.9812 | ppl 1076.2 | gnorm 32.493 | lr 3.09e-04 | 3611 tok/s | Φ 0.810 | λ₁ 0.075 | ign 0.68 | mesoLG 0.54 | troph 8/8 μ1.65 | NT[DA=0.07 NE=0.33 5HT=0.20 ACh=0.13 eCB=0.03 Glu=0.23 GABA=0.26] | osc[δ=0.572 θ=0.224 γ=0.205] | em[C2:ρ=0.39/τ=0.22/s=0.68 C4:Q=0.5 W=20 pl=24 C3:pc=0.313 VBB:β=1.01 σ=0.0687 kl=9045.688 C5:lat=1.00 C6:pac=0.03] | cortex[α_eff=0.509 inh=0.000 λ=0.311 kl=29.250 lm_ema=7.63 cx_ema=6.94] | hpa[load=0.23 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1700 | loss 19.7865 | lm 7.0739 | ppl 1180.7 | gnorm 70.365 | lr 3.54e-04 | 3593 tok/s | Φ 0.794 | λ₁ 0.075 | ign 0.68 | mesoLG 0.49 | troph 8/8 μ1.65 | NT[DA=0.02 NE=0.33 5HT=0.20 ACh=0.23 eCB=0.05 Glu=0.46 GABA=0.10] | osc[δ=0.507 θ=0.220 γ=0.273] | em[C2:ρ=0.08/τ=0.22/s=0.68 C4:Q=4.0 W=40 pl=12 C3:pc=0.331 VBB:β=1.01 σ=0.0962 kl=12410.095 C5:lat=1.60 C6:pac=0.02] | cortex[α_eff=0.509 inh=0.000 λ=0.359 kl=40.000 lm_ema=7.59 cx_ema=6.80] | hpa[load=0.23 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1720 | loss 20.1204 | lm 6.8934 | ppl 985.7 | gnorm 9.589 | lr 3.16e-04 | 3571 tok/s | Φ 0.794 | λ₁ 0.075 | ign 0.68 | mesoLG 0.52 | troph 8/8 μ1.67 | NT[DA=0.07 NE=0.09 5HT=0.19 ACh=0.30 eCB=0.09 Glu=0.58 GABA=0.04] | osc[δ=0.473 θ=0.206 γ=0.320] | em[C2:ρ=0.00/τ=0.18/s=0.68 C4:Q=3.7 W=32 pl=15 C3:pc=0.321 VBB:β=1.01 σ=0.1254 kl=13008.110 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.509 inh=0.000 λ=0.331 kl=30.500 lm_ema=7.44 cx_ema=6.71] | hpa[load=0.23 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1740 | loss 19.1028 | lm 7.6871 | ppl 2180.0 | gnorm 11.332 | lr 3.62e-04 | 3630 tok/s | Φ 0.832 | λ₁ 0.075 | ign 0.68 | mesoLG 0.50 | troph 8/8 μ1.63 | NT[DA=0.10 NE=0.07 5HT=0.20 ACh=0.29 eCB=0.05 Glu=0.42 GABA=0.04] | osc[δ=0.491 θ=0.197 γ=0.313] | em[C2:ρ=0.00/τ=0.14/s=0.68 C4:Q=-2.2 W=25 pl=19 C3:pc=0.296 VBB:β=1.01 σ=0.1049 kl=12420.961 C5:lat=1.00 C6:pac=0.02] | cortex[α_eff=0.509 inh=0.000 λ=0.242 kl=42.000 lm_ema=8.00 cx_ema=7.44] | hpa[load=0.23 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1760 | loss 19.1446 | lm 6.8902 | ppl 982.6 | gnorm 49.342 | lr 3.24e-04 | 3565 tok/s | Φ 0.828 | λ₁ 0.075 | ign 0.68 | mesoLG 0.50 | troph 8/8 μ1.63 | NT[DA=0.04 NE=0.12 5HT=0.21 ACh=0.28 eCB=0.04 Glu=0.32 GABA=0.05] | osc[δ=0.459 θ=0.312 γ=0.230] | em[C2:ρ=0.00/τ=0.10/s=0.68 C4:Q=1.1 W=26 pl=18 C3:pc=0.297 VBB:β=1.01 σ=0.0817 kl=10386.527 C5:lat=1.51 C6:pac=0.01] | cortex[α_eff=0.510 inh=0.000 λ=0.322 kl=42.250 lm_ema=7.61 cx_ema=6.89] | hpa[load=0.24 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1780 | loss 22.4325 | lm 7.0437 | ppl 1145.6 | gnorm 42.920 | lr 3.71e-04 | 3559 tok/s | Φ 0.867 | λ₁ 0.075 | ign 0.67 | mesoLG 0.47 | troph 8/8 μ1.62 | NT[DA=0.00 NE=0.20 5HT=0.18 ACh=0.26 eCB=0.03 Glu=0.30 GABA=0.06] | osc[δ=0.445 θ=0.301 γ=0.253] | em[C2:ρ=0.05/τ=0.07/s=0.67 C4:Q=-0.1 W=45 pl=11 C3:pc=0.291 VBB:β=1.01 σ=0.0661 kl=10926.622 C5:lat=1.49 C6:pac=0.01] | cortex[α_eff=0.510 inh=0.000 λ=0.359 kl=60.000 lm_ema=7.72 cx_ema=6.94] | hpa[load=0.23 cort=0.23 NE×0.84 T×0.77 LR×0.88]
+step  1800 | loss 29.9087 | lm 7.0879 | ppl 1197.4 | gnorm 21.225 | lr 3.31e-04 | 3652 tok/s | Φ 0.808 | λ₁ 0.075 | ign 0.72 | mesoLG 0.51 | troph 8/8 μ1.65 | NT[DA=0.03 NE=0.71 5HT=0.14 ACh=0.16 eCB=0.08 Glu=0.59 GABA=0.31] | osc[δ=0.476 θ=0.299 γ=0.225] | em[C2:ρ=0.36/τ=0.07/s=0.72 C4:Q=3.6 W=23 pl=21 C3:pc=0.319 VBB:β=1.01 σ=0.1298 kl=12612.669 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.510 inh=0.000 λ=0.395 kl=43.500 lm_ema=7.66 cx_ema=6.81] | hpa[load=0.25 cort=0.24 NE×0.84 T×0.76 LR×0.88]
+step  1820 | loss 23.1146 | lm 7.1258 | ppl 1243.6 | gnorm 17.172 | lr 3.79e-04 | 3598 tok/s | Φ 0.827 | λ₁ 0.075 | ign 0.74 | mesoLG 0.51 | troph 8/8 μ1.72 | NT[DA=0.05 NE=0.10 5HT=0.15 ACh=0.11 eCB=0.24 Glu=0.85 GABA=0.23] | osc[δ=0.636 θ=0.152 γ=0.212] | em[C2:ρ=0.48/τ=0.12/s=0.74 C4:Q=-3.5 W=19 pl=25 C3:pc=0.317 VBB:β=1.02 σ=0.2114 kl=16931.473 C5:lat=1.52 C6:pac=0.01] | cortex[α_eff=0.510 inh=0.000 λ=0.330 kl=45.500 lm_ema=7.68 cx_ema=6.95] | hpa[load=0.25 cort=0.24 NE×0.83 T×0.76 LR×0.88]
+step  1840 | loss 24.3334 | lm 6.5333 | ppl 687.6 | gnorm 28.239 | lr 3.38e-04 | 3554 tok/s | Φ 0.775 | λ₁ 0.075 | ign 0.74 | mesoLG 0.47 | troph 8/8 μ1.78 | NT[DA=0.04 NE=0.16 5HT=0.15 ACh=0.12 eCB=0.29 Glu=0.84 GABA=0.24] | osc[δ=0.659 θ=0.173 γ=0.168] | em[C2:ρ=0.47/τ=0.18/s=0.74 C4:Q=3.7 W=68 pl=7 C3:pc=0.400 VBB:β=1.02 σ=0.3378 kl=17006.076 C5:lat=1.00 C6:pac=0.02] | cortex[α_eff=0.511 inh=0.000 λ=0.416 kl=41.250 lm_ema=7.12 cx_ema=6.23] | hpa[load=0.24 cort=0.24 NE×0.83 T×0.76 LR×0.88]
+step  1860 | loss 24.4471 | lm 7.0676 | ppl 1173.4 | gnorm 29.883 | lr 3.88e-04 | 3599 tok/s | Φ 0.804 | λ₁ 0.075 | ign 0.74 | mesoLG 0.51 | troph 8/8 μ1.82 | NT[DA=0.04 NE=0.11 5HT=0.15 ACh=0.19 eCB=0.29 Glu=0.84 GABA=0.10] | osc[δ=0.650 θ=0.162 γ=0.189] | em[C2:ρ=0.19/τ=0.20/s=0.74 C4:Q=6.5 W=122 pl=4 C3:pc=0.404 VBB:β=1.02 σ=0.3408 kl=19473.488 C5:lat=1.26 C6:pac=0.02] | cortex[α_eff=0.511 inh=0.000 λ=0.363 kl=37.750 lm_ema=7.63 cx_ema=6.84] | hpa[load=0.24 cort=0.24 NE×0.83 T×0.76 LR×0.88]
+step  1880 | loss 22.0917 | lm 6.7603 | ppl 862.9 | gnorm 10.210 | lr 3.45e-04 | 3655 tok/s | Φ 0.743 | λ₁ 0.075 | ign 0.74 | mesoLG 0.52 | troph 8/8 μ1.83 | NT[DA=0.09 NE=0.08 5HT=0.17 ACh=0.29 eCB=0.19 Glu=0.73 GABA=0.04] | osc[δ=0.485 θ=0.248 γ=0.267] | em[C2:ρ=0.00/τ=0.17/s=0.74 C4:Q=2.1 W=67 pl=7 C3:pc=0.408 VBB:β=1.02 σ=0.2416 kl=17609.334 C5:lat=1.70 C6:pac=0.01] | cortex[α_eff=0.511 inh=0.000 λ=0.354 kl=35.000 lm_ema=7.34 cx_ema=6.57] | hpa[load=0.24 cort=0.24 NE×0.83 T×0.76 LR×0.88]
+step  1900 | loss 25.3803 | lm 7.4002 | ppl 1636.3 | gnorm 90.376 | lr 3.96e-04 | 3690 tok/s | Φ 0.840 | λ₁ 0.075 | ign 0.74 | mesoLG 0.47 | troph 8/8 μ1.75 | NT[DA=0.02 NE=0.28 5HT=0.16 ACh=0.29 eCB=0.08 Glu=0.45 GABA=0.06] | osc[δ=0.639 θ=0.172 γ=0.190] | em[C2:ρ=0.00/τ=0.13/s=0.74 C4:Q=-0.0 W=128 pl=3 C3:pc=0.357 VBB:β=1.02 σ=0.0785 kl=13785.698 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.511 inh=0.000 λ=0.350 kl=48.000 lm_ema=7.89 cx_ema=7.13] | hpa[load=0.25 cort=0.24 NE×0.83 T×0.76 LR×0.88]
+step  1920 | loss 24.2809 | lm 6.9592 | ppl 1052.8 | gnorm 35.135 | lr 3.53e-04 | 3613 tok/s | Φ 0.818 | λ₁ 0.075 | ign 0.70 | mesoLG 0.48 | troph 8/8 μ1.71 | NT[DA=0.06 NE=0.14 5HT=0.17 ACh=0.22 eCB=0.06 Glu=0.46 GABA=0.08] | osc[δ=0.652 θ=0.192 γ=0.156] | em[C2:ρ=0.16/τ=0.12/s=0.70 C4:Q=-2.0 W=143 pl=3 C3:pc=0.348 VBB:β=1.02 σ=0.0911 kl=15012.274 C5:lat=1.78 C6:pac=0.01] | cortex[α_eff=0.512 inh=0.000 λ=0.358 kl=45.000 lm_ema=7.51 cx_ema=6.73] | hpa[load=0.24 cort=0.24 NE×0.83 T×0.76 LR×0.88]
+step  1940 | loss 23.1097 | lm 6.3154 | ppl 553.0 | gnorm 24.411 | lr 4.04e-04 | 3497 tok/s | Φ 0.775 | λ₁ 0.075 | ign 0.70 | mesoLG 0.48 | troph 8/8 μ1.69 | NT[DA=0.05 NE=0.10 5HT=0.18 ACh=0.21 eCB=0.06 Glu=0.41 GABA=0.08] | osc[δ=0.618 θ=0.173 γ=0.209] | em[C2:ρ=0.16/τ=0.11/s=0.70 C4:Q=-2.1 W=101 pl=5 C3:pc=0.391 VBB:β=1.02 σ=0.0919 kl=13066.822 C5:lat=1.00 C6:pac=0.00] | cortex[α_eff=0.512 inh=0.000 λ=0.390 kl=48.000 lm_ema=7.05 cx_ema=6.21] | hpa[load=0.24 cort=0.24 NE×0.83 T×0.76 LR×0.88]
+step  1960 | loss 22.1495 | lm 6.6269 | ppl 755.2 | gnorm 15.711 | lr 3.60e-04 | 3484 tok/s | Φ 0.632 | λ₁ 0.075 | ign 0.70 | mesoLG 0.52 | troph 8/8 μ1.66 | NT[DA=0.15 NE=0.12 5HT=0.20 ACh=0.21 eCB=0.04 Glu=0.36 GABA=0.08] | osc[δ=0.411 θ=0.270 γ=0.320] | em[C2:ρ=0.16/τ=0.10/s=0.70 C4:Q=-2.0 W=24 pl=20 C3:pc=0.426 VBB:β=1.02 σ=0.0881 kl=13152.243 C5:lat=1.82 C6:pac=0.01] | cortex[α_eff=0.512 inh=0.000 λ=0.355 kl=33.000 lm_ema=7.10 cx_ema=6.32] | hpa[load=0.25 cort=0.24 NE×0.83 T×0.76 LR×0.88]
+step  1980 | loss 21.8794 | lm 6.7712 | ppl 872.3 | gnorm 27.575 | lr 4.12e-04 | 3523 tok/s | Φ 0.787 | λ₁ 0.075 | ign 0.70 | mesoLG 0.51 | troph 8/8 μ1.65 | NT[DA=0.09 NE=0.12 5HT=0.21 ACh=0.27 eCB=0.04 Glu=0.37 GABA=0.05] | osc[δ=0.502 θ=0.263 γ=0.235] | em[C2:ρ=0.00/τ=0.07/s=0.70 C4:Q=-3.0 W=104 pl=4 C3:pc=0.402 VBB:β=1.02 σ=0.0839 kl=13293.633 C5:lat=1.44 C6:pac=0.01] | cortex[α_eff=0.512 inh=0.000 λ=0.341 kl=42.750 lm_ema=7.36 cx_ema=6.61] | hpa[load=0.25 cort=0.24 NE×0.83 T×0.76 LR×0.88]
+step  2000 | loss 22.1177 | lm 6.1904 | ppl 488.0 | gnorm 34.259 | lr 3.67e-04 | 3508 tok/s | Φ 0.764 | λ₁ 0.075 | ign 0.69 | mesoLG 0.58 | troph 8/8 μ1.68 | NT[DA=0.06 NE=0.11 5HT=0.22 ACh=0.22 eCB=0.05 Glu=0.42 GABA=0.08] | osc[δ=0.360 θ=0.338 γ=0.302] | em[C2:ρ=0.20/τ=0.05/s=0.69 C4:Q=0.8 W=95 pl=5 C3:pc=0.512 VBB:β=1.02 σ=0.0846 kl=12828.791 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.513 inh=0.000 λ=0.372 kl=37.500 lm_ema=6.97 cx_ema=6.17] | hpa[load=0.25 cort=0.24 NE×0.83 T×0.76 LR×0.88]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/dsl_arch_20260612-193532_step2000.pt
+[mid-ood] step 2000: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 2000: wikitext ppl=3002.9 gap_ratio=0.00 (train_ppl=485165195.4) (50 seq, 6430 tok)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/dsl_arch_20260612-193532_step2000.pt
+[train_dsl] final OOD eval @ step 2000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=3494.5  train_ppl=485165195.4  gap_ratio=0.00  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260612-193532.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7f1338000f80 must be current when releasing
+Python runtime state: finalizing (tstate=0x0000000025607a30)
+
+Thread 0x00007f18ee54f740 (most recent call first):
+  <no Python frame>
+
+Extension modules: mkl._mklinit, mkl._py_mkl_service, numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, torch._C, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, gmpy2.gmpy2, _brotli, zstandard.backend_c, yaml._yaml, regex._regex, markupsafe._speedups, PIL._imaging, PIL._imagingft, pyarrow.lib, pandas._libs.tslibs.ccalendar, pandas._libs.tslibs.np_datetime, pandas._libs.tslibs.dtypes, pandas._libs.tslibs.base, pandas._libs.tslibs.nattype, pandas._libs.tslibs.timezones, pandas._libs.tslibs.fields, pandas._libs.tslibs.timedeltas, pandas._libs.tslibs.tzconversion, pandas._libs.tslibs.timestamps, pandas._libs.properties, pandas._libs.tslibs.offsets, pandas._libs.tslibs.strptime, pandas._libs.tslibs.parsing, pandas._libs.tslibs.conversion, pandas._libs.tslibs.period, pandas._libs.tslibs.vectorized, pandas._libs.ops_dispatch, pandas._libs.missing, pandas._libs.hashtable, pandas._libs.algos, pandas._libs.interval, pandas._libs.lib, pyarrow._compute, pandas._libs.ops, pandas._libs.hashing, pandas._libs.arrays, pandas._libs.tslib, pandas._libs.sparse, pandas._libs.internals, pandas._libs.indexing, pandas._libs.index, pandas._libs.writers, pandas._libs.join, pandas._libs.window.aggregations, pandas._libs.window.indexers, pandas._libs.reshape, pandas._libs.groupby, pandas._libs.json, pandas._libs.parsers, pandas._libs.testing, pyarrow._acero, pyarrow._fs, pyarrow._csv, pyarrow._json, pyarrow._substrait, pyarrow._dataset, pyarrow._dataset_orc, pyarrow._parquet, pyarrow._azurefs, pyarrow._hdfs, pyarrow._gcsfs, pyarrow._s3fs, pyarrow._parquet_encryption, pyarrow._dataset_parquet_encryption, pyarrow._dataset_parquet, multidict._multidict, yarl._quoting_c, propcache._helpers_c, aiohttp._http_writer, aiohttp._http_parser, aiohttp._websocket.mask, aiohttp._websocket.reader_c, frozenlist._frozenlist, xxhash._xxhash (total: 96)
+scripts/vast_train_dna_loop.sh: line 192:   872 Aborted                 python -u -m neuroslm.train_dsl --dna "$DNA" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume "${EVOLVE_ARGS[@]}"
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 2 @ 19:42:37Z
+[train_dsl] DNA mode: /workspace/brian/dna/evol/arch.dna → rcc_bowtie
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+/workspace/brian/neuroslm/harness.py:474: RuntimeWarning: multi_cortex.router_d_model=256 != harness.d_sem=512; overriding to d_sem so the fusion path lines up dimensionally.
+  warnings.warn(
+[train_dsl] DSL-LM parameters: 847.0M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 847,044,207
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/2000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1299, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1181, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 372, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2211, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 3 @ 19:43:04Z
+[train_dsl] DNA mode: /workspace/brian/dna/evol/arch.dna → rcc_bowtie
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+/workspace/brian/neuroslm/harness.py:474: RuntimeWarning: multi_cortex.router_d_model=256 != harness.d_sem=512; overriding to d_sem so the fusion path lines up dimensionally.
+  warnings.warn(
+[train_dsl] DSL-LM parameters: 847.0M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 847,044,207
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/2000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1299, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1181, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 372, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2211, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 4 @ 19:43:32Z
+[train_dsl] DNA mode: /workspace/brian/dna/evol/arch.dna → rcc_bowtie
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+/workspace/brian/neuroslm/harness.py:474: RuntimeWarning: multi_cortex.router_d_model=256 != harness.d_sem=512; overriding to d_sem so the fusion path lines up dimensionally.
+  warnings.warn(
+[train_dsl] DSL-LM parameters: 847.0M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 847,044,207
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/2000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1299, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1181, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 372, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2211, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 5 @ 19:43:59Z
+[train_dsl] DNA mode: /workspace/brian/dna/evol/arch.dna → rcc_bowtie
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+/workspace/brian/neuroslm/harness.py:474: RuntimeWarning: multi_cortex.router_d_model=256 != harness.d_sem=512; overriding to d_sem so the fusion path lines up dimensionally.
+  warnings.warn(
+[train_dsl] DSL-LM parameters: 847.0M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 847,044,207
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/2000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1299, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1181, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 372, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2211, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 6 @ 19:44:27Z
+[train_dsl] DNA mode: /workspace/brian/dna/evol/arch.dna → rcc_bowtie
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+/workspace/brian/neuroslm/harness.py:474: RuntimeWarning: multi_cortex.router_d_model=256 != harness.d_sem=512; overriding to d_sem so the fusion path lines up dimensionally.
+  warnings.warn(
+[train_dsl] DSL-LM parameters: 847.0M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 847,044,207
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/2000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1299, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1181, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 372, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2211, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 7 @ 19:44:55Z
+[train_dsl] DNA mode: /workspace/brian/dna/evol/arch.dna → rcc_bowtie
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+/workspace/brian/neuroslm/harness.py:474: RuntimeWarning: multi_cortex.router_d_model=256 != harness.d_sem=512; overriding to d_sem so the fusion path lines up dimensionally.
+  warnings.warn(
+[train_dsl] DSL-LM parameters: 847.0M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 847,044,207
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/2000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1299, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1181, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 372, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2211, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 8 @ 19:45:22Z
+[train_dsl] DNA mode: /workspace/brian/dna/evol/arch.dna → rcc_bowtie
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+/workspace/brian/neuroslm/harness.py:474: RuntimeWarning: multi_cortex.router_d_model=256 != harness.d_sem=512; overriding to d_sem so the fusion path lines up dimensionally.
+  warnings.warn(
+[train_dsl] DSL-LM parameters: 847.0M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 847,044,207
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/2000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
