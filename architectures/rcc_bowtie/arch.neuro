@@ -149,11 +149,34 @@ training {
     # `freeze_weights = true` keeps the GPT-2 backbones frozen and
     # trains only the router + per-cortex projections in the cold-start
     # phase.  Set to false to fine-tune all cortices end-to-end.
+    #
+    # ── Mixture-of-Experts (`experts: [...]`) supersedes `weights:` ──
+    # Setting `experts: [...]` replaces the legacy single-`weights`
+    # field with an explicit per-expert roster. Each expert returns
+    # logits DIRECTLY in trunk-vocab space via its OWN pretrained LM
+    # head — bypassing the random Xavier `cortex_lm_head` projection
+    # that previously sat at the catastrophic `loss ≈ ln(V)` ceiling
+    # (see scripts/diagnose_cortex_init.py for the in-vitro repro).
+    # When `experts:` is set, `n_cortices` and `domains:` are
+    # auto-derived from the roster (still listed below for human
+    # readability). See neuroslm/experts.py + tests/training/
+    # test_lm_expert_harness_integration.py for the smoking-gun CE
+    # contract (initial CE on natural English drops from ~10.85 to
+    # ~3-5 nats at step 0).
     multi_cortex: {
         enabled:             true,
-        n_cortices:          4,
-        domains:             ["math", "code", "chat", "general"],
-        weights:             "gpt2",
+        n_cortices:          3,
+        domains:             ["general", "code", "reasoning"],
+        # Per-expert roster (new MoE path). Each row binds a HuggingFace
+        # model id to a routing domain. The expert's pretrained LM head
+        # produces trunk-vocab logits directly via VocabBridge — no
+        # random projection chain, no rogue-dim band-aid LayerNorm.
+        experts: [
+            { id: "gpt2",                       domain: "general",   freeze: true },
+            { id: "microsoft/CodeGPT-small-py", domain: "code",      freeze: true },
+            { id: "Qwen/Qwen2.5-0.5B",          domain: "reasoning", freeze: true }
+        ],
+        trunk_tokenizer:     "gpt2",
         freeze_weights:      true,
         lexical_bias_weight: 2.0,
         bema_tau:            0.5,
@@ -406,6 +429,36 @@ training {
             approx_params: "30M"
         }
 
+        # ── Cheap-hardware 2k smoke run ─────────────────────────────
+        # Target: short (~2 hour) end-to-end smoke run on a $0.15-0.30/hr
+        # vast.ai instance — RTX 3090 / RTX 4090 / A5000 / RTX 4000 Ada.
+        # Used to verify that a DSL/DNA change boots cleanly + the MoE
+        # experts ensemble produces real loss before paying for full A100
+        # runs. NOT a research run; trajectories ≤2k steps are noise.
+        # Per CLAUDE.md §10, even smoke runs are recorded as findings.
+        cheap_2k: {
+            d_model:       512
+            depth:         8
+            n_heads:       8
+            max_ctx:       1024   # 2× the 30m_p4 ctx; still fits ~10 GiB
+            batch_size:    2      # double the signal/step of 30m_p4
+            seq_len:       1024
+            grad_accum:    2      # 4k tok/step — enough to dampen jitter
+            approx_params: "30M"
+            hardware: {
+                # RTX 3090 is the sweet spot: 24 GiB headroom for the
+                # 3 frozen MoE experts (~1.5 GiB fp16 each w/ activations),
+                # widely available at $0.15-0.25/hr; ~5x cheaper than A100.
+                gpu_name:        "RTX_3090"
+                num_gpus:        1
+                min_gpu_mem_gib: 20
+                min_reliability: 0.98
+                min_inet_mbps:   100
+                dist_strategy:   "single"
+                precision:       "bf16"
+            }
+        }
+
         100m: {
             # Honest ~100M: trunk + embedding + lm_head ≈ 103M.
             # (The previous 768/10 config was 204M because embedding +
@@ -642,6 +695,55 @@ import { lattice_slice_winner, lattice_specialisation_index } from "@/lib/emerge
 import { pac_bandpass_analytic, pac_phase_and_amplitude, pac_modulation_index } from "@/lib/emergent"
 
 # =============================================================================
+# TOGGLEABLE MECHANISMS (§14 — declared inactive; activation = ablation)
+# =============================================================================
+# Five toggleable mechanisms from the shared @brian library. Each pairs
+# a real PyTorch impl (under neuroslm/modules/) with TDD-pinned math
+# contracts (under tests/). The feature blocks below import the
+# canonical equations + impl bindings; `active: false` keeps each one
+# bypassed at runtime so this baseline arch is byte-identical to the
+# pre-mechanism build. To run an ablation, copy-paste a feature block
+# below and flip `active: true` (and optionally tune its `params:`).
+#
+# See docs/features/<name>.md for hypothesis + math + wiring example.
+import { hyperbolic_attention }          from "@brian/features/hyperbolic_attention"
+import { rope_torus }                    from "@brian/features/rope_torus"
+import { hrr_memory }                    from "@brian/features/hrr_memory"
+import { predictive_coding_residual }    from "@brian/features/predictive_coding_residual"
+import { surprise_gated_moe }            from "@brian/features/surprise_gated_moe"
+
+# =============================================================================
+# §14 FEATURE ACTIVATION — flip mechanisms ON for this architecture
+# =============================================================================
+# Per CLAUDE.md §14 the shared lib defines every feature with
+# `active: false` (clean baseline). The arch-local re-declarations
+# below override only the `active` flag — impl/params/endpoints are
+# inherited from the lib spec via the compiler's merge-by-name pass.
+# To run an ablation just delete (or comment out) the matching block
+# to revert that mechanism to its bypassed baseline.
+
+feature hyperbolic_attention {
+    equation: hyperbolic_attention_eq,
+    active:   true
+}
+feature rope_torus {
+    equation: rope_torus_eq,
+    active:   true
+}
+feature hrr_memory {
+    equation: hrr_memory_eq,
+    active:   true
+}
+feature predictive_coding_residual {
+    equation: predictive_coding_residual_eq,
+    active:   true
+}
+feature surprise_gated_moe {
+    equation: surprise_gated_moe_eq,
+    active:   true
+}
+
+# =============================================================================
 # MODULE IMPORTS — every brain region this architecture comprises
 # =============================================================================
 
@@ -708,7 +810,13 @@ synapse thalamus -> cortex_general {
 # State models → workspace
 synapse world -> gws {
     weight: 0.6, neurotransmitter: "glutamate",
-    equation: @standard_synapse
+    equation: @standard_synapse,
+    # ── §14 mechanism #4: predictive-coding residual ──
+    # World-model → conscious-workspace edge is the canonical sensory
+    # surface in PC (Rao-Ballard 1999). The trunk prediction g(x) is
+    # subtracted out; only the surprise (x - g(x)), scaled by alpha=0.1,
+    # propagates forward. See docs/features/predictive_coding_residual.md.
+    feature: "predictive_coding_residual.edge"
 }
 synapse self_m -> gws {
     weight: 0.6, neurotransmitter: "glutamate",
@@ -724,7 +832,13 @@ synapse gws -> hippo {
 # GWS → cognitive control (top-down planning)
 synapse gws -> pfc {
     weight: 0.8, neurotransmitter: "glutamate",
-    equation: @standard_synapse
+    equation: @standard_synapse,
+    # ── §14 mechanism #1: hyperbolic attention ──
+    # The semantic broadcast from the conscious workspace to executive
+    # control carries tree-shaped context (task hierarchy, plan
+    # subgoals); a Poincaré-disc metric (volume ∝ e^r) is the natural
+    # geometry. Ganea/Bécigneul/Hofmann 2018.
+    feature: "hyperbolic_attention.edge"
 }
 synapse gws -> acc {
     weight: 0.7, neurotransmitter: "glutamate",
@@ -734,7 +848,13 @@ synapse gws -> acc {
 # PFC → basal ganglia (action selection)
 synapse pfc -> bg {
     weight: 0.6, neurotransmitter: "glutamate",
-    equation: @standard_synapse
+    equation: @standard_synapse,
+    # ── §14 mechanism #5: surprise-gated MoE ──
+    # Action-selection cost should scale with how uncertain the policy
+    # is. SurpriseGatedMoE routes confident tokens to k_min=1 expert
+    # (cheap) and uncertain tokens to k_max=4 (rich mixture). Free-
+    # energy principle (Friston 2010) made concrete in compute budget.
+    feature: "surprise_gated_moe.edge"
 }
 
 # Basal ganglia → motor (action execution; GABAergic disinhibition)
@@ -752,7 +872,13 @@ synapse forward_m -> evaluator {
 # Memory feedback → PFC (recall-guided planning)
 synapse hippo -> pfc {
     weight: 0.5, neurotransmitter: "glutamate",
-    equation: @standard_synapse
+    equation: @standard_synapse,
+    # ── §14 mechanism #3: HRR-bound holographic memory ──
+    # The hippocampus-to-PFC recall edge is exactly the content-
+    # addressable retrieval HRR was invented for (Plate 1995). Per-batch
+    # memory M = Σ_t bind(k_t, v_t); per-token query unbinds the
+    # superposition.
+    feature: "hrr_memory.edge"
 }
 synapse entorhinal -> pfc {
     weight: 0.4, neurotransmitter: "glutamate",
@@ -762,7 +888,13 @@ synapse entorhinal -> pfc {
 # Re-entry loop: PFC back to thalamus (bowtie closure → Φ > 0)
 synapse pfc -> thalamus {
     weight: 0.3, neurotransmitter: "glutamate",
-    equation: @standard_synapse
+    equation: @standard_synapse,
+    # ── §14 mechanism #2: RoPE-on-Torus ──
+    # The bowtie closure carries iteration position around the re-entry
+    # loop — naturally cyclic, naturally multi-scale (token, episode,
+    # session). Per-slice torus periods (Su et al. 2024, generalised)
+    # encode this directly into the transmission.
+    feature: "rope_torus.edge"
 }
 
 # DMN → GWS (narrative broadcasts to conscious access)

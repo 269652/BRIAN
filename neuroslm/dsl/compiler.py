@@ -364,6 +364,48 @@ class CircuitIR(NodeIR):
                 self.modulations + self.formal_specs + self.sheaf_specs)
 
 
+class _ParamRef:
+    """Marker for a feature.params value that is a bare Python identifier
+    rather than a literal — emitted unquoted by codegen so the generated
+    ``__init__`` can pass through a constructor argument like ``d_sem``.
+
+    Example::
+
+        params: { d_model: d_sem, max_seq_len: 2048 }
+
+    parses to ``{"d_model": _ParamRef("d_sem"), "max_seq_len": 2048}``,
+    and codegen lowers it to ``ImplClass(d_model=d_sem, max_seq_len=2048)``
+    where ``d_sem`` is the runtime trunk width passed to the generated
+    circuit's ``__init__``.
+
+    Why a class (vs a string sentinel): keeps `isinstance(v, _ParamRef)`
+    clean in codegen and avoids any chance of a user-supplied string
+    colliding with a sentinel prefix.
+    """
+    __slots__ = ("expr",)
+
+    def __init__(self, expr: str) -> None:
+        self.expr = expr
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid only
+        return f"_ParamRef({self.expr!r})"
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, _ParamRef) and self.expr == other.expr
+
+    def __hash__(self) -> int:
+        return hash((type(self).__name__, self.expr))
+
+
+# Identifier regex used to decide whether a params value is a bare
+# Python name. Kept here (not in the parse function) so codegen tests
+# can import it for symmetry checks.
+_BARE_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Identifiers we never treat as variable refs even if they look like
+# bare names — they're language-level literals or reserved keywords.
+_PARAM_LITERAL_KEYWORDS = {"true", "false", "none", "null"}
+
+
 @dataclass
 class FeatureIR(NodeIR):
     """Toggleable mechanism — names an equation + carries an active flag.
@@ -1144,6 +1186,7 @@ def _extract_features(source: str,
     ``tests/dsl/test_feature_endpoints.py`` (impl + endpoints).
     """
     out: List[FeatureIR] = []
+    by_name: Dict[str, int] = {}  # name → index in out, for override merge
     known_equations = {e.name for e in eq_defs}
     # Strip end-of-line comments BEFORE scanning for feature blocks.
     # Otherwise a docstring like ``# `feature foo { params: {...} }` re-
@@ -1193,7 +1236,7 @@ def _extract_features(source: str,
         )
         # ── optional: params dict ──
         params = _parse_feature_params_dict(props.get("params", "").strip())
-        out.append(FeatureIR(
+        new_feat = FeatureIR(
             name=name,
             id=name,
             equation_ref=equation_ref,
@@ -1201,15 +1244,60 @@ def _extract_features(source: str,
             impl=impl,
             endpoints=endpoints,
             params=params,
-        ))
+        )
+        # ── §14 override merge ──
+        # A feature may be declared more than once: the canonical
+        # pattern is "lib defines the default + impl + endpoints; arch
+        # overrides only the `active` toggle (and optionally a few
+        # params)". Later blocks win per-field; fields the override
+        # leaves implicit inherit from the earlier declaration so an
+        # arch override never has to repeat the whole impl spec.
+        # The compile_folder pipeline also emits some sources twice for
+        # THSD context, so dedup-with-merge is the only correct policy.
+        existing_idx = by_name.get(name)
+        if existing_idx is None:
+            by_name[name] = len(out)
+            out.append(new_feat)
+        else:
+            prev = out[existing_idx]
+            merged_params = dict(prev.params or {})
+            merged_params.update(new_feat.params or {})
+            merged_endpoints = (
+                new_feat.endpoints
+                if new_feat.endpoints
+                else prev.endpoints
+            )
+            out[existing_idx] = FeatureIR(
+                name=prev.name,
+                id=prev.id,
+                equation_ref=(
+                    new_feat.equation_ref or prev.equation_ref
+                ),
+                active=new_feat.active,
+                impl=new_feat.impl or prev.impl,
+                endpoints=merged_endpoints,
+                params=merged_params,
+            )
     return out
 
 
 def _parse_feature_params_dict(raw: str) -> Dict:
     """Parse a ``{ k: v, k: v }`` literal into a dict.
 
-    Performs best-effort numeric coercion so downstream consumers don't
-    have to cast every numeric param. Strings preserve as-is.
+    Coercion rules (most-specific wins):
+
+    * ``true`` / ``false`` (case-insensitive) → Python ``bool``.
+    * Bare identifiers like ``d_sem`` (matching :data:`_BARE_IDENT_RE`
+      and not in :data:`_PARAM_LITERAL_KEYWORDS`) → :class:`_ParamRef`
+      so codegen emits them unquoted in the impl constructor call.
+      This is how a feature spec wires its ``d_model`` to the trunk
+      width without hard-coding it::
+
+          params: { d_model: d_sem, max_seq_len: 2048 }
+
+    * Numeric strings → ``int`` or ``float`` (``.`` or ``e`` → float).
+    * Everything else stays as a string (preserving the user's quotes
+      already stripped).
     """
     if not raw:
         return {}
@@ -1217,14 +1305,40 @@ def _parse_feature_params_dict(raw: str) -> Dict:
     inner = raw.lstrip("{").rstrip("}").strip()
     out: Dict = {}
     for k, v in _parse_properties(inner).items():
-        v = v.strip().strip('"\'')
+        v_stripped = v.strip()
+        # If the value was quoted, force-string mode: keep the literal
+        # without interpretation. Lets users opt out of bool/ident
+        # coercion by writing ``schedule: "geometric"`` vs the bare
+        # ``schedule: geometric`` (which would become a _ParamRef).
+        is_quoted = (
+            len(v_stripped) >= 2
+            and v_stripped[0] in ("'", '"')
+            and v_stripped[-1] == v_stripped[0]
+        )
+        v_clean = v_stripped.strip('"\'')
+        if is_quoted:
+            out[k] = v_clean
+            continue
+        v_low = v_clean.lower()
+        if v_low == "true":
+            out[k] = True
+            continue
+        if v_low == "false":
+            out[k] = False
+            continue
+        if (
+            _BARE_IDENT_RE.match(v_clean)
+            and v_low not in _PARAM_LITERAL_KEYWORDS
+        ):
+            out[k] = _ParamRef(v_clean)
+            continue
         try:
-            if "." in v or "e" in v.lower():
-                out[k] = float(v)
+            if "." in v_clean or "e" in v_clean.lower():
+                out[k] = float(v_clean)
             else:
-                out[k] = int(v)
+                out[k] = int(v_clean)
         except ValueError:
-            out[k] = v
+            out[k] = v_clean
     return out
 
 

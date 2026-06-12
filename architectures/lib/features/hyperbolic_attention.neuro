@@ -30,8 +30,10 @@ export feature hyperbolic_attention {
 
     # Feature-level defaults; an arch may override these in its own
     # `feature hyperbolic_attention { params: { ... } }` re-declaration.
+    # `d_model: d_sem` is a bare-identifier reference — codegen emits it
+    # unquoted so the impl receives the runtime trunk width.
     params: {
-        d_model: 256,
+        d_model: d_sem,
         n_heads: 4,
         c:       1.0
     },

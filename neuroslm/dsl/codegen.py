@@ -36,6 +36,7 @@ from .compiler import (
     ModulationIR,
     FeatureIR,
     FeatureEndpointIR,
+    _ParamRef,
 )
 from .equations import (
     DYNAMICS_DECLS,
@@ -266,10 +267,19 @@ class CodeGenerator:
     def _format_kwarg(value) -> str:
         """Render a feature.params value as a Python literal kwarg.
 
-        Floats keep their decimal (so ``c=1.0`` not ``c=1``), ints
-        stay ints, strings get repr'd. Everything else falls back to
-        repr — the parser only coerces to int/float/str so we're safe.
+        Coercion table (ordered most-specific to least):
+
+        * :class:`_ParamRef` → bare identifier (no quotes). Lets the
+          impl constructor receive a runtime variable like ``d_sem``.
+        * ``bool`` → ``True`` / ``False`` (must come BEFORE the int
+          branch because ``isinstance(True, int)`` is ``True``).
+        * ``int`` → integer literal.
+        * ``float`` → keeps the decimal (so ``c=1.0`` not ``c=1``).
+        * ``str`` → quoted via ``repr``.
+        * fallback → ``repr``.
         """
+        if isinstance(value, _ParamRef):
+            return value.expr
         if isinstance(value, bool):
             return repr(value)
         if isinstance(value, int):

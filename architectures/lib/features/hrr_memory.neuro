@@ -1,0 +1,36 @@
+# -*- coding: utf-8 -*-
+# HRR (Holographic Reduced Representations) memory — wiring spec.
+#
+# Self-attention-shaped HRR memory: each token projects to (k, v, q);
+# the per-batch memory M = Σ_t bind(k_t, v_t) is queried via
+# unbind(M, q_x). Cost O(T · d_memory · log d_memory) — far below
+# attention's O(T² · d).
+#
+# Implementation: neuroslm/modules/hrr_memory.py
+# Contracts:      tests/test_hrr_memory.py (16)
+# Docs:           docs/features/hrr_memory.md
+
+import { hrr_memory_eq } from "@brian/equations"
+
+export feature hrr_memory {
+    equation: hrr_memory_eq,
+    active:   false,
+    impl:     "neuroslm.modules.hrr_memory.HRRMemory",
+
+    # `d_model: d_sem` ties the projection width to the runtime trunk
+    # dim; `d_memory` is independent and stays an integer literal.
+    params: {
+        d_model:        d_sem,
+        d_memory:       512,
+        normalize_keys: true,
+        bias:           true
+    },
+
+    endpoints: {
+        edge: {
+            kind:   "edge",
+            inputs: [x_pre],
+            output: y
+        }
+    }
+}
