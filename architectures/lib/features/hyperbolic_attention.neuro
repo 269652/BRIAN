@@ -1,0 +1,50 @@
+# -*- coding: utf-8 -*-
+# Hyperbolic (Poincaré-disc) multi-head attention — wiring spec.
+#
+# Imports the canonical equation from @brian/equations, binds it to the
+# Python implementation class, and exposes one wiring endpoint
+# (`edge`, kind="edge") so a synapse can route its transmission through
+# this feature with `feature: "hyperbolic_attention.edge"`.
+#
+# This file declares the feature; it does NOT enable it. Activation is
+# per-architecture: an arch.neuro that wants hyperbolic attention
+# imports the feature and sets `active: true` in its own re-declaration
+# (or overrides via experiment harness). The default below is `false` so
+# any arch importing this is opt-in.
+#
+# References:
+#   * Ganea, Bécigneul, Hofmann — "Hyperbolic Neural Networks"
+#     (NeurIPS 2018) — the Möbius gyrovector formulation.
+#   * Ungar 2005 — Poincaré ball Möbius operations.
+#
+# Implementation: neuroslm/modules/hyperbolic_attention.py
+# Contracts:      tests/test_hyperbolic_attention.py
+# Docs:           docs/features/hyperbolic_attention.md
+
+import { hyperbolic_attention_eq } from "@brian/equations"
+
+export feature hyperbolic_attention {
+    equation: hyperbolic_attention_eq,
+    active:   false,
+    impl:     "neuroslm.modules.hyperbolic_attention.HyperbolicMultiHeadAttention",
+
+    # Feature-level defaults; an arch may override these in its own
+    # `feature hyperbolic_attention { params: { ... } }` re-declaration.
+    params: {
+        d_model: 256,
+        n_heads: 4,
+        c:       1.0
+    },
+
+    # Wiring surfaces. A synapse references one of these via
+    # `feature: "hyperbolic_attention.<endpoint>"`.
+    endpoints: {
+        # Synapse-shaped: takes the pre-population's activations and
+        # produces the post-population's contribution.
+        edge: {
+            kind:   "edge",
+            inputs: [x_pre],
+            output: y
+        }
+    }
+}

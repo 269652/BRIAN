@@ -27,19 +27,56 @@ from typing import Any, Dict, List, Optional, Tuple
 from .equations import DynamicsDecl
 
 
+def _discover_repo_root(start: Path) -> Optional[Path]:
+    """Walk up from ``start`` looking for a ``pyproject.toml`` marker.
+
+    Returns the directory containing the first ``pyproject.toml`` found,
+    or ``None`` if walking reaches the filesystem root without finding
+    one. Pure-function helper — never raises.
+    """
+    cur = Path(start).resolve()
+    if cur.is_file():
+        cur = cur.parent
+    # Bound the loop by parent-chain length so a pathological FS can't
+    # spin forever.
+    for candidate in (cur, *cur.parents):
+        if (candidate / "pyproject.toml").is_file():
+            return candidate
+    return None
+
+
 class PathResolver:
     """Resolve `.neuro` import specifiers to absolute file paths.
 
-    The resolver normalizes mjs-style specifiers (`@/`, `./`, `../`) and
-    falls back to `index.neuro` when a specifier names a directory.
+    The resolver normalizes three specifier scopes:
+
+      * ``@/<path>``       — anchored at the architecture root.
+      * ``@brian/<path>``  — anchored at the repository's shared
+        ``architectures/lib/`` directory (cross-architecture reuse).
+      * ``./<path>`` / ``../<path>`` — relative to the importing file.
+
+    All forms fall back to ``index.neuro`` when a specifier names a
+    directory.
 
     Args:
-        arch_root: filesystem path to the architecture root. The `@/`
-            prefix in specifiers is anchored here.
+        arch_root: filesystem path to the architecture root. The ``@/``
+            prefix is anchored here.
+        repo_root: optional explicit repository root containing the
+            shared ``architectures/lib/`` directory used by
+            ``@brian/...``. If not given, the resolver walks up from
+            ``arch_root`` looking for ``pyproject.toml``.
     """
 
-    def __init__(self, arch_root: Path):
+    def __init__(
+        self,
+        arch_root: Path,
+        repo_root: Optional[Path] = None,
+    ):
         self.arch_root = Path(arch_root).resolve()
+        if repo_root is not None:
+            self.repo_root: Optional[Path] = Path(repo_root).resolve()
+        else:
+            self.repo_root = _discover_repo_root(self.arch_root)
 
     # ── Public ──────────────────────────────────────────────────────
 
@@ -47,20 +84,34 @@ class PathResolver:
         """Resolve `specifier` (as used in an `import "<specifier>"`).
 
         Args:
-            specifier: the import target, e.g. "@/lib/dynamics", "./layers"
+            specifier: the import target, e.g. ``@/lib/dynamics``,
+                ``@brian/features/hyperbolic_attention``, ``./layers``.
             from_file: the file containing the import (required for
-                relative paths; ignored for absolute `@/...` paths).
+                relative paths; ignored for absolute prefixes).
 
         Returns:
             Absolute resolved path of the target `.neuro` file.
 
         Raises:
             ValueError: malformed specifier, relative-without-from_file,
-                       or path that escapes the architecture root.
+                or path that escapes its scope's root.
             FileNotFoundError: resolved path doesn't exist (neither as a
-                               `.neuro` file nor a folder-module).
+                ``.neuro`` file nor a folder-module).
         """
-        if specifier.startswith("@/"):
+        # ── @brian/<path> ── shared lib under architectures/lib/ ─────
+        if specifier.startswith("@brian/"):
+            if self.repo_root is None:
+                raise ValueError(
+                    f"specifier {specifier!r} uses the @brian/ prefix but "
+                    f"no repo root was discovered (no pyproject.toml found "
+                    f"by walking up from {self.arch_root}); pass "
+                    f"repo_root=... explicitly to PathResolver"
+                )
+            scope_root = self.repo_root / "architectures" / "lib"
+            base = scope_root
+            rest = specifier[len("@brian/"):]
+        elif specifier.startswith("@/"):
+            scope_root = self.arch_root
             base = self.arch_root
             rest = specifier[2:]
         elif specifier.startswith("./") or specifier.startswith("../"):
@@ -68,24 +119,26 @@ class PathResolver:
                 raise ValueError(
                     f"relative specifier {specifier!r} needs from_file"
                 )
+            scope_root = self.arch_root
             base = Path(from_file).resolve().parent
             rest = specifier
         else:
             raise ValueError(
                 f"unsupported specifier {specifier!r}: must start with "
-                "@/ (absolute), ./, or ../ (relative)"
+                "@/ (architecture-root), @brian/ (shared lib), ./, or "
+                "../ (relative)"
             )
 
         candidate = (base / rest).resolve()
 
-        # Reject specifiers that escape the architecture root. This guards
-        # against `import "../../etc/passwd"`-style mistakes (or worse).
+        # Reject specifiers that escape their scope's root. For @brian/
+        # the scope is <repo_root>/architectures/lib/ (NOT the whole
+        # repo); for the other scopes it's the architecture root.
         try:
-            candidate.relative_to(self.arch_root)
+            candidate.relative_to(scope_root)
         except ValueError:
             raise ValueError(
-                f"specifier {specifier!r} escapes architecture root "
-                f"{self.arch_root}"
+                f"specifier {specifier!r} escapes scope root {scope_root}"
             )
 
         # File resolution: try exact path, then with .neuro suffix, then
@@ -197,6 +250,8 @@ _DECL_KEYWORDS_NAMED = (
     "gene",
     "protein",
     "metric",
+    # §14 — toggleable mechanism block (see _extract_features in compiler.py)
+    "feature",
 )
 _DECL_KEYWORDS_ARROW = ("synapse", "modulation")
 
@@ -643,6 +698,15 @@ class Resolver:
         if arch_ast and arch_ast.architecture:
             program.architecture = arch_ast.architecture
 
+        # Pass 1.5: lazily load shared-lib (`@brian/...`) imports. The
+        # FolderLoader only walks the arch directory, so any file under
+        # <repo>/lib/ that an arch module imports must be discovered and
+        # parsed before Pass 2 can resolve those import targets. We iterate
+        # to a fixed point because shared-lib files may themselves import
+        # from other shared-lib files (or from arch-local `./` siblings,
+        # though those are already loaded).
+        self._lazy_load_shared_imports(program)
+
         # Pass 2: resolve every import to a target file + validate exports
         for file_path, ast in program.modules.items():
             file_imports: Dict[str, tuple] = {}
@@ -702,15 +766,78 @@ class Resolver:
 
         return program
 
+    # ── Internal: lazy-load `@brian/...` imports ────────────────────
 
-# ════════════════════════════════════════════════════════════════════════
-# Stage 4 — `dynamics` / `function` block parsers
-# ════════════════════════════════════════════════════════════════════════
+    def _lazy_load_shared_imports(self, program: "ResolvedProgram") -> None:
+        """Walk every loaded module's imports; for any specifier that
+        points outside the arch root (currently only ``@brian/...``),
+        resolve it, load + parse the target, register it in
+        ``program.modules``, and recurse until fixed point.
+
+        Pure side-effect: mutates ``program.modules`` in place.
+        """
+        pending: List[Path] = []
+        for file_path, ast in program.modules.items():
+            for imp in ast.imports:
+                target = self._maybe_shared_target(imp.specifier, file_path)
+                if target is not None and target not in program.modules:
+                    pending.append(target)
+
+        loaded: set[Path] = set()
+        while pending:
+            target = pending.pop()
+            if target in loaded or target in program.modules:
+                continue
+            try:
+                src = target.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as e:
+                raise ResolverError(
+                    f"cannot read shared-lib file {target}: {e}"
+                ) from e
+            try:
+                program.modules[target] = parse_module(src, path=target)
+            except ValueError as e:
+                raise ResolverError(
+                    f"{target}: parse error: {e}"
+                ) from e
+            loaded.add(target)
+            # Recurse: this newly loaded file may import other shared
+            # files (e.g. lib/features/foo.neuro imports
+            # @brian/equations).
+            for imp in program.modules[target].imports:
+                child = self._maybe_shared_target(imp.specifier, target)
+                if child is not None and child not in program.modules:
+                    pending.append(child)
+
+    def _maybe_shared_target(
+        self, specifier: str, from_file: Path
+    ) -> Optional[Path]:
+        """Return the resolved absolute path if ``specifier`` is a
+        shared-lib (``@brian/...``) import, else ``None``.
+
+        Errors during resolution are re-raised as ``ResolverError`` so
+        the caller gets a single, traceable failure mode.
+        """
+        if not specifier.startswith("@brian/"):
+            return None
+        try:
+            return self.path_resolver.resolve(
+                specifier, from_file=from_file
+            ).resolve()
+        except (FileNotFoundError, ValueError) as e:
+            raise ResolverError(
+                f"{from_file}: cannot resolve shared-lib import "
+                f"{specifier!r}: {e}"
+            ) from e
 
 # Recognise the head of a stored declaration text and pull out its body.
+# The optional ``export`` prefix is stripped because declarations may be
+# stored verbatim (with or without the leading keyword) depending on
+# whether the parser saw an export modifier.
 _DECL_HEAD_RE = re.compile(
-    r'^\s*(?P<kind>population|synapse|neurotransmitter|modulation|'
-    r'dynamics|function|formal_spec|sheaf|gene|protein|metric)\s+'
+    r'^\s*(?:export\s+)?(?P<kind>population|synapse|neurotransmitter|'
+    r'modulation|dynamics|function|equation|formal_spec|sheaf|'
+    r'gene|protein|metric|feature)\s+'
     r'(?P<header>[^{]*)\{'
 )
 
@@ -904,7 +1031,8 @@ def compile_folder(arch_root):
     """
     from .compiler import NeuroMLCompiler
 
-    program = Resolver(Path(arch_root)).resolve()
+    resolver = Resolver(Path(arch_root))
+    program = resolver.resolve()
     arch_path = (Path(arch_root).resolve() / "arch.neuro")
     arch_ast = program.modules.get(arch_path)
     if arch_ast is None:
@@ -930,6 +1058,29 @@ def compile_folder(arch_root):
         except Exception:
             pass
 
+    # 0b. Shared library equations from <repo>/architectures/lib/.
+    # Any `@brian/...` import the resolver pulled in lives in
+    # program.modules and outside the arch root — emit every equation
+    # those files export so they're visible to the single-file compiler.
+    arch_root_resolved = Path(arch_root).resolve()
+    for file_path, ast in program.modules.items():
+        try:
+            file_path.relative_to(arch_root_resolved)
+            in_arch = True
+        except ValueError:
+            in_arch = False
+        if in_arch:
+            continue
+        # Transitively loaded (shared lib) — emit all equation decls.
+        for _, decl_text in ast.exports.items():
+            kind, _, _ = _decl_kind_and_body(decl_text)
+            if kind == "equation":
+                parts.append(decl_text)
+        for _, decl_text in ast.private.items():
+            kind, _, _ = _decl_kind_and_body(decl_text)
+            if kind == "equation":
+                parts.append(decl_text)
+
     # 1. Globals from arch.neuro — NT systems first
     _emit(arch_ast.private, ("neurotransmitter",))
     _emit(arch_ast.exports, ("neurotransmitter",))
@@ -940,10 +1091,12 @@ def compile_folder(arch_root):
     _emit(arch_ast.private, ("population",))
     _emit(arch_ast.exports, ("population",))
 
-    # 2. Populations in import order
+    # 2. Populations + features in import order. Use the resolver's
+    # PathResolver so `@brian/...` specifiers resolve correctly (a fresh
+    # PathResolver would not have the repo_root cached).
     for imp in arch_ast.imports:
         try:
-            target_file = PathResolver(program.arch_root).resolve(
+            target_file = resolver.path_resolver.resolve(
                 imp.specifier, from_file=arch_path
             ).resolve()
         except (FileNotFoundError, ValueError):
@@ -954,6 +1107,10 @@ def compile_folder(arch_root):
         for imported_name in imp.names:
             if imported_name in target_ast.exports:
                 parts.append(target_ast.exports[imported_name])
+
+    # 2b. Inline feature blocks declared directly in arch.neuro.
+    _emit(arch_ast.private, ("feature",))
+    _emit(arch_ast.exports, ("feature",))
 
     # 3. Synapses + modulations from arch.neuro
     _emit(arch_ast.private, ("synapse", "modulation"))
@@ -973,7 +1130,7 @@ def compile_folder(arch_root):
     emitted: set = set()
     for imp in arch_ast.imports:
         try:
-            tf = PathResolver(program.arch_root).resolve(
+            tf = resolver.path_resolver.resolve(
                 imp.specifier, from_file=arch_path
             ).resolve()
             emitted.add(tf)

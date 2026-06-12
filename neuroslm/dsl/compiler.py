@@ -73,6 +73,12 @@ class SynapseIR(NodeIR):
     # Phase 7 Stage 1 — algebraic transmission equation, e.g.
     # `y = g * sigmoid(W @ x_pre)`. None → fall back to linear default.
     equation: str = None
+    # §14 — reference to a `feature.endpoint` whose impl class supplies
+    # the edge function. Format: ``"<feature_name>.<endpoint_name>"`` or
+    # short form ``"<feature_name>"`` when the feature has exactly one
+    # endpoint. ``None`` keeps the canonical ``weight * (x_pre @ W)``
+    # transmission for backwards compatibility.
+    feature_ref: Optional[str] = None
 
     def __post_init__(self):
         if self.properties is None:
@@ -359,6 +365,95 @@ class CircuitIR(NodeIR):
 
 
 @dataclass
+class FeatureIR(NodeIR):
+    """Toggleable mechanism — names an equation + carries an active flag.
+
+    Grammar::
+
+        feature <name> {
+            equation: <equation_name>      # must resolve at compile time
+            active:   true | false         # required
+            impl:     "<dotted.python.path>" # optional — implementation class
+            endpoints: {                   # optional — wiring surfaces
+                <ep_name>: {
+                    kind: "edge" | "modulator" | "transform",
+                    inputs: [<arg_names>],
+                    output: <name>,
+                    params: { ... }
+                },
+                ...
+            }
+            params:   { k: v, ... }        # optional — feature-level defaults
+        }
+
+    Why this is a separate IR node (not a flag on EquationDefnIR):
+    a mechanism's math is reusable across architectures, but its
+    on/off state, implementation binding, and wiring surfaces are
+    per-arch and per-experiment. The feature block is the single edit
+    point for an ablation run.
+
+    Pinned by ``tests/dsl/test_feature_block.py`` and
+    ``tests/dsl/test_feature_endpoints.py``.
+    """
+    name: str = ""
+    id: str = ""
+    equation_ref: str = ""
+    active: bool = False
+    # Dotted Python path to the implementation class, e.g.
+    # ``"neuroslm.modules.hyperbolic_attention.HyperbolicMultiHeadAttention"``.
+    # Empty string means documentation-only (no runtime wiring).
+    impl: str = ""
+    # Wiring surfaces this feature exposes. Empty list = feature can be
+    # declared but not referenced from a synapse / modulation / etc.
+    endpoints: List["FeatureEndpointIR"] = None
+    params: Dict = None
+
+    def __post_init__(self):
+        if self.params is None:
+            self.params = {}
+        if self.endpoints is None:
+            self.endpoints = []
+        if not self.id:
+            self.id = self.name
+
+
+@dataclass
+class FeatureEndpointIR(NodeIR):
+    """Single wiring surface exposed by a feature.
+
+    A feature's implementation class may expose several callable surfaces
+    (e.g. a hyperbolic-attention module exposes ``edge`` for synapse
+    routing AND ``modulator`` for neurotransmitter-gated variants).
+    Each surface is one ``FeatureEndpointIR``.
+
+    Fields:
+        name: endpoint identifier, e.g. ``"edge"``.
+        kind: one of ``"edge"`` (synapse-shaped), ``"modulator"``
+            (multiplicative gain), ``"transform"`` (population-level
+            in-place update). Validated against the synapse/modulation
+            it gets wired into.
+        inputs: ordered list of argument names the impl's forward expects.
+        output: name of the produced tensor (matches the equation's LHS).
+        params: optional endpoint-level overrides on top of the feature's
+            top-level ``params`` dict.
+    """
+    name: str = ""
+    id: str = ""
+    kind: str = "edge"
+    inputs: List[str] = None
+    output: str = ""
+    params: Dict = None
+
+    def __post_init__(self):
+        if self.inputs is None:
+            self.inputs = []
+        if self.params is None:
+            self.params = {}
+        if not self.id:
+            self.id = self.name
+
+
+@dataclass
 class ProgramIR(NodeIR):
     id: str = ""
     # Architecture metadata (from architecture { ... } block in arch.neuro)
@@ -380,6 +475,11 @@ class ProgramIR(NodeIR):
     workspaces: List[WorkspaceIR] = None
     vesicles: List[VesicleIR] = None
     sieves: List[SieveIR] = None
+    # Toggleable mechanisms (2026-06-12). Each feature names an
+    # equation from the lib and carries an active flag — flip one
+    # bit to enable/disable a mechanism for an ablation run.
+    # Pinned by tests/dsl/test_feature_block.py.
+    features: List["FeatureIR"] = None
     # THSD (Topological Hyper-Sheaf Dynamics) primitives
     thsd_complexes: List["ComplexIR"] = None  # From thsd_ir.py
     thsd_sheaves: List["SheafIR"] = None
@@ -416,6 +516,8 @@ class ProgramIR(NodeIR):
             self.vesicles = []
         if self.sieves is None:
             self.sieves = []
+        if self.features is None:
+            self.features = []
         # THSD initialization
         if self.thsd_complexes is None:
             self.thsd_complexes = []
@@ -562,10 +664,18 @@ class NeuroMLCompiler:
             equation = props_dict.get('equation')
             if equation is not None:
                 equation = equation.strip().strip('"\'')
+            # §14 — optional feature-endpoint reference; if set, codegen
+            # routes the edge function through the named feature.
+            feature_ref = props_dict.get('feature')
+            if feature_ref is not None:
+                feature_ref = feature_ref.strip().strip('"\'')
+                if not feature_ref:
+                    feature_ref = None
             synapses.append(SynapseIR(
                 source=src, target=tgt, id=f"{src}_{tgt}",
                 weight=weight, neurotransmitter=nt,
                 equation=equation,
+                feature_ref=feature_ref,
             ))
 
         # Extract neurotransmitters with kinetics: base_concentration, release_rate, reuptake_rate, diffusion_rate
@@ -650,6 +760,12 @@ class NeuroMLCompiler:
         vesicles = _extract_vesicles(source)
         sieves = _extract_sieves(source)
 
+        # Feature blocks — toggleable mechanisms with equation refs.
+        # Each block must reference an equation defined elsewhere in the
+        # source (either inline or imported from lib/). Unresolved refs
+        # raise at compile time so a typo never reaches the vast.ai box.
+        features = _extract_features(source, eq_defs)
+
         ir = ProgramIR(
             id="circuit",
             equation_decls=eq_defs,
@@ -666,6 +782,7 @@ class NeuroMLCompiler:
             workspaces=workspaces,
             vesicles=vesicles,
             sieves=sieves,
+            features=features,
         )
 
         # Attach THSD blocks to IR
@@ -1005,6 +1122,210 @@ def _extract_workspaces(source: str) -> List[WorkspaceIR]:
             sheaf=sheaf
         ))
     return out
+
+
+def _extract_features(source: str,
+                      eq_defs: "List[EquationDefnIR]") -> List["FeatureIR"]:
+    """Extract all ``feature Name { equation: ..., active: ..., ... }`` blocks.
+
+    Validates at compile time:
+      - ``active`` is mandatory and parses to a Python bool.
+      - ``equation`` is mandatory and must reference a known equation
+        (either defined inline or imported from ``lib/`` — both end up
+        in ``eq_defs`` after the multifile resolver has run).
+
+    Optional fields:
+      - ``impl``: dotted Python path to the implementation class.
+      - ``endpoints``: ``{ name: { kind, inputs, output, params } }``
+        block declaring wiring surfaces consumable by ``synapse`` etc.
+      - ``params``: feature-level default kwargs for the impl.
+
+    Pinned by ``tests/dsl/test_feature_block.py`` (core) and
+    ``tests/dsl/test_feature_endpoints.py`` (impl + endpoints).
+    """
+    out: List[FeatureIR] = []
+    known_equations = {e.name for e in eq_defs}
+    # Strip end-of-line comments BEFORE scanning for feature blocks.
+    # Otherwise a docstring like ``# `feature foo { params: {...} }` re-
+    # declaration`` matches the feature regex and the brace-slicer pulls
+    # the wrong body. Stripping preserves character offsets so any future
+    # error messages still point at the right line.
+    source = _strip_line_comments(source)
+    for name, body in _iter_named_blocks(source, "feature"):
+        # Body is already comment-free because we stripped the whole
+        # source above; no second strip needed.
+        props = _parse_properties(body)
+        # ── mandatory: equation ref ──
+        if "equation" not in props:
+            raise NeuroMLError(
+                f"feature {name!r}: missing required field `equation` "
+                f"(must reference an exported equation by name)"
+            )
+        equation_ref = props["equation"].strip().strip('"\'')
+        if equation_ref not in known_equations:
+            raise NeuroMLError(
+                f"feature {name!r}: equation reference {equation_ref!r} "
+                f"is not defined; known equations: "
+                f"{sorted(known_equations) or '[]'}"
+            )
+        # ── mandatory: active flag ──
+        if "active" not in props:
+            raise NeuroMLError(
+                f"feature {name!r}: missing required field `active` "
+                f"(true|false) — the toggle is the whole point of "
+                f"the block"
+            )
+        active_raw = props["active"].strip().strip('"\'').lower()
+        if active_raw == "true":
+            active = True
+        elif active_raw == "false":
+            active = False
+        else:
+            raise NeuroMLError(
+                f"feature {name!r}: `active` must be `true` or `false`, "
+                f"got {props['active']!r}"
+            )
+        # ── optional: impl (dotted Python path) ──
+        impl = props.get("impl", "").strip().strip('"\'')
+        # ── optional: endpoints block ──
+        endpoints = _parse_feature_endpoints(
+            name, props.get("endpoints", "").strip()
+        )
+        # ── optional: params dict ──
+        params = _parse_feature_params_dict(props.get("params", "").strip())
+        out.append(FeatureIR(
+            name=name,
+            id=name,
+            equation_ref=equation_ref,
+            active=active,
+            impl=impl,
+            endpoints=endpoints,
+            params=params,
+        ))
+    return out
+
+
+def _parse_feature_params_dict(raw: str) -> Dict:
+    """Parse a ``{ k: v, k: v }`` literal into a dict.
+
+    Performs best-effort numeric coercion so downstream consumers don't
+    have to cast every numeric param. Strings preserve as-is.
+    """
+    if not raw:
+        return {}
+    raw = _strip_line_comments(raw)
+    inner = raw.lstrip("{").rstrip("}").strip()
+    out: Dict = {}
+    for k, v in _parse_properties(inner).items():
+        v = v.strip().strip('"\'')
+        try:
+            if "." in v or "e" in v.lower():
+                out[k] = float(v)
+            else:
+                out[k] = int(v)
+        except ValueError:
+            out[k] = v
+    return out
+
+
+def _parse_feature_endpoints(
+    feature_name: str, raw: str
+) -> List["FeatureEndpointIR"]:
+    """Parse an ``endpoints: { ep1: {...}, ep2: {...} }`` block.
+
+    Each inner block must have ``kind`` and ``output`` fields; ``inputs``
+    defaults to ``[]`` and ``params`` defaults to ``{}``.
+
+    Returns an empty list if ``raw`` is empty (endpoints are optional).
+    """
+    if not raw:
+        return []
+    raw = _strip_line_comments(raw)
+    # Strip the outer braces of the endpoints map.
+    inner = raw.lstrip("{").rstrip("}").strip()
+    if not inner:
+        return []
+
+    out: List[FeatureEndpointIR] = []
+    # Use _split_top_level so commas inside per-endpoint bodies don't
+    # break us.
+    for piece in _split_top_level(inner):
+        if ":" not in piece:
+            continue
+        ep_name, body = piece.split(":", 1)
+        ep_name = ep_name.strip().strip('"\'')
+        body = body.strip()
+        if not body.startswith("{") or not body.endswith("}"):
+            raise NeuroMLError(
+                f"feature {feature_name!r}: endpoint {ep_name!r} must be "
+                f"a block ``{{ kind: ..., output: ..., ... }}``, got "
+                f"{body!r}"
+            )
+        ep_body = body.lstrip("{").rstrip("}").strip()
+        ep_props = _parse_properties(ep_body)
+        if "kind" not in ep_props:
+            raise NeuroMLError(
+                f"feature {feature_name!r}: endpoint {ep_name!r} missing "
+                f"required field `kind` (edge|modulator|transform)"
+            )
+        if "output" not in ep_props:
+            raise NeuroMLError(
+                f"feature {feature_name!r}: endpoint {ep_name!r} missing "
+                f"required field `output`"
+            )
+        kind = ep_props["kind"].strip().strip('"\'')
+        output = ep_props["output"].strip().strip('"\'')
+        inputs_raw = ep_props.get("inputs", "[]").strip()
+        inputs = [
+            tok.strip().strip('"\'')
+            for tok in inputs_raw.lstrip("[").rstrip("]").split(",")
+            if tok.strip()
+        ]
+        ep_params = _parse_feature_params_dict(
+            ep_props.get("params", "").strip()
+        )
+        out.append(FeatureEndpointIR(
+            name=ep_name,
+            id=ep_name,
+            kind=kind,
+            inputs=inputs,
+            output=output,
+            params=ep_params,
+        ))
+    return out
+
+
+def _strip_line_comments(source: str) -> str:
+    """Replace ``# ... <EOL>`` with spaces (preserve offsets + newlines).
+
+    String-aware: hashes inside ``"..."`` / ``'...'`` are kept verbatim.
+    Mirrors ``training_config._strip_comments`` so we don't take a
+    cross-module dependency on a private helper.
+    """
+    out = []
+    i, n = 0, len(source)
+    in_str = None
+    while i < n:
+        ch = source[i]
+        if in_str:
+            out.append(ch)
+            if ch == in_str and (i == 0 or source[i - 1] != "\\"):
+                in_str = None
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            in_str = ch
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "#":
+            while i < n and source[i] != "\n":
+                out.append(" ")
+                i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def _extract_vesicles(source: str) -> List[VesicleIR]:

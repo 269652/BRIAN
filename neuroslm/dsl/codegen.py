@@ -34,6 +34,8 @@ from .compiler import (
     PopulationIR,
     SynapseIR,
     ModulationIR,
+    FeatureIR,
+    FeatureEndpointIR,
 )
 from .equations import (
     DYNAMICS_DECLS,
@@ -50,6 +52,16 @@ from .equations import (
 # Symbols that are *always* available in the population forward() scope
 # and therefore should not be treated as learnable parameters.
 _RESERVED_SYMBOLS = {"x", "y", "d_sem"}
+
+
+class CodegenError(RuntimeError):
+    """Raised when the IR is structurally valid but cannot be lowered.
+
+    Examples: a synapse references an unknown feature, a feature is
+    active but missing its ``impl:`` binding, an endpoint kind doesn't
+    match its usage site. Per CLAUDE.md §14 every such error is loud
+    and fatal — we never silently fall back to a stub.
+    """
 
 
 class CodeGenerator:
@@ -126,10 +138,192 @@ class CodeGenerator:
         )
 
     def _gen_imports(self) -> str:
+        lines = [
+            "import torch",
+            "import torch.nn as nn",
+            "import torch.nn.functional as F",
+        ]
+        # §14: an active feature wired into a synapse must have its
+        # impl class imported into the generated module. Inactive
+        # features are deliberately omitted so the ablation switch
+        # (flip `active: false`) genuinely strips the dependency.
+        seen: set = set()
+        for feat in self._wired_active_features():
+            module_path, cls_name = self._split_impl_path(feat)
+            key = (module_path, cls_name)
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append(f"from {module_path} import {cls_name}")
+        return "\n".join(lines)
+
+    # ── Feature wiring (§14) ────────────────────────────────────────
+
+    def _feature_by_name(self, name: str) -> Optional[FeatureIR]:
+        for f in self.ir.features:
+            if f.name == name:
+                return f
+        return None
+
+    def _resolve_feature_ref(
+        self, ref: str, *, context: str
+    ) -> Tuple[FeatureIR, FeatureEndpointIR]:
+        """Resolve a synapse/modulation ``feature: "..."`` reference.
+
+        Accepts ``"<feature>"`` (short form, requires exactly one
+        endpoint on the feature) or ``"<feature>.<endpoint>"``.
+        Raises :class:`CodegenError` for any of: unknown feature,
+        unknown endpoint, ambiguous short form. ``context`` is a
+        human-readable site name for the error message (e.g.
+        ``"synapse a->b"``).
+        """
+        parts = ref.split(".", 1)
+        feat_name = parts[0]
+        ep_name = parts[1] if len(parts) == 2 else None
+
+        feat = self._feature_by_name(feat_name)
+        if feat is None:
+            known = ", ".join(sorted(f.name for f in self.ir.features)) \
+                    or "<none>"
+            raise CodegenError(
+                f"{context}: unknown feature {feat_name!r} "
+                f"(known: {known})"
+            )
+
+        if ep_name is None:
+            if len(feat.endpoints) == 0:
+                raise CodegenError(
+                    f"{context}: feature {feat_name!r} has no endpoints; "
+                    f"cannot resolve short-form reference {ref!r}"
+                )
+            if len(feat.endpoints) > 1:
+                names = ", ".join(e.name for e in feat.endpoints)
+                raise CodegenError(
+                    f"{context}: feature {feat_name!r} has multiple "
+                    f"endpoints ({names}); short-form reference {ref!r} "
+                    f"is ambiguous — use \"{feat_name}.<endpoint>\""
+                )
+            return feat, feat.endpoints[0]
+
+        for ep in feat.endpoints:
+            if ep.name == ep_name:
+                return feat, ep
+        known = ", ".join(e.name for e in feat.endpoints) or "<none>"
+        raise CodegenError(
+            f"{context}: feature {feat_name!r} has no endpoint "
+            f"{ep_name!r} (known: {known})"
+        )
+
+    def _wired_active_features(self) -> List[FeatureIR]:
+        """Active features that at least one synapse actually references.
+
+        Inactive features — even if referenced — are excluded so the
+        canonical edge takes over and no impl import / instantiation
+        leaks into the generated module.
+        """
+        out: List[FeatureIR] = []
+        seen_names: set = set()
+        for syn in self.ir.synapses:
+            if not syn.feature_ref:
+                continue
+            try:
+                feat, _ = self._resolve_feature_ref(
+                    syn.feature_ref,
+                    context=f"synapse {syn.source}->{syn.target}",
+                )
+            except CodegenError:
+                # Defer the error to the actual lowering step so the
+                # message points at the failing synapse, not just at
+                # import generation.
+                continue
+            if not feat.active:
+                continue
+            if feat.name in seen_names:
+                continue
+            seen_names.add(feat.name)
+            out.append(feat)
+        return out
+
+    def _split_impl_path(self, feat: FeatureIR) -> Tuple[str, str]:
+        """Split ``feat.impl`` into ``(module_path, class_name)``.
+
+        Raises :class:`CodegenError` if the impl is missing or malformed.
+        """
+        if not feat.impl:
+            raise CodegenError(
+                f"feature {feat.name!r}: active and wired into a synapse "
+                f"but has no `impl:` binding — per §14 every wired "
+                f"feature MUST resolve to a real Python class."
+            )
+        if "." not in feat.impl:
+            raise CodegenError(
+                f"feature {feat.name!r}: `impl` must be a dotted Python "
+                f"path (e.g. ``pkg.mod.ClassName``); got {feat.impl!r}"
+            )
+        return feat.impl.rsplit(".", 1)
+
+    @staticmethod
+    def _format_kwarg(value) -> str:
+        """Render a feature.params value as a Python literal kwarg.
+
+        Floats keep their decimal (so ``c=1.0`` not ``c=1``), ints
+        stay ints, strings get repr'd. Everything else falls back to
+        repr — the parser only coerces to int/float/str so we're safe.
+        """
+        if isinstance(value, bool):
+            return repr(value)
+        if isinstance(value, int):
+            return repr(value)
+        if isinstance(value, float):
+            return repr(float(value))
+        if isinstance(value, str):
+            return repr(value)
+        return repr(value)
+
+    def _feature_init_lines(self, feat: FeatureIR) -> List[str]:
+        """Emit ``self.feature_<name> = ImplClass(**params)`` for one
+        active wired feature.
+        """
+        _, cls_name = self._split_impl_path(feat)
+        kwargs = ", ".join(
+            f"{k}={self._format_kwarg(v)}" for k, v in feat.params.items()
+        )
+        return [
+            f"        self.feature_{feat.name} = {cls_name}({kwargs})",
+        ]
+
+    def _feature_edge_expr(
+        self,
+        syn: SynapseIR,
+        src_expr: str,
+        feat: FeatureIR,
+        ep: FeatureEndpointIR,
+    ) -> str:
+        """Lower a feature-routed synapse to a Python expression.
+
+        Contract (kind="edge"): the impl is called like an nn.Module
+        on the pre-population's activation. Most impls (notably
+        attention) expect a sequence dim ``(B, T, D)``; the canonical
+        BRIAN circuit emits ``(B, D)`` per step. We adapt by
+        unsqueezing to ``T=1`` and squeezing back. The result is then
+        gated by the synapse weight, preserving the legacy edge-
+        weighting semantics.
+        """
+        if ep.kind != "edge":
+            raise CodegenError(
+                f"synapse {syn.source}->{syn.target}: feature endpoint "
+                f"{feat.name}.{ep.name} has kind {ep.kind!r}; only "
+                f"kind=\"edge\" can be wired into a synapse (kinds "
+                f"\"modulator\" / \"transform\" are wired into "
+                f"modulations / populations respectively)."
+            )
+        weight = float(syn.weight if syn.weight is not None else 1.0)
+        # Impl forward: (B, T, D) → (B, T, D). The synapse passes (B, D),
+        # we add T=1 then strip it so the contribution lands at (B, D)
+        # for the post-population's input sum.
         return (
-            "import torch\n"
-            "import torch.nn as nn\n"
-            "import torch.nn.functional as F"
+            f"({weight!r} * self.feature_{feat.name}"
+            f"(({src_expr}).unsqueeze(1)).squeeze(1))"
         )
 
     # ── Per-population class ────────────────────────────────────────
@@ -354,7 +548,27 @@ class CodeGenerator:
         binds runtime symbols to the right Python expressions, and returns
         a single inline expression suitable for use as part of the target
         population's input sum.
+
+        §14 path: if the synapse has a ``feature_ref`` AND the referenced
+        feature is ``active: true``, the contribution is computed by
+        calling the feature's impl class instead of the canonical
+        ``weight * (x_pre @ W)``. Inactive features fall through to the
+        canonical form — flipping ``active`` is therefore a real
+        ablation switch.
         """
+        if syn.feature_ref:
+            feat, ep = self._resolve_feature_ref(
+                syn.feature_ref,
+                context=f"synapse {syn.source}->{syn.target}",
+            )
+            if feat.active:
+                # Validate impl exists *now* so the error points at
+                # the synapse site (covered by
+                # test_active_feature_missing_impl_raises_when_wired).
+                self._split_impl_path(feat)
+                return self._feature_edge_expr(syn, src_expr, feat, ep)
+            # Inactive → fall through to canonical edge below.
+
         eq_str = syn.equation or self._SYNAPSE_CANONICAL
         eq_str = self._resolve_equation_ref(eq_str)
         eq = parse_equation(eq_str)
@@ -478,6 +692,13 @@ class CodeGenerator:
         for pop in self.ir.populations:
             pcls = self._population_class_name(pop.name)
             init.append(f"        self.{pop.name} = {pcls}(d_sem)")
+
+        # §14: instantiate any active feature impl whose endpoint is
+        # actually referenced by a synapse. These appear as
+        # ``self.feature_<name>`` modules on the circuit and are
+        # invoked from the forward pass via _feature_edge_expr.
+        for feat in self._wired_active_features():
+            init.extend(self._feature_init_lines(feat))
 
         # Synapse weights as fixed buffers (random init; not learnable in
         # Stage 1 — that's the codegen contract today, can be lifted later
