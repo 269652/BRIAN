@@ -499,6 +499,78 @@ class BrainConfig:
     # the observed "n_active: 2/16" collapse pattern.
     trophic_prune_mat:     float = 0.6
 
+    # ──────────────────────────────────────────────────────────────────
+    # Env-var overlay for ablation flags
+    # ──────────────────────────────────────────────────────────────────
+    @classmethod
+    def from_env(cls, base: "BrainConfig") -> "BrainConfig":
+        """Return a copy of ``base`` with any ``BRIAN_*`` env vars overlaid.
+
+        Existence of this overlay is what makes the four ablation flags
+        scriptable from the shell without editing CLI plumbing in every
+        training entry point. Schema (all optional; absence = no change):
+
+            BRIAN_USE_TDW                bool  → cfg.use_tdw
+            BRIAN_USE_DIFF_ATTN          bool  → cfg.use_diff_attn
+            BRIAN_USE_TONNETZ_PRIOR      bool  → cfg.use_tonnetz_prior
+            BRIAN_USE_EXPERT_ENSEMBLE    bool  → cfg.use_expert_ensemble
+            BRIAN_TONNETZ_GAP_THRESHOLD  float → cfg.tonnetz_gap_threshold
+            BRIAN_W_TONNETZ              float → cfg.w_tonnetz
+
+        Bool parsing rules:
+            '1', 'true', 'yes', 'on'         → True (case-insensitive)
+            '0', 'false', 'no', 'off', ''    → False
+            anything else                    → ValueError
+
+        Per CLAUDE.md §10 the input ``base`` is never mutated — a
+        :func:`dataclasses.replace` copy is returned so the original
+        preset stays reusable in the same process.
+        """
+        import os
+        from dataclasses import replace as _dc_replace
+
+        bool_keys = {
+            "BRIAN_USE_TDW":              "use_tdw",
+            "BRIAN_USE_DIFF_ATTN":        "use_diff_attn",
+            "BRIAN_USE_TONNETZ_PRIOR":    "use_tonnetz_prior",
+            "BRIAN_USE_EXPERT_ENSEMBLE":  "use_expert_ensemble",
+        }
+        float_keys = {
+            "BRIAN_TONNETZ_GAP_THRESHOLD": "tonnetz_gap_threshold",
+            "BRIAN_W_TONNETZ":             "w_tonnetz",
+        }
+
+        truthy = {"1", "true", "yes", "on"}
+        falsy  = {"0", "false", "no", "off", ""}
+
+        overrides: dict = {}
+
+        for env_key, attr in bool_keys.items():
+            raw = os.environ.get(env_key)
+            if raw is None:
+                continue
+            v = raw.strip().lower()
+            if v in truthy:
+                overrides[attr] = True
+            elif v in falsy:
+                overrides[attr] = False
+            else:
+                raise ValueError(
+                    f"{env_key}={raw!r} is not a valid bool. "
+                    f"Expected one of {sorted(truthy | falsy)}.")
+
+        for env_key, attr in float_keys.items():
+            raw = os.environ.get(env_key)
+            if raw is None:
+                continue
+            try:
+                overrides[attr] = float(raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"{env_key}={raw!r} is not a valid float.") from exc
+
+        return _dc_replace(base, **overrides)
+
 
 # ----- Preset sizes -----
 def tiny() -> BrainConfig:
