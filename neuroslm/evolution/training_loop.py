@@ -112,6 +112,18 @@ class EvolutionLoop:
     hot_threshold: float = 0.7
     cold_threshold: float = 0.1
     loss_window_size: int = 64
+    # ── Pressure-gated cycle (added 2026-06-12) ──────────────────────
+    # Cadence is necessary but not sufficient. The mutation cycle also
+    # requires the heatmap to show real concentration: ``max(normalised
+    # heat) >= pressure_threshold``. Default ``0.0`` reproduces the
+    # original cadence-only behaviour (any positive max heat passes).
+    # Set to e.g. ``0.5`` to mutate only when at least one element has
+    # accumulated ≥50% of the maximum signal in the IR — useful for
+    # steady-state runs where you want to avoid drifting the DNA on
+    # uniform noise. The skip path increments
+    # ``stats["n_cycles_skipped_lowpressure"]`` so every gate decision
+    # is recorded.
+    pressure_threshold: float = 0.0
 
     # ── internal state — populated by __post_init__ ──────────────────
     _hook: Optional[HeatmapHook] = field(init=False, default=None, repr=False)
@@ -142,6 +154,7 @@ class EvolutionLoop:
             "n_admitted_total": 0,
             "n_rejected_total": 0,
             "n_cycles_fired": 0,
+            "n_cycles_skipped_lowpressure": 0,
             "n_heatmaps_saved": 0,
         }
         self._loss_window = deque(maxlen=self.loss_window_size)
@@ -248,9 +261,38 @@ class EvolutionLoop:
         if len(self._loss_window) < 8:
             return None
 
-        return self._run_cycle(step)
+        # ── Pressure gate ─────────────────────────────────────────────
+        # Cadence-only firing wastes compute on no-op cycles and drifts
+        # the DNA on noise. Require at least one IR element with
+        # normalised heat ≥ pressure_threshold. Default 0.0 keeps
+        # legacy behaviour (any positive max heat passes).
+        max_pressure = self._max_normalised_heat()
+        if max_pressure < self.pressure_threshold:
+            self._stats["n_cycles_skipped_lowpressure"] += 1
+            return None
+
+        result = self._run_cycle(step)
+        if isinstance(result, dict):
+            result["max_pressure"] = max_pressure
+        return result
 
     # ── internals ───────────────────────────────────────────────────
+
+    def _max_normalised_heat(self) -> float:
+        """Return the largest normalised-heat value currently in the
+        heatmap, in [0, 1]. Returns 0.0 when the heatmap is empty or
+        the hook is disabled — safe ``< threshold`` for any positive
+        ``pressure_threshold``.
+        """
+        if self._hook is None:
+            return 0.0
+        try:
+            norm = self._hook.heatmap.normalized()
+        except Exception:  # noqa: BLE001 — never crash the gate path
+            return 0.0
+        if not norm:
+            return 0.0
+        return max(norm.values())
 
     def _maybe_save_heatmap(self, step: int) -> None:
         if self.save_heatmap_every <= 0 or step <= 0:
