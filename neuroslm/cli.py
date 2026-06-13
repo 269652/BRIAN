@@ -804,14 +804,46 @@ def _deploy_dsl(steps: int, branch: Optional[str], extra_env: dict,
 
 def _deploy_dna(dna_path: str, steps: int, branch: Optional[str], extra_env: dict,
                 ood_every: int = 0) -> int:
-    """Run _deploy_train.py with DNA file for evolved architecture training.
+    """Deploy a DNA-driven training run on vast.ai through the canonical
+    workspace pipeline.
 
-    DNA-based training uses the same vast.ai infrastructure but passes the
-    DNA file path instead of an architecture name. The deploy script builds
-    the model from the unfolded DSL inside the DNA.
+    The DNA is compiled to DSL → HypergraphIR LOCALLY (via
+    ``prepare_run_workspace``) before any vast.ai network call. Two
+    consequences:
+
+      1. Bad DNA fails fast — the user never pays for vast.ai
+         provisioning when their snapshot is broken.
+      2. ``_deploy_train.py`` (and the on-box bash wrapper) consume the
+         pre-compiled ``.neuro/arch/temp/`` workspace, not a raw .dna
+         file. There is exactly ONE DNA→DSL unfold in the entire deploy
+         path, in this function, just like ``cmd_train``.
+
+    The vast.ai box sees ``ARCH=.neuro/arch/temp`` and runs the DSL
+    training path. The DNA snapshot still ships in the git clone so
+    on-box evolution callbacks (mutation persistence) can rewrite it.
     """
+    # ── 1. compile DNA locally (fail-fast before any vast.ai call) ──
+    try:
+        from neuroslm.compiler.run_workspace import prepare_run_workspace
+        workspace = prepare_run_workspace(dna=dna_path)
+    except Exception as e:
+        print(f"[deploy] workspace preparation failed: {e}", file=sys.stderr)
+        print(f"[deploy] aborting — no vast.ai resources were provisioned.",
+              file=sys.stderr)
+        return 1
+    print(f"[deploy] workspace ready: {workspace.arch_root}")
+    print(f"        source: {workspace.source_kind}={workspace.source_path}")
+    print(f"        hypergraph IR: {len(workspace.hypergraph_ir.nodes)} nodes, "
+          f"{len(workspace.hypergraph_ir.hyperedges)} edges")
+
+    # ── 2. hand off the prepared workspace path to the deploy script ──
+    # We pass ARCH=<workspace> (NOT DNA=...) so _deploy_train.py reads
+    # the pre-compiled tree via the existing DSL code path. The original
+    # DNA path is exposed as BRIAN_SOURCE_DNA for telemetry / labels
+    # only — no code on the vast.ai box should compile it again.
     env = os.environ.copy()
-    env["DNA"] = dna_path
+    env["ARCH"] = str(workspace.arch_root)
+    env["BRIAN_SOURCE_DNA"] = dna_path
     env["STEPS"] = str(steps)
     if ood_every > 0:
         env["OOD_EVERY"] = str(ood_every)
@@ -819,29 +851,37 @@ def _deploy_dna(dna_path: str, steps: int, branch: Optional[str], extra_env: dic
         env["BRANCH"] = branch
     env["PYTHONIOENCODING"] = "utf-8"
     env.update(extra_env)
-    # Use the same deploy script — it now detects DNA vs ARCH mode.
     deploy_script = REPO_ROOT / "_deploy_train.py"
     python = _find_deploy_python()
     return subprocess.call([python, str(deploy_script)], cwd=str(REPO_ROOT), env=env)
 
 
 def _find_deploy_python() -> str:
-    """Find the python with vastai installed (.venv-2 preferred)."""
-    venv2 = REPO_ROOT / ".venv-2" / "Scripts" / "python.exe"
-    if venv2.is_file():
-        return str(venv2)
-    # Fallback: current interpreter
+    """Return the Python interpreter to run ``_deploy_train.py`` with.
+
+    Per CLAUDE.md §13 we have exactly one venv (``./.venv``). The
+    canonical interpreter is whatever's currently running — it already
+    has every dep the deploy script needs (torch is no longer required
+    after the canonical-pipeline refactor; vastai is the only hard
+    requirement, and it lives in ``./.venv``).
+    """
     return sys.executable
 
 
 def cmd_deploy(args: argparse.Namespace) -> int:
     """Launch a DSL or DNA training run on vast.ai.
 
-    Use --dna to train from an evolved DNA file:
-      brian deploy --dna dna/evol/arch.dna --steps 10000
+    Source-of-truth precedence (highest wins):
 
-    Omit --dna to train from a DSL architecture:
-      brian deploy --steps 10000
+      1. ``--dna <path>``      — explicit CLI flag.
+      2. ``brian.toml`` ``[current].dna`` — when set, DNA wins even if
+         ``[current].arch`` is also configured (the DNA snapshot is the
+         evolved artifact; the arch field is reference / informational).
+      3. ``brian.toml`` ``[current].arch`` — DSL deploy fallback.
+
+    Examples:
+      brian deploy --dna dna/evol/arch.dna --steps 10000   # explicit
+      brian deploy --steps 10000                           # brian.toml
     """
     ood = args.ood if args.ood else 0
     extra = {}
@@ -850,9 +890,21 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     if getattr(args, "label", None):
         extra["LABEL_SUFFIX"] = args.label
 
-    # Route to DNA or DSL deployment based on --dna flag
-    if getattr(args, "dna", None):
-        return _deploy_dna(dna_path=args.dna, steps=args.steps,
+    # Resolve the DNA path: explicit flag wins, else consult brian.toml.
+    # The brian.toml fallback is what makes ``brian deploy`` (no flags)
+    # route through the canonical pipeline when DNA is the configured
+    # source of truth — otherwise unflagged deploy would silently skip
+    # local DNA compilation by falling into _deploy_dsl.
+    dna_path = getattr(args, "dna", None)
+    if not dna_path:
+        from neuroslm.project_config import load_project_config
+        cfg = load_project_config()
+        if cfg.is_dna_mode:
+            dna_path = cfg.dna
+            print(f"[deploy] brian.toml DNA mode: {dna_path}")
+
+    if dna_path:
+        return _deploy_dna(dna_path=dna_path, steps=args.steps,
                           branch=args.branch, extra_env=extra, ood_every=ood)
     else:
         return _deploy_dsl(steps=args.steps, branch=args.branch,
@@ -1686,6 +1738,83 @@ def cmd_ai(args: argparse.Namespace) -> int:
         env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
+# ─── Effective-preset resolution (CLI > arch > hardware-map > global > AUTO) ──
+
+def _resolve_effective_preset(cli_preset, arch_cfg, project_cfg):
+    """Fold the precedence layers into one decision.
+
+    **2026-06-12 precedence (high → low):**
+
+      1. CLI flag                    (``--preset``)
+      2. Arch.neuro                  (any non-empty ``preset:`` value)
+      3. ``[hardware.<DETECTED>]``   per-hardware map in ``brian.toml``
+      4. ``[defaults] preset``       workspace-wide fallback
+      5. AUTO                        detect hardware → look up map → else
+                                     ``pick_preset_for_vram(detected_gib)``
+
+    Hardware "detection" uses ``project_cfg.default_hardware`` when set,
+    otherwise asks :func:`neuroslm.hardware.detect_hardware`.
+
+    Returns
+    -------
+    (effective_preset, change_log) : (Optional[str], List[Tuple[str, str, str]])
+        ``effective_preset`` is ``None`` only when every layer is empty
+        (no CUDA, no config) so the caller can fall back to its own
+        hardcoded default. ``change_log`` carries any merges done by
+        :func:`apply_global_defaults` (empty when no merge ran).
+    """
+    # Layer 1: CLI flag wins outright.
+    if cli_preset:
+        return cli_preset, []
+
+    # Layer 2: Arch.neuro non-empty value wins over everything below.
+    arch_preset = (getattr(arch_cfg, "preset", "") or "").strip()
+    if arch_preset:
+        return arch_preset, []
+
+    # Resolve the active hardware key once — used by layers 3 and 5.
+    from neuroslm import hardware as _hw
+    active_hw = (
+        (getattr(project_cfg, "default_hardware", "") or "").strip()
+        or _hw.detect_hardware()
+    )
+
+    # Layer 3: per-hardware map in brian.toml.
+    hw_map = getattr(project_cfg, "hardware_presets", {}) or {}
+    if active_hw and active_hw in hw_map and hw_map[active_hw]:
+        return hw_map[active_hw], []
+
+    # Layer 4: workspace-wide [defaults] preset (apply_global_defaults
+    # writes it onto arch_cfg.preset so subsequent reads see it).
+    from neuroslm.dsl.training_config import apply_global_defaults
+    changes = apply_global_defaults(arch_cfg, project_cfg)
+    eff = (getattr(arch_cfg, "preset", "") or "").strip()
+    if eff:
+        return eff, changes
+
+    # Layer 5: AUTO — VRAM-based fallback.
+    if active_hw == "CPU":
+        return "tiny", changes
+    return _hw.pick_preset_for_vram(_hw.detect_vram_gib()), changes
+
+
+def _resolve_effective_steps(cli_steps, arch_cfg, project_cfg):
+    """Mirror of :func:`_resolve_effective_preset` for the step count.
+
+    Precedence: CLI > arch.neuro > ``brian.toml [defaults] steps``.
+    Returns ``None`` when every layer is silent (caller picks default).
+    """
+    if cli_steps:
+        return int(cli_steps)
+    arch_steps = int(getattr(arch_cfg, "steps", 0) or 0)
+    if arch_steps > 0:
+        return arch_steps
+    glb_steps = int(getattr(project_cfg, "default_steps", 0) or 0)
+    if glb_steps > 0:
+        return glb_steps
+    return None
+
+
 def cmd_train(args: argparse.Namespace) -> int:
     """Train a model with configurable settings.
 
@@ -1694,7 +1823,60 @@ def cmd_train(args: argparse.Namespace) -> int:
         brian train --preset=tiny --steps=100  # Train tiny model for 100 steps
         brian train --arch=rcc_bowtie --steps=10000
         brian train --dna=dna/evol/arch.dna    # Load from DNA with fitness config
+
+    When ``--dna`` or ``--arch`` is given, the source is unpacked into
+    ``./.neuro/arch/temp/`` (canonical run workspace) and the
+    Hypergraph IR is compiled from there. This keeps every consumer
+    (harness, NFG, evolution overlays) reading from a single,
+    predictable location and avoids accidental writes to the source
+    architecture tree. See ``neuroslm/compiler/run_workspace.py``.
     """
+    # ── Unpack DNA/arch into .neuro/arch/temp/ (single source of truth) ──
+    # When either flag is set (and we're NOT on the `tiny` preset path
+    # which handles DNA loading itself via colab_train_minimal_cpu),
+    # we centralise the unfolding so the run ALWAYS reads from the
+    # workspace — never from the source tree — and so the lifted
+    # HypergraphIR is built from exactly the bytes the run will use.
+    # The workspace is rebuilt on every invocation (no stale modules
+    # leaking between runs).
+    #
+    # Tiny preset is special-cased because it dispatches to
+    # ``colab_train_minimal_cpu.main(dna_path=...)`` which runs its own
+    # ``init_evolution(dna_path)`` — pre-unpacking the workspace from
+    # the CLI would force the DNA file to exist on disk just to satisfy
+    # the workspace prep step, breaking the mock-based unit tests in
+    # ``tests/test_fitness_load_or_default.py::TestTinyCliDnaRouting``
+    # and forcing every Colab/local CPU run to pre-cache a DNA file
+    # that the inner path was perfectly capable of fetching itself.
+    workspace = None
+    _skip_workspace_prep = (args.preset == "tiny")
+    if not _skip_workspace_prep and (
+        args.dna or (args.arch and not args.arch.endswith('.dna'))
+    ):
+        try:
+            from neuroslm.compiler.run_workspace import prepare_run_workspace
+            workspace = prepare_run_workspace(
+                dna=args.dna,
+                arch=None if args.dna else args.arch,
+            )
+            print(f"[train] workspace ready: {workspace.arch_root}")
+            print(f"        source: {workspace.source_kind}={workspace.source_path}")
+            print(f"        hypergraph IR: {len(workspace.hypergraph_ir.nodes)} nodes, "
+                  f"{len(workspace.hypergraph_ir.hyperedges)} edges")
+        except Exception as e:
+            print(f"[train] workspace preparation failed: {e}", file=sys.stderr)
+            return 1
+    elif (not _skip_workspace_prep) and args.arch and args.arch.endswith('.dna'):
+        # Back-compat: `--arch=foo.dna` is treated as `--dna=foo.dna`.
+        try:
+            from neuroslm.compiler.run_workspace import prepare_run_workspace
+            workspace = prepare_run_workspace(dna=args.arch)
+            print(f"[train] workspace ready (via --arch=.dna): "
+                  f"{workspace.arch_root}")
+        except Exception as e:
+            print(f"[train] workspace preparation failed: {e}", file=sys.stderr)
+            return 1
+
     # If tiny preset requested, run minimal training
     if args.preset == "tiny":
         import importlib.util
@@ -1737,28 +1919,79 @@ def cmd_train(args: argparse.Namespace) -> int:
     # Build training command
     cmd = [sys.executable, "-m", "neuroslm.train_dsl"]
 
-    if args.dna:
-        # Train from DNA with embedded fitness config
-        # This would require special handling in train_dsl
-        print(f"[INFO] Training from DNA: {args.dna}")
-        print("[TODO] DNA training not yet integrated into train_dsl")
-        print("       For now, use colab_train_minimal_cpu.py or full Colab workflow")
-        return 1
-
-    # Standard training
-    if args.arch:
+    # Workspace-based dispatch — both DNA and arch modes use the
+    # unpacked .neuro/arch/temp/ tree.
+    if workspace is not None:
+        cmd.extend(["--arch", str(workspace.arch_root)])
+    elif args.arch:
+        # arch path that didn't go through the workspace (e.g. user
+        # explicitly pointed at an existing flat folder) — keep legacy.
         arch = _resolve_arch(args.arch)
         cmd.extend(["--arch", arch])
     else:
         cmd.extend(["--arch", "architectures/rcc_bowtie"])
 
-    if args.preset:
-        cmd.extend(["--preset", args.preset])
+    # ── Resolve effective preset + steps (CLI > arch > global > AUTO) ──
+    # Load the arch's parsed training config + the workspace-level
+    # brian.toml defaults. The CLI flag is the top-priority lever;
+    # otherwise the arch wins over the global, which wins over the
+    # auto-detected hardware bucket. See docs/CLI.md § "Global defaults"
+    # and tests/test_hardware_aware_preset_selection.py for the spec.
+    arch_cfg = None
+    project_cfg = None
+    try:
+        from neuroslm.dsl.training_config import (
+            load_training_config_from_arch,
+        )
+        from neuroslm.project_config import load_project_config
+        arch_root_for_cfg = (
+            workspace.arch_root if workspace is not None
+            else (REPO_ROOT / (args.arch or "architectures/rcc_bowtie"))
+        )
+        arch_cfg = load_training_config_from_arch(arch_root_for_cfg)
+        project_cfg = load_project_config()
+        effective_preset, preset_changes = _resolve_effective_preset(
+            cli_preset=args.preset,
+            arch_cfg=arch_cfg,
+            project_cfg=project_cfg,
+        )
+        for field_name, old, new in preset_changes:
+            print(f"[global] {field_name}: {old!r} → {new!r}  "
+                  f"(from brian.toml [defaults])")
+        # Announce the hardware/preset decision so deploys are traceable.
+        from neuroslm import hardware as _hw
+        active_hw = (project_cfg.default_hardware or _hw.detect_hardware())
+        if not args.preset and not (arch_cfg and arch_cfg.preset):
+            print(f"[train] hardware: {active_hw}  "
+                  f"→ preset: {effective_preset!r}")
+    except Exception as e:
+        # Resolution must never break training. Fall back to CLI or
+        # built-in default and warn the user.
+        print(f"[train] preset resolution failed ({e}); "
+              f"falling back to CLI/default", file=sys.stderr)
+        effective_preset = args.preset
+
+    if effective_preset:
+        cmd.extend(["--preset", effective_preset])
     else:
         cmd.extend(["--preset", "rcc_bowtie_30m_p4"])
 
-    if args.steps:
-        cmd.extend(["--steps", str(args.steps)])
+    # Resolve effective step count with the same precedence.
+    effective_steps = args.steps
+    if arch_cfg is not None and project_cfg is not None:
+        try:
+            effective_steps = _resolve_effective_steps(
+                cli_steps=args.steps,
+                arch_cfg=arch_cfg,
+                project_cfg=project_cfg,
+            )
+        except Exception as e:
+            print(f"[train] step resolution failed ({e}); "
+                  f"using CLI value", file=sys.stderr)
+            effective_steps = args.steps
+
+    if effective_steps:
+        cmd.extend(["--steps", str(effective_steps)])
 
     if args.batch:
         cmd.extend(["--batch", str(args.batch)])

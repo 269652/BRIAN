@@ -122,7 +122,6 @@ class Brain(nn.Module):
             fe_gate_enable=bool(getattr(cfg, 'fe_gate_enable', False)),
             fe_gate_center=float(getattr(cfg, 'fe_gate_center', 1000.0)),
             fe_gate_width=float(getattr(cfg, 'fe_gate_width', 300.0)),
-            force_diff_attn=bool(getattr(cfg, 'use_diff_attn', False)),
             )
 
         # ── ReZero / Smooth-Gated-Bus on module → LM forward injections ──
@@ -154,33 +153,7 @@ class Brain(nn.Module):
         self.association = AssociationCortex(cfg.d_sem)
 
         # ---- Global workspace ----
-        # Default: GlobalWorkspace (Hopfield + ignition phase transition).
-        # use_tdw=True swaps in the TopologicalDifferentialWorkspace, which
-        # has the same forward signature (B, T, d_sem) -> (B, n_slots, d_sem)
-        # so the call sites at brain.py:1366 and :2340 are unchanged.
-        # See CLAUDE.md §10: this is an ablation knob, not an upgrade.
-        if bool(getattr(cfg, 'use_tdw', False)):
-            from .modules.workspace import TopologicalDifferentialWorkspace
-            self.gws = TopologicalDifferentialWorkspace(
-                cfg.d_sem, cfg.gws_slots, cfg.gws_heads)
-        else:
-            self.gws = GlobalWorkspace(cfg.d_sem, cfg.gws_slots, cfg.gws_heads)
-
-        # ---- Tonnetz adjacency-loss prior (opt-in) ----
-        # When use_tonnetz_prior=True, instantiate the spectral-gap
-        # regulariser. The forward pass adds w_tonnetz * prior(...) to
-        # the novel_aux_loss bucket (see line ~1734). When the flag is
-        # False the attribute is None and the loss contribution is
-        # bit-identical to today's run.
-        if bool(getattr(cfg, 'use_tonnetz_prior', False)):
-            from .modules.tonnetz_prior import TonnetzPrior
-            self.tonnetz_prior = TonnetzPrior(
-                vocab_size=cfg.vocab_size,
-                d_embed=cfg.d_hidden,
-                gap_threshold=float(getattr(cfg, 'tonnetz_gap_threshold', 0.3)),
-            )
-        else:
-            self.tonnetz_prior = None
+        self.gws = GlobalWorkspace(cfg.d_sem, cfg.gws_slots, cfg.gws_heads)
 
         # ---- Thalamus ----
         self.thalamus = Thalamus(cfg.d_sem, cfg.d_hidden)
@@ -1759,21 +1732,6 @@ class Brain(nn.Module):
             if self.pred_coding is not None:
                 pc_novel, _ = self.pred_coding(sem)
                 novel_aux_loss = novel_aux_loss + pc_novel
-
-            # ── Tonnetz adjacency-loss prior (opt-in via use_tonnetz_prior) ──
-            # Hinge on the algebraic connectivity λ_1 of the per-batch
-            # token-cooccurrence Laplacian. Reads the trunk's token
-            # embedding table directly so the regulariser shapes
-            # embedding geometry without adding new parameters. The
-            # contribution is gated through the same `novel_aux_loss`
-            # bucket / `aux_w * ph_novel * 0.05` weighting as every
-            # other novel aux, so the maturity-aware ramps still apply.
-            if getattr(self, 'tonnetz_prior', None) is not None:
-                w_tonnetz = float(getattr(cfg, 'w_tonnetz', 0.01))
-                tonnetz_pen = self.tonnetz_prior(
-                    self.language.tok_emb.weight, ids)
-                novel_aux_loss = novel_aux_loss + w_tonnetz * tonnetz_pen
-                self._last_tonnetz_penalty = float(tonnetz_pen.detach().item())
 
             # CPC: contrastive predictive coding on GWS slot sequence
             cpc_loss = torch.tensor(0.0, device=device)

@@ -150,43 +150,6 @@ class BrainConfig:
     sgb_default_center: float = 2000.0
     sgb_default_width: float = 500.0
 
-    # ---- Ablation-knob feature flags (default False, opt-in) ──────────
-    # These four flags exist purely to give clean A/B comparisons; each one
-    # toggles a single mechanism without touching any other moving part.
-    # Per CLAUDE.md §10, flipping any of them creates a new experimental
-    # condition that should be run as its own short eval, not silently
-    # merged into the default config.
-    #
-    # use_tdw — swap the Hopfield/ignition GlobalWorkspace for the
-    #   TopologicalDifferentialWorkspace defined in modules/workspace.py.
-    #   Same forward signature, so brain.py:1366/2340 call sites are
-    #   untouched. The TDW kernel subtracts a blurry Hopfield retrieval
-    #   from a sharp one and (optionally) projects the result onto an
-    #   orthonormalised Tonnetz basis; this replaces ignition, it does
-    #   not add anything on top.
-    use_tdw: bool = False
-    # use_diff_attn — DifferentialAttention is already in the cortex via
-    #   DiffTransformerBlock at the every-3rd-layer slot of the
-    #   interleaved [Std, Diff, MoD] pattern. When this flag is True the
-    #   cortex is rebuilt with EVERY non-baseline block as
-    #   DiffTransformerBlock (uniform DiffAttn cortex). Default False
-    #   keeps today's interleaved pattern bit-identical.
-    use_diff_attn: bool = False
-    # use_tonnetz_prior — instantiate the TonnetzPrior adjacency-loss
-    #   regulariser (modules/tonnetz_prior.py). Penalises the per-batch
-    #   token-cooccurrence Laplacian when its algebraic-connectivity
-    #   eigenvalue λ_1 falls below `tonnetz_gap_threshold`. Adds a single
-    #   scalar loss term, zero new parameters at the trunk.
-    use_tonnetz_prior: bool = False
-    tonnetz_gap_threshold: float = 0.3
-    w_tonnetz: float = 0.01
-    # use_expert_ensemble — wired no-op reservation for the in-flight
-    #   neuroslm/experts.py module (unstaged at time of writing). The
-    #   flag is checked at Brain construction but no expert ensemble is
-    #   built yet; once experts.py is committed its plumbing slots in
-    #   behind this same flag without a schema change.
-    use_expert_ensemble: bool = False
-
     # ---- Free-energy temporal ramp (synthesis-v1 stability fix) ----
     # When True, the PCT free-energy loss is multiplied by a smooth
     # sigmoid gate(step). At step 0 PCT contributes ~0; at step >>
@@ -498,78 +461,6 @@ class BrainConfig:
     # post-awakening window where projections are still resolving — closes
     # the observed "n_active: 2/16" collapse pattern.
     trophic_prune_mat:     float = 0.6
-
-    # ──────────────────────────────────────────────────────────────────
-    # Env-var overlay for ablation flags
-    # ──────────────────────────────────────────────────────────────────
-    @classmethod
-    def from_env(cls, base: "BrainConfig") -> "BrainConfig":
-        """Return a copy of ``base`` with any ``BRIAN_*`` env vars overlaid.
-
-        Existence of this overlay is what makes the four ablation flags
-        scriptable from the shell without editing CLI plumbing in every
-        training entry point. Schema (all optional; absence = no change):
-
-            BRIAN_USE_TDW                bool  → cfg.use_tdw
-            BRIAN_USE_DIFF_ATTN          bool  → cfg.use_diff_attn
-            BRIAN_USE_TONNETZ_PRIOR      bool  → cfg.use_tonnetz_prior
-            BRIAN_USE_EXPERT_ENSEMBLE    bool  → cfg.use_expert_ensemble
-            BRIAN_TONNETZ_GAP_THRESHOLD  float → cfg.tonnetz_gap_threshold
-            BRIAN_W_TONNETZ              float → cfg.w_tonnetz
-
-        Bool parsing rules:
-            '1', 'true', 'yes', 'on'         → True (case-insensitive)
-            '0', 'false', 'no', 'off', ''    → False
-            anything else                    → ValueError
-
-        Per CLAUDE.md §10 the input ``base`` is never mutated — a
-        :func:`dataclasses.replace` copy is returned so the original
-        preset stays reusable in the same process.
-        """
-        import os
-        from dataclasses import replace as _dc_replace
-
-        bool_keys = {
-            "BRIAN_USE_TDW":              "use_tdw",
-            "BRIAN_USE_DIFF_ATTN":        "use_diff_attn",
-            "BRIAN_USE_TONNETZ_PRIOR":    "use_tonnetz_prior",
-            "BRIAN_USE_EXPERT_ENSEMBLE":  "use_expert_ensemble",
-        }
-        float_keys = {
-            "BRIAN_TONNETZ_GAP_THRESHOLD": "tonnetz_gap_threshold",
-            "BRIAN_W_TONNETZ":             "w_tonnetz",
-        }
-
-        truthy = {"1", "true", "yes", "on"}
-        falsy  = {"0", "false", "no", "off", ""}
-
-        overrides: dict = {}
-
-        for env_key, attr in bool_keys.items():
-            raw = os.environ.get(env_key)
-            if raw is None:
-                continue
-            v = raw.strip().lower()
-            if v in truthy:
-                overrides[attr] = True
-            elif v in falsy:
-                overrides[attr] = False
-            else:
-                raise ValueError(
-                    f"{env_key}={raw!r} is not a valid bool. "
-                    f"Expected one of {sorted(truthy | falsy)}.")
-
-        for env_key, attr in float_keys.items():
-            raw = os.environ.get(env_key)
-            if raw is None:
-                continue
-            try:
-                overrides[attr] = float(raw)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"{env_key}={raw!r} is not a valid float.") from exc
-
-        return _dc_replace(base, **overrides)
 
 
 # ----- Preset sizes -----

@@ -455,6 +455,55 @@ class BRIANHarness(nn.Module):
         if self.multi_cortex is not None:
             return  # already built — idempotent
 
+        # ── New path: `experts: [...]` roster → LMExpertEnsemble ───
+        # When the operator declares an explicit per-expert roster
+        # (the preferred path going forward), every expert returns
+        # logits directly in trunk-vocab space via its OWN pretrained
+        # LM head — no random Xavier projection, no rogue-dim band-aid
+        # LayerNorm, no tied head plagiarised from the trunk's
+        # untrained embedding. Initial CE on natural English drops
+        # from `~ln(V)` (uniform baseline, the catastrophic legacy
+        # default) to `~3-5` nats from step 0. See
+        # `tests/training/test_lm_expert_harness_integration.py` for
+        # the smoking-gun contract and `neuroslm/experts.py` for the
+        # full mechanism (VocabBridge + per-tokenizer alignment).
+        if getattr(cfg, "experts", None) is not None:
+            # Lazy import to keep legacy paths free of the experts
+            # module load (which imports transformers eagerly under
+            # the hood of LMExpert).
+            from neuroslm.experts import build_lm_expert_ensemble
+
+            self.multi_cortex = build_lm_expert_ensemble(
+                experts=cfg.experts,
+                trunk_tokenizer=getattr(cfg, "trunk_tokenizer", "gpt2"),
+                vocab_size=self.vocab_size,
+                router_d_model=int(getattr(cfg, "router_d_model", 256)),
+                lexical_bias_weight=float(getattr(
+                    cfg, "lexical_bias_weight", 2.0)),
+                bema_tau=float(getattr(cfg, "bema_tau", 0.5)),
+            )
+            # The ensemble already produces (B, T, V_trunk) logits, so
+            # the legacy projection chain (cortex_pre_head_norm + the
+            # tied cortex_lm_head) is BY DESIGN absent on this path.
+            # `cortex_lm_head=None` is the harness's signal in forward()
+            # to skip the chain entirely (see the fusion branch).
+            self.cortex_lm_head = None
+            self.cortex_pre_head_norm = None
+            fusion_mode = getattr(cfg, "fusion_mode", "logits_mixture")
+            if fusion_mode == "off":
+                self.cortex_mix_logit = None
+                return
+            # Still build the mixing scalar so the operator can ramp
+            # the ensemble in/out of the trunk logits over training
+            # (identical surface to the legacy fusion path).
+            fusion_init = float(getattr(cfg, "fusion_init", 0.5))
+            fusion_init = min(max(fusion_init, 1e-6), 1.0 - 1e-6)
+            init_logit = math.log(fusion_init / (1.0 - fusion_init))
+            self.cortex_mix_logit = nn.Parameter(
+                torch.tensor([init_logit], dtype=torch.float32)
+            )
+            return
+
         # Lazy import so legacy runs that never enable multi_cortex
         # never pay the import cost (cortex.py loads torch.nn extras
         # + sets up the DomainLexicon BPE table).
@@ -1031,12 +1080,42 @@ class BRIANHarness(nn.Module):
             # the harness so compute_loss can build the KL-distillation
             # aux loss without redoing the forward pass.
             if (self.multi_cortex is not None
-                    and getattr(self, "cortex_lm_head", None) is not None):
-                cortex_h = self.multi_cortex(ids)             # (B, T, d_sem)
-                # Anisotropy-suppression LayerNorm (see _build_multi_cortex).
-                if getattr(self, "cortex_pre_head_norm", None) is not None:
-                    cortex_h = self.cortex_pre_head_norm(cortex_h)
-                cortex_logits = self.cortex_lm_head(cortex_h) # (B, T, vocab)
+                    and getattr(self, "cortex_mix_logit", None) is not None):
+                # Two ensemble dialects share this fusion branch:
+                #   * Legacy `MultiCortexEnsemble`: returns hidden states
+                #     `(B, T, d_sem)`. We then run them through the
+                #     anisotropy-suppression LayerNorm (`cortex_pre_head_norm`)
+                #     and the tied `cortex_lm_head` to reach trunk-vocab.
+                #   * New `LMExpertEnsemble` (set via cfg.experts): the
+                #     pretrained heads are already on the inside, so the
+                #     return value is already `(B, T, V_trunk)` and the
+                #     entire random-projection chain is bypassed (both
+                #     `cortex_lm_head` and `cortex_pre_head_norm` are
+                #     `None` in this case — `_build_multi_cortex` skipped
+                #     building them).
+                cortex_out = self.multi_cortex(ids)
+                if getattr(self, "cortex_lm_head", None) is not None:
+                    # Legacy hidden-state path. The (B, T, d_sem) output
+                    # needs a LayerNorm + tied-head trip to trunk vocab.
+                    cortex_h = cortex_out                       # (B, T, d_sem)
+                    if getattr(self, "cortex_pre_head_norm", None) is not None:
+                        cortex_h = self.cortex_pre_head_norm(cortex_h)
+                    cortex_logits = self.cortex_lm_head(cortex_h)
+                else:
+                    # New experts path: ensemble output IS the cortex
+                    # logits, already in trunk-vocab space. Assert this
+                    # at dev time — easier to catch a contract violation
+                    # here than in the loss.
+                    if __debug__:
+                        # `cortex_out` should be `(B, T, V_trunk)`; check
+                        # the last dim only (B/T can differ on padded batches).
+                        assert cortex_out.dim() == 3 and \
+                            cortex_out.shape[-1] == self.vocab_size, (
+                                f"LMExpertEnsemble must return (B, T, "
+                                f"{self.vocab_size}) logits; got "
+                                f"{tuple(cortex_out.shape)}"
+                            )
+                    cortex_logits = cortex_out
                 # Cast cortex_logits to match logits dtype/device (autocast
                 # may place them in bf16/fp16, but tied embed is fp32).
                 cortex_logits = cortex_logits.to(logits.dtype)

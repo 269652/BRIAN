@@ -213,14 +213,7 @@ class LanguageCortex(nn.Module):
                  # regime the first synth-v1 run hit at step ~500.
                  fe_gate_enable: bool = False,
                  fe_gate_center: float = 1000.0,
-                 fe_gate_width: float = 300.0,
-                 # ---- DiffAttn ablation knob (use_diff_attn flag) -----
-                 # When True, EVERY non-baseline cortex block becomes a
-                 # DiffTransformerBlock instead of the default
-                 # [Std, Diff, MoD] interleaved pattern. Default False
-                 # keeps today's pattern bit-identical. Set by Brain
-                 # from cfg.use_diff_attn.
-                 force_diff_attn: bool = False):
+                 fe_gate_width: float = 300.0):
         super().__init__()
         self.gradient_checkpointing = gradient_checkpointing
         self.dropout = float(dropout)
@@ -284,15 +277,7 @@ class LanguageCortex(nn.Module):
             for i in range(n_layers):
                 pattern = i % 3
                 mem_xattn = self.enable_memory_xattn and (i >= mem_xattn_start)
-                if force_diff_attn:
-                    # use_diff_attn=True path: every block is a
-                    # DiffTransformerBlock. Memory cross-attention isn't
-                    # supported on DiffTransformerBlock today, so we
-                    # silently drop the mem_xattn flag here (the bus
-                    # path can still inject via brain.lambda_mem).
-                    self.blocks.append(DiffTransformerBlock(
-                        d_hidden, n_heads, max_ctx, n_kv_heads, n_nt=n_nt))
-                elif pattern == 0:
+                if pattern == 0:
                     # Standard attention + Hebbian traces
                     self.blocks.append(TransformerBlock(
                         d_hidden, n_heads, max_ctx, n_kv_heads,

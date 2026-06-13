@@ -161,12 +161,23 @@ class StubSubCortex(SubCortex):
             raise ValueError(f"expected (B, T) ids, got shape {tuple(ids.shape)}")
         h = self.embed(ids)
         T = ids.shape[1]
-        # Causal mask — additive (-inf above diagonal, 0 on/below)
+        # Causal mask via the EXPLICIT additive mask only.
+        #
+        # We deliberately do NOT pass ``is_causal=True`` alongside.
+        # The boolean ``is_causal`` flag is a kernel-fast-path hint
+        # for the SDPA backend; on bf16/A100 the combination of an
+        # explicit additive ``mask`` AND ``is_causal=True`` triggers
+        # a documented memory-corruption bug in the nested-tensor
+        # fast path that crashes with "illegal memory access" inside
+        # the FFN (``linear2(dropout(activation(linear1(x))))``).
+        # The mask alone gives identical (correct) causal attention
+        # and avoids the buggy fast path entirely. Regression-pinned
+        # by ``tests/training/test_stub_subcortex_bf16_safety.py``.
         mask = torch.triu(
             torch.full((T, T), float("-inf"), device=ids.device, dtype=h.dtype),
             diagonal=1,
         )
-        h = self.encoder(h, mask=mask, is_causal=True)
+        h = self.encoder(h, mask=mask, is_causal=False)
         return self.norm(h)
 
 
@@ -341,6 +352,14 @@ class DomainLexicon:
         return table
 
     # ── HuggingFace-tokenizer-aware factory ──────────────────────────
+
+    @classmethod
+    def empty(cls, domains: Sequence[str]) -> "DomainLexicon":
+        """Build a lexicon with no domain-token associations — every
+        token has a zero lexical-bias row. Useful when the router's
+        learnable head is the only signal source (e.g. tests that
+        want predictable uniform routing)."""
+        return cls(domain_token_map={str(d): set() for d in domains})
 
     @classmethod
     def from_gpt2_keywords(cls,

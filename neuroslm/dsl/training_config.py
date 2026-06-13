@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 # ── Sub-config dataclasses ─────────────────────────────────────────────
@@ -373,6 +373,51 @@ class AllostasisConfig:
 
 
 @dataclass
+class ExpertSpec:
+    """One row of the ``multi_cortex.experts: [...]`` roster.
+
+    Each spec describes a HuggingFace causal-LM expert that contributes
+    logits to the trunk's mixture. The expert's **native pretrained
+    head** is what produces logits — this is the architectural difference
+    from the legacy ``GPT2SubCortex`` path, which threw the head away
+    and replaced it with a random Xavier projection (causing initial CE
+    to sit at the ``ln(vocab_size)`` ceiling; see
+    ``scripts/diagnose_cortex_init.py``).
+
+    Fields:
+      id      — HuggingFace model id (``gpt2-medium``,
+                ``Qwen/Qwen2.5-0.5B``, ``microsoft/CodeGPT-small-py``, …)
+      domain  — routing key (must be unique within a roster)
+      freeze  — when ``True`` (default), every expert parameter has
+                ``requires_grad=False``. Distillation gradients still
+                flow into the trunk; the expert itself is the teacher.
+      weight  — multiplicative prior on the router output for this
+                expert. ``1.0`` (default) keeps the router untouched;
+                values > 1 over-weight a domain (e.g. while a particular
+                expert is being introduced to the ensemble).
+    """
+    id: str
+    domain: str
+    freeze: bool = True
+    weight: float = 1.0
+
+    def __post_init__(self) -> None:
+        if not self.id or not isinstance(self.id, str):
+            raise ValueError(
+                f"ExpertSpec.id must be a non-empty string, got {self.id!r}"
+            )
+        if not self.domain or not isinstance(self.domain, str):
+            raise ValueError(
+                f"ExpertSpec.domain must be a non-empty string, "
+                f"got {self.domain!r}"
+            )
+        if self.weight < 0:
+            raise ValueError(
+                f"ExpertSpec.weight must be >= 0, got {self.weight}"
+            )
+
+
+@dataclass
 class MultiCortexConfig:
     """`multi_cortex { ... }` block — wires the Multi-Trunk-V2 ensemble.
 
@@ -422,6 +467,16 @@ class MultiCortexConfig:
     # "stub" is the safe default — no network access, no HF download.
     # arch.neuro must explicitly opt-in to "gpt2" to pull weights.
     weights: str = "stub"
+    # New (preferred) per-expert roster. When set (non-None), it
+    # supersedes the ``weights`` shorthand and ``domains`` / ``n_cortices``
+    # are auto-derived from the roster. Each expert's pretrained LM head
+    # is used directly — no random projection chain.
+    experts: Optional[List[ExpertSpec]] = None
+    # When ``experts`` is set, this is the BPE tokenizer id used to
+    # decode trunk ids into text so cross-tokenizer experts can
+    # re-encode and bridge their vocab back to trunk-vocab space. Must
+    # match the tokenizer the dataset was tokenised with.
+    trunk_tokenizer: str = "gpt2"
     freeze_weights: bool = True
     lexical_bias_weight: float = 2.0
     bema_tau: float = 0.5
@@ -556,7 +611,10 @@ class TrainingConfig:
     # 32k tokens/step; DSL must match for trajectory parity).
     batch_size: int = 4
     seq_len: int = 256
-    steps: int = 10000
+    # ``steps == 0`` means "no opinion — let the CLI / brian.toml decide".
+    # Non-zero arch values win over ``brian.toml [defaults] steps`` per
+    # the 2026-06-12 precedence (arch > global > CLI fallback).
+    steps: int = 0
     warmup_steps: int = 300
     min_lr_ratio: float = 0.1
     # OOD-generalization knobs (added 2026-05-30 after first 10k run hit
@@ -778,6 +836,12 @@ class TrainingConfig:
     # neuroslm.dsl.regularization.parse_regularization_block; harness
     # consumption lands in PR2.
     regularization: Any = None  # filled with RegularizationConfig in parse_training_config
+    # Field names the arch declared with a trailing ``!`` (e.g.
+    # ``preset!: "cheap_2k"``). These resist global-default merging in
+    # :func:`apply_global_defaults`. Never set by users directly —
+    # populated by :func:`parse_training_config` from the DSL source.
+    # ``repr=False`` keeps debug output uncluttered.
+    _sticky_fields: Set[str] = field(default_factory=set, repr=False)
 
 
 # ── Constants for validation ───────────────────────────────────────────
@@ -819,7 +883,10 @@ def parse_training_config(body: str) -> TrainingConfig:
     """
     cfg = TrainingConfig()
 
-    props = _split_top_level_kv(body)
+    props, sticky = _split_top_level_kv_with_stickies(body)
+    # Track every field the arch insisted on with `!`. `apply_global_defaults`
+    # consults this set so the global `[defaults]` block can't stomp pins.
+    cfg._sticky_fields = set(sticky)
 
     # Sub-blocks
     if "loss_clipping" in props:
@@ -1086,6 +1153,83 @@ def _parse_genetics(body: str) -> GeneticsConfig:
     return g
 
 
+def _parse_experts_list(raw: str) -> List[ExpertSpec]:
+    """Parse ``[ { id: "x", domain: "y", freeze: true, weight: 1.0 }, ... ]``
+    into a list of :class:`ExpertSpec`.
+
+    Whitespace + newline tolerant. Unknown per-expert fields are
+    silently ignored (forward-compat for future flags like ``bridge_mode``).
+    """
+    s = raw.strip()
+    if not (s.startswith("[") and s.endswith("]")):
+        raise ValueError(
+            f"multi_cortex.experts must be a [...] list, got: {raw[:60]}"
+        )
+    s = s[1:-1].strip()
+    if not s:
+        # Empty list — handled by cross-field validation downstream
+        return []
+
+    # Split top-level `{...}` dict literals at commas not inside braces.
+    rows: List[str] = []
+    depth, in_str, start = 0, None, 0
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if in_str:
+            if ch == in_str:
+                in_str = None
+        elif ch in ('"', "'"):
+            in_str = ch
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                rows.append(s[start:i + 1])
+        i += 1
+
+    if not rows:
+        raise ValueError(
+            f"multi_cortex.experts: could not find any "
+            f"{{ ... }} entries in: {raw[:80]}"
+        )
+
+    seen_domains: set = set()
+    out: List[ExpertSpec] = []
+    for row in rows:
+        body = _strip_braces(row)
+        kv = _split_top_level_kv(body)
+        if "id" not in kv:
+            raise ValueError(
+                f"multi_cortex.experts: missing required field `id` "
+                f"in entry: {row[:80]}"
+            )
+        if "domain" not in kv:
+            raise ValueError(
+                f"multi_cortex.experts: missing required field `domain` "
+                f"in entry: {row[:80]}"
+            )
+        eid = _strip_quotes(kv["id"])
+        domain = _strip_quotes(kv["domain"])
+        freeze = (
+            _parse_bool(kv["freeze"]) if "freeze" in kv else True
+        )
+        weight = float(kv["weight"]) if "weight" in kv else 1.0
+        if domain in seen_domains:
+            raise ValueError(
+                f"multi_cortex.experts: duplicate domain {domain!r} — "
+                f"each expert must have a unique routing key"
+            )
+        seen_domains.add(domain)
+        out.append(ExpertSpec(
+            id=eid, domain=domain, freeze=freeze, weight=weight,
+        ))
+    return out
+
+
 def _parse_multi_cortex(body: str) -> MultiCortexConfig:
     """Parse a `multi_cortex { ... }` block.
 
@@ -1165,6 +1309,28 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
     if "inhibition_temperature" in props:
         m.inhibition_temperature = float(props["inhibition_temperature"])
 
+    # ── Per-expert roster (new path, replaces ``weights`` shorthand) ──
+    # `experts: [ { id: "gpt2", domain: "general", freeze: true }, ... ]`
+    # When present, supersedes ``weights`` and auto-derives `domains`
+    # and `n_cortices` from the roster so they can't drift.
+    if "experts" in props:
+        m.experts = _parse_experts_list(props["experts"])
+        # Auto-derive — operator can't get them out of sync
+        m.domains = [e.domain for e in m.experts]
+        m.n_cortices = len(m.experts)
+        # Deprecation warning if legacy `weights` was also supplied
+        if "weights" in props:
+            import warnings
+            warnings.warn(
+                "multi_cortex: both `weights` and `experts` were supplied; "
+                "`experts` takes precedence. Remove `weights` to silence "
+                "this warning.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+    if "trunk_tokenizer" in props:
+        m.trunk_tokenizer = _strip_quotes(props["trunk_tokenizer"])
+
     # ── Cross-field validation ──
     if m.lexical_bias_weight < 0:
         raise ValueError(
@@ -1210,6 +1376,13 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
         raise ValueError(
             f"multi_cortex.inhibition_temperature must be > 0, "
             f"got {m.inhibition_temperature}"
+        )
+    # Reject empty `experts: []` roster — the whole point of the
+    # block is to declare at least one expert.
+    if m.experts is not None and len(m.experts) == 0:
+        raise ValueError(
+            "multi_cortex.experts: must contain at least one expert "
+            "(or omit the field entirely to use the legacy `weights` path)"
         )
     return m
 
@@ -1571,6 +1744,72 @@ def load_training_config_from_arch(arch_root) -> TrainingConfig:
     return parse_training_config(body)
 
 
+# ── Global-defaults merge: workspace-level brian.toml → TrainingConfig ─
+
+# Map ``ProjectConfig`` global-default attribute → ``TrainingConfig``
+# field it fills when the arch is silent. Add a new pair here to teach
+# the merge a new overridable knob (e.g. `("default_optimizer", "optimizer")`).
+# ``hardware`` is intentionally absent until the harness consumes a
+# string ``hardware`` field on ``TrainingConfig`` — for now the global
+# ``default_hardware`` flows through the deploy script env var and the
+# CLI's per-hardware preset map.
+_GLOBAL_DEFAULTS_FIELD_MAP: List[Tuple[str, str]] = [
+    ("default_preset", "preset"),
+]
+
+
+def _field_is_empty(value: Any) -> bool:
+    """Treat empty strings, 0, None, and empty containers as "not set"."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value == ""
+    if isinstance(value, (int, float)):
+        # 0 is the "no opinion" sentinel for steps. Bools are also
+        # ints in Python — falsy bools count as empty too.
+        return value == 0
+    if isinstance(value, (list, tuple, set, dict)):
+        return len(value) == 0
+    return False
+
+
+def apply_global_defaults(
+    arch_cfg: "TrainingConfig",
+    project_cfg: Any,  # neuroslm.project_config.ProjectConfig
+) -> List[Tuple[str, str, str]]:
+    """Merge workspace-level defaults from ``brian.toml`` into ``arch_cfg``.
+
+    **2026-06-12 precedence (REVERSED from sticky-overrides spec):**
+
+      1. CLI flag                    (handled in the CLI, not here)
+      2. Arch.neuro                  → any non-empty value WINS
+      3. Global ``[defaults]``       → fills only EMPTY arch fields
+      4. CLI / built-in fallback     (handled in the CLI)
+
+    Operates in place on ``arch_cfg``. Returns ``[(field, old, new), ...]``
+    listing every field this call changed, so the CLI can report::
+
+        [global] preset: '' -> 'cheap_2k'
+
+    The ``!`` parser support stays in :func:`parse_training_config` as
+    a forward-compat marker, but is no longer consulted here because
+    arch ALWAYS wins now.
+    """
+    changes: List[Tuple[str, str, str]] = []
+    for proj_attr, arch_attr in _GLOBAL_DEFAULTS_FIELD_MAP:
+        global_value = getattr(project_cfg, proj_attr, "") or ""
+        if not global_value:
+            continue                            # no opinion from the global
+        old = getattr(arch_cfg, arch_attr, "")
+        if not _field_is_empty(old):
+            continue                            # arch already has a value — wins
+        if old == global_value:
+            continue                            # already matches, no change
+        setattr(arch_cfg, arch_attr, global_value)
+        changes.append((arch_attr, str(old), str(global_value)))
+    return changes
+
+
 # ── Helpers (mirror multifile.py's small parsers) ─────────────────────
 
 def _strip_comments(source: str) -> str:
@@ -1638,9 +1877,24 @@ def _extract_block(source: str, keyword: str) -> Optional[str]:
     return source[start + 1 : i - 1]
 
 
-def _split_top_level_kv(body: str) -> Dict[str, str]:
-    """Quote/paren/brace-aware key:value splitter."""
+def _split_top_level_kv_with_stickies(
+    body: str,
+) -> Tuple[Dict[str, str], Set[str]]:
+    """Quote/paren/brace-aware key:value splitter with sticky-key support.
+
+    A key suffixed with ``!`` (``preset!: "cheap_2k"``) is recorded in
+    the returned ``sticky`` set with its bare name (``"preset"``).
+    Sticky keys mean "this arch insists on the value — the global
+    fallback in ``brian.toml`` ``[defaults]`` must not stomp it".
+
+    Returns
+    -------
+    (props, sticky) : (Dict[str, str], Set[str])
+        ``props`` is the normal key→value mapping with bare keys.
+        ``sticky`` is the subset of keys that carried a ``!``.
+    """
     out: Dict[str, str] = {}
+    sticky: Set[str] = set()
     buf, depth, in_str = [], 0, None
 
     def flush() -> None:
@@ -1648,7 +1902,11 @@ def _split_top_level_kv(body: str) -> Dict[str, str]:
         if not piece or ":" not in piece:
             return
         k, v = piece.split(":", 1)
-        out[k.strip()] = v.strip()
+        key = k.strip()
+        if key.endswith("!"):
+            key = key[:-1].rstrip()
+            sticky.add(key)
+        out[key] = v.strip()
 
     for ch in body:
         if in_str:
@@ -1670,7 +1928,14 @@ def _split_top_level_kv(body: str) -> Dict[str, str]:
         else:
             buf.append(ch)
     flush()
-    return out
+    return out, sticky
+
+
+def _split_top_level_kv(body: str) -> Dict[str, str]:
+    """Legacy shim. Strips the ``!`` from sticky keys so existing
+    callers that don't care about stickiness still see bare keys."""
+    props, _sticky = _split_top_level_kv_with_stickies(body)
+    return props
 
 
 def _strip_quotes(s: str) -> str:

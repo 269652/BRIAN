@@ -24,7 +24,7 @@ import sys
 if getattr(sys, 'version_info', (0,)) < (3, 8):
     raise RuntimeError("neuroslm training requires Python 3.8+. Please run using your venv python or 'py -3'.")
 
-from .config import PRESETS, BrainConfig
+from .config import PRESETS
 from .tokenizer import Tokenizer
 from .brain import Brain
 from .data import batch_iterator
@@ -476,22 +476,6 @@ def main():
           f"min_lr_ratio={cfg.min_lr_ratio} "
           f"label_smoothing={cfg.label_smoothing}", flush=True)
 
-    # ── BRIAN_* env-var overlay for the four ablation flags ──────────────
-    # Per CLAUDE.md §10 these are experiments, not upgrades — flipping
-    # any of them from the shell creates a distinct experimental
-    # condition without editing CLI plumbing. See
-    # tests/test_brainconfig_from_env.py for the full schema.
-    cfg = BrainConfig.from_env(cfg)
-    _ablation_on = [
-        n for n, v in (
-            ("use_tdw",              cfg.use_tdw),
-            ("use_diff_attn",        cfg.use_diff_attn),
-            ("use_tonnetz_prior",    cfg.use_tonnetz_prior),
-            ("use_expert_ensemble",  cfg.use_expert_ensemble),
-        ) if v
-    ]
-    if _ablation_on:
-        print(f"[train] ablation flags on: {_ablation_on}", flush=True)
     # ── Fresh start: ignore any resume so the new config trains from 0 ───
     if args.fresh:
         if args.resume:

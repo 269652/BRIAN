@@ -53,21 +53,33 @@ sys.path.insert(0, str(Path(__file__).parent))
 from neuroslm.project_config import load_project_config
 
 _proj = load_project_config()
-_env_dna = os.environ.get("DNA", "")
 _env_arch = os.environ.get("ARCH", "")
+# BRIAN_SOURCE_DNA is set by ``cli._deploy_dna`` after it pre-compiles
+# the DNA via ``prepare_run_workspace``. It carries the ORIGINAL .dna
+# path for labelling / logging only — the actual arch tree the box
+# trains from lives at ARCH=<workspace> (a .neuro/arch/temp path).
+# Legacy ``DNA=...`` env var: tolerated for back-compat but treated as
+# pure metadata, NEVER re-compiled here (that's cli.cmd_deploy's job
+# per the canonical-pipeline contract).
+_source_dna = os.environ.get("BRIAN_SOURCE_DNA", "") or os.environ.get("DNA", "")
 
-if _env_dna:
-    DNA = _env_dna
-    ARCH = _env_arch or _proj.arch.split("/")[-1]
-elif _env_arch:
-    DNA = ""
+if _env_arch:
     ARCH = _env_arch
 elif _proj.is_dna_mode:
-    DNA = _proj.dna
-    ARCH = _proj.arch.split("/")[-1]  # purely informational in DNA mode
-    print(f"[brian.toml] DNA mode: DNA={DNA}")
+    # brian.toml says DNA mode but ``cli._deploy_dna`` didn't run
+    # (operator invoked _deploy_train.py directly). This is no longer
+    # a supported entry point — the canonical pipeline requires the
+    # cli to pre-compile the workspace. Bail with a clear message.
+    print(
+        f"✗ brian.toml selects DNA mode (dna={_proj.dna}) but ARCH "
+        f"env var is not set.\n"
+        f"  Run via the CLI: brian deploy --dna {_proj.dna}\n"
+        f"  (the CLI pre-compiles the DNA into .neuro/arch/temp/ and "
+        f"sets ARCH for this script).",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 else:
-    DNA = ""
     # arch field is "architectures/<name>"; the legacy ARCH env var
     # expects just the leaf name (the scripts join "architectures/$ARCH").
     ARCH = _proj.arch.split("/")[-1] if "/" in _proj.arch else _proj.arch
@@ -76,47 +88,47 @@ else:
 SCALE = os.environ.get("SCALE", "")
 LABEL_SUFFIX = os.environ.get("LABEL_SUFFIX", "")
 
-# ── Detect mode: DNA vs DSL ──
-USE_DNA = bool(DNA)
+# ── Detect mode purely from BRIAN_SOURCE_DNA (labelling only) ──
+USE_DNA = bool(_source_dna)
 if USE_DNA:
-    mode_label = f"-dna-{Path(DNA).stem}"
+    mode_label = f"-dna-{Path(_source_dna).stem}"
 else:
     mode_label = ""
 
 LABEL = "neuroslm-full" + (f"-{LABEL_SUFFIX}" if LABEL_SUFFIX else "") \
     + mode_label + (f"-{SCALE}" if SCALE else "")
 
-# ── Read hardware + scale from arch.neuro ──
+# ── Read hardware + scale from arch.neuro (one path for DNA + DSL) ──
+# After the canonical-pipeline refactor (2026-06-12), ``ARCH`` always
+# points at a directory containing ``arch.neuro`` — either an existing
+# ``architectures/<name>/`` (DSL mode) or the prepared
+# ``.neuro/arch/temp/`` workspace that cli._deploy_dna unfolded from a
+# DNA snapshot. Either way, ``load_training_config_from_arch`` is the
+# only call needed; this script no longer imports the DNA compiler and
+# therefore no longer pulls torch as a transitive dependency.
 from neuroslm.dsl.training_config import load_training_config_from_arch
 
-if USE_DNA:
-    # DNA mode: read training config from embedded arch.neuro in the DNA
-    from neuroslm.compiler.ribosome import RibosomeCompiler
-    print(f"DNA mode: {DNA}")
-    try:
-        compiler = RibosomeCompiler()
-        dsl_code = compiler.dna_translator.translate_from_file(str(DNA))
-        import re as _re
-        m = _re.search(r"\barchitecture\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{",
-                      dsl_code)
-        if not m:
-            raise ValueError(f"Cannot extract `architecture <name>` from {DNA}")
-        arch_name = m.group(1)
-        ARCH_ROOT = Path("architectures") / arch_name
-        if not (ARCH_ROOT / "arch.neuro").is_file():
-            raise FileNotFoundError(
-                f"DNA references {arch_name} but "
-                f"{ARCH_ROOT}/arch.neuro not found")
-        tc = load_training_config_from_arch(ARCH_ROOT)
-        dna_arch_name = arch_name
-    except Exception as e:
-        print(f"✗ Failed to load DNA {DNA}: {e}", file=sys.stderr)
-        sys.exit(1)
+# ARCH may be either a bare name ("rcc_bowtie") or a workspace path
+# (e.g. "C:/.../.neuro/arch/temp"). If it's a path that exists, use it
+# directly; otherwise treat it as a name under architectures/.
+_arch_as_path = Path(ARCH)
+if _arch_as_path.is_dir() and (_arch_as_path / "arch.neuro").is_file():
+    ARCH_ROOT = _arch_as_path
+    # For logging only — strip drive prefix on Windows to keep the
+    # banner short.
+    arch_display = _arch_as_path.name
 else:
-    # DSL mode: read from architecture folder
     ARCH_ROOT = Path("architectures") / ARCH
-    tc = load_training_config_from_arch(ARCH_ROOT)
-    dna_arch_name = None
+    arch_display = ARCH
+
+if not (ARCH_ROOT / "arch.neuro").is_file():
+    print(f"✗ {ARCH_ROOT}/arch.neuro not found", file=sys.stderr)
+    sys.exit(1)
+tc = load_training_config_from_arch(ARCH_ROOT)
+dna_arch_name = Path(_source_dna).stem if USE_DNA else None
+if USE_DNA:
+    print(f"DNA mode (canonical pipeline): source={_source_dna} "
+          f"workspace={ARCH_ROOT}")
 
 scale_name = SCALE or tc.scales.default
 if scale_name and scale_name in tc.scales.variants:
@@ -161,12 +173,25 @@ launch_cmd = ("torchrun --nproc_per_node=" + str(hw.num_gpus)
                if hw.num_gpus > 1 and hw.dist_strategy != "single"
                else "python")
 
-# ── Build training command (DNA or DSL mode) ──
+# ── Build training command ──
+# After the canonical-pipeline refactor, both DNA-mode and DSL-mode
+# runs use the same on-box wrapper: ``vast_train_dna_loop.sh`` if a
+# source DNA is present (so on-box evolution can rewrite the snapshot
+# back to BRIAN_SOURCE_DNA), otherwise the DSL loop. Both wrappers
+# receive ``ARCH=<arch-or-workspace>`` and read the prepared tree —
+# neither one re-compiles a DNA on the box.
 if USE_DNA:
-    training_cmd = f"DNA={DNA} STEPS={STEPS} OOD_EVERY={OOD_EVERY} FRESH=1 \\\n    bash scripts/vast_train_dna_loop.sh 2>&1 | tee /workspace/train.log"
-    arch_name_for_log = dna_arch_name or Path(DNA).stem
+    training_cmd = (
+        f"ARCH={ARCH} BRIAN_SOURCE_DNA={_source_dna} "
+        f"STEPS={STEPS} OOD_EVERY={OOD_EVERY} FRESH=1 \\\n"
+        f"    bash scripts/vast_train_dna_loop.sh 2>&1 | tee /workspace/train.log"
+    )
+    arch_name_for_log = dna_arch_name or arch_display
 else:
-    training_cmd = f"ARCH={ARCH} STEPS={STEPS} OOD_EVERY={OOD_EVERY} FRESH=1 \\\n    bash scripts/vast_train_dsl_loop.sh 2>&1 | tee /workspace/train.log"
+    training_cmd = (
+        f"ARCH={ARCH} STEPS={STEPS} OOD_EVERY={OOD_EVERY} FRESH=1 \\\n"
+        f"    bash scripts/vast_train_dsl_loop.sh 2>&1 | tee /workspace/train.log"
+    )
     arch_name_for_log = ARCH
 
 ONSTART = f"""set -e
@@ -247,9 +272,12 @@ fi
 echo "done"
 """
 
-VASTAI_EXE = Path(".venv-2/Scripts/vastai.exe")
-if not VASTAI_EXE.is_file():
-    VASTAI_EXE = "vastai"
+# Use the on-PATH ``vastai`` binary. The canonical venv (./.venv per
+# CLAUDE.md §13) installs it into ``.venv/Scripts/`` — when this
+# script is launched via ``cli._deploy_dna`` that path is on PATH
+# automatically. The legacy sibling-venv lookup was removed in the
+# 2026-06-12 canonical-pipeline refactor.
+VASTAI_EXE = "vastai"
 
 def vastai(*args, capture=False):
     cmd = [str(VASTAI_EXE)] + list(args)

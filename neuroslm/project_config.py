@@ -34,7 +34,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 # ─── tomllib (stdlib in 3.11+; tomli fallback for 3.10) ──────────────
 if sys.version_info >= (3, 11):
@@ -53,6 +53,9 @@ _DEFAULT_DNA = ""
 _DEFAULT_NFG_OUTPUT = ".neuro/nfg.png"
 _DEFAULT_NFG_FORMAT = "png"
 _DEFAULT_NFG_ENGINE = "dot"
+_DEFAULT_PRESET = ""
+_DEFAULT_HARDWARE = ""
+_DEFAULT_STEPS = 0  # 0 = "no opinion — caller picks"
 
 
 # ─── data class ──────────────────────────────────────────────────────
@@ -71,6 +74,24 @@ class ProjectConfig:
     nfg_output: str = _DEFAULT_NFG_OUTPUT
     nfg_format: str = _DEFAULT_NFG_FORMAT
     nfg_engine: str = _DEFAULT_NFG_ENGINE
+    # ── Global training defaults ──
+    # Read from the ``[defaults]`` section of ``brian.toml``. Empty means
+    # "no opinion — let the arch or CLI decide". Merged into a parsed
+    # ``TrainingConfig`` by ``neuroslm.dsl.training_config.apply_global_defaults``
+    # under the 2026-06-12 precedence (arch wins over global).
+    # See ``docs/CLI.md`` § "Global defaults".
+    default_preset: str = _DEFAULT_PRESET      # e.g. "cheap_2k", "t4_2k"
+    default_hardware: str = _DEFAULT_HARDWARE  # e.g. "RTX_3090", "A100"
+    default_steps: int = _DEFAULT_STEPS        # 0 = no opinion
+    # ── Per-hardware preset map ──
+    # ``[hardware.<NAME>] preset = "..."`` sections feed this dict.
+    # Looked up by ``cli._resolve_effective_preset`` AFTER the arch's
+    # own preset and BEFORE the workspace ``default_preset``.
+    # Example::
+    #     [hardware.A100] preset = "large"
+    #     [hardware.T4]   preset = "t4_2k"
+    #     [hardware.CPU]  preset = "tiny"
+    hardware_presets: Dict[str, str] = field(default_factory=dict)
 
     # ── computed ──
 
@@ -217,12 +238,30 @@ def load_project_config(
 
     current = data.get("current", {}) if isinstance(data, dict) else {}
     nfg_section = data.get("nfg", {}) if isinstance(data, dict) else {}
+    defaults_section = (
+        data.get("defaults", {}) if isinstance(data, dict) else {}
+    )
+    # ``[hardware.A100] preset = "large"`` deserialises as
+    # ``data["hardware"] == {"A100": {"preset": "large"}}``.
+    hardware_section = (
+        data.get("hardware", {}) if isinstance(data, dict) else {}
+    )
+    hardware_presets: Dict[str, str] = {}
+    if isinstance(hardware_section, dict):
+        for hw_name, hw_cfg in hardware_section.items():
+            if isinstance(hw_cfg, dict) and "preset" in hw_cfg:
+                hardware_presets[str(hw_name)] = str(hw_cfg["preset"])
 
     arch = str(current.get("arch", _DEFAULT_ARCH))
     dna = str(current.get("dna", _DEFAULT_DNA))
     nfg_output = str(nfg_section.get("output", _DEFAULT_NFG_OUTPUT))
     nfg_format = str(nfg_section.get("format", _DEFAULT_NFG_FORMAT))
     nfg_engine = str(nfg_section.get("engine", _DEFAULT_NFG_ENGINE))
+    default_preset = str(defaults_section.get("preset", _DEFAULT_PRESET))
+    default_hardware = str(
+        defaults_section.get("hardware", _DEFAULT_HARDWARE)
+    )
+    default_steps = int(defaults_section.get("steps", _DEFAULT_STEPS))
 
     # ── env-var overrides (BRIAN_ prefix to avoid collisions) ──
     env_arch = os.environ.get("BRIAN_ARCH")
@@ -230,6 +269,9 @@ def load_project_config(
     env_nfg_out = os.environ.get("BRIAN_NFG_OUTPUT")
     env_nfg_format = os.environ.get("BRIAN_NFG_FORMAT")
     env_nfg_engine = os.environ.get("BRIAN_NFG_ENGINE")
+    env_default_preset = os.environ.get("BRIAN_DEFAULT_PRESET")
+    env_default_hardware = os.environ.get("BRIAN_DEFAULT_HARDWARE")
+    env_default_steps = os.environ.get("BRIAN_DEFAULT_STEPS")
 
     if env_arch:
         arch = env_arch
@@ -246,6 +288,15 @@ def load_project_config(
         nfg_format = env_nfg_format
     if env_nfg_engine:
         nfg_engine = env_nfg_engine
+    if env_default_preset is not None:
+        default_preset = env_default_preset
+    if env_default_hardware is not None:
+        default_hardware = env_default_hardware
+    if env_default_steps:
+        try:
+            default_steps = int(env_default_steps)
+        except ValueError:
+            pass  # leave whatever the file said
 
     return ProjectConfig(
         repo_root=repo_root,
@@ -254,6 +305,10 @@ def load_project_config(
         nfg_output=nfg_output,
         nfg_format=nfg_format,
         nfg_engine=nfg_engine,
+        default_preset=default_preset,
+        default_hardware=default_hardware,
+        default_steps=default_steps,
+        hardware_presets=hardware_presets,
     )
 
 
