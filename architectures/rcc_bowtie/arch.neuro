@@ -673,7 +673,15 @@ neurotransmitter gaba {
 # LIBRARY IMPORTS — shared equations, constraints, regularization
 # =============================================================================
 
-import { standard_synapse, multiplicative_modulation, additive_modulation } from "@/lib/equations"
+# Canonical shared lib. The 3 standard equations live in @brian/equations
+# alongside the 5 feature-toggleable equations (hyperbolic_attention_eq,
+# rope_torus_eq, hrr_memory_eq, predictive_coding_residual_eq,
+# surprise_gated_moe_eq) — importing the whole shared registry from one
+# place avoids the local-shadow conflict that arose when both
+# `@/lib/equations` and `@brian/equations` resolved to the same bundled
+# `lib/equations.neuro` at unfold time and the local 3-symbol shadow
+# silently overwrote the canonical 8-symbol source of truth.
+import { standard_synapse, multiplicative_modulation, additive_modulation } from "@brian/equations"
 # Regularizer & CDGA equation libraries — math-first declarative specs
 # for the OOD interventions (PR2 + PR-A + PR-B). The Python lowerings
 # live in neuroslm/regularizers.py and read their hyperparameters from

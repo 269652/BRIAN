@@ -28,11 +28,23 @@ from neuroslm.compiler.genome_assembler import GenomeAssembler, Genome
 def _spec_to_relpath(spec: str) -> str:
     """Map an import specifier to a relative file path under the arch root.
 
-    "@/lib/equations" -> "lib/equations.neuro"
-    "@/modules/cortex" -> "modules/cortex.neuro"
+    ``"@/lib/equations"``          → ``"lib/equations.neuro"``
+    ``"@/modules/cortex"``         → ``"modules/cortex.neuro"``
+    ``"@brian/features/hyperbolic_attention"`` → ``"lib/features/hyperbolic_attention.neuro"``
+
+    The ``@brian/`` prefix is mapped under ``lib/`` so the DNA stays
+    self-contained: on unfold, every bundled feature ends up alongside
+    the rest of the shared lib inside the workspace tree (instead of
+    requiring the runtime resolver to walk up to a host-wide repo
+    root). Mirrors the contract enforced by
+    :class:`neuroslm.compiler.module_bundler.ModuleBundler.resolve_import`.
     """
     s = spec
-    if s.startswith("@/"):
+    if s.startswith("@brian/"):
+        # @brian/features/foo → lib/features/foo  (parallel to runtime
+        # PathResolver anchoring @brian/ at <repo>/architectures/lib/).
+        s = "lib/" + s[len("@brian/"):]
+    elif s.startswith("@/"):
         s = s[2:]
     elif s.startswith("./"):
         s = s[2:]

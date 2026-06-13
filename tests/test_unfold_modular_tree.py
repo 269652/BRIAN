@@ -104,10 +104,29 @@ class TestRccBowtieModularUnfold:
             assert n_lib >= 3, f"expected several lib files, got {n_lib}"
 
             # Spot-check one reconstructed module is bit-identical to source.
-            for rel in ["modules/gws.neuro", "lib/equations.neuro"]:
-                src_file = arch_root / rel
+            # `modules/gws.neuro` is arch-local (`@/modules/...`) and
+            # roundtrips against its arch-relative source.
+            # `lib/equations.neuro` now comes from the canonical
+            # `@brian/equations` (under <repo>/architectures/lib/), not
+            # from the local `<arch>/lib/equations.neuro` shadow — the
+            # arch.neuro switched to `@brian/equations` so its 5
+            # feature equations are picked up. Compare against the
+            # canonical path to keep the bit-identical guarantee where
+            # it matters (the source of truth on disk).
+            local_checks = [
+                ("modules/gws.neuro", arch_root / "modules/gws.neuro"),
+            ]
+            canonical_lib = (
+                arch_root.parent / "lib" / "equations.neuro"
+            )
+            if canonical_lib.is_file():
+                local_checks.append(("lib/equations.neuro", canonical_lib))
+            for rel, src_file in local_checks:
                 out_file = out_root / rel
                 if src_file.exists():
                     assert out_file.exists(), f"missing {rel}"
                     assert out_file.read_text(encoding="utf-8") == \
-                        src_file.read_text(encoding="utf-8")
+                        src_file.read_text(encoding="utf-8"), (
+                            f"unfold of {rel} drifted from its source "
+                            f"of truth {src_file}"
+                        )

@@ -100,16 +100,39 @@ class PathResolver:
         """
         # ── @brian/<path> ── shared lib under architectures/lib/ ─────
         if specifier.startswith("@brian/"):
-            if self.repo_root is None:
+            rest = specifier[len("@brian/"):]
+            # Canonical source: <repo_root>/architectures/lib/<rest>.
+            # We try this FIRST so dev-mode edits to the shared lib are
+            # always seen (an arch may have a stale local lib/ shadow
+            # from an older multi-file layout that we don't want to
+            # silently override the @brian/ source of truth).
+            if self.repo_root is not None:
+                scope_root = self.repo_root / "architectures" / "lib"
+                base = scope_root
+                # rest already stripped; fall through to file resolution.
+            else:
+                # No repo_root → standalone workspace (typical for
+                # unfolded DNA in pytest tmp dirs, vast.ai boxes, or
+                # colab). Look in the workspace's bundled lib/.
+                # Mirrors neuroslm.compiler.ribosome._spec_to_relpath
+                # which writes @brian/<x> to lib/<x>.neuro at unfold.
+                ws_candidate = (self.arch_root / "lib" / rest).resolve()
+                ws_resolved = self._try_resolve_file(ws_candidate)
+                if ws_resolved is not None:
+                    try:
+                        ws_resolved.relative_to(self.arch_root)
+                        return ws_resolved
+                    except ValueError:
+                        pass  # escapes workspace → error below
                 raise ValueError(
                     f"specifier {specifier!r} uses the @brian/ prefix but "
                     f"no repo root was discovered (no pyproject.toml found "
-                    f"by walking up from {self.arch_root}); pass "
-                    f"repo_root=... explicitly to PathResolver"
+                    f"by walking up from {self.arch_root}) and no "
+                    f"workspace-local lib/{rest} was found either; either "
+                    f"pass repo_root=... explicitly to PathResolver or "
+                    f"ensure the unfolded workspace contains the bundled "
+                    f"@brian/ files under {self.arch_root / 'lib'}"
                 )
-            scope_root = self.repo_root / "architectures" / "lib"
-            base = scope_root
-            rest = specifier[len("@brian/"):]
         elif specifier.startswith("@/"):
             scope_root = self.arch_root
             base = self.arch_root
@@ -158,6 +181,30 @@ class PathResolver:
             f"could not resolve specifier {specifier!r}: tried "
             f"{candidate}, {with_suffix}, and {index_in_folder}"
         )
+
+    @staticmethod
+    def _try_resolve_file(candidate: Path) -> Optional[Path]:
+        """Best-effort file resolution: returns the matching ``.neuro``
+        path, or ``None`` if neither the exact path, the ``.neuro``
+        suffix, nor the ``index.neuro`` fallback exists.
+
+        Used by the ``@brian/`` workspace-local lookup, which needs a
+        "does this exist?" check without raising — control then falls
+        through to the canonical repo-anchored resolution.
+        """
+        if candidate.is_file() and candidate.suffix == ".neuro":
+            return candidate
+        with_suffix = (
+            candidate.with_suffix(".neuro")
+            if candidate.suffix == ""
+            else candidate
+        )
+        if with_suffix.is_file():
+            return with_suffix
+        index_in_folder = candidate / "index.neuro"
+        if index_in_folder.is_file():
+            return index_in_folder
+        return None
 
 
 class FolderLoader:

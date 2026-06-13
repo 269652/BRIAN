@@ -17,6 +17,22 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 
+def _discover_repo_root(start: Path) -> Optional[Path]:
+    """Walk up from ``start`` looking for the ``pyproject.toml`` marker.
+
+    Mirrors :func:`neuroslm.dsl.multifile._discover_repo_root` so the
+    bundler resolves ``@brian/...`` exactly the same way the runtime
+    DSL resolver does — guarantees DNA roundtrip parity for repo-shared
+    feature imports.
+    """
+    start = Path(start).resolve()
+    candidates = [start] + list(start.parents)
+    for candidate in candidates:
+        if (candidate / "pyproject.toml").is_file():
+            return candidate
+    return None
+
+
 @dataclass
 class Module:
     """A single .neuro module file with its source and origin."""
@@ -193,35 +209,61 @@ class ModuleBundler:
     def resolve_import(self, specifier: str, from_file: Optional[Path]) -> Optional[Path]:
         """Resolve an import specifier to an absolute file path.
 
-        Handles @/, ./, and ../ style paths.
+        Handles @/, @brian/, ./, and ../ style paths.
+
+        ``@brian/<rest>`` resolves under ``<repo_root>/architectures/lib/``
+        (the shared "brian lib" — same anchor used by the runtime
+        ``PathResolver``). The repo root is auto-discovered by walking
+        up from ``arch_root`` looking for ``pyproject.toml``. This MUST
+        match the runtime resolver semantics, or DNA roundtrip is lossy:
+        a feature imported via ``@brian/features/foo`` would be silently
+        dropped at bundle time and the unfolded arch would reference a
+        non-existent module.
 
         Returns:
             Absolute path to the file, or None if resolution fails.
         """
         try:
-            if specifier.startswith("@/"):
+            if specifier.startswith("@brian/"):
+                # Anchor at <repo_root>/architectures/lib/ — must mirror
+                # neuroslm.dsl.multifile.PathResolver to keep DNA<->DSL
+                # roundtrip lossless.
+                repo_root = _discover_repo_root(self.arch_root)
+                if repo_root is None:
+                    return None
+                base = repo_root / "architectures" / "lib"
+                rest = specifier[len("@brian/"):]
+                # @brian/ targets escape arch_root by definition, so we
+                # bypass the arch_root containment check below.
+                allow_escape = True
+            elif specifier.startswith("@/"):
                 base = self.arch_root
                 rest = specifier[2:]
+                allow_escape = False
             elif specifier.startswith("./") or specifier.startswith("../"):
                 if from_file is None:
                     return None
                 base = Path(from_file).resolve().parent
                 rest = specifier
+                allow_escape = False
             else:
                 # Bare specifier like "lib/cortex" — try as relative
                 if from_file:
                     base = Path(from_file).resolve().parent
                     rest = rest if "/" in specifier else f"./{specifier}"
+                    allow_escape = False
                 else:
                     return None
 
             candidate = (base / rest).resolve()
 
-            # Check bounds: must not escape arch_root
-            try:
-                candidate.relative_to(self.arch_root)
-            except ValueError:
-                return None
+            # Check bounds: must not escape arch_root (except for @brian/
+            # which lives outside the architecture by design).
+            if not allow_escape:
+                try:
+                    candidate.relative_to(self.arch_root)
+                except ValueError:
+                    return None
 
             # Try exact, with .neuro suffix, or index.neuro
             if candidate.is_file() and candidate.suffix == ".neuro":
