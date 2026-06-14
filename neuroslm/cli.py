@@ -576,23 +576,84 @@ def cmd_discovery(args: argparse.Namespace) -> int:
 # ── bundle ─────────────────────────────────────────────────────────────
 
 def cmd_dna(args: argparse.Namespace) -> int:
-    """Dispatch DNA compile/unfold commands."""
+    """Dispatch DNA compile/unfold commands.
+
+    ``brian dna compile`` (no positional arg) reads the architecture
+    from ``brian.toml [current].arch`` and, when ``--output`` is also
+    omitted, writes to ``brian.toml [current].dna`` (the path the
+    deploy actually consumes). This closes the two-file split that
+    caused wasted-compute deploy 40951692 on 2026-06-14: the legacy
+    behaviour of writing to ``architectures/<arch>/evolution.dna``
+    by default left the deploy-targeted ``dna/evol/arch.dna`` stale
+    after every recompile.
+
+    The legacy form ``brian dna compile <arch>`` (positional) still
+    writes to ``architectures/<arch>/evolution.dna`` — that's the
+    "compile some other arch, leave deploy alone" workflow.
+    """
     from neuroslm.compiler.ribosome import RibosomeCompiler
 
     if args.dna_cmd is None:
         print("Error: dna subcommand required (compile or unfold)", file=sys.stderr)
-        print("Usage: brian dna compile <arch> [--output FILE]", file=sys.stderr)
+        print("Usage: brian dna compile [<arch>] [--output FILE]", file=sys.stderr)
         print("       brian dna unfold <dna_file> [--output FILE]", file=sys.stderr)
         return 1
 
     if args.dna_cmd == "compile":
-        if not hasattr(args, 'arch') or args.arch is None:
-            print("Error: architecture name required for 'brian dna compile'", file=sys.stderr)
-            print("Usage: brian dna compile <arch> [--output FILE]", file=sys.stderr)
-            return 1
+        # ── Resolve the source arch ────────────────────────────────
+        # No positional → consult brian.toml [current].arch.
+        arch_name = getattr(args, "arch", None)
+        used_brian_toml_arch = False
+        if not arch_name:
+            from neuroslm.project_config import load_project_config
+            cfg = load_project_config()
+            if not cfg.arch:
+                print(
+                    "Error: architecture name required for 'brian dna compile'",
+                    file=sys.stderr,
+                )
+                print(
+                    "Usage: brian dna compile [<arch>] [--output FILE]",
+                    file=sys.stderr,
+                )
+                print(
+                    "       (no positional → reads brian.toml [current].arch)",
+                    file=sys.stderr,
+                )
+                return 1
+            arch_name = cfg.arch
+            used_brian_toml_arch = True
+            print(f"[dna compile] arch from brian.toml: {arch_name}")
 
-        arch = _resolve_arch(args.arch)
-        output = args.output or str(Path(arch) / "evolution.dna")
+        arch = _resolve_arch(arch_name)
+
+        # ── Resolve the output path ────────────────────────────────
+        # Precedence:
+        #   1. --output flag                            (always wins)
+        #   2. brian.toml [current].dna                 (only when arch
+        #                                                came from
+        #                                                brian.toml too —
+        #                                                we'd silently
+        #                                                retarget the
+        #                                                deploy otherwise)
+        #   3. architectures/<arch>/evolution.dna       (legacy default)
+        if args.output:
+            output = args.output
+        elif used_brian_toml_arch:
+            from neuroslm.project_config import load_project_config
+            cfg = load_project_config()
+            if cfg.dna:
+                # brian.toml says deploy reads this exact path — write
+                # there so a subsequent `brian deploy` picks up the
+                # fresh DNA without the user re-typing -o.
+                output = str(cfg.resolve_dna_path())
+                print(
+                    f"[dna compile] output from brian.toml: {output}"
+                )
+            else:
+                output = str(Path(arch) / "evolution.dna")
+        else:
+            output = str(Path(arch) / "evolution.dna")
         output_path = Path(output)
 
         try:
@@ -605,8 +666,8 @@ def cmd_dna(args: argparse.Namespace) -> int:
                 or output_path.is_dir()
             )
             if looks_like_dir:
-                arch_name = Path(arch).name or "evolution"
-                output_path = output_path / f"{arch_name}.dna"
+                arch_short = Path(arch).name or "evolution"
+                output_path = output_path / f"{arch_short}.dna"
                 output = str(output_path)
 
             # Create parent directory if needed
@@ -871,18 +932,63 @@ def _find_deploy_python() -> str:
 def cmd_deploy(args: argparse.Namespace) -> int:
     """Launch a DSL or DNA training run on vast.ai.
 
-    Source-of-truth precedence (highest wins):
+    Source-of-truth precedence (highest wins) for ``steps``, ``branch``,
+    and ``dna``::
 
-      1. ``--dna <path>``      — explicit CLI flag.
-      2. ``brian.toml`` ``[current].dna`` — when set, DNA wins even if
-         ``[current].arch`` is also configured (the DNA snapshot is the
-         evolved artifact; the arch field is reference / informational).
-      3. ``brian.toml`` ``[current].arch`` — DSL deploy fallback.
+        1. CLI flag (``--steps`` / ``--branch`` / ``--dna``)
+        2. ``brian.toml`` (``[defaults].steps`` / ``[defaults].branch``
+           / ``[current].dna``)
+        3. Hardcoded fallback (``10_000`` steps, no BRANCH env →
+           ``_deploy_train.py``'s own default kicks in)
 
-    Examples:
-      brian deploy --dna dna/evol/arch.dna --steps 10000   # explicit
-      brian deploy --steps 10000                           # brian.toml
+    This matches the same precedence rule the rest of the CLI uses
+    (CLI > workspace config > sensible default). It also makes the
+    one-line invocation ``brian deploy`` produce a DEFINED training
+    run: brian.toml is the single source of truth, the CLI is for
+    one-off overrides.
+
+    Examples::
+
+        # Use brian.toml [defaults].steps + [defaults].branch + [current].dna
+        brian deploy
+
+        # Override just the step count, keep brian.toml's branch + dna
+        brian deploy --steps 50000
+
+        # Override branch, DSL mode (no DNA in brian.toml)
+        brian deploy --branch feature/new-arch
     """
+    # ── Single config load: amortise the brian.toml read ──
+    # All three CLI flags consult the same config; loading it once
+    # avoids re-parsing the TOML file three times AND keeps the
+    # precedence rule (CLI > brian.toml > hardcoded) consistent.
+    from neuroslm.project_config import load_project_config
+    cfg = load_project_config()
+
+    # ── Steps: CLI > brian.toml [defaults].steps > 10_000 ──
+    steps = args.steps
+    if steps is None:
+        steps = cfg.default_steps if cfg.default_steps > 0 else 10_000
+
+    # ── Branch: CLI > brian.toml [defaults].branch > leave unset ──
+    # When neither layer specifies a branch, we deliberately DON'T set
+    # the BRANCH env var so the downstream ``_deploy_train.py`` falls
+    # through to its own hardcoded fallback (a git HEAD lookup). This
+    # avoids hardcoding "master" here — different workspaces / forks
+    # use different default branches.
+    branch = args.branch
+    if branch is None and cfg.default_branch:
+        branch = cfg.default_branch
+
+    # ── DNA: CLI > brian.toml [current].dna (when file exists) > None ──
+    # The ``is_dna_mode`` check tests file existence too, so a stale
+    # ``[current].dna`` pointing at a deleted file won't silently switch
+    # us into DNA mode with garbage.
+    dna_path = getattr(args, "dna", None)
+    if not dna_path and cfg.is_dna_mode:
+        dna_path = cfg.dna
+        print(f"[deploy] brian.toml DNA mode: {dna_path}")
+
     ood = args.ood if args.ood else 0
     extra = {}
     if args.scale:
@@ -890,24 +996,11 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     if getattr(args, "label", None):
         extra["LABEL_SUFFIX"] = args.label
 
-    # Resolve the DNA path: explicit flag wins, else consult brian.toml.
-    # The brian.toml fallback is what makes ``brian deploy`` (no flags)
-    # route through the canonical pipeline when DNA is the configured
-    # source of truth — otherwise unflagged deploy would silently skip
-    # local DNA compilation by falling into _deploy_dsl.
-    dna_path = getattr(args, "dna", None)
-    if not dna_path:
-        from neuroslm.project_config import load_project_config
-        cfg = load_project_config()
-        if cfg.is_dna_mode:
-            dna_path = cfg.dna
-            print(f"[deploy] brian.toml DNA mode: {dna_path}")
-
     if dna_path:
-        return _deploy_dna(dna_path=dna_path, steps=args.steps,
-                          branch=args.branch, extra_env=extra, ood_every=ood)
+        return _deploy_dna(dna_path=dna_path, steps=steps,
+                           branch=branch, extra_env=extra, ood_every=ood)
     else:
-        return _deploy_dsl(steps=args.steps, branch=args.branch,
+        return _deploy_dsl(steps=steps, branch=branch,
                            extra_env=extra, ood_every=ood)
 
 
@@ -2316,8 +2409,22 @@ def _build_parser() -> argparse.ArgumentParser:
     sdna_sub = sdna.add_subparsers(dest="dna_cmd", required=True)
 
     sdna_compile = sdna_sub.add_parser("compile", help="Compile arch.neuro to DNA binary")
-    sdna_compile.add_argument("arch", help="architecture name (e.g., rcc_bowtie)")
-    sdna_compile.add_argument("--output", "-o", help="DNA output file (default: architectures/<arch>/evolution.dna)")
+    # ``arch`` is OPTIONAL. When omitted, ``cmd_dna`` reads
+    # ``[current].arch`` from brian.toml and writes to
+    # ``[current].dna`` (so a subsequent ``brian deploy`` picks up
+    # the fresh DNA without -o). When given, the legacy default
+    # (``architectures/<arch>/evolution.dna``) applies.
+    sdna_compile.add_argument(
+        "arch", nargs="?", default=None,
+        help="architecture name (e.g., rcc_bowtie). "
+             "Default: brian.toml [current].arch.",
+    )
+    sdna_compile.add_argument(
+        "--output", "-o",
+        help="DNA output file. Default: brian.toml [current].dna when "
+             "no positional arch is given, else "
+             "architectures/<arch>/evolution.dna.",
+    )
     sdna_compile.set_defaults(func=cmd_dna)
 
     sdna_unfold = sdna_sub.add_parser("unfold", help="Unfold DNA binary back to .neuro DSL")
@@ -2438,8 +2545,16 @@ def _build_parser() -> argparse.ArgumentParser:
     # deploy
     sd = sub.add_parser("deploy",
                         help="Launch a DSL or DNA training run on vast.ai")
-    sd.add_argument("--steps", type=int, default=10_000)
-    sd.add_argument("--branch", help="git branch to train (default: current)")
+    # Default=None lets cmd_deploy distinguish "user didn't say" (fall
+    # through to brian.toml [defaults].steps) from "user explicitly
+    # asked for N steps" (always wins). The hardcoded final fallback
+    # of 10_000 lives in cmd_deploy, not in the argparse default.
+    sd.add_argument("--steps", type=int, default=None,
+                    help="Training steps (default: brian.toml "
+                         "[defaults].steps, then 10000)")
+    sd.add_argument("--branch",
+                    help="git branch to train (default: brian.toml "
+                         "[defaults].branch, then current HEAD)")
     sd.add_argument("--scale", help="Scale variant from arch.neuro scales block "
                     "(e.g. 100m, 300m, 1b). Default: arch's scales.default")
     sd.add_argument("--dna", help="path to evolved DNA file for training "

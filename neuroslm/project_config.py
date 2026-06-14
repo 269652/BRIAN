@@ -56,6 +56,9 @@ _DEFAULT_NFG_ENGINE = "dot"
 _DEFAULT_PRESET = ""
 _DEFAULT_HARDWARE = ""
 _DEFAULT_STEPS = 0  # 0 = "no opinion — caller picks"
+_DEFAULT_BRANCH = ""  # "" = "no opinion — caller picks" (deploy will
+                      # then fall through to _deploy_train.py's own default,
+                      # which today is the git HEAD branch)
 
 
 # ─── data class ──────────────────────────────────────────────────────
@@ -83,6 +86,12 @@ class ProjectConfig:
     default_preset: str = _DEFAULT_PRESET      # e.g. "cheap_2k", "t4_2k"
     default_hardware: str = _DEFAULT_HARDWARE  # e.g. "RTX_3090", "A100"
     default_steps: int = _DEFAULT_STEPS        # 0 = no opinion
+    default_branch: str = _DEFAULT_BRANCH      # "" = no opinion. Consumed
+                                               # by ``cli.cmd_deploy`` as
+                                               # the BRANCH env var passed
+                                               # to ``_deploy_train.py``
+                                               # when neither ``--branch``
+                                               # nor ``$BRANCH`` is set.
     # ── Per-hardware preset map ──
     # ``[hardware.<NAME>] preset = "..."`` sections feed this dict.
     # Looked up by ``cli._resolve_effective_preset`` AFTER the arch's
@@ -262,6 +271,7 @@ def load_project_config(
         defaults_section.get("hardware", _DEFAULT_HARDWARE)
     )
     default_steps = int(defaults_section.get("steps", _DEFAULT_STEPS))
+    default_branch = str(defaults_section.get("branch", _DEFAULT_BRANCH))
 
     # ── env-var overrides (BRIAN_ prefix to avoid collisions) ──
     env_arch = os.environ.get("BRIAN_ARCH")
@@ -272,6 +282,7 @@ def load_project_config(
     env_default_preset = os.environ.get("BRIAN_DEFAULT_PRESET")
     env_default_hardware = os.environ.get("BRIAN_DEFAULT_HARDWARE")
     env_default_steps = os.environ.get("BRIAN_DEFAULT_STEPS")
+    env_default_branch = os.environ.get("BRIAN_DEFAULT_BRANCH")
 
     if env_arch:
         arch = env_arch
@@ -297,6 +308,9 @@ def load_project_config(
             default_steps = int(env_default_steps)
         except ValueError:
             pass  # leave whatever the file said
+    if env_default_branch is not None:
+        # Allow BRIAN_DEFAULT_BRANCH="" to clear a file setting.
+        default_branch = env_default_branch
 
     return ProjectConfig(
         repo_root=repo_root,
@@ -308,6 +322,7 @@ def load_project_config(
         default_preset=default_preset,
         default_hardware=default_hardware,
         default_steps=default_steps,
+        default_branch=default_branch,
         hardware_presets=hardware_presets,
     )
 

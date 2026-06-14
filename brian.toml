@@ -6,23 +6,40 @@
 # training pipeline retargets.
 #
 # Schema (locked by tests/test_project_config.py +
-# tests/test_hardware_aware_preset_selection.py):
+# tests/test_hardware_aware_preset_selection.py +
+# tests/test_brian_deploy_defaults.py):
 #
 #   [current]    arch, dna
-#   [defaults]   preset, hardware, steps
+#   [defaults]   preset, hardware, steps, branch
 #   [hardware.<NAME>]  preset                ← per-hardware override
 #   [nfg]        output, format, engine
 #
 # Precedence (2026-06-12, locked by tests):
-#   1. CLI flag (--preset / --steps)            ← always wins
-#   2. arch.neuro (any non-empty value)         ← beats brian.toml
-#   3. brian.toml [hardware.<DETECTED>]         ← per-hardware override
-#   4. brian.toml [defaults]                    ← workspace fallback
-#   5. AUTO: detect hardware + pick by VRAM     ← last-ditch
+#   1. CLI flag (--preset / --steps / --branch)  ← always wins
+#   2. arch.neuro (any non-empty value)          ← beats brian.toml
+#   3. brian.toml [hardware.<DETECTED>]          ← per-hardware override
+#   4. brian.toml [defaults]                     ← workspace fallback
+#   5. AUTO: detect hardware + pick by VRAM      ← last-ditch
+#
+# `brian deploy` resolution (2026-06-14, locked by
+# tests/test_brian_deploy_defaults.py):
+#   --steps:  CLI > [defaults].steps  > 10_000 hardcoded
+#   --branch: CLI > [defaults].branch > leave unset (let _deploy_train.py
+#             pick HEAD)
+#   --dna:    CLI > [current].dna (when file exists) > DSL fallback
+#
+# `brian dna compile` resolution (2026-06-14):
+#   positional arch: CLI positional > [current].arch
+#   --output:        CLI > [current].dna (only when arch came from
+#                    brian.toml too, never when a positional was given —
+#                    so legacy `brian dna compile <other_arch>` does
+#                    NOT silently retarget the deploy) > legacy default
+#                    architectures/<arch>/evolution.dna
 #
 # Env-var overrides:
 #   BRIAN_ARCH, BRIAN_DNA, BRIAN_DEFAULT_PRESET, BRIAN_DEFAULT_HARDWARE,
-#   BRIAN_DEFAULT_STEPS, BRIAN_NFG_OUTPUT, BRIAN_NFG_FORMAT, BRIAN_NFG_ENGINE
+#   BRIAN_DEFAULT_STEPS, BRIAN_DEFAULT_BRANCH, BRIAN_NFG_OUTPUT,
+#   BRIAN_NFG_FORMAT, BRIAN_NFG_ENGINE
 # ──────────────────────────────────────────────────────────────────
 
 [current]
@@ -38,7 +55,13 @@ preset = ""
 hardware = "A100"
 
 # Default step count when neither --steps nor arch.neuro `steps:` is set.
-steps = 2000
+steps = 10000
+
+# Default branch for `brian deploy` when --branch is not given.
+# Empty = let _deploy_train.py fall through to its own default (which
+# resolves to the current git HEAD). Set to a real branch name to lock
+# every unflagged deploy onto a known integration branch.
+branch = "master"
 
 [hardware.A100]
 preset = "large"

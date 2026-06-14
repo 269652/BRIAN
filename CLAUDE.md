@@ -713,3 +713,63 @@ That's worse than the mechanism not existing: it lets hypothesis rows in
 B sides ran identical code." Every claim in `findings.md` and
 `technical_report.md` must trace back to a real implementation that does
 what its equation says it does.
+
+---
+
+## 15. Always use `brian` CLI commands for repo operations
+
+Every workspace-level operation — training, deploying, destroying,
+checking status, compiling DNA, rendering an NFG, running OOD eval —
+has a `brian` subcommand. **Use it.** Do not call the underlying
+shell scripts or Python entry points directly.
+
+| Operation                | ✅ Use this                                  | ❌ Do not call this directly                        |
+|--------------------------|---------------------------------------------|-----------------------------------------------------|
+| Launch training run      | `brian deploy [--steps N] [--branch X]`     | `python _deploy_train.py` · `bash scripts/vast_train.sh` |
+| Long-horizon run         | `brian deploy-100k`                         | same                                                |
+| Kill a vast.ai instance  | `brian destroy <ID>`                        | `bash scripts/vast.sh destroy instance <ID> -y`     |
+| List active instances    | `brian ps [--it]` · `brian status`          | `vastai show instances`                             |
+| Tail container logs      | `brian logs <ID>`                           | `vastai logs <ID>`                                  |
+| Compile arch → DNA       | `brian dna compile [<arch>] [-o FILE]`      | `python -m neuroslm.compiler.ribosome ...`          |
+| Unfold DNA → DSL         | `brian dna unfold <dna> [-o FILE]`          | same                                                |
+| Render NFG diagram       | `brian compile nfg --current` · `brian nfg` | `python -m neuroslm.graphviz ...`                   |
+| OOD evaluation           | `brian ood eval <checkpoint>`               | `python deploy/ood_eval.py`                         |
+| Train locally            | `brian train [--steps N]`                   | `python -m neuroslm.train_dsl ...`                  |
+| Analyse arch             | `brian analyze <arch>`                      | `python -m neuroslm.analyzer ...`                   |
+
+**Why this rule exists.**
+
+1. **brian.toml is the single source of truth.** Every `brian`
+   subcommand consults `brian.toml [current]` + `[defaults]` so an
+   unflagged invocation produces a fully-defined operation. Bypassing
+   the CLI means re-typing `--steps` / `--branch` / `--dna` every time,
+   and worse: the bypassed scripts have stale hardcoded fallbacks
+   (`_deploy_train.py` defaults to `BRANCH=arch/rcc-p4-loss-clip` from
+   May 2026, deeply wrong now). The `brian` CLI layer is what keeps
+   those drift bugs from reaching production.
+2. **Canonical pipeline guarantees.** `brian deploy --dna ...` calls
+   `prepare_run_workspace` LOCALLY before any vast.ai network call, so
+   broken DNA fails fast and you never pay for provisioning. The raw
+   `_deploy_train.py` skips that check.
+3. **Two-file split avoidance.** `brian dna compile` (no args) writes
+   to `brian.toml [current].dna` — the exact path the deploy reads.
+   Calling the underlying `RibosomeCompiler` directly forces you to
+   pick an output path manually, and on 2026-06-14 that misalignment
+   shipped a wasted-compute deploy on the stale legacy roster (see
+   findings.md H22 sidebar). The CLI closes that gap.
+4. **Telemetry, logging, label suffixes.** `brian deploy` automatically
+   builds the vast.ai instance label (`neuroslm-full-<scale>-<label>-<source>`),
+   sets `LABEL_SUFFIX`, picks the right Python interpreter, scrubs the
+   environment of stale `BRIAN_*` vars. Reproducing that by hand is
+   exactly the kind of accidental-complexity work that produces silent
+   regressions.
+
+**Exceptions.** The CLI layer doesn't have to be a hard wall — there
+are legitimate one-offs (debugging a specific subcommand by stepping
+through it with `python -m pdb -m neuroslm.cli ...`, calling
+`compiler.run_workspace` from a test fixture, etc.). The rule is "use
+the CLI for anything you would do MORE THAN ONCE." If you find
+yourself reaching for the raw script, either (a) you're debugging and
+that's fine, or (b) the CLI is missing a flag — in which case ADD the
+flag instead of bypassing.
+

@@ -322,6 +322,12 @@ class TestCmdDeployRespectsBrianToml:
             arch = "architectures/rcc_bowtie"
             dna = "dna/evol/arch.dna"
             is_dna_mode = True
+            # Fields added 2026-06-14 when cmd_deploy started reading
+            # brian.toml [defaults] for steps + branch. Default values
+            # below mean "no opinion" so this test still exercises ONLY
+            # the dna-routing branch it was written to pin.
+            default_steps = 0
+            default_branch = ""
 
         monkeypatch.setattr(
             "neuroslm.project_config.load_project_config",
@@ -366,6 +372,8 @@ class TestCmdDeployRespectsBrianToml:
             arch = "architectures/rcc_bowtie"
             dna = "dna/evol/arch.dna"   # brian.toml value
             is_dna_mode = True
+            default_steps = 0
+            default_branch = ""
 
         monkeypatch.setattr(
             "neuroslm.project_config.load_project_config",
@@ -404,6 +412,8 @@ class TestCmdDeployRespectsBrianToml:
             arch = "architectures/rcc_bowtie"
             dna = ""
             is_dna_mode = False
+            default_steps = 0
+            default_branch = ""
 
         monkeypatch.setattr(
             "neuroslm.project_config.load_project_config",
