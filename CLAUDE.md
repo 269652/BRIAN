@@ -26,6 +26,41 @@ Exemptions (no test required, but still confirm intent in conversation):
 If the test is hard to write, ask before skipping it. "It's hard to
 test" is the most common smell that the design needs rethinking.
 
+**Strict TDD is non-negotiable.** "I'll add tests after" is the
+single biggest source of regressions in this repo. RED-GREEN-COMMIT
+in that order. No exceptions for "small" changes — small changes are
+exactly where regressions hide.
+
+---
+
+## 1b. Read the existing pieces FIRST
+
+Before writing any new code:
+
+1. **Search the codebase** for existing helpers that solve part of the
+   problem. Use `grep_search`, `semantic_search`, or `list_code_usages`
+   on the relevant function/class names.
+2. **Read the file you're about to edit**, top to bottom of the
+   relevant region, before making the first edit. Match the surrounding
+   conventions (naming, error handling, logging style, type-hint style).
+3. **Reuse before reinventing.** If `_find_latest_log` already walks
+   `logs/vast/`, the new `--latest` flag calls it; it does NOT define
+   a new walker. If `_detect_exit_reason` already parses the tail of a
+   training log, the new "destroyed instance" code path calls it; it
+   does NOT re-grep the log inline.
+4. **Honour the file's existing structure.** Helpers go next to other
+   helpers. Argparse subparsers go in the argparse block. Tests go in
+   the file that already covers the module under test.
+
+Why this matters: every uncoordinated reinvention is two implementations
+of the same thing that will silently diverge. The bug is then not in
+either copy individually — it's in the *gap between them*. That bug is
+the hardest class to diagnose because it doesn't live in any single
+file.
+
+The grep-first / read-first / reuse-first discipline takes ~2 minutes
+per change and saves ~2 hours per regression. Always pay the 2 minutes.
+
 ---
 
 ## 2. No sycophancy

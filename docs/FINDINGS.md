@@ -672,3 +672,166 @@ Based on your memory, this fits the P4 loss-clipping experiment. Should I check 
 - Port-aware routing for NT arcs entering spine nodes (ordered entry ports per NT lane, not just departure stem).
 - Subsystem-aware force layout: repulsion between envelope groups so self-model and memory cannot drift into the cortical loop region.
 - Recognizable "compiler-generated neurodiagram" style will require explicit subsystem framing + canonicalised port grammar rather than more force-directed relaxation.
+
+---
+
+## Run 40952126 — 2026-06-14 18:48 UTC — H22 SmolLM2 expert swap
+
+**Status:** ❌ **FALSIFIED** — `general` expert swap `gpt2 → smollm2_360m` regressed
+training trajectory by ~8× wall-clock and never closed the gap before being
+destroyed manually at step 7800/10000.
+
+**Hypothesis (commit `9d070bf`):** Upgrading the `general` expert from gpt2
+(125M, 2019, WebText) to SmolLM2-360M (360M, 2024, 4T tokens of curated
+FineWeb-Edu) would improve trunk perplexity. The per-position abstain logic
+from H21 (`neuroslm/experts.py::VocabBridge.apply`) was assumed to make the
+cross-tokenizer bridge path safe.
+
+**Artifacts:**
+- Run log: `logs/vast/20260614T184807Z_31cf84a0b3c6_arch_1127M_h22-smollm2-dna-arch_step7800of10k.log` (213 KB, 510 lines)
+- Baseline log: `logs/vast/20260614T182653Z_07aba24be2bf_rcc_bowtie_889M_run_step920of10k.log` (gpt2 variant, same harness, only ran 920 steps)
+- DNA in checkpoint: commit `700f16e` (`dna/evol/arch.dna` regenerated post-swap)
+
+### Symptom table
+
+| Metric | GPT2 (889M) baseline | H22 SmolLM2 (1127M) | Delta |
+|---|---|---|---|
+| Initial lm CE @ step 20 | 5.55 nats | 5.85 nats | **+0.30** worse |
+| lm CE @ step 500 | 5.31 (monotone ↓) | **6.40** | **+1.09**, having REGRESSED from 5.85 |
+| train ppl @ step 500 | 201.6 | **603.5** | **3.0× worse** |
+| ood ppl @ step 500 | 413.6 | 656.3 | 1.6× worse |
+| Steps to reach train_ppl ≈ 175 | ~920 | ~7500 | **~8× slower** |
+| Steady-state throughput | ~2400 tok/s | ~950 tok/s | **2.5× slower** |
+| Wall-clock-equivalent step 7800 → | step ~3120 of gpt2 | step 7800 | gpt2 would be at train_ppl ~150 by then (extrapolated) |
+| Max gnorm during 0-2k window | <600 | **809,260** @ step 1720 | catastrophic |
+| Gnorm explosions (>10k) in first 2k steps | 0 | 6 (steps 960, 1720, 1740, 1780, 1840, 1860) | 6 ÷ 0 = ∞ |
+| Frozen-param accounting | 889M trunk + frozen gpt2 experts | 1127M (+238M from SmolLM2 swap) | bridged frozen weight does not help trunk learn faster |
+
+### Root-cause analysis
+
+**Three compounding failures**, in order of severity:
+
+#### 1. The trunk REGRESSED in early training (the smoking gun)
+
+Token-level `lm` CE on the trunk's own LM head over the first 500 steps:
+
+```
+GPT2 baseline:  5.55 → 5.42 → 5.38 → 5.31  (monotone improvement, Δ = -0.24)
+H22 SmolLM2:    5.85 → 6.01 → 6.26 → 6.40  (monotone DEGRADATION, Δ = +0.55)
+```
+
+The trunk did not just learn slower — it actively unlearned for ~700 steps,
+then drifted sideways until step ~3000 before finally recovering. By step
+7500 the trunk reached `lm CE = 5.10` — barely better than gpt2 baseline at
+step 920. Eight times the compute for parity.
+
+**Mechanism (hypothesis):** the bridged SmolLM2 logits arriving via the
+distillation loss (KL with `λ_t` ramp + temperature 4.0, configured in
+`architectures/rcc_bowtie/arch.neuro:200-220`) pushed the trunk toward a
+distribution that the trunk's own embedding/LM-head geometry could not
+represent. SmolLM2 has a different tokenizer (49,152 BPE vs gpt2's 50,257),
+so the bridge maps each trunk vocab id to the nearest single-token surface
+equivalent and abstains (`max(mapped) - ln(V)`) on the rest. Even with the
+H21 fix, this introduces a systematic bias on every unmapped slot — and for
+a 49k vs 50k vocab pair, that's thousands of slots per step receiving the
+abstain signal as the teacher target. The trunk is then trained via KL to
+push these slots toward uniform — a destructive prior.
+
+#### 2. Catastrophic gradient explosions in the 1700-1900 step window
+
+Six gnorm spikes >10k inside 240 steps, all correlated with NE pegged at
+0.97-0.98 (norepinephrine maxed = NT system detecting model in trouble):
+
+```
+step  960:  gnorm   32,100   NE=0.97  C3:pc=  7,407
+step 1720:  gnorm  809,260   NE=0.97  C3:pc=291,422
+step 1740:  gnorm  334,185   NE=0.68  C3:pc=297,691
+step 1780:  gnorm   93,550   NE=0.16  C3:pc=115,784
+step 1840:  gnorm  128,209   NE=0.14  C3:pc= 75,610
+step 1860:  gnorm   16,121   NE=0.11  C3:pc= 40,864
+```
+
+The `C3:pc` ("C3 prediction confidence") column normally sits at 0.15-0.35.
+Values of 290,000+ indicate the trunk's representation has lost isotropy —
+classic rogue-dim collapse driven by an anisotropic teacher signal. The
+loss clipping (`f=3.0`) and the NT-mediated cortex inhibition saved the run
+from diverging, but the recovery cost ~2000 steps.
+
+#### 3. Bridge-path throughput tax compounds the loss penalty
+
+Per-sample retokenisation + char-offset alignment (`LMExpert._forward_bridge`,
+`neuroslm/experts.py:545-640`) is unavoidable when expert vocab ≠ trunk vocab.
+Measured at runtime: 950 tok/s vs gpt2 baseline's 2400 tok/s (2.5× slower).
+With the loss-trajectory tax compounding, H22 at step 7800 has roughly the
+same training signal as gpt2 baseline would have at step 3120, where gpt2
+was already at train_ppl ≈ 145 (extrapolated from baseline's
+174 @ step 920 + linear-in-log fit).
+
+### Insights for improving gpt2-based expert cortices
+
+The forensic post-mortem reveals what made the gpt2 baseline robust and
+what to copy/avoid for the next architectural iteration:
+
+1. **Same-tokenizer experts are non-negotiable for the trunk's first 2000
+   steps.** The bridge path's per-position abstain is mathematically sound
+   (per-row `max(mapped) - ln(V)` keeps the unmapped CE at the uniform
+   baseline) but **the distillation loss treats abstain slots as targets**,
+   not as "no-op" slots. The trunk gets pulled toward uniform on every
+   unmapped vocab id every step. Fix options:
+   - (a) **Gate distillation by bridge coverage** — only apply KL on tokens
+     where the bridge mapped successfully; treat unmapped slots as
+     missing-label. New `distillation_mask` kwarg in
+     `harness._cortex_fusion_aux_step`.
+   - (b) **Gate distillation by `bridge.coverage` at construction time** —
+     refuse to enable distillation for any expert with coverage < 0.95.
+     Cheaper, less invasive, but stops research into harder bridges.
+   - (c) **Same-tokenizer-only experts in the cold-start phase**, switch
+     bridge experts on after step 2000 once trunk is settled. Two-phase
+     `experts:` roster in the DSL.
+2. **Add a `gnorm_emergency_brake` to the harness.** When `gnorm > 10×
+   gnorm_ema`, freeze the cortex contribution (`α_eff = 0`) for the next
+   step and skip the optimizer update. The NT system already detects this
+   (NE → 0.97); wire that detection to a hard halt instead of just a soft
+   modulation. Will save the next destabilised run from the 1700-1900
+   window cost.
+3. **The `C3:pc` channel is a leading indicator of rogue-dim collapse.**
+   `C3:pc > 100` predicts gnorm explosion ~20 steps later in this log.
+   Add `C3:pc > 50` to the harness's early-warning system; emit a WARN
+   line and dump router weights + per-expert CE for postmortem.
+4. **gpt2 fast-path experts win on per-FLOP utility.** The 889M baseline
+   would extrapolate to train_ppl ≈ 100 by step 10000 (linear-in-log fit on
+   step 20-920 trajectory). The 1127M H22 is on track for train_ppl ≈ 150
+   by step 10000. **More params via bridge experts = strictly worse than
+   more depth in a same-tokenizer trunk** at the rcc_bowtie scale.
+   Next experiment: H23 swap `code` slot from `microsoft/CodeGPT-small-py`
+   (~124M, same tok) to a same-tok bigger code expert (no bridge tax)
+   instead of adding cross-tok generalist experts.
+5. **Distillation gap-floor=0.1 was too aggressive.** With H22's initial CE
+   gap of ~5 nats, `λ_t` ramped to max immediately and the trunk got a full
+   KL signal from a teacher whose distribution it couldn't represent. For
+   bridge-path experts specifically, set `distillation_gap_floor` to
+   `max(0.1, 0.5 × initial_bridge_kl_divergence)` — measured once at step 0
+   then frozen.
+
+### Operational lessons
+
+- **Manual destroy at step 7800/10000 was the right call.** Cost: ~$0.73/hr
+  × 3.3 hr ≈ $2.40 wasted on the failing run. Would have been ~$4.00 if it
+  ran to completion. The early kill saved 22%.
+- **`brian logs <destroyed_id>` failed** because the vast API can't reach
+  a destroyed instance. The log was only retrievable by `git pull` (the run
+  pushes its log file on self-destruct). Tracked as a CLI gap; fix:
+  `brian logs` should fall back to `git fetch && git pull && cat
+  logs/vast/*<id>*.log` when vast returns 404. **In flight.**
+- **No `brian logs --latest`** meant manually searching `logs/vast/`. Add
+  `--latest` flag that resolves to the most-recently-modified file. **In
+  flight.**
+
+### What this falsifies
+
+| Claim | Status before run | Status after run |
+|---|---|---|
+| H21's per-position abstain makes bridge-path experts safe | 🟠 PENDING | 🟡 PARTIAL — safe for forward, NOT safe for distillation gradient |
+| Bigger pretrained expert improves trunk via distillation | 🟠 PENDING | ❌ FALSIFIED at rcc_bowtie scale, bridge-path variant |
+| Frozen expert weight count is a strict win | implicit | ❌ FALSIFIED — bridge tax >> param benefit |
+

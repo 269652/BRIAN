@@ -1025,11 +1025,120 @@ def cmd_deploy_brain(args: argparse.Namespace) -> int:
 
 # ── logs / status / destroy ───────────────────────────────────────────
 
+def _find_latest_log_file(log_dir: Path) -> Optional[Path]:
+    """Return the newest ``*.log`` file in ``log_dir`` by mtime, or None.
+
+    Returns ``None`` if the directory is missing or contains no ``.log``
+    files. Matches every ``.log`` file regardless of naming convention —
+    both the legacy ``<id>__neuroslm-*.log`` format and the newer
+    ``<utc>_<container>_<arch>_<params>_<label>_stepNofN.log`` format
+    work. (Contrast with ``_scan_recent_destroyed`` which uses the
+    narrower glob ``*__neuroslm-*.log`` and misses the new format.)
+    """
+    if not log_dir.is_dir():
+        return None
+    logs = [p for p in log_dir.glob("*.log") if p.is_file()]
+    if not logs:
+        return None
+    return max(logs, key=lambda p: p.stat().st_mtime)
+
+
+def _find_local_log_for_instance(instance_id: str) -> Optional[Path]:
+    """Find the locally-pushed log snapshot for a (possibly destroyed)
+    vast instance. Returns the newest match or None.
+
+    ``scripts/log_pusher.sh`` running on the instance periodically
+    rsyncs the training log to ``logs/vast/<instance_id>__neuroslm-*.log``
+    in this repo, then commits + pushes. So even after the instance is
+    destroyed, the log lives on locally.
+    """
+    log_dir = Path("logs/vast")
+    if not log_dir.is_dir():
+        return None
+    matches = [p for p in log_dir.glob(f"{instance_id}__*.log") if p.is_file()]
+    if not matches:
+        return None
+    return max(matches, key=lambda p: p.stat().st_mtime)
+
+
+def _print_log_file(path: Path) -> None:
+    """Print a log file's content to stdout (UTF-8, errors replaced)."""
+    body = path.read_text(encoding="utf-8", errors="replace")
+    sys.stdout.write(body)
+    if not body.endswith("\n"):
+        sys.stdout.write("\n")
+    sys.stdout.flush()
+
+
 def cmd_logs(args: argparse.Namespace) -> int:
+    """Show training logs for a vast.ai instance.
+
+    Three modes:
+
+    1. ``brian logs --latest``
+       Local-only. Print the newest ``*.log`` in ``logs/vast/`` by
+       mtime. No vast API call. Useful when the last instance was
+       destroyed and you just want to see what happened.
+
+    2. ``brian logs <id>``
+       Try ``scripts/vast.sh logs <id>`` first (live container).
+       If that fails (e.g. the instance is destroyed), fall back to
+       the locally-pushed snapshot ``logs/vast/<id>__neuroslm-*.log``.
+       If even that's missing, ``git fetch && git pull`` once and
+       retry (maybe a sibling workstation pushed the log).
+
+    3. ``brian logs`` (no positional, no ``--latest``)
+       User mistake — print a one-line hint and exit non-zero.
+    """
+    # Mode 1: --latest (strictly local, no vast API call)
+    if getattr(args, "latest", False):
+        log_dir = Path("logs/vast")
+        latest = _find_latest_log_file(log_dir)
+        if latest is None:
+            print(f"brian logs --latest: no log files found in {log_dir}/")
+            return 1
+        print(f"# brian logs --latest → {latest.name}")
+        _print_log_file(latest)
+        return 0
+
+    # Mode 3: nothing to do
+    if not args.instance_id:
+        print("brian logs: pass an instance id (e.g. `brian logs 40952126`) "
+              "or use `--latest` to view the newest log in logs/vast/.")
+        return 1
+
+    # Mode 2a: try live container first
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
-    return _run([_bash(), "scripts/vast.sh", "logs", str(args.instance_id)],
-                env=env)
+    rc = _run([_bash(), "scripts/vast.sh", "logs", str(args.instance_id)],
+              env=env)
+    if rc == 0:
+        return 0
+
+    # Mode 2b: live call failed → look for locally-pushed snapshot
+    local = _find_local_log_for_instance(str(args.instance_id))
+    if local is not None:
+        print(f"# vast.ai has no record of {args.instance_id}; "
+              f"showing local snapshot {local.name}")
+        _print_log_file(local)
+        return 0
+
+    # Mode 2c: no local file → maybe a sibling pushed it; pull & retry
+    print(f"# No local log for {args.instance_id} either; "
+          f"running git fetch && git pull...")
+    _run(["git", "fetch", "--all"])
+    _run(["git", "pull"])
+    local = _find_local_log_for_instance(str(args.instance_id))
+    if local is not None:
+        print(f"# Found pulled log {local.name}")
+        _print_log_file(local)
+        return 0
+
+    # Mode 2d: nothing worked → user-facing hint
+    print(f"brian logs: no log found for instance {args.instance_id} "
+          f"(not live on vast.ai, no local snapshot, no pulled snapshot). "
+          f"Try `brian logs --latest` to see the most recent run.")
+    return 1
 
 
 def cmd_status(_: argparse.Namespace) -> int:
@@ -2603,8 +2712,31 @@ def _build_parser() -> argparse.ArgumentParser:
     sdb.set_defaults(func=cmd_deploy_brain)
 
     # logs
-    sl = sub.add_parser("logs", help="Tail container logs for a vast instance")
-    sl.add_argument("instance_id")
+    sl = sub.add_parser(
+        "logs",
+        help="Tail container logs for a vast instance. "
+             "Use --latest for the newest local log (no vast API call).",
+        description=(
+            "Show training logs for a vast.ai instance.\n\n"
+            "Three modes:\n"
+            "  brian logs <id>      Tail the live container log; if the\n"
+            "                       instance is destroyed, fall back to the\n"
+            "                       locally-pushed snapshot under logs/vast/.\n"
+            "                       Runs `git fetch && git pull` once if the\n"
+            "                       local file is missing (maybe a sibling\n"
+            "                       workstation already pushed it).\n"
+            "  brian logs --latest  Print the newest .log in logs/vast/ by\n"
+            "                       mtime. Strictly local, no vast API call.\n"
+            "                       Useful when the last instance was just\n"
+            "                       destroyed and you want to know why."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sl.add_argument("instance_id", nargs="?", default=None,
+                    help="vast.ai instance id (omit when using --latest)")
+    sl.add_argument("--latest", action="store_true",
+                    help="show the newest .log in logs/vast/ by mtime "
+                         "(strictly local — no vast API call)")
     sl.set_defaults(func=cmd_logs)
 
     # status
