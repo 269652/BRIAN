@@ -197,9 +197,28 @@ def _load_tokenizer_cached(model_id: str):
     return tok
 
 
-# Magnitude of the "expert abstains" logit — large enough that softmax
-# gives near-zero probability without producing -inf NaNs in mixing.
-_ABSTAIN_LOGIT: float = -1e4
+# Default fallback magnitude when no max-mapped reference is available
+# (degenerate all-unmapped position). The bridge ``apply`` method
+# computes a PER-POSITION abstain value relative to the mapped max:
+# ``abstain = max(mapped_logits) - ln(V_trunk)``. This gives each
+# unmapped slot ~uniform-baseline probability mass ``1/V_trunk``,
+# yielding CE ≈ ln(V_trunk) on unmapped targets (the principled
+# "expert genuinely doesn't know" baseline).
+#
+# Why per-position-relative not a global constant:
+# Pretrained LM logits have arbitrary additive baselines (gpt2 sits
+# around -65; a freshly-init head sits around 0). A global negative
+# constant (the old ``-1e4``) blows up ``cortex_loss_ema`` because
+# the harness's ``_cortex_fusion_aux_step`` recomputes
+#   ``ce_cx = F.cross_entropy(cortex_logits.float(), targets)``
+# and unmapped-target CE ≈ |abstain| ≈ 10000 nats. A global modest
+# constant (e.g. -12) can be ABOVE the expert's mapped logits and
+# dominate the softmax → CE blows up the other way (observed
+# 17-nat ensemble CE on plain English with two gpt2-family experts).
+# The relative formulation is invariant to the expert's logit baseline.
+# Regression-pinned by ``tests/training/test_lm_expert_abstain_safety.py``.
+_ABSTAIN_LOGIT: float = -10.0  # legacy constant kept for back-compat
+                               # callers that don't use VocabBridge.apply
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -333,8 +352,32 @@ class VocabBridge:
         """Project ``(..., V_expert)`` logits into ``(..., V_trunk)`` space.
 
         For same-tok bridges this is a no-op (returns the input). For
-        cross-tok, gathers expert logits by the trunk→expert table and
-        masks unmapped trunk ids to ``_ABSTAIN_LOGIT``.
+        cross-tok bridges, gathers expert logits by the trunk→expert
+        table and fills unmapped trunk slots with a PER-POSITION abstain
+        value such that each unmapped slot carries roughly uniform
+        baseline mass (``1/V_trunk``) in the softmax.
+
+        Why per-position-relative
+        -------------------------
+        Pretrained LM logits have an arbitrary additive baseline
+        (gpt2's sit around -65; a freshly-init head sits around 0).
+        A *global* abstain constant has two failure modes:
+
+        * Too small (e.g. ``-1e4``): unmapped-target cross-entropy
+          explodes to ~10 000 nats per such position, poisoning
+          ``cortex_loss_ema`` and forcing ``α_eff → 0`` (deploy
+          40923107).
+        * Too large (e.g. ``-12``): abstain logits may sit ABOVE the
+          expert's mapped logits (gpt2 baseline ~-65) and dominate
+          the softmax → CE blows up the other way (~17 nats observed).
+
+        The per-position formulation ``abstain = max(mapped) -
+        ln(V_trunk)`` is invariant to the expert's logit baseline and
+        always yields ``p(unmapped slot) ≈ 1/V_trunk`` — exactly the
+        uniform fallback semantic of "expert abstains".
+
+        Regression-pinned by
+        ``tests/training/test_lm_expert_abstain_safety.py``.
         """
         if self.is_identity:
             return expert_logits
@@ -348,11 +391,32 @@ class VocabBridge:
         gathered = expert_logits.index_select(-1, idx_safe)
         # Mask the unmapped slots
         mask = (idx == -1).to(gathered.device)
-        if mask.any():
-            gathered = torch.where(
-                mask, torch.full_like(gathered, _ABSTAIN_LOGIT), gathered,
-            )
-        return gathered
+        if not mask.any():
+            return gathered
+
+        # Per-position abstain: ``max(mapped) - ln(V_trunk)``.
+        # We need the max OVER the mapped slots only — push unmapped
+        # values to -inf before taking amax so they don't contaminate
+        # the reference. Use float for the masked clone to keep dtypes
+        # consistent (no implicit promotion in `where`).
+        neg_inf = torch.full_like(gathered, float("-inf"))
+        mapped_only = torch.where(mask, neg_inf, gathered)
+        max_mapped = mapped_only.amax(dim=-1, keepdim=True)  # (..., 1)
+        # Degenerate case: all trunk slots unmapped in this row →
+        # amax is -inf. Use 0.0 as the reference (the abstain will
+        # then be -ln(V_trunk), i.e. plain uniform).
+        degenerate = ~torch.isfinite(max_mapped)
+        max_mapped = torch.where(
+            degenerate, torch.zeros_like(max_mapped), max_mapped,
+        )
+        ln_v = float(torch.log(torch.tensor(
+            float(self.vocab_size_trunk),
+            device=gathered.device, dtype=gathered.dtype,
+        )))
+        abstain = max_mapped - ln_v
+        # Fill the unmapped trunk slots with the per-position abstain
+        # value. Mapped slots keep their expert-derived logits.
+        return torch.where(mask, abstain.expand_as(gathered), gathered)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -534,9 +598,16 @@ class LMExpert(nn.Module):
         """
         B, T = ids.shape
         device = ids.device
-        out = torch.full(
+        # Initialize the output buffer to zeros so any trailing positions
+        # the per-sample bridge can't fill (e.g. ``t_count < T`` due to
+        # character-offset edge cases) softmax to a uniform distribution
+        # — CE = ln(V) on any target, the right "no information" baseline.
+        # Filling with a constant negative value (the old ``_ABSTAIN_LOGIT``)
+        # would inflate CE on trailing positions and re-introduce the
+        # deploy 40923107 ``α_eff → 0`` regression for non-full-coverage
+        # bridges.
+        out = torch.zeros(
             (B, T, self.vocab_size_trunk),
-            _ABSTAIN_LOGIT,
             device=device,
             dtype=torch.float32,
         )
