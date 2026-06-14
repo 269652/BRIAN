@@ -359,8 +359,36 @@ def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
     # trophic, mesoLG), seeded with the architecture's NT baselines.
     from neuroslm.dsl.metrics import MetricObserver
     nt_baselines = _nt_baselines_from_arch(arch_root)
-    harness._observer = MetricObserver(n_layers=depth, nt_baselines=nt_baselines)
+    harness._observer = MetricObserver(
+        n_layers=depth,
+        nt_baselines=nt_baselines,
+        # Item 6: when the arch declares `nt_w_trainable: true`, the
+        # DrivenNTSystem inside the observer exposes its 7×5 coupling
+        # matrix as an nn.Parameter so the optimiser can refine the
+        # NT-driver coupling end-to-end via the differentiable
+        # `predict_nt_tensor` readout. Off by default.
+        nt_w_trainable=bool(getattr(cfg, "nt_w_trainable", False)),
+    )
     harness.last_metrics = None
+
+    # Item 6: if W is trainable, register its single Parameter with
+    # the harness's optimiser so SGD actually updates it. The observer
+    # is not a submodule of the LM, so `harness.parameters()` would
+    # miss it without an explicit add_param_group on first optim
+    # construction. The harness handles this lazily in `train_step`
+    # via the `_extra_params` hook (added below).
+    if bool(getattr(cfg, "nt_w_trainable", False)):
+        nt_module = harness._observer._emergent["nt"]
+        if getattr(nt_module, "W_param", None) is not None:
+            existing = getattr(harness, "_extra_trainable_params", [])
+            harness._extra_trainable_params = list(existing) + [
+                nt_module.W_param
+            ]
+            print(
+                f"[train_dsl] Item 6: NT coupling matrix W "
+                f"({nt_module.W_param.numel()} scalars) registered as "
+                f"trainable Parameter."
+            )
 
     n_params = sum(p.numel() for p in harness.parameters())
     print(f"[train_dsl] DSL-LM parameters: {n_params/1e6:.1f}M")
@@ -781,7 +809,21 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
         ids, targets = source.next()
         if not tokens_per_step:
             tokens_per_step = ids.numel()
-        loss = harness.train_step(ids, targets)
+        # ── NT distribution: source the live homeostat dict from the
+        # PREVIOUS step's observer state and pass it into train_step.
+        # The observer is updated AFTER train_step below, so this dict
+        # is one step stale — negligible over a 2k-step run, and the
+        # natural ~1-step latency mirrors transcription delay in real
+        # NT signalling. At step 0 the observer hasn't been touched
+        # yet; `getattr` returns None and the harness leaves all NT
+        # consumers at their identity defaults (back-compat).
+        _live_nt = None
+        if observer is not None and observer.enable_emergent:
+            try:
+                _live_nt = observer._emergent["nt"].levels()
+            except Exception:
+                _live_nt = None
+        loss = harness.train_step(ids, targets, nt_levels=_live_nt)
         log_buf.append(loss)
         # `harness._last_lm_loss_value` is the LM-only CE (set inside
         # compute_loss before aux terms are added). When aux losses are

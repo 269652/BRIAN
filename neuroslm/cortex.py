@@ -442,12 +442,27 @@ class ThalamicRouter(nn.Module):
 
     followed by renormalisation. ``tau = 0.0`` is the identity case
     (no damping); ``tau = 0.9`` gives strong biological inertia.
+
+    NT-modulated routing temperature  (Item 2)
+    ------------------------------------------
+    The locus coeruleus (NE) is the brain's gain / arousal channel.
+    High NE sharpens routing (winner-take-most); low NE diffuses it
+    (mixture stays soft). With ``router_temp_nt_gain > 0`` and the
+    current NE level supplied via ``set_nt_levels({"NE": ...})``:
+
+       z_NE  = 2 * (NE - 0.5)                           # in [-1, +1]
+       mult  = clamp(1 + k_NE * z_NE, 0.1, 10.0)        # temperature multiplier
+       logits_T = logits * mult                         # same as dividing by T
+
+    The default (``router_temp_nt_gain = 0.0`` or no NT set) is
+    multiplier = 1 → bit-identical to the legacy path.
     """
 
     def __init__(self, vocab_size: int, d_model: int,
                  domains: Sequence[str], lexicon: DomainLexicon,
                  lexical_bias_weight: float = 2.0,
-                 bema_tau: float = 0.0):
+                 bema_tau: float = 0.0,
+                 router_temp_nt_gain: float = 0.0):
         super().__init__()
         if not 0.0 <= bema_tau < 1.0:
             raise ValueError(
@@ -455,6 +470,11 @@ class ThalamicRouter(nn.Module):
         if lexical_bias_weight < 0.0:
             raise ValueError(
                 f"lexical_bias_weight must be non-negative, got {lexical_bias_weight}")
+        if router_temp_nt_gain < 0.0:
+            raise ValueError(
+                f"router_temp_nt_gain must be non-negative (negative "
+                f"would flip the NE → sharpness polarity), got "
+                f"{router_temp_nt_gain}")
         self.domains = [str(d) for d in domains]
         self.n_cortices = len(self.domains)
         if self.n_cortices < 2:
@@ -462,7 +482,14 @@ class ThalamicRouter(nn.Module):
         self.lexicon = lexicon
         self.lexical_bias_weight = float(lexical_bias_weight)
         self.bema_tau = float(bema_tau)
+        self.router_temp_nt_gain = float(router_temp_nt_gain)
         self.vocab_size = int(vocab_size)
+
+        # NT level snapshot — the harness pushes the homeostat's NE
+        # value via set_nt_levels() before forward(). Default 0.5
+        # (centre of the [0, 1] sigmoid range) so z_NE = 0 and the
+        # multiplier stays at 1 if no NT is ever pushed.
+        self._ne_level: float = 0.5
 
         # Router-only token embedding (small, learnable)
         self.router_embed = nn.Embedding(vocab_size, d_model)
@@ -523,6 +550,24 @@ class ThalamicRouter(nn.Module):
 
     # ── public ───────────────────────────────────────────────────────
 
+    def set_nt_levels(self, levels: "Mapping[str, float]") -> None:
+        """Push the current neuromodulator levels into the router.
+
+        Only the ``"NE"`` key is consumed today (drives the routing
+        softmax temperature — Item 2). Other keys are silently ignored
+        so the caller can pass the whole ``NTSystem.levels()`` dict
+        without filtering. Out-of-range values are clamped to
+        ``[0, 1]`` (NTs are sigmoid-bounded by construction).
+        """
+        if levels is None:
+            return
+        ne = levels.get("NE")
+        if ne is None:
+            return
+        # Clamp defensively — homeostat sigmoid guarantees [0, 1] but
+        # tests may push synthetic levels for sharpness assertions.
+        self._ne_level = max(0.0, min(1.0, float(ne)))
+
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         """``ids: (B, T)`` ⇒ routing weights ``(B, T, N)``."""
         if ids.dim() != 2:
@@ -531,6 +576,18 @@ class ThalamicRouter(nn.Module):
         h = self.router_embed(ids)                                  # (B, T, d)
         learn = self.learnable_logits(h)                            # (B, T, N)
         logits = bias + learn
+
+        # Item 2: NE-driven temperature. Multiplier > 1 sharpens,
+        # < 1 softens. Both are clamped to [0.1, 10.0] for numerical
+        # safety. With k_NE = 0 (default) the multiplier is exactly 1
+        # so this path is bit-identical to the legacy router.
+        if self.router_temp_nt_gain > 0.0:
+            z_ne = 2.0 * (self._ne_level - 0.5)                     # [-1, +1]
+            raw_mult = 1.0 + self.router_temp_nt_gain * z_ne
+            mult = max(0.1, min(10.0, raw_mult))
+            if mult != 1.0:
+                logits = logits * mult
+
         weights = F.softmax(logits, dim=-1)
         return self._apply_bema(weights)
 
@@ -539,6 +596,122 @@ class ThalamicRouter(nn.Module):
                 f"domains={self.domains}, "
                 f"lexical_bias_weight={self.lexical_bias_weight}, "
                 f"bema_tau={self.bema_tau}")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Lateral expert inhibition  (Item 4 — Mexican-hat / WTA via GABA)
+# ──────────────────────────────────────────────────────────────────────
+
+class LateralInhibition(nn.Module):
+    """Divisive lateral inhibition between expert routing weights.
+
+    Motivation
+    ----------
+    The softmax router can stay in a soft-tie equilibrium (e.g.
+    ``0.45 / 0.45 / 0.10``) for the whole run — there is no
+    mathematical pressure to actually *pick* one expert. Real cortex
+    avoids this with lateral GABAergic inhibition: a strongly firing
+    pyramidal cell recruits interneurons that suppress its neighbours.
+    The classical model is divisive normalisation
+    (Carandini & Heeger 2012, *Normalization as a canonical neural
+    computation*), which is exactly what this module implements.
+
+    Formula
+    -------
+    Given routing weights ``w_i`` on the simplex ``Δ^N`` per token:
+
+        rival_mass_i   = Σ_{j≠i} w_j            = (Σ_j w_j) − w_i
+        suppressed_i   = w_i / (1 + κ_eff · rival_mass_i)
+        w_i'           = suppressed_i / Σ_j suppressed_j
+
+    The effective inhibition strength is gated by the GABA channel:
+
+        κ_eff = κ_base · clamp(GABA, 0, 1)
+
+    so the legacy path is preserved unless **both** ``κ_base > 0`` and
+    a positive ``GABA`` level have been pushed via
+    :meth:`set_nt_levels`.
+
+    Why divisive (not subtractive)
+    ------------------------------
+    Subtractive inhibition (``w_i − κ · rival_mass``) requires a hard
+    ``max(0, ·)`` floor which has zero gradient for suppressed experts —
+    pathological for training. Divisive normalisation cannot go
+    negative, has a smooth gradient everywhere, and matches
+    biophysical shunting inhibition at the membrane.
+
+    Output guarantees
+    -----------------
+    * Always on the simplex (sums to 1 within float tol).
+    * Always non-negative.
+    * Identity when ``κ_base = 0`` OR ``GABA = 0``.
+    * Identity for uniform inputs (rival_mass is the same scalar for
+      every component → renormalise reverts it).
+    * Gradient flows end-to-end (no detach, no hard floors).
+    """
+
+    def __init__(self, kappa_base: float = 0.0) -> None:
+        super().__init__()
+        if kappa_base < 0.0:
+            raise ValueError(
+                f"kappa_base must be non-negative (negative would amplify "
+                f"rivals, breaking the WTA semantics), got {kappa_base}"
+            )
+        self.kappa_base = float(kappa_base)
+        # GABA snapshot — the harness pushes via set_nt_levels() each
+        # training step. Default 0.0 means the module is fully identity
+        # until BOTH κ_base > 0 AND a positive GABA level have been
+        # explicitly pushed. This mirrors the safe default of
+        # ThalamicRouter's NE channel (centre → no effect).
+        self._gaba_level: float = 0.0
+
+    # ── public ───────────────────────────────────────────────────────
+
+    def set_nt_levels(self, levels: "Mapping[str, float]") -> None:
+        """Push the current neuromodulator levels into the inhibitor.
+
+        Only the ``"GABA"`` key is consumed. Other NT keys are silently
+        ignored so the caller can pass the whole ``NTSystem.levels()``
+        dict without filtering. Out-of-range values are clamped to
+        ``[0, 1]`` (NTs are sigmoid-bounded by construction).
+        """
+        if levels is None:
+            return
+        gaba = levels.get("GABA")
+        if gaba is None:
+            return
+        self._gaba_level = max(0.0, min(1.0, float(gaba)))
+
+    def forward(self, weights: torch.Tensor) -> torch.Tensor:
+        """``weights: (..., N)`` on the simplex ⇒ post-inhibition weights.
+
+        The output is guaranteed to be on the simplex and non-negative
+        regardless of κ_eff or the input distribution.
+        """
+        if weights.dim() < 1:
+            raise ValueError(
+                f"expected weights with at least one dim (last = N), "
+                f"got shape {tuple(weights.shape)}"
+            )
+
+        # Identity short-circuits — both make this module a no-op.
+        if self.kappa_base <= 0.0 or self._gaba_level <= 0.0:
+            return weights
+
+        # κ scales linearly with GABA; at GABA = 1 the full κ_base is
+        # in effect. Linear (not z-centred) because GABA acts in an
+        # additive concentration sense, not as a centred deviation.
+        kappa_eff = self.kappa_base * self._gaba_level
+        if kappa_eff <= 0.0:                    # defensive — shouldn't fire
+            return weights
+
+        sum_all = weights.sum(dim=-1, keepdim=True)         # (..., 1)
+        rival_mass = sum_all - weights                       # (..., N)
+        suppressed = weights / (1.0 + kappa_eff * rival_mass)
+        return suppressed / suppressed.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+
+    def extra_repr(self) -> str:    # pragma: no cover
+        return f"kappa_base={self.kappa_base}"
 
 
 # ──────────────────────────────────────────────────────────────────────

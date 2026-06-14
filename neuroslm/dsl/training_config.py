@@ -515,6 +515,38 @@ class MultiCortexConfig:
     inhibition_ema_alpha: float = 0.05
     inhibition_temperature: float = 1.0     # nats of gap → full inhibition
 
+    # ── Item 2: NT → router temperature (NE-driven sharpness) ──
+    # The locus coeruleus (NE) is the brain's gain channel. With
+    # `router_temp_nt_gain > 0`, the harness pushes the homeostat's
+    # NE level into `ThalamicRouter.set_nt_levels()` before each
+    # forward and the router logits are multiplied by
+    #   mult = clamp(1 + k_NE * 2 * (NE - 0.5), 0.1, 10.0)
+    # before softmax. mult > 1 ⇒ sharper routing (winner-take-most),
+    # mult < 1 ⇒ softer (mixture mode). Default 0.0 ⇒ identity.
+    router_temp_nt_gain: float = 0.0
+
+    # ── Item 3: NT → distillation λ (DA/5HT-driven trust schedule) ──
+    # The harness already ramps λ piecewise-linearly in the EMA gap
+    # `lm_loss_ema - cortex_loss_ema`. With these gains > 0, the
+    # gap-ramp value is then multiplied by
+    #   nt_mult = clamp(1 + k_5HT*z_5HT - k_DA*z_DA, 0, 2)
+    # so the trunk leans HARDER on the cortex teacher when 5HT is
+    # high (stress / conservatism) and LESS when DA is high (reward /
+    # explore). Both default to 0.0 ⇒ identity (back-compat).
+    distillation_5ht_gain: float = 0.0
+    distillation_da_gain: float = 0.0
+
+    # ── Item 4: Lateral expert inhibition (Mexican-hat / WTA via GABA) ──
+    # When `lateral_inhibition_kappa > 0`, a `LateralInhibition` module
+    # is inserted between the router and the per-expert mixing. It
+    # implements divisive normalisation (Carandini & Heeger 2012-style):
+    #   suppressed_i = w_i / (1 + κ_eff · Σ_{j≠i} w_j)
+    #   w'_i         = suppressed_i / Σ_j suppressed_j
+    # with κ_eff = κ_base · GABA_level (linear, [0, κ_base]).
+    # The harness pushes the live GABA level via
+    # `ensemble.set_nt_levels(...)` each step. Default 0.0 ⇒ identity.
+    lateral_inhibition_kappa: float = 0.0
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Multi-Objective Fitness — Phase A/F1 (central selection-pressure switch)
@@ -685,6 +717,18 @@ class TrainingConfig:
     # and weakens under cortical inhibition (GABA up). Other NTs are
     # left agnostic to avoid double-counting with the homeostat.
     pc_reentry_nt_gate: bool = False
+    # ── Item 6: trainable NT coupling matrix W ────────────────────────
+    # When True, the DrivenNTSystem exposes its 7×5 driver→channel
+    # coupling matrix as an ``nn.Parameter`` of shape (7, 5). The
+    # *float* OU dynamics in ``step_full`` are unchanged (still use
+    # the float ``self._W`` dict), so this knob never alters the
+    # behaviour of ``levels()`` on its own. Gradient flows back to
+    # ``W_param`` only through the differentiable readout
+    # ``predict_nt_tensor(drivers)`` — the harness can use that
+    # tensor wherever NT levels modulate trainable parameters
+    # (router temperature, distillation λ, lateral inhibition κ) to
+    # let the optimiser refine the coupling end-to-end.
+    nt_w_trainable: bool = False
     # ── Variational Bowtie Bottleneck (VBB) — Jun 2026 ────────────────
     # Upgrades the C3 PC-reentry from a plain squared residual into a
     # *variational free-energy* term at the bowtie waist. When
@@ -951,6 +995,9 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.pc_reentry_weight = float(props["pc_reentry_weight"])
     if "pc_reentry_nt_gate" in props:
         cfg.pc_reentry_nt_gate = _parse_bool(props["pc_reentry_nt_gate"])
+    # ── Item 6: trainable NT coupling matrix W ──
+    if "nt_w_trainable" in props:
+        cfg.nt_w_trainable = _parse_bool(props["nt_w_trainable"])
     if "vbb_alpha" in props:
         cfg.vbb_alpha = float(props["vbb_alpha"])
     if "vbb_beta_init" in props:
@@ -1308,6 +1355,20 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
         m.inhibition_ema_alpha = float(props["inhibition_ema_alpha"])
     if "inhibition_temperature" in props:
         m.inhibition_temperature = float(props["inhibition_temperature"])
+
+    # ── Item 2: NT → router temperature ──
+    if "router_temp_nt_gain" in props:
+        m.router_temp_nt_gain = float(props["router_temp_nt_gain"])
+
+    # ── Item 3: NT → distillation λ ──
+    if "distillation_5ht_gain" in props:
+        m.distillation_5ht_gain = float(props["distillation_5ht_gain"])
+    if "distillation_da_gain" in props:
+        m.distillation_da_gain = float(props["distillation_da_gain"])
+
+    # ── Item 4: Lateral expert inhibition (κ_base; GABA pushed by harness) ──
+    if "lateral_inhibition_kappa" in props:
+        m.lateral_inhibition_kappa = float(props["lateral_inhibition_kappa"])
 
     # ── Per-expert roster (new path, replaces ``weights`` shorthand) ──
     # `experts: [ { id: "gpt2", domain: "general", freeze: true }, ... ]`

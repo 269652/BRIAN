@@ -205,7 +205,38 @@ training {
         # scale).
         inhibition_enabled:        true,
         inhibition_ema_alpha:      0.05,
-        inhibition_temperature:    1.0
+        inhibition_temperature:    1.0,
+
+        # ── Item 2 (Jun 2026): NE → router temperature ──
+        # The locus coeruleus (NE) is the brain's gain channel. With
+        # this gain > 0 the harness pushes the live NE level into the
+        # router each step; logits are multiplied by
+        #   mult = clamp(1 + k_NE·z_NE, 0.1, 10.0)
+        # before softmax. mult > 1 sharpens routing (winner-take-most),
+        # mult < 1 softens it. k_NE = 0.5 gives a ±50% logit-scale
+        # swing across NE ∈ [0, 1], plenty to register without ever
+        # collapsing the softmax to a one-hot.
+        router_temp_nt_gain:       0.5,
+
+        # ── Item 3 (Jun 2026): 5HT/DA → distillation λ ──
+        # The gap-ramp λ is multiplied by
+        #   nt_mult = clamp(1 + k_5HT·z_5HT − k_DA·z_DA, 0, 2)
+        # so the trunk LEANS HARDER on the cortex when 5HT is high
+        # (stress / conservatism — trust the teacher) and LESS when
+        # DA is high (reward / explore — go your own way). Identical
+        # gains (0.4) keep the two channels balanced; an asymmetric
+        # split would prejudge the policy.
+        distillation_5ht_gain:     0.4,
+        distillation_da_gain:      0.4,
+
+        # ── Item 4 (Jun 2026): GABA → lateral expert inhibition ──
+        # κ_eff = κ_base · GABA. With κ_base = 0.5 and GABA at its
+        # baseline (~0.15) the effective inhibition is ~0.075 — a
+        # gentle nudge toward specialisation that ramps as the
+        # homeostat raises GABA during high-ignition phases. The
+        # divisive normalisation is unconditionally on the simplex
+        # so the routing weights stay well-formed regardless of κ.
+        lateral_inhibition_kappa:  0.5
     }
     # ── Synthetic HPA axis — slow homeostatic stress damping ──────
     # The existing neuromod stack has fast feedback (Homeostasis bumps
@@ -301,6 +332,26 @@ training {
     # other parts of the homeostat).
     pc_reentry_weight:  0.1
     pc_reentry_nt_gate: true
+
+    # ── Item 6 (Jun 2026): trainable NT coupling matrix W ──
+    # When true, the DrivenNTSystem exposes its 7×5 driver→channel
+    # coupling matrix as an nn.Parameter (35 extra trainable scalars
+    # vs ~900M trunk + cortex params — negligible). The float OU
+    # dynamics in step_full() remain unchanged, so this flag never
+    # alters the numerical trajectory of `levels()` on its own.
+    # Gradient flows back to W_param only through differentiable
+    # downstream uses (router temperature, distillation λ, lateral
+    # inhibition κ) via predict_nt_tensor().
+    #
+    # SHIPPED DISABLED for the B5 sweep: Items 2/3/4 push float NT
+    # values into their consumers via plain dict `levels()`, which is
+    # all the optimisation signal we need to validate the GABA / NE /
+    # 5HT / DA mechanisms in isolation. Flipping this to `true` would
+    # add 35 trainable scalars whose gradient path is not yet wired
+    # to the consumers (would receive identically-zero grad → adds
+    # noise without learning signal). Re-enable once predict_nt_tensor
+    # is plumbed into the router / inhibition / distillation modules.
+    nt_w_trainable:     false
 
     # ── Variational Bowtie Bottleneck (VBB) — Jun 2026 surgery ──
     # The plain C3 PC-reentry residual was acting as a self-distillation

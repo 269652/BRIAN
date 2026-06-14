@@ -75,7 +75,137 @@ __all__ = [
     "_load_lm_cached",
     "_load_tokenizer_cached",
     "build_lm_expert_ensemble",
+    "register_expert_alias",
+    "resolve_expert_alias",
 ]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Expert model alias registry — DSL-level plug-and-play (Item 5)
+# ──────────────────────────────────────────────────────────────────────
+#
+# The DSL author writes a short alias (``smollm2_360m``), a full HF
+# model id (``HuggingFaceTB/SmolLM2-360M``), or an ``hf://`` URL. The
+# resolver normalises any of these to a canonical HF model id, which
+# is what every loading path inside ``LMExpert`` actually consumes.
+#
+# Why a registry instead of "just pass the HF id":
+# 1. **Typo safety on bare names.** A bare alias without ``/`` (e.g.
+#    ``smollm_360m``) is checked against the registry; if missing, we
+#    raise a ValueError listing the known aliases. The user finds the
+#    typo before the HF hub returns a 404.
+# 2. **Stable short names in arch.neuro.** ``smollm2_360m`` is easier
+#    to read in a 1200-line arch file than ``HuggingFaceTB/SmolLM2-360M``
+#    and gives us a single place to update if a vendor renames a repo.
+# 3. **One canonical form per model.** The cache (``_LM_CACHE``,
+#    ``_TOKENIZER_CACHE``, ``_VOCAB_BRIDGE_CACHE``) is keyed on the
+#    canonical id, so loading via an alias and via its HF id share one
+#    cache entry.
+#
+# Registration:
+#   * Built-in entries below cover the families we ship support for.
+#   * ``register_expert_alias("new_alias", "owner/repo")`` extends the
+#     registry at runtime (used by tests; production arch.neuro should
+#     prefer the canonical HF id for novel models).
+_EXPERT_ALIAS_REGISTRY: "dict[str, str]" = {
+    # Legacy GPT-2 family — bare names are HF-canonical (no owner prefix
+    # needed; the HF hub accepts them directly).
+    "gpt2":         "gpt2",
+    "gpt2-medium":  "gpt2-medium",
+    "gpt2-large":   "gpt2-large",
+    "gpt2-xl":      "gpt2-xl",
+    "distilgpt2":   "distilgpt2",
+    # SmolLM2 — HuggingFaceTB's compact, 4T-token-trained family.
+    # Card: https://huggingface.co/HuggingFaceTB/SmolLM2-360M
+    "smollm2_135m": "HuggingFaceTB/SmolLM2-135M",
+    "smollm2_360m": "HuggingFaceTB/SmolLM2-360M",
+    "smollm2_1_7b": "HuggingFaceTB/SmolLM2-1.7B",
+    # Qwen2.5 — strong small-LM reasoning baseline.
+    "qwen2_5_0_5b": "Qwen/Qwen2.5-0.5B",
+    "qwen2_5_1_5b": "Qwen/Qwen2.5-1.5B",
+    # Microsoft code SLM — the current `code` expert in arch.neuro.
+    "codegpt_py":   "microsoft/CodeGPT-small-py",
+}
+
+
+def resolve_expert_alias(model_id_or_alias: str) -> str:
+    """Resolve a DSL-side expert id to a canonical HuggingFace model id.
+
+    Resolution rules (first match wins):
+
+    1. ``hf://owner/repo``  →  ``owner/repo`` (URL scheme strip).
+    2. ``owner/repo``       →  identity (already canonical; we trust
+                               any string with a ``/`` because checking
+                               existence would require a network call).
+    3. Bare name in the registry → registered canonical id.
+    4. Bare name NOT in the registry → ``ValueError`` listing the
+       known aliases (typo safety).
+
+    The function is **pure** — no HF I/O, no caching. Safe to call
+    in tests and DSL parsing.
+    """
+    if not isinstance(model_id_or_alias, str) or not model_id_or_alias:
+        raise ValueError(
+            f"resolve_expert_alias: expected a non-empty string, "
+            f"got {model_id_or_alias!r}"
+        )
+    s = model_id_or_alias.strip()
+
+    # Rule 1: URL scheme strip.
+    if s.startswith("hf://"):
+        return s[len("hf://"):]
+
+    # Rule 2: owner/repo form is always canonical (trust + typo escape).
+    if "/" in s:
+        return s
+
+    # Rule 3: bare name in registry.
+    if s in _EXPERT_ALIAS_REGISTRY:
+        return _EXPERT_ALIAS_REGISTRY[s]
+
+    # Rule 4: typo. List known aliases sorted for a stable error message.
+    known = sorted(_EXPERT_ALIAS_REGISTRY.keys())
+    raise ValueError(
+        f"resolve_expert_alias: unknown expert alias {s!r}. "
+        f"Either use a HuggingFace ``owner/repo`` id, the ``hf://`` URL "
+        f"form, or register an alias first. Known aliases: {known}"
+    )
+
+
+def register_expert_alias(alias: str, canonical_hf_id: str) -> None:
+    """Register a new alias → canonical HF id mapping.
+
+    ``alias``         must be a bare name (no ``/``); enforced.
+    ``canonical_hf_id`` must contain ``/`` (i.e. ``owner/repo``),
+                       except for the legacy gpt2 family which is
+                       pre-registered with bare names.
+
+    Idempotent: re-registering with the same target is a no-op;
+    re-registering with a different target overwrites.
+    """
+    if not isinstance(alias, str) or not alias or "/" in alias:
+        raise ValueError(
+            f"register_expert_alias: alias must be a bare name "
+            f"(no ``/``), got {alias!r}"
+        )
+    if not isinstance(canonical_hf_id, str) or not canonical_hf_id:
+        raise ValueError(
+            f"register_expert_alias: canonical_hf_id must be a "
+            f"non-empty string, got {canonical_hf_id!r}"
+        )
+    # Refuse to register a bare-name target — that's an alias chain
+    # waiting to break. The only exception is the legacy gpt2 family
+    # which the hub accepts as canonical (and is pre-seeded above).
+    if "/" not in canonical_hf_id:
+        legacy_ok = {"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl",
+                     "distilgpt2"}
+        if canonical_hf_id not in legacy_ok:
+            raise ValueError(
+                f"register_expert_alias: canonical_hf_id {canonical_hf_id!r} "
+                f"must be of the form ``owner/repo``. Bare names are only "
+                f"allowed for the pre-seeded legacy gpt2 family."
+            )
+    _EXPERT_ALIAS_REGISTRY[alias] = canonical_hf_id
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -496,7 +626,7 @@ class LMExpert(nn.Module):
                 "Install it with: pip install transformers"
             ) from exc
 
-        self.model_id = str(model_id)
+        self.model_id = resolve_expert_alias(str(model_id))
         self.domain = str(domain)
         # Frozen experts share weights process-wide (see _LM_CACHE
         # comment). Unfrozen experts bypass the cache so training
@@ -701,6 +831,7 @@ class LMExpertEnsemble(nn.Module):
         self,
         experts: Sequence[LMExpert],
         router,                         # ThalamicRouter (avoid circular import)
+        lateral_inhibition=None,        # Optional[LateralInhibition] (Item 4)
     ) -> None:
         super().__init__()
         experts = list(experts)
@@ -717,12 +848,34 @@ class LMExpertEnsemble(nn.Module):
             )
         self.experts = nn.ModuleList(experts)
         self.router = router
+        # Item 4: optional Mexican-hat / WTA inhibition on routing
+        # weights. `None` (default) → pass-through (legacy behaviour).
+        # When present, applied between router output and weighted sum.
+        self.lateral_inhibition = lateral_inhibition
         self.domains: List[str] = expert_domains
         self._last_routing_weights: Optional[torch.Tensor] = None
 
     @property
     def last_routing_weights(self) -> Optional[torch.Tensor]:
         return self._last_routing_weights
+
+    def set_nt_levels(self, levels) -> None:
+        """Push the current neuromodulator levels into all
+        NT-modulated sub-modules of the ensemble.
+
+        The harness calls this once per training step with the full
+        ``NTSystem.levels()`` dict; each sub-module picks the NT key
+        it cares about (NE for the router, GABA for the inhibitor)
+        and silently ignores the rest.
+        """
+        if levels is None:
+            return
+        if hasattr(self.router, "set_nt_levels"):
+            self.router.set_nt_levels(levels)
+        if self.lateral_inhibition is not None and hasattr(
+            self.lateral_inhibition, "set_nt_levels"
+        ):
+            self.lateral_inhibition.set_nt_levels(levels)
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         """Mixture of expert logits, router-weighted per token."""
@@ -732,6 +885,9 @@ class LMExpertEnsemble(nn.Module):
             )
 
         weights = self.router(ids)               # (B, T, N)
+        # Item 4: divisive lateral inhibition (no-op when disabled).
+        if self.lateral_inhibition is not None:
+            weights = self.lateral_inhibition(weights)
         self._last_routing_weights = weights
 
         # Compute every expert's logits in trunk-vocab space.
@@ -763,6 +919,7 @@ def build_lm_expert_ensemble(
     lexical_bias_weight: float = 2.0,
     bema_tau: float = 0.5,
     lexicon=None,                  # Optional DomainLexicon; built if None
+    lateral_inhibition_kappa: float = 0.0,   # Item 4 — Mexican-hat WTA
 ) -> "LMExpertEnsemble":
     """Build an :class:`LMExpertEnsemble` from a list of expert specs.
 
@@ -886,7 +1043,23 @@ def build_lm_expert_ensemble(
             freeze=bool(getattr(spec, "freeze", True)),
         ))
 
-    return LMExpertEnsemble(experts=lm_experts, router=router)
+    # ── Build optional lateral inhibition (Item 4) ────────────────────
+    # `lateral_inhibition_kappa > 0` is required to enable; the harness
+    # then pushes the live GABA level via `ensemble.set_nt_levels(...)`
+    # each step. Even with κ_base > 0, GABA = 0 keeps the module fully
+    # identity, so it never silently changes routing behaviour.
+    inhibition = None
+    if float(lateral_inhibition_kappa) > 0.0:
+        from neuroslm.cortex import LateralInhibition
+        inhibition = LateralInhibition(
+            kappa_base=float(lateral_inhibition_kappa)
+        )
+
+    return LMExpertEnsemble(
+        experts=lm_experts,
+        router=router,
+        lateral_inhibition=inhibition,
+    )
 
 
 class _UniformSingletonRouter(nn.Module):

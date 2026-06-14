@@ -755,6 +755,17 @@ class BRIANHarness(nn.Module):
             floor < gap < ceil  → linear interp
             gap ≥ ceiling       → lambda_max    (trunk much worse)
 
+        Item 3 (NT-mod). When either ``distillation_5ht_gain`` or
+        ``distillation_da_gain`` is non-zero, the gap-ramp value is
+        multiplied by
+
+            nt_mult = clamp(1 + k_5HT * z_5HT - k_DA * z_DA, 0, 2)
+
+        with ``z_X = 2 * (level - 0.5) ∈ [-1, +1]``. NT levels are read
+        from ``self._nt_levels_for_distill`` (the harness pushes the
+        homeostat readout there each step). Missing channels default
+        to ``0.5`` so the multiplier collapses to ``1`` (identity).
+
         Returns 0.0 unconditionally when `multi_cortex.distillation_enabled`
         is False, so the entire term collapses to a no-op for back-compat.
         """
@@ -765,11 +776,27 @@ class BRIANHarness(nn.Module):
         ceiling = float(cfg.distillation_gap_ceiling)
         lam_max = float(cfg.distillation_lambda_max)
         if gap_nats <= floor:
-            return 0.0
-        if gap_nats >= ceiling:
-            return lam_max
-        # Linear interpolation
-        return lam_max * (gap_nats - floor) / (ceiling - floor)
+            base = 0.0
+        elif gap_nats >= ceiling:
+            base = lam_max
+        else:
+            base = lam_max * (gap_nats - floor) / (ceiling - floor)
+
+        # Item 3: NT modulation. Skip the work when both gains are 0
+        # so back-compat callers see bit-identical behaviour.
+        k_5ht = float(getattr(cfg, "distillation_5ht_gain", 0.0))
+        k_da  = float(getattr(cfg, "distillation_da_gain", 0.0))
+        if k_5ht == 0.0 and k_da == 0.0:
+            return base
+
+        nt_levels = getattr(self, "_nt_levels_for_distill", None) or {}
+        ht5 = float(nt_levels.get("5HT", 0.5))
+        da  = float(nt_levels.get("DA", 0.5))
+        z_5ht = 2.0 * (ht5 - 0.5)
+        z_da  = 2.0 * (da - 0.5)
+        nt_mult = 1.0 + k_5ht * z_5ht - k_da * z_da
+        nt_mult = max(0.0, min(2.0, nt_mult))
+        return base * nt_mult
 
     def _update_cortex_inhibition(
         self, lm_loss: float, cortex_loss: float,
@@ -1535,6 +1562,43 @@ class BRIANHarness(nn.Module):
             pass
         return loss
 
+    # ── NT distribution seam ──────────────────────────────────────────
+
+    def distribute_nt_levels(self, levels: Optional[Dict[str, float]]) -> None:
+        """Fan out the live neuromodulator dict to every consumer.
+
+        Single seam called by :meth:`compute_loss` whenever a fresh
+        NT dict is available (the training loop sources it from the
+        observer's :class:`~neuroslm.emergent.DrivenNTSystem`).
+
+        Consumers (each one a no-op if the relevant gain is 0):
+
+        * ``self._nt_levels_for_distill`` — read inside
+          :meth:`_distillation_lambda` for the 5HT/DA-modulated
+          distillation strength multiplier (Item 3).
+        * ``self.multi_cortex.set_nt_levels(levels)`` if supported —
+          the new :class:`LMExpertEnsemble` forwards to both:
+            - its ``ThalamicRouter`` (NE → routing-softmax sharpness,
+              Item 2),
+            - its optional ``LateralInhibition`` (GABA → Mexican-hat
+              κ, Item 4).
+          The legacy ``MultiCortexEnsemble`` doesn't expose this
+          method — we silently skip the push for back-compat.
+
+        Passing ``None`` is a no-op so callers can be permissive.
+        """
+        if levels is None:
+            return
+        # Items 3 + (downstream uses): the gap-ramp ×NT-multiplier
+        # distillation reads this dict by name in `_distillation_lambda`.
+        self._nt_levels_for_distill = dict(levels)
+        # Items 2 + 4: the new expert ensemble fans out internally to
+        # router (NE) and lateral inhibition (GABA). Polymorphic guard
+        # for the legacy MultiCortexEnsemble which has no such method.
+        mc = getattr(self, "multi_cortex", None)
+        if mc is not None and hasattr(mc, "set_nt_levels"):
+            mc.set_nt_levels(levels)
+
     def compute_loss(self, ids: torch.Tensor, targets: torch.Tensor,
                      nt_levels: Optional[Dict[str, float]] = None) -> torch.Tensor:
         """Cross-entropy loss with optional per-sample clipping + aux losses.
@@ -1562,6 +1626,14 @@ class BRIANHarness(nn.Module):
           * `_last_cpc_loss`         → 'cpc'
           * `_last_phi_loss`         → 'phi'
         """
+        # ── NT-distribution seam: push the live homeostat dict to every
+        # consumer BEFORE the forward fires.  This is what activates
+        # Items 2/3/4 — without it the router temp, lateral-inhibition
+        # κ, and distillation λ all stay at their centre defaults
+        # forever.  No-op when `nt_levels` is None (back-compat).
+        if nt_levels is not None:
+            self.distribute_nt_levels(nt_levels)
+
         # ── MAT-phase-gated mechanism multipliers ──
         # If the arch declared `mechanisms { dropout: { strength, phase_gate },
         # pct_trunk: { ... } }`, refresh the cortex's runtime multipliers
@@ -2226,6 +2298,29 @@ class BRIANHarness(nn.Module):
                 )
         else:
             raise ValueError(f"unsupported optimizer {opt_name!r}")
+
+        # Item 6: tiny NT-coupling Parameters (DrivenNTSystem.W_param)
+        # live OUTSIDE the harness module tree (the observer is a
+        # sidecar, not a submodule), so `self.parameters()` doesn't
+        # pick them up. Register them as a separate param group so the
+        # optimiser actually updates them. Same LR/WD as the main
+        # group — there are only 35 scalars, so the choice is moot.
+        extra = list(getattr(self, "_extra_trainable_params", []) or [])
+        if extra:
+            already = set()
+            for g in self._optimizer.param_groups:
+                for p in g["params"]:
+                    already.add(id(p))
+            fresh = [p for p in extra if id(p) not in already]
+            if fresh:
+                self._optimizer.add_param_group({
+                    "params": fresh, "lr": lr, "weight_decay": wd,
+                })
+                print(
+                    f"[harness] Item 6 / extras: added {len(fresh)} "
+                    f"extra trainable Parameter(s) to optimiser as a "
+                    f"new param group"
+                )
 
         # Stage 3 OOD push: wrap the optimizer with BEMA when enabled.
         rw = self.training_config.bema_rollback_window

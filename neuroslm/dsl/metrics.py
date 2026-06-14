@@ -240,7 +240,8 @@ class MetricObserver:
     def __init__(self, n_layers: int,
                  nt_baselines: Optional[Dict[str, float]] = None,
                  enable_emergent: bool = True,
-                 emergent_dim: Optional[int] = None):
+                 emergent_dim: Optional[int] = None,
+                 nt_w_trainable: bool = False):
         self.n_layers = n_layers
         self.nt = NTSystem(nt_baselines)
         self.trophic = TrophicSystem(n_projections=n_layers)
@@ -260,7 +261,16 @@ class MetricObserver:
                 TopologicalChargeProbe, BowtieLatticeProbe, PACBindingProbe,
             )
             self._emergent = {
-                "nt":      DrivenNTSystem(baselines=nt_baselines),
+                # Item 6: when nt_w_trainable=True the OU coupling matrix
+                # is exposed as a (7, 5) nn.Parameter. The float OU
+                # dynamics in step_full() are unchanged either way, so
+                # `levels()` is bit-identical — only `predict_nt_tensor()`
+                # carries the gradient path that lets the optimiser
+                # refine W.
+                "nt":      DrivenNTSystem(
+                    baselines=nt_baselines,
+                    trainable_W=bool(nt_w_trainable),
+                ),
                 "ign":     MetastableIgnition(),
                 "pc":      None,                # constructed on first call (need dim)
                 "topo":    None,                # constructed on first call

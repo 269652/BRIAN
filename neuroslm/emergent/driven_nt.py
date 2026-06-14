@@ -44,6 +44,9 @@ from __future__ import annotations
 import math
 from typing import Dict, Optional
 
+import torch
+import torch.nn as nn
+
 
 _CHANNELS = ("DA", "NE", "5HT", "ACh", "eCB", "Glu", "GABA")
 _DRIVERS = ("surprise", "grad_norm", "activation", "ignition", "attn_sharp")
@@ -118,8 +121,25 @@ class _RunningStats:
         sd = math.sqrt(max(self.var, 1e-8))
         return (x - self.mean) / sd
 
+    def peek(self, x: float) -> float:
+        """Return the z-score of ``x`` against the *current* running
+        stats WITHOUT updating them.
 
-class DrivenNTSystem:
+        Used by the differentiable readout ``predict_nt_tensor`` so
+        repeated readouts on the same step are idempotent and the
+        stats only advance via ``update`` inside ``step_full``.
+
+        Mirrors the warmup semantics of :meth:`update`: returns 0
+        during warmup (``n < 5``) or before any sample (``n == 0``).
+        """
+        x = float(x)
+        if self.n < 5:
+            return 0.0
+        sd = math.sqrt(max(self.var, 1e-8))
+        return (x - self.mean) / sd
+
+
+class DrivenNTSystem(nn.Module):
     """Seven-channel NT homeostat (OU in logit space, σ at readout).
 
     Drop-in replacement for ``dsl.metrics.NTSystem``: exposes the same
@@ -143,6 +163,19 @@ class DrivenNTSystem:
         ⇒ ~200-step half-life: slow enough that a regime shift gives
         sustained nonzero z for the channels to integrate, fast enough
         to eventually re-baseline so the readout never ratchets.
+    trainable_W : bool, default False
+        Item 6 — when True, expose ``self.W_param`` as an
+        ``nn.Parameter`` of shape ``(7, 5)`` initialised from the
+        active ``W`` dict (rows in :data:`_CHANNELS` order, columns in
+        :data:`_DRIVERS` order). The optimizer can then refine the
+        coupling matrix end-to-end via :meth:`predict_nt_tensor`.
+
+        The float OU dynamics in :meth:`step_full` remain unchanged
+        (they always use the float dict ``self._W``, which is a
+        detached snapshot), so enabling ``trainable_W`` never alters
+        the numerical trajectory of ``levels()`` on its own. Gradient
+        only flows through the *instantaneous* readout returned by
+        :meth:`predict_nt_tensor`.
 
     Back-compat kwargs (``taus``, ``surprise_window``, ``slow_loss_alpha``,
     ``fast_loss_alpha``, ``gnorm_alpha``, ``ignition_target``) are
@@ -165,6 +198,7 @@ class DrivenNTSystem:
                  alpha: Optional[Dict[str, float]] = None,
                  W: Optional[Dict[str, tuple]] = None,
                  driver_alpha: float = 0.005,
+                 trainable_W: bool = False,
                  # accepted for back-compat with previous signature; ignored.
                  taus: Optional[Dict[str, float]] = None,
                  surprise_window: int = 32,
@@ -172,6 +206,7 @@ class DrivenNTSystem:
                  fast_loss_alpha: float = 0.1,
                  gnorm_alpha: float = 0.1,
                  ignition_target: float = 0.2):
+        super().__init__()
         # Baselines
         self._baselines = dict(self._DEFAULT_BASELINES)
         if baselines:
@@ -203,6 +238,23 @@ class DrivenNTSystem:
 
         # Retained for API-introspection (not used in dynamics).
         self._ignition_target = float(ignition_target)
+
+        # ── Item 6: optional trainable coupling matrix ───────────────
+        # Off by default → zero parameters → bit-identical to legacy.
+        # When on: a single (7, 5) Parameter initialised from the
+        # *current* self._W dict, in (_CHANNELS, _DRIVERS) order.
+        self.trainable_W: bool = bool(trainable_W)
+        if self.trainable_W:
+            init = torch.tensor(
+                [[self._W[c][j] for j in range(len(_DRIVERS))]
+                 for c in _CHANNELS],
+                dtype=torch.float32,
+            )
+            self.W_param: Optional[nn.Parameter] = nn.Parameter(init)
+        else:
+            # Explicit None so callers can test `nt.W_param is None`
+            # rather than `hasattr(nt, 'W_param')`.
+            self.W_param: Optional[nn.Parameter] = None
 
     # ── Shim for legacy `metrics.NTSystem.step(activity=...)` ────────
 
@@ -254,6 +306,99 @@ class DrivenNTSystem:
             # Clamp logit just for paranoia (|y| > 20 makes σ flat).
             self._y[c] = max(-20.0, min(20.0, self._y[c]))
             self._level[c] = _sigmoid(self._y[c])
+
+    # ── Differentiable readout (Item 6 — trainable W) ────────────────
+
+    def predict_nt_tensor(self,
+                          drivers: Optional[Dict[str, float]] = None
+                          ) -> torch.Tensor:
+        """Instantaneous differentiable NT readout — gradient path
+        for refining the coupling matrix ``W``.
+
+        Computes the *one-shot* (no OU integration) readout
+        :math:`\\hat{nt} = \\sigma(\\mu + W \\cdot z)` where ``z`` is
+        the per-driver z-score derived from the current EMA stats
+        WITHOUT updating them. This makes the call idempotent —
+        repeated invocations on the same step return identical values.
+
+        Parameters
+        ----------
+        drivers : dict, optional
+            Same keys as :meth:`step_full` (``loss``, ``grad_norm``,
+            ``activation``, ``ignition_rate``, ``attn_entropy_norm``).
+            Any missing key contributes z=0 to its column.
+
+        Returns
+        -------
+        torch.Tensor
+            Shape ``(7,)`` in :data:`_CHANNELS` order, values in
+            ``[0, 1]``.
+
+            * With ``trainable_W=True``: ``requires_grad=True``;
+              gradient flows back into ``self.W_param`` via standard
+              autograd. The stochastic μ/y state is treated as a
+              constant (no grad through history — STE on the OU
+              chain).
+            * With ``trainable_W=False``: a detached tensor (no
+              grad), so callers can use the same code path
+              regardless of the trainable flag.
+        """
+        drivers = drivers or {}
+
+        # ── Per-driver z-scores using PEEK (no state update) ─────────
+        # Same sign conventions as step_full(): surprise = -loss z.
+        z_floats = [0.0] * len(_DRIVERS)
+        if drivers.get("loss") is not None:
+            z_floats[0] = -self._stats["surprise"].peek(
+                float(drivers["loss"]))
+        if drivers.get("grad_norm") is not None:
+            z_floats[1] = self._stats["grad_norm"].peek(
+                float(drivers["grad_norm"]))
+        if drivers.get("activation") is not None:
+            z_floats[2] = self._stats["activation"].peek(
+                float(drivers["activation"]))
+        if drivers.get("ignition_rate") is not None:
+            z_floats[3] = self._stats["ignition"].peek(
+                float(drivers["ignition_rate"]))
+        if drivers.get("attn_entropy_norm") is not None:
+            z_floats[4] = self._stats["attn_sharp"].peek(
+                1.0 - float(drivers["attn_entropy_norm"]))
+
+        # Same saturation as step_full.
+        z_floats = [max(-5.0, min(5.0, v)) for v in z_floats]
+
+        # ── Build μ and W tensors on the W_param device/dtype ────────
+        if self.trainable_W and self.W_param is not None:
+            W_t = self.W_param                                   # (7, 5)
+            device = W_t.device
+            dtype = W_t.dtype
+        else:
+            # Detached path — match torch defaults.
+            device = torch.device("cpu")
+            dtype = torch.float32
+            W_t = torch.tensor(
+                [[self._W[c][j] for j in range(len(_DRIVERS))]
+                 for c in _CHANNELS],
+                dtype=dtype, device=device,
+            )
+
+        z_t = torch.tensor(z_floats, dtype=dtype, device=device)  # (5,)
+        mu_t = torch.tensor(
+            [self._mu[c] for c in _CHANNELS],
+            dtype=dtype, device=device,
+        )                                                          # (7,)
+
+        # ŷ = μ + W · z  →  (7,)
+        y_hat = mu_t + W_t @ z_t
+        # Same logit clamp as step_full for numerical hygiene.
+        y_hat = torch.clamp(y_hat, min=-20.0, max=20.0)
+        nt_hat = torch.sigmoid(y_hat)
+
+        if not self.trainable_W:
+            # Caller invariant: trainable_W=False ⇒ detached output.
+            nt_hat = nt_hat.detach()
+
+        return nt_hat
 
     # ── Accessors ────────────────────────────────────────────────────
 
