@@ -494,17 +494,44 @@ class LMExpert(nn.Module):
 
     def _forward_same_tok(self, ids: torch.Tensor) -> torch.Tensor:
         """Fast path: native LM forward. The expert's own pretrained
-        head produces logits directly in trunk vocab space."""
-        # AutoModelForCausalLM.forward returns a CausalLMOutput; logits
-        # are at ``.logits``. We feed input_ids only; attention mask is
-        # all-ones (no padding in our fixed-length training batches).
-        out = self.lm(input_ids=ids)
+        head produces logits directly in trunk vocab space.
+
+        Autocast is disabled inside the expert forward — the frozen
+        pretrained head lives in its loaded dtype (fp32 for legacy
+        ``.bin`` repos like gpt2) and any bf16 leakage from the
+        outer training step can corrupt its CUBLAS matmuls. The
+        bridged logits are cast back to the harness's expected dtype
+        in the fusion path. Regression-pinned by
+        ``tests/training/test_lm_expert_bridge_safety.py``.
+        """
+        with torch.amp.autocast(
+            device_type=ids.device.type, enabled=False,
+        ):
+            out = self.lm(input_ids=ids)
         return out.logits  # (B, T, V_expert == V_trunk)
 
     def _forward_bridge(self, ids: torch.Tensor) -> torch.Tensor:
         """Bridge path: per-sample re-tokenise, run expert, align,
         project. Slower than the fast path but enables true
-        cross-architecture experts (Qwen, DeepSeek, etc.)."""
+        cross-architecture experts (Qwen, DeepSeek, etc.).
+
+        Safety guards
+        -------------
+        * **Truncate expert tokens to trunk T.** When the trunk's text
+          decodes to lots of characters, the expert tokenizer can
+          re-encode it into ``T_expert >> T`` tokens (observed: 3307
+          tokens from a T=512 trunk batch with random ids). The
+          alignment map only ever uses ``t_count <= T`` positions, so
+          the trailing expert tokens are wasted work AND a frequent
+          source of CUBLAS instability on bf16 CUDA at large matmul
+          sizes. Cap ``expert_input_ids`` at ``T`` up-front.
+        * **Disable autocast around the expert forward.** Same reason
+          as ``_forward_same_tok``: the frozen expert's CUBLAS path is
+          unstable when bf16 autocast downcasts its inputs.
+
+        Regression-pinned by
+        ``tests/training/test_lm_expert_bridge_safety.py``.
+        """
         B, T = ids.shape
         device = ids.device
         out = torch.full(
@@ -535,19 +562,25 @@ class LMExpert(nn.Module):
             )
             trunk_offsets = trunk_enc["offset_mapping"]
             expert_offsets = expert_enc["offset_mapping"]
+            # Truncate at trunk T — see docstring "Safety guards".
+            expert_input_ids_list = expert_enc["input_ids"][:T]
+            expert_offsets = expert_offsets[:T]
             expert_input_ids = torch.tensor(
-                expert_enc["input_ids"], dtype=torch.long, device=device,
-            ).unsqueeze(0)  # (1, T_expert)
+                expert_input_ids_list, dtype=torch.long, device=device,
+            ).unsqueeze(0)  # (1, T_expert <= T)
 
             if expert_input_ids.shape[1] == 0:
                 # Edge case: empty sample — leave as abstain row
                 continue
 
-            # Run expert on its own tokenisation
-            with torch.no_grad():
-                expert_logits = self.lm(
-                    input_ids=expert_input_ids,
-                ).logits.squeeze(0)  # (T_expert, V_expert)
+            # Run expert on its own tokenisation — autocast disabled.
+            with torch.amp.autocast(
+                device_type=device.type, enabled=False,
+            ):
+                with torch.no_grad():
+                    expert_logits = self.lm(
+                        input_ids=expert_input_ids,
+                    ).logits.squeeze(0)  # (T_expert, V_expert)
 
             # Align: for every trunk-position t (up to the lesser of
             # T and len(trunk_offsets)), pick the expert position whose
