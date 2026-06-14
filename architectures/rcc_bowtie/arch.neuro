@@ -171,8 +171,23 @@ training {
         # model id to a routing domain. The expert's pretrained LM head
         # produces trunk-vocab logits directly via VocabBridge — no
         # random projection chain, no rogue-dim band-aid LayerNorm.
+        #
+        # 2026-06-14 (H22): the `general` slot was upgraded from `gpt2`
+        # (2019, ~125M params, WebText) to `smollm2_360m` (HuggingFaceTB
+        # /SmolLM2-360M — late-2024, ~360M params, 4T tokens of curated
+        # FineWeb-Edu + SmolLM-corpus + Cosmopedia). 3× the parameters,
+        # ~100× the training tokens, dramatically better per-parameter
+        # quality on natural English. Trade-off: SmolLM2 uses its own
+        # tokenizer (~49 152 BPE) ≠ trunk's gpt2 tokenizer, so the
+        # `general` expert now traverses the VocabBridge path (per-sample
+        # retokenise + char-offset align) instead of the same-tokenizer
+        # fast path. With CodeGPT-small-py still on the gpt2 vocab, the
+        # ensemble is 1 fast-path + 2 bridge-path experts after the
+        # swap. The per-position abstain logic from H21 is what makes
+        # this safe — every cross-tok expert correctly fills unmapped
+        # trunk slots at the uniform baseline.
         experts: [
-            { id: "gpt2",                       domain: "general",   freeze: true },
+            { id: "smollm2_360m",               domain: "general",   freeze: true },
             { id: "microsoft/CodeGPT-small-py", domain: "code",      freeze: true },
             { id: "Qwen/Qwen2.5-0.5B",          domain: "reasoning", freeze: true }
         ],

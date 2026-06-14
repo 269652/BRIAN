@@ -403,6 +403,78 @@ cortex did populate, not 10,000 nats below them. Predicted impact:
 
 ---
 
+### H22 — SmolLM2-360M `general` expert upgrade (2026-06-14)
+
+**Hypothesis.** B4 (H21) used `gpt2` (~125M, 2019, ~40 GB WebText) for
+the `general` routing slot of the multi-cortex ensemble. Replacing it
+with `smollm2_360m` (`HuggingFaceTB/SmolLM2-360M`, late 2024, ~360M,
+4 T tokens of FineWeb-Edu + SmolLM-corpus + Cosmopedia) should improve
+the trunk's distillation target on natural-English tokens: ~3× the
+parameters and ~100× the training tokens at the same routing slot. The
+other two experts (`microsoft/CodeGPT-small-py` for code,
+`Qwen/Qwen2.5-0.5B` for reasoning) are unchanged so the comparison is
+clean.
+
+Predicted impact at the same `30m_p4` scale + 10k steps:
+
+- **Train PPL @ 2000:** target ≤ 102.9 (B4 baseline) — better
+  distillation target should pull the trunk down faster.
+- **Train PPL @ 10000:** target ≤ 70 (under H21 trajectory
+  extrapolation 102.9 @ 2k → ~70 @ 10k assuming similar slope).
+- **Mid-OOD PPL @ 10k (WikiText-103):** target ≤ 250 (B4 was 295.9 at
+  2k; SmolLM2's superior natural-English coverage should compound
+  through KL distillation).
+- **gap_ratio @ 10k:** target ≤ 2.5 (B4 hit 2.87 at 2k; aim to
+  stay under 3.0 even at deeper training).
+- **Realised harness param count:** ~1.12 B (was 889.6 M with gpt2).
+- **Throughput:** ~5-15 % slower per step. SmolLM2 uses its own
+  tokenizer (~49 152 BPE) ≠ trunk's gpt2 (50 257 BPE), so the
+  `general` expert now traverses the cross-tokenizer **VocabBridge**
+  path (per-sample retokenise + char-offset align) instead of the
+  same-tokenizer fast path. Ensemble splits 1 fast (CodeGPT) + 2
+  bridge (SmolLM2 + Qwen2.5).
+
+**Risk surface (why this could regress, not just improve).** SmolLM2's
+own tokenizer means **abstain-fill rate is higher** for the `general`
+expert than it was with gpt2 (which shared the trunk's BPE). If
+SmolLM2's vocab coverage of the trunk's gpt2 vocab is poor — say
+< 60 % of trunk slots map cleanly — many trunk positions will see
+`general` contribute only the uniform-baseline abstain logit. The
+per-position abstain fix from H21 keeps that safe (no fusion-killing
+catastrophe) but it does cap the effective signal injected by the
+`general` expert at its coverage fraction. The Qwen2.5 expert
+already lives with this on the `reasoning` slot, so the regime is
+proven survivable; the empirical question is whether SmolLM2's
+better per-mapped-token quality outweighs its coverage haircut.
+
+- **Spec.** `architectures/rcc_bowtie/arch.neuro` `multi_cortex.experts[0]`,
+  uses the `smollm2_360m` alias resolved via
+  `neuroslm/experts.py::resolve_expert_alias` (the alias registry
+  shipped with Item 5).
+- **Tests.** Alias resolution pinned by
+  `tests/training/test_expert_alias_registry.py` (14 contracts; all
+  GREEN as of `aeac569`). Bridge-path correctness pinned by
+  `tests/training/test_lm_expert_bridge_safety.py` and
+  `tests/training/test_lm_expert_abstain_safety.py`. No new tests
+  required — the swap is a config change exercising already-tested
+  code paths.
+- **Run** — vast.ai deploy queued at commit time, label `neuroslm-full`,
+  A100 SXM4 single-GPU, branch `master`, scale `30m_p4`, 10 000 steps,
+  `OOD_EVERY=500`. Predecessor instance 40950265 (H21 / B4 10k repeat
+  with legacy roster) was destroyed at step 840 to free the budget
+  for this run.
+- **Outcome.** ⏳ pending the deploy's first OOD snapshot at step 500.
+  Will record train PPL + WikiText PPL + gap_ratio at 500 / 1000 /
+  2000 / 5000 / 10000 and compare row-for-row to B4.
+- **What confirms / refutes:** confirms iff the 10k row beats or
+  matches the H21 predictions above on at least 2 of 3 metrics
+  (train PPL, OOD PPL, gap_ratio). Refutes iff train PPL plateaus
+  worse than B4 at any milestone, or gap_ratio drifts above 3.0
+  (suggesting SmolLM2's coverage penalty outweighs its quality
+  advantage).
+
+---
+
 ## What proved to solve or break things — the punchline list
 
 ### Things that demonstrably solved something

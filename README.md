@@ -11,7 +11,7 @@
 [![cortex-fusion](https://img.shields.io/badge/cortex--fusion-KL%20+%20NT--gated-blueviolet)]()
 [![formal-gate](https://img.shields.io/badge/improvement--gate-Welch's%20t-9cf)]()
 
-BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained GPT-2 cortex experts.
+BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained causal-LM cortex experts (SmolLM2-360M for general English, CodeGPT-small-py for code, Qwen2.5-0.5B for reasoning).
 
 **Current status:**
 - ✅ **Layer A (mechanisms):** 20+ core properties verified via 1511 unit tests across `tests/` (`tests/dsl/` alone runs 620). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
@@ -154,7 +154,7 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: B4 (abstain-fix + mult
 | **BRIAN (abstain-fix + multi-cortex, B4)** | **889.6M** | **2,000** | **102.9** | **295.9** | **2.87** | [vast 40925851 log](logs/vast/) — `*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log` |
 
 **What the table says:**
-1. **B4 wins absolute OOD PPL among BRIAN variants** (295.9 vs ≥1351 for B1–B3). The abstain fix unblocks the multi-cortex fusion pathway, and the full 889M DNA-compiled `BRIANHarness` (3 frozen GPT-2 cortex experts + bowtie trunk + every wired module) now contributes signal that earlier variants couldn't access.
+1. **B4 wins absolute OOD PPL among BRIAN variants** (295.9 vs ≥1351 for B1–B3). The abstain fix unblocks the multi-cortex fusion pathway, and the full 889M DNA-compiled `BRIANHarness` (3 frozen causal-LM cortex experts + bowtie trunk + every wired module) now contributes signal that earlier variants couldn't access. *B4 used the legacy gpt2/CodeGPT/Qwen2.5 roster; the post-H22 roster (`smollm2_360m` + CodeGPT + Qwen2.5) is the 10k follow-up baseline.*
 2. **B4 is also the first BRIAN variant with gap_ratio < 3.0** (2.87, vs 4.51 best prior). The drop from B3's 4.51 to B4's 2.87 is larger than any single prior step in the arc.
 3. **B4 still trails the flat baseline on absolute PPL** (295.9 OOD vs 404.0), but with 40× fewer training steps (2k vs 80k). Matched-compute comparison is the next experiment.
 4. **gap_ratio is drifting upward within B4** (2.05 → 2.87 between step 500 and step 2000). The 10k rerun queued immediately after H21 will distinguish plateau vs accelerating overfit. [See H21 in findings.md for the full trajectory, telemetry, and adjacent issues.](docs/FINDINGS.md#h21--per-position-abstain-logit-fixes-catastrophic-cortex-ce-2026-06-14)
@@ -167,13 +167,23 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: B4 (abstain-fix + mult
 - Training with optimizer-partitioned checkpoint streaming
 - DSL-based architecture specs compile to byte-equivalent PyTorch models with **source maps** (`neuroslm/compiler/module_bundler.py`) and **byte-identity round-trip** verification
 - Real-time architecture evolution via RAID-5 protected DNA mutations, gated by **`ImprovementGate`** (Welch's t-test) — no mutation lands without statistically significant fitness gain
-- **Multi-cortex fusion** (3 pretrained GPT-2 experts + bowtie trunk) with **LayerNorm pre-head anisotropy suppression**, **KL distillation** (trunk learns from cortex), and **NT-mediated α gating** (cortex retires when trunk surpasses it)
+- **Multi-cortex fusion** (3 pretrained causal-LM experts — `smollm2_360m` / `CodeGPT-small-py` / `Qwen2.5-0.5B` — + bowtie trunk) with **LayerNorm pre-head anisotropy suppression**, **KL distillation** (trunk learns from cortex), and **NT-mediated α gating** (cortex retires when trunk surpasses it)
 
 ---
 
-## Multi-Cortex Fusion (Pretrained GPT-2 Experts + Bowtie Trunk)
+## Multi-Cortex Fusion (Pretrained Causal-LM Experts + Bowtie Trunk)
 
-BRIAN's 30M-P4 preset stacks three frozen GPT-2 "cortex" experts above the bowtie trunk and fuses their logits with the trunk's at the LM head. This pillar is governed by three interlocking mechanisms (all configurable in `arch.neuro` and parsed into `MultiCortexConfig` in `neuroslm/dsl/training_config.py`):
+BRIAN's 30M-P4 preset stacks three frozen causal-LM "cortex" experts above the bowtie trunk and fuses their logits with the trunk's at the LM head. The post-H22 roster (configured in `architectures/rcc_bowtie/arch.neuro`):
+
+| Domain | Expert | Tokenizer vs trunk | Path |
+|---|---|---|---|
+| `general` | `smollm2_360m` (HuggingFaceTB/SmolLM2-360M, ~360M, 4T tokens, late 2024) | different (~49 152 BPE) | bridge (per-sample retokenise + char-offset align) |
+| `code` | `microsoft/CodeGPT-small-py` (~125M) | same (gpt2 BPE) | fast (`lm(ids).logits` direct) |
+| `reasoning` | `Qwen/Qwen2.5-0.5B` (~500M) | different | bridge |
+
+The legacy roster used plain `gpt2` for `general` (2019, ~125M, WebText). It was upgraded under [H22](docs/FINDINGS.md#h22--smollm2-360m-general-expert-upgrade-2026-06-14) on 2026-06-14 to capture ~3× the parameters and ~100× the training tokens at the same routing slot.
+
+This pillar is governed by three interlocking mechanisms (all configurable in `arch.neuro` and parsed into `MultiCortexConfig` in `neuroslm/dsl/training_config.py`):
 
 ### 1. `cortex_pre_head_norm` — catastrophic-loss prophylaxis
 

@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-NeuroSLM (a.k.a. BRIAN) is a research project exploring whether **biologically-inspired topology** can achieve better generalization at lower parameter counts than flat transformer baselines. The core claim: a 30M–240M parameter model with cortical-grade modular structure, plasticity, homeostatic regulation, and a **fusion stack of pretrained GPT-2 cortex experts** with KL distillation and NT-mediated α-gating, outperforms vanilla transformers at matched compute on out-of-distribution tasks.
+NeuroSLM (a.k.a. BRIAN) is a research project exploring whether **biologically-inspired topology** can achieve better generalization at lower parameter counts than flat transformer baselines. The core claim: a 30M–240M parameter model with cortical-grade modular structure, plasticity, homeostatic regulation, and a **fusion stack of pretrained causal-LM cortex experts** (`smollm2_360m` general + `CodeGPT-small-py` code + `Qwen2.5-0.5B` reasoning, post-H22) with KL distillation and NT-mediated α-gating, outperforms vanilla transformers at matched compute on out-of-distribution tasks.
 
 **Current evidence:**
 - **Layer A (mechanism):** **1511 unit tests** confirm core modules (consciousness, plasticity, narrative memory, survival loop, multi-cortex fusion, KL distillation, NT-gated inhibition, ImprovementGate admission, TheoryOfMindIR sheaf stalks) behave as specified. ✅ CONFIRMED
@@ -42,7 +42,7 @@ NeuroSLM (a.k.a. BRIAN) is a research project exploring whether **biologically-i
 3. **Recursive reasoning depth:** Weight-sharing expert loops add reasoning depth at zero parameters. [Status: 🟡 in-distribution win, no OOD payoff]
 4. **Predictive coding trunk (PCT):** Top-down generative predictors suppress train→OOD gap. [Status: 🟡 PARTIAL — 26% improvement but not 2× threshold]
 5. **Phased maturation & ReZero gates:** Soft awakening via learnable scalar gates prevents the catastrophic PPL jump at convergence. [Status: 🟡 removes discontinuity, no OOD win]
-6. **Multi-cortex fusion (`cortex_pre_head_norm` + KL distillation + NT-gated α):** Pretrained GPT-2 cortex experts can be fused with a bowtie trunk without catastrophic init loss, the trunk can be distilled from the cortex via KL, and the cortex can be retired via NT-mediated inhibition once the trunk surpasses it. [Status: ✅ MECHANISM CONFIRMED — 8 tests for the LayerNorm fix, 22 for distillation+gating; Layer-B payoff pending long run]
+6. **Multi-cortex fusion (`cortex_pre_head_norm` + KL distillation + NT-gated α):** Pretrained causal-LM cortex experts (post-H22: SmolLM2-360M / CodeGPT-small-py / Qwen2.5-0.5B) can be fused with a bowtie trunk without catastrophic init loss, the trunk can be distilled from the cortex via KL, and the cortex can be retired via NT-mediated inhibition once the trunk surpasses it. [Status: ✅ MECHANISM CONFIRMED — 8 tests for the LayerNorm fix, 22 for distillation+gating; Layer-B payoff pending long run]
 7. **Statistical mutation admission (`ImprovementGate`):** Architectural mutations should only land when a Welch's t-test on a fitness metric over a moving window confirms statistically-significant improvement, gated by minimum effect size. [Status: ✅ MECHANISM CONFIRMED — 16 tests, pure-Python Welch's t + Lentz continued fraction within 1e-6 of scipy reference]
 8. **TheoryOfMind via sheaf stalks (`TheoryOfMindIR`):** Nested agent beliefs (k-th order ToM) can be represented as a vector bundle whose stalk dimension scales geometrically with recursion order. [Status: ✅ SHAPE GEOMETRY CONFIRMED — 9 tests; full sheaf-cohomology guard pending]
 
@@ -202,7 +202,7 @@ current baseline.
 
 ## 2.7 Pillar 7: Multi-Cortex Fusion with Distillation & NT-Gated α
 
-**Claim:** Three frozen pretrained GPT-2 cortex experts can be fused with a bowtie trunk into a single LM head, with three interlocking mechanisms ensuring the fusion is (a) stable from step 0, (b) actually transfers signal from cortex to trunk, and (c) automatically retires cortex contribution once the trunk surpasses it.
+**Claim:** Three frozen pretrained causal-LM cortex experts (post-H22: `smollm2_360m` for general English, `CodeGPT-small-py` for code, `Qwen2.5-0.5B` for reasoning) can be fused with a bowtie trunk into a single LM head, with three interlocking mechanisms ensuring the fusion is (a) stable from step 0, (b) actually transfers signal from cortex to trunk, and (c) automatically retires cortex contribution once the trunk surpasses it.
 
 **Operationalization (three slots in `multi_cortex { ... }` DSL block):**
 
@@ -435,8 +435,11 @@ python -m neuroslm.train_dsl \
 > non-embedding budget. When the full DNA-compiled `BRIANHarness`
 > instantiates with all modules wired (motor / memory / cortex
 > ensemble / qualia / forward model), the realised count is
-> **889.6M** at this scale (most of which is the 3 frozen GPT-2
-> cortex experts and the tied 50 257-vocab embedding). `brian
+> **889.6M** at this scale with the legacy gpt2/CodeGPT/Qwen2.5
+> roster (most of which is the 3 frozen cortex experts and the
+> tied 50 257-vocab embedding). After H22 the `general` slot moves
+> from `gpt2` (~125M) to `smollm2_360m` (~360M), so the realised
+> count rises to **~1.12B** at the same `30m_p4` scale. `brian
 > compile nfg --current` prints the realised count.
 
 **Current results (FINDINGS.md ::B4 — committed 2026-06-14, vast
