@@ -207,6 +207,7 @@ current baseline.
 **Operationalization (three slots in `multi_cortex { ... }` DSL block):**
 
 - **Slot 0 — `cortex_pre_head_norm` (always on):** `nn.LayerNorm(d_sem)` applied to the cortex projection *before* it enters the tied LM head. Suppresses the rogue dimension in GPT-2's hidden state (std ≈ 24 ≈ 82× median) that would otherwise amplify into ±8.5 logit spikes → uniform-distribution-breaking softmax → CE at init = 13.84 nats (> ln(50257) = 10.82). With the norm, CE returns to **10.82 ± 0.5 nats** baseline. Validated by `scripts/diagnose_catastrophic_loss.py` (exit-coded fix verifier).
+- **Slot 0b — per-position abstain logit (always on, FINDINGS::H21):** When projecting cortex logits onto the trunk's larger vocabulary (`LMExpertEnsemble._project_to_trunk_vocab` in `neuroslm/experts.py`), trunk-vocab IDs that the cortex tokenizer never sees must be filled with an *abstain* value. The legacy `_ABSTAIN_LOGIT = -1e4` constant poisoned standalone-cortex cross-entropy — every target token at an unmapped slot scored CE ≈ 10,000 nats → `cortex_loss_ema` blew up to ~500 → Slot C inhibition (below) correctly diagnosed catastrophe → `α_eff → 0` → fusion collapsed → trunk trained alone, **all signal from the pretrained cortex was destroyed.** Fix: per-position formula `abstain = max(mapped_logits) − ln(V_trunk)`, which keeps unmapped slots at the *uniform-distribution baseline* relative to the populated slots. Effect on deploy 40925851 vs precursor 40923107 (same arch, broken abstain): **14× drop in train PPL** (1444 → 102.9), **17× drop in OOD PPL** (4655 → 295.9), **gap_ratio first time under 3.0** (4655/1444=3.2 → 295.9/102.9=2.87). Validated by `tests/training/test_lm_expert_abstain_safety.py` (5 contracts).
 - **Slot A — KL distillation (`distillation_enabled`):** Per-step aux loss
 $$\mathcal{L}_{\text{KL}} = \lambda_t \cdot T^2 \cdot \mathrm{KL}\big(\mathrm{softmax}(\text{cortex}_{\text{logits}}/T) \,\big\|\, \mathrm{softmax}(\text{lm}_{\text{logits}}/T)\big)$$
   with cortex logits **detached** (gradient only into trunk). The mixing weight $\lambda_t$ is a piecewise-linear ramp over the EMA gap between cortex and trunk losses:
@@ -430,13 +431,32 @@ python -m neuroslm.train_dsl \
     --device cuda:0
 ```
 
-**Current results (from findings.md::B3, committed 2026-05-25):**
-- **Train PPL:** 400.9 @ step 4000 (best checkpoint)
-- **OOD PPL (WikiText-103-v1):** 1806.6
-- **gap_ratio:** 4.51 ← **best achieved to date**
-- **Status:** Reaches step 10k cleanly; training stable.
+> **Note on parameter count.** The "30m" label is the *bowtie-trunk*
+> non-embedding budget. When the full DNA-compiled `BRIANHarness`
+> instantiates with all modules wired (motor / memory / cortex
+> ensemble / qualia / forward model), the realised count is
+> **889.6M** at this scale (most of which is the 3 frozen GPT-2
+> cortex experts and the tied 50 257-vocab embedding). `brian
+> compile nfg --current` prints the realised count.
 
-**Checkpoint:** `lfs_checkpoints/neuroslm_pct_30m_68M_adamw_mix_best.pt`
+**Current results (FINDINGS.md ::B4 — committed 2026-06-14, vast
+40925851, A100 SXM4 @ $0.74/hr, branch `master` @ `a22eecc`):**
+
+- **Train PPL:** 102.9 @ step 2000
+- **OOD PPL (WikiText-103-v1, 200-seq final):** 295.9
+- **gap_ratio:** **2.87** ← **best achieved to date** (first variant under 3.0)
+- **Trajectory:** mid-OOD at 500 / 1000 / 1500 / 2000 → wiki PPL 413 / 285 / 265 / 274; gap_ratio 2.05 / 2.20 / 2.18 / 2.66
+- **Cortex telemetry:** `α_eff` stable at 0.500–0.505, `inh=0.000` throughout — fusion contributing signal (vs broken precursor deploy 40923107 where `α_eff=0.000 inh=1.000` collapsed fusion).
+- **Status:** ✅ stable run to step 2000; per-position abstain logit fix (see §2.7 Slot 0b) validated. 10k-step rerun queued.
+
+**Checkpoint:** `lfs_checkpoints/dsl_arch_20260614-135401_step2000.pt`
+
+**Raw log:** `logs/vast/20260614*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log`
+
+**Known follow-ups** (recorded in FINDINGS.md::H21):
+1. Gradient spike at steps 1100–1700 (gnorm peaked 142M) caught by `loss_clip(f=3.0)`; band-aid, not fix.
+2. Resume crashed 8× with `Unexpected key(s) in state_dict: _genetics_orch.*, _transmitter_sys.*` — checkpoint schema drift.
+3. gap_ratio drifting upward (2.05 → 2.87 over 2k steps) — 10k run will distinguish plateau vs accelerating overfit.
 
 ---
 

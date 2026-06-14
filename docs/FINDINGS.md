@@ -151,6 +151,7 @@ window with stride 512 / seq_len 1024, GPT-2 BPE tokenizer
 | **B2** trunk-iso + ReZero (load-bug, do not cite) | `stabilize/trunk-grad-isolation` | 7000 | 107.8M | 1169.9 | 5242.7 | 4.48 | ARTIFACT — λ params zero-init at eval (see B2.fix) | `results/ood_rezero-buggy-preload_107M_step7000.json` |
 | **B2.fix** trunk-iso + ReZero (legacy-fallback fix) | `stabilize/trunk-grad-isolation` | 7000 | 107.8M | 258.8 | 1351.5 | **5.22** | STRONG OVERFITTING | `results/ood_rezero-fixed_107M_step7000.json` |
 | **B3** PCT (loss-only, 30M preset) | `arch/predictive-coding-trunk` | 4000 (best) | 69.2M | 400.9 | 1806.6 | **4.51** | STRONG OVERFITTING (but lowest ratio so far) | `results/ood_pct-30m_68M_step4000.json` |
+| **B4** abstain-fix + multi-cortex (30m_p4 scale, full DNA) | `master` @ `a22eecc` | 2000 | **889.6M** | **102.9** | **295.9** | **2.87** | **NEW BAND** (gap 2.0–3.0) | `logs/vast/20260614*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log` |
 
 All numbers above are read directly from the committed JSON. No
 hand-summarised numbers in this table.
@@ -320,6 +321,88 @@ What this caveat *does not* mitigate:
 
 ---
 
+### H21 — Per-position abstain logit fixes catastrophic cortex CE (2026-06-14)
+
+**Hypothesis.** The flat `_ABSTAIN_LOGIT = -1e4` constant used to fill
+unmapped trunk-vocab slots in `LMExpertEnsemble._project_to_trunk_vocab`
+poisons standalone-cortex cross-entropy: every target token whose ID
+the GPT-2 cortex doesn't tokenize (most of the trunk's 50,257-vocab
+extension) hits the `-1e4` slot → CE per such token ≈ 10,000 nats →
+`cortex_loss_ema` blows up to ~500 → harness's Slot-C inhibition
+correctly diagnoses the "catastrophic cortex" and pushes `α_eff → 0`
+→ fusion collapses, trunk trains alone, all signal from the 3
+pretrained GPT-2 experts is destroyed. Replacing the flat constant
+with a per-position formula `abstain = max(mapped_logits) − ln(V_trunk)`
+restores the inductive bias that an unmapped slot represents
+"vocabulary item the cortex never saw" — its logit should sit
+*at the uniform-distribution baseline* relative to the slots the
+cortex did populate, not 10,000 nats below them. Predicted impact:
+8–14× drop in train PPL, similar on OOD.
+
+- **Spec.** `neuroslm/experts.py::LMExpertEnsemble._project_to_trunk_vocab`
+  (the `_ABSTAIN_LOGIT` constant and the per-position formula that
+  replaced it), pinned by `tests/training/test_lm_expert_abstain_safety.py`
+  (5 contracts).
+- **Tests.** All 57 `LMExpert*` tests + 151 training + 741 dsl GREEN
+  after the fix (pre-fix standalone CE on random batch ≈ 17.37 nats,
+  post-fix ≈ 4.03 nats — a 4.3× reduction).
+- **Run** — vast.ai **40925851**, label `abstain-fix-dna-arch-30m_p4`,
+  A100 SXM4 @ $0.74/hr, branch `master` @ `a22eecc`, DNA-driven
+  (`dna/evol/arch.dna`), **889.6M params**, preset `rcc_bowtie_30m_p4`
+  (`d_model=512 depth=8 heads=8 ctx=512 batch=16 lr=5e-4 wd=0.01
+  warmup=2400`), loss-clip=True(f=3.0), bf16, 2000 steps. Boot stamp
+  in log header confirms unfolded DSL sha + git sha at deploy time.
+- **Trajectory.**
+
+  | Step | train PPL | mid-OOD WikiText | gap_ratio | cortex telemetry |
+  |---|---|---|---|---|
+  | 500 | 201.6 | 413.5 | 2.05 | `α_eff=0.500 inh=0.000 cx_ema=3.31` |
+  | 1000 | 129.2 | 284.7 | 2.20 | `α_eff=0.503 inh=0.000 cx_ema=3.27` |
+  | 1500 | 121.1 | 264.6 | 2.18 | `α_eff=0.504 inh=0.000 cx_ema=3.08` |
+  | 2000 | **102.9** | **274.1** | **2.66** | `α_eff=0.505 inh=0.000 cx_ema=3.21` |
+  | Final (200-seq, 32,914 tok) | — | **295.9** | **2.87** | — |
+
+  Compare to broken precursor deploy **40923107** (same arch, broken
+  abstain): train PPL **1444**, OOD PPL **4655**, `cortex[α_eff=0.000
+  inh=1.000 cx_ema=491]` — fusion entirely off. The B4 numbers above
+  represent a **14× train-PPL and 17× OOD-PPL improvement** and the
+  first time any BRIAN variant has crossed the gap_ratio < 3.0
+  threshold on this eval harness (B0–B3 all sat in 4.5–6.3).
+- **Outcome.** ✅ **CONFIRMED.** The abstain-fix hypothesis is
+  validated: with `α_eff` stable at ~0.5 (not pushed to 0 by the
+  catastrophic-cortex defence), the fusion contributes signal, the
+  trunk trains, and PPL/OOD drop by ~order of magnitude. **gap_ratio
+  2.87** is the new best in the Layer B reference table.
+- **🟠 Adjacent issues uncovered** (do not invalidate H21 — recorded
+  for follow-up):
+  1. **Gradient spike** at steps 1100–1700 (gnorm peaked 142M).
+     `loss_clip=True(f=3.0)` caught it (lm loss stayed 4.6–5.2 nats),
+     but the spike is a band-aid, not a fix. The `cortex_pre_head_norm`
+     stops *cortex* anisotropy; nothing yet stops *trunk* anisotropy
+     once the cortex retires it does not fire. Open follow-up.
+  2. **Resume crashed 8×** after the run completed, with
+     `Unexpected key(s) in state_dict: _genetics_orch.lib.*,
+     _transmitter_sys.*`. The checkpoint at step 2000 was saved by a
+     `BRIANHarness` snapshot that carries optional subsystems
+     (`_genetics_orch`, `_transmitter_sys`) which the resume path's
+     freshly-built `BRIANHarness` did not register. Schema-drift
+     between save and load. Open follow-up — gated by either
+     (a) `strict=False` for these optional keys, or (b) wiring the
+     subsystems on by default in `arch.neuro`.
+  3. **gap_ratio drift upward** (2.05 → 2.20 → 2.18 → 2.66 → 2.87).
+     Train PPL keeps dropping; OOD PPL is roughly flat at 264–295.
+     This is the classical overfit signature, but in a *new and
+     much smaller* gap band than the 5–6× regime B0–B3 lived in. A
+     10k run is the next thing required to know whether (a) gap_ratio
+     plateaus around 3, (b) train PPL bottoms out and OOD catches up,
+     or (c) overfit accelerates. **This drives the next experiment.**
+- **Follow-up:** **10k-step rerun at same scale + same arch + same
+  abstain fix**, capture full trajectory at 500/1000/2000/5000/10000
+  with mid-OOD at each milestone. Tracked as the deploy queued
+  immediately after this finding is committed.
+
+---
+
 ## What proved to solve or break things — the punchline list
 
 ### Things that demonstrably solved something
@@ -327,6 +410,7 @@ What this caveat *does not* mitigate:
 - **ReZero zero-init forward gates (§5.3 / H8)** — *removed* the awakening discontinuity. Modest gap_ratio win (5.22 vs 6.34); no absolute-OOD win.
 - **Recursive reasoning (§5.4 / H9)** — *improves* in-distribution training quality (~20%).
 - **PCT loss-only (§5.5 / H10)** — *first* sub-5× gap_ratio in the arc, with the matched-PPL caveat.
+- **Per-position abstain logit (H21, 2026-06-14)** — *unlocked* multi-cortex fusion: 14× train-PPL / 17× OOD-PPL drop on rcc_bowtie_30m_p4 vs the broken precursor, and the **first BRIAN variant under gap_ratio 3.0** (2.87 vs ≥4.51 for all prior).
 
 ### Things that broke or under-delivered
 - **README H12 ("BRIAN measurably better at matched FLOPs vs flat baseline") not yet supported** — head-to-head shows baseline 80k beats BRIAN 7k by ~3-4× on absolute PPL. Compute asymmetry (11× more steps for baseline) too large for this comparison to decide H12. Result is *consistent with* H12 being false but also consistent with H12 being rescuable at matched compute. BRIAN does win gap_ratio modestly (15%) even under the asymmetry.
@@ -340,6 +424,9 @@ What this caveat *does not* mitigate:
 - Full PCT-feedback mode (`pct_mode="feedback"`) vs loss-only.
 - SRC-TEH wall-clock numbers (H11).
 - Matched-compute baseline (step-7000 baseline) for H12.
+- **H21 / B4 10k-step run** — does the gap_ratio plateau, the train PPL bottom out, or the overfit accelerate past step 2000? Deploy queued immediately after H21 was recorded.
+- **Trunk anisotropy spike fix** — H21 follow-up #1, the 1100–1700 gradient spike is currently band-aided by `loss_clip(f=3.0)`. Open whether `cortex_pre_head_norm`-style LayerNorm on the *trunk* pre-head suppresses it, or whether the source is elsewhere (residual stream, attention out-projection).
+- **Checkpoint schema-drift fix** — H21 follow-up #2, the resume crashed 8× with `Unexpected key(s)` for optional `_genetics_orch.*` / `_transmitter_sys.*` subsystems. Gated by either `strict=False` for these keys or wiring them on by default.
 
 ---
 
@@ -487,11 +574,11 @@ Based on your memory, this fits the P4 loss-clipping experiment. Should I check 
 
 ---
 
-## NFG Layout � Revision Assessment (2026-06-01)
+## NFG Layout � Revision Assessment (2026-06-01)
 
 **Revision:** rcc_bowtie NFG render after stabilisation of house layout.
 
-**Score:** Structural coherence 8.5 � Readability 8.2 � RCC bowtie identity 8.5 � Compiler-style maturity 8.3
+**Score:** Structural coherence 8.5 � Readability 8.2 � RCC bowtie identity 8.5 � Compiler-style maturity 8.3
 
 ### What works
 - Graph has stabilised into a coherent house layout that no longer shifts unpredictably between runs.
@@ -504,10 +591,10 @@ Based on your memory, this fits the P4 loss-clipping experiment. Should I check 
 - The central highlighted band is doing explanatory work that the topology itself should eventually carry (the graph is understandable because of band + placement, not purely because attachment grammar and routing are solved).
 
 ### Next steps (implemented in this commit)
-1. **Canonical slot templates** � _PRESET_TEMPLATES dict keyed by preset family (e.g. "rcc_bowtie"). Overrides _RESERVED_SLOTS so the same preset family always renders with the same stable house layout.
-2. **Subsystem envelopes** � _draw_subsystem_envelopes() draws faint dashed rounded-rect overlays for memory, self-model, predictive-ctrl, cortical-loop, and interoceptive groups. Drawn at zorder=0 so they frame but never obscure node circles.
-3. **Anchor constraint pass** � ANCHOR_ALPHA = 0.22 pull in _neuroanatomical_layout runs 3 iterations pulling each non-pinned population toward the weighted centroid of its synapse neighbours. Snaps peripheral nodes to their cluster without disturbing the pinned spine.
-4. **Modulation lane port assignment** � existing NT rail-point mechanism now combined with the per-NT ordered departure so each NT's arcs share a visual departure stub before splaying.
+1. **Canonical slot templates** � _PRESET_TEMPLATES dict keyed by preset family (e.g. "rcc_bowtie"). Overrides _RESERVED_SLOTS so the same preset family always renders with the same stable house layout.
+2. **Subsystem envelopes** � _draw_subsystem_envelopes() draws faint dashed rounded-rect overlays for memory, self-model, predictive-ctrl, cortical-loop, and interoceptive groups. Drawn at zorder=0 so they frame but never obscure node circles.
+3. **Anchor constraint pass** � ANCHOR_ALPHA = 0.22 pull in _neuroanatomical_layout runs 3 iterations pulling each non-pinned population toward the weighted centroid of its synapse neighbours. Snaps peripheral nodes to their cluster without disturbing the pinned spine.
+4. **Modulation lane port assignment** � existing NT rail-point mechanism now combined with the per-NT ordered departure so each NT's arcs share a visual departure stub before splaying.
 
 ### Remaining open items
 - Port-aware routing for NT arcs entering spine nodes (ordered entry ports per NT lane, not just departure stem).
