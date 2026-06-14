@@ -2292,6 +2292,47 @@ def cmd_clean(args: argparse.Namespace) -> int:
     return rc
 
 
+# ── migrate ────────────────────────────────────────────────────────────
+
+
+def cmd_migrate(args: argparse.Namespace) -> int:
+    """brian migrate — versioned, idempotent repo migrations.
+
+    Default: dry-run a single migration by ID, or `--list` to inventory
+    every migration with its status (APPLIED / PENDING / DRIFT /
+    NOOP_PENDING). Pass ``--force`` to actually apply. Pass ``--rerun``
+    to re-apply a migration that is already in the ledger.
+
+    The ledger lives at ``.brian/migrations.json`` and is the source
+    of truth for "has migration X been run?".
+    """
+    from neuroslm.migrations import _framework as fw
+    from neuroslm.references import build_reference_index
+
+    pkg_dir = Path(__file__).resolve().parent / "migrations"
+
+    if args.list:
+        return fw.cli_list(pkg_dir, REPO_ROOT)
+
+    if not args.id and not args.all:
+        print("[migrate] error: provide a migration id, --all, or --list",
+              flush=True)
+        return 2
+
+    # Build a single reference index up-front. Migrations that need it
+    # read `ctx.refs`; ones that don't, ignore it. One scan covers all.
+    refs = build_reference_index(REPO_ROOT, progress=args.verbose)
+    ctx = fw.Context(
+        root=REPO_ROOT, refs=refs,
+        dry_run=not args.force, force=args.force,
+    )
+
+    if args.all:
+        return fw.run_all(pkg_dir, ctx)
+
+    return fw.run_one(pkg_dir, args.id, ctx, rerun=args.rerun)
+
+
 # ── lint ───────────────────────────────────────────────────────────────
 
 def _infer_equation_name(formula: str) -> str:
@@ -2881,6 +2922,31 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-git", action="store_true",
         help="don't stage deletions via `git rm` — plain unlink only")
     sc_clean.set_defaults(func=cmd_clean)
+
+    # migrate — versioned, ledger-tracked repo migrations
+    sc_mig = sub.add_parser(
+        "migrate",
+        help="Run versioned repo migrations (default dry-run; --force to apply)")
+    sc_mig.add_argument(
+        "id", nargs="?", default=None,
+        help="migration id to run (omit + use --list/--all)")
+    sc_mig.add_argument(
+        "--list", action="store_true",
+        help="list every discovered migration with its status")
+    sc_mig.add_argument(
+        "--all", action="store_true",
+        help="run every PENDING migration in order")
+    sc_mig.add_argument(
+        "--force", action="store_true",
+        help="actually apply (default: dry-run only)")
+    sc_mig.add_argument(
+        "--rerun", action="store_true",
+        help="re-apply a migration that is already in the ledger "
+             "(escape hatch — usually a no-op)")
+    sc_mig.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="show reference-scan progress")
+    sc_mig.set_defaults(func=cmd_migrate)
 
     return p
 
