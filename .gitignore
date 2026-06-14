@@ -97,3 +97,8 @@ lean/build/
 # (sample_heatmap.json etc.) — only top-level demo PNGs are noise.
 /nfg_rcc_*.png
 /results/nfg_*.png
+
+# Run workspace — `prepare_run_workspace()` unpacks the current DNA /
+# arch source here on every `brian train --dna=... | --arch=...`
+# invocation. Pure runtime cache; rebuilt fresh every call.
+.neuro/arch/temp/

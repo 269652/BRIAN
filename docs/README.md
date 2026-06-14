@@ -20,11 +20,11 @@ This directory contains all technical and reference documentation for the BRIAN 
 
 | Document | For... | Contains |
 |----------|--------|----------|
-| **[`architecture.md`](architecture.md)** | Researchers, reproducers | Full spec: tensor shapes, mathematical formulas, all modules (§0–12), 1300+ lines. Claims here should be traceable to a file/line or test; if any drift, file an issue. |
-| **[`technical_report.md`](technical_report.md)** | External AIs, new contributors | Executive summary: project charter, current state, what is and is not measured, open questions. Synchronised with `findings.md`. |
-| **[`formal_framework.md`](formal_framework.md)** | Theorists, evolutionary loop | **Normative** mathematical contract for THSD (simpliziale ontology, $H^1$ guard, symbolic-simplex discovery operator, Φ guard, Tonnetz filter, Fisher-Rao retrieval, RAID-5 DNA). The framework the DSL and `ImprovementGate` are designed against; most associated Lean proofs are still scaffolds. |
-| **[`BRAIN.md`](BRAIN.md)** | Architects, designers | Design rationale for the 11-stage forward pass and re-entry loops, with pointers to the code that implements each stage. |
-| **[`harness.md`](harness.md)** | Training engineers | How BRIANHarness works: loss clipping, gradient accumulation, aux-loss schedule, OOD evaluation, metrics. |
+| **[`architecture.md`](architecture.md)** | Researchers, reproducers | Full spec: tensor shapes, mathematical formulas, all modules (§0–12), 1300+ lines. Every claim is citable to a line or test. |
+| **[`technical_report.md`](technical_report.md)** | External AIs, new contributors | Executive summary: project charter, current state, proven claims, evidence artifacts, open questions. Designed for NotebookLM/ChatGPT. |
+| **[`formal_framework.md`](formal_framework.md)** | Theorists, evolutionary loop | **Normative** mathematical contract for THSD (simpliziale ontology, $H^1$ guard, symbolic-simplex discovery operator, Φ guard, Tonnetz filter, Fisher-Rao retrieval, RAID-5 DNA). Source of Truth for evolutionary mutations. |
+| **[`BRAIN.md`](BRAIN.md)** | Architects, designers | Why BRIAN exists: the 11-stage forward pass explained, each design decision with rationale and evidence. |
+| **[`harness.md`](harness.md)** | Training engineers | How BRIANHarness works: loss clipping, gradient accumulation, maturity phasing, OOD evaluation, metrics. |
 
 ---
 
@@ -32,8 +32,8 @@ This directory contains all technical and reference documentation for the BRIAN 
 
 | Document | Purpose | When to read |
 |----------|---------|-------------|
-| **[`findings.md`](findings.md)** | Hypothesis ledger: every recorded experiment with hypothesis, run, trajectory, verdict. Mechanism-level claims link to tests; OOD claims link to result JSONs. Negative results are kept. | When verifying a claim, checking reproducibility, or deciding whether a mechanism is *implemented + tested* vs *implemented + tested + shown to help*. |
-| **[`metrics.md`](metrics.md)** | Auto-updated during training. Training loss curves, convergence rates, NT dynamics, etc. | When debugging training behaviour or comparing runs. |
+| **[`findings.md`](findings.md)** | Hypothesis ledger with Layer A (mechanisms) + Layer B (OOD eval) results. Every claim is linked to a test or result JSON. | When verifying claims, checking reproducibility, or understanding what we've actually proven vs overclaimed. |
+| **[`metrics.md`](metrics.md)** | Auto-updated during training. Training loss curves, convergence rates, NT dynamics, etc. | When debugging training behavior or comparing runs. |
 | **[`history.md`](history.md)** | Session notes, decisions, insights from past runs. Auto-maintained. | When understanding the context behind a design choice. |
 | **[`changelog.md`](changelog.md)** | Git-derived commit history (auto-maintained). | When tracing when a feature was added. |
 

@@ -64,6 +64,33 @@ class TestLifterSurfacesMultiCortex:
         from neuroslm.compiler.hypergraph_ir import lift_arch_to_hypergraph
         return lift_arch_to_hypergraph(RCC_ARCH)
 
+    def _expected_domains(self):
+        """The roster of experts the arch.neuro currently declares.
+
+        Source of truth: parse the arch DSL and read the
+        ``multi_cortex.experts`` block (post-H21 roster path) or fall
+        back to the legacy ``domains`` list. Data-driven so this test
+        does not break every time the roster is edited — it only
+        breaks when the *lifter* gets out of sync with the *parser*,
+        which is the actual contract being asserted.
+        """
+        from neuroslm.dsl.training_config import (
+            _extract_block, parse_training_config,
+        )
+        body = (RCC_ARCH / "arch.neuro").read_text(encoding="utf-8")
+        # parse_training_config expects the contents INSIDE the
+        # `training { ... }` braces, not the whole arch file.
+        training_body = _extract_block(body, "training")
+        assert training_body is not None, "arch.neuro has no training {} block"
+        cfg = parse_training_config(training_body)
+        mc = getattr(cfg, "multi_cortex", None)
+        assert mc is not None, "arch.neuro has no multi_cortex block"
+        experts = list(getattr(mc, "experts", []) or [])
+        if experts:
+            return [str(e.domain) for e in experts]
+        # Legacy path: domains list with no per-expert spec.
+        return list(getattr(mc, "domains", []))
+
     def test_emits_lm_trunk_node(self):
         """A synthetic `lm_trunk` node anchors distillation + inhibition
         edges in the diagram — distinct from any DSL population."""
@@ -74,29 +101,42 @@ class TestLifterSurfacesMultiCortex:
     def test_emits_cortex_expert_nodes(self):
         ir = self._ir()
         experts = [n for n in ir.nodes if n.kind == "cortex_expert"]
-        assert len(experts) == 4, \
-            f"expected 4 cortex experts (math/code/chat/general), got {len(experts)}"
+        expected_domains = self._expected_domains()
+        assert len(experts) == len(expected_domains), (
+            f"lifter must emit one cortex_expert node per arch.neuro "
+            f"roster entry — expected {len(expected_domains)} "
+            f"({expected_domains}), got {len(experts)} "
+            f"({[n.name for n in experts]})"
+        )
         names = {n.name for n in experts}
-        assert names == {"cortex_math", "cortex_code",
-                         "cortex_chat", "cortex_general"}, \
-            f"unexpected expert names: {names}"
+        expected_names = {f"cortex_{d}" for d in expected_domains}
+        assert names == expected_names, (
+            f"expert node names {names} do not match arch.neuro roster "
+            f"{expected_names}"
+        )
 
     def test_cortex_experts_record_weights_provider(self):
         ir = self._ir()
         experts = [n for n in ir.nodes if n.kind == "cortex_expert"]
+        # Per-expert weights tag must be non-empty. Each entry comes from
+        # either the per-expert `id:` field (new MoE roster path) or the
+        # block-level `weights:` field (legacy single-weights path).
         for n in experts:
-            assert n.attrs.get("weights") == "gpt2", \
-                f"expert {n.name} missing weights provider tag"
+            w = n.attrs.get("weights")
+            assert w not in (None, "", "None"), (
+                f"expert {n.name} has no weights provider tag "
+                f"(attrs={dict(n.attrs)})"
+            )
             assert n.attrs.get("freeze_weights") in {"true", True}, \
                 f"expert {n.name} missing freeze_weights tag"
-
     def test_emits_distillation_edges_to_trunk(self):
         """One `distillation` hyperedge per cortex expert, all targeting
         the synthetic `lm_trunk` node."""
         ir = self._ir()
+        expected = len(self._expected_domains())
         dist_edges = [e for e in ir.hyperedges if e.kind == "distillation"]
-        assert len(dist_edges) == 4, \
-            f"expected 4 distillation edges, got {len(dist_edges)}"
+        assert len(dist_edges) == expected, \
+            f"expected {expected} distillation edges, got {len(dist_edges)}"
         for e in dist_edges:
             assert len(e.members) == 2
             assert e.members[1] == "lm_trunk", \
@@ -118,9 +158,10 @@ class TestLifterSurfacesMultiCortex:
         from `lm_trunk` BACK to each cortex expert (the trunk releases
         the inhibitory signal when it outperforms)."""
         ir = self._ir()
+        expected = len(self._expected_domains())
         inh_edges = [e for e in ir.hyperedges if e.kind == "inhibition"]
-        assert len(inh_edges) == 4, \
-            f"expected 4 inhibition edges, got {len(inh_edges)}"
+        assert len(inh_edges) == expected, \
+            f"expected {expected} inhibition edges, got {len(inh_edges)}"
         for e in inh_edges:
             assert e.members[0] == "lm_trunk", \
                 f"inhibition edge {e.id} should originate at lm_trunk"

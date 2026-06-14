@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from neuroslm.dsl.compiler import _parse_properties
+from neuroslm.dsl.training_config import _strip_comments
 
 
 Span = Tuple[int, int]
@@ -341,6 +342,70 @@ def _parse_dsl_list(value: str) -> List[str]:
     return items
 
 
+def _parse_dsl_object_list(value: str) -> List[Dict[str, str]]:
+    """Parse ``[ { k1: v1, k2: v2 }, { ... } ]`` into a list of dicts.
+
+    Used for the per-expert roster ``experts: [{id, domain, freeze}, ...]``
+    inside the ``multi_cortex`` block. Comment-stripping must be done by
+    the caller; this routine assumes a clean DSL string.
+
+    Each inner brace block is parsed with the standard
+    ``_parse_properties`` so quoting/spacing rules match the rest of the
+    DSL surface. Unbalanced or malformed input returns ``[]`` rather
+    than raising — the caller will fall back to ``domains:`` lifting.
+    """
+    v = value.strip()
+    if not (v.startswith("[") and v.endswith("]")):
+        return []
+    inner = v[1:-1].strip()
+    if not inner:
+        return []
+    out: List[Dict[str, str]] = []
+    i, n = 0, len(inner)
+    while i < n:
+        # Skip whitespace and commas between objects
+        while i < n and inner[i] in " \t\n\r,":
+            i += 1
+        if i >= n:
+            break
+        if inner[i] != "{":
+            # Malformed — bail out rather than misparse.
+            return []
+        # Walk to matching '}' (string-aware)
+        depth = 0
+        in_str: Optional[str] = None
+        esc = False
+        start = i
+        end = -1
+        for j in range(i, n):
+            ch = inner[j]
+            if esc:
+                esc = False
+                continue
+            if in_str:
+                if ch == "\\":
+                    esc = True
+                elif ch == in_str:
+                    in_str = None
+                continue
+            if ch in ('"', "'"):
+                in_str = ch
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = j
+                    break
+        if end < 0:
+            return []
+        obj_body = inner[start + 1:end]
+        out.append(_parse_properties(obj_body))
+        i = end + 1
+    return out
+
+
 def _apply_multi_cortex(source: str, ir: HypergraphIR) -> None:
     """Surface the GPT-2 cortex ensemble + Slot A/C edges from the
     ``training { multi_cortex { ... } }`` block.
@@ -365,7 +430,26 @@ def _apply_multi_cortex(source: str, ir: HypergraphIR) -> None:
     These edges encode the BRIANHarness ``_cortex_fusion_aux_step`` aux
     losses so they show up in the diagram (see
     ``neuroslm/harness.py::_build_multi_cortex``).
+
+    Comment-stripping
+    -----------------
+    The raw DSL source contains free-text comments with apostrophes
+    (``# the expert's pretrained head``) and math notation
+    (``# L_{ti} = ...``). The brace walker is string-aware but not
+    comment-aware, so a stray apostrophe in a comment would put the
+    walker into single-quote string mode and let the multi_cortex
+    block "swallow" everything until the next apostrophe. That made
+    distillation/inhibition edges invisible in the diagram.
+
+    Fix: strip comments (replace ``# ...`` with spaces, preserving
+    offsets) before the brace walk. ``_strip_comments`` from
+    ``neuroslm.dsl.training_config`` already does this exactly.
     """
+    # Strip comments so apostrophes / { / } inside `# ...` text can't
+    # corrupt the brace walker or the property parser. Offsets are
+    # preserved (comments become spaces), so spans stay accurate.
+    source = _strip_comments(source)
+
     m = _MULTI_CORTEX_RE.search(source)
     if not m:
         return
@@ -379,17 +463,48 @@ def _apply_multi_cortex(source: str, ir: HypergraphIR) -> None:
     if _unquote(props.get("enabled", "false")).lower() != "true":
         return
 
-    domains = _parse_dsl_list(props.get("domains", "[]"))
+    # New MoE roster path: `experts: [{id, domain, freeze}, ...]`.
+    # Each entry's `id` (HF model id) becomes the per-expert `weights`
+    # attr, and `freeze` becomes `freeze_weights`. This supersedes the
+    # legacy block-level `weights: ""` field which only worked when
+    # every expert shared one HF id.
+    expert_specs = _parse_dsl_object_list(props.get("experts", ""))
+
+    if expert_specs:
+        domains = [_unquote(spec.get("domain", "")) for spec in expert_specs]
+        domains = [d for d in domains if d]
+        # Per-domain weight + freeze lookup
+        per_expert: Dict[str, Dict[str, str]] = {}
+        for spec in expert_specs:
+            d = _unquote(spec.get("domain", ""))
+            if not d:
+                continue
+            per_expert[d] = {
+                "weights":        _unquote(spec.get("id", "")),
+                "freeze_weights": _unquote(
+                    spec.get("freeze", "true")
+                ).lower(),
+            }
+    else:
+        # Legacy single-weights path: every expert shares the block
+        # level `weights:` / `freeze_weights:` fields.
+        domains = _parse_dsl_list(props.get("domains", "[]"))
+        block_weights = _unquote(props.get("weights", ""))
+        block_freeze  = _unquote(props.get("freeze_weights", "false")).lower()
+        per_expert = {
+            d: {"weights": block_weights, "freeze_weights": block_freeze}
+            for d in domains
+        }
+
     if not domains:
         return
 
-    weights = _unquote(props.get("weights", ""))
-    freeze = _unquote(props.get("freeze_weights", "false")).lower()
     span = (m.start(), end_idx)
 
     # 1. Reclassify cortex_<domain> populations -> cortex_expert
     for domain in domains:
         name = f"cortex_{domain}"
+        info = per_expert.get(domain, {"weights": "", "freeze_weights": "false"})
         promoted = False
         for node in ir.nodes:
             if node.name == name and node.kind == "population":
@@ -397,10 +512,10 @@ def _apply_multi_cortex(source: str, ir: HypergraphIR) -> None:
                 node.kind = "cortex_expert"
                 node.id = f"cortex_expert:{name}"
                 node.attrs["domain"] = domain
-                if weights:
-                    node.attrs["weights"] = weights
-                if freeze:
-                    node.attrs["freeze_weights"] = freeze
+                # Always tag weights/freeze from the roster so the
+                # IR is honest about what each expert actually loads.
+                node.attrs["weights"] = info["weights"]
+                node.attrs["freeze_weights"] = info["freeze_weights"]
                 # Re-key the span so round-trip rendering still works.
                 if old_id in ir.source_map.spans:
                     ir.source_map.spans[node.id] = ir.source_map.spans.pop(old_id)
@@ -417,8 +532,8 @@ def _apply_multi_cortex(source: str, ir: HypergraphIR) -> None:
                 name=name,
                 attrs={
                     "domain": domain,
-                    "weights": weights,
-                    "freeze_weights": freeze,
+                    "weights": info["weights"],
+                    "freeze_weights": info["freeze_weights"],
                     "synthetic": "true",
                 },
                 span=span,
@@ -498,6 +613,9 @@ def _apply_param_scopes(source: str, ir: HypergraphIR) -> None:
     a gradient mode is declared). Nodes not listed in any scope are left
     untouched so the renderer can route them to a fallback bucket.
     """
+    # Strip comments so apostrophes / { / } inside `# ...` text can't
+    # corrupt the brace walker (same reason as in _apply_multi_cortex).
+    source = _strip_comments(source)
     name_to_node = {n.name: n for n in ir.nodes}
 
     for m in _PARAM_SCOPE_RE.finditer(source):

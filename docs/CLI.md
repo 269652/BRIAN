@@ -326,6 +326,74 @@ bash scripts/vast_train_dsl_loop.sh
 
 ---
 
+### Cheap 2k-step smoke run from `dna/evol/arch.dna`
+
+Use this when you've changed `architectures/rcc_bowtie/` (or the MoE
+experts roster in `multi_cortex`) and want a short, cheap end-to-end
+verification on vast.ai before committing to a full A100 run. Costs
+~$0.30-0.60 for the whole run (RTX 3090 @ $0.15-0.25/hr × ~2 hours).
+
+**Prerequisites:**
+1. The DNA must be current. If you touched `arch.neuro`, recompile per
+   CLAUDE.md §14:
+   ```powershell
+   python -c "from neuroslm.compiler.ribosome import RibosomeCompiler; `
+              RibosomeCompiler().compile_file('architectures/evol', `
+                                              'dna/evol/arch.dna')"
+   ```
+2. Verify the invariant: `python -m pytest tests/test_evol_dna_has_experts.py -q`
+3. `.env` carries `VAST_API_KEY=...` and `GITHUB=<token>`.
+
+**Local dry-run (free, sanity-only):**
+```powershell
+# Unfolds dna/evol/arch.dna into .neuro/arch/temp/ and lifts the
+# Hypergraph IR — same path the vast.ai job will take, just without
+# the actual training.
+brian train --dna dna/evol/arch.dna --steps 10 --preset cheap_2k
+```
+
+**Deploy to vast.ai (2k steps, RTX 3090):**
+```powershell
+# _deploy_train.py reads `multi_cortex.experts` from the DNA's
+# embedded arch.neuro and provisions an RTX 3090 instance via the
+# `cheap_2k` scale's hardware{} override.
+$env:DNA = "dna/evol/arch.dna"
+$env:SCALE = "cheap_2k"
+$env:STEPS = "2000"
+$env:OOD_EVERY = "500"   # 4 OOD evals over the run
+python _deploy_train.py
+```
+
+**What the run produces:**
+- 4 OOD evals (steps 500, 1000, 1500, 2000) — enough to see whether
+  loss is still falling without paying for a full run.
+- ~4 checkpoints at `lfs_checkpoints/dsl_arch_cheap_2k_stepXXXXX.pt`.
+- `/workspace/train.log` containing per-step `train_ppl`, `ood_ppl`,
+  `cortex_alpha`, MoE router-weight distribution per domain.
+- Total token budget: 2000 × 2 × 1024 × 2 (grad_accum) ≈ 8M training
+  tokens — about 1/65 of GPT-2's 524M-per-step pretraining batch.
+
+**When this run is enough:**
+- Initial CE on natural English at step 0 should be **3-5 nats** (not
+  ~10.85 as on the old random-projection path). If it's >7 nats, the
+  MoE wiring is silently broken — abort and check
+  `tests/training/test_lm_expert_harness_integration.py::TestSmokingGunCE`.
+- `train_ppl` should fall from ~50-100 at step 0 to ~20-30 by step 2000.
+- Router weights should NOT all collapse onto a single expert (telemetry
+  field `cortex/router_weights/*`); if they do, lexical bias is too low.
+
+**When you need more than 2k:**
+- `train_ppl` hasn't dropped below 60 by step 2000 → architectural
+  problem, not a learning-rate problem. Don't extend the run; investigate.
+- `ood_ppl` is still falling fast at step 2000 → switch to the full
+  `30m_p4` scale (or `100m`) on an A100 for the 10k-40k step trajectory.
+
+**Record the result** per CLAUDE.md §10 — even a 2k smoke run is an
+experiment with a verdict; add a row to `docs/findings.md` with the
+vast.ai instance id and the cost.
+
+---
+
 ## Git LFS Checkpoint Management
 
 ### Skip LFS downloads (recommended for laptops)
