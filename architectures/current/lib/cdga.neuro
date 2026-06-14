@@ -1,0 +1,169 @@
+# -*- coding: utf-8 -*-
+# lib/cdga.neuro — Cross-Distribution Gradient Alignment (CDGA)
+#
+# Math-first specification of the gradient-surgery mechanism that
+# resolves the gap_ratio regression observed in the 2026-06-03 trace.
+#
+# ─────────────────────────────────────────────────────────────────────
+# WHY THIS EXISTS
+# ─────────────────────────────────────────────────────────────────────
+# All five PR2 OOD interventions (DAR, PCC, Isotropy, CMD, Adaptive
+# Mixture) operate in LOSS space — they add scalar penalties that
+# nudge the model away from collapse modes. Empirically they leave
+# the gap_ratio widening (train_ppl 1926 → 872 while wiki_ppl stayed
+# at 7000+, gap_ratio 4.0 → 7.4 over 500 steps).
+#
+# Diagnosis: the loss-space tools are isotropic in parameter space.
+# When the data distribution is dominated by one mode (chat 80%) the
+# vanilla LM gradient still points into the chat-attractor basin
+# every step; defensive regularizers add friction but no direction.
+# What is missing is an ANISOTROPIC, OOD-AWARE gradient signal.
+#
+# CDGA supplies it by maintaining a frozen anchor batch of pure OOD
+# (prose) tokens and projecting out the component of the training
+# gradient that would actively HURT the anchor.
+#
+# ─────────────────────────────────────────────────────────────────────
+# MATHEMATICAL FORMULATION
+# ─────────────────────────────────────────────────────────────────────
+# Let θ be the trainable parameters and L the standard LM loss.
+# At step t the harness computes two gradients on the same θ:
+#
+#     g_train  = ∇_θ L(x_train; θ)        # standard step, retained
+#     g_anchor = ∇_θ L(x_anchor; θ)        # OOD reference, discarded
+#                                          # after projection
+#
+# `x_anchor` is a held-out PROSE batch refreshed every `refresh_every`
+# steps from a separate corpus partition that NEVER overlaps with the
+# OOD evaluation slice (no test contamination — see formal_spec at the
+# end of this file).
+#
+# Compute the inner product and the cosine:
+#
+#     dot       = <g_train, g_anchor>
+#     g2        = <g_anchor, g_anchor>            ( = ||g_anchor||² )
+#     cos_θ     = dot / (||g_train|| · √g2)
+#
+# The CONFLICT COEFFICIENT is the negative projection coefficient,
+# rectified to be active only when the gradients oppose:
+#
+#     c = max(0, -dot / g2)                        # ≥ 0
+#
+# (When dot ≥ 0 the gradients are aligned or orthogonal — no surgery
+# needed. When dot < 0 the training step would actively worsen the
+# anchor loss; c quantifies by how much, in units of ||g_anchor||.)
+#
+# The aligned gradient subtracts the conflict component, scaled by
+# the global strength α ∈ [0, 1]:
+#
+#     g_aligned = g_train - α · c · g_anchor
+#
+# This is the same projection operator as PCGrad (Yu et al. 2020) but
+# applied between a single LM task evaluated on TWO distributions,
+# rather than between distinct multi-task objectives.
+#
+# ─────────────────────────────────────────────────────────────────────
+# PROPERTIES (proved in docs/CDGA.md)
+# ─────────────────────────────────────────────────────────────────────
+# (P1) Non-worsening anchor: when α = 1 and c > 0, the first-order
+#      expected change in L(x_anchor) is non-positive. The training
+#      step cannot increase anchor loss to first order.
+# (P2) Bounded perturbation: ||g_aligned - g_train|| = α · c · ||g_anchor||
+#      ≤ α · ||g_train|| · |cos_θ| ≤ α · ||g_train||. So CDGA never
+#      changes the gradient by more than the training gradient itself.
+# (P3) Idempotent on aligned tasks: when dot ≥ 0 the operator is a no-op.
+# (P4) Warmup-safe: applying the standard `warmup_steps` ramp to α
+#      ensures CDGA only engages once the LM has formed baseline
+#      features (otherwise both gradients are random noise and
+#      surgery is meaningless).
+#
+# ─────────────────────────────────────────────────────────────────────
+# IMPLEMENTATION CONTRACT
+# ─────────────────────────────────────────────────────────────────────
+# The Python implementation in neuroslm/regularizers.py :: CDGAController
+# realises these equations against PyTorch parameter `.grad` tensors:
+#
+#   1. After the standard backward() the harness owns g_train in p.grad
+#      for every trainable p.
+#   2. CDGAController.apply_surgery(model, anchor_batch_fn):
+#        a. Snapshot g_train as a flat vector (or per-parameter list).
+#        b. Zero grads, forward+backward on the anchor batch → g_anchor
+#           in p.grad.
+#        c. Compute dot, g2, c, α scalars.
+#        d. Write g_aligned = g_train - α·c·g_anchor back into p.grad.
+#   3. Optimizer.step() proceeds normally with the aligned gradients.
+#
+# Cost: one extra forward+backward every `refresh_every` steps. With
+# a 1/4-size anchor batch (e.g. 1 × 512 tok vs 4 × 2048 tok) the
+# overhead is ≈ 8% of one full training step amortised across the
+# refresh interval.
+# ─────────────────────────────────────────────────────────────────────
+
+# ── Core equations ───────────────────────────────────────────────────
+
+export equation cdga_inner_product {
+    params: [g_train, g_anchor],
+    formula: "dot = <g_train, g_anchor>"
+}
+
+export equation cdga_conflict_coef {
+    params: [g_train, g_anchor],
+    formula: "c = max(0, - <g_train, g_anchor> / <g_anchor, g_anchor>)"
+}
+
+export equation cdga_aligned_gradient {
+    params: [g_train, g_anchor, c, alpha],
+    formula: "g_aligned = g_train - alpha * c * g_anchor"
+}
+
+# Cosine similarity is published as a telemetry metric so that runs
+# can be diagnosed: a healthy training run shows cos_θ > 0 after
+# warmup (train and prose gradients aligned). A monotonically
+# decreasing cos_θ signals the chat-attractor pulling away from the
+# prose manifold — the failure mode CDGA is designed to interrupt.
+
+export equation cdga_cosine_similarity {
+    params: [g_train, g_anchor],
+    formula: "cos_theta = <g_train, g_anchor> / (||g_train|| * ||g_anchor||)"
+}
+
+# ── Schedule for the global strength α ───────────────────────────────
+# Linear ramp from 0 to alpha_max over `warmup_steps`. After warmup,
+# α stays at alpha_max. Setting alpha_max = 0 disables CDGA without
+# removing the telemetry pass (still computes cos_θ for diagnostics).
+
+export equation cdga_strength_schedule {
+    params: [step, warmup_steps, alpha_max],
+    formula: "alpha = min(alpha_max, alpha_max * step / warmup_steps)"
+}
+
+# ── Anchor batch refresh schedule ────────────────────────────────────
+# Pure-prose anchor token IDs are sampled from the OOD corpus
+# partition once every `refresh_every` steps. Between refreshes the
+# same anchor batch is reused (which is fine because we use it only
+# for gradient direction, not for parameter updates — staleness costs
+# at most a slight bias in the projection direction).
+
+export equation cdga_anchor_refresh {
+    params: [step, refresh_every],
+    formula: "is_refresh_step = (step mod refresh_every == 0)"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# FORMAL SPECIFICATIONS — analyser hints
+# ─────────────────────────────────────────────────────────────────────
+
+formal_spec cdga_test_contamination {
+    rule:   "anchor_corpus_disjoint_from_eval",
+    metric: "intersect(anchor_doc_ids, ood_eval_doc_ids) = empty"
+}
+
+formal_spec cdga_non_worsening {
+    rule:   "first_order_anchor_loss_non_increasing",
+    metric: "E[ <∇L_anchor, g_aligned> ] ≤ E[ <∇L_anchor, g_train> ]"
+}
+
+formal_spec cdga_bounded_perturbation {
+    rule:   "gradient_perturbation_bounded_by_training_gradient",
+    metric: "||g_aligned - g_train|| ≤ alpha_max * ||g_train||"
+}

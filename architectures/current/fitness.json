@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "enabled": true,
+  "objectives": [
+    {
+      "name": "minimize_ood_ppl",
+      "metric": "ood_ppl",
+      "direction": "minimize",
+      "weight": 0.5,
+      "target": 175.0,
+      "metadata": {}
+    },
+    {
+      "name": "maximize_phi",
+      "metric": "phi",
+      "direction": "maximize",
+      "weight": 0.3,
+      "target": 0.18,
+      "metadata": {}
+    },
+    {
+      "name": "minimize_gap_ratio",
+      "metric": "gap_ratio",
+      "direction": "minimize",
+      "weight": 0.2,
+      "target": 2.0,
+      "metadata": {}
+    }
+  ],
+  "adaptation": {
+    "enabled": true,
+    "mutation_rate": 0.01,
+    "target_adjustment_rate": 0.001,
+    "weight_adjustment_rate": 0.01,
+    "metadata": {}
+  },
+  "metadata": {
+    "description": "RCC Bowtie multi-objective fitness: minimize OOD PPL, maximize Phi, reduce gap ratio"
+  }
+}

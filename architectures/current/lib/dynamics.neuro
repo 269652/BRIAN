@@ -1,0 +1,18 @@
+# Shared dynamics — reusable building blocks
+#
+# Anything declared here can be `import`ed by any module. The macro forms
+# (rate_code, gated, attractor_network, etc.) are baked into the codegen
+# and don't need declarations here, but custom dynamics live in this file.
+#
+# Currently empty in the stock rcc_bowtie; populated as we extract
+# bespoke neural mechanics that recur across regions.
+
+# Example (commented — uncomment + import to activate):
+#
+# export dynamics fast_lif {
+#     ode: "tau * dV/dt = -(V - V_rest) + R * x",
+#     state: { V: "torch.zeros(1, d_sem)" },
+#     constants: { tau: 0.005, V_rest: 0.0, R: 1.0, dt: 0.001 }
+# }
+#
+# export function leak(x, alpha) { equation: "(1 - alpha) * x" }

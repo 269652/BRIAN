@@ -1,0 +1,198 @@
+# -*- coding: utf-8 -*-
+# lib/regularizers.neuro — math-first OOD intervention library
+#
+# Declarative equations for the five interventions proposed in
+# docs/technical_report.md §3 (post-mortem of the gap_ratio regression).
+#
+# Each `equation` declares a closed-form loss term. The harness binds the
+# free symbols (h, p, etc.) to the appropriate tensors at runtime.
+# These are the *canonical* mathematical statements — the Python parser
+# in neuroslm/dsl/regularization.py exposes their hyperparameters.
+#
+# Conventions:
+#   h, h_t, h_pre, h_post  — hidden states (tensor, last dim = d_model)
+#   p, q                   — distributions over vocab (tensor, last dim = V)
+#   L_ce                   — per-sample cross-entropy losses (tensor [B])
+#   E[ · ]                 — batch-mean expectation
+#   < ·, · >               — inner product
+#   ||·||_F                — Frobenius norm
+#   σ                      — sigmoid; KL, JSD as standard
+#   GRL_α                  — gradient reversal layer with scale α
+#
+# IMPORTANT: these equations are research-grade specifications. The
+# codegen lowers them through neuroslm/dsl/regularization.py for now;
+# PR4 will add a generic `optimization_problem` lowerer so new losses
+# can be added without touching Python.
+
+# ── Intervention A — Distributional Adversarial Reweighting ──────────
+
+export equation dar_discriminator {
+    params: [h, W_d, b_d, alpha],
+    formula: "y = sigmoid(GRL(h, alpha) @ W_d + b_d)"
+}
+
+export equation dar_loss {
+    params: [L_ce, d_pred, domain_label, lam, minority_mask],
+    formula: "y = mean(exp(lam * L_ce * minority_mask) * L_ce) + BCE(d_pred, domain_label)"
+}
+
+# ── Intervention B — Predictive Contrastive Coding ───────────────────
+# Replaces the reconstructive PCT loss. Forces deep layers to encode
+# features predictive of future context while remaining invariant to
+# document-specific surface form (negatives come from other documents).
+
+export equation pcc_anchor {
+    params: [h_t, W_proj],
+    formula: "y = h_t @ W_proj"
+}
+
+export equation pcc_loss {
+    params: [z_anchor, z_positive, z_negatives, tau],
+    formula: "y = -log(exp(<z_anchor, z_positive> / tau) / (exp(<z_anchor, z_positive> / tau) + sum(exp(<z_anchor, z_negatives> / tau))))"
+}
+
+# ── Intervention C — Isotropy whitening ──────────────────────────────
+# Pushes the empirical Gram matrix toward I, killing the "narrow cone"
+# anisotropy that mediates OOD gap in transformer LMs.
+
+export equation isotropy_gram {
+    params: [H_buf, N],
+    formula: "G = (H_buf.T @ H_buf) / N"
+}
+
+export equation isotropy_loss_frobenius {
+    params: [G, d],
+    formula: "L = ||G - I||_F^2 / (d * d)"
+}
+
+export equation isotropy_loss_log_det {
+    params: [G],
+    formula: "L = -log(det(G))"
+}
+
+# ── Intervention D — Cross-Module Disagreement ───────────────────────
+# Two read-out heads produce vocab distributions p, q; we penalize their
+# JSD. Shared signal between modules is OOD-robust; idiosyncratic
+# disagreement is the shortcut and gets punished.
+
+export equation cmd_mean_distribution {
+    params: [p, q],
+    formula: "m = 0.5 * (p + q)"
+}
+
+export equation cmd_loss_jsd {
+    params: [p, q, m, weight],
+    formula: "L = weight * (0.5 * KL(p, m) + 0.5 * KL(q, m))"
+}
+
+export equation cmd_loss_kl_sym {
+    params: [p, q, weight],
+    formula: "L = weight * (0.5 * KL(p, q) + 0.5 * KL(q, p))"
+}
+
+export equation cmd_loss_l1 {
+    params: [p, q, weight],
+    formula: "L = weight * mean(|p - q|)"
+}
+
+# ── Intervention E — Adaptive mixture controller ─────────────────────
+# Closed-loop control rule: re-weights the corpus mixture every K steps
+# based on measured logit entropy on a held-out prose probe.
+
+export equation probe_entropy {
+    params: [p_probe],
+    formula: "H = -mean(sum(p_probe * log(p_probe)))"
+}
+
+# Adaptive mixture controller — corrected (entropy-parity) direction.
+#
+# Intuition: H_t is the measured entropy on a held-out PROSE probe.
+# If H_t > H_target the model is *uncertain* on prose → it has seen
+# too little of that distribution → the controller must dial CHAT
+# DOWN (more prose exposure). If H_t < H_target the model is fluent
+# on prose → it has spare capacity for chat → chat ratio can grow.
+#
+# The original `(H_t / H_target)^gamma` formula was BACKWARDS: it
+# *amplified* whichever distribution the model already overfit to,
+# producing the runaway 0.60 → 0.80 chat_ratio observed in the
+# 2026-06-03 trace where gap_ratio widened monotonically.
+#
+# The `direction` parameter selects the rule:
+#   direction = "balance"  →  (H_target / H_t)^gamma    (DEFAULT, correct)
+#   direction = "amplify"  →  (H_t / H_target)^gamma    (legacy bug — kept
+#                                                        for ablation only)
+
+export equation adaptive_mixture_update {
+    params: [chat_ratio_t, H_t, H_target, gamma, r_min, r_max, direction],
+    formula: "chat_ratio_next = clip(chat_ratio_t * (direction == \"balance\" ? (H_target / H_t)^gamma : (H_t / H_target)^gamma), r_min, r_max)"
+}
+
+# ── Intervention F — Frequency-balanced cross-entropy ────────────────
+# Token-level inverse-frequency reweighting toward an OOD target
+# corpus. Pre-computed unigram frequencies on both train and target
+# corpora produce a per-vocab weight vector that downweights tokens
+# the train corpus over-represents relative to the OOD target.
+#
+# Math (cf. focal loss, class-balanced loss [Cui et al. 2019]):
+#
+#   freq_train[v]   = count_v / Σ_v count_v       (over training sample)
+#   freq_target[v]  = count_v / Σ_v count_v       (over OOD probe sample)
+#   ratio[v]        = freq_target[v] / (freq_train[v] + ε)
+#   w[v]            = clip(ratio[v]^beta, w_min, w_max)
+#   w[v]            = w[v] / mean(w[v])           (mean-normalised so
+#                                                  the loss scale is
+#                                                  unchanged — only the
+#                                                  *direction* per token)
+#   L_freq          = mean( w[ targets ] * CE_per_token )
+#
+# β controls the strength: 0 = uniform (identity), 1 = exact inverse
+# frequency, 0.5 = square-root smoothing (Mikolov 2013-style).
+# Recommended β = 0.5, w_max = 5.0, w_min = 0.2 — keeps the loss
+# scale within 5× of the baseline so the LR schedule still works.
+
+export equation freq_balance_weight {
+    params: [freq_train, freq_target, beta, w_min, w_max],
+    formula: "w[v] = clip((freq_target[v] / (freq_train[v] + epsilon))^beta, w_min, w_max)"
+}
+
+export equation freq_balance_normalize {
+    params: [w],
+    formula: "w_norm[v] = w[v] / mean(w[v])"
+}
+
+export equation freq_balance_loss {
+    params: [CE_per_token, targets, w_norm],
+    formula: "L = mean( w_norm[ targets ] * CE_per_token )"
+}
+
+# ── PCT-IB (proposed, lands in PR3) — multi-scale predictive coding ──
+# Information-bottleneck variant of PCT. Replaces ||ĥ_n - h_n||^2 with
+# a stochastic latent + KL penalty + shortcut-orthogonal projection.
+# Currently declared for documentation; codegen lowering in PR3.
+
+export equation pct_ib_latent {
+    params: [h_post, encoder_mu, encoder_sigma, epsilon],
+    formula: "z = encoder_mu(h_post) + epsilon * encoder_sigma(h_post)"
+}
+
+export equation pct_ib_loss {
+    params: [h_pre, h_pre_hat, P_perp, mu, sigma, beta],
+    formula: "L = ||P_perp @ (h_pre - h_pre_hat)||_F^2 + beta * KL(N(mu, sigma^2), N(0, 1))"
+}
+
+# ── Constraints — provide solver hints for the analyzer ──────────────
+
+formal_spec dar_objective {
+    rule: "domain_adversarial_invariance",
+    metric: "domain_classification_acc_target = 0.5"
+}
+
+formal_spec isotropy_objective {
+    rule: "rank_preservation",
+    metric: "effective_rank(G) -> d"
+}
+
+formal_spec pcc_objective {
+    rule: "infomax_with_invariance",
+    metric: "I(z_t; z_{t+k}) under cross_document_negatives"
+}
