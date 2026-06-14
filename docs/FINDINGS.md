@@ -835,3 +835,120 @@ what to copy/avoid for the next architectural iteration:
 | Bigger pretrained expert improves trunk via distillation | 🟠 PENDING | ❌ FALSIFIED at rcc_bowtie scale, bridge-path variant |
 | Frozen expert weight count is a strict win | implicit | ❌ FALSIFIED — bridge tax >> param benefit |
 
+
+---
+
+## Run 40952126 — 2026-06-14 21:30 UTC — root-cause UPDATE (post-mortem #2)
+
+After writing the post-mortem above, the obvious next question was
+*"which of the five candidate mechanisms is actually killing the bridge?"*
+I built `scripts/diagnose_bridge_ce.py` to test each one in isolation
+against gpt2's own next-token CE on a 7-sentence English paragraph. The
+results inverted my initial diagnosis.
+
+### Setup
+
+* Trunk tokenizer: gpt2 (V_t = 50257)
+* Expert: SmolLM2-360M (V_e = 49152)
+* Test paragraph: 83 trunk tokens / 79 expert tokens of natural English
+* Baseline: gpt2's own next-token CE on the paragraph = **3.016 nats**
+
+### Four bridge configurations measured
+
+| Config | Bridge build | Alignment | CE (nats) | Δ vs gpt2 |
+|---|---|---|---|---|
+| (C1) Current shipping code | strict 1-token only | smallest-`e` with `e_end ≥ t_end` | 3.068 | +0.05 |
+| (C2) Relaxed bridge only | `n ≥ 1`, use first expert subtoken | smallest-`e` (unchanged) | **3.870** | **+0.85** |
+| (C3) Exact alignment only | strict 1-token (unchanged) | only-`e` with `e_end == t_end` else -1 | **2.798** | **−0.22** |
+| (C4) Both | relaxed | exact | 3.547 | +0.53 |
+
+### Hypothesis flips
+
+**Vocab coverage is NOT the bottleneck.** I assumed the strict
+`len(eids) == 1` rule (73.6% trunk coverage) was wasting signal at
+26% of slots. Relaxing it to `len(eids) >= 1` (99.99% coverage) actually
+makes CE **WORSE by 0.85 nats**. Reason: many trunk tokens share the
+same first expert subtoken — e.g. ` general`, ` generate`, ` generation`
+all start with ` gen` — so the bridged trunk softmax dilutes correct
+mass equally across all "siblings" with the same prefix. CE penalty
+≈ ln(sibling count). The strict bridge's per-position abstain (with
+`max(mapped) − ln V_trunk`) was the *correct* fallback all along.
+
+**Alignment SHIFT is the bottleneck.** At positions where trunk and
+expert tokenisations don't share a char-end boundary, the legacy
+`smallest e such that e_end ≥ t_end` rule picks an expert position
+whose end is *strictly greater than* trunk's. Two failures compound:
+
+1. **One-step leakage** — the expert at `e` has already SEEN trunk's
+   target as part of its input prefix.
+2. **Wrong-horizon prediction** — the expert at `e` predicts content
+   *starting past* trunk's prediction horizon. Using that as the
+   distillation target trains trunk toward "what comes after trunk's
+   target", not "what trunk's target IS".
+
+On natural English with gpt2/SmolLM2, only ~5% of trunk positions
+suffer from this misalignment. But that 5% of *actively wrong* signal
+is more harmful than 5% of *uniform* signal — the trunk's distillation
+loss tries to match it, dragging the trunk toward bad next-token
+distributions.
+
+### The actual fix (one-line conceptually, ~50 lines of code)
+
+* New helper `_align_by_char_offsets_exact` returns `-1` at mismatched
+  positions. The legacy `_align_by_char_offsets` stays for back-compat.
+* `LMExpert._forward_bridge` switches to the exact helper; at `-1`
+  positions, the output buffer stays at zero (= uniform after softmax).
+* `LMExpert.last_alignment_coverage` now exposes the per-batch fraction
+  of trunk positions that exact-aligned. Harness can log this as a
+  leading indicator.
+* `VocabBridge.build` is unchanged — keeps the strict `len(eids) == 1`
+  rule because relaxing it hurts more than it helps.
+
+Files: `neuroslm/experts.py`,
+`tests/training/test_lm_expert_bridge_exact_alignment.py` (14 tests,
+8 unit + 3 telemetry + 1 integration + 2 export-surface).
+
+### Predicted training impact
+
+The standalone bridge-CE win is 0.27 nats (3.068 → 2.798) on English.
+In the H22 training run this would feed back through the distillation
+KL on every step. With distillation weight α≈0.5 (the H22 setting),
+that's a ~0.13-nat improvement in the per-step KL loss, which
+historically converts to ~3-5× of that in trunk LM CE at the start
+of training where the trunk is most plastic. So a conservative
+prediction for H23:
+
+* Step 500 trunk lm CE: H22 was 6.40, H23 should be ≤ 5.5
+  (the gpt2 baseline was 5.31)
+* Step 7800 train_ppl: H22 hit 175 after 7800 steps; H23 should
+  cross 175 by ~step 3500-4500
+* OOD `wikitext` ppl gap_ratio: should converge toward the gpt2
+  baseline's 1.6-1.8 range (H22 was stuck at 1.09 because the trunk
+  LM head was perma-stuck high on both)
+
+### Things STILL to fix from the H22 post-mortem
+
+These remain real concerns even with the alignment fix:
+
+* **Bridge throughput tax (2.5×).** Per-sample Python loop in
+  `_forward_bridge` is the bottleneck. A batched re-tokenisation +
+  vectorised alignment would close most of the gap. Defer until H23
+  shows whether the CE win justifies a bigger refactor.
+* **`gnorm_emergency_brake`.** Still needed — the alignment fix doesn't
+  prevent the kind of routing collapse seen at steps 1720-1860.
+* **`C3:pc > 50` early-warning.** Still worth wiring up.
+* **Same-tok experts cold-start.** No longer required for *correctness*
+  (the alignment fix makes cross-tok safe), but still a throughput win
+  during the bootstrap phase.
+
+### What this updates
+
+| Claim from post-mortem #1 | Status after post-mortem #2 |
+|---|---|
+| "Vocab coverage gates distillation quality"                | ❌ FALSIFIED — coverage was a red herring |
+| "Bridge path adds ~0.5 nats per-step CE penalty"           | 🟡 PARTIAL — actual mechanism is alignment shift, ~0.27 nats |
+| "H22 SmolLM2 cannot beat gpt2 at this scale"               | ❌ FALSIFIED — with exact alignment, SmolLM2 beats gpt2 by 0.22 nats on the held-out paragraph |
+| "Same-tok experts are non-negotiable in the first 2000 steps" | 🟡 PARTIAL — required for *speed*, no longer required for *correctness* |
+| "Per-position abstain is mathematically sound"             | ✅ CONFIRMED — and now lightly used (only at the ~5% of positions that misalign) |
+
+

@@ -72,6 +72,7 @@ __all__ = [
     "LMExpertEnsemble",
     "VocabBridge",
     "_align_by_char_offsets",
+    "_align_by_char_offsets_exact",
     "_load_lm_cached",
     "_load_tokenizer_cached",
     "build_lm_expert_ensemble",
@@ -565,6 +566,17 @@ def _align_by_char_offsets(
     every trunk position. If the expert tokenisation ends earlier than
     the trunk's (rare; happens with EOS / special tokens), the last
     expert position is returned for the trailing trunk positions.
+
+    .. warning::
+       **Legacy helper.** The bridge no longer uses this in
+       ``_forward_bridge`` because the "smallest e with e_end >= t_end"
+       rule yields wrong-horizon predictions when boundaries don't
+       match (the expert at position e has already SEEN the trunk's
+       target and is predicting content PAST trunk's horizon). Use
+       :func:`_align_by_char_offsets_exact` instead, which returns
+       ``-1`` at mismatched positions so the caller can abstain. Kept
+       in the public surface for back-compat with tests + external
+       diagnostics.
     """
     out: List[int] = []
     e_idx = 0
@@ -577,6 +589,73 @@ def _align_by_char_offsets(
         ):
             e_idx += 1
         out.append(e_idx)
+    return out
+
+
+def _align_by_char_offsets_exact(
+    trunk_offsets: Sequence[Tuple[int, int]],
+    expert_offsets: Sequence[Tuple[int, int]],
+) -> List[int]:
+    """For every trunk position t, return the expert position e_t whose
+    end-character offset EQUALS trunk[t].end EXACTLY, or ``-1`` if no
+    such expert position exists.
+
+    Why exact-only matters (vs. the legacy "smallest e with e_end >= t_end")
+    ----------------------------------------------------------------------
+    In next-token prediction, trunk position t carries a hidden state
+    that has consumed trunk_tokens[0..t] (decoded text up to
+    ``trunk_offsets[t][1]``) and predicts trunk_token[t+1] (which
+    starts at ``trunk_offsets[t][1]``).
+
+    Expert position e carries a hidden state that has consumed
+    expert_tokens[0..e] (decoded text up to ``expert_offsets[e][1]``)
+    and predicts the next expert token (which starts at
+    ``expert_offsets[e][1]``).
+
+    For the expert's prediction to be a valid distillation target for
+    trunk's prediction, both must be predicting content that STARTS at
+    the same character offset:
+
+        ``expert_offsets[e][1] == trunk_offsets[t][1]`` (exact match).
+
+    When boundaries don't match, the legacy "smallest e with e_end >=
+    t_end" alignment picks an expert position whose end-offset is
+    STRICTLY GREATER than trunk's. Two failures compound:
+
+    * **One-step leakage**: the expert at e has SEEN trunk's target
+      as part of its input prefix.
+    * **Wrong-horizon prediction**: the expert at e predicts content
+      starting PAST trunk's prediction horizon. Using its logits as
+      trunk's target trains trunk toward "what comes after trunk's
+      target", not toward trunk's target itself.
+
+    Empirical impact
+    ----------------
+    On a natural-English paragraph with gpt2 trunk + SmolLM2 expert::
+
+        gpt2 own next-token CE     = 3.016 nats   (baseline)
+        legacy smallest-ge bridge  = 3.068 nats   (+0.05 vs gpt2)
+        exact-end bridge           = 2.798 nats   (-0.22 vs gpt2 !)
+
+    ~95% of natural-English trunk positions align exactly with SmolLM2;
+    the remaining ~5% abstain (uniform) instead of contributing
+    wrong-horizon noise. See ``scripts/diagnose_bridge_ce.py`` for the
+    full experiment and the H22 forensic in ``docs/FINDINGS.md``.
+
+    Regression-pinned by
+    ``tests/training/test_lm_expert_bridge_exact_alignment.py``.
+    """
+    out: List[int] = []
+    e_idx = 0
+    n_e = len(expert_offsets)
+    for _t_start, t_end in trunk_offsets:
+        # Advance e_idx until expert_offsets[e_idx].end >= t_end
+        while e_idx < n_e and expert_offsets[e_idx][1] < t_end:
+            e_idx += 1
+        if e_idx < n_e and expert_offsets[e_idx][1] == t_end:
+            out.append(e_idx)
+        else:
+            out.append(-1)
     return out
 
 
@@ -659,6 +738,16 @@ class LMExpert(nn.Module):
         self.vocab_size_trunk = self.vocab_bridge.vocab_size_trunk
         self.vocab_size_expert = self.vocab_bridge.vocab_size_expert
 
+        # ── Telemetry: per-batch alignment coverage ──────────────────
+        # For same-tok experts this is always 1.0 (after forward); for
+        # cross-tok experts it's the fraction of trunk positions that
+        # exact-aligned to an expert position in the most recent
+        # forward pass. Set by ``_forward_*``. The harness can log
+        # this as a leading indicator of distillation quality — low
+        # coverage means the expert mostly abstains (uniform) and
+        # contributes no real signal at most positions.
+        self.last_alignment_coverage: Optional[float] = None
+
     # ── public ───────────────────────────────────────────────────────
 
     @property
@@ -702,12 +791,38 @@ class LMExpert(nn.Module):
             device_type=ids.device.type, enabled=False,
         ):
             out = self.lm(input_ids=ids)
+        # Same-tok experts are trivially 100% aligned (no bridge / no
+        # re-tokenisation), so the telemetry reads 1.0.
+        self.last_alignment_coverage = 1.0
         return out.logits  # (B, T, V_expert == V_trunk)
 
     def _forward_bridge(self, ids: torch.Tensor) -> torch.Tensor:
-        """Bridge path: per-sample re-tokenise, run expert, align,
-        project. Slower than the fast path but enables true
-        cross-architecture experts (Qwen, DeepSeek, etc.).
+        """Bridge path: per-sample re-tokenise, run expert, align via
+        :func:`_align_by_char_offsets_exact`, project via the vocab
+        bridge. Misaligned trunk positions abstain to uniform.
+
+        Why exact-end alignment (vs. the legacy smallest-ge alignment)
+        --------------------------------------------------------------
+        The legacy alignment chose the smallest expert position whose
+        end-offset was ``>= trunk[t].end`` — at positions where the two
+        tokenisations don't share a boundary, this picks an expert
+        position whose end is STRICTLY GREATER than trunk's. The expert
+        at that position has already SEEN trunk's target as part of its
+        input prefix AND its prediction is for content STARTING PAST
+        trunk's prediction horizon. Using such logits as distillation
+        targets is wrong-horizon noise that drags the trunk toward
+        "what comes after trunk's target", not "what IS trunk's target".
+
+        Exact alignment fixes this: at trunk position t, use expert
+        position e iff ``expert_offsets[e][1] == trunk_offsets[t][1]``
+        exactly; otherwise leave the trunk position at uniform (zero
+        logits, ``CE = ln V_trunk``). On natural English with gpt2
+        trunk + SmolLM2 expert, ~95% of trunk positions exact-align;
+        the remaining ~5% abstain instead of contributing noise. The
+        H22 forensic (see ``docs/FINDINGS.md`` and
+        ``scripts/diagnose_bridge_ce.py``) measured a 0.27-nat CE
+        improvement on a held-out paragraph, taking SmolLM2 from
+        +0.05 nats over gpt2 to -0.22 nats UNDER it.
 
         Safety guards
         -------------
@@ -723,8 +838,17 @@ class LMExpert(nn.Module):
           as ``_forward_same_tok``: the frozen expert's CUBLAS path is
           unstable when bf16 autocast downcasts its inputs.
 
+        Telemetry
+        ---------
+        Sets ``self.last_alignment_coverage`` to the fraction of trunk
+        positions that exact-aligned (averaged across the batch). The
+        harness logs this as a leading indicator: coverage near 0
+        means the expert is silently abstaining at most positions,
+        contributing essentially no distillation signal.
+
         Regression-pinned by
-        ``tests/training/test_lm_expert_bridge_safety.py``.
+        ``tests/training/test_lm_expert_bridge_safety.py`` and
+        ``tests/training/test_lm_expert_bridge_exact_alignment.py``.
         """
         B, T = ids.shape
         device = ids.device
@@ -741,6 +865,9 @@ class LMExpert(nn.Module):
             device=device,
             dtype=torch.float32,
         )
+        # Track per-batch alignment coverage (sum across samples, then mean)
+        n_aligned_total = 0
+        n_positions_total = 0
 
         for b in range(B):
             sample_ids = ids[b].tolist()
@@ -770,8 +897,12 @@ class LMExpert(nn.Module):
                 expert_input_ids_list, dtype=torch.long, device=device,
             ).unsqueeze(0)  # (1, T_expert <= T)
 
+            t_count = min(T, len(trunk_offsets))
+            n_positions_total += t_count
+
             if expert_input_ids.shape[1] == 0:
-                # Edge case: empty sample — leave as abstain row
+                # Edge case: empty sample — leave as abstain row.
+                # All t_count positions count as misaligned.
                 continue
 
             # Run expert on its own tokenisation — autocast disabled.
@@ -783,22 +914,37 @@ class LMExpert(nn.Module):
                         input_ids=expert_input_ids,
                     ).logits.squeeze(0)  # (T_expert, V_expert)
 
-            # Align: for every trunk-position t (up to the lesser of
-            # T and len(trunk_offsets)), pick the expert position whose
-            # char-end is just past trunk_offsets[t].end
-            t_count = min(T, len(trunk_offsets))
             if t_count == 0:
                 continue
-            idx_map = _align_by_char_offsets(
+
+            # EXACT alignment: idx[t] is the expert position whose
+            # end-offset equals trunk_offsets[t][1] exactly, or -1.
+            idx_map = _align_by_char_offsets_exact(
                 trunk_offsets[:t_count],
                 expert_offsets,
             )
             idx_t = torch.tensor(idx_map, dtype=torch.long, device=device)
-            picked = expert_logits.index_select(0, idx_t)  # (t_count, V_expert)
+            valid_mask = idx_t >= 0
+            n_aligned_total += int(valid_mask.sum().item())
+            if not valid_mask.any():
+                # Whole sample is misaligned — output already uniform.
+                continue
+            valid_pos = torch.nonzero(valid_mask, as_tuple=True)[0]
+            valid_idx = idx_t.index_select(0, valid_pos)
+            picked = expert_logits.index_select(0, valid_idx)  # (n_valid, V_expert)
             # Project to trunk vocab via bridge
-            bridged = self.vocab_bridge.apply(picked)  # (t_count, V_trunk)
-            out[b, :t_count] = bridged.to(out.dtype)
+            bridged = self.vocab_bridge.apply(picked)  # (n_valid, V_trunk)
+            # Scatter only the aligned positions; misaligned stay zero.
+            out[b].index_copy_(0, valid_pos, bridged.to(out.dtype))
 
+        # Update telemetry — mean alignment coverage over the batch.
+        if n_positions_total > 0:
+            self.last_alignment_coverage = (
+                n_aligned_total / float(n_positions_total)
+            )
+        else:
+            # Pathological all-empty batch — keep previous value (or None).
+            pass
         return out
 
 
