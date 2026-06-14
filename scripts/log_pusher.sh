@@ -31,11 +31,18 @@ REPO_DIR="${REPO_DIR:-/workspace/brian}"
 INSTANCE_ID="${INSTANCE_ID:-$(hostname)}"
 REPO_SLUG="${REPO_SLUG:-269652/BRIAN}"
 # Run identity, used to build a speaking filename like
-# `<instance>_<arch>_<params>_<label>_step<cur>of<target>.log`
+# `<UTC_stamp>_<instance>_<arch>_<params>_<label>_step<cur>of<target>.log`
 # Each env var is optional — missing ones get sensible defaults.
 ARCH_NAME="${ARCH_NAME:-${ARCH:-rcc_bowtie}}"
 LABEL="${LABEL:-neuroslm-full}"
 TOTAL_STEPS="${TOTAL_STEPS:-${STEPS:-?}}"
+# UTC boot timestamp prefix. The deploy script (vast_train.sh) exports
+# this before launching us so the timestamp matches the train_dsl boot
+# stamp printed in the log itself. If unset (e.g. running standalone),
+# we fall back to "now" — still better than no prefix, which lets two
+# runs on the same vast.ai instance id silently overwrite each other
+# (regression: deploy 40923107 clobbered 40921910 on instance 38569395).
+BOOT_TIMESTAMP="${BOOT_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
 
 : "${GITHUB:?log_pusher: GITHUB PAT must be exported}"
 
@@ -84,7 +91,9 @@ _compose_logfile() {
     local short_label="${LABEL#neuroslm-full-}"
     short_label="${short_label#neuroslm-full}"
     [ -z "$short_label" ] && short_label="run"
-    echo "logs/vast/${INSTANCE_ID}_${ARCH_NAME}_${params}_${short_label}_step${cur}of${tgt}.log"
+    # Timestamp prefix MUST come first so `ls logs/vast/` sorts
+    # chronologically and reused vast instance ids never alias.
+    echo "logs/vast/${BOOT_TIMESTAMP}_${INSTANCE_ID}_${ARCH_NAME}_${params}_${short_label}_step${cur}of${tgt}.log"
 }
 
 # Previous-file tracker so we can remove an old name when the step bumps.
@@ -96,7 +105,7 @@ git config user.name  "vast-train"             >/dev/null 2>&1 || true
 
 PUSH_URL="https://x-access-token:${GITHUB}@github.com/${REPO_SLUG}.git"
 
-echo "[log_pusher] watching $SOURCE_LOG → logs/vast/${INSTANCE_ID}_..._stepNofN.log (every ${PUSH_INTERVAL}s)"
+echo "[log_pusher] watching $SOURCE_LOG → logs/vast/${BOOT_TIMESTAMP}_${INSTANCE_ID}_..._stepNofN.log (every ${PUSH_INTERVAL}s)"
 
 while true; do
     sleep "$PUSH_INTERVAL"

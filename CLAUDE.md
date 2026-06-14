@@ -198,17 +198,21 @@ Every architectural change **must** synchronize documentation:
    architecture.md, findings.md, or technical_report.md, commit them in
    the same change set. One logical change = one commit with all docs.
 
-### 9.1 DSL/arch ↔ technical_report.md cross-alignment (anti-drift)
+### 9.1 DSL/arch ↔ technical_report.md ↔ README.md cross-alignment (anti-drift)
 
 **Trigger:** any change to one of these surfaces must be cross-aligned
-with `docs/technical_report.md` **in the same commit**:
+with **both** `docs/technical_report.md` *and* the top-level `README.md`
+**in the same commit**:
 
 - `architectures/*/arch.neuro` (and any `architectures/*/modules/*.neuro`)
 - `neuroslm/dsl/*.py` — DSL grammar, parser, training_config, regularization
 - `neuroslm/compiler/*.py` — Ribosome / NFG / Hypergraph IR
+- `neuroslm/experts.py` — multi-cortex routing, abstain logits, KL distill
+- `neuroslm/harness.py` — fusion gate, inhibition, loss composition
 - `dna/*/*.dna` (compiled snapshots — usually downstream of an arch edit)
 - Anything that changes the **schema** of what the DSL accepts, what the
-  Hypergraph IR exposes, or what `dna/evol/arch.dna` carries
+  Hypergraph IR exposes, what `dna/evol/arch.dna` carries, or what loss
+  terms / telemetry the trainer emits
 
 **What "cross-aligned" means:** every commit touching the surfaces above
 must do **one** of the following:
@@ -219,12 +223,25 @@ must do **one** of the following:
    - §5 (mechanisms — match `multi_cortex`, `regularization`, `hardware`)
    - §6 (DSL surface — match grammar/parser changes)
    - §7.2 (current state — match the active arch + scale + preset)
-2. **OR** add a single-line `[NO SPEC IMPACT]` annotation in the commit
+2. **AND update `README.md`** — the README is the human-facing entry
+   point that every external visitor reads first. The §s most likely to
+   drift on an architectural change:
+   - `## System Architecture` (block diagram, layer count, dims)
+   - `## The .neuro DSL` (DSL snippets must compile against current grammar)
+   - `## Multi-Cortex Fusion` (experts roster, fusion gate semantics,
+     abstain logit formula, KL-distill schedule)
+   - `## Loss composition` (every loss term name + weight that
+     `harness.py` actually emits)
+   - `## Parameter presets` (preset names and param counts must match
+     `brian.toml` / `training_config.py`)
+   - `## Quick start` (CLI flags must match `train_dsl.py` / `brian`)
+3. **OR** add a single-line `[NO SPEC IMPACT]` annotation in the commit
    body explaining why no doc update is needed (typo fix, internal
    rename, perf-only refactor with identical observable behaviour).
    Pure perf wins like adding a cache or memoisation typically qualify;
-   anything that changes loss, throughput envelopes, or what gets
-   logged does not.
+   anything that changes loss, throughput envelopes, what gets logged,
+   what the CLI accepts, or what the architecture diagram should show
+   does not.
 
 **Pre-commit check** (run before you `git add`):
 
@@ -237,13 +254,23 @@ The script greps `arch.neuro` for every section/field name that
 Non-zero exit = doc drift = do not commit. If the script flags a false
 positive, fix the script — never silence the warning.
 
+> **README audit:** the script currently audits `technical_report.md`
+> only. README drift must be checked by eye: open `README.md` next to
+> the modified file (`arch.neuro` / `experts.py` / etc.) and confirm
+> every claim still holds. If you add a new mechanism to the trunk,
+> ask: "would a first-time visitor reading the README know this exists,
+> and would the snippet they copy-paste still run?" If no, edit README.
+
 **Why this rule exists.** Earlier sessions added the `experts: [...]`
 roster, the `hardware{}` block, the `cheap_2k`/`t4_2k` scales, and the
 `brian.toml [defaults]` precedence — all real architectural surface —
 without touching `technical_report.md`. External AIs reading the report
-then made plans against a 6-month-stale picture of the system. The
-report is the contract; if it's wrong, every downstream reasoning step
-is wrong.
+then made plans against a 6-month-stale picture of the system. Worse,
+external humans landing on the GitHub README read the *headline* of the
+project and tried to reproduce a setup that no longer existed. The
+README is the contract with the outside world; the technical_report is
+the contract with collaborating AIs. If either is wrong, every
+downstream reasoning step is wrong.
 
 **Worked example (good commit):**
 ```
@@ -256,6 +283,8 @@ feat(arch): add MoE LM-expert ensemble with vocab bridge
 - experts.py: new LMExpertEnsemble routes pretrained heads to trunk vocab
 - technical_report.md §5.7: rewrite "Multi-Cortex Ensemble" to describe
   pretrained-head routing (was: random-projection chain)
+- README.md §Multi-Cortex Fusion: update experts list + telemetry
+  example so visitors see the actual roster, not the legacy one
 - maintain_technical_report.py --verbose: clean (no drift)
 
 [EVIDENCE: tests/training/test_lm_expert_harness_integration.py::TestSmokingGunCE]
@@ -348,6 +377,84 @@ Anti-patterns to refuse:
   ablation" backlog entry.
 - Recording a finding without the instance id — the raw log is the
   only thing that lets a future reader audit the claim.
+
+### 10.1 Log naming + boot-stamp forensics (audit trail contract)
+
+**Every** `logs/vast/*.log` filename **must** start with a UTC boot
+timestamp and **every** log body **must** open with a 3-line boot
+stamp. This is the contract that makes a deploy auditable months later
+without git archaeology.
+
+**Filename format** (enforced by `scripts/log_pusher.sh::_compose_logfile`):
+
+```
+logs/vast/<UTC_YYYYMMDDTHHMMSSZ>_<instance>_<arch>_<params>_<label>_step<cur>of<target>.log
+```
+
+Worked example:
+
+```
+logs/vast/20260614T160423Z_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log
+```
+
+- The leading `UTC_…Z` is `$BOOT_TIMESTAMP`, set ONCE in
+  `scripts/vast_train.sh` via `date -u +%Y%m%dT%H%M%SZ` and propagated
+  as an env var to both the background `log_pusher.sh` and the final
+  one-shot push. The same timestamp prefixes every snapshot from the
+  same run so `ls logs/vast/` groups them visually.
+- The timestamp comes **first** so directory listings sort
+  chronologically and reused vast.ai instance ids never alias
+  (regression: deploy 40923107 silently clobbered 40921910 on
+  instance `38569395` before this rule existed).
+
+**Boot stamp format** (enforced by
+`neuroslm/train_dsl.py::_print_boot_stamp`, called from `main()`):
+
+```
+[train_dsl] boot @ 2026-06-14T16:04:23Z
+[train_dsl] git_commit a22eecc4e7b9c8d6f5a3b2e1d0c9b8a7f6e5d4c3 (master)
+[train_dsl] arch_dsl_sha256 7f4a2b8e1c9d3a5f6b7e8c9d0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b (architectures/rcc_bowtie)
+```
+
+- **Line 1**: UTC ISO-8601 with `Z` suffix — when the trainer booted.
+- **Line 2**: 40-hex git sha + branch — pin the exact commit that
+  produced this run, even if it was later rebased or force-pushed away.
+- **Line 3**: 64-hex SHA-256 of the canonical concatenation of all
+  `*.neuro` files under `arch_root`, sorted by relative path with a
+  `--- {relpath} ---` separator between files. Pins the **unfolded
+  DSL state**, including any uncommitted local edits at deploy time.
+
+**Why both?** The git sha catches "what commit did this come from".
+The DSL sha catches "what arch did the trainer actually see" — useful
+when you deploy with uncommitted changes (DEFAULT for fast iteration)
+or when the arch_root resolution picks a different DNA than expected.
+Two runs with identical git shas but different DSL shas → someone
+modified the working tree between launches. Two runs with identical
+DSL shas but different metrics → a non-DSL change (data, seed, tokeniser).
+
+**Pre-commit check.** Boot stamp + filename are pinned by:
+
+- `tests/training/test_train_dsl_boot_stamp.py` (9 contracts)
+- `tests/training/test_log_pusher_naming.py` (2 contracts)
+
+Both must stay GREEN. If you rename a helper, update the test. If you
+change the format, write the new contract first (TDD per §1) — the
+forensic value is the format itself, not the implementation.
+
+**Anti-patterns to refuse:**
+
+- Stripping the timestamp prefix because "the instance id is enough" —
+  it isn't; vast.ai recycles ids on destroy/recreate within hours.
+- Putting the timestamp at the END of the filename — defeats the
+  chronological sort that makes incidents triageable at a glance.
+- Logging the git sha but skipping the DSL sha because "git already
+  has it" — git only has it for **committed** state. Deploys with
+  uncommitted edits (common during a rapid debug loop) leave no other
+  trace of what the trainer actually saw.
+- Catching and swallowing an exception inside `_print_boot_stamp` to
+  print `?` for one of the lines — the helper is wrapped in a broad
+  try/except that already returns `"-"` placeholders; if you see `-`
+  in real logs, fix the helper, do not hide the failure.
 
 ---
 

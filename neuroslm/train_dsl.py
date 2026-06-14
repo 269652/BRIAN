@@ -22,8 +22,10 @@ Usage (DNA):
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import os
 import re
+import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,6 +65,101 @@ def _load_tokenizer():
             def encode(self, _: str): return [0]
             def decode(self, _): return ""
         return _SynthTok()
+
+
+# ── Boot stamp (forensic-friction reduction) ────────────────────────
+#
+# Every training run prints a 3-line boot stamp BEFORE any other
+# train_dsl output. The stamp answers the three questions a forensic
+# investigator always asks first:
+#
+#   1. WHEN was this run?              → UTC ISO-8601 timestamp
+#   2. WHICH git commit produced it?   → 40-hex sha + branch name
+#   3. WHICH DSL did it compile?       → SHA-256 of the unfolded
+#                                         arch.neuro files
+#
+# (1) and (2) together let you ``git checkout <sha>`` and reproduce
+# the run. (3) catches the "I edited arch.neuro between launches and
+# forgot" failure mode that produced two identical-looking deploys
+# with different behaviour.
+#
+# Regression-pinned by ``tests/training/test_train_dsl_boot_stamp.py``.
+
+
+def _git_commit_info() -> tuple[str, str]:
+    """Return ``(sha40, branch)`` for the current HEAD. On failure
+    (not a git repo, missing git binary), returns ``("-", "-")`` —
+    the boot stamp must never crash the trainer."""
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        if len(sha) == 40 and re.fullmatch(r"[0-9a-f]{40}", sha):
+            return sha, branch or "-"
+    except Exception:
+        pass
+    return "-", "-"
+
+
+def _arch_dsl_sha256(arch_root: Optional[Path]) -> str:
+    """SHA-256 of the canonical unfolded DSL bytes for ``arch_root``.
+
+    Canonicalisation: concatenate every ``*.neuro`` file in the folder
+    (recursive), sorted by relative path, with a separator line that
+    embeds the relative path so a file rename also changes the hash.
+    This matches the unfolded view ``brian unfold`` would produce —
+    two runs with the same arch SHA loaded byte-identical DSL.
+
+    Returns ``"-"`` if ``arch_root`` is None or contains no ``*.neuro``
+    files — the boot stamp must never crash.
+    """
+    if arch_root is None:
+        return "-"
+    root = Path(arch_root)
+    if not root.is_dir():
+        return "-"
+    neuro_files = sorted(
+        root.rglob("*.neuro"),
+        key=lambda p: str(p.relative_to(root)).replace("\\", "/"),
+    )
+    if not neuro_files:
+        return "-"
+    h = hashlib.sha256()
+    for p in neuro_files:
+        rel = str(p.relative_to(root)).replace("\\", "/")
+        # Separator embeds the path so renames change the hash
+        h.update(b"\n--- " + rel.encode("utf-8") + b" ---\n")
+        try:
+            h.update(p.read_bytes())
+        except OSError:
+            # Unreadable file is treated as empty — don't crash the boot
+            continue
+    return h.hexdigest()
+
+
+def _print_boot_stamp(arch_root: Optional[Path] = None) -> None:
+    """Emit the 3-line boot stamp. See the module-level comment above.
+
+    Always prints exactly 3 lines, each prefixed with ``[train_dsl] ``
+    so the existing log-pipeline grep filters keep matching. Robust to
+    missing ``arch_root``, missing git, missing files — degraded fields
+    show as ``-`` rather than crashing the trainer.
+    """
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sha, branch = _git_commit_info()
+    dsl_sha = _arch_dsl_sha256(arch_root)
+    arch_label = str(arch_root) if arch_root is not None else "-"
+    print(f"[train_dsl] boot @ {now}", flush=True)
+    print(f"[train_dsl] git_commit {sha} ({branch})", flush=True)
+    print(
+        f"[train_dsl] arch_dsl_sha256 {dsl_sha} ({arch_label})",
+        flush=True,
+    )
 
 
 # ── Data — synthetic random batches for Phase A smoke ───────────────
@@ -1015,6 +1112,13 @@ def main():
         arch_root = Path(args.arch).resolve()
         if not (arch_root / "arch.neuro").is_file():
             parser.error(f"missing {arch_root}/arch.neuro")
+
+    # Boot stamp: forensic record of WHEN, WHICH git commit, and WHICH
+    # DSL produced this run. Printed before any other train_dsl output
+    # so it survives even if the rest of the boot path crashes. See
+    # _print_boot_stamp() docstring and CLAUDE.md §10.x for the
+    # rationale (deploy 40923107 retrospective).
+    _print_boot_stamp(arch_root=arch_root)
 
     tok = _load_tokenizer()
     vocab_size = args.vocab_size or tok.vocab_size

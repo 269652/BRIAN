@@ -251,8 +251,17 @@ echo "── starting log-pusher (background) ──"
 # Push the current training log to git every PUSH_INTERVAL seconds so
 # progress is visible from any clone without SSH-ing into the instance.
 # Default 300s ≈ every ~200 train steps at typical ~1.5s/step.
+#
+# BOOT_TIMESTAMP is computed ONCE here so the filename prefix and the
+# train_dsl boot-stamp line in the log share the same UTC moment. Both
+# the background pusher (below) and the final one-shot pusher (after
+# training) must see the same value, otherwise the final commit would
+# write to a different filename than the snapshots.
+export BOOT_TIMESTAMP="\$(date -u +%Y%m%dT%H%M%SZ)"
+echo "    BOOT_TIMESTAMP=\$BOOT_TIMESTAMP (used in log filename prefix)"
 INSTANCE_ID="\$(hostname)" PUSH_INTERVAL='${LOG_PUSH_INTERVAL}' \\
     BRANCH='${BRANCH}' REPO_SLUG='${REPO_SLUG}' \\
+    BOOT_TIMESTAMP="\$BOOT_TIMESTAMP" \\
     nohup bash scripts/log_pusher.sh > /workspace/log_pusher.log 2>&1 &
 LOG_PUSHER_PID=\$!
 echo "    log_pusher pid=\$LOG_PUSHER_PID"
@@ -283,8 +292,12 @@ sleep 2   # give it a moment to exit cleanly
 # is unbounded so we wrap with timeout — but we want it to exit ASAP,
 # not poll for 60s. Solution: send SIGTERM after the first cycle (~5s
 # at worst on a successful push).
+#
+# Reuse the same BOOT_TIMESTAMP as the background pusher so the final
+# commit writes to the same filename, not a fresh one.
 SOURCE_LOG=/workspace/train.log INSTANCE_ID="\$(hostname)" \\
     PUSH_INTERVAL=1 BRANCH='${BRANCH}' REPO_SLUG='${REPO_SLUG}' \\
+    BOOT_TIMESTAMP="\$BOOT_TIMESTAMP" \\
     timeout 30 bash scripts/log_pusher.sh 2>&1 | head -10 \\
     || echo "[onstart] final log push: timeout/exit (best-effort)"
 
