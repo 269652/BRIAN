@@ -112,14 +112,17 @@ def _is_migration_filename(name: str) -> bool:
 def _load_module_from_path(path: Path) -> Any:
     """Load a Python file as a fresh module by file path.
 
-    We use the stem as the module name. Each call yields a *new* module
-    object (we don't cache in `sys.modules` long-term) so tests can
-    rebuild migrations between cases without import shadowing.
+    We use the stem as the module name. The module is registered in
+    ``sys.modules`` BEFORE exec because Python 3.13's ``@dataclass``
+    looks the module up via ``sys.modules.get(cls.__module__)`` during
+    class construction — and crashes with ``AttributeError: 'NoneType'``
+    if the lookup misses.
     """
     spec = importlib.util.spec_from_file_location(path.stem, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"could not load migration spec from {path}")
     mod = importlib.util.module_from_spec(spec)
+    sys.modules[path.stem] = mod  # MUST come before exec_module (PY 3.13)
     spec.loader.exec_module(mod)
     return mod
 
@@ -361,10 +364,13 @@ _STATUS_GLYPH = {
 }
 
 
-def cli_list(pkg_dir: Path, root: Path) -> int:
-    """Print status of every migration. Always exit 0 unless errors."""
-    ctx = Context(root=root, refs=ReferenceIndex(),
-                  dry_run=True, force=False)
+def cli_list(pkg_dir: Path, ctx: Context) -> int:
+    """Print status of every migration. Always exit 0 unless errors.
+
+    The caller MUST pass a Context with a real reference index;
+    otherwise every migration that gates on `ctx.refs.references(...)`
+    will appear as NOOP_PENDING when it actually has work to do.
+    """
     statuses = status_all(pkg_dir, ctx)
     if not statuses:
         print("[migrate] no migrations discovered", flush=True)

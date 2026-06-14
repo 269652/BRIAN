@@ -374,6 +374,7 @@ def test_cli_list_shows_pending_and_applied(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     from neuroslm.migrations import _framework as fw
+    from neuroslm.references import ReferenceIndex
     pkg = tmp_path / "mig_pkg_j"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("", encoding="utf-8")
@@ -383,7 +384,9 @@ def test_cli_list_shows_pending_and_applied(
 
     fw.Ledger(fake_repo).record(mig_id="0001_done", commit="x", ops_applied=0)
 
-    rc = fw.cli_list(pkg, fake_repo)
+    ctx = fw.Context(root=fake_repo, refs=ReferenceIndex(),
+                     dry_run=True, force=False)
+    rc = fw.cli_list(pkg, ctx)
     assert rc == 0
     out = capsys.readouterr().out
     assert "0001_done" in out

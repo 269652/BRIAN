@@ -2311,21 +2311,24 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
     pkg_dir = Path(__file__).resolve().parent / "migrations"
 
-    if args.list:
-        return fw.cli_list(pkg_dir, REPO_ROOT)
-
-    if not args.id and not args.all:
-        print("[migrate] error: provide a migration id, --all, or --list",
-              flush=True)
-        return 2
-
     # Build a single reference index up-front. Migrations that need it
-    # read `ctx.refs`; ones that don't, ignore it. One scan covers all.
+    # read `ctx.refs`; ones that don't, ignore it. One scan covers
+    # --list, --all, and single-id runs equally — and --list MUST
+    # have the real refs or its status output lies (NOOP_PENDING vs
+    # PENDING flips on whether refs.references() returned True).
     refs = build_reference_index(REPO_ROOT, progress=args.verbose)
     ctx = fw.Context(
         root=REPO_ROOT, refs=refs,
         dry_run=not args.force, force=args.force,
     )
+
+    if args.list:
+        return fw.cli_list(pkg_dir, ctx)
+
+    if not args.id and not args.all:
+        print("[migrate] error: provide a migration id, --all, or --list",
+              flush=True)
+        return 2
 
     if args.all:
         return fw.run_all(pkg_dir, ctx)
