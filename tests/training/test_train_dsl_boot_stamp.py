@@ -69,7 +69,7 @@ def test_print_boot_stamp_prints_three_labeled_lines():
 
     buf = io.StringIO()
     with redirect_stdout(buf):
-        _print_boot_stamp(arch_root=REPO_ROOT / "architectures" / "rcc_bowtie")
+        _print_boot_stamp(arch_root=REPO_ROOT / "architectures" / "master")
     lines = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
     assert len(lines) == 3, (
         f"expected exactly 3 stamp lines; got {len(lines)}:\n"
@@ -88,7 +88,7 @@ def test_boot_timestamp_is_utc_iso8601_with_Z_suffix():
 
     buf = io.StringIO()
     with redirect_stdout(buf):
-        _print_boot_stamp(arch_root=REPO_ROOT / "architectures" / "rcc_bowtie")
+        _print_boot_stamp(arch_root=REPO_ROOT / "architectures" / "master")
     first = buf.getvalue().splitlines()[0]
     # Match "2026-06-14T17:42:09Z" exactly
     m = re.match(
@@ -108,7 +108,7 @@ def test_git_commit_line_carries_40_hex_sha():
 
     buf = io.StringIO()
     with redirect_stdout(buf):
-        _print_boot_stamp(arch_root=REPO_ROOT / "architectures" / "rcc_bowtie")
+        _print_boot_stamp(arch_root=REPO_ROOT / "architectures" / "master")
     second = buf.getvalue().splitlines()[1]
     m = re.match(
         r"^\[train_dsl\] git_commit ([0-9a-f]{40})\s*(\([^)]+\))?$",
@@ -135,7 +135,7 @@ def test_arch_dsl_sha256_line_carries_64_hex_sha_for_real_arch():
     architectures."""
     from neuroslm.train_dsl import _print_boot_stamp
 
-    arch_root = REPO_ROOT / "architectures" / "rcc_bowtie"
+    arch_root = REPO_ROOT / "architectures" / "master"
     buf = io.StringIO()
     with redirect_stdout(buf):
         _print_boot_stamp(arch_root=arch_root)
@@ -156,7 +156,7 @@ def test_arch_dsl_sha256_is_deterministic_for_same_arch():
     """Two calls on the same arch_root must produce the same SHA."""
     from neuroslm.train_dsl import _print_boot_stamp
 
-    arch_root = REPO_ROOT / "architectures" / "rcc_bowtie"
+    arch_root = REPO_ROOT / "architectures" / "master"
 
     def _capture_third_line():
         buf = io.StringIO()
@@ -198,7 +198,7 @@ def test_arch_dsl_sha256_helper_returns_64_hex_chars():
     """The helper must return a string of exactly 64 hex chars (SHA-256)."""
     from neuroslm.train_dsl import _arch_dsl_sha256
 
-    arch_root = REPO_ROOT / "architectures" / "rcc_bowtie"
+    arch_root = REPO_ROOT / "architectures" / "master"
     sha = _arch_dsl_sha256(arch_root)
     assert isinstance(sha, str)
     assert len(sha) == 64, f"expected 64-hex SHA, got len {len(sha)}: {sha}"

@@ -7,9 +7,9 @@
 #
 # Examples:
 #   bash scripts/brian.sh status
-#   bash scripts/brian.sh compile architectures/rcc_bowtie --out arch.py
-#   bash scripts/brian.sh wolfram architectures/rcc_bowtie --full --out arch.m
-#   bash scripts/brian.sh analyze architectures/rcc_bowtie --all
+#   bash scripts/brian.sh compile architectures/current --out arch.py
+#   bash scripts/brian.sh wolfram architectures/current --full --out arch.m
+#   bash scripts/brian.sh analyze architectures/current --all
 #   bash scripts/brian.sh deploy --steps 10000
 #   bash scripts/brian.sh deploy-100k
 #   bash scripts/brian.sh logs 38569395

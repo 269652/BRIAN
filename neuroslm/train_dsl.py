@@ -13,7 +13,7 @@ otherwise determined entirely by the .neuro files — no Python
 architecture code path involved.
 
 Usage (DSL):
-    python -m neuroslm.train_dsl --arch architectures/rcc_bowtie \\
+    python -m neuroslm.train_dsl --arch architectures/current \\
         --steps 10000 --batch 4 --seq_len 256 --d_sem 256
 
 Usage (DNA):

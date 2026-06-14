@@ -40,7 +40,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DNA_PATH = REPO_ROOT / "dna" / "evol" / "arch.dna"
 EVOL_ARCH_NEURO = REPO_ROOT / "architectures" / "evol" / "arch.neuro"
-RCC_ARCH_NEURO = REPO_ROOT / "architectures" / "rcc_bowtie" / "arch.neuro"
+RCC_ARCH_NEURO = REPO_ROOT / "architectures" / "master" / "arch.neuro"
 
 
 def _read_unfolded_dsl(dna_path: Path) -> str:
@@ -158,7 +158,7 @@ class TestEvolDnaCarriesExpertsRoster:
 
 
 class TestRccBowtieAndEvolArchAreInSync:
-    """Per CLAUDE.md §14: any change to architectures/rcc_bowtie/arch.neuro
+    """Per CLAUDE.md §14: any change to architectures/master/arch.neuro
     that touches ``multi_cortex`` must be mirrored to
     architectures/evol/arch.neuro AND recompiled into dna/evol/arch.dna.
 

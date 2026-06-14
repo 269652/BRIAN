@@ -121,7 +121,7 @@ class TestArchNeuroParsesExperts:
             load_training_config_from_arch,
         )
 
-        cfg = load_training_config_from_arch("architectures/rcc_bowtie")
+        cfg = load_training_config_from_arch("architectures/master")
         mc = cfg.multi_cortex
         assert mc.enabled, (
             "arch.neuro multi_cortex.enabled must be True so the harness "

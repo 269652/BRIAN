@@ -100,8 +100,8 @@ def _resolve_nfg_arch(arg: str) -> str:
 
     The user can pass several shapes:
 
-      1. ``architectures/rcc_bowtie/`` — a regular folder with arch.neuro
-         (the legacy / canonical path).
+      1. ``architectures/current/`` — a regular folder with arch.neuro
+         (the active working-copy; renamed from rcc_bowtie/ on 2026-06-14).
       2. ``some/path/evol.dna``        — a self-contained DNA snapshot.
       3. ``some/path/evol/``           — a folder whose ``arch.neuro`` is
          absent but which contains exactly one ``*.dna`` snapshot
@@ -2131,7 +2131,11 @@ def cmd_train(args: argparse.Namespace) -> int:
         arch = _resolve_arch(args.arch)
         cmd.extend(["--arch", arch])
     else:
-        cmd.extend(["--arch", "architectures/rcc_bowtie"])
+        # Default: the active working-copy arch. Renamed from
+        # architectures/rcc_bowtie on 2026-06-14; master/ holds the
+        # canonical source-of-truth, current/ is the live arch the
+        # trainer consumes by default.
+        cmd.extend(["--arch", "architectures/current"])
 
     # ── Resolve effective preset + steps (CLI > arch > global > AUTO) ──
     # Load the arch's parsed training config + the workspace-level
@@ -2148,7 +2152,7 @@ def cmd_train(args: argparse.Namespace) -> int:
         from neuroslm.project_config import load_project_config
         arch_root_for_cfg = (
             workspace.arch_root if workspace is not None
-            else (REPO_ROOT / (args.arch or "architectures/rcc_bowtie"))
+            else (REPO_ROOT / (args.arch or "architectures/current"))
         )
         arch_cfg = load_training_config_from_arch(arch_root_for_cfg)
         project_cfg = load_project_config()

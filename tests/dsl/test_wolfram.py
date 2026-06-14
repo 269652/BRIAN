@@ -104,9 +104,9 @@ class TestArchitectureFullIITGrade:
         import os
         arch_root = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "architectures", "rcc_bowtie")
+            "architectures", "master")
         if not os.path.isdir(arch_root):
-            pytest.skip("rcc_bowtie arch not present in this checkout")
+            pytest.skip("master arch not present in this checkout")
         code = W.architecture_to_wolfram_full(arch_root)
         for sec in ("Populations", "Synapses", "Modulations",
                     "NeurotransmitterDynamics"):
@@ -117,9 +117,9 @@ class TestArchitectureFullIITGrade:
         import os
         arch_root = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "architectures", "rcc_bowtie")
+            "architectures", "master")
         if not os.path.isdir(arch_root):
-            pytest.skip("rcc_bowtie arch not present")
+            pytest.skip("master arch not present")
         code = W.architecture_to_wolfram_full(
             arch_root, include_populations=False, include_synapses=True,
             include_modulations=False, include_nt_dynamics=False)
@@ -132,9 +132,9 @@ class TestArchitectureFullIITGrade:
         import os
         arch_root = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "architectures", "rcc_bowtie")
+            "architectures", "master")
         if not os.path.isdir(arch_root):
-            pytest.skip("rcc_bowtie arch not present")
+            pytest.skip("master arch not present")
         code = W.architecture_to_wolfram_full(
             arch_root, include_populations=False, include_synapses=False,
             include_modulations=False, include_nt_dynamics=True)

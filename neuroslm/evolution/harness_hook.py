@@ -11,9 +11,9 @@ Typical usage in the harness:
     from neuroslm.evolution.harness_hook import HeatmapHook
 
     hook = HeatmapHook.from_arch_root(
-        model, arch_root="architectures/rcc_bowtie",
+        model, arch_root="architectures/current",
         every_n=100,
-        heatmap_path="results/heatmaps/rcc_bowtie.heatmap.json",
+        heatmap_path="results/heatmaps/current.heatmap.json",
     )
 
     for step in range(total_steps):

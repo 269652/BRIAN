@@ -89,9 +89,9 @@ class TestGenomeEmbedded:
 
 class TestRealArchRoundtrip:
     def test_rcc_bowtie_roundtrip_bit_identical(self):
-        arch_root = Path(__file__).parent.parent / "architectures" / "rcc_bowtie"
+        arch_root = Path(__file__).parent.parent / "architectures" / "master"
         if not (arch_root / "arch.neuro").exists():
-            pytest.skip("rcc_bowtie not found")
+            pytest.skip("master arch not found")
 
         original = (arch_root / "arch.neuro").read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as td:

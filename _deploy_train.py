@@ -108,9 +108,9 @@ LABEL = "neuroslm-full" + (f"-{LABEL_SUFFIX}" if LABEL_SUFFIX else "") \
 # therefore no longer pulls torch as a transitive dependency.
 from neuroslm.dsl.training_config import load_training_config_from_arch
 
-# ARCH may be either a bare name ("rcc_bowtie") or a workspace path
-# (e.g. "C:/.../.neuro/arch/temp"). If it's a path that exists, use it
-# directly; otherwise treat it as a name under architectures/.
+# ARCH may be either a bare name ("current" / "master") or a workspace
+# path (e.g. "C:/.../.neuro/arch/temp"). If it's a path that exists, use
+# it directly; otherwise treat it as a name under architectures/.
 _arch_as_path = Path(ARCH)
 if _arch_as_path.is_dir() and (_arch_as_path / "arch.neuro").is_file():
     ARCH_ROOT = _arch_as_path

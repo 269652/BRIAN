@@ -15,7 +15,7 @@ from neuroslm.dsl.training_config import (
 
 def test_config_parses_all_new_fields():
     """arch.neuro should parse every Stage 3-7 field with the right type."""
-    c = load_training_config_from_arch("architectures/rcc_bowtie")
+    c = load_training_config_from_arch("architectures/master")
     # Stage 3 BEMA
     assert isinstance(c.bema_rollback_window, int)
     assert isinstance(c.bema_snapshot_every, int)

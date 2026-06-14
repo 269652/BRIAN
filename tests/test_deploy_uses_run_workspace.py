@@ -319,7 +319,7 @@ class TestCmdDeployRespectsBrianToml:
 
         # Pretend brian.toml has DNA configured.
         class _FakeProjectConfig:
-            arch = "architectures/rcc_bowtie"
+            arch = "architectures/master"
             dna = "dna/evol/arch.dna"
             is_dna_mode = True
             # Fields added 2026-06-14 when cmd_deploy started reading
@@ -369,7 +369,7 @@ class TestCmdDeployRespectsBrianToml:
         from neuroslm import cli
 
         class _FakeProjectConfig:
-            arch = "architectures/rcc_bowtie"
+            arch = "architectures/master"
             dna = "dna/evol/arch.dna"   # brian.toml value
             is_dna_mode = True
             default_steps = 0
@@ -409,7 +409,7 @@ class TestCmdDeployRespectsBrianToml:
         from neuroslm import cli
 
         class _FakeProjectConfig:
-            arch = "architectures/rcc_bowtie"
+            arch = "architectures/master"
             dna = ""
             is_dna_mode = False
             default_steps = 0

@@ -35,7 +35,7 @@ class TestEvolutionaryInitialization:
         """Unfold DNA to arch.neuro DSL."""
         from neuroslm.compiler.ribosome import RibosomeCompiler
 
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dna_file = Path(tmpdir) / "test.dna"

@@ -1,6 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Compile rcc_bowtie architecture to DNA and unfold it back.
+"""Compile the canonical bowtie architecture to DNA and unfold it back.
+
+The arch folder was renamed 2026-06-14 from ``architectures/rcc_bowtie``
+to ``architectures/master`` (canonical source-of-truth). The live
+working-copy lives at ``architectures/current``. This script always
+compiles from ``master/`` so the DNA captures the canonical state.
 
 Usage:
     python scripts/compile_rcc_bowtie.py
@@ -19,8 +24,8 @@ from neuroslm.compiler.ribosome import RibosomeCompiler
 def main():
     compiler = RibosomeCompiler()
 
-    # Compile rcc_bowtie to DNA
-    arch_root = str(Path("architectures/rcc_bowtie").resolve())
+    # Compile the canonical bowtie to DNA.
+    arch_root = str(Path("architectures/master").resolve())
     dna_output = str(Path("dna/evol/arch.dna").resolve())
 
     # Create output directory if needed

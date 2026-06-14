@@ -31,7 +31,7 @@ from neuroslm.dsl.multifile import compile_folder
 from neuroslm.harness import BRIANHarness
 
 
-ARCH_ROOT = Path(__file__).resolve().parent.parent.parent / "architectures" / "rcc_bowtie"
+ARCH_ROOT = Path(__file__).resolve().parent.parent.parent / "architectures" / "master"
 
 
 # ── Parser ─────────────────────────────────────────────────────────────

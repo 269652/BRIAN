@@ -24,7 +24,7 @@ from neuroslm.dsl.training_config import TrainingConfig, LossClippingConfig
 from neuroslm.harness import BRIANHarness
 
 
-ARCH_ROOT = Path(__file__).resolve().parent.parent / "architectures" / "rcc_bowtie"
+ARCH_ROOT = Path(__file__).resolve().parent.parent / "architectures" / "master"
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────

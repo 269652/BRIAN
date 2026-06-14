@@ -1,4 +1,4 @@
-"""End-to-end smoke test: instantiate the actual rcc_bowtie harness, run a
+"""End-to-end smoke test: instantiate the actual bowtie harness, run a
 training step, and confirm allostasis is wired into the live system.
 
 Run with:
@@ -14,7 +14,10 @@ from neuroslm.harness import BRIANHarness
 
 
 def main() -> None:
-    cfg = load_training_config_from_arch("architectures/rcc_bowtie")
+    # Use the canonical source-of-truth arch (renamed 2026-06-14 from
+    # architectures/rcc_bowtie). The live working-copy lives at
+    # architectures/current; tests + smokes use master/ for determinism.
+    cfg = load_training_config_from_arch("architectures/master")
     # Override to a tiny model so we can run a real step in seconds on CPU
     cfg.multi_cortex.enabled = False  # skip GPT-2 download in this smoke test
     cfg.genetics.enabled = False

@@ -65,7 +65,7 @@ synapse pop1 -> pop1 {
         not necessarily byte-identical (imports are resolved).
         """
         compiler = RibosomeCompiler()
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)

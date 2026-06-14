@@ -16,7 +16,7 @@ build a per-vocab weight vector
 and multiply per-token CE by w[targets]. Tokens over-represented in
 chat get downweighted; tokens unique to prose get upweighted.
 
-Math reference: architectures/rcc_bowtie/lib/regularizers.neuro
+Math reference: architectures/master/lib/regularizers.neuro
 ::freq_balance_weight / freq_balance_normalize / freq_balance_loss.
 """
 import pytest

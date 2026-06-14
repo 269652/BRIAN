@@ -66,7 +66,11 @@ LOG_PUSH_INTERVAL="${LOG_PUSH_INTERVAL:-300}"
 # via train_dsl.py + BRIANHarness instead of the hand-written Brain. Loss
 # clipping etc. is configured in arch.neuro's `training { ... }` block.
 USE_DSL="${USE_DSL:-0}"
-ARCH="${ARCH:-rcc_bowtie}"
+# 2026-06-14: bowtie arch folder renamed rcc_bowtie → master (canonical),
+# with architectures/current as the live working-copy `brian train`
+# consumes by default. Match that here so vast.ai deploys land on the
+# same arch.
+ARCH="${ARCH:-current}"
 # Training hyperparameters (STEPS, BATCH, GRAD_ACCUM, SEQ_LEN, D_SEM):
 # the canonical defaults live in architectures/<ARCH>/arch.neuro's
 # `training { ... }` block. Leave these unset here so vast_train_dsl_loop

@@ -3,7 +3,7 @@
 
 Each intervention is parsed into a structured dataclass that the BRIAN
 harness consumes in PR2. The math for each lives in
-`architectures/rcc_bowtie/lib/regularizers.neuro` as canonical equations;
+`architectures/master/lib/regularizers.neuro` as canonical equations;
 the dataclasses here are the *parameterization* of those equations.
 
 Interventions (rationale in docs/technical_report.md §3):

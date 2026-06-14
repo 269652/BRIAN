@@ -11,7 +11,7 @@ The existing resolver supports two import scopes:
 This stage adds a third scope: ``@brian/...`` is anchored at the
 **repository's shared** ``architectures/lib/`` directory so that
 equations and features defined once can be reused across every
-architecture (master, rcc_bowtie, future evol variants, …) without
+architecture (master, current, future evol variants, …) without
 copy-pasting.
 
 Repo root is auto-discovered by walking up from the architecture root

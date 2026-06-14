@@ -43,7 +43,12 @@
 # ──────────────────────────────────────────────────────────────────
 
 [current]
-arch = "architectures/rcc_bowtie"
+# 2026-06-14: the bowtie arch folder was renamed rcc_bowtie → master
+# (canonical source-of-truth), and architectures/current/ was added as
+# the live working-copy that brian train/deploy consume by default.
+# Edit master/ for designed changes; current/ tracks master/ unless an
+# experiment branches it.
+arch = "architectures/current"
 dna  = "./dna/evol/arch.dna"
 
 [defaults]

@@ -50,7 +50,7 @@ def diagnose_regularization():
     try:
         from neuroslm.dsl.parser import parse_architecture_file
         
-        arch_path = "architectures/rcc_bowtie/arch.neuro"
+        arch_path = "architectures/master/arch.neuro"
         print(f"  Parsing: {arch_path}")
         
         ast = parse_architecture_file(arch_path)

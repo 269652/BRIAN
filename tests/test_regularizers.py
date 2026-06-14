@@ -3,7 +3,7 @@
 
 Each test asserts that the PyTorch module produces a value matching the
 canonical equation declared in
-`architectures/rcc_bowtie/lib/regularizers.neuro`.
+`architectures/master/lib/regularizers.neuro`.
 
 The tests cover (1) module forward output, (2) gradient flow, and (3)
 disabled-path no-op behavior so the controller is safe to leave wired

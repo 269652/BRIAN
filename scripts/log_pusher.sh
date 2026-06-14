@@ -33,7 +33,10 @@ REPO_SLUG="${REPO_SLUG:-269652/BRIAN}"
 # Run identity, used to build a speaking filename like
 # `<UTC_stamp>_<instance>_<arch>_<params>_<label>_step<cur>of<target>.log`
 # Each env var is optional — missing ones get sensible defaults.
-ARCH_NAME="${ARCH_NAME:-${ARCH:-rcc_bowtie}}"
+# 2026-06-14: bowtie arch folder renamed rcc_bowtie → master (canonical)
+# with architectures/current as the live working-copy. Default to
+# "current" so log filenames match `brian train` without --arch.
+ARCH_NAME="${ARCH_NAME:-${ARCH:-current}}"
 LABEL="${LABEL:-neuroslm-full}"
 TOTAL_STEPS="${TOTAL_STEPS:-${STEPS:-?}}"
 # UTC boot timestamp prefix. The deploy script (vast_train.sh) exports

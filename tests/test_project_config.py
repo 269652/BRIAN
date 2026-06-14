@@ -14,7 +14,7 @@ Contract (frozen by these tests):
    six attributes::
 
        arch          str   path to architecture folder (default
-                           "architectures/rcc_bowtie")
+                           "architectures/current")
        dna           str   path to .dna file, or "" if DSL mode
                            (default "")
        nfg_output    str   default ".neuro/nfg.png"
@@ -72,7 +72,7 @@ class TestProjectConfigParsing:
         """A folder with no ``brian.toml`` returns sensible defaults."""
         from neuroslm.project_config import load_project_config
         cfg = load_project_config(start=tmp_path)
-        assert cfg.arch == "architectures/rcc_bowtie"
+        assert cfg.arch == "architectures/current"
         assert cfg.dna == ""
         assert cfg.nfg_output == ".neuro/nfg.png"
         assert cfg.nfg_format == "png"
@@ -156,10 +156,10 @@ class TestModeAndPaths:
     def test_resolve_arch_path_is_absolute(self, tmp_path):
         from neuroslm.project_config import ProjectConfig
         cfg = ProjectConfig(repo_root=tmp_path,
-                            arch="architectures/rcc_bowtie")
+                            arch="architectures/master")
         resolved = cfg.resolve_arch_path()
         assert resolved.is_absolute()
-        assert resolved == (tmp_path / "architectures" / "rcc_bowtie").resolve()
+        assert resolved == (tmp_path / "architectures" / "master").resolve()
 
     def test_resolve_dna_path_is_absolute(self, tmp_path):
         from neuroslm.project_config import ProjectConfig
@@ -191,7 +191,7 @@ class TestTrainingTarget:
     def test_dsl_mode_when_no_dna(self, tmp_path):
         from neuroslm.project_config import ProjectConfig
         cfg = ProjectConfig(repo_root=tmp_path,
-                            arch="architectures/rcc_bowtie")
+                            arch="architectures/master")
         kind, path = cfg.training_target()
         assert kind == "arch"
         assert path == cfg.resolve_arch_path()
@@ -202,7 +202,7 @@ class TestTrainingTarget:
         dna_file.parent.mkdir(parents=True)
         dna_file.write_text("stub", encoding="utf-8")
         cfg = ProjectConfig(repo_root=tmp_path,
-                            arch="architectures/rcc_bowtie",
+                            arch="architectures/master",
                             dna="dna/evol/arch.dna")
         kind, path = cfg.training_target()
         assert kind == "dna"
@@ -357,14 +357,14 @@ class TestCompileNfgCurrentFlag:
 
         # Build a fake workspace with brian.toml + an arch folder.
         (tmp_path / "brian.toml").write_text(
-            '[current]\narch = "architectures/rcc_bowtie"\n'
+            '[current]\narch = "architectures/master"\n'
             '[nfg]\noutput = ".neuro/nfg.png"\n',
             encoding="utf-8",
         )
-        arch_dir = tmp_path / "architectures" / "rcc_bowtie"
+        arch_dir = tmp_path / "architectures" / "master"
         arch_dir.mkdir(parents=True)
         (arch_dir / "arch.neuro").write_text(
-            'architecture rcc_bowtie { d_sem: 4, dt: 0.01 }\n',
+            'architecture master { d_sem: 4, dt: 0.01 }\n',
             encoding="utf-8",
         )
 
@@ -407,7 +407,7 @@ class TestCompileNfgCurrentFlag:
         rc = _cli.cmd_compile_nfg(args)
         assert rc == 0
         # The arch that got rendered is the configured one.
-        assert "rcc_bowtie" in captured["arch"]
+        assert "master" in captured["arch"]
         # The output landed at the configured nfg_output, NOT inside
         # the arch folder.
         assert captured["out_path"].endswith(
@@ -421,14 +421,14 @@ class TestCompileNfgCurrentFlag:
         from neuroslm import cli as _cli
 
         (tmp_path / "brian.toml").write_text(
-            '[current]\narch = "architectures/rcc_bowtie"\n'
+            '[current]\narch = "architectures/master"\n'
             '[nfg]\noutput = ".neuro/nfg.png"\n',
             encoding="utf-8",
         )
-        arch_dir = tmp_path / "architectures" / "rcc_bowtie"
+        arch_dir = tmp_path / "architectures" / "master"
         arch_dir.mkdir(parents=True)
         (arch_dir / "arch.neuro").write_text(
-            'architecture rcc_bowtie { d_sem: 4, dt: 0.01 }\n',
+            'architecture master { d_sem: 4, dt: 0.01 }\n',
             encoding="utf-8",
         )
 
@@ -479,7 +479,7 @@ class TestCompileNfgCurrentFlag:
         from neuroslm import cli as _cli
         import argparse
         args = argparse.Namespace(
-            arch="architectures/rcc_bowtie",
+            arch="architectures/master",
             current=True, heat=False,
             out=None, png=None,
             semantic=False, legacy=False,
@@ -495,10 +495,10 @@ class TestCompileNfgCurrentFlag:
         heat overlay, no filename change."""
         from neuroslm import cli as _cli
 
-        arch_dir = tmp_path / "architectures" / "rcc_bowtie"
+        arch_dir = tmp_path / "architectures" / "master"
         arch_dir.mkdir(parents=True)
         (arch_dir / "arch.neuro").write_text(
-            'architecture rcc_bowtie { d_sem: 4, dt: 0.01 }\n',
+            'architecture master { d_sem: 4, dt: 0.01 }\n',
             encoding="utf-8",
         )
 

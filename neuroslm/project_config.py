@@ -7,7 +7,7 @@ or DNA every training/deploy/colab script targets**. It reads a tiny
 
     # brian.toml
     [current]
-    arch = "architectures/rcc_bowtie"   # current architecture folder
+    arch = "architectures/current"      # current architecture folder
     dna  = ""                            # set to a .dna path for DNA-mode
 
     [nfg]
@@ -48,7 +48,11 @@ else:  # pragma: no cover — exercised only on 3.10
 
 # ─── defaults ────────────────────────────────────────────────────────
 
-_DEFAULT_ARCH = "architectures/rcc_bowtie"
+# Default arch is the live working-copy folder. Renamed on 2026-06-14
+# from "architectures/rcc_bowtie": master/ holds the canonical
+# hand-edited source-of-truth, current/ is the live arch the trainer
+# consumes by default (and the one experiments may branch off).
+_DEFAULT_ARCH = "architectures/current"
 _DEFAULT_DNA = ""
 _DEFAULT_NFG_OUTPUT = ".neuro/nfg.png"
 _DEFAULT_NFG_FORMAT = "png"

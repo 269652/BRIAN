@@ -10,12 +10,12 @@ import sympy as sp
 
 ARCH_ROOT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    "architectures", "rcc_bowtie")
+    "architectures", "master")
 
 
 pytestmark = pytest.mark.skipif(
     not os.path.isdir(ARCH_ROOT),
-    reason="rcc_bowtie architecture not present in this checkout")
+    reason="master architecture not present in this checkout")
 
 
 def test_compile_to_sympy_populates_all_sections():

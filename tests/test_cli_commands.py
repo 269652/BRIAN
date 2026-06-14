@@ -87,11 +87,11 @@ class TestCLICommands:
             "Should show help/error about missing DNA file"
 
     @pytest.mark.skipif(
-        not (Path(__file__).parent.parent / "architectures" / "rcc_bowtie").exists(),
-        reason="rcc_bowtie architecture not found"
+        not (Path(__file__).parent.parent / "architectures" / "master").exists(),
+        reason="master architecture not found"
     )
     def test_brian_dna_compile_rcc_bowtie_succeeds(self):
-        """brian dna compile rcc_bowtie should work without crashing."""
+        """brian dna compile master should work without crashing."""
         import tempfile
         import os
 
@@ -100,7 +100,7 @@ class TestCLICommands:
 
             result = subprocess.run(
                 [sys.executable, "-m", "neuroslm.cli", "dna", "compile",
-                 "rcc_bowtie", "--output", output_file],
+                 "master", "--output", output_file],
                 capture_output=True,
                 text=True,
                 cwd=str(Path(__file__).parent.parent),
@@ -140,9 +140,9 @@ class TestCLICommands:
             assert Path(output_file).stat().st_size > 0, "Unfolded file is empty"
 
     def test_brian_compile_rcc_bowtie_succeeds(self):
-        """brian compile rcc_bowtie should succeed (compile DSL to Python)."""
+        """brian compile master should succeed (compile DSL to Python)."""
         result = subprocess.run(
-            [sys.executable, "-m", "neuroslm.cli", "compile", "rcc_bowtie"],
+            [sys.executable, "-m", "neuroslm.cli", "compile", "master"],
             capture_output=True,
             text=True,
             cwd=str(Path(__file__).parent.parent),

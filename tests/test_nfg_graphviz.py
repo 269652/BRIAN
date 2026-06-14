@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
-RCC_ARCH = REPO_ROOT / "architectures" / "rcc_bowtie"
+RCC_ARCH = REPO_ROOT / "architectures" / "master"
 
 _HAS_DOT = shutil.which("dot") is not None
 _HAS_GRAPHVIZ_PKG = True

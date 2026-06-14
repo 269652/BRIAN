@@ -277,10 +277,10 @@ population main {
             assert len(content.split('\n')) > 5
 
     def test_rcc_bowtie_evolution_structure(self):
-        """Full rcc_bowtie should support evolution through DNA."""
-        arch_root = Path(__file__).parent.parent / "architectures" / "rcc_bowtie"
+        """Full bowtie arch should support evolution through DNA."""
+        arch_root = Path(__file__).parent.parent / "architectures" / "master"
         if not arch_root.exists():
-            pytest.skip("rcc_bowtie not found")
+            pytest.skip("master arch not found")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)

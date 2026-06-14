@@ -406,29 +406,39 @@ _NT_ABBREV = {
 # When g.arch_name contains the key string the matching template REPLACES
 # _RESERVED_SLOTS so recurring presets always render with the same stable
 # house layout regardless of graph-force relaxation.
+#
+# 2026-06-14: the bowtie folder was renamed rcc_bowtie → master, with
+# architectures/current as the live working-copy. All three names map to
+# the same canonical layout so existing presets (and the legacy
+# ``rcc_bowtie`` research identifier in arch.neuro back-compat fixtures)
+# keep rendering with the stable house spine.
+_BOWTIE_LAYOUT: Dict[str, Tuple[float, float]] = {
+    # ── main spine (y=0) — wider spacing to reduce trunk crowding ─
+    "sensory":     (-8.0,  0.0), "association":  (-6.2,  0.0),
+    "thalamus":    (-4.2,  0.0), "gws":          (-1.4,  0.0),
+    "pfc":         ( 1.6,  0.0), "bg":           ( 4.4,  0.0),
+    "motor":       ( 7.2,  0.0),
+    # ── upper cortical/cognitive loop ─────────────────────────────
+    "acc":              ( 1.6,  2.4), "dmn":           (-1.4,  2.9),
+    "claustrum":        ( 0.2,  2.4),
+    "thought_transformer": ( 0.8,  3.0),
+    "reasoning_cortex": ( 3.2,  2.4), "language_cortex": ( 6.0,  3.0),
+    "math_cortex":      ( 4.6,  3.0),
+    # ── memory cluster ────────────────────────────────────────────
+    "hippo":       ( 0.5, -2.4), "entorhinal":   (-0.7, -2.4),
+    "cerebellum":  ( 3.4, -3.0),
+    # ── self / world / predictive-control cluster ─────────────────
+    "world":       (-4.2,  2.8), "self_m":       (-4.2, -3.0),
+    "qualia":      (-1.4, -2.9), "neural_geometry": (-2.4,  2.9),
+    "forward_m":   ( 4.4, -2.4), "evaluator":    ( 6.0, -2.4),
+    # ── subcortical / interoceptive ───────────────────────────────
+    "amygdala":    (-6.2, -2.4), "insula":       (-8.0, -2.4),
+}
+
 _PRESET_TEMPLATES: Dict[str, Dict[str, Tuple[float, float]]] = {
-    "rcc_bowtie": {
-        # ── main spine (y=0) — wider spacing to reduce trunk crowding ─
-        "sensory":     (-8.0,  0.0), "association":  (-6.2,  0.0),
-        "thalamus":    (-4.2,  0.0), "gws":          (-1.4,  0.0),
-        "pfc":         ( 1.6,  0.0), "bg":           ( 4.4,  0.0),
-        "motor":       ( 7.2,  0.0),
-        # ── upper cortical/cognitive loop ─────────────────────────────
-        "acc":              ( 1.6,  2.4), "dmn":           (-1.4,  2.9),
-        "claustrum":        ( 0.2,  2.4),
-        "thought_transformer": ( 0.8,  3.0),
-        "reasoning_cortex": ( 3.2,  2.4), "language_cortex": ( 6.0,  3.0),
-        "math_cortex":      ( 4.6,  3.0),
-        # ── memory cluster ────────────────────────────────────────────
-        "hippo":       ( 0.5, -2.4), "entorhinal":   (-0.7, -2.4),
-        "cerebellum":  ( 3.4, -3.0),
-        # ── self / world / predictive-control cluster ─────────────────
-        "world":       (-4.2,  2.8), "self_m":       (-4.2, -3.0),
-        "qualia":      (-1.4, -2.9), "neural_geometry": (-2.4,  2.9),
-        "forward_m":   ( 4.4, -2.4), "evaluator":    ( 6.0, -2.4),
-        # ── subcortical / interoceptive ───────────────────────────────
-        "amygdala":    (-6.2, -2.4), "insula":       (-8.0, -2.4),
-    },
+    "rcc_bowtie": _BOWTIE_LAYOUT,  # legacy research identifier
+    "master":     _BOWTIE_LAYOUT,  # canonical source-of-truth folder
+    "current":    _BOWTIE_LAYOUT,  # live working-copy folder
 }
 
 # ── Subsystem envelope definitions ────────────────────────────────────
@@ -763,7 +773,9 @@ def _inferred_arch_root(g: "NeuralFlowGraph") -> str:
     candidate = here / "architectures" / g.arch_name
     if candidate.is_dir():
         return str(candidate)
-    return str(here / "architectures" / "rcc_bowtie")
+    # Fallback: the canonical hand-edited source-of-truth.
+    # Renamed 2026-06-14 from "architectures/rcc_bowtie".
+    return str(here / "architectures" / "master")
 
 
 # ── 3a. Helpers for rendering side panels ─────────────────────────────

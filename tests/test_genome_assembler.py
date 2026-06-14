@@ -127,9 +127,9 @@ class TestRealArchitecture:
     """The real rcc_bowtie main source round-trips bit-identically."""
 
     def test_rcc_bowtie_main_source_bit_identical(self):
-        arch_root = Path(__file__).parent.parent / "architectures" / "rcc_bowtie"
+        arch_root = Path(__file__).parent.parent / "architectures" / "master"
         if not (arch_root / "arch.neuro").exists():
-            pytest.skip("rcc_bowtie not found")
+            pytest.skip("master arch not found")
 
         from neuroslm.compiler.module_bundler import ModuleBundler
         bundled = ModuleBundler(arch_root).bundle(arch_root / "arch.neuro")

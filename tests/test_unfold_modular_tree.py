@@ -78,9 +78,9 @@ class TestModularUnfold:
 
 class TestRccBowtieModularUnfold:
     def test_rcc_bowtie_unfold_regenerates_all_modules(self):
-        arch_root = Path(__file__).parent.parent / "architectures" / "rcc_bowtie"
+        arch_root = Path(__file__).parent.parent / "architectures" / "master"
         if not (arch_root / "arch.neuro").exists():
-            pytest.skip("rcc_bowtie not found")
+            pytest.skip("master arch not found")
 
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)

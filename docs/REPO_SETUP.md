@@ -171,7 +171,7 @@ brian clean lfs
 # expected: 85 passed
 
 # (c) DSL training smoke test (10 steps, synthetic data, CPU)
-python -m neuroslm.train_dsl --arch architectures/rcc_bowtie --scale 30m_p4 --steps 10 --mode synthetic --device cpu
+python -m neuroslm.train_dsl --arch architectures/current --scale 30m_p4 --steps 10 --mode synthetic --device cpu
 ```
 
 If all three return cleanly, you're done.

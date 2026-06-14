@@ -17,8 +17,8 @@ Two foot-guns this contract closes:
    to ``None`` and reading ``cfg.default_steps`` when unspecified
    restores precedence: CLI > brian.toml > hardcoded fallback.
 
-2. **DNA two-file split.** ``brian dna compile rcc_bowtie`` writes to
-   ``architectures/rcc_bowtie/evolution.dna`` by default — but the
+2. **DNA two-file split.** ``brian dna compile master`` writes to
+   ``architectures/master/evolution.dna`` by default — but the
    deploy reads ``brian.toml [current].dna`` which points at
    ``./dna/evol/arch.dna``. These can (and on 2026-06-14, did)
    diverge: a stale ``dna/evol/arch.dna`` shipped a wasted-compute
@@ -176,7 +176,7 @@ class TestDeployStepsDefault:
         """No ``--steps`` ⇒ STEPS env = brian.toml [defaults].steps."""
         isolated_brian_toml(
             '[current]\n'
-            'arch = "architectures/rcc_bowtie"\n'
+            'arch = "architectures/master"\n'
             'dna  = ""\n'
             '[defaults]\n'
             'steps = 7777\n'
@@ -198,7 +198,7 @@ class TestDeployStepsDefault:
         """``--steps N`` from the CLI always wins."""
         isolated_brian_toml(
             '[current]\n'
-            'arch = "architectures/rcc_bowtie"\n'
+            'arch = "architectures/master"\n'
             'dna  = ""\n'
             '[defaults]\n'
             'steps = 7777\n'
@@ -219,7 +219,7 @@ class TestDeployStepsDefault:
         to a sensible hardcoded value (currently 10_000)."""
         isolated_brian_toml(
             '[current]\n'
-            'arch = "architectures/rcc_bowtie"\n'
+            'arch = "architectures/master"\n'
             'dna  = ""\n'
         )
         from neuroslm.cli import cmd_deploy
@@ -256,7 +256,7 @@ class TestDeployBranchDefault:
         """No ``--branch`` ⇒ BRANCH env = brian.toml [defaults].branch."""
         isolated_brian_toml(
             '[current]\n'
-            'arch = "architectures/rcc_bowtie"\n'
+            'arch = "architectures/master"\n'
             'dna  = ""\n'
             '[defaults]\n'
             'branch = "master"\n'
@@ -277,7 +277,7 @@ class TestDeployBranchDefault:
         """``--branch X`` from the CLI always wins."""
         isolated_brian_toml(
             '[current]\n'
-            'arch = "architectures/rcc_bowtie"\n'
+            'arch = "architectures/master"\n'
             'dna  = ""\n'
             '[defaults]\n'
             'branch = "master"\n'
@@ -300,7 +300,7 @@ class TestDeployBranchDefault:
         fallback (current HEAD via its hardcoded default) applies."""
         isolated_brian_toml(
             '[current]\n'
-            'arch = "architectures/rcc_bowtie"\n'
+            'arch = "architectures/master"\n'
             'dna  = ""\n'
         )
         from neuroslm.cli import cmd_deploy
@@ -346,7 +346,7 @@ class TestDeployDnaDefault:
         dna.write_text("# fake dna\n", encoding="utf-8")
         isolated_brian_toml(
             '[current]\n'
-            'arch = "architectures/rcc_bowtie"\n'
+            'arch = "architectures/master"\n'
             f'dna  = "{dna.as_posix()}"\n'
             '[defaults]\n'
             'steps = 1000\n'

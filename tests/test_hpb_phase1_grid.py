@@ -159,7 +159,7 @@ def test_actual_arch_neuro_grid_positions_enabled():
     activation step itself."""
     from pathlib import Path
     from neuroslm.dsl.training_config import load_training_config_from_arch
-    arch_root = Path(__file__).parent.parent / "architectures" / "rcc_bowtie"
+    arch_root = Path(__file__).parent.parent / "architectures" / "master"
     cfg = load_training_config_from_arch(arch_root)
     assert cfg.grid_positions is not None, (
         "arch.neuro must declare a grid_positions block"

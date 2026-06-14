@@ -17,7 +17,7 @@ class TestDNARoundtripFidelity:
     def test_roundtrip_preserves_architecture_declaration(self):
         """After roundtrip, unfold should contain architecture declaration."""
         compiler = RibosomeCompiler()
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dna_file = Path(tmpdir) / "test.dna"
@@ -38,7 +38,7 @@ class TestDNARoundtripFidelity:
     def test_roundtrip_preserves_training_block(self):
         """After roundtrip, should contain training configuration."""
         compiler = RibosomeCompiler()
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dna_file = Path(tmpdir) / "test.dna"
@@ -54,7 +54,7 @@ class TestDNARoundtripFidelity:
     def test_roundtrip_multiple_cycles(self):
         """DNA → unfold → re-encode → unfold should be stable."""
         compiler = RibosomeCompiler()
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
@@ -75,7 +75,7 @@ class TestDNARoundtripFidelity:
     def test_roundtrip_content_is_parseable_as_dsl(self):
         """Unfolded DSL should be parseable (or at least have DSL-like syntax)."""
         compiler = RibosomeCompiler()
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dna_file = Path(tmpdir) / "test.dna"
@@ -99,7 +99,7 @@ class TestDNARoundtripFidelity:
     def test_full_arch_roundtrip_creates_valid_file(self):
         """Full roundtrip produces a file that can be read and parsed."""
         compiler = RibosomeCompiler()
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dna_file = Path(tmpdir) / "evolved.dna"
@@ -126,7 +126,7 @@ class TestDNARoundtripFidelity:
     def test_roundtrip_preserves_dimensionality_parameters(self):
         """Roundtrip should preserve d_sem, dt, and other key parameters."""
         compiler = RibosomeCompiler()
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dna_file = Path(tmpdir) / "test.dna"

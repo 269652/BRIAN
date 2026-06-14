@@ -15,7 +15,7 @@ class TestDNACompile:
     def test_dna_compile_creates_file(self):
         """Compiling arch should create a .dna file."""
         compiler = RibosomeCompiler()
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dna = str(Path(tmpdir) / "test.dna")
@@ -28,7 +28,7 @@ class TestDNACompile:
     def test_dna_compile_roundtrip(self):
         """Compile → unfold → should recover original (approximately)."""
         compiler = RibosomeCompiler()
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dna_path = str(Path(tmpdir) / "test.dna")
@@ -53,7 +53,7 @@ class TestDNAUnfold:
     def test_dna_unfold_creates_file(self):
         """Unfolding DNA should create a .neuro file."""
         compiler = RibosomeCompiler()
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dna_path = str(Path(tmpdir) / "test.dna")
@@ -70,7 +70,7 @@ class TestDNAUnfold:
     def test_dna_unfold_produces_valid_dsl(self):
         """Unfolded DSL should parse (approximately) as valid architecture."""
         compiler = RibosomeCompiler()
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dna_path = str(Path(tmpdir) / "test.dna")
@@ -97,7 +97,7 @@ class TestDNACLIIntegration:
         """Test `brian dna compile` command."""
         from neuroslm.cli import cmd_dna
 
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dna_path = str(Path(tmpdir) / "test.dna")
@@ -118,7 +118,7 @@ class TestDNACLIIntegration:
         """Test `brian dna unfold` command."""
         from neuroslm.cli import cmd_dna
 
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             dna_path = str(Path(tmpdir) / "test.dna")
@@ -149,10 +149,10 @@ class TestDNACLIIntegration:
         with tempfile.TemporaryDirectory() as tmpdir:
             dna_path = str(Path(tmpdir) / "test.dna")
 
-            # Use short name "rcc_bowtie" instead of full path
+            # Use short name "master" instead of full path
             args = argparse.Namespace(
                 dna_cmd="compile",
-                arch="rcc_bowtie",
+                arch="master",
                 output=dna_path
             )
 
@@ -178,7 +178,7 @@ class TestDNAUnfoldDirectoryDestination:
     def _make_dna(self, tmpdir: Path) -> Path:
         """Compile a small DNA file we can repeatedly unfold."""
         compiler = RibosomeCompiler()
-        arch_root = str(Path(__file__).parent.parent / "architectures" / "rcc_bowtie")
+        arch_root = str(Path(__file__).parent.parent / "architectures" / "master")
         dna_path = tmpdir / "evol.dna"
         compiler.compile_file(arch_root, str(dna_path))
         assert dna_path.exists()

@@ -51,9 +51,9 @@ REPO_ROOT = Path(__file__).parent.parent
 # ──────────────────────────────────────────────────────────────────────
 
 def _make_dna(tmpdir: Path) -> Path:
-    """Compile the rcc_bowtie architecture into a fresh ``.dna`` snapshot."""
+    """Compile the canonical bowtie architecture into a fresh ``.dna`` snapshot."""
     compiler = RibosomeCompiler()
-    arch_root = str(REPO_ROOT / "architectures" / "rcc_bowtie")
+    arch_root = str(REPO_ROOT / "architectures" / "master")
     dna_path = tmpdir / "evol.dna"
     compiler.compile_file(arch_root, str(dna_path))
     assert dna_path.exists(), "fixture failed: DNA was not produced"
@@ -207,9 +207,9 @@ class TestCompileNfgRegression:
     def test_full_arch_folder_still_compiles(self):
         from neuroslm.cli import cmd_compile_nfg
 
-        rcc = REPO_ROOT / "architectures" / "rcc_bowtie"
+        rcc = REPO_ROOT / "architectures" / "master"
         if not (rcc / "arch.neuro").is_file():
-            pytest.skip("rcc_bowtie reference architecture not present")
+            pytest.skip("master arch not present")
 
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = Path(tmp)

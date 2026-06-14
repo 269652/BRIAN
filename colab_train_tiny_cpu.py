@@ -25,7 +25,7 @@ def run_training():
     # d_model=128 (vs 512), depth=2 (vs 8), batch=1, seq_len=256, steps=100
     cmd = (
         "python -u -m neuroslm.train_dsl "
-        "--arch architectures/rcc_bowtie "
+        "--arch architectures/current "
         "--model dsl_lm "
         "--preset rcc_bowtie_30m_p4 "  # Use existing preset but override with flags
         "--data real "

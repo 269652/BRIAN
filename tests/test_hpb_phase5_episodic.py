@@ -55,7 +55,7 @@ def test_actual_arch_neuro_h15_h19_uniform_writes():
     """Phase 5 ships: H15 + H19 both on, episodic write_gate="all"."""
     from pathlib import Path
     from neuroslm.dsl.training_config import load_training_config_from_arch
-    arch_root = Path(__file__).parent.parent / "architectures" / "rcc_bowtie"
+    arch_root = Path(__file__).parent.parent / "architectures" / "master"
     cfg = load_training_config_from_arch(arch_root)
     # H19
     assert cfg.surprise_head is not None

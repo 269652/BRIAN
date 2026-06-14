@@ -53,7 +53,7 @@ class TestFitnessConfigDefinition:
     def test_fitness_sidefile_format(self):
         """Define fitness in separate fitness.neuro file."""
         fitness_dsl = """
-# architectures/rcc_bowtie/fitness.neuro
+# architectures/master/fitness.neuro
 fitness {
     objectives: [
         { name: "minimize_ood_ppl", metric: "ood_ppl", direction: "minimize", weight: 0.5, target: 180.0 },
@@ -116,9 +116,10 @@ class TestFitnessLoadingFromDNA:
         dna = LatentDNA(length=256)
         # No fitness in DNA invariants
 
-        # Should fall back to loading from sidefile
-        fitness_file = "architectures/rcc_bowtie/fitness.neuro"  # Not checking if exists
-
+        # Should fall back to loading from sidefile under
+        # architectures/master/fitness.neuro (the canonical bowtie
+        # source-of-truth). This test only exercises the routing
+        # logic — the file isn't actually loaded here.
         if "fitness_config" not in dna.invariants:
             # Fallback behavior
             use_sidefile = True
@@ -251,7 +252,7 @@ class TestFitnessConfigurationIntegration:
     def test_init_evolution_loads_fitness(self):
         """init_evolution loads fitness when DNA present."""
         # Simulate what init_evolution should do
-        architecture_config = {"arch_path": "architectures/rcc_bowtie"}
+        architecture_config = {"arch_path": "architectures/master"}
         dna_path = "architectures/evol/evol.dna"
 
         # Check if DNA has fitness, fall back to fitness.neuro
@@ -260,7 +261,7 @@ class TestFitnessConfigurationIntegration:
         # If DNA has fitness_config invariant, use it
         # Otherwise, try to load fitness.neuro from architecture
         if fitness_config is None:
-            fitness_path = "architectures/rcc_bowtie/fitness.neuro"
+            fitness_path = "architectures/master/fitness.neuro"
             # Load from fitness_path (in real implementation)
 
         assert architecture_config is not None

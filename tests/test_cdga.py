@@ -3,8 +3,8 @@
 
 CDGA performs gradient surgery against a frozen OOD anchor batch.
 
-Reference: architectures/rcc_bowtie/lib/cdga.neuro  (math-first DSL)
-            docs/CDGA.md                              (full design doc)
+Reference: architectures/master/lib/cdga.neuro  (math-first DSL)
+            docs/CDGA.md                          (full design doc)
 
 Pipeline contract
 ─────────────────

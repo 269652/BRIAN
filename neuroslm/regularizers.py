@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Five OOD-generalization interventions, math-aligned with
-`architectures/rcc_bowtie/lib/regularizers.neuro`.
+`architectures/master/lib/regularizers.neuro` (the canonical source-of-truth;
+the live working-copy ``architectures/current/lib/regularizers.neuro`` is a
+verbatim copy unless an experiment has branched it).
 
 Each module is a self-contained `nn.Module`. The `RegularizationController`
 composes them and is wired into `BRIANHarness.compute_loss`. All five are

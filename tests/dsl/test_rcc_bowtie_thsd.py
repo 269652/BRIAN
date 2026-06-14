@@ -14,7 +14,7 @@ class TestRCCBowtieThsdParsing:
 
     def test_rcc_bowtie_compiles_with_thsd_complexes(self):
         """RCC Bowtie arch.neuro should compile despite having THSD complex blocks."""
-        arch_root = Path("architectures/rcc_bowtie")
+        arch_root = Path("architectures/master")
 
         # Should not raise an error
         ir = compile_folder(arch_root)
@@ -23,7 +23,7 @@ class TestRCCBowtieThsdParsing:
 
     def test_rcc_bowtie_extracts_thsd_complexes(self):
         """RCC Bowtie THSD complexes should be extracted correctly."""
-        arch_root = Path("architectures/rcc_bowtie")
+        arch_root = Path("architectures/master")
         ir = compile_folder(arch_root)
 
         # Should have extracted THSD complexes
@@ -37,7 +37,7 @@ class TestRCCBowtieThsdParsing:
 
     def test_rcc_bowtie_thalamus_complex(self):
         """Thalamus complex should have correct specifications."""
-        arch_root = Path("architectures/rcc_bowtie")
+        arch_root = Path("architectures/master")
         ir = compile_folder(arch_root)
 
         thalamus = next((c for c in ir.thsd_complexes if c.name == "Thalamus"), None)
@@ -52,7 +52,7 @@ class TestRCCBowtieThsdParsing:
 
     def test_rcc_bowtie_global_workspace_complex(self):
         """GlobalWorkspace complex should have correct specifications."""
-        arch_root = Path("architectures/rcc_bowtie")
+        arch_root = Path("architectures/master")
         ir = compile_folder(arch_root)
 
         gws = next((c for c in ir.thsd_complexes if c.name == "GlobalWorkspace"), None)
@@ -68,12 +68,12 @@ class TestRCCBowtieThsdParsing:
 
     def test_rcc_bowtie_preserves_v2_declarations(self):
         """v2.0 declarations should still be accessible."""
-        arch_root = Path("architectures/rcc_bowtie")
+        arch_root = Path("architectures/master")
         ir = compile_folder(arch_root)
 
         # Should have architecture declaration
         assert ir.architecture is not None
-        assert ir.architecture['name'] == 'rcc_bowtie'
+        assert ir.architecture['name'] == 'master'
 
 
 if __name__ == "__main__":

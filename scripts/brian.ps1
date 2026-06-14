@@ -2,9 +2,9 @@
 #
 # Examples:
 #   .\scripts\brian.ps1 status
-#   .\scripts\brian.ps1 compile architectures/rcc_bowtie --out arch.py
-#   .\scripts\brian.ps1 wolfram architectures/rcc_bowtie --full --out arch.m
-#   .\scripts\brian.ps1 analyze architectures/rcc_bowtie --all
+#   .\scripts\brian.ps1 compile architectures/current --out arch.py
+#   .\scripts\brian.ps1 wolfram architectures/current --full --out arch.m
+#   .\scripts\brian.ps1 analyze architectures/current --all
 #   .\scripts\brian.ps1 deploy --steps 10000
 #   .\scripts\brian.ps1 logs 38569395
 #   .\scripts\brian.ps1 destroy --all

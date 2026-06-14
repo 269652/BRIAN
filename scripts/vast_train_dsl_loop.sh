@@ -10,7 +10,9 @@
 # Source of truth for ARCH (highest priority first):
 #   1. ARCH env var (legacy / CI overrides)
 #   2. brian.toml [current].arch  (workspace config)
-#   3. hardcoded fallback: "rcc_bowtie"
+#   3. hardcoded fallback: "current"  (2026-06-14: was "rcc_bowtie";
+#      the bowtie folder was renamed to master/, with current/ as the
+#      live working-copy `brian train` consumes by default)
 #
 # Tunable env vars (with defaults):
 #   ARCH=<name>                      architecture folder under architectures/
@@ -32,7 +34,7 @@ cd "$REPO_DIR"
 
 # Resolve ARCH from brian.toml if not set in the environment.
 if [ -z "${ARCH:-}" ]; then
-    ARCH="$(python3 - <<'PY' 2>/dev/null || echo rcc_bowtie
+    ARCH="$(python3 - <<'PY' 2>/dev/null || echo current
 from neuroslm.project_config import load_project_config
 cfg = load_project_config()
 # arch field is "architectures/<name>" — extract the leaf
@@ -40,7 +42,7 @@ print(cfg.arch.split("/")[-1] if "/" in cfg.arch else cfg.arch)
 PY
 )"
 fi
-ARCH="${ARCH:-rcc_bowtie}"
+ARCH="${ARCH:-current}"
 PRESET="${PRESET:-rcc_bowtie_30m_p4}"   # sizes the DSL LM trunk to match P4
 
 # Read runtime hyperparameters from the architecture's `training { ... }`

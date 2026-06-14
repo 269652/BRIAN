@@ -22,7 +22,7 @@ Why Python instead of Mathematica:
     measured Phi trajectory against the symbolic prediction).
 
 CLI:
-    py -3 -m neuroslm.dsl.analyzer architectures/rcc_bowtie \\
+    py -3 -m neuroslm.dsl.analyzer architectures/current \\
         --fixed-points --jacobian --stability --graph topology.png \\
         --wa-queries
 """

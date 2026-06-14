@@ -16,7 +16,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 REPORT_PATH = REPO_ROOT / "docs" / "technical_report.md"
-ARCH_NEURO = REPO_ROOT / "architectures" / "rcc_bowtie" / "arch.neuro"
+# Canonical source-of-truth arch (renamed 2026-06-14 from rcc_bowtie).
+ARCH_NEURO = REPO_ROOT / "architectures" / "master" / "arch.neuro"
 ARCHIVE_DIR = REPO_ROOT / "docs" / "archive"
 
 

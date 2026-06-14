@@ -162,7 +162,7 @@ def test_actual_arch_neuro_grid_positions_k4_phi():
     """After Phase 2 lands, arch.neuro MUST declare K=4 with φ-ratio."""
     from pathlib import Path
     from neuroslm.dsl.training_config import load_training_config_from_arch
-    arch_root = Path(__file__).parent.parent / "architectures" / "rcc_bowtie"
+    arch_root = Path(__file__).parent.parent / "architectures" / "master"
     cfg = load_training_config_from_arch(arch_root)
     assert cfg.grid_positions is not None
     assert cfg.grid_positions.get("enabled") is True

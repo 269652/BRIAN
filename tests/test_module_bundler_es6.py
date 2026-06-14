@@ -108,11 +108,11 @@ population main { count: 256 }
             assert len(bundled.modules) == 2
 
     def test_rcc_bowtie_modules_are_bundled(self):
-        """Full rcc_bowtie should bundle all modules."""
-        arch_root = Path(__file__).parent.parent / "architectures" / "rcc_bowtie"
+        """Full bowtie arch should bundle all modules."""
+        arch_root = Path(__file__).parent.parent / "architectures" / "master"
 
         if not arch_root.exists():
-            pytest.skip("rcc_bowtie architecture not found")
+            pytest.skip("master arch not found")
 
         arch_file = arch_root / "arch.neuro"
         if not arch_file.exists():
@@ -135,12 +135,12 @@ population main { count: 256 }
             "Should have modules/ modules"
 
     def test_unfold_rcc_bowtie_produces_complete_dsl(self):
-        """Unfolding rcc_bowtie DNA should produce complete DSL."""
+        """Unfolding bowtie DNA should produce complete DSL."""
         from neuroslm.compiler.ribosome import RibosomeCompiler
 
-        arch_root = Path(__file__).parent.parent / "architectures" / "rcc_bowtie"
+        arch_root = Path(__file__).parent.parent / "architectures" / "master"
         if not arch_root.exists():
-            pytest.skip("rcc_bowtie not found")
+            pytest.skip("master arch not found")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)

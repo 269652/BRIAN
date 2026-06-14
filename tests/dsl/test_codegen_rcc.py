@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """End-to-end demo: codegen on the full RCC bowtie architecture.
 
-After the Stage-6 migration, `architectures/rcc_bowtie/` is the canonical
-source for this architecture. This test exercises the full pipeline:
+After the Stage-6 migration, `architectures/master/` (renamed 2026-06-14
+from `architectures/rcc_bowtie/`) is the canonical source for this
+architecture. This test exercises the full pipeline:
 
     folder  →  compile_folder  →  ProgramIR  →  CodeGenerator  →  nn.Module
 
@@ -24,7 +25,7 @@ from neuroslm.dsl.multifile import compile_folder
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-ARCH_ROOT = REPO_ROOT / "architectures" / "rcc_bowtie"
+ARCH_ROOT = REPO_ROOT / "architectures" / "master"
 
 
 def _compile_arch(module_name: str = "RCCBowtie"):

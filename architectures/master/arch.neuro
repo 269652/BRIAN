@@ -1,5 +1,5 @@
     # -*- coding: utf-8 -*-
-# RCC Bowtie — package config + global wiring
+# RCC Bowtie (master) — package config + global wiring
 #
 # This `arch.neuro` is the architecture's entry point. It sets runtime
 # defaults, declares the 7 classical neurotransmitter systems globally,
@@ -16,12 +16,21 @@
 #
 # References — Dehaene (2011), Baars (2005), Doya (1999), Tononi (2016),
 # Mashour (2020).
+#
+# Folder layout (2026-06-14):
+#   architectures/master/   — canonical, hand-edited source of truth
+#                              (this file). Renamed from rcc_bowtie/ on
+#                              2026-06-14; the topology and findings
+#                              still reference the RCC-Bowtie name.
+#   architectures/current/  — working-copy / active arch consumed by
+#                              `brian train` by default. Should track
+#                              master/ unless an experiment branches.
 
 # Equations are imported from lib/equations.neuro (see MODULE IMPORTS below).
 # This keeps arch.neuro free of implementation details and focuses it on
 # high-level architecture + wiring + constraints.
 
-architecture rcc_bowtie {
+architecture master {
     d_sem: 256,
     dt: 0.01
 }
@@ -172,22 +181,28 @@ training {
         # produces trunk-vocab logits directly via VocabBridge — no
         # random projection chain, no rogue-dim band-aid LayerNorm.
         #
-        # 2026-06-14 (H22): the `general` slot was upgraded from `gpt2`
-        # (2019, ~125M params, WebText) to `smollm2_360m` (HuggingFaceTB
-        # /SmolLM2-360M — late-2024, ~360M params, 4T tokens of curated
-        # FineWeb-Edu + SmolLM-corpus + Cosmopedia). 3× the parameters,
-        # ~100× the training tokens, dramatically better per-parameter
-        # quality on natural English. Trade-off: SmolLM2 uses its own
-        # tokenizer (~49 152 BPE) ≠ trunk's gpt2 tokenizer, so the
-        # `general` expert now traverses the VocabBridge path (per-sample
-        # retokenise + char-offset align) instead of the same-tokenizer
-        # fast path. With CodeGPT-small-py still on the gpt2 vocab, the
-        # ensemble is 1 fast-path + 2 bridge-path experts after the
-        # swap. The per-position abstain logic from H21 is what makes
-        # this safe — every cross-tok expert correctly fills unmapped
-        # trunk slots at the uniform baseline.
+        # 2026-06-14 (H23 post-mortem): the `general` slot was REVERTED
+        # from `smollm2_360m` back to `gpt2`. H22 swapped gpt2 →
+        # smollm2_360m chasing better per-token capacity; H23 fixed
+        # the bridge alignment shift (commit a976fee) and isolated
+        # SmolLM2 bridge CE (2.798) BEAT gpt2 (3.016) on the held-out
+        # paragraph — but actual training PPL/OOD got dramatically
+        # worse. Forensic in docs/FINDINGS.md "Run 40968510" identified
+        # TWO compounding mechanisms:
+        #   (1) **F.kl_div(reduction="batchmean") bug** in
+        #       neuroslm.harness._cortex_fusion_aux_step makes the
+        #       distillation loss ~T=512× too strong relative to the
+        #       LM loss. With gpt2 teacher this is survivable; with
+        #       SmolLM2 teacher (sharper distribution) it dominates.
+        #       See scripts/diagnose_kl_distill_blowup.py.
+        #   (2) **Cross-family imitation infeasibility**: gpt2-trunk
+        #       cannot efficiently learn to imitate a teacher with a
+        #       different tokenizer + positional encoding. The KL
+        #       gradient points to an unreachable target distribution.
+        # Until the reduction bug is fixed + ablated (FINDINGS Followup
+        # F1), the safe roster is the all-gpt2-family H21 baseline.
         experts: [
-            { id: "smollm2_360m",               domain: "general",   freeze: true },
+            { id: "gpt2",                       domain: "general",   freeze: true },
             { id: "microsoft/CodeGPT-small-py", domain: "code",      freeze: true },
             { id: "Qwen/Qwen2.5-0.5B",          domain: "reasoning", freeze: true }
         ],

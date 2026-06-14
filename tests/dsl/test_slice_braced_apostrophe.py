@@ -28,7 +28,7 @@ def test_slice_braced_still_balances_normally():
 
 def test_parse_module_extracts_formal_phi_integration():
     """End-to-end: the real constraints.neuro must expose all 3 formal specs."""
-    path = Path('architectures/rcc_bowtie/lib/constraints.neuro')
+    path = Path('architectures/master/lib/constraints.neuro')
     if not path.exists():
         return  # skip when running in a stripped repo
     m = parse_module(path.read_text(encoding='utf-8'), path)

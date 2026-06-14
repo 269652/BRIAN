@@ -20,7 +20,8 @@ Concretely:
 4. Rejected mutations are persisted to a separate audit file
    (``step_<N>.rejected.json``) so the human/automatic reviewer can
    see *what* the architecture refused to become.
-5. ``architectures/rcc_bowtie/arch.neuro`` can declare a
+5. ``architectures/master/arch.neuro`` (the canonical bowtie arch,
+   renamed 2026-06-14 from ``rcc_bowtie``) can declare a
    ``formal_spec { triple_guard { ... } }`` block which compiles into
    a ``TripleGuard`` instance — closing the loop from DSL → live gate.
 
@@ -442,32 +443,33 @@ class TestEvolutionContextGating:
 # ──────────────────────────────────────────────────────────────────────
 
 class TestRccBowtieIntegration:
-    """End-to-end: ``architectures/rcc_bowtie/arch.neuro`` must be able
-    to declare a ``formal_spec { triple_guard { ... } }`` block, and
+    """End-to-end: ``architectures/master/arch.neuro`` (canonical bowtie
+    arch, renamed 2026-06-14 from ``rcc_bowtie``) must be able to
+    declare a ``formal_spec { triple_guard { ... } }`` block, and
     compiling the architecture must surface that block as a usable
     ``TripleGuard`` on the resulting context."""
 
     def test_rcc_bowtie_arch_neuro_compiles(self):
-        """Sanity: the current rcc_bowtie compiles at all (so any
+        """Sanity: the current bowtie arch compiles at all (so any
         ``formal_spec`` addition we make won't break the build)."""
         from neuroslm.dsl.multifile import compile_folder
-        arch_root = Path(__file__).resolve().parents[2] / "architectures" / "rcc_bowtie"
+        arch_root = Path(__file__).resolve().parents[2] / "architectures" / "master"
         assert arch_root.exists()
         ir = compile_folder(str(arch_root))
         assert ir is not None
-        # rcc_bowtie has populations; this lets us confirm we got the
-        # real bowtie, not a stub.
+        # The bowtie has populations; this lets us confirm we got the
+        # real arch, not a stub.
         assert len(ir.populations) > 0
 
     def test_rcc_bowtie_triple_guard_from_arch_neuro(self):
         """``TripleGuard.from_arch_neuro`` must work on the production
-        rcc_bowtie arch.neuro — either reading a triple_guard block if
+        bowtie arch.neuro — either reading a triple_guard block if
         present, or falling back to defaults if not.  Either way: a
         TripleGuard instance comes back."""
         from neuroslm.verification.triple_guard import TripleGuard
         arch_neuro = (
             Path(__file__).resolve().parents[2]
-            / "architectures" / "rcc_bowtie" / "arch.neuro"
+            / "architectures" / "master" / "arch.neuro"
         )
         guard = TripleGuard.from_arch_neuro(str(arch_neuro))
         assert isinstance(guard, TripleGuard)

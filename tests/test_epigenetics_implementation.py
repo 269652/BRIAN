@@ -240,9 +240,9 @@ synapse main -> aux { weight: 1.0 }
 
     def test_evolved_dna_maintains_modules(self):
         """Evolved DNA should maintain module structure."""
-        arch_root = Path(__file__).parent.parent / "architectures" / "rcc_bowtie"
+        arch_root = Path(__file__).parent.parent / "architectures" / "master"
         if not arch_root.exists():
-            pytest.skip("rcc_bowtie not found")
+            pytest.skip("master arch not found")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)

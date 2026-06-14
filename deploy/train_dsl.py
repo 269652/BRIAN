@@ -29,7 +29,10 @@ REPO_SLUG = "269652/BRIAN"
 VAST_IMAGE = "pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime"
 OOD_EVERY = int(os.environ.get("OOD_EVERY", "500"))
 STEPS = int(os.environ.get("STEPS", "40000"))
-ARCH = os.environ.get("ARCH", "rcc_bowtie")
+# 2026-06-14: rcc_bowtie folder renamed to master, with current/ as the
+# live working-copy. Default to "current" so vast.ai deploys hit the
+# same arch as ``brian train`` without --arch.
+ARCH = os.environ.get("ARCH", "current")
 SCALE = os.environ.get("SCALE", "")
 LABEL_SUFFIX = os.environ.get("LABEL_SUFFIX", "")
 LABEL = "neuroslm-full" + (f"-{LABEL_SUFFIX}" if LABEL_SUFFIX else "") \
