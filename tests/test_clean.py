@@ -254,3 +254,60 @@ def test_all_bucket_expands_to_three(fake_repo: Path) -> None:
     rc = cl.run(["all"], force=False, root=fake_repo, keep_recent=0,
                 use_git=False)
     assert rc == 0
+
+
+# ── uninformative globs must NOT match ────────────────────────────────
+
+
+@pytest.mark.parametrize("bad_glob", ["*.pt", "*.log", "*.json", "*.mem",
+                                       "*.mem.json", "*", "*.md"])
+def test_uninformative_globs_rejected(bad_glob: str) -> None:
+    """A glob like `*.pt` must not be allowed to protect every checkpoint.
+
+    Regression: an early matcher was treating any `.gitignore` entry
+    like `*.pt` as a reference, which silently neutered the entire
+    delete plan — the dry-run showed `kept * referenced: 51` for 51
+    checkpoints in a repo with no actual reference to any of them.
+    """
+    assert not cl._is_informative_glob(bad_glob), (
+        f"{bad_glob!r} is too generic and must NOT be treated as a reference"
+    )
+
+
+@pytest.mark.parametrize("good_glob", [
+    "20260614*_step2kof2k.log",
+    "neuroslm_large_*_step5000.pt",
+    "*_keep_me_glob_*.log",
+    "dsl_arch_20260531-*_step3000.pt",
+])
+def test_informative_globs_accepted(good_glob: str) -> None:
+    assert cl._is_informative_glob(good_glob), (
+        f"{good_glob!r} has a distinctive literal segment and must be kept"
+    )
+
+
+def test_gitignore_style_glob_does_not_protect_checkpoint(tmp_path: Path) -> None:
+    """Full integration: a `.gitignore` containing `*.pt` must NOT cause
+    an unreferenced checkpoint to be marked referenced."""
+    root = tmp_path
+    (root / "lfs_checkpoints").mkdir()
+    (root / "lfs_checkpoints" / ".gitkeep").write_text("", encoding="utf-8")
+    orphan = root / "lfs_checkpoints" / "completely_orphan_step9000.pt"
+    orphan.write_bytes(b"x" * 16)
+    # The kind of file that introduced the bug:
+    (root / ".gitignore").write_text("*.pt\n*.log\n*.mem\n", encoding="utf-8")
+    # Plus a docs README that doesn't reference the orphan:
+    (root / "docs").mkdir()
+    (root / "docs" / "README.md").write_text("# Docs\n", encoding="utf-8")
+
+    idx = cl.build_reference_index(
+        root, skip_dirs=("logs", "lfs_checkpoints", "checkpoints", "docs/archive"),
+    )
+    assert not idx.references("completely_orphan_step9000.pt"), (
+        "`.gitignore *.pt` must not silently protect every checkpoint"
+    )
+    plan = cl.plan_for_bucket(
+        "checkpoints", idx, root=root, keep_recent=0,
+        extra_keep=set(), git_protected=set(),
+    )
+    assert orphan.resolve() in {p.resolve() for p in plan.delete}

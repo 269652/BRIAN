@@ -164,6 +164,24 @@ _TOKEN_RE = re.compile(
 )
 
 
+def _is_informative_glob(g: str) -> bool:
+    """Reject globs that don't pin down a specific run.
+
+    `*.pt` / `*.log` / `*.mem.json` etc. would otherwise match every
+    checkpoint, silently neutering the entire reference filter. We
+    require at least one literal segment of >= 4 characters BEFORE the
+    final extension. (The extension itself doesn't count -- `pt`/`log`
+    are too generic to identify a single artifact.)
+    """
+    # Strip the final ".ext" so the extension can't act as the
+    # distinctive segment.
+    body = g.rsplit(".", 1)[0] if "." in g else g
+    for seg in re.split(r"[*?]+", body):
+        if len(seg.strip("._-")) >= 4:
+            return True
+    return False
+
+
 def _iter_text_files(root: Path, extra_skip_dirs: Iterable[str] = ()) -> Iterable[Path]:
     """Walk the repo yielding every text file we should scan."""
     skip = set(_SKIP_DIRS) | set(extra_skip_dirs)
@@ -192,7 +210,10 @@ def build_reference_index(
         for m in _TOKEN_RE.finditer(text):
             tok = m.group(0)
             if any(c in tok for c in "*?"):
-                idx.globs.add(tok)
+                # Drop uninformative globs like `*.pt` that would match
+                # every checkpoint in the repo.
+                if _is_informative_glob(tok):
+                    idx.globs.add(tok)
             else:
                 idx.exact.add(tok)
                 # Also store basename-only form so refs like
@@ -533,21 +554,44 @@ def _fmt_size(n: int) -> str:
     return f"{n} PiB"
 
 
+# Choose ASCII-safe separators on legacy Windows consoles where stdout
+# can't encode U+2500. We test by trying to encode the box-drawing char
+# through stdout's encoding.
+def _ascii_safe() -> bool:
+    enc = (getattr(sys.stdout, "encoding", None) or "ascii").lower()
+    try:
+        "\u2500".encode(enc)
+        return False
+    except (UnicodeEncodeError, LookupError):
+        return True
+
+
+if _ascii_safe():
+    _SEP = "-"
+    _BULLET_DEL = "-"
+    _BULLET_KEEP = "+"
+else:
+    _SEP = "\u2500"  # ─
+    _BULLET_DEL = "-"
+    _BULLET_KEEP = "+"
+
+
 def print_plan(plan: CleanPlan, root: Path = REPO_ROOT, *,
                verbose: bool = False) -> None:
-    print(f"\n── bucket: {plan.bucket} ─────────────────────────────")
+    bar = _SEP * 30
+    print(f"\n{_SEP * 2} bucket: {plan.bucket} {bar}")
     print(f"  total candidates examined : {plan.total_kept + len(plan.delete)}")
     print(f"  would DELETE              : {len(plan.delete)}"
           f"  ({_fmt_size(plan.bytes_to_free)} reclaimable)")
-    print(f"  kept · referenced         : {len(plan.keep_referenced)}")
-    print(f"  kept · finding-md         : {len(plan.keep_finding)}")
-    print(f"  kept · anchor / best      : {len(plan.keep_anchor)}")
-    print(f"  kept · recent (mtime)     : {len(plan.keep_recent)}")
-    print(f"  kept · git-dirty/staged   : {len(plan.keep_git)}")
-    print(f"  kept · extra_keep (toml)  : {len(plan.keep_extra)}")
+    print(f"  kept * referenced         : {len(plan.keep_referenced)}")
+    print(f"  kept * finding-md         : {len(plan.keep_finding)}")
+    print(f"  kept * anchor / best      : {len(plan.keep_anchor)}")
+    print(f"  kept * recent (mtime)     : {len(plan.keep_recent)}")
+    print(f"  kept * git-dirty/staged   : {len(plan.keep_git)}")
+    print(f"  kept * extra_keep (toml)  : {len(plan.keep_extra)}")
 
     if plan.delete:
-        print("\n  ── will delete ──")
+        print(f"\n  {_SEP * 2} will delete {_SEP * 2}")
         for p in plan.delete:
             try:
                 rel = p.relative_to(root).as_posix()
@@ -557,7 +601,7 @@ def print_plan(plan: CleanPlan, root: Path = REPO_ROOT, *,
                 sz = _fmt_size(p.stat().st_size)
             except OSError:
                 sz = "?"
-            print(f"    - {rel}  ({sz})")
+            print(f"    {_BULLET_DEL} {rel}  ({sz})")
     if verbose:
         for label, items in (("referenced", plan.keep_referenced),
                              ("finding-md", plan.keep_finding),
@@ -567,13 +611,13 @@ def print_plan(plan: CleanPlan, root: Path = REPO_ROOT, *,
                              ("extra_keep", plan.keep_extra)):
             if not items:
                 continue
-            print(f"\n  ── kept · {label} ──")
+            print(f"\n  {_SEP * 2} kept * {label} {_SEP * 2}")
             for p in items:
                 try:
                     rel = p.relative_to(root).as_posix()
                 except ValueError:
                     rel = str(p)
-                print(f"    + {rel}")
+                print(f"    {_BULLET_KEEP} {rel}")
 
 
 # ── CLI ────────────────────────────────────────────────────────────────
@@ -595,7 +639,7 @@ def run(
     # Pass --skip the bucket dirs themselves; their internal filenames
     # don't count as "references" to one another.
     skip = ("logs", "lfs_checkpoints", "checkpoints", "docs/archive")
-    print(f"[clean] scanning references under {root} (skipping {skip}) …")
+    print(f"[clean] scanning references under {root} (skipping {skip}) ...")
     idx = build_reference_index(root, skip_dirs=skip)
     print(f"[clean] index: {len(idx.exact)} basenames, "
           f"{len(idx.globs)} glob tokens, "
@@ -617,22 +661,23 @@ def run(
         total_delete += len(plan.delete)
         total_bytes += plan.bytes_to_free
 
-    print("\n══════════════════════════════════════════════════════════")
+    rule = _SEP * 60
+    print(f"\n{rule}")
     print(f"  GRAND TOTAL: {total_delete} files, "
           f"{_fmt_size(total_bytes)} reclaimable across {len(plans)} bucket(s)")
     if not force:
-        print("  (dry-run — re-run with --force to actually delete)")
-        print("══════════════════════════════════════════════════════════")
+        print("  (dry-run -- re-run with --force to actually delete)")
+        print(rule)
         return 0
 
-    print("  --force given — DELETING NOW …")
-    print("══════════════════════════════════════════════════════════")
+    print("  --force given -- DELETING NOW ...")
+    print(rule)
     total_done, total_err = 0, 0
     for plan in plans:
         d, e = execute_plan(plan, use_git=use_git, root=root)
         total_done += d
         total_err += e
-        print(f"  · {plan.bucket}: deleted {d}, errors {e}")
+        print(f"  {_BULLET_KEEP} {plan.bucket}: deleted {d}, errors {e}")
     print(f"\n  done: {total_done} deleted, {total_err} errors")
     return 1 if total_err else 0
 
