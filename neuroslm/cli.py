@@ -2046,6 +2046,27 @@ def cmd_push(args: argparse.Namespace) -> int:
     return rc
 
 
+def cmd_clean(args: argparse.Namespace) -> int:
+    """Find + delete unreferenced logs / checkpoints / docs.
+
+    Default is dry-run; pass ``--force`` to actually delete. Files
+    are protected if they appear in any markdown/code in the repo
+    (so a checkpoint cited in docs/FINDINGS.md is never deleted),
+    if they are ``*_best.*`` checkpoints, if they are anchor docs,
+    if they are among the N most-recent in the bucket, or if they
+    are currently staged / modified in git.
+    """
+    from neuroslm.tools.clean import run as _clean_run
+    return _clean_run(
+        args.bucket,
+        force=args.force,
+        verbose=args.verbose,
+        keep_recent=args.keep_recent,
+        use_git=not args.no_git,
+        root=REPO_ROOT,
+    )
+
+
 # ── lint ───────────────────────────────────────────────────────────────
 
 def _infer_equation_name(formula: str) -> str:
@@ -2566,6 +2587,29 @@ def _build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("push",
                         help="Push current branch via PAT (no credential helper)")
     sp.set_defaults(func=cmd_push)
+
+    # clean — reference-aware repo janitor
+    sc_clean = sub.add_parser(
+        "clean",
+        help="Find + delete unreferenced logs / checkpoints / docs (default dry-run)")
+    sc_clean.add_argument(
+        "bucket", nargs="+",
+        choices=["logs", "checkpoints", "docs", "all"],
+        help="which bucket(s) to clean")
+    sc_clean.add_argument(
+        "--force", action="store_true",
+        help="actually delete (default: dry-run only)")
+    sc_clean.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="also list every kept file with the reason it was kept")
+    sc_clean.add_argument(
+        "--keep-recent", type=int, default=3,
+        help="number of most-recent files per bucket to always keep "
+             "(default 3)")
+    sc_clean.add_argument(
+        "--no-git", action="store_true",
+        help="don't stage deletions via `git rm` — plain unlink only")
+    sc_clean.set_defaults(func=cmd_clean)
 
     return p
 
