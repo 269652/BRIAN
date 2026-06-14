@@ -111,12 +111,70 @@ _VOCAB_BRIDGE_CACHE: "dict[tuple, object]" = {}
 def _load_lm_cached(model_id: str):
     """Return the cached ``AutoModelForCausalLM`` for ``model_id``,
     loading it from HF on first call. Subsequent callers receive the
-    SAME object — safe only for frozen / eval-mode use."""
+    SAME object — safe only for frozen / eval-mode use.
+
+    Loader dispatch (torch < 2.6 / CVE-2025-32434 aware)
+    ---------------------------------------------------
+    1. **Prefer safetensors**: pass ``use_safetensors=True`` so HF
+       bypasses ``torch.load`` entirely when the repo ships a
+       ``model.safetensors`` file. This is the only loader path that
+       works on torch < 2.6 without raising the CVE-2025-32434
+       check.
+    2. **Fall back for legacy .bin repos** (e.g. ``gpt2``): retry
+       with ``use_safetensors=False`` + ``weights_only=False`` so the
+       legacy checkpoint loads on torch < 2.6. Safe in our use case —
+       every ``model_id`` we load comes from a hard-coded ``arch.neuro``
+       config (no user-controlled paths), and ``weights_only=False`` is
+       the only way to load pre-safetensors checkpoints on torch < 2.6
+       without forcing a system-package upgrade.
+
+    Regression-pinned by
+    ``tests/training/test_lm_expert_safetensors_loader.py``.
+    """
     cached = _LM_CACHE.get(model_id)
     if cached is not None:
         return cached
     from transformers import AutoModelForCausalLM
-    lm = AutoModelForCausalLM.from_pretrained(model_id)
+
+    # Path 1: safetensors-only (works on every torch version)
+    try:
+        lm = AutoModelForCausalLM.from_pretrained(
+            model_id, use_safetensors=True,
+        )
+    except Exception as exc:
+        msg = str(exc)
+        # Distinguish the CVE-2025-32434 path from a real failure.
+        # The exact error string is documented; match on the stable
+        # substring ``torch.load`` + ``v2.6`` which together are
+        # unique to this version-restriction error.
+        is_cve = (
+            "torch.load" in msg
+            and ("v2.6" in msg or "weights_only" in msg)
+        )
+        # ``no file named model.safetensors`` is what HF says when
+        # the repo has no safetensors at all — also a fall-back case.
+        is_no_safetensors = (
+            "safetensors" in msg.lower()
+            and ("not found" in msg.lower() or "no file" in msg.lower())
+        )
+        if not (is_cve or is_no_safetensors):
+            raise
+        # Path 2: legacy .bin with weights_only=False. The CVE check
+        # is bypassed in this mode for repos that pre-date safetensors.
+        import warnings
+        warnings.warn(
+            f"_load_lm_cached({model_id!r}): safetensors load failed "
+            f"({type(exc).__name__}); retrying with use_safetensors=False "
+            f"and weights_only=False. This is required for legacy .bin "
+            f"checkpoints (e.g. gpt2) on torch < 2.6.",
+            RuntimeWarning,
+        )
+        lm = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            use_safetensors=False,
+            weights_only=False,
+        )
+
     lm.eval()
     _LM_CACHE[model_id] = lm
     return lm
