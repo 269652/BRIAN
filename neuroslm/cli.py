@@ -2140,24 +2140,47 @@ def cmd_push(args: argparse.Namespace) -> int:
 
 
 def cmd_clean(args: argparse.Namespace) -> int:
-    """Find + delete unreferenced logs / checkpoints / docs.
+    """Find + delete unreferenced logs / checkpoints / docs / lfs.
 
     Default is dry-run; pass ``--force`` to actually delete. Files
     are protected if they appear in any markdown/code in the repo
     (so a checkpoint cited in docs/FINDINGS.md is never deleted),
-    if they are ``*_best.*`` checkpoints, if they are anchor docs,
-    if they are among the N most-recent in the bucket, or if they
-    are currently staged / modified in git.
+    if they are anchor docs, if they are among the N most-recent in
+    the bucket, or if they are currently staged / modified in git.
+
+    The ``lfs`` bucket is special: it runs the per-run LFS pruner
+    (``neuroslm.tools.clean_lfs``) which groups checkpoints by their
+    parent folder, keeps the N most-recent steps per folder, and
+    keeps ``*_best.*`` only when its run's log file is itself
+    referenced anywhere in the repo.
     """
-    from neuroslm.tools.clean import run as _clean_run
-    return _clean_run(
-        args.bucket,
-        force=args.force,
-        verbose=args.verbose,
-        keep_recent=args.keep_recent,
-        use_git=not args.no_git,
-        root=REPO_ROOT,
-    )
+    buckets = list(args.bucket)
+    rc = 0
+
+    # `lfs` has different semantics (per-run-folder retention + log-
+    # gated best protection) so it gets its own runner.
+    if "lfs" in buckets:
+        buckets.remove("lfs")
+        from neuroslm.tools.clean_lfs import run as _lfs_run
+        rc |= _lfs_run(
+            root=REPO_ROOT,
+            force=args.force,
+            keep_recent=args.keep_recent,
+            verbose=args.verbose,
+            use_git=not args.no_git,
+        )
+
+    if buckets:
+        from neuroslm.tools.clean import run as _clean_run
+        rc |= _clean_run(
+            buckets,
+            force=args.force,
+            verbose=args.verbose,
+            keep_recent=args.keep_recent,
+            use_git=not args.no_git,
+            root=REPO_ROOT,
+        )
+    return rc
 
 
 # ── lint ───────────────────────────────────────────────────────────────
@@ -2706,11 +2729,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # clean — reference-aware repo janitor
     sc_clean = sub.add_parser(
         "clean",
-        help="Find + delete unreferenced logs / checkpoints / docs (default dry-run)")
+        help="Find + delete unreferenced logs / checkpoints / docs / lfs (default dry-run)")
     sc_clean.add_argument(
         "bucket", nargs="+",
-        choices=["logs", "checkpoints", "docs", "all"],
-        help="which bucket(s) to clean")
+        choices=["logs", "checkpoints", "docs", "lfs", "all"],
+        help="which bucket(s) to clean ('lfs' = per-run LFS pruner with "
+             "log-gated best-protection)")
     sc_clean.add_argument(
         "--force", action="store_true",
         help="actually delete (default: dry-run only)")

@@ -66,15 +66,33 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Directories never scanned for references AND never enumerated for
 # candidates. Anything inside these is invisible to `clean`.
-_SKIP_DIRS: frozenset = frozenset({
+# NOTE: prefix-match — any dir whose name *starts with* one of these is
+# skipped, so `.venv-1`, `.venv-old`, `__pycache_old__` all get pruned.
+_SKIP_DIR_PREFIXES: Tuple[str, ...] = (
     ".git",
     ".venv",
+    "venv",
+    "env",
     "__pycache__",
     "node_modules",
     ".pytest_cache",
     "neuroslm.egg-info",
     ".claude",
-})
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    "site-packages",
+    "dist",
+    "build",
+)
+# Back-compat alias kept for any external imports.
+_SKIP_DIRS: frozenset = frozenset(_SKIP_DIR_PREFIXES)
+
+# Files larger than this are skipped during reference scanning. A real
+# scientific record fits in KB; multi-MB text files are notebooks-with-
+# inline-outputs, large logs, or generated code that have no business in
+# the protection index.
+_MAX_SCAN_BYTES = 1 * 1024 * 1024  # 1 MiB
 
 # Suffixes whose text content we scan for references. (We *don't* read
 # binary checkpoints — that would defeat the point.)
@@ -183,11 +201,21 @@ def _is_informative_glob(g: str) -> bool:
 
 
 def _iter_text_files(root: Path, extra_skip_dirs: Iterable[str] = ()) -> Iterable[Path]:
-    """Walk the repo yielding every text file we should scan."""
-    skip = set(_SKIP_DIRS) | set(extra_skip_dirs)
+    """Walk the repo yielding every text file we should scan.
+
+    Directory pruning is **prefix-based** — any folder whose name
+    starts with one of the configured prefixes is skipped (so
+    ``.venv-1``, ``.venv-old``, etc. all get cut). Extra skip names
+    passed via ``extra_skip_dirs`` are exact-match only.
+    """
+    extra = set(extra_skip_dirs)
     for dirpath, dirnames, filenames in os.walk(root):
-        # In-place filter so os.walk doesn't descend into skipped dirs.
-        dirnames[:] = [d for d in dirnames if d not in skip]
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in extra and not any(
+                d.startswith(pfx) for pfx in _SKIP_DIR_PREFIXES
+            )
+        ]
         for name in filenames:
             p = Path(dirpath) / name
             if p.suffix.lower() in _TEXT_SUFFIXES:
@@ -197,11 +225,28 @@ def _iter_text_files(root: Path, extra_skip_dirs: Iterable[str] = ()) -> Iterabl
 def build_reference_index(
     root: Path = REPO_ROOT,
     skip_dirs: Iterable[str] = (),
+    *,
+    progress: bool = False,
+    max_bytes: int = _MAX_SCAN_BYTES,
 ) -> ReferenceIndex:
-    """Scan the repo for every basename-shaped token + finding markers."""
+    """Scan the repo for every basename-shaped token + finding markers.
+
+    Files larger than ``max_bytes`` are silently skipped — those are
+    notebooks-with-outputs / logs / generated dumps that bloat scan
+    time without contributing real references. Pass ``progress=True``
+    to print a one-line counter every 100 files so the user knows the
+    scan is alive on large repos.
+    """
     idx = ReferenceIndex()
+    seen = skipped_big = 0
     for fp in _iter_text_files(root, extra_skip_dirs=skip_dirs):
+        seen += 1
+        if progress and seen % 100 == 0:
+            print(f"[refs] scanned {seen} files...", flush=True)
         try:
+            if fp.stat().st_size > max_bytes:
+                skipped_big += 1
+                continue
             text = fp.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
@@ -228,6 +273,11 @@ def build_reference_index(
             if any(marker in text for marker in _FINDING_MARKERS):
                 idx.finding_files.add(fp.resolve())
 
+    if progress:
+        print(f"[refs] scanned {seen} files "
+              f"({skipped_big} skipped as >{max_bytes // 1024} KiB), "
+              f"{len(idx.exact)} basenames, {len(idx.globs)} globs",
+              flush=True)
     return idx
 
 
