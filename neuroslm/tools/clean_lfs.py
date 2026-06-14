@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from neuroslm.tools.clean import (
+from neuroslm.references import (
     REPO_ROOT,
     ReferenceIndex,
     build_reference_index,
