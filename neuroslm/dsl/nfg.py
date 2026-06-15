@@ -116,7 +116,7 @@ class NFGNode:
 class NFGEdge:
     src: str
     tgt: str
-    kind: str                      # "synapse" | "modulation"
+    kind: str                      # "synapse" | "modulation" | "funnel"
     weight: float = 1.0
     nt: Optional[str] = None
     effect: Optional[str] = None
@@ -145,6 +145,7 @@ class NeuralFlowGraph:
             "n_neurotransmitters": len(self.nt_systems),
             "n_synapses": sum(1 for e in self.edges if e.kind == "synapse"),
             "n_modulations": sum(1 for e in self.edges if e.kind == "modulation"),
+            "n_funnels": sum(1 for e in self.edges if e.kind == "funnel"),
         }
 
 
@@ -230,6 +231,25 @@ def compile_nfg(arch_root) -> NeuralFlowGraph:
             nt=mod.source_nt, effect=mod.effect,
             equation=getattr(mod, "equation", None),
         ))
+
+    # Funnels — declarative ``funnel { inputs: [E1, E2, ...], target: P }``
+    # rows from the LanguageCortex / CFD subsystem. These are the actual
+    # MoE→LM gradient path produced by ``module brain = LanguageCortex
+    # { target: pfc }`` (see lib/LanguageCortex.neuro and
+    # neuroslm/dsl/compiler.py::FunnelIR). One NFG edge per (input,
+    # target) pair so the rendered graph can draw each expert's
+    # contribution; tagged ``kind="funnel"`` so the renderer can use
+    # a distinct visual grammar (dashed gradient edge) without
+    # confusing distillation flow with forward signal or NT
+    # modulation. Pinned by tests/test_nfg_funnel_edges.py (Fix C).
+    for fn in getattr(ir, "funnels", None) or []:
+        for inp in fn.inputs or []:
+            g.edges.append(NFGEdge(
+                src=inp, tgt=fn.target, kind="funnel",
+                weight=1.0,
+                nt=None, effect=None,
+                equation=getattr(fn, "method_ref", None) or None,
+            ))
 
     # Architecture-level metadata (d_sem, dt, ...)
     g.architecture_meta = dict(getattr(ir, "architecture", {}) or {})
