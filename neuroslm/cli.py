@@ -953,6 +953,20 @@ def _find_deploy_python() -> str:
     return sys.executable
 
 
+def _run_hook(name: str, repo_root: Optional[Path] = None,
+              env: Optional[dict] = None) -> int:
+    """Thin shim around :func:`neuroslm.hooks.run_hook` so cmd_deploy
+    can be monkey-patched in tests without touching the runner module.
+
+    Returns 0 on success / skip / disabled; non-zero on fatal hook
+    failure. ``cmd_deploy`` aborts on any non-zero value, propagating
+    the exact exit code upstream.
+    """
+    from neuroslm.hooks import run_hook
+    return run_hook(name, repo_root if repo_root is not None else REPO_ROOT,
+                    env=env)
+
+
 def cmd_deploy(args: argparse.Namespace) -> int:
     """Launch a DSL or DNA training run on vast.ai.
 
@@ -982,6 +996,17 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         # Override branch, DSL mode (no DNA in brian.toml)
         brian deploy --branch feature/new-arch
     """
+    # ── Pre-deploy hook (cross-platform, YAML-declared) ──
+    # See ``hooks/pre-deploy.yaml`` + ``hooks/scripts/pre-deploy.{sh,ps1}``.
+    # Default contract: recompile master arch → DNA → unfold into
+    # ``architectures/current``. A non-zero return aborts the deploy
+    # BEFORE any vast.ai call so the user never pays for a bad arch.
+    hook_rc = _run_hook("pre-deploy")
+    if hook_rc != 0:
+        print(f"[deploy] pre-deploy hook failed (exit {hook_rc}); aborting.",
+              file=sys.stderr)
+        return hook_rc
+
     # ── Single config load: amortise the brian.toml read ──
     # All three CLI flags consult the same config; loading it once
     # avoids re-parsing the TOML file three times AND keeps the

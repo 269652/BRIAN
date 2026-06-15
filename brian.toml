@@ -49,7 +49,12 @@
 # Edit master/ for designed changes; current/ tracks master/ unless an
 # experiment branches it.
 arch = "architectures/current"
-# dna  = "./dna/evol/arch.dna"
+# 2026-06-15: DNA path mirrors the active git branch so a fork on
+# `feature/X` never clobbers master's compiled DNA. The pre-deploy
+# hook (hooks/pre-deploy.yaml) recompiles architectures/master into
+# this exact path on every `brian deploy`, then unfolds back to
+# architectures/current/arch.neuro so the working copy stays in sync.
+dna = "./dna/master/arch.dna"
 
 [defaults]
 # Workspace-wide default preset (used only when no [hardware.<DETECTED>]

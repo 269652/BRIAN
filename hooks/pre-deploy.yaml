@@ -1,0 +1,46 @@
+# ──────────────────────────────────────────────────────────────────
+# hooks/pre-deploy.yaml — runs BEFORE `brian deploy` provisions vast.ai
+#
+# Default contract (shipped 2026-06-15):
+#   1. Compile `architectures/master` → `dna/evol/arch.dna`
+#      (the canonical DNA the deploy will train on)
+#   2. Unfold the freshly-compiled DNA back to `architectures/current`
+#      (so the working copy on disk always matches the deployed bytes)
+#
+# Why this is a hook and not hard-coded in cmd_deploy
+# ──────────────────────────────────────────────────────
+# The compile + unfold dance is *one specific workflow* — the H22
+# experimental fork, for instance, deploys directly from `dna/evol/`
+# without ever touching `architectures/master`. A hook keeps the CLI
+# project-agnostic.
+#
+# Disabling the hook
+# ──────────────────
+# Either:
+#   * Set `enabled: false` here (most explicit), or
+#   * Delete this YAML file (the runner treats missing files as a
+#     silent skip, return code 0).
+#
+# Both `.ps1` and `.sh` are listed so the same hook works on Windows
+# devboxes and Linux deploy boxes. The runner picks the right one at
+# call time via `platform.system()`.
+# ──────────────────────────────────────────────────────────────────
+
+name: pre-deploy
+description: Recompile master arch → DNA → unfold to current
+
+enabled: true
+
+# Abort `brian deploy` on any non-zero exit. False here would log the
+# failure but let the deploy continue with whatever stale DNA is on
+# disk — usually the wrong default.
+fail_on_error: true
+
+# Hard cap on the compile+unfold step. The bowtie 889M arch takes
+# ~10s end-to-end on a developer laptop; 5 minutes is plenty of slack
+# for slower CI runners without ever masking a runaway.
+timeout_seconds: 300
+
+scripts:
+  windows: hooks/scripts/pre-deploy.ps1
+  unix:    hooks/scripts/pre-deploy.sh

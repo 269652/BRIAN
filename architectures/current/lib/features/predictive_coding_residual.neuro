@@ -1,0 +1,35 @@
+# -*- coding: utf-8 -*-
+# Predictive-coding residuals (Rao-Ballard 1999) — wiring spec.
+#
+# Self-predicting variant: forward(x) computes the residual ε = x - g(x)
+# against a learned predictor g, returns x - α·ε. Residual norm exposed
+# via the module's `last_residual_norm` buffer for downstream losses.
+#
+# Implementation: neuroslm/modules/predictive_coding_residual.py
+# Contracts:      tests/test_predictive_coding_residual.py (14)
+# Docs:           docs/features/predictive_coding_residual.md
+
+import { predictive_coding_residual_eq } from "@brian/equations"
+
+export feature predictive_coding_residual {
+    equation: predictive_coding_residual_eq,
+    active:   false,
+    impl:     "neuroslm.modules.predictive_coding_residual.PredictiveCodingResidual",
+
+    # `d_model: d_sem` ties the predictor's hidden width to the runtime
+    # trunk dim. step_size, mode, and n_iterations are independent.
+    params: {
+        d_model:      d_sem,
+        step_size:    0.1,
+        mode:         "single",
+        n_iterations: 1
+    },
+
+    endpoints: {
+        edge: {
+            kind:   "edge",
+            inputs: [x_pre],
+            output: y
+        }
+    }
+}

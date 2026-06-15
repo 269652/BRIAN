@@ -1,0 +1,40 @@
+# -*- coding: utf-8 -*-
+# Surprise-gated Mixture-of-Experts — wiring spec.
+#
+# Standard MoE (Shazeer 2017) extended with dynamic per-token top-k:
+# k(x) = round(k_min + (k_max-k_min)·σ(steepness·(surprise - midpoint))).
+# Internal surprise = normalised gating-distribution entropy (low =
+# confident routing, high = uncertain → more experts).
+#
+# Implementation: neuroslm/modules/surprise_gated_moe.py
+# Contracts:      tests/test_surprise_gated_moe.py (20)
+# Docs:           docs/features/surprise_gated_moe.md
+
+import { surprise_gated_moe_eq } from "@brian/equations"
+
+export feature surprise_gated_moe {
+    equation: surprise_gated_moe_eq,
+    active:   false,
+    impl:     "neuroslm.modules.surprise_gated_moe.SurpriseGatedMoE",
+
+    # `d_model: d_sem` ties expert in/out widths to the runtime trunk
+    # dim. d_hidden, n_experts, k_min/k_max, etc. stay literals.
+    params: {
+        d_model:             d_sem,
+        n_experts:           8,
+        d_hidden:            1024,
+        k_min:               1,
+        k_max:               4,
+        midpoint:            1.0,
+        steepness:           4.0,
+        load_balance_weight: 0.01
+    },
+
+    endpoints: {
+        edge: {
+            kind:   "edge",
+            inputs: [x_pre],
+            output: y
+        }
+    }
+}

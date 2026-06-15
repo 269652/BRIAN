@@ -1,0 +1,40 @@
+# -*- coding: utf-8 -*-
+# RoPE-on-a-Torus — wiring spec.
+#
+# Multi-frequency rotary positional encoding on the product manifold
+# T^n = (S^1)^n. Each 2D embedding slice rotates by an angle whose
+# period is drawn from a configurable schedule; positions wrap mod
+# each period (the "torus" part).
+#
+# Implementation: neuroslm/modules/rope_torus.py
+# Contracts:      tests/test_rope_torus.py (19)
+# Docs:           docs/features/rope_torus.md
+
+import { rope_torus_eq } from "@brian/equations"
+
+export feature rope_torus {
+    equation: rope_torus_eq,
+    active:   false,
+    impl:     "neuroslm.modules.rope_torus.RoPETorus",
+
+    # ── Per-arch defaults; override in arch.neuro's re-declaration. ──
+    # `d_model: d_sem` is a bare-identifier reference — codegen emits it
+    # unquoted so the cos/sin tables track the runtime trunk width.
+    # max_seq_len caps the precomputed cos/sin table — longer seqs are
+    # recomputed on the fly (cheap, ~T·d_pair flops).
+    params: {
+        d_model:           d_sem,
+        max_seq_len:       2048,
+        base:              10000.0,
+        schedule:          "geometric",
+        learnable_periods: false
+    },
+
+    endpoints: {
+        edge: {
+            kind:   "edge",
+            inputs: [x_pre],
+            output: y
+        }
+    }
+}
