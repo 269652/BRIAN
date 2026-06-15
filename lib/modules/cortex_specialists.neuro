@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Multi-Trunk-v2 specialist language cortices
 #
-# Four specialist cortical populations that form the trunk of the
+# Three specialist cortical populations that form the trunk of the
 # multi-cortex thalamic ensemble (see `neuroslm/cortex.py` for the
 # Python lowering and `tests/test_ensemble_routing.py` for the TDD
 # acceptance suite).  At the DSL level each cortex is declared as an
@@ -31,26 +31,23 @@
 # `arch.neuro` for the hyperparameter exposure, and Section 5.7 of
 # `docs/architecture.md` for the full Phi-maximisation derivation.
 #
-# Default domain assignment (mirrors `neuroslm.cortex.DEFAULT_GPT2_VARIANTS`):
+# Active domain assignment — the canonical 3-cortex roster that pairs
+# with `multi_cortex.experts: [...]` in `architectures/master/arch.neuro`:
 #
-#     cortex_math     -> gpt2-medium  (stand-in for DeepSeek-Math in prod)
-#     cortex_code     -> distilgpt2   (stand-in for a code fine-tune)
-#     cortex_chat     -> gpt2         (stand-in for DialoGPT)
-#     cortex_general  -> gpt2         (balanced LM baseline)
+#     cortex_general   -> smollm2_360m            (balanced LM baseline)
+#     cortex_code      -> microsoft/CodeGPT-small-py
+#     cortex_reasoning -> Qwen/Qwen2.5-0.5B       (chain-of-thought specialist)
+#
+# Legacy 4-cortex stand-ins (cortex_math, cortex_chat) were deleted
+# on 2026-06-15 by the orphan-cortex audit (see docs/FINDINGS.md):
+# they had no MoE routing, no distillation gradient, and showed up as
+# disconnected ghost nodes in the NFG cross-alignment check.
 #
 # References:
 #   - Sherman & Guillery (2002), Phil. Trans. R. Soc. — Thalamus as relay
 #   - Halassa & Kastner (2017), Nat. Neurosci. — Thalamic cortical control
 #   - Shazeer et al. (2017), arXiv:1701.06538 — Sparsely-gated MoE
 #   - Fedus et al. (2022), JMLR — Switch Transformer
-
-export population cortex_math {
-    count: 256,
-    dynamics: "attention_pool",
-    equation: "y = softmax(x) * ReLU(x)",
-    timescale: 0.02,
-    capacity: 4.0
-}
 
 export population cortex_code {
     count: 256,
@@ -60,7 +57,7 @@ export population cortex_code {
     capacity: 4.0
 }
 
-export population cortex_chat {
+export population cortex_general {
     count: 256,
     dynamics: "attention_pool",
     equation: "y = softmax(x) * ReLU(x)",
@@ -68,7 +65,17 @@ export population cortex_chat {
     capacity: 4.0
 }
 
-export population cortex_general {
+# cortex_reasoning is the MoE expert population for the "reasoning"
+# domain declared in `multi_cortex.domains` (paired with
+# Qwen/Qwen2.5-0.5B in the current `architectures/master/arch.neuro`
+# experts roster). It is DISTINCT from the `reasoning_cortex`
+# population in `@lib/modules/reasoning_cortex` — that one is the
+# trunk-side cognitive population that participates in chain-of-thought
+# routing (PFC <-> reasoning_cortex <-> DMN). Keeping both nodes lets
+# the NFG graph and the Hypergraph IR distinguish "the MoE specialist
+# that produces reasoning tokens" from "the brain region that plans
+# reasoning steps".
+export population cortex_reasoning {
     count: 256,
     dynamics: "attention_pool",
     equation: "y = softmax(x) * ReLU(x)",

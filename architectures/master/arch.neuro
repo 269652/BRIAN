@@ -719,7 +719,7 @@ training {
 # =============================================================================
 
 param_scope trunk {
-    populations: [sensory, association, thalamus, world, self_m, qualia, gws, neural_geometry, entorhinal, pfc, acc, forward_m, evaluator, dmn, thought_transformer, claustrum, motor, reasoning_cortex, cortex_math, cortex_code, cortex_chat, cortex_general]
+    populations: [sensory, association, thalamus, world, self_m, qualia, gws, neural_geometry, entorhinal, pfc, acc, forward_m, evaluator, dmn, thought_transformer, claustrum, motor, reasoning_cortex, cortex_code, cortex_general, cortex_reasoning]
 }
 
 param_scope bio {
@@ -882,9 +882,15 @@ import { reasoning_cortex }                               from "@lib/modules/rea
 # Multi-Trunk-v2 specialist language cortices â€” see Section 5.7 of
 # docs/architecture.md.  The dynamic per-token routing lives in
 # neuroslm/cortex.py (ThalamicRouter); the DSL declarations below
-# expose the four cortices to the analyser, the param_scope, and the
-# bowtie's synaptic wiring.
-import { cortex_math, cortex_code, cortex_chat, cortex_general } from "@lib/modules/cortex_specialists"
+# expose the three cortices to the analyser, the param_scope, and the
+# bowtie's synaptic wiring. The 3-cortex roster (general/code/reasoning)
+# matches `multi_cortex.domains` and the `experts: [...]` block above.
+# Legacy `cortex_math` / `cortex_chat` populations remain in
+# `@lib/modules/cortex_specialists` (back-compat with the old 4-cortex
+# default ensemble) but are NOT imported here because the current
+# roster doesn't route to them â€” importing would leave them as zombie
+# orphans in the IR (no MoE routing, no distillation).
+import { cortex_code, cortex_general, cortex_reasoning } from "@lib/modules/cortex_specialists"
 
 # =============================================================================
 # ANATOMICAL PROJECTIONS (cross-module synaptic wiring)
@@ -908,21 +914,23 @@ synapse thalamus -> gws {
 # Mathematical contract (cf. Sherman & Guillery 2002, Halassa & Kastner
 # 2017): the thalamus is the brain's central gating bus; one synapse
 # per cortical specialist makes the gradient routing explicit, and
-# `param_scope trunk` keeps all four cortices on the language gradient.
-synapse thalamus -> cortex_math {
-    weight: 0.25, neurotransmitter: "glutamate",
-    equation: @standard_synapse
-}
+# `param_scope trunk` keeps all three cortices on the language gradient.
+# Roster matches `multi_cortex.experts: [...]` + `multi_cortex.domains`
+# at the top of this file: general (smollm2_360m), code (CodeGPT),
+# reasoning (Qwen2.5-0.5B). Legacy `cortex_math` / `cortex_chat`
+# synapses were removed on 2026-06-15 when the orphan-cortex audit
+# (NFG cross-alignment, see docs/FINDINGS.md) showed they had no MoE
+# routing and no distillation gradient.
 synapse thalamus -> cortex_code {
-    weight: 0.25, neurotransmitter: "glutamate",
-    equation: @standard_synapse
-}
-synapse thalamus -> cortex_chat {
-    weight: 0.25, neurotransmitter: "glutamate",
+    weight: 0.33, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 synapse thalamus -> cortex_general {
-    weight: 0.25, neurotransmitter: "glutamate",
+    weight: 0.33, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+synapse thalamus -> cortex_reasoning {
+    weight: 0.33, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 
