@@ -2602,7 +2602,20 @@ class BRIANHarness(nn.Module):
     def save_checkpoint(self, path: str, step: int = 0,
                         extra: Optional[Dict[str, Any]] = None) -> None:
         """Persist model + optimizer state + step. Mirrors Brain's format
-        loosely enough that a future merger can interoperate."""
+        loosely enough that a future merger can interoperate.
+
+        Creates the parent directory if it does not already exist —
+        the H24+ per-run subdir layout
+        (``lfs_checkpoints/<RUN_ID>_<GIT>_<ARCH>/step<N>.pt``) is only
+        materialised on the first save, and ``torch.save`` blows up
+        otherwise. Regression-pinned by
+        ``tests/test_checkpoint_path_layout.py``
+        ::``TestCheckpointDirLayout::test_save_checkpoint_writes_into_run_subdir``.
+        """
+        import os as _os
+        parent = _os.path.dirname(_os.fspath(path))
+        if parent:
+            _os.makedirs(parent, exist_ok=True)
         payload = {
             "step": step,
             "model": self.state_dict(),
@@ -2617,8 +2630,47 @@ class BRIANHarness(nn.Module):
         torch.save(payload, path)
 
     def load_checkpoint(self, path: str, device: str = "cpu") -> int:
-        """Load model + optimizer state. Returns the saved step."""
+        """Load model + optimizer state. Returns the saved step.
+
+        Rebuilds lazy submodules (``_genetics_orch``,
+        ``_transmitter_sys``) *before* ``load_state_dict`` when the
+        checkpoint contains their keys. Without this, resume from any
+        real production run blows up with ``Unexpected key(s)``
+        because those modules are normally built on the first
+        ``_step_genetics_pre`` call and a freshly-instantiated
+        harness has them as ``None``. Regression-pinned by
+        ``tests/test_checkpoint_path_layout.py``
+        ::``TestStateDictRoundTripAfterTraining``.
+        """
         payload = torch.load(path, map_location=device, weights_only=False)
+        model_keys = payload["model"].keys()
+        # Lazy submodule rebuild: a fresh harness has these as None,
+        # but production checkpoints carry their state. Build them
+        # *exactly* the same way ``_step_genetics_pre`` does so the
+        # state_dict shapes match.
+        if (self._genetics_orch is None
+                and any(k.startswith("_genetics_orch.") for k in model_keys)):
+            self._ensure_genetics()
+        # ``_ensure_genetics`` builds BOTH orchestrator + transmitter,
+        # so the second condition is normally redundant. Keep it as a
+        # belt-and-braces guard for future divergence.
+        if (self._transmitter_sys is None
+                and any(k.startswith("_transmitter_sys.") for k in model_keys)):
+            self._ensure_genetics()
+        # Transmitter buffers (``level``, ``vesicles``,
+        # ``module_baseline_off``, ``module_tau_shift``) carry a
+        # leading ``batch`` dim that is set by ``reset(batch_size,
+        # device)`` on first training step. A fresh
+        # ``_ensure_genetics()`` call constructs them at batch=1, but
+        # production checkpoints were saved with batch=2 (or higher)
+        # → state_dict shape mismatch on load. Infer the batch dim
+        # from the saved tensor and reset BEFORE ``load_state_dict``.
+        if (self._transmitter_sys is not None
+                and "_transmitter_sys.level" in payload["model"]):
+            saved_bs = int(payload["model"]["_transmitter_sys.level"].shape[0])
+            cur_bs = int(self._transmitter_sys.level.shape[0])
+            if saved_bs != cur_bs:
+                self._transmitter_sys.reset(saved_bs, device)
         self.load_state_dict(payload["model"])
         if "optimizer" in payload and self._optimizer is not None:
             self._optimizer.load_state_dict(payload["optimizer"])

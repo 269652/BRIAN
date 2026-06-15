@@ -201,6 +201,12 @@ export GITHUB='{GITHUB}' HF_TOKEN='' VAST_API_KEY='{VAST_API_KEY}'
 export DIST_STRATEGY={hw.dist_strategy}
 export NUM_GPUS={hw.num_gpus}
 export PRECISION={hw.precision}
+# DSL_ARCH_LABEL feeds neuroslm.train_dsl module-level _ARCH_LABEL which
+# becomes the third component of the per-run checkpoint subdir name
+# (lfs_checkpoints/<RUN_ID>_<GIT>_<ARCH_LABEL>/step<N>.pt). Without
+# this export the box would default to "run" and lose per-deploy
+# traceability. Pinned by tests/test_checkpoint_path_layout.py.
+export DSL_ARCH_LABEL='{LABEL}'
 # Expandable-segments allocator dramatically reduces fragmentation on
 # long runs that mix bursty large tensors (CE backward, diff-attention
 # softmax) with small tensors (genetics overlays, optimizer state) —
@@ -246,7 +252,12 @@ echo "── pushing checkpoints + OOD mid-eval JSONs ──"
 cd /workspace/brian
 git config user.email "vast-train@brian.local"
 git config user.name "vast-train"
-for ckpt in lfs_checkpoints/dsl_arch_*.pt; do
+# Recursive scan: H24+ uses per-run subdirs
+# ``lfs_checkpoints/<RUN_ID>_<GIT>_<ARCH>/step<N>.pt`` so a flat
+# ``lfs_checkpoints/dsl_arch_*.pt`` glob misses everything.
+# Regression-pinned by tests/test_checkpoint_path_layout.py
+# ::TestDeployPushGlob::test_push_glob_pattern_is_recursive.
+find lfs_checkpoints -type f -name '*.pt' 2>/dev/null | while read -r ckpt; do
     [ -e "$ckpt" ] || continue
     git add "$ckpt" 2>/dev/null || true
 done

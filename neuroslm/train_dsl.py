@@ -39,6 +39,13 @@ from typing import Optional
 _RUN_ID = os.environ.get(
     "DSL_RUN_ID", datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
 
+# Per-run checkpoint subdir label. Mirrors log_pusher.sh `LABEL` so the
+# checkpoint directory and the log filename can be cross-referenced
+# mechanically (same RUN_ID + same label). Settable via DSL_ARCH_LABEL
+# env var (_deploy_train.py exports it from the deploy --label). Falls
+# back to "run" for unlabelled local-dev runs.
+_ARCH_LABEL = os.environ.get("DSL_ARCH_LABEL", "run")
+
 import torch
 
 from neuroslm.dsl.codegen import CodeGenerator
@@ -451,12 +458,117 @@ def build_harness(arch_root: Path, vocab_size: int, d_sem: int,
 
 _RUN_ID_RE = re.compile(r"dsl_arch_(\d{8}-\d{6})_step(\d+)\.pt$")
 _LEGACY_STEP_RE = re.compile(r"dsl_arch_step(\d+)\.pt$")
+# New per-run subdir layout (H24+):
+#   lfs_checkpoints/<RUN_ID>_<GIT_SHORT>_<ARCH_LABEL>/step<N>.pt
+# - <RUN_ID>   = ``%Y%m%d-%H%M%S`` UTC, mirroring _RUN_ID env var
+# - <GIT_SHORT>= 8-char git short SHA at deploy time
+# - <ARCH_LABEL>= filesystem-safe slug of the deploy --label suffix
+#   (or "run" when unlabelled). Slashes / spaces are normalised so
+#   the directory name is portable across Linux + Windows checkouts.
+_NEW_LAYOUT_RE = re.compile(r"step(\d+)\.pt$")
+
+
+def _git_short_sha() -> str:
+    """Return the 8-char short SHA of HEAD, or "unknown" if git fails.
+
+    Used to embed the trunk version into checkpoint directory names so
+    you can tell at a glance which commit produced which artefact.
+    """
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short=8", "HEAD"],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        return out or "unknown"
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return "unknown"
+
+
+def _sanitise_label(label: str) -> str:
+    """Make ``label`` safe to use as a directory component.
+
+    Strips path separators, collapses whitespace runs to single ``-``,
+    drops control characters, and lower-cases. Empty input becomes
+    ``"run"`` so the directory name always has a third component.
+    """
+    if not label:
+        return "run"
+    # Replace path separators + whitespace with single dashes
+    cleaned = re.sub(r"[\s/\\]+", "-", label.strip())
+    # Drop anything that's not alnum, dash, dot, or underscore
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "", cleaned)
+    cleaned = cleaned.strip("-_.")
+    return cleaned or "run"
+
+
+def build_run_dir_name(run_id: str, git_short: str, arch_label: str) -> str:
+    """Build the per-run checkpoint subdirectory name.
+
+    Layout: ``<RUN_ID>_<GIT_SHORT>_<ARCH_LABEL>`` — same separator
+    convention as ``scripts/log_pusher.sh`` uses for log filenames so
+    cross-referencing logs ↔ checkpoints is mechanical (same prefix).
+
+    Mirrors the contract:
+
+      * RUN_ID first → ``ls lfs_checkpoints/`` sorts chronologically.
+      * GIT_SHORT next → per-commit traceability.
+      * ARCH_LABEL last → per-arch differentiation; arbitrary length.
+    """
+    return f"{run_id}_{git_short}_{_sanitise_label(arch_label)}"
+
+
+def checkpoint_path_for_step(
+        ckpt_root: Path, run_dir_name: str, step: int) -> Path:
+    """Return ``<ckpt_root>/<run_dir_name>/step<N>.pt`` (no mkdir)."""
+    return ckpt_root / run_dir_name / f"step{step}.pt"
+
+
+def _run_dir_name() -> str:
+    """Convenience wrapper: build the per-run dir name from module-level
+    ``_RUN_ID`` + ``_ARCH_LABEL`` + live ``_git_short_sha()``.
+
+    Computed lazily (not at module import) so a test can monkey-patch
+    ``_git_short_sha`` to make the dir deterministic.
+    """
+    return build_run_dir_name(_RUN_ID, _git_short_sha(), _ARCH_LABEL)
 
 
 def _checkpoint_step(path: Path) -> int:
-    """Extract step from `dsl_arch_{TS}_step{N}.pt` or legacy `dsl_arch_step{N}.pt`."""
-    m = _RUN_ID_RE.search(path.name) or _LEGACY_STEP_RE.search(path.name)
-    return int(m.group(2 if _RUN_ID_RE.search(path.name) else 1)) if m else 0
+    """Extract step from any of the three supported layouts:
+
+      * ``dsl_arch_{TS}_step{N}.pt``  (H21–H23 flat)
+      * ``dsl_arch_step{N}.pt``        (very-old flat)
+      * ``<RUN_DIR>/step{N}.pt``       (H24+ per-run subdir)
+    """
+    m = (_RUN_ID_RE.search(path.name)
+         or _LEGACY_STEP_RE.search(path.name)
+         or _NEW_LAYOUT_RE.match(path.name))
+    if not m:
+        return 0
+    # _RUN_ID_RE has two groups (TS, step); the others have one (step).
+    return int(m.group(2 if m.re is _RUN_ID_RE else 1))
+
+
+def _find_resume_candidates(ckpt_dir: Path) -> list[tuple[int, Path]]:
+    """Return ``[(step, path), ...]`` for every resume-eligible checkpoint
+    under ``ckpt_dir``, traversing BOTH the legacy flat layout AND the
+    new per-run subdirectory layout. LFS pointer files are filtered out.
+
+    Used by ``_maybe_resume`` to pick the highest-step entry.
+    """
+    if not ckpt_dir.is_dir():
+        return []
+    # Legacy flat layout: direct children of ckpt_dir.
+    flat = (list(ckpt_dir.glob("dsl_arch_*_step*.pt"))
+            + list(ckpt_dir.glob("dsl_arch_step*.pt")))
+    # New per-run subdir layout: <ckpt_dir>/*/step<N>.pt
+    subdir = list(ckpt_dir.glob("*/step*.pt"))
+    all_ckpts = flat + subdir
+    real = [p for p in all_ckpts if not _is_lfs_pointer(p)]
+    skipped = len(all_ckpts) - len(real)
+    if skipped:
+        print(f"[train_dsl] skipping {skipped} LFS pointer file(s) in {ckpt_dir}")
+    return [(_checkpoint_step(p), p) for p in real if _checkpoint_step(p) > 0]
 
 
 def _is_lfs_pointer(path: Path) -> bool:
@@ -477,25 +589,18 @@ def _is_lfs_pointer(path: Path) -> bool:
 
 
 def _maybe_resume(harness: BRIANHarness, ckpt_dir: Path) -> int:
-    """Load the highest-step dsl_arch checkpoint, regardless of run-id prefix.
+    """Load the highest-step dsl_arch checkpoint, regardless of layout.
 
-    Returns the resumed step (0 if no real checkpoint found). LFS pointer
-    files are filtered out so a freshly-cloned container without LFS
-    smudge doesn't crash on pickle-load.
+    Traverses both the legacy flat layout (``dsl_arch_*_step*.pt``)
+    AND the new per-run subdir layout (``<RUN_DIR>/step<N>.pt``).
+    Returns the resumed step (0 if no real checkpoint found).
     """
-    if not ckpt_dir.is_dir():
+    candidates = _find_resume_candidates(ckpt_dir)
+    if not candidates:
         return 0
-    all_ckpts = (list(ckpt_dir.glob("dsl_arch_*_step*.pt"))
-                 + list(ckpt_dir.glob("dsl_arch_step*.pt")))
-    real_ckpts = [p for p in all_ckpts if not _is_lfs_pointer(p)]
-    skipped = len(all_ckpts) - len(real_ckpts)
-    if skipped:
-        print(f"[train_dsl] skipping {skipped} LFS pointer file(s) in {ckpt_dir}")
-    if not real_ckpts:
-        return 0
-    latest = sorted(real_ckpts, key=_checkpoint_step)[-1]
-    step = harness.load_checkpoint(str(latest))
-    print(f"[train_dsl] resumed from {latest} @ step {step}")
+    top_step, top_path = max(candidates, key=lambda x: x[0])
+    step = harness.load_checkpoint(str(top_path))
+    print(f"[train_dsl] resumed from {top_path} @ step {step}")
     return step
 
 
@@ -927,18 +1032,21 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                       flush=True)
                 # Save a final checkpoint so the run isn't lost
                 if ckpt_dir is not None:
-                    path = ckpt_dir / f"dsl_arch_{_RUN_ID}_step{step}.pt"
+                    path = checkpoint_path_for_step(
+                        ckpt_dir, _run_dir_name(), step)
                     harness.save_checkpoint(str(path), step=step)
                     print(f"[train_dsl] saved early-exit checkpoint {path}",
                           flush=True)
                 return
 
         if ckpt_dir is not None and step % save_every == 0:
-            # Filename includes a per-run timestamp prefix so concurrent /
-            # successive runs to the same dir never overwrite each other.
-            # Pattern: dsl_arch_{YYYYMMDD-HHMMSS}_step{N}.pt
-            # Resume globs all `dsl_arch_*_step*.pt` and picks highest step.
-            path = ckpt_dir / f"dsl_arch_{_RUN_ID}_step{step}.pt"
+            # H24+ per-run subdir layout:
+            #   lfs_checkpoints/<RUN_ID>_<GIT_SHORT>_<ARCH_LABEL>/step<N>.pt
+            # Mirrors scripts/log_pusher.sh naming so logs ↔ checkpoints
+            # share a unique prefix per (commit, arch, day). Resume globs
+            # both this layout AND the legacy flat ones.
+            path = checkpoint_path_for_step(
+                ckpt_dir, _run_dir_name(), step)
             harness.save_checkpoint(str(path), step=step)
             print(f"[train_dsl] saved checkpoint {path}", flush=True)
 
@@ -962,7 +1070,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                         print(f"[train_dsl] PASS-MARK EARLY EXIT @ step "
                               f"{step}: {reason}", flush=True)
                         if ckpt_dir is not None:
-                            path = ckpt_dir / f"dsl_arch_{_RUN_ID}_step{step}.pt"
+                            path = checkpoint_path_for_step(
+                                ckpt_dir, _run_dir_name(), step)
                             harness.save_checkpoint(str(path), step=step)
                             print(f"[train_dsl] saved early-exit "
                                   f"checkpoint {path}", flush=True)
@@ -980,7 +1089,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
     # comprehensive OOD eval so the run has gap-ratio data.
     if ckpt_dir is not None:
         final_step = steps
-        final_path = ckpt_dir / f"dsl_arch_{_RUN_ID}_step{final_step}.pt"
+        final_path = checkpoint_path_for_step(
+            ckpt_dir, _run_dir_name(), final_step)
         harness.save_checkpoint(str(final_path), step=final_step)
         print(f"[train_dsl] saved final checkpoint {final_path}", flush=True)
 

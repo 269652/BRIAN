@@ -1,21 +1,13 @@
 ---
-code_refs:
-  - neuroslm/harness.py::_cortex_fusion_aux_step
-  - neuroslm/harness.py::_cfd_topk_target
-  - neuroslm/harness.py::_cfd_effective_temperature
-  - neuroslm/harness.py::_cfd_grad_alignment_gate
-  - neuroslm/dsl/training_config.py::MultiCortexConfig.cfd_*
+code_refs: [neuroslm/harness.py, neuroslm/dsl/training_config.py]
 created_at: "2026-06-15T00:30:00Z"
 id: H006
 proof_path: null
 proof_status: missing
-references:
-  - "formal_framework.md §13"
-  - "FINDINGS.md Run pre-H24 — CFD design"
+references: [formal_framework.md §13, FINDINGS.md Run pre-H24]
 status: draft
-tags: [distillation, capacity, implode, slm, kl, teacher-student, optimal-training]
-test_refs:
-  - tests/training/test_cfd_distillation.py
+tags: [distillation, capacity, implode, slm, kl, teacher-student]
+test_refs: [tests/training/test_cfd_distillation.py]
 theorem_name: Brian.CapacityFunneledDistillationImplode
 title: Capacity-Funneled Distillation produces monotone-implode PPL in teacher capacity
 updated_at: "2026-06-15T00:30:00Z"
