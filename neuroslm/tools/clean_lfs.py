@@ -30,11 +30,20 @@ A checkpoint is KEPT iff at least one of:
 
 Anything else is PRUNABLE.
 
-This module deletes the LFS *pointer* file and the local cache blob.
-Reclaiming server-side LFS quota needs a separate ``git filter-repo`` /
-``git lfs migrate`` pass.
+With ``--force``, this module:
 
-Default mode is dry-run; ``--force`` actually unlinks.
+  1. Deletes each prunable LFS pointer file from the working tree.
+  2. Deletes the matching local blob from ``.git/lfs/objects/``.
+  3. (use_git=True, default) Stages the deletions via ``git rm --cached``.
+  4. Commits the staged removals.
+  5. Pushes to origin so the remote LFS server can start reclaiming storage.
+  6. Runs ``git lfs prune`` to clean up locally-cached blobs.
+
+NOTE: blobs referenced only by OLD commits in history still count toward the
+LFS quota even after the push. A full reclaim requires ``git lfs migrate
+export`` (history rewrite) followed by a force-push and a GitHub GC pass.
+
+Default mode is dry-run; ``--force`` actually deletes.
 """
 from __future__ import annotations
 
@@ -527,16 +536,76 @@ def run(
     print("[lfs prune] --force given -- DELETING NOW ...")
     print(bar)
     n_ptr = n_blob = n_err = 0
+    deleted_pointers: List[Path] = []
     for p in prunable:
         ok_ptr, ok_blob = _delete_pointer_and_cache(p, root)
         if ok_ptr:
             n_ptr += 1
+            deleted_pointers.append(p)
         else:
             n_err += 1
         if ok_blob:
             n_blob += 1
     print(f"[lfs prune] deleted {n_ptr} pointer(s), {n_blob} cached blob(s), "
           f"{n_err} error(s)")
+
+    if use_git and deleted_pointers:
+        # G1: Stage deletions so HEAD no longer references these blobs.
+        rel_paths = [p.relative_to(root).as_posix() for p in deleted_pointers]
+        rm_result = subprocess.run(
+            ["git", "rm", "--cached", "--ignore-unmatch", "-f", "--"] + rel_paths,
+            cwd=root, capture_output=True, text=True,
+        )
+        if rm_result.returncode != 0:
+            print(f"[lfs prune] ⚠ git rm --cached failed:\n"
+                  f"  {rm_result.stderr[:400].strip()}")
+        else:
+            print(f"[lfs prune] staged {len(deleted_pointers)} deletion(s) "
+                  f"via git rm --cached")
+
+            # G2: Commit the staged removals.
+            commit_msg = (
+                f"lfs prune: remove {len(deleted_pointers)} "
+                f"unreferenced checkpoint(s)"
+            )
+            commit_result = subprocess.run(
+                ["git", "commit", "-m", commit_msg],
+                cwd=root, capture_output=True, text=True,
+            )
+            if commit_result.returncode != 0:
+                print(f"[lfs prune] ⚠ git commit failed:\n"
+                      f"  {commit_result.stderr[:400].strip()}")
+            else:
+                print("[lfs prune] committed removals")
+
+                # G3: Push so the remote LFS server can reclaim storage.
+                push_result = subprocess.run(
+                    ["git", "push"],
+                    cwd=root, capture_output=True, text=True,
+                )
+                if push_result.returncode != 0:
+                    print(f"[lfs prune] ⚠ git push failed:\n"
+                          f"  {push_result.stderr[:400].strip()}\n"
+                          f"  Run `git push` manually to sync with origin.")
+                else:
+                    print("[lfs prune] pushed to origin")
+
+        # G4: Clean locally-cached blobs no longer referenced by any branch.
+        prune_result = subprocess.run(
+            ["git", "lfs", "prune"],
+            cwd=root, capture_output=True, text=True,
+        )
+        if prune_result.stdout.strip():
+            print(f"[lfs prune] {prune_result.stdout.strip()}")
+
+        print(
+            "[lfs prune] NOTE: blobs in OLD commit history still count toward\n"
+            "            your LFS quota. To fully reclaim server-side storage:\n"
+            "              git lfs migrate export "
+            "--include='lfs_checkpoints/**/*.pt'\n"
+            "            then force-push and contact GitHub support to GC."
+        )
+
     return 1 if n_err else 0
 
 

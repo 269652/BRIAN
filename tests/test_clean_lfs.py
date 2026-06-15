@@ -25,6 +25,12 @@ Anything else is PRUNABLE.
 Default mode = dry-run (no filesystem mutation, exit 0). ``--force``
 deletes (a) the in-tree LFS pointer file and (b) any blob in
 ``.git/lfs/objects/<oid>`` whose OID matches the pointer.
+
+With ``use_git=True`` (the default), ``--force`` additionally:
+  G1. Stages deletions via ``git rm --cached`` (removes from git index).
+  G2. Commits the staged removals.
+  G3. Pushes to origin so the remote LFS server can reclaim storage.
+  G4. Runs ``git lfs prune`` to clean the local blob cache.
 """
 from __future__ import annotations
 
@@ -32,6 +38,7 @@ import os
 import subprocess
 from pathlib import Path
 from typing import List
+from unittest.mock import patch
 
 import pytest
 
@@ -355,6 +362,149 @@ def test_checkpoint_info_records_is_best(tmp_path: Path) -> None:
     infos = {c.path.name: c for c in folders[ck]}
     assert infos["step01000_best.pt"].is_best is True
     assert infos["step01000.pt"].is_best is False
+
+
+# ── git staging / push contracts (G1-G4) ─────────────────────────────
+
+
+def _fake_subprocess_factory(git_calls: List[List[str]]):
+    """Return a subprocess.run replacement that:
+    - Records every git call in `git_calls`.
+    - Returns non-zero for `git lfs ls-files` and `git rev-parse HEAD`
+      (forces filesystem fallback, no real git repo needed).
+    - Returns zero for all other calls (git rm, commit, push, lfs prune).
+    """
+    def _fake(cmd, **kwargs):
+        cmd_list = list(cmd)
+        git_calls.append(cmd_list)
+        # Force fallback to filesystem walk (no git LFS in tmp_path).
+        if "lfs" in cmd_list and "ls-files" in cmd_list:
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+        # No HEAD in tmp_path.
+        if cmd_list[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+    return _fake
+
+
+def test_force_with_use_git_calls_git_rm_cached(tmp_path: Path) -> None:
+    """G1: --force with use_git=True stages deletions via git rm --cached."""
+    ck = tmp_path / "lfs_checkpoints" / "run1"
+    ck.mkdir(parents=True)
+    old_ptr = ck / "step01000.pt"
+    _make_lfs_pointer(old_ptr)
+    for step in (3000, 4000, 5000):
+        _make_lfs_pointer(ck / f"step{step:05d}.pt")
+
+    git_calls: List[List[str]] = []
+    with patch("subprocess.run", side_effect=_fake_subprocess_factory(git_calls)):
+        rc = cl.run(root=tmp_path, force=True, keep_recent=3, use_git=True)
+
+    assert rc == 0
+    assert not old_ptr.exists(), "pointer must be deleted from disk"
+    rm_calls = [c for c in git_calls if len(c) >= 3 and c[:3] == ["git", "rm", "--cached"]]
+    assert rm_calls, "git rm --cached must be called"
+    all_rm_args = " ".join(str(a) for a in rm_calls[0])
+    assert "step01000.pt" in all_rm_args, \
+        f"deleted pointer must appear in git rm args, got: {rm_calls[0]}"
+
+
+def test_force_with_use_git_commits_removals(tmp_path: Path) -> None:
+    """G2: --force with use_git=True commits the staged deletions."""
+    ck = tmp_path / "lfs_checkpoints" / "run1"
+    ck.mkdir(parents=True)
+    _make_lfs_pointer(ck / "step01000.pt")
+    for step in (3000, 4000, 5000):
+        _make_lfs_pointer(ck / f"step{step:05d}.pt")
+
+    git_calls: List[List[str]] = []
+    with patch("subprocess.run", side_effect=_fake_subprocess_factory(git_calls)):
+        cl.run(root=tmp_path, force=True, keep_recent=3, use_git=True)
+
+    commit_calls = [c for c in git_calls if c[:2] == ["git", "commit"]]
+    assert commit_calls, "git commit must be called after staging deletions"
+
+
+def test_force_with_use_git_pushes_to_origin(tmp_path: Path) -> None:
+    """G3: --force with use_git=True pushes so remote LFS can reclaim storage."""
+    ck = tmp_path / "lfs_checkpoints" / "run1"
+    ck.mkdir(parents=True)
+    _make_lfs_pointer(ck / "step01000.pt")
+    for step in (3000, 4000, 5000):
+        _make_lfs_pointer(ck / f"step{step:05d}.pt")
+
+    git_calls: List[List[str]] = []
+    with patch("subprocess.run", side_effect=_fake_subprocess_factory(git_calls)):
+        cl.run(root=tmp_path, force=True, keep_recent=3, use_git=True)
+
+    push_calls = [c for c in git_calls if c[:2] == ["git", "push"]]
+    assert push_calls, "git push must be called to free remote LFS quota"
+
+
+def test_force_with_use_git_runs_lfs_prune(tmp_path: Path) -> None:
+    """G4: --force with use_git=True runs git lfs prune to clean local cache."""
+    ck = tmp_path / "lfs_checkpoints" / "run1"
+    ck.mkdir(parents=True)
+    _make_lfs_pointer(ck / "step01000.pt")
+    for step in (3000, 4000, 5000):
+        _make_lfs_pointer(ck / f"step{step:05d}.pt")
+
+    git_calls: List[List[str]] = []
+    with patch("subprocess.run", side_effect=_fake_subprocess_factory(git_calls)):
+        cl.run(root=tmp_path, force=True, keep_recent=3, use_git=True)
+
+    lfs_prune_calls = [
+        c for c in git_calls if "lfs" in c and "prune" in c
+    ]
+    assert lfs_prune_calls, "git lfs prune must be called to clean local cache"
+
+
+def test_force_without_use_git_skips_git_ops(tmp_path: Path) -> None:
+    """use_git=False must not call git rm / commit / push / lfs prune."""
+    ck = tmp_path / "lfs_checkpoints" / "run1"
+    ck.mkdir(parents=True)
+    _make_lfs_pointer(ck / "step01000.pt")
+    for step in (3000, 4000, 5000):
+        _make_lfs_pointer(ck / f"step{step:05d}.pt")
+
+    git_calls: List[List[str]] = []
+    with patch("subprocess.run", side_effect=_fake_subprocess_factory(git_calls)):
+        rc = cl.run(root=tmp_path, force=True, keep_recent=3, use_git=False)
+
+    assert rc == 0
+    # No git calls at all when use_git=False.
+    assert not git_calls, f"git must not be called with use_git=False, got: {git_calls}"
+
+
+def test_force_git_rm_failure_does_not_commit_or_push(tmp_path: Path) -> None:
+    """If git rm --cached fails, commit and push must NOT be attempted."""
+    ck = tmp_path / "lfs_checkpoints" / "run1"
+    ck.mkdir(parents=True)
+    _make_lfs_pointer(ck / "step01000.pt")
+    for step in (3000, 4000, 5000):
+        _make_lfs_pointer(ck / f"step{step:05d}.pt")
+
+    git_calls: List[List[str]] = []
+
+    def _fail_on_rm(cmd, **kwargs):
+        cmd_list = list(cmd)
+        git_calls.append(cmd_list)
+        if "lfs" in cmd_list and "ls-files" in cmd_list:
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+        if cmd_list[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+        if len(cmd_list) >= 3 and cmd_list[:3] == ["git", "rm", "--cached"]:
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="error: rm failed")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    with patch("subprocess.run", side_effect=_fail_on_rm):
+        rc = cl.run(root=tmp_path, force=True, keep_recent=3, use_git=True)
+
+    assert rc == 0  # deletion of files still succeeded
+    commit_calls = [c for c in git_calls if c[:2] == ["git", "commit"]]
+    push_calls = [c for c in git_calls if c[:2] == ["git", "push"]]
+    assert not commit_calls, "must not commit when git rm failed"
+    assert not push_calls, "must not push when git rm failed"
 
 
 # ── git lfs ls-files based enumeration ────────────────────────────────

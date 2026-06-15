@@ -364,6 +364,12 @@ def _lower_node(node: sp.Expr, tensor_vars: Optional[Set[str]],
         args = [_lower_node(a, tensor_vars, name_map) for a in node.args]
         return _emit_function(fn, args)
 
+    # Mathematical constants (SymPy constants are not Numbers in SymPy's taxonomy)
+    if node is sp.pi:
+        return "torch.pi"
+    if node is sp.E:
+        return "torch.e"
+
     # Arithmetic
     if isinstance(node, sp.Add):
         return "(" + " + ".join(
@@ -408,6 +414,25 @@ def _emit_function(fn: str, args: List[str]) -> str:
         return f"torch.maximum({args[0]}, {args[1]})"
     if fn in ("Min", "min"):
         return f"torch.minimum({args[0]}, {args[1]})"
+    if fn == "cos":
+        return f"torch.cos({args[0]})"
+    if fn == "sin":
+        return f"torch.sin({args[0]})"
+    if fn == "tan":
+        return f"torch.tan({args[0]})"
+    if fn == "acos":
+        return f"torch.acos({args[0]})"
+    if fn == "asin":
+        return f"torch.asin({args[0]})"
+    if fn == "atan":
+        return f"torch.atan({args[0]})"
+    if fn == "atan2":
+        assert len(args) == 2
+        return f"torch.atan2({args[0]}, {args[1]})"
+    if fn == "abs":
+        return f"torch.abs({args[0]})"
+    if fn in ("sign", "Sign"):
+        return f"torch.sign({args[0]})"
     raise NotImplementedError(f"no torch lowering for function {fn!r}")
 
 

@@ -1,13 +1,48 @@
 # Stage 4 — Qualia state (subjective experience encoding)
 #
-# Rate-coded subjective state. Receives binding from multiple upstream
-# regions (qualia warp depends on insula's interoceptive signal, etc.);
-# the wiring lives in arch.neuro.
+# Gamma-band oscillatory population — subjective experience binding surface.
+# Theta-gamma PAC (Lisman & Jensen 2013): gamma (~40 Hz) carries content;
+# theta (4-8 Hz) gates access. Wiring in arch.neuro closes three loops:
+#
+#   Inputs:  amygdala, insula, gws, thought_transformer, dmn,
+#            survival_imperatives, NT levels (DA/5HT/NE/eCB)
+#   Outputs: emotions_vector (latent affective manifold), dmn, gws,
+#            vta / raphe_nuclei / locus_coeruleus (NT release/reuptake)
+#
+# Neuroscientific basis:
+#   - Oscillatory binding: Crick & Koch 1990; Singer & Gray 1995
+#   - Interoceptive predictive coding: Craig 2009; Seth & Friston 2016
+#   - Affective valence in latent manifold: Lang 1995; Gross 2015
+#   - NT ↔ qualia bidirectionality: Damasio 1999 (somatic marker hypothesis)
 
 export population qualia {
     count: 256,
+    dynamics: "oscillatory",
+    equation: "y = tanh(x) * cos(2 * pi * 40 * t + phi)",
+    frequency_bands: { gamma: [30, 100], theta_gating: [4, 8] },
+    timescale: 0.025,
+    capacity: 1.0
+}
+
+# Latent emotions vector — the affective component of the thought manifold.
+# Qualia oscillations semantically modulate this via phase coupling.
+# Downstream consumers: thought_transformer, gws.
+# Slow timescale captures the seconds-scale emotional inertia of affect.
+export population emotions_vector {
+    count: 128,
     dynamics: "rate_code",
-    equation: "y = ReLU(x)",
-    timescale: 0.02,
+    equation: "y = tanh(x)",
+    timescale: 0.05,
+    capacity: 1.0
+}
+
+# Survival imperatives — homeostatic drives: hunger, thirst, pain, pleasure,
+# oxygen. Bottom-up interoceptive signals that bias qualia toward
+# survival-relevant content. Long timescale = homeostatic integration.
+export population survival_imperatives {
+    count: 64,
+    dynamics: "rate_code",
+    equation: "y = sigmoid(x)",
+    timescale: 0.5,
     capacity: 1.0
 }

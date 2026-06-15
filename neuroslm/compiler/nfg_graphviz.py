@@ -256,12 +256,15 @@ def _graph_attrs(engine: str) -> dict:
         pad="0.5",
     )
     if engine == "dot":
-        base.update(rankdir="LR", nodesep="0.35", ranksep="0.6",
-                    overlap="false", splines="spline")
+        base.update(rankdir="TB", nodesep="0.45", ranksep="0.85",
+                    overlap="false", splines="spline",
+                    newrank="true", concentrate="true",
+                    page="11.69,8.27", pagedir="TL")
     elif engine == "neato":
         base.update(overlap="prism", splines="curved", sep="+12")
     elif engine in {"sfdp", "fdp"}:
-        base.update(overlap="prism", splines="true", K="1.4")
+        base.update(overlap="prism", splines="curved", K="1.4", sep="+10",
+                    size="16,20", ratio="compress")
     return base
 
 
@@ -335,6 +338,11 @@ def emit_dot_from_hypergraph(
             c.attr(label=style["label"], style="rounded,dashed",
                    color=style["color"], fontsize="13",
                    bgcolor=style["fillcolor"])
+            # rank=same forces all nodes in this cluster to one rank row,
+            # eliminating the large empty interior that appears when nodes
+            # span multiple ranks.
+            ids = " ".join(f'"{n.name}"' for n in nodes_in_region)
+            c.body.append(f"\t{{rank=same; {ids}}}")
             for n in nodes_in_region:
                 # Tint each population's fill by its region so they stay
                 # visually anchored to the cluster even when the layout
@@ -361,6 +369,10 @@ def emit_dot_from_hypergraph(
             c.attr(label=style["label"], style="rounded,solid",
                    color=style["color"], fontsize="13",
                    bgcolor=style["fillcolor"])
+            all_mc = trunk_nodes + expert_nodes
+            if all_mc:
+                ids = " ".join(f'"{n.name}"' for n in all_mc)
+                c.body.append(f"\t{{rank=same; {ids}}}")
             for n in trunk_nodes:
                 trunk_style = dict(_KIND_STYLES["lm_trunk"])
                 c.node(n.name, label=_trunk_label(n), **trunk_style)
@@ -374,6 +386,8 @@ def emit_dot_from_hypergraph(
         with g.subgraph(name="cluster_neurotransmitters") as c:
             c.attr(label="neurotransmitters", style="rounded,dashed",
                    color="#7a6b00", fontsize="14", bgcolor="#fffcec")
+            ids = " ".join(f'"{n.name}"' for n in nt_nodes)
+            c.body.append(f"\t{{rank=same; {ids}}}")
             for n in nt_nodes:
                 style = dict(_KIND_STYLES["neurotransmitter"])
                 # Tint the NT node by its semantic colour so the modulator

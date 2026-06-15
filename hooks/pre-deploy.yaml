@@ -27,7 +27,7 @@
 # ──────────────────────────────────────────────────────────────────
 
 name: pre-deploy
-description: Recompile master arch → DNA → unfold to current
+description: Recompile architectures/master → dna/master/arch.dna, commit, push
 
 enabled: true
 

@@ -115,4 +115,4 @@ preset = "tiny"
 [nfg]
 output = ".neuro/nfg.png"
 format = "png"
-engine = "neato"
+engine = "dot"

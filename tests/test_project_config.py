@@ -72,7 +72,7 @@ class TestProjectConfigParsing:
         """A folder with no ``brian.toml`` returns sensible defaults."""
         from neuroslm.project_config import load_project_config
         cfg = load_project_config(start=tmp_path)
-        assert cfg.arch == "architectures/current"
+        assert cfg.arch == "architectures/master"
         assert cfg.dna == ""
         assert cfg.nfg_output == ".neuro/nfg.png"
         assert cfg.nfg_format == "png"
