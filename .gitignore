@@ -75,13 +75,20 @@ temp/
 # re-include rule for arch.dna can take effect — git can't un-ignore a
 # file whose parent directory has been ignored wholesale.
 #
+# 2026-06-15: extended the whitelist to ANY branch's arch.dna
+# (dna/{branch}/arch.dna) after instance 41048619 crashed with
+# "✗ missing ./dna/master/arch.dna" — the pre-deploy hook silently
+# falsely-reported "no roundtrip diff" because `dna/*` was dropping
+# the file before `git add -A` could stage it. Locked by
+# tests/test_deploy_failure_safety.py::TestPerBranchDnaIsNotGitignored.
+#
 # Heatmaps written by the evolution loop live in results/heatmaps/
 # (HeatmapPublisher default) or in <checkpoint_dir>/live_heatmap.json
 # (runtime artifact), so they don't need allowlisting under dna/.
 dna/*
-!dna/evol/
-dna/evol/*
-!dna/evol/arch.dna
+!dna/*/
+dna/*/*
+!dna/*/arch.dna
 architectures/evol/
 
 # Lean / Lake build artifacts (lean/Brian/** source IS tracked)

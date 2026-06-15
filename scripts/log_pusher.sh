@@ -108,6 +108,46 @@ git config user.name  "vast-train"             >/dev/null 2>&1 || true
 
 PUSH_URL="https://x-access-token:${GITHUB}@github.com/${REPO_SLUG}.git"
 
+# ── ONESHOT mode (deterministic exit code for the deploy gate) ─────
+# 2026-06-15: instance 41048619 trace showed `timeout 120 log_pusher
+# | head -30` always returned 141 (SIGPIPE) — turning a successful
+# final-log push into a false-positive that tripped the gated-
+# self-destroy contract. ONESHOT=1 runs ONE push iteration and exits
+# with the real status (0 = pushed or nothing-to-push, 1 = push
+# actually failed). Locked by tests/test_deploy_failure_safety.py
+# ::TestLogPusherOneshotMode + ::TestDeployUsesOneshotForFinalLog.
+if [ "${ONESHOT:-0}" = "1" ]; then
+    if [ ! -f "$SOURCE_LOG" ]; then
+        echo "[log_pusher] ONESHOT: source log not present at $SOURCE_LOG"
+        exit 0   # nothing to push isn't a failure
+    fi
+    LOG_REL="$(_compose_logfile)"
+    cp -f "$SOURCE_LOG" "$LOG_REL"
+    git add "$LOG_REL"
+    if git diff --cached --quiet 2>/dev/null; then
+        echo "[log_pusher] ONESHOT: log unchanged, nothing to push"
+        exit 0
+    fi
+    SIZE="$(wc -c <"$LOG_REL")"
+    if ! git commit -m "logs($(basename "$LOG_REL" .log)): final sync @ $(date -u +%H:%M:%SZ) (${SIZE} B)" >/dev/null 2>&1; then
+        echo "[log_pusher] ONESHOT: commit failed"
+        exit 1
+    fi
+    if git push "$PUSH_URL" "${BRANCH}:${BRANCH}" 2>&1 | sed -E "s#${GITHUB}#***#g"; then
+        echo "[log_pusher] ONESHOT: pushed (${SIZE} B)"
+        exit 0
+    fi
+    # Push rejected — try rebase + retry ONCE before giving up.
+    echo "[log_pusher] ONESHOT: push rejected, attempting rebase + retry"
+    if git pull --rebase "$PUSH_URL" "$BRANCH" 2>&1 | sed -E "s#${GITHUB}#***#g" \
+        && git push "$PUSH_URL" "${BRANCH}:${BRANCH}" 2>&1 | sed -E "s#${GITHUB}#***#g"; then
+        echo "[log_pusher] ONESHOT: pushed after rebase (${SIZE} B)"
+        exit 0
+    fi
+    echo "[log_pusher] ONESHOT: push failed after rebase retry"
+    exit 1
+fi
+
 echo "[log_pusher] watching $SOURCE_LOG → logs/vast/${BOOT_TIMESTAMP}_${INSTANCE_ID}_..._stepNofN.log (every ${PUSH_INTERVAL}s)"
 
 while true; do

@@ -276,12 +276,18 @@ sleep 2
 # push fails we leave the instance alive — paying $0.73/h for an extra
 # hour is cheap insurance against losing the crash trace. Locked by
 # tests/test_deploy_failure_safety.py::TestSelfDestroyIsGatedOnLogPush.
+#
+# ONESHOT=1: log_pusher.sh runs a single commit+push and exits with
+# the REAL status. We previously piped through ``| head -30`` which
+# always closed the pipe → SIGPIPE=141 → false-positive trip of the
+# gate even on successful pushes (instance 41048619 trace 2026-06-15).
+# Locked by ::TestDeployUsesOneshotForFinalLog.
 echo "── final log push (GATES self-destroy) ──"
 LOG_PUSH_RC=0
-SOURCE_LOG=/workspace/train.log INSTANCE_ID="$(hostname)" PUSH_INTERVAL=1 \\
+ONESHOT=1 SOURCE_LOG=/workspace/train.log INSTANCE_ID="$(hostname)" \\
     BRANCH='{BRANCH}' REPO_SLUG='{REPO_SLUG}' \\
     ARCH_NAME='{arch_name_for_log}' LABEL='{LABEL}' TOTAL_STEPS='{STEPS}' \\
-    timeout 120 bash scripts/log_pusher.sh 2>&1 | head -30 || LOG_PUSH_RC=$?
+    timeout 180 bash scripts/log_pusher.sh || LOG_PUSH_RC=$?
 if [ "$LOG_PUSH_RC" -ne 0 ]; then
     echo "✗ FINAL LOG PUSH FAILED (rc=$LOG_PUSH_RC) — keeping instance alive"
     echo "  for forensics. Use 'brian ps' to find the id, then"

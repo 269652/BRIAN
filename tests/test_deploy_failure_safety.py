@@ -380,3 +380,133 @@ class TestKeepAliveOnFailure:
             r'TRAIN_RC["\s]*-eq\s+0|TRAIN_RC.*==\s*"?0"?',
             deploy_src,
         ), "expected a TRAIN_RC == 0 branch that triggers immediate destroy"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# D. Per-branch DNA must be git-trackable
+# ─────────────────────────────────────────────────────────────────────
+# Discovered live on instance 41048619 (2026-06-15): training crashed
+# with "✗ missing ./dna/master/arch.dna" because .gitignore line 81
+# (`dna/*`) silently dropped the file. The pre-deploy hook reported
+# "no roundtrip diff" because `git add -A` never saw it. EVERY recent
+# deploy was training (or trying to train) without the canonical DNA.
+
+
+class TestPerBranchDnaIsNotGitignored:
+    """``dna/{branch}/arch.dna`` is the per-branch canonical DNA path
+    (introduced 2026-06-15 by brian.toml change + pre-deploy hook).
+    ``.gitignore`` must whitelist arch.dna under EVERY branch dir, not
+    only ``dna/evol/``."""
+
+    @pytest.mark.parametrize("branch", ["master", "evol", "feature_test_branch"])
+    def test_branch_arch_dna_is_trackable(self, branch):
+        import subprocess as _sp
+        rel = f"dna/{branch}/arch.dna"
+        # `git check-ignore -q PATH`: exit 0 = IGNORED, 1 = NOT ignored,
+        # 128 = error. We want 1.
+        r = _sp.run(
+            ["git", "check-ignore", "-q", rel],
+            cwd=str(REPO_ROOT), capture_output=True, text=True,
+        )
+        assert r.returncode == 1, (
+            f"{rel} is gitignored (check-ignore exit={r.returncode}, "
+            f"stderr={r.stderr!r}). `git add -A` silently drops it, so "
+            f"the pre-deploy hook falsely reports 'no roundtrip diff' "
+            f"and the DNA never reaches origin. Fix .gitignore to "
+            f"whitelist `dna/*/arch.dna` (pattern shape: ignore "
+            f"dna/* and dna/*/* but re-include dna/*/ and dna/*/arch.dna)."
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# E. Final log push must not false-positive
+# ─────────────────────────────────────────────────────────────────────
+# ``scripts/log_pusher.sh`` is a forever-looping daemon. The pattern
+# ``timeout 120 bash log_pusher.sh | head -30`` ALWAYS exits non-zero:
+# either timeout=124 or SIGPIPE=141 from head closing the pipe. That
+# turns the gated-self-destroy contract from a safety into a noisy
+# false-positive (instance 41048619 trace, 2026-06-15: log push
+# succeeded but rc=141 tripped the gate). The fix: log_pusher.sh
+# grows a ``ONESHOT=1`` mode that runs ONE push iteration and exits
+# with the real status.
+
+
+class TestLogPusherOneshotMode:
+    """``scripts/log_pusher.sh`` must support ``ONESHOT=1`` which
+    runs a single commit+push cycle and exits with the real status
+    (0 on success, non-zero on actual failure)."""
+
+    @pytest.fixture(scope="class")
+    def log_pusher_src(self) -> str:
+        return (REPO_ROOT / "scripts" / "log_pusher.sh").read_text(encoding="utf-8")
+
+    def test_oneshot_var_referenced(self, log_pusher_src):
+        assert "ONESHOT" in log_pusher_src, (
+            "log_pusher.sh must check ONESHOT to support a one-shot "
+            "push mode (avoids SIGPIPE/timeout false-positives when "
+            "the deploy script needs a deterministic exit code)"
+        )
+
+    def test_oneshot_branch_exits_with_real_status(self, log_pusher_src):
+        # The ONESHOT branch must EXIT (with real status) — not fall
+        # through to the `while true` daemon loop. Anchor on either
+        # `exit 0` or `exit $?` within the ONESHOT branch.
+        assert re.search(
+            r"ONESHOT[\s\S]{0,1200}?\bexit\s+[01]\b",
+            log_pusher_src,
+        ), (
+            "expected ONESHOT branch to contain `exit 0` (success) "
+            "and `exit 1` (push failure) so the deploy gate gets the "
+            "real outcome instead of always-141 from a pipe close"
+        )
+
+    def test_oneshot_branch_does_not_enter_daemon_loop(self, log_pusher_src):
+        """If we set ONESHOT=1 and the code falls through to the
+        ``while true`` daemon loop, the deploy script will hang. The
+        ONESHOT branch must exit BEFORE the daemon loop."""
+        idx_oneshot = log_pusher_src.find("ONESHOT")
+        idx_daemon = log_pusher_src.find("while true")
+        assert idx_oneshot >= 0, "log_pusher.sh references ONESHOT"
+        assert idx_daemon >= 0, "log_pusher.sh has its `while true` loop"
+        # Between ONESHOT and the daemon loop there must be an `exit`
+        # so the ONESHOT path can never fall through.
+        between = log_pusher_src[idx_oneshot:idx_daemon]
+        assert re.search(r"\bexit\b", between), (
+            "expected `exit` between ONESHOT branch and the daemon "
+            "loop so ONESHOT=1 never falls into the forever loop"
+        )
+
+
+class TestDeployUsesOneshotForFinalLog:
+    """The deploy script's `── final log push ──` block must call
+    log_pusher with ``ONESHOT=1`` and read its REAL exit code (NOT
+    pipe it through `head -N` which always exits non-zero)."""
+
+    def test_final_log_push_sets_oneshot(self, deploy_src):
+        idx_log = deploy_src.find("── final log push")
+        idx_dst = deploy_src.find("── self-destroy ──")
+        assert idx_log >= 0 and idx_dst > idx_log
+        block = deploy_src[idx_log:idx_dst]
+        assert "ONESHOT" in block, (
+            "the `── final log push ──` block must set ONESHOT=1 when "
+            "invoking log_pusher.sh so it gets the REAL push status "
+            "(not always-141 from pipe close)"
+        )
+
+    def test_final_log_push_does_not_use_head_pipe(self, deploy_src):
+        """The legacy `| head -N` clipped the daemon's output but had
+        the side effect of always closing the pipe and making the
+        exit code unreadable (SIGPIPE → 141). Forbid it inside the
+        final log push block so a future regression can't silently
+        re-introduce the false positive."""
+        idx_log = deploy_src.find("── final log push")
+        idx_dst = deploy_src.find("── self-destroy ──")
+        assert idx_log >= 0 and idx_dst > idx_log
+        block = deploy_src[idx_log:idx_dst]
+        # Forbid `| head` in this block specifically.
+        assert not re.search(r"\|\s*head\s+-", block), (
+            "the final log push block must NOT pipe log_pusher into "
+            "`head -N` — that always closes the pipe and turns a "
+            "successful push into a SIGPIPE=141 false-positive. Use "
+            "ONESHOT=1 and read $? directly."
+        )
