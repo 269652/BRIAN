@@ -26,6 +26,15 @@ A YAML hook folder gives you all of that with zero changes to
 | ---------------- | -------------------------- | ----------------------------------------------- |
 | `pre-deploy`     | `hooks/pre-deploy.yaml`    | `cmd_deploy` (before any vast.ai network call)  |
 
+The shipped `pre-deploy` implements the 5-step "roundtrip + publish"
+pipeline:
+
+1. **Clean-check** — refuse if `git status --porcelain` is non-empty.
+2. **Compile** `architectures/master` → `dna/master/arch.dna`
+3. **Unfold** `dna/master/arch.dna` → `architectures/current/arch.neuro`
+4. **Commit** — `git add -A` + `git commit -m "chore: roundtrip recompile of current architecture"` (no-op when the roundtrip is idempotent)
+5. **Push** — `git push`. Only on success does the hook return 0, unblocking the deploy.
+
 More events (`post-deploy`, `pre-train`, `pre-compile`, …) can be
 added by wiring a single `_run_hook("event-name")` line at the right
 spot in `cli.py`; the runner module is event-agnostic.

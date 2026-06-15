@@ -286,6 +286,23 @@ class TestShippedPreDeployHook:
         assert any(m in body for m in unfold_markers), \
             f"{self.SH_PATH} must call brian dna unfold; got: {body[:300]}"
 
+    def test_bash_script_full_pipeline(self):
+        """Locks the 5-step pipeline (clean-check → compile → unfold →
+        commit → push). Each gate is loadbearing for the user's
+        contract: the deploy only proceeds AFTER a successful push of
+        the roundtrip artefacts.
+        """
+        body = self.SH_PATH.read_text(encoding="utf-8")
+        # 1. Clean-check
+        assert "git status --porcelain" in body, \
+            "step 1 missing: must `git status --porcelain` to refuse on dirty tree"
+        # 4. Stage + commit with the exact chore message
+        assert "git add -A" in body, "step 4 missing: must `git add -A`"
+        assert "chore: roundtrip recompile of current architecture" in body, \
+            "step 4 missing: must commit with the canonical chore message"
+        # 5. Push
+        assert "git push" in body, "step 5 missing: must `git push`"
+
     def test_powershell_script_exists_and_compiles_master(self):
         assert self.PS1_PATH.is_file(), f"missing {self.PS1_PATH}"
         body = self.PS1_PATH.read_text(encoding="utf-8")
@@ -297,3 +314,13 @@ class TestShippedPreDeployHook:
                           "-m neuroslm.cli dna unfold")
         assert any(m in body for m in unfold_markers), \
             f"{self.PS1_PATH} must call brian dna unfold; got: {body[:300]}"
+
+    def test_powershell_script_full_pipeline(self):
+        """PowerShell mirror of test_bash_script_full_pipeline."""
+        body = self.PS1_PATH.read_text(encoding="utf-8")
+        assert "git status --porcelain" in body, \
+            "step 1 missing: must `git status --porcelain` to refuse on dirty tree"
+        assert "git add -A" in body, "step 4 missing: must `git add -A`"
+        assert "chore: roundtrip recompile of current architecture" in body, \
+            "step 4 missing: must commit with the canonical chore message"
+        assert "git push" in body, "step 5 missing: must `git push`"
