@@ -313,6 +313,9 @@ If the user explicitly asks for a long-form document:
 
 - **Don't push without explicit ask.** Commit locally, then surface
   the diff for review.
+- **Don't deploy to vast.ai without explicit ask** — every `brian deploy`
+  creates a billable instance. Even a "quick test" deploy costs real money.
+  Always confirm before calling `brian deploy` or any equivalent.
 - **Don't destroy vast.ai instances without explicit ask** — running
   jobs cost money to restart, not to keep going.
 - **Don't reset / force-push / amend pushed commits** unless the user
@@ -321,6 +324,32 @@ If the user explicitly asks for a long-form document:
 Match the scope of your actions to what was requested. If the user
 asks to "fix the bug," they didn't ask for a refactor — they didn't
 ask for renaming, they didn't ask for a new abstraction. Stay tight.
+
+### 8.1 Secrets never enter the repo
+
+- **API tokens / write-keys / passwords belong in `.env`** (gitignored;
+  `.env.example` is the public template). The chain `_deploy_train.py`
+  uses is:
+  1. Process env (`$HF_TOKEN`, `$GITHUB`, `$VAST_API_KEY`) wins.
+  2. `os.environ.setdefault(...)` falls back to the matching line in
+     `.env`.
+  3. For runtime-only auth (HF Hub), `~/.huggingface/token` (from
+     `huggingface-cli login`) is the last-ditch fallback.
+- **Never** add a literal token to source, tests, fixtures, docstrings,
+  comments, log files, `.md` evidence files, or commit messages.
+  `grep -r "hf_[A-Za-z0-9]\{20,\}" .` and the GitHub-side equivalents
+  for `ghp_` / `vast_` should always return zero matches inside
+  `git ls-files`.
+- **Never** print a rendered token-containing string to stdout/stderr
+  (the `ONSTART` script in `_deploy_train.py` is the canonical example
+  of what NOT to log — it gets POSTed to vast.ai's API but is never
+  echoed locally).
+- **When checking in a new secret-bearing flow:** add the field to
+  `.env.example` with a comment explaining what it auths against, add
+  a pre-flight warning in the consumer (so a missing token surfaces
+  at deploy-time, not 500 steps into a $1.50/hr GPU run), and the
+  consumer must "fail open" — print a clean skip message, never crash
+  the training loop.
 
 ---
 
