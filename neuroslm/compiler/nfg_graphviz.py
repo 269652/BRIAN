@@ -231,6 +231,21 @@ def _edge_label(edge: HyperEdge) -> str:
     return _escape_label(" ".join(parts))
 
 
+def _hex_with_alpha(hex_color: str, opacity: float) -> str:
+    """Return hex_color with an alpha byte appended (#RRGGBB → #RRGGBBAA).
+
+    opacity: 0.0 = fully transparent, 1.0 = fully opaque (no change).
+    Non-hex color names (e.g. "white", "transparent") are returned unchanged.
+    """
+    if opacity >= 1.0:
+        return hex_color
+    bare = hex_color.strip().lstrip("#")
+    if len(bare) not in (6, 8):
+        return hex_color  # named color or unknown format
+    alpha = max(0, min(255, round(opacity * 255)))
+    return f"#{bare[:6]}{alpha:02x}"
+
+
 def _nt_colour(name: str) -> str:
     """Look up a deterministic colour for a neurotransmitter name.
 
@@ -246,18 +261,23 @@ def _nt_colour(name: str) -> str:
     return _NT_COLOURS.get(key, _DEFAULT_MOD_COLOUR)
 
 
-def _graph_attrs(engine: str, dpi: int = 96) -> dict:
+def _graph_attrs(engine: str, dpi: int = 96, spring_gain: float = 0.9) -> dict:
     """Top-level graph attributes — engine-specific tweaks.
 
     Parameters
     ----------
     engine
-        Layout engine — ``"dot"`` / ``"neato"`` / ``"sfdp"`` / ``"fdp"``.
+        Layout engine — ``"dot"`` / ``"neato"`` / ``"sfdp"`` / ``"fdp"`` /
+        ``"circo"``.
     dpi
         PNG rasterization DPI. Graphviz default is 96; bumping to 150+
         produces sharper text/lines when zooming. SVG / PDF ignore this
         attribute (they're vector formats). Pass via ``[nfg].dpi`` in
         brian.toml or the ``BRIAN_NFG_DPI`` env var.
+    spring_gain
+        Ideal edge length (K) for spring-based engines (``fdp`` / ``sfdp`` /
+        ``neato``). Lower = denser; higher = more spread. Configurable via
+        ``[nfg].spring_gain`` in brian.toml. Ignored by ``dot`` and ``circo``.
     """
     base = dict(
         labelloc="t",
@@ -279,11 +299,27 @@ def _graph_attrs(engine: str, dpi: int = 96) -> dict:
         # newrank=true uses dot's per-node-rank algorithm (vs the old
         # cluster-rank default), which behaves better on graphs with
         # mixed constrained / unconstrained edges.
-        base.update(rankdir="TB", nodesep="0.4", ranksep="0.8",
+        #
+        # Compactness knobs (tuned for the 31-population master arch):
+        #   nodesep=0.2  horizontal gap between siblings on the same
+        #                rank (inches). Default 0.25; we set 0.2 to
+        #                tighten the executive trunk's 9-wide row.
+        #   ranksep=0.4  vertical gap between consecutive ranks. Default
+        #                0.5; tightened to 0.4 to reduce the white space
+        #                between cluster strata.
+        #   margin=0.1   page margin (inches) around the whole canvas.
+        #                Default 0.5 leaves visible white border;
+        #                shrinking gives the diagram more breathing
+        #                room when embedded in markdown.
+        # If the result becomes too cramped, push nodesep/ranksep back
+        # up — 0.4/0.8 was the previous (looser) baseline.
+        base.update(rankdir="TB", nodesep="0.2", ranksep="0.4",
+                    margin="0.1",
                     overlap="false", splines="spline",
                     newrank="true", concentrate="true")
     elif engine == "neato":
-        base.update(overlap="prism", splines="curved", sep="+12")
+        base.update(overlap="prism", splines="curved", sep="+12",
+                    K=str(spring_gain))
     elif engine in {"sfdp", "fdp"}:
         # Force-directed cluster-aware layout. ``fdp`` (vs ``neato`` /
         # ``sfdp``) is the only force-directed engine that honours
@@ -317,10 +353,15 @@ def _graph_attrs(engine: str, dpi: int = 96) -> dict:
         #                the cost of ~2× layout time, still <1s).
         base.update(
             overlap="prism", splines="curved",
-            K="0.9", sep="+15",
+            K=str(spring_gain), sep="+15",
             size="24,15", ratio="compress",
             maxiter="1500",
         )
+    elif engine == "circo":
+        # Circular layout — nodes placed on concentric rings.
+        # overlap=false + voronoi post-pass removes residual collisions.
+        # mindist controls minimum separation between adjacent nodes on a ring.
+        base.update(overlap="false", splines="curved", mindist="0.5")
     return base
 
 
@@ -399,6 +440,8 @@ def emit_dot_from_hypergraph(
     title: Optional[str] = None,
     heat: Optional[Any] = None,
     dpi: int = 96,
+    spring_gain: float = 0.9,
+    panel_opacity: float = 1.0,
 ) -> str:
     """Build a DOT-string view of the hypergraph.
 
@@ -409,15 +452,22 @@ def emit_dot_from_hypergraph(
                  layered hierarchical (default), ``"neato"`` / ``"sfdp"`` /
                  ``"fdp"`` for force-directed.
         title:   optional graph title displayed at the top.
-        heat:    optional heatmap overlay — accepts a ``dict[str, float]``,
-                 a :class:`TrainingHeatmap` instance, or a path to the
-                 JSON file produced by :class:`HeatmapPublisher`. Element
-                 ids that match a population / synapse / modulation are
-                 retinted by their normalized heat. See
-                 :mod:`neuroslm.compiler.heat_overlay`.
-        dpi:     PNG rasterization DPI baked into the DOT source. Default
-                 96 (graphviz default); bump to 150+ for sharper PNG.
-                 Ignored by SVG / PDF outputs.
+        heat:          optional heatmap overlay — accepts a ``dict[str, float]``,
+                       a :class:`TrainingHeatmap` instance, or a path to the
+                       JSON file produced by :class:`HeatmapPublisher`. Element
+                       ids that match a population / synapse / modulation are
+                       retinted by their normalized heat. See
+                       :mod:`neuroslm.compiler.heat_overlay`.
+        dpi:           PNG rasterization DPI baked into the DOT source. Default
+                       96 (graphviz default); bump to 150+ for sharper PNG.
+                       Ignored by SVG / PDF outputs.
+        spring_gain:   Ideal edge length (K) for spring-based engines. Only
+                       used when *engine* is ``"fdp"`` / ``"sfdp"`` / ``"neato"``.
+                       Configurable via ``[nfg].spring_gain`` in brian.toml.
+        panel_opacity: Alpha for cluster panel backgrounds (0.0 = fully
+                       transparent, 1.0 = fully opaque). Useful with
+                       ``circo``/``fdp`` where clusters can overlap.
+                       Configurable via ``[nfg].panel_opacity`` in brian.toml.
 
     Returns:
         A complete DOT source string ready for ``dot -Tpng`` or
@@ -437,7 +487,7 @@ def emit_dot_from_hypergraph(
     heat_map: Dict[str, float] = load_heat_source(heat)
 
     g = graphviz.Digraph("nfg", engine=engine)
-    g.attr(**_graph_attrs(engine, dpi=dpi))
+    g.attr(**_graph_attrs(engine, dpi=dpi, spring_gain=spring_gain))
     if title:
         g.attr(label=_escape_label(title))
 
@@ -446,7 +496,8 @@ def emit_dot_from_hypergraph(
     if arch_nodes:
         with g.subgraph(name="cluster_architecture") as c:
             c.attr(label="architecture", style="rounded,dashed",
-                   color="#888888", fontsize="14", bgcolor="#fafafa")
+                   color="#888888", fontsize="14",
+                   bgcolor=_hex_with_alpha("#fafafa", panel_opacity))
             for n in arch_nodes:
                 style = _KIND_STYLES["architecture"]
                 c.node(n.name, label=_arch_label(n), **style)
@@ -465,17 +516,12 @@ def emit_dot_from_hypergraph(
         with g.subgraph(name=f"cluster_{region}") as c:
             c.attr(label=style["label"], style="rounded,dashed",
                    color=style["color"], fontsize="13",
-                   bgcolor=style["fillcolor"])
+                   bgcolor=_hex_with_alpha(style["fillcolor"], panel_opacity))
             # rank=same forces all nodes in this anatomical region onto
             # a single horizontal row (the cluster becomes a wide
-            # horizontal band). Combined with rankdir=TB at the graph
-            # level, the clusters stack top-to-bottom as horizontal
-            # strata → landscape canvas. Without this, dot lays each
-            # cluster's nodes onto distinct ranks (turning every
-            # cluster into a vertical column, breaking the readable
-            # left→right flow the user wants). No glue / wrap helper
-            # this time — accept that wide clusters (e.g. executive
-            # with 9 modules) make the canvas wider, that's fine.
+            # horizontal band). With pack=true at the graph level,
+            # narrow clusters get tiled side-by-side rather than
+            # leaving white space around centered single rows.
             c.attr(rank="same")
             for n in nodes_in_region:
                 # Tint each population's fill by its region so they stay
@@ -502,7 +548,7 @@ def emit_dot_from_hypergraph(
         with g.subgraph(name="cluster_multi_cortex") as c:
             c.attr(label=style["label"], style="rounded,solid",
                    color=style["color"], fontsize="13",
-                   bgcolor=style["fillcolor"])
+                   bgcolor=_hex_with_alpha(style["fillcolor"], panel_opacity))
             # Single horizontal row: lm_trunk + cortex experts side
             # by side (same rationale as the anatomical regions above).
             c.attr(rank="same")
@@ -518,7 +564,8 @@ def emit_dot_from_hypergraph(
     if nt_nodes:
         with g.subgraph(name="cluster_neurotransmitters") as c:
             c.attr(label="neurotransmitters", style="rounded,dashed",
-                   color="#7a6b00", fontsize="14", bgcolor="#fffcec")
+                   color="#7a6b00", fontsize="14",
+                   bgcolor=_hex_with_alpha("#fffcec", panel_opacity))
             # 7 NTs sit at the top as a single broadcast-bus row —
             # matches the brain's "neuromodulators are global, not
             # hierarchical" mental model.
@@ -670,20 +717,24 @@ def render_hypergraph(
     title: Optional[str] = None,
     heat: Optional[Any] = None,
     dpi: int = 96,
+    spring_gain: float = 0.9,
+    panel_opacity: float = 1.0,
 ) -> str:
     """Render the hypergraph to disk.
 
     Args:
-        ir:        the hypergraph
-        out_path:  destination path; suffix is overridden by *format* unless
-                   *format* is ``"dot"`` (in which case the DOT text is
-                   written verbatim — no external binary needed).
-        format:    ``"png"`` / ``"svg"`` / ``"pdf"`` / ``"dot"``
-        engine:    Graphviz layout engine (``"dot"`` default, also
-                   ``"neato"`` / ``"sfdp"`` / ``"fdp"`` / ``"circo"``)
-        title:     optional title for the rendered diagram.
-        heat:      optional heatmap overlay (see :func:`emit_dot_from_hypergraph`).
-        dpi:       PNG rasterization DPI (default 96). Ignored by SVG/PDF.
+        ir:            the hypergraph
+        out_path:      destination path; suffix is overridden by *format* unless
+                       *format* is ``"dot"`` (in which case the DOT text is
+                       written verbatim — no external binary needed).
+        format:        ``"png"`` / ``"svg"`` / ``"pdf"`` / ``"dot"``
+        engine:        Graphviz layout engine (``"dot"`` default, also
+                       ``"neato"`` / ``"sfdp"`` / ``"fdp"`` / ``"circo"``)
+        title:         optional title for the rendered diagram.
+        heat:          optional heatmap overlay (see :func:`emit_dot_from_hypergraph`).
+        dpi:           PNG rasterization DPI (default 96). Ignored by SVG/PDF.
+        spring_gain:   K parameter for spring-based engines (fdp/sfdp/neato).
+        panel_opacity: Alpha for cluster panel backgrounds (0.0–1.0).
 
     Returns:
         Absolute path to the file actually written.
@@ -691,7 +742,8 @@ def render_hypergraph(
     from pathlib import Path as _Path
 
     dot_src = emit_dot_from_hypergraph(
-        ir, engine=engine, title=title, heat=heat, dpi=dpi)
+        ir, engine=engine, title=title, heat=heat, dpi=dpi,
+        spring_gain=spring_gain, panel_opacity=panel_opacity)
     out = _Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -724,6 +776,8 @@ def render_arch(
     title: Optional[str] = None,
     heat: Optional[Any] = None,
     dpi: int = 96,
+    spring_gain: float = 0.9,
+    panel_opacity: float = 1.0,
 ) -> str:
     """Convenience: lift an arch folder and render in one call."""
     from neuroslm.compiler.hypergraph_ir import lift_arch_to_hypergraph
@@ -735,4 +789,5 @@ def render_arch(
         except Exception:
             title = None
     return render_hypergraph(ir, out_path, format=format,
-                             engine=engine, title=title, heat=heat, dpi=dpi)
+                             engine=engine, title=title, heat=heat, dpi=dpi,
+                             spring_gain=spring_gain, panel_opacity=panel_opacity)

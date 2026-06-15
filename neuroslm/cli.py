@@ -280,6 +280,8 @@ def cmd_compile_nfg(args: argparse.Namespace) -> int:
             args._cfg_formats = list(cfg.nfg_formats)
             args._cfg_output_paths = cfg.nfg_output_paths(heat=bool(heat))
         args._cfg_dpi = cfg.nfg_dpi
+        args._cfg_spring_gain = cfg.nfg_spring_gain
+        args._cfg_panel_opacity = cfg.nfg_panel_opacity
         print(
             f"current: {source_label}  ->  {resolved_out}"
             + (" (heat overlay)" if heat else "")
@@ -331,6 +333,8 @@ def _cmd_compile_nfg_graphviz(args: argparse.Namespace,
     out_format = getattr(args, "format", "png") or "png"
     engine = getattr(args, "engine", "dot") or "dot"
     dpi = int(getattr(args, "_cfg_dpi", 96) or 96)
+    spring_gain = float(getattr(args, "_cfg_spring_gain", 0.9) or 0.9)
+    panel_opacity = float(getattr(args, "_cfg_panel_opacity", 1.0) or 1.0)
 
     # --png overrides --format implicitly to png
     if args.png:
@@ -369,6 +373,7 @@ def _cmd_compile_nfg_graphviz(args: argparse.Namespace,
             written = render_hypergraph(
                 ir, target_path, format=fmt, engine=engine, title=title,
                 heat=getattr(args, "heat", None), dpi=dpi,
+                spring_gain=spring_gain, panel_opacity=panel_opacity,
             )
             written_list.append(written)
     except Exception as e:

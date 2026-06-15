@@ -15,6 +15,8 @@ or DNA every training/deploy/colab script targets**. It reads a tiny
                                           # --current` writes the diagram
     format = "png"                       # png | svg | pdf | dot
     engine = "dot"                       # dot | neato | sfdp | fdp | circo
+    spring_gain = 0.9                    # K for spring engines
+    panel_opacity = 1.0                  # 0.0–1.0 alpha for cluster panels
 
 Six fields, one decision per field. The training scripts
 (``vast_train_dsl_loop.sh``, ``vast_train_dna_loop.sh``,
@@ -22,9 +24,9 @@ Six fields, one decision per field. The training scripts
 :func:`ProjectConfig.training_target` so a one-line edit to
 ``brian.toml`` re-targets every script in the repo.
 
-Env-var overrides (``BRIAN_ARCH``, ``BRIAN_DNA``, ``BRIAN_NFG_OUTPUT``)
-keep existing vast.ai pipelines working — they take priority over the
-file.
+Env-var overrides (``BRIAN_ARCH``, ``BRIAN_DNA``, ``BRIAN_NFG_OUTPUT``,
+``BRIAN_NFG_SPRING_GAIN``, ``BRIAN_NFG_PANEL_OPACITY``) keep existing
+vast.ai pipelines working — they take priority over the file.
 
 The contract is locked by ``tests/test_project_config.py``.
 """
@@ -67,6 +69,10 @@ _DEFAULT_NFG_FORMATS: List[str] = ["png", "svg"]
 # file size — a reasonable middle for inline previews. SVG ignores it.
 _DEFAULT_NFG_DPI = 150
 _DEFAULT_NFG_ENGINE = "dot"
+# Ideal edge length (K) for spring-based engines (fdp/sfdp/neato).
+_DEFAULT_NFG_SPRING_GAIN = 0.9
+# Cluster panel background opacity (0.0 = transparent, 1.0 = opaque).
+_DEFAULT_NFG_PANEL_OPACITY = 1.0
 _DEFAULT_PRESET = ""
 _DEFAULT_HARDWARE = ""
 _DEFAULT_STEPS = 0  # 0 = "no opinion — caller picks"
@@ -142,6 +148,10 @@ class ProjectConfig:
     # PNG rasterization DPI (graphviz ``-Gdpi=``). SVG output ignores it.
     nfg_dpi: int = _DEFAULT_NFG_DPI
     nfg_engine: str = _DEFAULT_NFG_ENGINE
+    # Spring constant K for fdp/sfdp/neato engines.
+    nfg_spring_gain: float = _DEFAULT_NFG_SPRING_GAIN
+    # Cluster panel background alpha (0.0–1.0).
+    nfg_panel_opacity: float = _DEFAULT_NFG_PANEL_OPACITY
     # ── Global training defaults ──
     # Read from the ``[defaults]`` section of ``brian.toml``. Empty means
     # "no opinion — let the arch or CLI decide". Merged into a parsed
@@ -418,6 +428,8 @@ def load_project_config(
     nfg_format = nfg_formats[0]
     nfg_dpi = int(nfg_section.get("dpi", _DEFAULT_NFG_DPI))
     nfg_engine = str(nfg_section.get("engine", _DEFAULT_NFG_ENGINE))
+    nfg_spring_gain = float(nfg_section.get("spring_gain", _DEFAULT_NFG_SPRING_GAIN))
+    nfg_panel_opacity = float(nfg_section.get("panel_opacity", _DEFAULT_NFG_PANEL_OPACITY))
     default_preset = str(defaults_section.get("preset", _DEFAULT_PRESET))
     default_hardware = str(
         defaults_section.get("hardware", _DEFAULT_HARDWARE)
@@ -453,6 +465,8 @@ def load_project_config(
     env_nfg_formats = os.environ.get("BRIAN_NFG_FORMATS")
     env_nfg_dpi = os.environ.get("BRIAN_NFG_DPI")
     env_nfg_engine = os.environ.get("BRIAN_NFG_ENGINE")
+    env_nfg_spring_gain = os.environ.get("BRIAN_NFG_SPRING_GAIN")
+    env_nfg_panel_opacity = os.environ.get("BRIAN_NFG_PANEL_OPACITY")
     env_default_preset = os.environ.get("BRIAN_DEFAULT_PRESET")
     env_default_hardware = os.environ.get("BRIAN_DEFAULT_HARDWARE")
     env_default_steps = os.environ.get("BRIAN_DEFAULT_STEPS")
@@ -505,6 +519,16 @@ def load_project_config(
             pass  # leave whatever the file said
     if env_nfg_engine:
         nfg_engine = env_nfg_engine
+    if env_nfg_spring_gain:
+        try:
+            nfg_spring_gain = float(env_nfg_spring_gain)
+        except ValueError:
+            pass
+    if env_nfg_panel_opacity:
+        try:
+            nfg_panel_opacity = float(env_nfg_panel_opacity)
+        except ValueError:
+            pass
     if env_default_preset is not None:
         default_preset = env_default_preset
     if env_default_hardware is not None:
@@ -559,6 +583,8 @@ def load_project_config(
         nfg_formats=nfg_formats,
         nfg_dpi=nfg_dpi,
         nfg_engine=nfg_engine,
+        nfg_spring_gain=nfg_spring_gain,
+        nfg_panel_opacity=nfg_panel_opacity,
         default_preset=default_preset,
         default_hardware=default_hardware,
         default_steps=default_steps,

@@ -186,6 +186,78 @@ class TestEmitDotFromHypergraph:
         dot = emit_dot_from_hypergraph(self._ir(), engine="neato")
         assert isinstance(dot, str) and len(dot) > 100
 
+    def test_circo_engine_produces_valid_dot(self):
+        """`engine='circo'` (circular layout) returns a valid DOT string."""
+        from neuroslm.compiler.nfg_graphviz import emit_dot_from_hypergraph
+        dot = emit_dot_from_hypergraph(self._ir(), engine="circo")
+        assert isinstance(dot, str) and len(dot) > 100
+        assert "digraph" in dot
+
+    def test_spring_gain_appears_in_fdp_graph_attrs(self):
+        """`spring_gain` feeds K= into fdp/sfdp graph attrs."""
+        from neuroslm.compiler.nfg_graphviz import _graph_attrs
+        attrs = _graph_attrs("fdp", dpi=96, spring_gain=1.5)
+        assert attrs.get("K") == "1.5", f"expected K=1.5, got {attrs}"
+
+    def test_spring_gain_appears_in_sfdp_graph_attrs(self):
+        from neuroslm.compiler.nfg_graphviz import _graph_attrs
+        attrs = _graph_attrs("sfdp", dpi=96, spring_gain=0.4)
+        assert attrs.get("K") == "0.4"
+
+    def test_spring_gain_not_in_dot_attrs(self):
+        """dot engine ignores spring_gain (it's not a spring-based engine)."""
+        from neuroslm.compiler.nfg_graphviz import _graph_attrs
+        attrs = _graph_attrs("dot", dpi=96, spring_gain=1.5)
+        assert "K" not in attrs
+
+    def test_panel_opacity_1_produces_no_alpha(self):
+        """Fully opaque (default) clusters must NOT emit #RRGGBBAA colours."""
+        import re
+        from neuroslm.compiler.nfg_graphviz import emit_dot_from_hypergraph
+        dot = emit_dot_from_hypergraph(self._ir(), panel_opacity=1.0)
+        rgba_pat = re.compile(r'#[0-9a-fA-F]{8}\b')
+        assert not rgba_pat.search(dot), "opacity=1.0 should produce no alpha hex"
+
+    def test_panel_opacity_half_produces_rgba_clusters(self):
+        """panel_opacity=0.5 must produce at least one #RRGGBBAA colour."""
+        import re
+        from neuroslm.compiler.nfg_graphviz import emit_dot_from_hypergraph
+        dot = emit_dot_from_hypergraph(self._ir(), panel_opacity=0.5)
+        rgba_pat = re.compile(r'#[0-9a-fA-F]{8}\b')
+        assert rgba_pat.search(dot), "opacity<1.0 must produce #RRGGBBAA hex in DOT"
+
+
+class TestHexWithAlpha:
+    """Unit tests for the _hex_with_alpha colour helper."""
+
+    def test_opaque_unchanged(self):
+        from neuroslm.compiler.nfg_graphviz import _hex_with_alpha
+        assert _hex_with_alpha("#f5e8ff", 1.0) == "#f5e8ff"
+
+    def test_fully_transparent(self):
+        from neuroslm.compiler.nfg_graphviz import _hex_with_alpha
+        assert _hex_with_alpha("#f5e8ff", 0.0) == "#f5e8ff00"
+
+    def test_half_opacity(self):
+        from neuroslm.compiler.nfg_graphviz import _hex_with_alpha
+        result = _hex_with_alpha("#f5e8ff", 0.5)
+        # 0.5 * 255 = 127.5 → round → 128 → 0x80
+        assert result == "#f5e8ff80"
+
+    def test_75_percent_opacity(self):
+        from neuroslm.compiler.nfg_graphviz import _hex_with_alpha
+        result = _hex_with_alpha("#ffffff", 0.75)
+        # 0.75 * 255 = 191.25 → round → 191 → 0xbf
+        assert result == "#ffffffbf"
+
+    def test_non_hex_color_unchanged(self):
+        from neuroslm.compiler.nfg_graphviz import _hex_with_alpha
+        assert _hex_with_alpha("white", 0.5) == "white"
+
+    def test_existing_alpha_is_replaced(self):
+        from neuroslm.compiler.nfg_graphviz import _hex_with_alpha
+        assert _hex_with_alpha("#f5e8ffff", 0.5) == "#f5e8ff80"
+
 
 # ───────────────────────────────────────────────────────────────────────
 # 3. Rendering (PNG/SVG) — requires `dot` binary on PATH

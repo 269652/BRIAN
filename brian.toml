@@ -12,7 +12,7 @@
 #   [current]    arch, dna
 #   [defaults]   preset, hardware, steps, branch
 #   [hardware.<NAME>]  preset                ← per-hardware override
-#   [nfg]        output, format, engine
+#   [nfg]        output, format, engine, spring_gain, panel_opacity
 #
 # Precedence (2026-06-12, locked by tests):
 #   1. CLI flag (--preset / --steps / --branch)  ← always wins
@@ -39,7 +39,8 @@
 # Env-var overrides:
 #   BRIAN_ARCH, BRIAN_DNA, BRIAN_DEFAULT_PRESET, BRIAN_DEFAULT_HARDWARE,
 #   BRIAN_DEFAULT_STEPS, BRIAN_DEFAULT_BRANCH, BRIAN_NFG_OUTPUT,
-#   BRIAN_NFG_FORMAT, BRIAN_NFG_ENGINE
+#   BRIAN_NFG_FORMAT, BRIAN_NFG_ENGINE, BRIAN_NFG_SPRING_GAIN,
+#   BRIAN_NFG_PANEL_OPACITY
 # ──────────────────────────────────────────────────────────────────
 
 [current]
@@ -149,12 +150,19 @@ formats = ["png", "svg"]
 # 150 dpi is ~1.56x sharper text/lines at the cost of ~2.4x file size.
 # SVG ignores this (it's vector).
 dpi = 150
-# Layout engine — vanilla ``"dot"`` with no external constraints.
-# Earlier experiments with rank=same forcing + invisible glue edges
-# (commit c19bf62) and fdp spring layout (commit 13b4c4c) were both
-# rejected: rank=same broke the green/grey clusters, fdp produced a
-# square 2538x2250 blob with no readable flow direction.
-# Vanilla dot relies on the back-edge DFS cycle-breaker
-# (_compute_back_edges in nfg_graphviz.py) to handle the 23 modulation
-# cycles; everything else is dot's natural hierarchical autolayout.
-engine = "dot"
+# Layout engine. Options: dot | neato | fdp | sfdp | circo
+# dot    → hierarchical layered DAG (default; best for flow diagrams)
+# circo  → circular layout (nodes on rings; good for symmetric / cyclic graphs)
+# fdp    → force-directed spring layout (cluster-aware; tried 2026-06, produced
+#           a square blob — re-enable with a lower spring_gain if desired)
+engine = "neato"
+
+# Ideal edge length (K) for spring-based engines (fdp / sfdp / neato).
+# Lower = denser / tighter clusters; higher = more spread.
+# Ignored by dot and circo.
+spring_gain = 0.9
+
+# Cluster panel background opacity (0.0 = fully transparent, 1.0 = fully opaque).
+# Useful with circo / fdp where anatomical region panels can overlap.
+# SVG and PNG both honour RGBA hex colours (#RRGGBBAA) from Graphviz 2.x onward.
+panel_opacity = 0.40
