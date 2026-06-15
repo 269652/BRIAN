@@ -97,6 +97,18 @@ push_every = 2500
 push_backend = "hf"
 hf_repo_id = "moritzroessler/BRIAN"
 
+# ── push_optimizer (2026-06-15) ──
+# When false (the default), the HF uploader strips Adam state (m+v)
+# from each push. Saves ~2/3 of the upload size for a 107M trunk
+# (1.4 GB → ~430 MB). Trade-off: a resume FROM A FRESH BOX off the HF
+# copy shows a ~500-step LR-warmup-shape blip while Adam re-builds
+# its 2nd-moment EMA from zero. Same-box crash resume is unaffected
+# — the local lfs_checkpoints/.../step*.pt always has full state.
+#
+# Set to true if bandwidth is cheap and you want the HF copy to be a
+# perfect resume target with no Adam warmup penalty.
+push_optimizer = false
+
 [hardware.A100]
 preset = "large"
 

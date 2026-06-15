@@ -99,6 +99,16 @@ _DEFAULT_PUSH_EVERY = 500
 _DEFAULT_PUSH_BACKEND = "hf"
 _DEFAULT_HF_REPO_ID = "moritzroessler/BRIAN"
 
+# ── push_optimizer (2026-06-15) ──────────────────────────────────────
+# When False (default), :func:`push_checkpoint_to_hf` strips the
+# ``optimizer`` key from the uploaded payload — saves ~2/3 of the
+# file size (weights+m+v → weights only). The on-disk ``.pt`` always
+# keeps the full state for same-box resume; the strip only affects
+# what crosses the wire. Set True for the rare case where bandwidth
+# is cheap and you want the HF copy to be a perfect resume target
+# (no ~500-step LR-warmup-shape recovery curve).
+_DEFAULT_PUSH_OPTIMIZER = False
+
 
 # ─── data class ──────────────────────────────────────────────────────
 
@@ -150,6 +160,13 @@ class ProjectConfig:
     # ``CHECKPOINT_PUSH_BACKEND`` and ``HF_REPO_ID`` envs.
     default_push_backend: str = _DEFAULT_PUSH_BACKEND
     default_hf_repo_id: str = _DEFAULT_HF_REPO_ID
+    # ``default_push_optimizer``: when False (the default),
+    # ``push_checkpoint_to_hf`` strips the Adam state from the
+    # uploaded ``.pt`` (saves ~2/3 of the file size for a 107 M
+    # trunk). Local same-box resume is unaffected — the on-disk
+    # ``.pt`` always has full optimiser state. See
+    # ``neuroslm.checkpoint_push._maybe_strip_optimizer``.
+    default_push_optimizer: bool = _DEFAULT_PUSH_OPTIMIZER
     # ── Per-hardware preset map ──
     # ``[hardware.<NAME>] preset = "..."`` sections feed this dict.
     # Looked up by ``cli._resolve_effective_preset`` AFTER the arch's
@@ -345,6 +362,9 @@ def load_project_config(
     default_hf_repo_id = str(
         defaults_section.get("hf_repo_id", _DEFAULT_HF_REPO_ID)
     )
+    default_push_optimizer = bool(
+        defaults_section.get("push_optimizer", _DEFAULT_PUSH_OPTIMIZER)
+    )
 
     # ── env-var overrides (BRIAN_ prefix to avoid collisions) ──
     env_arch = os.environ.get("BRIAN_ARCH")
@@ -363,6 +383,9 @@ def load_project_config(
         "BRIAN_DEFAULT_PUSH_BACKEND"
     )
     env_default_hf_repo_id = os.environ.get("BRIAN_DEFAULT_HF_REPO_ID")
+    env_default_push_optimizer = os.environ.get(
+        "BRIAN_DEFAULT_PUSH_OPTIMIZER"
+    )
 
     if env_arch:
         arch = env_arch
@@ -416,6 +439,13 @@ def load_project_config(
         default_push_backend = env_default_push_backend
     if env_default_hf_repo_id:
         default_hf_repo_id = env_default_hf_repo_id
+    if env_default_push_optimizer is not None and \
+            env_default_push_optimizer != "":
+        # Permissive parse: "true"/"1"/"yes"/"on" → True, anything
+        # else (incl. "false"/"0"/"no"/"off") → False. Mirrors the
+        # truthy semantics most CLI users expect from a bool env.
+        default_push_optimizer = env_default_push_optimizer.strip().lower() \
+            in ("1", "true", "yes", "on")
 
     return ProjectConfig(
         repo_root=repo_root,
@@ -433,6 +463,7 @@ def load_project_config(
         default_push_every=default_push_every,
         default_push_backend=default_push_backend,
         default_hf_repo_id=default_hf_repo_id,
+        default_push_optimizer=default_push_optimizer,
         hardware_presets=hardware_presets,
     )
 
