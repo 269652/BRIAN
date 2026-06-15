@@ -73,7 +73,9 @@
       "Bash(.venv/Scripts/python.exe -m neuroslm.cli ai --help)",
       "Bash(mv COLAB_README.md docs/archive/2026-05-25_colab_readme.md)",
       "Bash(mv COLAB_DPO_README.md docs/archive/2026-05-25_colab_dpo_readme.md)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(.venv/Scripts/brian.exe test *)",
+      "Bash(git fetch *)"
     ]
   }
 }

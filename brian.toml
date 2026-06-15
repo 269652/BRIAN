@@ -79,9 +79,9 @@ branch = "master"
 # failure) can never eat more than ~500 steps of progress. Set
 # push_every = 0 to disable pushes entirely (back to "save locally
 # only" behaviour).
-log_every = 20
+log_every = 100
 save_every = 500    
-push_every = 500
+push_every = 2500
 
 # ── Checkpoint push backend (2026-06-15) ──
 # Default flipped from Git LFS to HuggingFace Hub after run 41063959
