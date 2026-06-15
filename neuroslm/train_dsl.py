@@ -398,8 +398,18 @@ def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
                 f"trainable Parameter."
             )
 
-    n_params = sum(p.numel() for p in harness.parameters())
-    print(f"[train_dsl] DSL-LM parameters: {n_params/1e6:.1f}M")
+    n_total     = sum(p.numel() for p in harness.parameters())
+    n_trainable = sum(p.numel() for p in harness.parameters() if p.requires_grad)
+    n_frozen    = n_total - n_trainable
+    # Frozen-fraction is what tells you "this number looks huge because
+    # of the HF experts loaded into multi_cortex.experts.*" — keeps the
+    # 1.1 B total honest while making the ~30 M trainable trunk visible.
+    print(
+        f"[train_dsl] DSL-LM parameters: total {n_total/1e6:.1f}M  "
+        f"(trainable {n_trainable/1e6:.1f}M · frozen {n_frozen/1e6:.1f}M); "
+        f"checkpoint will only save the trainable subset "
+        f"(frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)"
+    )
     return harness
 
 

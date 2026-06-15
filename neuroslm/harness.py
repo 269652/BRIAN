@@ -2750,14 +2750,42 @@ class BRIANHarness(nn.Module):
 
     def topology_summary(self) -> str:
         """Human-readable topology string. Mirrors Brain.topology_summary().
+
+        Breaks the parameter count down three ways so the LFS
+        checkpoint-size question never has to be asked again:
+
+          * ``total``     — every tensor in the forward graph
+                            (trunk + frozen HF experts).
+          * ``trainable`` — parameters that actually receive gradients
+                            (the trunk). This is the number that matters
+                            for "model capacity that's being learned".
+          * ``saved``     — parameters that ``save_checkpoint`` actually
+                            writes to disk (= trainable + any frozen-but-
+                            persisted heads). For the multi-cortex MoE
+                            setup this should equal ``trainable`` because
+                            the frozen HF experts are excluded via
+                            :data:`_CKPT_EXTERNAL_PREFIXES`.
+
+        The estimated checkpoint size assumes float32 (4 bytes/param)
+        which is the BRIANHarness default; bf16 mixed-precision training
+        still saves master weights in fp32 so the estimate stays honest.
         """
-        n_params = sum(p.numel() for p in self.parameters())
-        n_pops = sum(1 for _ in self.circuit.children())
+        all_params = list(self.parameters())
+        n_total     = sum(p.numel() for p in all_params)
+        n_trainable = sum(p.numel() for p in all_params if p.requires_grad)
+        # Computing the persistable count walks the full state_dict
+        # once; cheap on a 30 M-trunk and a one-off operation.
+        n_saved     = sum(t.numel() for t in self._persistable_state_dict().values())
+        ckpt_mb     = n_saved * 4 / (1024 * 1024)  # fp32 → MB
+        n_pops      = sum(1 for _ in self.circuit.children())
         return (
             f"BRIANHarness:\n"
             f"  vocab_size = {self.vocab_size}\n"
             f"  d_sem      = {self.d_sem}\n"
-            f"  parameters = {n_params:,}\n"
+            f"  parameters = {n_total:,}  "
+            f"(trainable {n_trainable:,} · frozen {n_total - n_trainable:,})\n"
+            f"  checkpoint = {n_saved:,} params ≈ {ckpt_mb:.1f} MB (fp32) "
+            f"— frozen HF experts excluded\n"
             f"  circuit populations = {n_pops}\n"
             f"  sink population = {self.sink_population}\n"
             f"  loss clipping = {self.training_config.loss_clipping.enabled} "
