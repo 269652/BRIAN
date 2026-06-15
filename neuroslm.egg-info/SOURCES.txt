@@ -253,15 +253,20 @@ neuroslm/verification/triple_guard.py
 neuroslm/verification/verifier.py
 tests/test_adaptive_mixture_direction.py
 tests/test_adaptive_mixture_stability.py
+tests/test_arch_lm_trunk_wiring.py
 tests/test_brain_forward.py
 tests/test_branching_ema.py
 tests/test_brian_deploy_defaults.py
 tests/test_brian_harness.py
 tests/test_brian_logs.py
+tests/test_brian_no_verify_flag.py
+tests/test_brian_test_subcommands.py
 tests/test_cdga.py
 tests/test_checkpoint_excludes_frozen_experts.py
 tests/test_checkpoint_path_layout.py
 tests/test_checkpoint_push_cadence.py
+tests/test_checkpoint_push_hf.py
+tests/test_checkpoint_push_strip_optimizer.py
 tests/test_clean.py
 tests/test_clean_lfs.py
 tests/test_cli_commands.py
@@ -306,6 +311,7 @@ tests/test_grad_heat.py
 tests/test_hardware_aware_preset_selection.py
 tests/test_harness_heatmap_hook.py
 tests/test_harness_schedule.py
+tests/test_harness_topology_summary.py
 tests/test_heatmap_publisher.py
 tests/test_hooks.py
 tests/test_hotpath_mutator.py
@@ -326,6 +332,7 @@ tests/test_memory.py
 tests/test_mid_ood_uses_lm_only_loss.py
 tests/test_migrate_framework.py
 tests/test_migration_0001.py
+tests/test_module_bundler_at_lib_alignment.py
 tests/test_module_bundler_basic.py
 tests/test_module_bundler_es6.py
 tests/test_modules.py
@@ -336,8 +343,10 @@ tests/test_narrative_memory.py
 tests/test_neurochem.py
 tests/test_nfg_cli_dna.py
 tests/test_nfg_full_coverage.py
+tests/test_nfg_funnel_edges.py
 tests/test_nfg_graphviz.py
 tests/test_nfg_heat_overlay.py
+tests/test_nfg_nt_colour_quotes.py
 tests/test_nrcstk_metabolic.py
 tests/test_nucleotide_codec.py
 tests/test_ood_optimizations.py
@@ -348,6 +357,7 @@ tests/test_phi.py
 tests/test_predictive_coding_residual.py
 tests/test_project_config.py
 tests/test_proposal_gate.py
+tests/test_qualia_affective_wiring.py
 tests/test_recursive_reasoning.py
 tests/test_references_exact_only.py
 tests/test_regularizer_warmup.py

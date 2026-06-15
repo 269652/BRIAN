@@ -287,6 +287,103 @@ def _resolve_hf_token(explicit: Optional[str]) -> Optional[str]:
         return None
 
 
+def _maybe_strip_optimizer(
+        ckpt_path: str, push_optimizer: bool):
+    """Resolve the path that ``upload_file`` should actually transmit.
+
+    If ``push_optimizer`` is True (explicit opt-in for end-of-training
+    or "perfect resume target" pushes), return the original
+    ``ckpt_path`` and a no-op cleanup — the full ``weights+m+v``
+    payload goes on the wire.
+
+    If ``push_optimizer`` is False (the default after 2026-06-15),
+    load the ``.pt`` via ``torch.load``, pop the ``"optimizer"`` key,
+    re-save to ``<ckpt_path>.strip.tmp`` beside the original, and
+    return ``(temp_path, cleanup_fn)``. The caller is responsible
+    for calling ``cleanup_fn()`` after the upload finishes (success
+    OR failure) — that's why we return the cleanup as a closure
+    instead of using a context manager, so the call-site can wrap
+    the upload in its own ``try/finally``.
+
+    Failure modes are all "fail soft, upload the original" so a
+    corrupt ckpt or a torch-less environment never blocks the push:
+
+    * ``torch`` not importable → upload as-is (with a printed notice).
+    * ``torch.load`` raises    → upload as-is.
+    * Payload has no ``"optimizer"`` key already → upload as-is
+      (avoids an unnecessary re-save of small ckpts).
+
+    Returns
+    -------
+    (str, Callable[[], None])
+        ``(path_to_upload, cleanup_fn)``.
+    """
+    _noop = lambda: None  # noqa: E731 — local-scope sentinel
+
+    if push_optimizer:
+        return ckpt_path, _noop
+
+    try:
+        import torch  # lazy: keeps checkpoint_push importable w/o torch
+    except ImportError:
+        print(
+            "[ckpt_push] ⚠ torch not importable; uploading full ckpt "
+            "(cannot strip optimizer state)",
+            flush=True,
+        )
+        return ckpt_path, _noop
+
+    try:
+        payload = torch.load(
+            ckpt_path, map_location="cpu", weights_only=False)
+    except Exception as e:
+        print(
+            f"[ckpt_push] ⚠ could not torch.load {ckpt_path} for "
+            f"strip ({e}); uploading full ckpt as-is",
+            flush=True,
+        )
+        return ckpt_path, _noop
+
+    if not isinstance(payload, dict) or "optimizer" not in payload:
+        # Nothing to strip. Skip the re-save: cheaper to upload the
+        # original than to re-serialise small ckpts that never had
+        # optimiser state in the first place (e.g. eval-only or
+        # legacy step0 saves).
+        return ckpt_path, _noop
+
+    payload.pop("optimizer")
+    tmp_path = ckpt_path + ".strip.tmp"
+    try:
+        torch.save(payload, tmp_path)
+    except Exception as e:
+        # Re-save failed (disk full, weird filesystem). Fall back
+        # to full upload rather than blocking the push.
+        print(
+            f"[ckpt_push] ⚠ could not write strip temp "
+            f"{tmp_path} ({e}); uploading full ckpt as-is",
+            flush=True,
+        )
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        return ckpt_path, _noop
+
+    def cleanup():
+        try:
+            os.unlink(tmp_path)
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            print(
+                f"[ckpt_push] ⚠ could not delete strip temp "
+                f"{tmp_path}: {e}",
+                flush=True,
+            )
+
+    return tmp_path, cleanup
+
+
 def push_checkpoint_to_hf(
         ckpt_path: str,
         repo_id: Optional[str] = None,
@@ -294,6 +391,7 @@ def push_checkpoint_to_hf(
         token: Optional[str] = None,
         repo_root: Optional[str] = None,
         repo_type: str = "model",
+        push_optimizer: bool = False,
 ) -> None:
     """Upload a checkpoint (+ ``.mem`` sidecar if present) to a HF Hub
     model repo.
@@ -324,6 +422,22 @@ def push_checkpoint_to_hf(
     repo_type : str
         Forwarded to ``upload_file``; default ``"model"`` matches a
         HF Hub model repo.
+    push_optimizer : bool, default False
+        When False (the default), the ``"optimizer"`` key is stripped
+        from the uploaded payload via :func:`_maybe_strip_optimizer`.
+        For a 107 M trunk that's ~870 MB saved per push (Adam stores
+        ``m`` and ``v`` as separate fp32 tensors the same shape as
+        the params). The on-disk ``.pt`` is never mutated — the
+        strip happens in a temp file that's deleted after the
+        upload.
+
+        Set True for the final end-of-training push (so the HF copy
+        is a perfect resume target) or when bandwidth is cheap and
+        you want zero ~500-step LR-warmup-shape recovery on resume.
+
+        Same-box crash recovery is *unaffected* either way: the
+        local ``.pt`` in ``lfs_checkpoints/`` always has the full
+        optimiser state and that's what the resume path tries first.
 
     Returns
     -------
@@ -360,41 +474,54 @@ def push_checkpoint_to_hf(
             )
             return
 
-        # ── Upload .pt ──
+        # ── Upload .pt (optionally stripped of optimizer state) ──
+        # The strip + upload + cleanup is wrapped in an inner
+        # try/finally so the temp file is removed even if the
+        # upload raises (the outer except swallows it per the
+        # "never raise" contract).
         pt_path_in_repo = _hf_path_in_repo(ckpt_path, repo_root)
-        upload_file(
-            path_or_fileobj=ckpt_path,
-            path_in_repo=pt_path_in_repo,
-            repo_id=repo_id,
-            repo_type=repo_type,
-            token=tok,
-            commit_message=f"chkpt: {os.path.basename(ckpt_path)}",
-        )
-        print(
-            f"[ckpt_push] ✓ pushed {os.path.basename(ckpt_path)} → "
-            f"hf://{repo_id}/{pt_path_in_repo}",
-            flush=True,
-        )
-
-        # ── Upload .mem sidecar if present ──
-        mem_path = ckpt_path[:-3] + ".mem" if ckpt_path.endswith(".pt") \
-            else ckpt_path + ".mem"
-        if os.path.exists(mem_path):
-            mem_path_in_repo = _hf_path_in_repo(mem_path, repo_root)
+        pt_to_upload, cleanup_pt = _maybe_strip_optimizer(
+            ckpt_path, push_optimizer)
+        try:
             upload_file(
-                path_or_fileobj=mem_path,
-                path_in_repo=mem_path_in_repo,
+                path_or_fileobj=pt_to_upload,
+                path_in_repo=pt_path_in_repo,
                 repo_id=repo_id,
                 repo_type=repo_type,
                 token=tok,
-                commit_message=f"chkpt: {os.path.basename(mem_path)}",
+                commit_message=f"chkpt: {os.path.basename(ckpt_path)}",
             )
+            _strip_note = "" if push_optimizer else " (optimizer stripped)"
             print(
-                f"[ckpt_push] ✓ pushed sidecar "
-                f"{os.path.basename(mem_path)} → "
-                f"hf://{repo_id}/{mem_path_in_repo}",
+                f"[ckpt_push] ✓ pushed {os.path.basename(ckpt_path)}"
+                f"{_strip_note} → hf://{repo_id}/{pt_path_in_repo}",
                 flush=True,
             )
+
+            # ── Upload .mem sidecar if present ──
+            # Sidecar carries genetics-overlay state (small,
+            # ~kB-MB) — never has optimiser state, so the strip
+            # logic doesn't apply.
+            mem_path = ckpt_path[:-3] + ".mem" if ckpt_path.endswith(".pt") \
+                else ckpt_path + ".mem"
+            if os.path.exists(mem_path):
+                mem_path_in_repo = _hf_path_in_repo(mem_path, repo_root)
+                upload_file(
+                    path_or_fileobj=mem_path,
+                    path_in_repo=mem_path_in_repo,
+                    repo_id=repo_id,
+                    repo_type=repo_type,
+                    token=tok,
+                    commit_message=f"chkpt: {os.path.basename(mem_path)}",
+                )
+                print(
+                    f"[ckpt_push] ✓ pushed sidecar "
+                    f"{os.path.basename(mem_path)} → "
+                    f"hf://{repo_id}/{mem_path_in_repo}",
+                    flush=True,
+                )
+        finally:
+            cleanup_pt()
     except Exception as e:
         print(
             f"[ckpt_push] ⚠ HF push failed: {type(e).__name__}: {e}",
@@ -415,6 +542,7 @@ def push_checkpoint(
         # HF-specific kwargs (ignored by LFS path)
         repo_id: Optional[str] = None,
         token: Optional[str] = None,
+        push_optimizer: bool = False,
 ) -> None:
     """Push a checkpoint via the configured backend.
 
@@ -431,6 +559,12 @@ def push_checkpoint(
       any remote push at all)
 
     Unknown values fall through to the HF path with a warning.
+
+    ``push_optimizer`` (HF only): False (default) strips Adam state
+    from the upload (saves ~2/3 of the file size); True keeps the
+    full payload. See :func:`push_checkpoint_to_hf` for the
+    bandwidth-vs-resume-fidelity trade-off. Ignored by the LFS
+    backend, which always uploads the full file.
 
     All errors inside the chosen backend are swallowed — see the
     per-backend "never raise" contracts.
@@ -449,6 +583,7 @@ def push_checkpoint(
         push_checkpoint_to_hf(
             ckpt_path, repo_id=repo_id,
             token=token, repo_root=repo_root,
+            push_optimizer=push_optimizer,
         )
         return
 
@@ -459,6 +594,7 @@ def push_checkpoint(
     )
     push_checkpoint_to_hf(
         ckpt_path, repo_id=repo_id, token=token, repo_root=repo_root,
+        push_optimizer=push_optimizer,
     )
 
 
