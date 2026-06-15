@@ -1031,11 +1031,20 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     # Default contract: recompile master arch → DNA → unfold into
     # ``architectures/current``. A non-zero return aborts the deploy
     # BEFORE any vast.ai call so the user never pays for a bad arch.
-    hook_rc = _run_hook("pre-deploy")
-    if hook_rc != 0:
-        print(f"[deploy] pre-deploy hook failed (exit {hook_rc}); aborting.",
-              file=sys.stderr)
-        return hook_rc
+    #
+    # Escape hatch: ``brian --no-verify deploy ...`` (or
+    # ``brian deploy --no-verify ...``) short-circuits the hook for
+    # quick-iteration cycles where the working tree is intentionally
+    # dirty or the hook is known-redundant. We ALWAYS print a notice
+    # so silent omission can't masquerade as a successful hook run.
+    if getattr(args, "no_verify", False):
+        print("[deploy] pre-deploy hook SKIPPED (--no-verify)")
+    else:
+        hook_rc = _run_hook("pre-deploy")
+        if hook_rc != 0:
+            print(f"[deploy] pre-deploy hook failed (exit {hook_rc}); aborting.",
+                  file=sys.stderr)
+            return hook_rc
 
     # ── Single config load: amortise the brian.toml read ──
     # All three CLI flags consult the same config; loading it once
@@ -2846,6 +2855,22 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="brian",
         description="Unified CLI for the NeuroSLM / BRIAN project.")
+    # Top-level escape hatch for pre-flight hooks (modelled after
+    # ``git commit --no-verify``). Today only ``brian deploy`` calls a
+    # hook (``pre-deploy``); future hook-calling commands inherit this
+    # flag automatically because it lives on the parent parser.
+    # Lives on BOTH parent and subparser so it works in either position:
+    #   brian --no-verify deploy   (parent slot)
+    #   brian deploy --no-verify   (subparser slot, see ``sd`` below)
+    # The subparser uses ``default=SUPPRESS`` so an unset subparser
+    # flag does NOT clobber the parent's value.
+    p.add_argument(
+        "--no-verify",
+        action="store_true",
+        default=False,
+        help="Skip pre-flight hooks (currently: pre-deploy). "
+             "Mirrors `git commit --no-verify`.",
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     # compile (group: `brian compile <arch>` for nn.Module, or
@@ -3067,6 +3092,19 @@ def _build_parser() -> argparse.ArgumentParser:
     sd.add_argument("--ood", type=int, nargs="?", const=3000,
                     help="Run mid-training OOD eval every N steps "
                          "(default 3000 if flag passed without value)")
+    # Subparser-slot alias for the top-level --no-verify flag so
+    # `brian deploy --no-verify` works as well as
+    # `brian --no-verify deploy`. ``default=SUPPRESS`` is critical:
+    # without it, parsing `brian --no-verify deploy` would have the
+    # subparser silently overwrite the parent's True with this
+    # subparser's False default, defeating the whole flag.
+    sd.add_argument(
+        "--no-verify",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Skip the pre-deploy hook (alias for top-level "
+             "`brian --no-verify deploy`).",
+    )
     sd.set_defaults(func=cmd_deploy)
 
     # deploy-100k

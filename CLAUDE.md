@@ -119,6 +119,64 @@ with the same. Don't reach for `pytest`.
 
 ---
 
+## 1d. Use the existing `.venv` — **never** create a new one
+
+The repo ships a single, canonical virtual environment at
+`./.venv/` with every dependency the project needs (torch, transformers,
+pytest, vastai, the editable `brian` console script, etc.). **Always
+use it.** Do not create `venv/`, `env/`, `.venv2/`, `conda` envs,
+`uv venv`, `poetry shell`, or any sibling environment "just for this
+task". Every drift between environments has, historically, produced a
+day of "works on my machine" debugging.
+
+**The one and only Python interpreter for this repo:**
+
+```
+.venv\Scripts\python.exe        # Windows (PowerShell / cmd)
+.venv/bin/python                # macOS / Linux
+```
+
+**Everything routes through it:**
+
+| What you want                  | The right invocation                                  |
+| ------------------------------ | ----------------------------------------------------- |
+| Run the CLI                    | `.venv\Scripts\brian.exe <subcommand>`                |
+| Run tests                      | `.venv\Scripts\brian.exe test <quick\|fast\|full\|PATH>` |
+| Run a one-off Python script    | `.venv\Scripts\python.exe path\to\script.py`          |
+| Install a new package          | `.venv\Scripts\pip.exe install <pkg>` (then update `requirements.txt` / `pyproject.toml`) |
+| Activate interactively         | `.venv\Scripts\Activate.ps1`                          |
+
+**Forbidden patterns** (immediate red flag in review):
+
+```
+# DON'T:
+python -m venv venv              # creates a SECOND env
+python -m venv .venv2            # same problem, different name
+uv venv                          # ditto
+conda create -n brian ...        # ditto
+python script.py                 # bare `python` -> whichever python is on PATH (often Python 2.7 or a system python)
+pip install foo                  # bare `pip` -> installs into the wrong env
+
+# DO:
+.venv\Scripts\python.exe script.py
+.venv\Scripts\pip.exe install foo
+.venv\Scripts\brian.exe test quick
+```
+
+The bare command `python` on Windows frequently resolves to
+`C:\Python27\python.exe` or the Microsoft Store stub — neither of
+which has any of this repo's dependencies. **Always use the absolute
+`.venv\Scripts\python.exe` path** (or activate first). If something
+"isn't installed", the answer is almost always *wrong interpreter*,
+not *missing package*.
+
+If `.venv` is somehow corrupted or missing, the correct fix is to
+delete it and re-create it **at the same path** with
+`python -m venv .venv && .venv\Scripts\pip.exe install -e .` —
+never to create it under a different name.
+
+---
+
 ## 2. No sycophancy
 
 - Don't preface answers with "Great question!", "You're absolutely
