@@ -86,18 +86,24 @@ def fake_repo(tmp_path: Path) -> Path:
 # ── reference index ───────────────────────────────────────────────────
 
 
-def test_index_picks_up_basename_and_glob(fake_repo: Path) -> None:
+def test_index_picks_up_basename_only(fake_repo: Path) -> None:
+    """Under the EXACT-ONLY contract (see
+    ``tests/test_references_exact_only.py``), only verbatim basename
+    citations register. Glob tokens are dropped on the floor."""
     idx = cl.build_reference_index(
         fake_repo,
         skip_dirs=("logs", "lfs_checkpoints", "docs/archive"),
     )
     # Basename from FINDINGS.md should be in `exact`.
     assert "neuroslm_keep_me_42M_step5000.pt" in idx.exact
-    # Glob token should be captured.
-    assert any("*" in g and g.endswith(".log") for g in idx.globs)
-    # Glob protects matching basenames.
-    assert idx.references("af758c381388_keep_me_glob_step2kof2k.log")
-    # Orphan must NOT register as referenced.
+    # Glob tokens are no longer stored ANYWHERE.
+    assert idx.globs == set(), \
+        f"globs should remain empty under exact-only matching, got {idx.globs!r}"
+    # Glob does NOT protect any matching basename — the doc author
+    # must write the exact basename to protect a file.
+    assert not idx.references("af758c381388_keep_me_glob_step2kof2k.log")
+    # Orphan likewise unreferenced (was unreferenced under the old
+    # contract too; preserved).
     assert not idx.references("orphan_run_step1k.log")
 
 
@@ -112,7 +118,13 @@ def test_finding_markers_detect_findings_md(fake_repo: Path) -> None:
 # ── plan: logs bucket ─────────────────────────────────────────────────
 
 
-def test_logs_plan_keeps_referenced_and_deletes_orphans(fake_repo: Path) -> None:
+def test_logs_plan_deletes_both_orphan_and_glob_only_log(
+    fake_repo: Path,
+) -> None:
+    """Under exact-only matching, BOTH logs in ``fake_repo`` end up on
+    the delete list — neither has its basename cited verbatim. The
+    glob ``20260614*_keep_me_glob_step2kof2k.log`` in FINDINGS.md no
+    longer protects the matching log file."""
     idx = cl.build_reference_index(
         fake_repo,
         skip_dirs=("logs", "lfs_checkpoints", "docs/archive"),
@@ -124,8 +136,14 @@ def test_logs_plan_keeps_referenced_and_deletes_orphans(fake_repo: Path) -> None
     delete_names = {p.name for p in plan.delete}
     kept_names = {p.name for p in plan.keep_referenced}
 
-    assert "af758c381388_keep_me_glob_step2kof2k.log" in kept_names
+    # Glob-only protection is gone: this log is now prunable.
+    assert "af758c381388_keep_me_glob_step2kof2k.log" in delete_names
+    # The orphan (always was prunable) still is.
     assert "orphan_run_step1k.log" in delete_names
+    # Nothing should land in keep_referenced — both logs were only
+    # ever referenced (if at all) via globs, which no longer count.
+    assert kept_names == set(), \
+        f"no logs should be kept under exact-only matching, got {kept_names!r}"
 
 
 def test_keep_recent_protects_newest(fake_repo: Path) -> None:
@@ -239,15 +257,29 @@ def test_dry_run_makes_no_filesystem_changes(fake_repo: Path) -> None:
 
 
 def test_force_deletes_orphan(fake_repo: Path) -> None:
+    """Under exact-only matching, only the EXACT basename
+    ``neuroslm_keep_me_42M_step5000.pt`` (cited verbatim in
+    ``fake_repo``'s FINDINGS.md) is reference-protected. To pin the
+    "referenced files survive --force" behaviour with a log, we add
+    an explicit verbatim citation to FINDINGS.md first."""
     orphan = fake_repo / "logs" / "vast" / "orphan_run_step1k.log"
-    referenced = fake_repo / "logs" / "vast" / "af758c381388_keep_me_glob_step2kof2k.log"
-    assert orphan.exists() and referenced.exists()
+    exact_ref_log = fake_repo / "logs" / "vast" / "exact_protected_log.log"
+    exact_ref_log.write_text("loss=0.5\n", encoding="utf-8")
+    # Add an exact-basename citation so the new contract protects it.
+    findings = fake_repo / "docs" / "FINDINGS.md"
+    findings.write_text(
+        findings.read_text(encoding="utf-8")
+        + "\nAlso see `exact_protected_log.log` for the H42 evidence.\n",
+        encoding="utf-8",
+    )
+    assert orphan.exists() and exact_ref_log.exists()
 
     rc = cl.run(["logs"], force=True, root=fake_repo, keep_recent=0,
                 use_git=False)
     assert rc == 0
     assert not orphan.exists(), "orphan should be gone after --force"
-    assert referenced.exists(), "referenced log must survive --force"
+    assert exact_ref_log.exists(), \
+        "exact-basename-cited log must survive --force"
 
 
 def test_all_bucket_expands_to_three(fake_repo: Path) -> None:
@@ -256,33 +288,29 @@ def test_all_bucket_expands_to_three(fake_repo: Path) -> None:
     assert rc == 0
 
 
-# ── uninformative globs must NOT match ────────────────────────────────
+# ── _is_informative_glob is a deprecation stub under exact-only ──────
 
 
-@pytest.mark.parametrize("bad_glob", ["*.pt", "*.log", "*.json", "*.mem",
-                                       "*.mem.json", "*", "*.md"])
-def test_uninformative_globs_rejected(bad_glob: str) -> None:
-    """A glob like `*.pt` must not be allowed to protect every checkpoint.
-
-    Regression: an early matcher was treating any `.gitignore` entry
-    like `*.pt` as a reference, which silently neutered the entire
-    delete plan — the dry-run showed `kept * referenced: 51` for 51
-    checkpoints in a repo with no actual reference to any of them.
-    """
-    assert not cl._is_informative_glob(bad_glob), (
-        f"{bad_glob!r} is too generic and must NOT be treated as a reference"
-    )
-
-
-@pytest.mark.parametrize("good_glob", [
+@pytest.mark.parametrize("any_glob", [
+    # The old "uninformative" set — all still rejected.
+    "*.pt", "*.log", "*.json", "*.mem", "*.mem.json", "*", "*.md",
+    # The old "informative" set — now ALSO rejected, because globs
+    # are not references at all under the new contract.
     "20260614*_step2kof2k.log",
     "neuroslm_large_*_step5000.pt",
     "*_keep_me_glob_*.log",
     "dsl_arch_20260531-*_step3000.pt",
 ])
-def test_informative_globs_accepted(good_glob: str) -> None:
-    assert cl._is_informative_glob(good_glob), (
-        f"{good_glob!r} has a distinctive literal segment and must be kept"
+def test_is_informative_glob_always_false_under_exact_only(
+    any_glob: str,
+) -> None:
+    """Pinned by ``tests/test_references_exact_only.py``. The stub
+    keeps the symbol importable for any out-of-tree diagnostic that
+    used to call it, but always returns False — there is no concept
+    of an "informative" glob under exact-only matching."""
+    assert cl._is_informative_glob(any_glob) is False, (
+        f"_is_informative_glob({any_glob!r}) must be False under "
+        "exact-only matching; it is a deprecation stub now"
     )
 
 
@@ -311,3 +339,213 @@ def test_gitignore_style_glob_does_not_protect_checkpoint(tmp_path: Path) -> Non
         extra_keep=set(), git_protected=set(),
     )
     assert orphan.resolve() in {p.resolve() for p in plan.delete}
+
+
+# ── per-run log folders (0001 migration layout) ───────────────────────
+
+
+@pytest.fixture
+def fake_repo_with_run_folders(fake_repo: Path) -> Path:
+    """Extend ``fake_repo`` with the per-run folder layout produced by
+    the 0001 logs-layout migration:
+
+        logs/<YYYYMMDD-HHMMSS>_<arch>_<params>[_<label>]_<sha>/train.log
+
+    Adds one *orphan* folder (no citation anywhere) and one *cited*
+    folder (its full date-prefixed name is appended to ``FINDINGS.md``).
+    """
+    root = fake_repo
+
+    orphan = root / "logs" / "20260601-100000_arch_42M_orphan_abc123"
+    orphan.mkdir(parents=True)
+    (orphan / "train.log").write_text(
+        "step 1 loss=4.2\nstep 2 loss=4.1\n", encoding="utf-8",
+    )
+
+    cited = root / "logs" / "20260602-110000_arch_42M_cited_def456"
+    cited.mkdir(parents=True)
+    (cited / "train.log").write_text(
+        "step 1 loss=4.0\nstep 2 loss=3.9\n", encoding="utf-8",
+    )
+
+    # Cite the second folder verbatim in FINDINGS.md (path-form, so
+    # the doc author doesn't have to know about the bare-basename rule).
+    findings = root / "docs" / "FINDINGS.md"
+    findings.write_text(
+        findings.read_text(encoding="utf-8")
+        + "\nThe H99 evidence run lives in "
+        + "`logs/20260602-110000_arch_42M_cited_def456/train.log`.\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_folder_token_regex_indexes_run_folder_names(
+    fake_repo_with_run_folders: Path,
+) -> None:
+    """``_FOLDER_TOKEN_RE`` must pick the date-prefixed folder name out
+    of a path-form citation like
+    ``logs/20260602-110000_arch_42M_cited_def456/train.log`` and seed
+    ``idx.exact`` with the bare folder name. Without this, per-run
+    folders could never be protected (the folder has no suffix, so the
+    suffix-anchored ``_TOKEN_RE`` can't see it)."""
+    root = fake_repo_with_run_folders
+    idx = cl.build_reference_index(
+        root, skip_dirs=("logs", "lfs_checkpoints", "docs/archive"),
+    )
+    assert "20260602-110000_arch_42M_cited_def456" in idx.exact, (
+        "_FOLDER_TOKEN_RE must seed cited folder names into idx.exact; "
+        f"got exact = {sorted(idx.exact)!r}"
+    )
+    # The orphan folder is NOT cited anywhere, so it must NOT be in
+    # the index (this is the whole point of the protect-by-citation
+    # contract).
+    assert "20260601-100000_arch_42M_orphan_abc123" not in idx.exact
+
+
+def test_unreferenced_run_folder_is_on_delete_list(
+    fake_repo_with_run_folders: Path,
+) -> None:
+    """Per-run folders whose date-prefixed name isn't cited anywhere
+    end up in ``plan.delete`` as a directory ``Path``."""
+    root = fake_repo_with_run_folders
+    idx = cl.build_reference_index(
+        root, skip_dirs=("logs", "lfs_checkpoints", "docs/archive"),
+    )
+    plan = cl.plan_for_bucket(
+        "logs", idx, root=root, keep_recent=0,
+        extra_keep=set(), git_protected=set(),
+    )
+    orphan = root / "logs" / "20260601-100000_arch_42M_orphan_abc123"
+    delete_set = {p.resolve() for p in plan.delete}
+    assert orphan.resolve() in delete_set, (
+        f"orphan run folder should be marked for deletion; "
+        f"got delete = {[p.name for p in plan.delete]!r}"
+    )
+    # And it must be a directory candidate, not the contained train.log.
+    matching = [p for p in plan.delete if p.resolve() == orphan.resolve()]
+    assert matching and matching[0].is_dir(), (
+        "candidate must be the folder itself (so the whole dir gets "
+        "rmtree'd), not the contained train.log file"
+    )
+
+
+def test_referenced_run_folder_is_protected(
+    fake_repo_with_run_folders: Path,
+) -> None:
+    """When a per-run folder's full date-prefixed name is cited in a
+    scientific record (FINDINGS.md), the folder lands in
+    ``plan.keep_referenced`` and never in ``plan.delete``."""
+    root = fake_repo_with_run_folders
+    idx = cl.build_reference_index(
+        root, skip_dirs=("logs", "lfs_checkpoints", "docs/archive"),
+    )
+    plan = cl.plan_for_bucket(
+        "logs", idx, root=root, keep_recent=0,
+        extra_keep=set(), git_protected=set(),
+    )
+    cited = root / "logs" / "20260602-110000_arch_42M_cited_def456"
+    keep_set = {p.resolve() for p in plan.keep_referenced}
+    delete_set = {p.resolve() for p in plan.delete}
+    assert cited.resolve() in keep_set, (
+        "cited folder must land in keep_referenced; "
+        f"got keep_referenced = {[p.name for p in plan.keep_referenced]!r}"
+    )
+    assert cited.resolve() not in delete_set
+
+
+def test_train_log_basename_alone_does_not_protect_folder(
+    fake_repo_with_run_folders: Path,
+) -> None:
+    """A doc that writes the bare basename ``train.log`` somewhere must
+    NOT silently protect every per-run folder. The discriminator is the
+    folder's full date-prefixed name, not the inner filename (which is
+    identical across every run)."""
+    root = fake_repo_with_run_folders
+    # Add a stray ``train.log`` mention in a side doc.
+    side = root / "docs" / "rambling_note.md"
+    side.write_text(
+        "Random aside: the per-run output goes to `train.log`.\n",
+        encoding="utf-8",
+    )
+    idx = cl.build_reference_index(
+        root, skip_dirs=("logs", "lfs_checkpoints", "docs/archive"),
+    )
+    plan = cl.plan_for_bucket(
+        "logs", idx, root=root, keep_recent=0,
+        extra_keep=set(), git_protected=set(),
+    )
+    orphan = root / "logs" / "20260601-100000_arch_42M_orphan_abc123"
+    # The orphan must STILL be on the delete list — its full folder
+    # name is not in idx.exact, regardless of train.log mentions.
+    assert orphan.resolve() in {p.resolve() for p in plan.delete}
+
+
+def test_recent_run_folder_is_protected_by_mtime(
+    fake_repo_with_run_folders: Path,
+) -> None:
+    """``keep_recent=N`` ranks per-run folders by folder mtime (not
+    contained-file mtime), so an in-flight run is never surprise-pruned."""
+    root = fake_repo_with_run_folders
+    orphan = root / "logs" / "20260601-100000_arch_42M_orphan_abc123"
+    future = time.time() + 1000
+    os.utime(orphan, (future, future))
+
+    idx = cl.build_reference_index(
+        root, skip_dirs=("logs", "lfs_checkpoints", "docs/archive"),
+    )
+    plan = cl.plan_for_bucket(
+        "logs", idx, root=root, keep_recent=1,
+        extra_keep=set(), git_protected=set(),
+    )
+    assert orphan.resolve() in {p.resolve() for p in plan.keep_recent}
+    assert orphan.resolve() not in {p.resolve() for p in plan.delete}
+
+
+def test_force_recursively_deletes_orphan_run_folder(
+    fake_repo_with_run_folders: Path,
+) -> None:
+    """``brian clean logs --force`` rmtree's an unreferenced per-run
+    folder — both the folder and the contained ``train.log`` must be
+    gone after the run."""
+    root = fake_repo_with_run_folders
+    orphan = root / "logs" / "20260601-100000_arch_42M_orphan_abc123"
+    train_log = orphan / "train.log"
+    cited = root / "logs" / "20260602-110000_arch_42M_cited_def456"
+    cited_train = cited / "train.log"
+    assert train_log.is_file() and cited_train.is_file()
+
+    rc = cl.run(["logs"], force=True, root=root, keep_recent=0,
+                use_git=False)
+    assert rc == 0
+    assert not orphan.exists(), (
+        f"orphan run folder must be rmtree'd, still exists at {orphan}"
+    )
+    # The cited folder must survive intact (folder + contained file).
+    assert cited.is_dir() and cited_train.is_file(), (
+        "cited run folder must survive --force"
+    )
+
+
+def test_plan_bytes_to_free_includes_folder_contents(
+    fake_repo_with_run_folders: Path,
+) -> None:
+    """``CleanPlan.bytes_to_free`` must recurse into per-run folder
+    candidates — otherwise the dry-run summary would report 0 B
+    reclaimable for the dominant disk-hog (multi-GB train.log)."""
+    root = fake_repo_with_run_folders
+    orphan = root / "logs" / "20260601-100000_arch_42M_orphan_abc123"
+    train_log = orphan / "train.log"
+    expected_min = train_log.stat().st_size  # the only file in there
+
+    idx = cl.build_reference_index(
+        root, skip_dirs=("logs", "lfs_checkpoints", "docs/archive"),
+    )
+    plan = cl.plan_for_bucket(
+        "logs", idx, root=root, keep_recent=0,
+        extra_keep=set(), git_protected=set(),
+    )
+    assert plan.bytes_to_free >= expected_min, (
+        f"bytes_to_free ({plan.bytes_to_free}) should include the "
+        f"orphan folder's train.log size ({expected_min})"
+    )

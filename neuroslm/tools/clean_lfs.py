@@ -9,20 +9,24 @@ tail behind.
 
 A checkpoint is KEPT iff at least one of:
 
-  R1.  Its basename is referenced anywhere in the repo
-       (``ReferenceIndex.references()``).
+  R1.  Its basename is referenced anywhere in the repo's MARKDOWN
+       (``ReferenceIndex.references()`` built with
+       ``text_suffixes={".md"}``). Random docstring examples in `.py`
+       files, JSON ood-result blobs, test-fixture names, and CLI
+       permission allow-lists do NOT count — only scientific records
+       (FINDINGS.md, technical_report.md, archived findings) can pin
+       a large binary blob.
   R2.  It is one of the N most-recent steps within its parent folder
        (default ``keep_recent=3``).
   R3.  Its parent folder contains a ``manifest.json`` whose ``commit``
        matches the current git ``HEAD``.
   R4.  It is a ``*_best.*`` checkpoint AND its run's log file is
-       referenced (the existing reference rules already protect the
-       log). Two layouts:
+       referenced (markdown-only, same scope as R1). Two layouts:
          (a) run-folder: ``logs/<same-folder-name>/*.log``.
          (b) flat: any ``logs/**/*.log`` whose basename shares a
              distinctive token (>= 8 chars) with the checkpoint's stem
              (after stripping ``_best`` / ``_step<N>``) AND whose
-             basename itself is referenced.
+             basename itself is referenced in a `.md`.
 
 Anything else is PRUNABLE.
 
@@ -451,12 +455,22 @@ def run(
     # checkpoint filenames mentioned inside sidecars don't self-protect.
     # Skip logs/ too because raw training logs name every checkpoint
     # they wrote — counting that as a "reference" defeats the point.
+    #
+    # MD-ONLY SCOPE: large binary blobs should only be pinned by a
+    # SCIENTIFIC RECORD (FINDINGS.md, technical_report.md, archived
+    # findings). Random docstring examples in `.py` files, JSON
+    # ood-results blobs, test fixture names, and CLI permission
+    # allow-lists must not accidentally protect a checkpoint — the
+    # post-exact-only forensic showed they were the dominant source
+    # of false-positive "kept" entries. Regression-pinned by
+    # ``tests/test_references_exact_only.py::TestLfsPrunerUsesMdOnlyScope``.
     print("[lfs prune] scanning repo for references "
-          "(markdown / py / json / yaml ...)...", flush=True)
+          "(markdown only)...", flush=True)
     idx = build_reference_index(
         root,
         skip_dirs=("lfs_checkpoints", "logs"),
         progress=True,
+        text_suffixes={".md"},
     )
 
     head = _git_head(root) if use_git else None

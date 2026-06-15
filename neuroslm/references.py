@@ -22,12 +22,11 @@ underscore-prefixed but importable for tests.
 """
 from __future__ import annotations
 
-import fnmatch
 import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Set, Tuple
+from typing import Iterable, Optional, Set, Tuple
 
 
 # ── Repo discovery ─────────────────────────────────────────────────────
@@ -114,86 +113,112 @@ _TOKEN_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Per-run log folder names emitted by the 0001 logs-layout migration:
+# ``<YYYYMMDD>-<HHMMSS>_<arch>_<params>[_<label>]_<instance>``. These
+# carry NO file suffix, so ``_TOKEN_RE`` (which requires one of the
+# allowed extensions) can never see them. Without this second regex,
+# ``brian clean logs`` would have no way to detect a doc citing a run
+# folder by name and would happily prune every per-run folder that
+# isn't in the N-most-recent window. Pattern intentionally narrow —
+# anchored on the date-prefix shape — so arbitrary tokens like
+# ``foo_bar_baz`` don't get pulled into the reference set.
+_FOLDER_TOKEN_RE = re.compile(
+    r"\b\d{8}-\d{6}_[A-Za-z0-9][A-Za-z0-9_\-]+",
+)
+
 
 # ── Reference index ────────────────────────────────────────────────────
 
 
 @dataclass
 class ReferenceIndex:
-    """All literal and glob filename tokens found anywhere in the repo.
+    """All literal filename tokens found anywhere in the repo.
 
-    A basename "is referenced" iff it passes ``references()`` — which
-    bakes in three matching modes: exact basename, stem (basename minus
-    extension), and glob (with permissive leading-``*`` and
-    distinctive-segment fallbacks).
+    Matching semantics (EXACT-ONLY)
+    -------------------------------
+    A basename "is referenced" iff it appears VERBATIM in ``self.exact``.
+    Stems (basename minus extension) and glob tokens (containing
+    ``*`` / ``?``) are NOT consulted. Path-prefixed citations like
+    ``lfs_checkpoints/foo.pt`` register their basename ``foo.pt`` in
+    ``exact`` (see :func:`build_reference_index`), so the doc author
+    doesn't have to write the bare basename to protect a file.
+
+    Why exact-only
+    --------------
+    The earlier three-matcher contract (exact / stem / glob with a
+    distinctive-segment fallback) silently protected ~25 LFS pointers
+    whose only "reference" was a glob example inside a docstring or a
+    test-fixture filename that happened to share an ≥8-char substring
+    with the production checkpoint. See the H22 forensic in
+    ``docs/FINDINGS.md`` ("LFS prune keeps everything"). With the
+    exact-only rule, a file is protected iff *some scanned text file
+    spells its basename verbatim* — no surprises.
+
+    The ``globs`` and ``stems`` fields are kept for back-compat with
+    external diagnostics that may inspect ``ReferenceIndex`` directly,
+    but :func:`build_reference_index` no longer populates them and
+    :meth:`references` no longer consults them.
+    Regression-pinned by ``tests/test_references_exact_only.py``.
     """
 
     exact: Set[str] = field(default_factory=set)        # basenames seen verbatim
-    globs: Set[str] = field(default_factory=set)        # tokens containing * or ?
-    stems: Set[str] = field(default_factory=set)        # basename minus extension
+    globs: Set[str] = field(default_factory=set)        # legacy, always empty
+    stems: Set[str] = field(default_factory=set)        # legacy, always empty
     finding_files: Set[Path] = field(default_factory=set)  # md files w/ finding markers
 
     def references(self, basename: str) -> bool:
-        if basename in self.exact:
-            return True
-        stem = basename.rsplit(".", 1)[0] if "." in basename else basename
-        if stem in self.stems:
-            return True
-        for g in self.globs:
-            # 1) Strict fnmatch as written.
-            if fnmatch.fnmatch(basename, g):
-                return True
-            # 2) Permissive: also try with an implicit leading `*`, so a
-            #    glob written as `20260614*_…_step2kof2k.log` (where the
-            #    leading literal was the example author's run prefix)
-            #    still matches any prefix.
-            if not g.startswith("*") and fnmatch.fnmatch(basename, "*" + g):
-                return True
-            # 3) Distinctive-literal-segment match: split the glob on
-            #    `*`/`?` and if ANY single literal segment of ≥8 chars
-            #    appears in `basename`, treat it as a reference. This
-            #    makes a finding-doc glob like
-            #    ``20260614*_keep_me_glob_step2kof2k.log`` correctly
-            #    protect ``af758c381388_keep_me_glob_step2kof2k.log``.
-            for seg in re.split(r"[*?]+", g):
-                if len(seg) >= 8 and seg in basename:
-                    return True
-        return False
+        """Return True iff ``basename`` appears verbatim in
+        ``self.exact``. No stem or glob expansion is performed."""
+        return basename in self.exact
 
 
-# ── Glob informativeness gate ──────────────────────────────────────────
+# ── Glob informativeness gate (DEPRECATED) ─────────────────────────────
 
 
 def _is_informative_glob(g: str) -> bool:
-    """Reject globs that don't pin down a specific run.
+    """Deprecated under the EXACT-ONLY contract.
 
-    ``*.pt`` / ``*.log`` / ``*.mem.json`` etc. would otherwise match
-    every checkpoint, silently neutering the entire reference filter.
-    We require at least one literal segment of ≥4 characters BEFORE
-    the final extension. (The extension itself doesn't count —
-    ``pt``/``log`` are too generic to identify a single artifact.)
+    Previously used to reject uninformative globs like ``*.pt`` /
+    ``*.log`` before they could pollute :attr:`ReferenceIndex.globs`.
+    Now that :func:`build_reference_index` drops glob tokens entirely
+    and :meth:`ReferenceIndex.references` never consults globs, this
+    function has no callers in the canonical path and always returns
+    ``False`` so any legacy caller behaves as if every glob is
+    uninformative (i.e. not a reference). Kept only so ``from
+    neuroslm.references import _is_informative_glob`` doesn't break
+    out-of-tree diagnostics. Regression-pinned by
+    ``tests/test_references_exact_only.py``.
     """
-    # Strip the final ".ext" so the extension can't act as the
-    # distinctive segment.
-    body = g.rsplit(".", 1)[0] if "." in g else g
-    for seg in re.split(r"[*?]+", body):
-        if len(seg.strip("._-")) >= 4:
-            return True
     return False
 
 
 # ── Filesystem walker ──────────────────────────────────────────────────
 
 
-def _iter_text_files(root: Path, extra_skip_dirs: Iterable[str] = ()) -> Iterable[Path]:
+def _iter_text_files(
+    root: Path,
+    extra_skip_dirs: Iterable[str] = (),
+    *,
+    suffixes: Optional[Iterable[str]] = None,
+) -> Iterable[Path]:
     """Walk ``root`` yielding every text file we should scan.
 
     Directory pruning is **prefix-based** — any folder whose name
     starts with one of the configured prefixes is skipped (so
     ``.venv-1``, ``.venv-old``, etc. all get cut). Extra skip names
     passed via ``extra_skip_dirs`` are exact-match only.
+
+    ``suffixes`` (case-insensitive) restricts which file extensions
+    are yielded. When ``None`` (default), the full :data:`_TEXT_SUFFIXES`
+    set is used — back-compat with the existing ``brian clean`` flow.
+    Pass e.g. ``{".md"}`` to scan only markdown (used by the LFS
+    pruner: only scientific records should pin large binary blobs).
     """
     extra = set(extra_skip_dirs)
+    if suffixes is None:
+        allowed = _TEXT_SUFFIXES
+    else:
+        allowed = frozenset(s.lower() for s in suffixes)
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
             d for d in dirnames
@@ -203,7 +228,7 @@ def _iter_text_files(root: Path, extra_skip_dirs: Iterable[str] = ()) -> Iterabl
         ]
         for name in filenames:
             p = Path(dirpath) / name
-            if p.suffix.lower() in _TEXT_SUFFIXES:
+            if p.suffix.lower() in allowed:
                 yield p
 
 
@@ -216,6 +241,7 @@ def build_reference_index(
     *,
     progress: bool = False,
     max_bytes: int = _MAX_SCAN_BYTES,
+    text_suffixes: Optional[Iterable[str]] = None,
 ) -> ReferenceIndex:
     """Scan ``root`` for every basename-shaped token + finding markers.
 
@@ -224,11 +250,25 @@ def build_reference_index(
     time without contributing real references. Pass ``progress=True``
     to print a one-line counter every 100 files so the user knows the
     scan is alive on large repos.
+
+    ``text_suffixes`` (case-insensitive) restricts which file types
+    are scanned for references. When ``None`` (default), the full
+    :data:`_TEXT_SUFFIXES` set is used — back-compat with the
+    existing ``brian clean logs/checkpoints/docs`` flow which needs
+    cross-filetype awareness. The LFS pruner overrides this with
+    ``{".md"}`` so only scientific records (FINDINGS.md,
+    technical_report.md, archived findings) can protect a large
+    binary blob — random docstring examples, test fixture names,
+    JSON ood-result blobs, and CLI permission allow-lists no longer
+    accidentally pin checkpoints. Regression-pinned by
+    ``tests/test_references_exact_only.py::TestBuildReferenceIndexSuffixScope``.
     """
     idx = ReferenceIndex()
     seen = 0
     skipped_big = 0
-    for fp in _iter_text_files(root, extra_skip_dirs=skip_dirs):
+    for fp in _iter_text_files(
+        root, extra_skip_dirs=skip_dirs, suffixes=text_suffixes,
+    ):
         seen += 1
         if progress and seen % 100 == 0:
             print(f"[refs] scanned {seen} files...", flush=True)
@@ -240,22 +280,36 @@ def build_reference_index(
         except OSError:
             continue
 
-        # Reference tokens
+        # Reference tokens — EXACT-ONLY contract: glob tokens
+        # (containing ``*`` / ``?``) are dropped on the floor; stems
+        # are no longer derived. See ReferenceIndex docstring +
+        # tests/test_references_exact_only.py for the rationale.
         for m in _TOKEN_RE.finditer(text):
             tok = m.group(0)
-            if any(c in tok for c in "*?"):
-                # Drop uninformative globs like `*.pt` that would match
-                # every checkpoint in the repo.
-                if _is_informative_glob(tok):
-                    idx.globs.add(tok)
-            else:
-                idx.exact.add(tok)
-                # Also store basename-only form so refs like
-                # ``lfs_checkpoints/foo.pt`` register ``foo.pt``.
-                base = Path(tok).name
-                idx.exact.add(base)
-                if "." in base:
-                    idx.stems.add(base.rsplit(".", 1)[0])
+            if "*" in tok or "?" in tok:
+                # Drop glob tokens entirely. The old behaviour added
+                # them to ``idx.globs`` and matched them at lookup
+                # time, which silently pinned files whose basenames
+                # only shared a ≥8-char substring with the glob's
+                # literal segments (see docs/FINDINGS.md "H22 LFS
+                # prune keeps everything" forensic).
+                continue
+            idx.exact.add(tok)
+            # Also store basename-only form so refs like
+            # ``lfs_checkpoints/foo.pt`` register ``foo.pt`` in the
+            # exact set — the doc author shouldn't have to spell out
+            # the bare basename to protect a file.
+            base = Path(tok).name
+            idx.exact.add(base)
+
+        # Per-run log folder names — same exact-only contract but with
+        # a separate regex because folder names have no file suffix.
+        # ``train.log`` itself is too generic to use as a folder key
+        # (every run has one), so the folder is protected ONLY if its
+        # full date-prefixed name appears verbatim in some scanned
+        # text file.
+        for m in _FOLDER_TOKEN_RE.finditer(text):
+            idx.exact.add(m.group(0))
 
         # Mark finding-style markdowns for docs-bucket protection
         if fp.suffix.lower() == ".md":
@@ -265,7 +319,8 @@ def build_reference_index(
     if progress:
         print(f"[refs] scanned {seen} files "
               f"({skipped_big} skipped as >{max_bytes // 1024} KiB), "
-              f"{len(idx.exact)} basenames, {len(idx.globs)} globs",
+              f"{len(idx.exact)} basenames (exact-only matching; "
+              "glob tokens dropped)",
               flush=True)
     return idx
 
@@ -275,6 +330,7 @@ __all__ = [
     "ReferenceIndex",
     "build_reference_index",
     "_FINDING_MARKERS",
+    "_FOLDER_TOKEN_RE",
     "_MAX_SCAN_BYTES",
     "_SKIP_DIRS",
     "_SKIP_DIR_PREFIXES",

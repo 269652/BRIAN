@@ -1,11 +1,12 @@
 """brian clean — delete unreferenced logs / checkpoints / docs.
 
-The repo accumulates raw training logs (`logs/vast/*.log`), per-step
-checkpoints (`lfs_checkpoints/*.pt|*.mem*|*.json`), and one-off design
-markdowns (`docs/archive/*.md`) at a pace that quickly bloats LFS and
-git history. This module finds files in those buckets that are *not*
-referenced by anything that counts as a scientific record — and deletes
-them.
+The repo accumulates raw training logs (`logs/vast/*.log`), per-run
+output folders (`logs/<YYYYMMDD-HHMMSS>_<arch>_<params>_<sha>/`),
+per-step checkpoints (`lfs_checkpoints/*.pt|*.mem*|*.json`), and
+one-off design markdowns (`docs/archive/*.md`) at a pace that quickly
+bloats LFS and git history. This module finds files in those buckets
+that are *not* referenced by anything that counts as a scientific
+record — and deletes them.
 
 A file is considered REFERENCED if any of the following is true:
 
@@ -143,7 +144,7 @@ class Bucket:
 
 def _enumerate_logs(root: Path) -> List[Path]:
     out: List[Path] = []
-    # vast.ai raw stdout
+    # vast.ai raw stdout (legacy flat layout)
     out.extend(sorted((root / "logs" / "vast").glob("*.log")))
     # analyzed insight markdowns are NOT enumerated here — they're docs.
     # Root-level stray training/debug logs
@@ -156,6 +157,25 @@ def _enumerate_logs(root: Path) -> List[Path]:
     p = root / "docs" / "debug.log"
     if p.is_file():
         out.append(p)
+    # Per-run log FOLDERS produced by the 0001 logs-layout migration
+    # (``logs/<YYYYMMDD-HHMMSS>_<arch>_<params>[_<label>]_<instance>/``).
+    # The whole folder is the unit of pruning: a folder is "referenced"
+    # iff its full date-prefixed name appears verbatim somewhere in the
+    # repo (the contained ``train.log`` basename is identical across
+    # every run and so cannot be used as a discriminator). Folder names
+    # are seeded into ``idx.exact`` via ``_FOLDER_TOKEN_RE`` in
+    # ``neuroslm.references``. The folder must contain a ``train.log``
+    # to count — anything else parked under ``logs/`` (vast/, archive/,
+    # ad-hoc dirs the user created) is left alone.
+    logs_dir = root / "logs"
+    if logs_dir.is_dir():
+        for child in sorted(logs_dir.iterdir()):
+            if not child.is_dir():
+                continue
+            if child.name == "vast":
+                continue  # legacy flat-layout subdir, walked above
+            if (child / "train.log").is_file():
+                out.append(child)
     return out
 
 
@@ -299,7 +319,19 @@ class CleanPlan:
         total = 0
         for p in self.delete:
             try:
-                total += p.stat().st_size
+                if p.is_dir():
+                    # Per-run log folders are sized by the union of
+                    # their contained files (currently just train.log,
+                    # but tomorrow's runs may drop metrics.json /
+                    # config.toml / etc. into the same dir).
+                    for sub in p.rglob("*"):
+                        if sub.is_file():
+                            try:
+                                total += sub.stat().st_size
+                            except OSError:
+                                pass
+                else:
+                    total += p.stat().st_size
             except OSError:
                 pass
         return total
@@ -369,8 +401,12 @@ def execute_plan(plan: CleanPlan, *, use_git: bool = True,
 
     If ``use_git`` is true and the path is tracked, deletion is staged
     via ``git rm`` (so LFS pointers + history are updated correctly).
-    Untracked files fall back to a plain ``Path.unlink``.
+    Untracked files fall back to a plain ``Path.unlink``. Directories
+    (per-run log folders) are removed recursively via ``git rm -rf``
+    when tracked and ``shutil.rmtree`` otherwise.
     """
+    import shutil
+
     deleted, errors = 0, 0
     tracked_cache: Optional[Set[str]] = None
 
@@ -390,17 +426,35 @@ def execute_plan(plan: CleanPlan, *, use_git: bool = True,
         except ValueError:
             rel = str(p)
         try:
-            if (use_git and tracked_cache is not None
-                    and rel in tracked_cache):
+            is_dir = p.is_dir()
+            # Tracked-ness probe: ``git ls-files`` lists files only, so
+            # a directory is "tracked" iff at least one descendant is.
+            is_tracked = False
+            if use_git and tracked_cache is not None:
+                if is_dir:
+                    prefix = rel + "/"
+                    is_tracked = any(t.startswith(prefix) for t in tracked_cache)
+                else:
+                    is_tracked = rel in tracked_cache
+
+            if is_tracked:
+                cmd = (["git", "rm", "-rf", "--", rel] if is_dir
+                       else ["git", "rm", "-f", "--", rel])
                 r = subprocess.run(
-                    ["git", "rm", "-f", "--", rel],
-                    cwd=root, capture_output=True, text=True, check=False,
+                    cmd, cwd=root, capture_output=True, text=True, check=False,
                 )
                 if r.returncode != 0:
-                    # Fall back to plain unlink so a hung git won't block us.
-                    p.unlink(missing_ok=True)
+                    # Fall back to a plain filesystem delete so a hung
+                    # or angry git won't block us.
+                    if is_dir:
+                        shutil.rmtree(p, ignore_errors=True)
+                    else:
+                        p.unlink(missing_ok=True)
             else:
-                p.unlink(missing_ok=True)
+                if is_dir:
+                    shutil.rmtree(p, ignore_errors=True)
+                else:
+                    p.unlink(missing_ok=True)
             deleted += 1
         except OSError as e:
             print(f"  ! failed to delete {rel}: {e}", file=sys.stderr)
@@ -466,7 +520,18 @@ def print_plan(plan: CleanPlan, root: Path = REPO_ROOT, *,
             except ValueError:
                 rel = str(p)
             try:
-                sz = _fmt_size(p.stat().st_size)
+                if p.is_dir():
+                    total = 0
+                    for sub in p.rglob("*"):
+                        if sub.is_file():
+                            try:
+                                total += sub.stat().st_size
+                            except OSError:
+                                pass
+                    rel = rel + "/"
+                    sz = _fmt_size(total)
+                else:
+                    sz = _fmt_size(p.stat().st_size)
             except OSError:
                 sz = "?"
             print(f"    {_BULLET_DEL} {rel}  ({sz})")
@@ -509,9 +574,8 @@ def run(
     skip = ("logs", "lfs_checkpoints", "checkpoints", "docs/archive")
     print(f"[clean] scanning references under {root} (skipping {skip}) ...")
     idx = build_reference_index(root, skip_dirs=skip)
-    print(f"[clean] index: {len(idx.exact)} basenames, "
-          f"{len(idx.globs)} glob tokens, "
-          f"{len(idx.stems)} stems, "
+    print(f"[clean] index: {len(idx.exact)} basenames "
+          f"(exact-only matching), "
           f"{len(idx.finding_files)} finding-style md files")
 
     git_protected = _git_protected_paths(root)
