@@ -13,3 +13,9 @@ accelerate>=0.27
 # arch.neuro declares `multi_cortex { weights: "gpt2" }`. Imported lazily
 # inside build_gpt2_ensemble so stub-weight runs never load it.
 transformers>=4.30
+# huggingface_hub — first-party dependency of neuroslm.checkpoint_push
+# for the HF-backed checkpoint pusher (2026-06-15 default; replaces
+# the hanging Git LFS push). Pulled transitively by ``transformers``
+# but pinning here documents the direct usage so a future
+# transformers bump can't accidentally drop it.
+huggingface_hub>=0.20
