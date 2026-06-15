@@ -256,20 +256,99 @@ def _graph_attrs(engine: str) -> dict:
         pad="0.5",
     )
     if engine == "dot":
-        # Portrait layout: width fixed to A4 content area (7.27") and height
-        # allowed up to 60" so the graph expands downward across strata.
-        # Real edges all carry constraint=false; invisible spine edges between
-        # stratum anchors enforce the top→bottom order (see emit_dot_...).
-        base.update(rankdir="TB", nodesep="0.4", ranksep="0.8",
+        # Portrait A4 width with explicit fixed canvas. ``size="7.27,40!"``
+        # forces the bounding box to exactly 7.27"×40" — dot rescales
+        # its natural layout proportionally to fit width (the limiting
+        # dimension here, since for 30+ nodes the natural width is
+        # ~6× the natural height in TB rankdir).
+        #
+        # The ``!`` is the magic — without it dot only USES UP TO that
+        # size, but with it the canvas is fixed and labels stay legible
+        # because dot uses the full vertical space we gave it.
+        #
+        # No hand-coded rank table — vertical order is computed by dot
+        # from the real synapse edges (forward edges carry constraint=true,
+        # back-edges from DFS get constraint=false to break cycles, see
+        # _compute_back_edges + the synapse loop in emit_dot_from_hypergraph).
+        # This generalises to any architecture without renderer changes.
+        base.update(rankdir="TB", nodesep="0.45", ranksep="0.9",
                     overlap="false", splines="spline",
                     newrank="true",
-                    size="7.27,60")
+                    size="7.27,40!", ratio="fill")
     elif engine == "neato":
         base.update(overlap="prism", splines="curved", sep="+12")
     elif engine in {"sfdp", "fdp"}:
         base.update(overlap="prism", splines="curved", K="1.4", sep="+10",
                     size="16,20", ratio="compress")
     return base
+
+
+def _compute_back_edges(ir: HypergraphIR) -> set:
+    """Identify back-edges in the synapse graph via iterative 3-colour DFS.
+
+    A back-edge ``(u, v)`` is one such that ``v`` is currently on the DFS
+    stack — i.e. removing it breaks a cycle. The renderer marks these
+    ``constraint="false"`` so they appear in the image but don't confuse
+    dot's hierarchical rank algorithm.
+
+    All other synapse edges become rank-contributing (``constraint="true"``),
+    which means dot computes the vertical strata directly from the
+    architecture's real connectivity rather than from a hand-coded anatomy
+    table. New modules slot into the right layer automatically based on
+    how far they sit from the synaptic sinks.
+
+    Determinism
+    -----------
+    Result is stable given the IR's hyperedge order (which itself is
+    stable across compiles since arch.neuro is parsed deterministically).
+    Two-cycle ties (``A↔B``) resolve to whichever direction DFS visits
+    first — typically the order the synapses were declared in arch.neuro.
+
+    Cost
+    ----
+    O(V+E) — single DFS pass. For 31 populations × 61 synapses runs in
+    microseconds. Iterative implementation avoids recursion-limit risk
+    on deep architectures.
+    """
+    # Build adjacency list over populations only. Modulation, distillation
+    # and inhibition edges are already rank-noise (constraint=false in
+    # their emission loops), so they don't need cycle-breaking.
+    adj: Dict[str, List[str]] = {}
+    for edge in ir.hyperedges:
+        if edge.kind != "synapse":
+            continue
+        if len(edge.members) < 2:
+            continue
+        src, dst = edge.members[0], edge.members[1]
+        adj.setdefault(src, []).append(dst)
+        adj.setdefault(dst, [])  # ensure dst is reachable from the state map
+
+    WHITE, GRAY, BLACK = 0, 1, 2
+    state: Dict[str, int] = {n: WHITE for n in adj}
+    back_edges: set = set()
+
+    # Iterative DFS using an explicit (node, child-iterator) stack.
+    for start in list(state.keys()):
+        if state[start] != WHITE:
+            continue
+        state[start] = GRAY
+        stack: List = [(start, iter(adj[start]))]
+        while stack:
+            u, it = stack[-1]
+            try:
+                v = next(it)
+            except StopIteration:
+                state[u] = BLACK
+                stack.pop()
+                continue
+            s = state.get(v, WHITE)
+            if s == GRAY:
+                back_edges.add((u, v))
+            elif s == WHITE:
+                state[v] = GRAY
+                stack.append((v, iter(adj.get(v, []))))
+            # s == BLACK: cross/forward edge to a finished subtree, ignore.
+    return back_edges
 
 
 def emit_dot_from_hypergraph(
@@ -390,54 +469,19 @@ def emit_dot_from_hypergraph(
                 g_node = c
                 g_node.node(n.name, label=_nt_label(n), **style)
 
-    # 3b. Explicit anatomical rank strata — forces a top-to-bottom
-    #     brain-like reading order even though this is a recurrent graph.
-    #     All real edges have constraint=false so they don't affect ranking.
-    #     The strata below pin horizontal bands, and invisible "spine" edges
-    #     between stratum anchors enforce the top→bottom inter-stratum order.
-    _RANK_STRATA: list[list[str]] = [
-        # Layer 0 — sensory periphery
-        ["sensory", "association"],
-        # Layer 1 — thalamic relay + geometry
-        ["thalamus", "neural_geometry"],
-        # Layer 2 — hippocampal / cerebellar memory
-        ["hippo", "entorhinal", "cerebellum"],
-        # Layer 3 — cortex experts + trunk
-        ["cortex_code", "cortex_general", "cortex_reasoning", "lm_trunk"],
-        # Layer 4 — executive / prefrontal
-        ["pfc", "acc", "claustrum", "gws", "reasoning_cortex"],
-        # Layer 5 — higher executive / evaluative
-        ["dmn", "forward_m", "evaluator", "thought_transformer"],
-        # Layer 6 — affective / world model
-        ["amygdala", "insula", "world", "self_m", "qualia"],
-        # Layer 7 — basal ganglia / reward
-        ["bg", "vta", "nucleus_accumbens", "substantia_nigra"],
-        # Layer 8 — neuromodulator nuclei + NT cluster
-        ["locus_coeruleus", "raphe_nuclei", "nucleus_basalis",
-         "glutamate", "gaba", "dopamine", "serotonin",
-         "norepinephrine", "acetylcholine", "endocannabinoid"],
-        # Layer 9 — motor output
-        ["motor"],
-    ]
-    all_node_names = {n.name for n in ir.nodes}
-    # Collect one anchor per stratum (first present node in each layer).
-    stratum_anchors: list[str] = []
-    for stratum in _RANK_STRATA:
-        present = [nm for nm in stratum if nm in all_node_names]
-        if not present:
-            continue
-        # rank=same groups co-layer nodes horizontally
-        ids = " ".join(f'"{nm}"' for nm in present)
-        g.body.append(f"\t{{rank=same; {ids}}}")
-        stratum_anchors.append(present[0])
-    # Invisible spine edges enforce vertical ordering between strata.
-    # constraint=true (the default) tells dot to use these for ranking;
-    # style=invis / color=none means they don't appear in the rendered image.
-    for i in range(len(stratum_anchors) - 1):
-        g.body.append(
-            f'\t"{stratum_anchors[i]}" -> "{stratum_anchors[i+1]}" '
-            f'[style=invis, constraint=true]'
-        )
+    # 3b. Cycle-breaking — let dot rank from the real synapse DAG.
+    #
+    #   We compute the back-edges (those that close cycles) of the
+    #   synapse subgraph via DFS and mark *only* those constraint=false
+    #   when emitting them below. All other synapse edges become
+    #   rank-contributing, which means dot derives the vertical strata
+    #   directly from the architecture's real connectivity.
+    #
+    #   No hand-coded anatomy table — the layout adapts to any arch.
+    #   For brian.master today this produces a sensory→thalamus→cortex
+    #   →executive→motor flow because that's what the DAG implies after
+    #   removing the qualia↔dmn / NT-feedback back-edges.
+    back_edges: set = _compute_back_edges(ir)
 
     # 4. Synapse edges (solid)
     for edge in ir.hyperedges:
@@ -463,6 +507,11 @@ def emit_dot_from_hypergraph(
             h = heat_map[eid]
             colour = heat_to_fillcolor(h)
             penwidth = f"{max(1.4, 1.4 + 3.0 * h):.2f}"
+        # Forward synapses contribute to vertical ranking; back-edges
+        # (those that close a cycle, detected in step 3b) get
+        # constraint=false so they render but don't break dot's
+        # acyclic rank algorithm.
+        is_back = (src, dst) in back_edges
         g.edge(src, dst,
                label=_edge_label(edge),
                color=colour,
@@ -470,7 +519,7 @@ def emit_dot_from_hypergraph(
                fontsize="9",
                penwidth=penwidth,
                arrowsize="0.7",
-               constraint="false")
+               constraint="false" if is_back else "true")
 
     # 5. Modulation edges (dashed, NT-coloured)
     for edge in ir.hyperedges:
