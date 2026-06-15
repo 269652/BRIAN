@@ -1154,7 +1154,7 @@ def compile_folder(arch_root):
     lib_equations_path = Path(arch_root).resolve() / "lib" / "equations.neuro"
     if lib_equations_path.exists():
         try:
-            with open(lib_equations_path, 'r') as f:
+            with open(lib_equations_path, 'r', encoding='utf-8') as f:
                 parts.append(f.read())
         except Exception:
             pass
@@ -1164,7 +1164,7 @@ def compile_folder(arch_root):
             repo_lib_eq = repo_root / "lib" / "equations.neuro"
             if repo_lib_eq.exists():
                 try:
-                    with open(repo_lib_eq, 'r') as f:
+                    with open(repo_lib_eq, 'r', encoding='utf-8') as f:
                         parts.append(f.read())
                 except Exception:
                     pass
