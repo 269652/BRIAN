@@ -328,6 +328,12 @@ class TestCmdDeployRespectsBrianToml:
             # the dna-routing branch it was written to pin.
             default_steps = 0
             default_branch = ""
+            # Fields added 2026-06-15 (push cadence regression fix +
+            # failure-safety contract). 0 = "trainer uses its own
+            # default" — keeps this test laser-focused on routing.
+            default_log_every = 0
+            default_save_every = 0
+            default_push_every = 0
 
         monkeypatch.setattr(
             "neuroslm.project_config.load_project_config",
@@ -374,6 +380,9 @@ class TestCmdDeployRespectsBrianToml:
             is_dna_mode = True
             default_steps = 0
             default_branch = ""
+            default_log_every = 0
+            default_save_every = 0
+            default_push_every = 0
 
         monkeypatch.setattr(
             "neuroslm.project_config.load_project_config",
@@ -414,6 +423,9 @@ class TestCmdDeployRespectsBrianToml:
             is_dna_mode = False
             default_steps = 0
             default_branch = ""
+            default_log_every = 0
+            default_save_every = 0
+            default_push_every = 0
 
         monkeypatch.setattr(
             "neuroslm.project_config.load_project_config",

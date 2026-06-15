@@ -212,7 +212,7 @@ else:
     )
     arch_name_for_log = ARCH
 
-ONSTART = f"""set -e
+ONSTART = f"""set -eo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export GITHUB='{GITHUB}' HF_TOKEN='' VAST_API_KEY='{VAST_API_KEY}'
 {scale_env}
@@ -255,16 +255,40 @@ INSTANCE_ID="$(hostname)" PUSH_INTERVAL=300 \\
 LOG_PUSHER_PID=$!
 
 echo "── starting {'DNA' if USE_DNA else 'DSL'} training (scale={scale_name}, dist={hw.dist_strategy}, {STEPS} steps, mid-OOD every {OOD_EVERY}) ──"
+# Disable -e around the training pipe so we can capture the LEFT-side
+# exit code via ${{PIPESTATUS[0]}} — `tee` ALWAYS exits 0 and would
+# otherwise mask the training crash (the H24 / 41031063 failure mode).
+# pipefail (set above) makes this defensive, but PIPESTATUS is the
+# unambiguous source of truth.
+set +e
 {training_cmd}
+TRAIN_RC=${{PIPESTATUS[0]}}
+set -e
+echo "── training exited with code $TRAIN_RC ──"
 
 echo "── stopping log-pusher ──"
 kill $LOG_PUSHER_PID 2>/dev/null || true
 sleep 2
 
-echo "── final log push ──"
+# ── Final log push — GATES the self-destroy ──
+# Hard contract (operator rule, 2026-06-15): the on-box script MUST
+# write the final log to origin BEFORE any ``vastai destroy``. If the
+# push fails we leave the instance alive — paying $0.73/h for an extra
+# hour is cheap insurance against losing the crash trace. Locked by
+# tests/test_deploy_failure_safety.py::TestSelfDestroyIsGatedOnLogPush.
+echo "── final log push (GATES self-destroy) ──"
+LOG_PUSH_RC=0
 SOURCE_LOG=/workspace/train.log INSTANCE_ID="$(hostname)" PUSH_INTERVAL=1 \\
     BRANCH='{BRANCH}' REPO_SLUG='{REPO_SLUG}' \\
-    timeout 30 bash scripts/log_pusher.sh 2>&1 | head -10 || echo "log push timeout"
+    ARCH_NAME='{arch_name_for_log}' LABEL='{LABEL}' TOTAL_STEPS='{STEPS}' \\
+    timeout 120 bash scripts/log_pusher.sh 2>&1 | head -30 || LOG_PUSH_RC=$?
+if [ "$LOG_PUSH_RC" -ne 0 ]; then
+    echo "✗ FINAL LOG PUSH FAILED (rc=$LOG_PUSH_RC) — keeping instance alive"
+    echo "  for forensics. Use 'brian ps' to find the id, then"
+    echo "  'brian destroy <id>' to clean up. Training rc was $TRAIN_RC."
+    exit 1
+fi
+echo "✓ final log pushed"
 
 echo "── pushing checkpoints + OOD mid-eval JSONs ──"
 cd /workspace/brian
@@ -281,9 +305,29 @@ find lfs_checkpoints -type f -name '*.pt' 2>/dev/null | while read -r ckpt; do
 done
 git add logs/vast/benchmarks/ood/ood_mid_*.json 2>/dev/null || true
 if ! git diff --cached --quiet 2>/dev/null; then
-    git commit -m "chkpt+mid-ood: training run @ $(date -u +%Y-%m-%dT%H:%M:%SZ)" >/dev/null 2>&1 || true
+    git commit -m "chkpt+mid-ood: training run @ $(date -u +%Y-%m-%dT%H:%M:%SZ) (rc=$TRAIN_RC)" >/dev/null 2>&1 || true
     PUSH_URL="https://x-access-token:${{GITHUB}}@github.com/{REPO_SLUG}.git"
     timeout 600 git push "$PUSH_URL" "HEAD:{BRANCH}" 2>&1 | sed "s#${{GITHUB}}#***#g" || true
+fi
+
+# ── Gated self-destroy ──
+# TRAIN_RC == 0 → destroy immediately (don't pay for an idle GPU).
+# TRAIN_RC != 0 → KEEP_ALIVE_ON_FAIL minutes of forensic window
+#                 (default 60), THEN destroy. Operator can SSH in
+#                 during that window to pull state or inspect.
+# KEEP_ALIVE_ON_FAIL == 0 → disable auto-destroy on failure entirely
+#                            (operator must `brian destroy <id>`).
+KEEP_ALIVE_ON_FAIL="${{KEEP_ALIVE_ON_FAIL:-60}}"
+if [ "$TRAIN_RC" -eq 0 ]; then
+    echo "── training succeeded → self-destroy ──"
+elif [ "$KEEP_ALIVE_ON_FAIL" -eq 0 ]; then
+    echo "── training FAILED (rc=$TRAIN_RC), KEEP_ALIVE_ON_FAIL=0 → no auto-destroy ──"
+    echo "  Instance will remain until 'brian destroy <id>'."
+    exit 1
+else
+    echo "── training FAILED (rc=$TRAIN_RC) → keep-alive ${{KEEP_ALIVE_ON_FAIL}} min then self-destroy ──"
+    sleep $((KEEP_ALIVE_ON_FAIL * 60))
+    echo "── keep-alive window elapsed → self-destroy ──"
 fi
 
 echo "── self-destroy ──"
@@ -316,6 +360,118 @@ def vastai(*args, capture=False):
         return r.stdout, r.returncode
     return subprocess.call(cmd)
 
+
+# ─────────────────────────────────────────────────────────────────────
+# Boot watchdog (locked by tests/test_deploy_failure_safety.py)
+# ─────────────────────────────────────────────────────────────────────
+# When ``vastai create instance`` succeeds the CLI prints a Python-repr
+# dict with the new contract id. The host may then silently fail to
+# bring up the container (exactly what happened to 41045637 on
+# 2026-06-15: vast accepted the create, we got an id, no container
+# was ever scheduled). The watchdog polls the REST API until the
+# instance reports ``actual_status == "running"`` or a clear failure.
+
+import re as _re
+
+_CONTRACT_RE = _re.compile(r"['\"]new_contract['\"]\s*:\s*(\d+)")
+
+
+def _parse_new_contract_id(out):
+    """Extract ``new_contract`` int from ``vastai create instance`` output.
+
+    Returns None when no contract id is present (typical for
+    ``success=False`` host-unavailable responses)."""
+    if not out:
+        return None
+    m = _CONTRACT_RE.search(out)
+    return int(m.group(1)) if m else None
+
+
+def _default_status_fn(instance_id):
+    """Look up vast.ai instance status via REST API.
+
+    Returns one of: ``"running"``, ``"loading"``, ``"exited"``,
+    ``"stopped"``, ``"scheduling"``, ``"gone"``, or whatever vast
+    reports verbatim. ``"gone"`` is our synthetic value for the
+    ``{"instances": null}`` response (contract destroyed / never
+    existed)."""
+    import urllib.request, urllib.error
+    import json as _json
+    url = f"https://console.vast.ai/api/v0/instances/{instance_id}/"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {VAST_API_KEY}",
+            "Accept": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=15) as r:
+        body = r.read().decode("utf-8", errors="replace")
+    data = _json.loads(body)
+    inst = data.get("instances")
+    if inst is None:
+        # Contract garbage-collected — host never came up or destroyed.
+        return "gone"
+    if isinstance(inst, list):  # defensive: not the documented shape
+        inst = inst[0] if inst else None
+        if inst is None:
+            return "gone"
+    return inst.get("actual_status") or "?"
+
+
+def _wait_for_instance_ready(instance_id, timeout=600, poll_interval=15,
+                              status_fn=None):
+    """Poll until the instance is ``running`` or a terminal state.
+
+    Returns 0 on success, 1 on timeout, 2 on terminal-state-before-ready.
+    Transient ``status_fn`` exceptions are tolerated for up to a few
+    consecutive failures so a network blip doesn't kill the watch.
+    """
+    import time
+    if status_fn is None:
+        status_fn = _default_status_fn
+
+    TERMINAL = {"exited", "stopped", "destroyed", "gone"}
+    deadline = time.time() + timeout
+    last_status = "?"
+    transient_streak = 0
+    MAX_TRANSIENT = 3
+    while time.time() < deadline:
+        try:
+            status = status_fn(instance_id)
+            transient_streak = 0
+        except Exception as exc:
+            transient_streak += 1
+            print(f"  [watchdog] transient API error ({transient_streak}/"
+                  f"{MAX_TRANSIENT}): {exc!r}", flush=True)
+            if transient_streak >= MAX_TRANSIENT:
+                print(f"✗ instance {instance_id} watchdog: "
+                      f"{MAX_TRANSIENT} consecutive API failures, "
+                      f"giving up.", flush=True)
+                return 1
+            time.sleep(poll_interval)
+            continue
+
+        last_status = status
+        if status == "running":
+            print(f"✓ instance {instance_id} ready (status=running)",
+                  flush=True)
+            return 0
+        if status in TERMINAL:
+            print(f"✗ instance {instance_id} reached terminal state "
+                  f"'{status}' before ever becoming running — host "
+                  f"failed to boot the container.", flush=True)
+            return 2
+
+        print(f"  [watchdog] instance {instance_id} status={status}, "
+              f"waiting {poll_interval}s...", flush=True)
+        time.sleep(poll_interval)
+
+    print(f"✗ instance {instance_id} did not reach 'running' within "
+          f"{timeout}s (last status={last_status}).", flush=True)
+    return 1
+
+
 print("setting api key...")
 vastai("set", "api-key", VAST_API_KEY)
 
@@ -340,10 +496,57 @@ print(f"picked offer {o['id']} ({o['gpu_name']} x{o.get('num_gpus','?')}, ${o['d
 
 print("creating instance...")
 env_arg = f"-e GITHUB={GITHUB} -e HF_TOKEN= -e VAST_API_KEY={VAST_API_KEY}"
-vastai("create", "instance", str(o["id"]),
-       "--image", VAST_IMAGE,
-       "--disk", str(disk_gib),
-       "--label", LABEL,
-       "--env", env_arg,
-       "--onstart-cmd", ONSTART)
-print(f"done (label={LABEL})")
+create_out, create_rc = vastai(
+    "create", "instance", str(o["id"]),
+    "--image", VAST_IMAGE,
+    "--disk", str(disk_gib),
+    "--label", LABEL,
+    "--env", env_arg,
+    "--onstart-cmd", ONSTART,
+    capture=True,
+)
+print(create_out, end="" if create_out.endswith("\n") else "\n")
+if create_rc != 0:
+    sys.exit(f"✗ vastai create failed (rc={create_rc}); aborting deploy.")
+
+# ── Boot watchdog ──
+# vast accepting the create call doesn't mean the container will boot.
+# Instance 41045637 (2026-06-15) is the canonical example: contract id
+# returned, container never created, log-pusher never started, no
+# checkpoints ever produced. The watchdog catches this BEFORE the
+# operator walks away thinking training is in progress.
+new_id = _parse_new_contract_id(create_out)
+if new_id is None:
+    sys.exit(
+        f"✗ vastai create returned no contract id (output above) — "
+        f"the host probably failed to schedule. Try `brian deploy` again."
+    )
+print(f"new_contract={new_id} (label={LABEL}) — watching for boot...")
+
+# Operator override knobs. ``BOOT_TIMEOUT_SEC`` is generous (10 min)
+# because a cold pytorch image pull on a slow host can take 5+ min.
+boot_timeout = int(os.environ.get("BOOT_TIMEOUT_SEC", "600"))
+boot_poll = int(os.environ.get("BOOT_POLL_SEC", "15"))
+
+watch_rc = _wait_for_instance_ready(
+    instance_id=new_id,
+    timeout=boot_timeout,
+    poll_interval=boot_poll,
+)
+if watch_rc != 0:
+    # Best-effort: tell vast to destroy the zombie contract so we
+    # don't keep paying. We tolerate failure here — if the contract
+    # is already gone the destroy call will no-op.
+    print(f"✗ instance {new_id} failed to boot — attempting to "
+          f"destroy zombie contract to stop billing...", flush=True)
+    try:
+        vastai("destroy", "instance", str(new_id), capture=True)
+    except Exception as exc:  # pragma: no cover — best-effort cleanup
+        print(f"  (destroy attempt failed: {exc!r})", flush=True)
+    sys.exit(
+        f"✗ instance {new_id} did not boot within {boot_timeout}s "
+        f"(watchdog rc={watch_rc}). Offer {o['id']} (machine "
+        f"{o.get('machine_id', '?')}) is unhealthy — re-run "
+        f"`brian deploy` to try another."
+    )
+print(f"done (label={LABEL}, id={new_id})")

@@ -22,6 +22,26 @@ def _seed_torch():
     torch.manual_seed(0)
 
 
+@pytest.fixture(autouse=True)
+def _stub_pre_deploy_hook(monkeypatch):
+    """Bypass the pre-deploy hook in unit tests by default.
+
+    The hook (added 2026-06-15) runs ``git status --porcelain`` and
+    refuses to deploy when the working tree is dirty — which it
+    almost always is during local TDD. Tests that legitimately want
+    to verify hook behaviour (``tests/test_hooks.py``) override this
+    by setting their OWN ``_run_hook`` monkeypatch AFTER this
+    fixture runs, which takes precedence.
+    """
+    try:
+        from neuroslm import cli
+    except ImportError:  # pragma: no cover — cli not importable yet
+        return
+    if hasattr(cli, "_run_hook"):
+        monkeypatch.setattr(cli, "_run_hook", lambda *a, **kw: 0,
+                            raising=False)
+
+
 @pytest.fixture()
 def device() -> torch.device:
     return torch.device("cpu")
