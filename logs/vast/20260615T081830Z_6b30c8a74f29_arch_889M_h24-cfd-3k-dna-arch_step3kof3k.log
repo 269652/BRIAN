@@ -2498,3 +2498,323 @@ Traceback (most recent call last):
 RuntimeError: Error(s) in loading state_dict for BRIANHarness:
 	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
 ⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 59 @ 09:09:02Z
+[train_dsl] boot @ 2026-06-15T09:09:03Z
+[train_dsl] git_commit b938c7d193e800841eefe5ef7fc48a1457941063 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1342, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1275, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 497, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2622, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 60 @ 09:09:42Z
+[train_dsl] boot @ 2026-06-15T09:09:43Z
+[train_dsl] git_commit b938c7d193e800841eefe5ef7fc48a1457941063 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1342, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1275, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 497, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2622, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 61 @ 09:10:19Z
+[train_dsl] boot @ 2026-06-15T09:10:20Z
+[train_dsl] git_commit b938c7d193e800841eefe5ef7fc48a1457941063 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1342, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1275, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 497, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2622, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 62 @ 09:10:57Z
+[train_dsl] boot @ 2026-06-15T09:10:59Z
+[train_dsl] git_commit b938c7d193e800841eefe5ef7fc48a1457941063 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1342, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1275, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 497, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2622, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 63 @ 09:11:35Z
+[train_dsl] boot @ 2026-06-15T09:11:37Z
+[train_dsl] git_commit b938c7d193e800841eefe5ef7fc48a1457941063 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1342, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1275, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 497, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2622, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 64 @ 09:12:15Z
+[train_dsl] boot @ 2026-06-15T09:12:17Z
+[train_dsl] git_commit b938c7d193e800841eefe5ef7fc48a1457941063 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1342, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1275, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 497, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2622, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 65 @ 09:12:53Z
+[train_dsl] boot @ 2026-06-15T09:12:55Z
+[train_dsl] git_commit b938c7d193e800841eefe5ef7fc48a1457941063 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1342, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1275, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 497, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2622, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 66 @ 09:13:31Z
+[train_dsl] boot @ 2026-06-15T09:13:33Z
+[train_dsl] git_commit b938c7d193e800841eefe5ef7fc48a1457941063 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1342, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1275, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 497, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2622, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
