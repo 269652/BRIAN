@@ -256,25 +256,20 @@ def _graph_attrs(engine: str) -> dict:
         pad="0.5",
     )
     if engine == "dot":
-        # Portrait A4 width with explicit fixed canvas. ``size="7.27,40!"``
-        # forces the bounding box to exactly 7.27"×40" — dot rescales
-        # its natural layout proportionally to fit width (the limiting
-        # dimension here, since for 30+ nodes the natural width is
-        # ~6× the natural height in TB rankdir).
+        # Vanilla dot — let it pick its natural canvas. The back-edge
+        # cycle-breaker (see _compute_back_edges + the synapse loop in
+        # emit_dot_from_hypergraph) is what makes dot work at all on
+        # this cyclic graph: forward synapses carry constraint=true and
+        # contribute to ranking, DFS-detected back-edges get
+        # constraint=false so they render without confusing dot's
+        # rank algorithm.
         #
-        # The ``!`` is the magic — without it dot only USES UP TO that
-        # size, but with it the canvas is fixed and labels stay legible
-        # because dot uses the full vertical space we gave it.
-        #
-        # No hand-coded rank table — vertical order is computed by dot
-        # from the real synapse edges (forward edges carry constraint=true,
-        # back-edges from DFS get constraint=false to break cycles, see
-        # _compute_back_edges + the synapse loop in emit_dot_from_hypergraph).
-        # This generalises to any architecture without renderer changes.
-        base.update(rankdir="TB", nodesep="0.45", ranksep="0.9",
+        # newrank=true uses dot's per-node-rank algorithm (vs the old
+        # cluster-rank default), which behaves better on graphs with
+        # mixed constrained / unconstrained edges.
+        base.update(rankdir="TB", nodesep="0.4", ranksep="0.8",
                     overlap="false", splines="spline",
-                    newrank="true",
-                    size="7.27,40!", ratio="fill")
+                    newrank="true", concentrate="true")
     elif engine == "neato":
         base.update(overlap="prism", splines="curved", sep="+12")
     elif engine in {"sfdp", "fdp"}:
