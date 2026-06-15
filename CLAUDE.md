@@ -566,13 +566,19 @@ without git archaeology.
 **Filename format** (enforced by `scripts/log_pusher.sh::_compose_logfile`):
 
 ```
-logs/vast/<UTC_YYYYMMDDTHHMMSSZ>_<instance>_<arch>_<params>_<label>_step<cur>of<target>.log
+logs/vast/<YYYYMMDD>/<arch>/<UTC_YYYYMMDDTHHMMSSZ>_<instance>_<arch>_<params>_<label>_step<cur>of<target>.log
 ```
+
+The `YYYYMMDD` date subfolder is the first 8 chars of `BOOT_TIMESTAMP`
+(`${BOOT_TIMESTAMP:0:8}`). The `<arch>` subfolder is `ARCH_NAME` so runs
+from different architectures are separated. Within the arch folder the leaf
+filename still starts with the full UTC boot timestamp so files sort
+chronologically and reused vast.ai instance ids never alias.
 
 Worked example:
 
 ```
-logs/vast/20260614T160423Z_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log
+logs/vast/20260614/arch/20260614T160423Z_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log
 ```
 
 - The leading `UTC_…Z` is `$BOOT_TIMESTAMP`, set ONCE in

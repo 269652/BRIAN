@@ -57,8 +57,8 @@ BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null)}"
 mkdir -p "logs/vast"
 
 # ── Filename builder ───────────────────────────────────────────────────
-# Returns a "speaking" path that includes:
-#   <instance>_<arch>_<params>_<label>_step<cur>of<target>.log
+# Returns a "speaking" path that includes date + arch subdirectories:
+#   logs/vast/<YYYYMMDD>/<ARCH_NAME>/<timestamp>_<instance>_<arch>_<params>_<label>_step<cur>of<target>.log
 # Where params + cur step are parsed live from $SOURCE_LOG (defaults
 # kick in when the log hasn't reported them yet).
 _format_steps() {
@@ -94,9 +94,15 @@ _compose_logfile() {
     local short_label="${LABEL#neuroslm-full-}"
     short_label="${short_label#neuroslm-full}"
     [ -z "$short_label" ] && short_label="run"
-    # Timestamp prefix MUST come first so `ls logs/vast/` sorts
-    # chronologically and reused vast instance ids never alias.
-    echo "logs/vast/${BOOT_TIMESTAMP}_${INSTANCE_ID}_${ARCH_NAME}_${params}_${short_label}_step${cur}of${tgt}.log"
+    # Subdirectory layout: logs/vast/<YYYYMMDD>/<ARCH_NAME>/
+    # Date is the first 8 chars of the UTC boot timestamp (YYYYMMDD).
+    # Arch subfolder keeps runs from different architectures separated.
+    local date_dir="${BOOT_TIMESTAMP:0:8}"
+    mkdir -p "logs/vast/${date_dir}/${ARCH_NAME}"
+    # Timestamp prefix MUST still come first in the FILENAME so files
+    # within an arch subfolder sort chronologically and reused vast
+    # instance ids never alias.
+    echo "logs/vast/${date_dir}/${ARCH_NAME}/${BOOT_TIMESTAMP}_${INSTANCE_ID}_${ARCH_NAME}_${params}_${short_label}_step${cur}of${tgt}.log"
 }
 
 # Previous-file tracker so we can remove an old name when the step bumps.
