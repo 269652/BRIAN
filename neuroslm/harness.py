@@ -2744,6 +2744,22 @@ class BRIANHarness(nn.Module):
             # experts attached at init are the source of truth.
         if "optimizer" in payload and self._optimizer is not None:
             self._optimizer.load_state_dict(payload["optimizer"])
+        elif self._optimizer is not None:
+            # Checkpoint carries no optimizer state — almost certainly
+            # an HF-Hub resume (we strip the Adam moments from cloud
+            # uploads by default, see ``checkpoint_push.py``). The
+            # optimiser will reinit from zero, which means the first
+            # ~500 steps will look like an LR-warmup blip while Adam's
+            # 2nd-moment EMA rebuilds. The weights themselves are
+            # exactly the trained ones, so eval metrics stay valid —
+            # only the gradient-step shape suffers transiently.
+            print(
+                "[harness] load_checkpoint: no optimizer state in payload "
+                "— Adam moments will reinit from zero (expect ~500-step "
+                "warmup-shape loss blip while the 2nd-moment EMA rebuilds; "
+                "weights themselves are untouched).",
+                flush=True,
+            )
         return int(payload.get("step", 0))
 
     # ── Introspection (for train.py compatibility) ──────────────────
