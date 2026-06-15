@@ -116,16 +116,30 @@ class TestTrainDslPushEveryFlag:
         )
 
     def test_save_site_calls_push_helper(self):
-        """The periodic-save block must invoke the push helper. We
+        """The periodic-save block must invoke a push helper. We
         grep for the import / call so the test doesn't need a real
-        train run."""
+        train run.
+
+        2026-06-15: relaxed to accept either the legacy direct
+        ``push_checkpoint_to_lfs`` call OR the new
+        :func:`push_checkpoint` dispatcher (see
+        ``tests/test_checkpoint_push_hf.py`` which pins the
+        dispatcher contract). The dispatcher routes to HF Hub by
+        default, with LFS still reachable via
+        ``--push_backend lfs`` / ``CHECKPOINT_PUSH_BACKEND=lfs``.
+        """
         src = (REPO_ROOT / "neuroslm" / "train_dsl.py").read_text(
             encoding="utf-8"
         )
-        assert "push_checkpoint_to_lfs" in src, (
-            "neuroslm/train_dsl.py must import and call "
-            "push_checkpoint_to_lfs from neuroslm.checkpoint_push "
-            "after each periodic save when --push_every > 0."
+        assert (
+            "push_checkpoint_to_lfs" in src
+            or "push_checkpoint" in src
+        ), (
+            "neuroslm/train_dsl.py must import + call a push helper "
+            "(``push_checkpoint`` dispatcher or "
+            "``push_checkpoint_to_lfs``) from "
+            "neuroslm.checkpoint_push after each periodic save when "
+            "--push_every > 0."
         )
 
 

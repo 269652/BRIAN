@@ -48,7 +48,7 @@ _ARCH_LABEL = os.environ.get("DSL_ARCH_LABEL", "run")
 
 import torch
 
-from neuroslm.checkpoint_push import push_checkpoint_to_lfs
+from neuroslm.checkpoint_push import push_checkpoint
 from neuroslm.dsl.codegen import CodeGenerator
 from neuroslm.dsl.multifile import compile_folder
 from neuroslm.dsl.training_config import load_training_config_from_arch
@@ -913,7 +913,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
           ckpt_dir: Optional[Path] = None, start_step: int = 0,
           tokens_per_step: int = 0,
           ood_every: int = 0,
-          push_every: int = 0) -> None:
+          push_every: int = 0,
+          push_backend: str = "hf") -> None:
     """Run train_steps from `start_step+1` to `steps`. Emits the native
     train.py metric format; saves checkpoints.
 
@@ -925,11 +926,21 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
     improving (or not) while training is still running.
 
     If `push_every > 0`: every save whose step is divisible by
-    `push_every` is followed by a ``git add``/``commit``/``push`` of
-    the checkpoint to Git LFS. Closes the H24 (run 41031063,
-    2026-06-15) loss-hole where the vast box self-destroyed before
-    the end-of-training push and stranded every checkpoint. Defaults
-    to 0 (off) so local-dev runs aren't tied to the git remote.
+    `push_every` is followed by a push of the checkpoint via the
+    dispatcher (:func:`neuroslm.checkpoint_push.push_checkpoint`).
+    The active backend is `push_backend` — one of:
+
+      * ``"hf"`` — HuggingFace Hub ``upload_file`` (default after
+        2026-06-15; ran 41063959 hung at step 500 because the old
+        ``git push`` of a 569 MB LFS object raced the background
+        log-pusher and never returned)
+      * ``"lfs"`` — legacy ``git add``/``commit``/``push``
+      * ``"none"`` — no remote push (local-dev runs)
+
+    Closes the H24 (run 41031063, 2026-06-15) loss-hole where the
+    vast box self-destroyed before the end-of-training push and
+    stranded every checkpoint. Defaults to 0 (off) so local-dev runs
+    aren't tied to the git remote.
     """
     if ckpt_dir is not None:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -1082,7 +1093,7 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                     # Always push the early-exit ckpt regardless of
                     # cadence — it's the LAST artefact of the run.
                     if push_every > 0:
-                        push_checkpoint_to_lfs(str(path))
+                        push_checkpoint(str(path), backend=push_backend)
                 return
 
         if ckpt_dir is not None and step % save_every == 0:
@@ -1095,12 +1106,14 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                 ckpt_dir, _run_dir_name(), step)
             harness.save_checkpoint(str(path), step=step)
             print(f"[train_dsl] saved checkpoint {path}", flush=True)
-            # Optionally push to Git LFS so an instance crash never
-            # strands artefacts. ``push_every`` is normally either 0
-            # (off) or equal to ``save_every`` (push every save). A
-            # value > save_every pushes less often than it saves.
+            # Optionally push to the configured backend so an
+            # instance crash never strands artefacts. ``push_every``
+            # is normally either 0 (off) or equal to ``save_every``
+            # (push every save). A value > save_every pushes less
+            # often than it saves. ``push_backend`` selects HF Hub
+            # (default) or legacy Git LFS — see :func:`push_checkpoint`.
             if push_every > 0 and step % push_every == 0:
-                push_checkpoint_to_lfs(str(path))
+                push_checkpoint(str(path), backend=push_backend)
 
         # Mid-training OOD eval — quick WikiText-103 ppl snapshot so we
         # can SEE generalization moving without waiting for end-of-run.
@@ -1128,7 +1141,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                             print(f"[train_dsl] saved early-exit "
                                   f"checkpoint {path}", flush=True)
                             if push_every > 0:
-                                push_checkpoint_to_lfs(str(path))
+                                push_checkpoint(
+                                    str(path), backend=push_backend)
                         return
             except Exception as e:
                 print(f"[train_dsl] mid-OOD eval failed at step {step}: {e}",
@@ -1151,7 +1165,7 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
         # _deploy_train.py end-of-training push exists as belt-and-
         # braces but the box may self-destroy first (H24).
         if push_every > 0:
-            push_checkpoint_to_lfs(str(final_path))
+            push_checkpoint(str(final_path), backend=push_backend)
 
     # Final OOD pass: a longer WikiText-103 eval (cap=200 windows instead
     # of the mid-OOD cap=50) plus a train-set ppl on the same loader, so
@@ -1249,11 +1263,22 @@ def main():
     parser.add_argument("--save_every", type=int, default=1000)
     parser.add_argument("--push_every", type=int, default=0,
                         help="If > 0, push each periodically-saved "
-                             "checkpoint to Git LFS via "
-                             "``git add/commit/push`` so the vast.ai box "
+                             "checkpoint via the configured backend "
+                             "(see --push_backend) so the vast.ai box "
                              "self-destruction can no longer eat them "
                              "(H24 loss-hole). Should normally equal "
                              "--save_every or be a small multiple thereof.")
+    parser.add_argument("--push_backend",
+                        choices=["hf", "lfs", "none"], default="hf",
+                        help="Checkpoint push backend:\n"
+                             "  hf   = HuggingFace Hub upload_file "
+                             "(default; post-2026-06-15)\n"
+                             "  lfs  = legacy git add/commit/push to "
+                             "Git LFS (run 41063959 hung at step 500 "
+                             "because of git-push/log-pusher race)\n"
+                             "  none = no remote push (local-dev runs)\n"
+                             "Overridden by CHECKPOINT_PUSH_BACKEND env "
+                             "on the box.")
     parser.add_argument("--ood_every", type=int, default=0,
                         help="If > 0, run a mid-training WikiText-103 OOD "
                              "ppl snapshot every N steps. Writes JSON to "
@@ -1510,6 +1535,7 @@ def main():
         save_every=args.save_every, ckpt_dir=ckpt_dir,
         start_step=start_step, ood_every=args.ood_every,
         push_every=args.push_every,
+        push_backend=args.push_backend,
     )
 
     print("[train_dsl] done.")
