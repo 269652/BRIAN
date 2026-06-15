@@ -46,9 +46,7 @@
 # 2026-06-14: the bowtie arch folder was renamed rcc_bowtie → master
 # (canonical source-of-truth), and architectures/current/ was added as
 # the live working-copy that brian train/deploy consume by default.
-# Edit master/ for designed changes; current/ tracks master/ unless an
-# experiment branches it.
-arch = "architectures/current"
+arch = "architectures/master"
 # 2026-06-15: DNA path mirrors the active git branch so a fork on
 # `feature/X` never clobbers master's compiled DNA. The pre-deploy
 # hook (hooks/pre-deploy.yaml) recompiles architectures/master into
@@ -85,6 +83,20 @@ log_every = 20
 save_every = 500    
 push_every = 500
 
+# ── Checkpoint push backend (2026-06-15) ──
+# Default flipped from Git LFS to HuggingFace Hub after run 41063959
+# hung at exactly step 500 — synchronous `git push` of a 569 MB LFS
+# object inside the training loop raced the background log-pusher
+# and never returned. HF Hub's single sync HTTPS PUT avoids the race.
+#
+# Values: "hf" (default), "lfs" (legacy), "none" (no remote push)
+# Overridden by CHECKPOINT_PUSH_BACKEND env on the box, and by the
+# --push_backend CLI flag of `python -m neuroslm.train_dsl`.
+#
+# `hf_repo_id` only used when push_backend = "hf".
+push_backend = "hf"
+hf_repo_id = "moritzroessler/BRIAN"
+
 [hardware.A100]
 preset = "large"
 
@@ -103,4 +115,4 @@ preset = "tiny"
 [nfg]
 output = ".neuro/nfg.png"
 format = "png"
-engine = "dot"
+engine = "neato"

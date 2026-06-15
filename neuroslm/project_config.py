@@ -52,7 +52,7 @@ else:  # pragma: no cover — exercised only on 3.10
 # from "architectures/rcc_bowtie": master/ holds the canonical
 # hand-edited source-of-truth, current/ is the live arch the trainer
 # consumes by default (and the one experiments may branch off).
-_DEFAULT_ARCH = "architectures/current"
+_DEFAULT_ARCH = "architectures/master"
 _DEFAULT_DNA = ""
 _DEFAULT_NFG_OUTPUT = ".neuro/nfg.png"
 _DEFAULT_NFG_FORMAT = "png"
@@ -81,6 +81,23 @@ _DEFAULT_BRANCH = ""  # "" = "no opinion — caller picks" (deploy will
 _DEFAULT_LOG_EVERY = 20
 _DEFAULT_SAVE_EVERY = 500
 _DEFAULT_PUSH_EVERY = 500
+
+# ── checkpoint push backend (2026-06-15) ────────────────────────────
+# Default flipped from Git-LFS to HuggingFace Hub after run 41063959
+# hung at exactly step 500 — synchronous ``git push`` of a 569 MB LFS
+# object inside the training loop raced the background log-pusher
+# and never returned. HF Hub's single sync HTTPS PUT avoids the race
+# entirely. The legacy LFS path is preserved (``push_backend = "lfs"``)
+# for envs that can't reach HF Hub.
+#
+# Same precedence chain as the cadence fields above:
+#   1. CLI flag (``--push_backend hf|lfs|none``)
+#   2. Env on box (``CHECKPOINT_PUSH_BACKEND``)
+#   3. ``BRIAN_DEFAULT_PUSH_BACKEND`` env locally
+#   4. ``[defaults]`` in ``brian.toml``
+#   5. This constant
+_DEFAULT_PUSH_BACKEND = "hf"
+_DEFAULT_HF_REPO_ID = "moritzroessler/BRIAN"
 
 
 # ─── data class ──────────────────────────────────────────────────────
@@ -124,6 +141,15 @@ class ProjectConfig:
     default_log_every: int = _DEFAULT_LOG_EVERY
     default_save_every: int = _DEFAULT_SAVE_EVERY
     default_push_every: int = _DEFAULT_PUSH_EVERY
+    # ── Checkpoint push backend (2026-06-15) ──
+    # ``default_push_backend`` chooses between the HF Hub uploader
+    # (default) and the legacy Git LFS uploader. ``default_hf_repo_id``
+    # names the target HF repo for the HF backend; ignored when
+    # ``default_push_backend == "lfs"``. Both propagate through
+    # ``cli.cmd_deploy`` → ``_deploy_train.py`` → vast loop as the
+    # ``CHECKPOINT_PUSH_BACKEND`` and ``HF_REPO_ID`` envs.
+    default_push_backend: str = _DEFAULT_PUSH_BACKEND
+    default_hf_repo_id: str = _DEFAULT_HF_REPO_ID
     # ── Per-hardware preset map ──
     # ``[hardware.<NAME>] preset = "..."`` sections feed this dict.
     # Looked up by ``cli._resolve_effective_preset`` AFTER the arch's
@@ -313,6 +339,12 @@ def load_project_config(
     default_push_every = int(
         defaults_section.get("push_every", _DEFAULT_PUSH_EVERY)
     )
+    default_push_backend = str(
+        defaults_section.get("push_backend", _DEFAULT_PUSH_BACKEND)
+    )
+    default_hf_repo_id = str(
+        defaults_section.get("hf_repo_id", _DEFAULT_HF_REPO_ID)
+    )
 
     # ── env-var overrides (BRIAN_ prefix to avoid collisions) ──
     env_arch = os.environ.get("BRIAN_ARCH")
@@ -327,6 +359,10 @@ def load_project_config(
     env_default_log_every = os.environ.get("BRIAN_DEFAULT_LOG_EVERY")
     env_default_save_every = os.environ.get("BRIAN_DEFAULT_SAVE_EVERY")
     env_default_push_every = os.environ.get("BRIAN_DEFAULT_PUSH_EVERY")
+    env_default_push_backend = os.environ.get(
+        "BRIAN_DEFAULT_PUSH_BACKEND"
+    )
+    env_default_hf_repo_id = os.environ.get("BRIAN_DEFAULT_HF_REPO_ID")
 
     if env_arch:
         arch = env_arch
@@ -373,6 +409,13 @@ def load_project_config(
                 default_push_every = int(env_default_push_every)
             except ValueError:
                 pass
+    if env_default_push_backend:
+        # Empty string keeps the file value; any non-empty value
+        # wins. Caller-side ``push_checkpoint`` dispatcher tolerates
+        # unknown strings by warning + falling back to ``hf``.
+        default_push_backend = env_default_push_backend
+    if env_default_hf_repo_id:
+        default_hf_repo_id = env_default_hf_repo_id
 
     return ProjectConfig(
         repo_root=repo_root,
@@ -388,6 +431,8 @@ def load_project_config(
         default_log_every=default_log_every,
         default_save_every=default_save_every,
         default_push_every=default_push_every,
+        default_push_backend=default_push_backend,
+        default_hf_repo_id=default_hf_repo_id,
         hardware_presets=hardware_presets,
     )
 
