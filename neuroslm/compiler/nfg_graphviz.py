@@ -246,14 +246,26 @@ def _nt_colour(name: str) -> str:
     return _NT_COLOURS.get(key, _DEFAULT_MOD_COLOUR)
 
 
-def _graph_attrs(engine: str) -> dict:
-    """Top-level graph attributes — engine-specific tweaks."""
+def _graph_attrs(engine: str, dpi: int = 96) -> dict:
+    """Top-level graph attributes — engine-specific tweaks.
+
+    Parameters
+    ----------
+    engine
+        Layout engine — ``"dot"`` / ``"neato"`` / ``"sfdp"`` / ``"fdp"``.
+    dpi
+        PNG rasterization DPI. Graphviz default is 96; bumping to 150+
+        produces sharper text/lines when zooming. SVG / PDF ignore this
+        attribute (they're vector formats). Pass via ``[nfg].dpi`` in
+        brian.toml or the ``BRIAN_NFG_DPI`` env var.
+    """
     base = dict(
         labelloc="t",
         fontsize="22",
         fontname="Helvetica",
         bgcolor="white",
         pad="0.5",
+        dpi=str(int(dpi)),
     )
     if engine == "dot":
         # Vanilla dot — let it pick its natural canvas. The back-edge
@@ -352,6 +364,7 @@ def emit_dot_from_hypergraph(
     engine: str = "dot",
     title: Optional[str] = None,
     heat: Optional[Any] = None,
+    dpi: int = 96,
 ) -> str:
     """Build a DOT-string view of the hypergraph.
 
@@ -368,6 +381,9 @@ def emit_dot_from_hypergraph(
                  ids that match a population / synapse / modulation are
                  retinted by their normalized heat. See
                  :mod:`neuroslm.compiler.heat_overlay`.
+        dpi:     PNG rasterization DPI baked into the DOT source. Default
+                 96 (graphviz default); bump to 150+ for sharper PNG.
+                 Ignored by SVG / PDF outputs.
 
     Returns:
         A complete DOT source string ready for ``dot -Tpng`` or
@@ -387,7 +403,7 @@ def emit_dot_from_hypergraph(
     heat_map: Dict[str, float] = load_heat_source(heat)
 
     g = graphviz.Digraph("nfg", engine=engine)
-    g.attr(**_graph_attrs(engine))
+    g.attr(**_graph_attrs(engine, dpi=dpi))
     if title:
         g.attr(label=_escape_label(title))
 
@@ -397,6 +413,14 @@ def emit_dot_from_hypergraph(
         with g.subgraph(name="cluster_architecture") as c:
             c.attr(label="architecture", style="rounded,dashed",
                    color="#888888", fontsize="14", bgcolor="#fafafa")
+            # rank=same forces all nodes in this cluster onto a single
+            # horizontal row (the cluster becomes a wide horizontal
+            # band). Combined with rankdir=TB at the graph level, the
+            # clusters STACK top-to-bottom as horizontal strata →
+            # landscape canvas. Without rank=same, dot lays each
+            # cluster's nodes onto distinct ranks (turning every
+            # cluster into a vertical column → portrait canvas).
+            c.attr(rank="same")
             for n in arch_nodes:
                 style = _KIND_STYLES["architecture"]
                 c.node(n.name, label=_arch_label(n), **style)
@@ -416,6 +440,11 @@ def emit_dot_from_hypergraph(
             c.attr(label=style["label"], style="rounded,dashed",
                    color=style["color"], fontsize="13",
                    bgcolor=style["fillcolor"])
+            # Same horizontal-band trick as the architecture cluster —
+            # forces all populations inside this anatomical region onto
+            # one rank, so e.g. "executive" reads left-to-right as a
+            # single row of 9 nodes instead of a 3×3 stack.
+            c.attr(rank="same")
             for n in nodes_in_region:
                 # Tint each population's fill by its region so they stay
                 # visually anchored to the cluster even when the layout
@@ -442,6 +471,8 @@ def emit_dot_from_hypergraph(
             c.attr(label=style["label"], style="rounded,solid",
                    color=style["color"], fontsize="13",
                    bgcolor=style["fillcolor"])
+            # lm_trunk + 4 experts read as one horizontal row.
+            c.attr(rank="same")
             for n in trunk_nodes:
                 trunk_style = dict(_KIND_STYLES["lm_trunk"])
                 c.node(n.name, label=_trunk_label(n), **trunk_style)
@@ -455,6 +486,10 @@ def emit_dot_from_hypergraph(
         with g.subgraph(name="cluster_neurotransmitters") as c:
             c.attr(label="neurotransmitters", style="rounded,dashed",
                    color="#7a6b00", fontsize="14", bgcolor="#fffcec")
+            # 7 neurotransmitters in one horizontal row at the top
+            # (matches the brain's "broadcast bus" mental model — all
+            # NTs available at all levels, no hierarchy between them).
+            c.attr(rank="same")
             for n in nt_nodes:
                 style = dict(_KIND_STYLES["neurotransmitter"])
                 # Tint the NT node by its semantic colour so the modulator
@@ -602,6 +637,7 @@ def render_hypergraph(
     engine: str = "dot",
     title: Optional[str] = None,
     heat: Optional[Any] = None,
+    dpi: int = 96,
 ) -> str:
     """Render the hypergraph to disk.
 
@@ -615,6 +651,7 @@ def render_hypergraph(
                    ``"neato"`` / ``"sfdp"`` / ``"fdp"`` / ``"circo"``)
         title:     optional title for the rendered diagram.
         heat:      optional heatmap overlay (see :func:`emit_dot_from_hypergraph`).
+        dpi:       PNG rasterization DPI (default 96). Ignored by SVG/PDF.
 
     Returns:
         Absolute path to the file actually written.
@@ -622,7 +659,7 @@ def render_hypergraph(
     from pathlib import Path as _Path
 
     dot_src = emit_dot_from_hypergraph(
-        ir, engine=engine, title=title, heat=heat)
+        ir, engine=engine, title=title, heat=heat, dpi=dpi)
     out = _Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -654,6 +691,7 @@ def render_arch(
     engine: str = "dot",
     title: Optional[str] = None,
     heat: Optional[Any] = None,
+    dpi: int = 96,
 ) -> str:
     """Convenience: lift an arch folder and render in one call."""
     from neuroslm.compiler.hypergraph_ir import lift_arch_to_hypergraph
@@ -665,4 +703,4 @@ def render_arch(
         except Exception:
             title = None
     return render_hypergraph(ir, out_path, format=format,
-                             engine=engine, title=title, heat=heat)
+                             engine=engine, title=title, heat=heat, dpi=dpi)

@@ -263,6 +263,23 @@ def cmd_compile_nfg(args: argparse.Namespace) -> int:
             args.format = cfg.nfg_format
         if not getattr(args, "engine", None) or args.engine == "dot":
             args.engine = cfg.nfg_engine
+        # Multi-format: stash the full ``[nfg].formats`` list + dpi knob
+        # on args so the renderer can loop over them. Only honoured when
+        # the operator didn't pass an explicit --out / --png / --format
+        # (which would mean "render this one specific thing"). When
+        # any of those CLI escape hatches are used we fall back to
+        # singular behaviour for orthogonality.
+        cli_overrode_target = bool(
+            getattr(args, "png", None)
+            or (getattr(args, "out", None) and args.out != resolved_out)
+        )
+        cli_overrode_format = (
+            getattr(args, "_format_explicit", False) is True
+        )
+        if not cli_overrode_target and not cli_overrode_format:
+            args._cfg_formats = list(cfg.nfg_formats)
+            args._cfg_output_paths = cfg.nfg_output_paths(heat=bool(heat))
+        args._cfg_dpi = cfg.nfg_dpi
         print(
             f"current: {source_label}  ->  {resolved_out}"
             + (" (heat overlay)" if heat else "")
@@ -313,6 +330,7 @@ def _cmd_compile_nfg_graphviz(args: argparse.Namespace,
 
     out_format = getattr(args, "format", "png") or "png"
     engine = getattr(args, "engine", "dot") or "dot"
+    dpi = int(getattr(args, "_cfg_dpi", 96) or 96)
 
     # --png overrides --format implicitly to png
     if args.png:
@@ -329,14 +347,30 @@ def _cmd_compile_nfg_graphviz(args: argparse.Namespace,
     else:
         out_path = str(default_dir / f"nfg.{out_format}")
 
+    # Multi-format render: cmd_compile_nfg's --current branch stashes the
+    # ``[nfg].formats`` list (and matching per-format output paths) onto
+    # args when no CLI override is present. We render each in a loop so a
+    # single ``brian compile nfg --current`` produces both .png AND .svg
+    # (or whatever the user configured).
+    cfg_formats = getattr(args, "_cfg_formats", None)
+    cfg_output_paths = getattr(args, "_cfg_output_paths", None)
+    render_targets: List[Tuple[str, str]]
+    if cfg_formats and cfg_output_paths:
+        render_targets = [(fmt, str(p)) for fmt, p in cfg_output_paths]
+    else:
+        render_targets = [(out_format, out_path)]
+
     ir = lift_arch_to_hypergraph(arch)
 
+    written_list: List[str] = []
     try:
         title = f"NFG · {Path(arch).name}"
-        written = render_hypergraph(
-            ir, out_path, format=out_format, engine=engine, title=title,
-            heat=getattr(args, "heat", None),
-        )
+        for fmt, target_path in render_targets:
+            written = render_hypergraph(
+                ir, target_path, format=fmt, engine=engine, title=title,
+                heat=getattr(args, "heat", None), dpi=dpi,
+            )
+            written_list.append(written)
     except Exception as e:
         # Most likely the `dot` binary isn't installed; tell the user
         # exactly how to fix it.
@@ -354,8 +388,17 @@ def _cmd_compile_nfg_graphviz(args: argparse.Namespace,
     nts = sum(1 for n in ir.nodes if n.kind == "neurotransmitter")
     syns = sum(1 for e in ir.hyperedges if e.kind == "synapse")
     mods = sum(1 for e in ir.hyperedges if e.kind == "modulation")
-    print(f"wrote NFG render      -> {written}  "
-          f"(engine: {engine}, format: {out_format})")
+    if len(written_list) == 1:
+        print(f"wrote NFG render      -> {written_list[0]}  "
+              f"(engine: {engine}, format: {render_targets[0][0]}"
+              f"{', dpi=' + str(dpi) if dpi != 96 else ''})")
+    else:
+        formats_str = ", ".join(fmt for fmt, _ in render_targets)
+        print(f"wrote NFG render ({len(written_list)} files, formats: "
+              f"{formats_str}, engine: {engine}"
+              f"{', dpi=' + str(dpi) if dpi != 96 else ''}):")
+        for w in written_list:
+            print(f"  - {w}")
     print(f"  hypergraph: {pops} populations · {nts} NT systems · "
           f"{syns} synapses · {mods} modulations")
     return 0

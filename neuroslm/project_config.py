@@ -34,7 +34,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # ─── tomllib (stdlib in 3.11+; tomli fallback for 3.10) ──────────────
 if sys.version_info >= (3, 11):
@@ -56,6 +56,16 @@ _DEFAULT_ARCH = "architectures/master"
 _DEFAULT_DNA = ""
 _DEFAULT_NFG_OUTPUT = ".neuro/nfg.png"
 _DEFAULT_NFG_FORMAT = "png"
+# Plural list of formats to render in one ``brian compile nfg`` call.
+# Defaults to PNG + SVG so users get both a raster image (chat embeds,
+# inline preview) AND a vector image (zoom-in inspection without
+# pixelation). Singular ``[nfg].format = "png"`` is still honoured
+# as a 1-element list for backwards compat — see loader below.
+_DEFAULT_NFG_FORMATS: List[str] = ["png", "svg"]
+# PNG rasterization DPI. Graphviz default is 96 (looks pixelated when
+# zooming on modern hi-DPI displays). 150 is ~1.56x sharper at ~2.4x
+# file size — a reasonable middle for inline previews. SVG ignores it.
+_DEFAULT_NFG_DPI = 150
 _DEFAULT_NFG_ENGINE = "dot"
 _DEFAULT_PRESET = ""
 _DEFAULT_HARDWARE = ""
@@ -125,6 +135,12 @@ class ProjectConfig:
     dna: str = _DEFAULT_DNA
     nfg_output: str = _DEFAULT_NFG_OUTPUT
     nfg_format: str = _DEFAULT_NFG_FORMAT
+    # Plural list of formats to render. ``nfg_format`` (singular) is
+    # kept as the FIRST element of ``nfg_formats`` for backwards compat
+    # with code that reads only one format. The loader populates both.
+    nfg_formats: List[str] = field(default_factory=lambda: list(_DEFAULT_NFG_FORMATS))
+    # PNG rasterization DPI (graphviz ``-Gdpi=``). SVG output ignores it.
+    nfg_dpi: int = _DEFAULT_NFG_DPI
     nfg_engine: str = _DEFAULT_NFG_ENGINE
     # ── Global training defaults ──
     # Read from the ``[defaults]`` section of ``brian.toml``. Empty means
@@ -240,6 +256,46 @@ class ProjectConfig:
         p.parent.mkdir(parents=True, exist_ok=True)
         return p
 
+    def nfg_output_paths(self, heat: bool = False) -> List[Tuple[str, Path]]:
+        """Plural version of :meth:`nfg_output_path` — returns one
+        ``(format, path)`` tuple per entry in ``self.nfg_formats``.
+
+        The path for each format is derived from ``self.nfg_output`` by
+        swapping the suffix to match. Example with default config::
+
+            self.nfg_output  = ".neuro/nfg.png"
+            self.nfg_formats = ["png", "svg"]
+            =>  [("png", "<repo>/.neuro/nfg.png"),
+                 ("svg", "<repo>/.neuro/nfg.svg")]
+
+        ``heat=True`` infixes ``.heat`` before each suffix, same rule
+        as the singular helper. Parent dirs are created.
+
+        Used by ``brian compile nfg --current`` to emit multiple formats
+        in one pass.
+        """
+        out: List[Tuple[str, Path]] = []
+        base = self.nfg_output_path(heat=heat)
+        # The singular method already resolved + mkdir'd the parent. Swap
+        # the suffix for each requested format. Preserve any infixed
+        # ``.heat`` in the stem — Path.with_suffix() would treat ``.heat``
+        # as the suffix and strip it (regression caught by
+        # test_current_flag_with_heat_writes_heat_sibling), so we slice
+        # the final extension off as a plain string and concatenate.
+        base_str = str(base)
+        last_dot = base_str.rfind(".")
+        if last_dot >= 0 and "/" not in base_str[last_dot:] \
+                and "\\" not in base_str[last_dot:]:
+            # Strip ONLY the final ``.ext`` — leaves ``foo.heat`` and
+            # ``foo.v2`` infixes intact.
+            stem_str = base_str[:last_dot]
+        else:
+            stem_str = base_str
+        for fmt in self.nfg_formats:
+            ext = fmt if fmt.startswith(".") else f".{fmt}"
+            out.append((fmt, Path(stem_str + ext)))
+        return out
+
     def training_target(self) -> Tuple[str, Path]:
         """Return ``("dna", path)`` in DNA-mode, else
         ``("arch", path)``. The single dispatch every training script
@@ -339,7 +395,28 @@ def load_project_config(
     arch = str(current.get("arch", _DEFAULT_ARCH))
     dna = str(current.get("dna", _DEFAULT_DNA))
     nfg_output = str(nfg_section.get("output", _DEFAULT_NFG_OUTPUT))
-    nfg_format = str(nfg_section.get("format", _DEFAULT_NFG_FORMAT))
+    # Plural ``formats`` wins over singular ``format``. Either is fine.
+    # Normalises to a list of lowercase strings, deduped while preserving
+    # order (so ``["png", "svg"]`` stays distinct from ``["svg", "png"]``).
+    raw_formats = nfg_section.get("formats")
+    if raw_formats is None:
+        # Fall back to singular ``format`` (= 1-element list), then default.
+        raw_formats = [nfg_section.get("format", _DEFAULT_NFG_FORMAT)]
+    if isinstance(raw_formats, str):
+        # Tolerate ``formats = "png"`` (string scalar instead of array).
+        raw_formats = [raw_formats]
+    seen: set = set()
+    nfg_formats: List[str] = []
+    for f in raw_formats:
+        fl = str(f).strip().lower()
+        if fl and fl not in seen:
+            seen.add(fl)
+            nfg_formats.append(fl)
+    if not nfg_formats:
+        nfg_formats = list(_DEFAULT_NFG_FORMATS)
+    # ``nfg_format`` (singular) tracks the primary = first format.
+    nfg_format = nfg_formats[0]
+    nfg_dpi = int(nfg_section.get("dpi", _DEFAULT_NFG_DPI))
     nfg_engine = str(nfg_section.get("engine", _DEFAULT_NFG_ENGINE))
     default_preset = str(defaults_section.get("preset", _DEFAULT_PRESET))
     default_hardware = str(
@@ -371,6 +448,10 @@ def load_project_config(
     env_dna = os.environ.get("BRIAN_DNA")
     env_nfg_out = os.environ.get("BRIAN_NFG_OUTPUT")
     env_nfg_format = os.environ.get("BRIAN_NFG_FORMAT")
+    # Comma-separated list, e.g. ``BRIAN_NFG_FORMATS=png,svg,pdf``.
+    # Wins over the singular ``BRIAN_NFG_FORMAT`` when both are set.
+    env_nfg_formats = os.environ.get("BRIAN_NFG_FORMATS")
+    env_nfg_dpi = os.environ.get("BRIAN_NFG_DPI")
     env_nfg_engine = os.environ.get("BRIAN_NFG_ENGINE")
     env_default_preset = os.environ.get("BRIAN_DEFAULT_PRESET")
     env_default_hardware = os.environ.get("BRIAN_DEFAULT_HARDWARE")
@@ -400,6 +481,28 @@ def load_project_config(
             nfg_format = _derive_nfg_format(env_nfg_out, nfg_format)
     if env_nfg_format:
         nfg_format = env_nfg_format
+    # ``BRIAN_NFG_FORMATS`` (plural, comma-sep) overrides the toml list
+    # AND the singular env. Last write wins.
+    if env_nfg_formats:
+        seen_e: set = set()
+        env_list: List[str] = []
+        for f in env_nfg_formats.split(","):
+            fl = f.strip().lower()
+            if fl and fl not in seen_e:
+                seen_e.add(fl)
+                env_list.append(fl)
+        if env_list:
+            nfg_formats = env_list
+            nfg_format = nfg_formats[0]
+    elif env_nfg_format:
+        # Singular env-format also re-syncs the plural list so callers
+        # that loop over ``nfg_formats`` honour the env override.
+        nfg_formats = [nfg_format]
+    if env_nfg_dpi:
+        try:
+            nfg_dpi = int(env_nfg_dpi)
+        except ValueError:
+            pass  # leave whatever the file said
     if env_nfg_engine:
         nfg_engine = env_nfg_engine
     if env_default_preset is not None:
@@ -453,6 +556,8 @@ def load_project_config(
         dna=dna,
         nfg_output=nfg_output,
         nfg_format=nfg_format,
+        nfg_formats=nfg_formats,
+        nfg_dpi=nfg_dpi,
         nfg_engine=nfg_engine,
         default_preset=default_preset,
         default_hardware=default_hardware,

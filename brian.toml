@@ -72,14 +72,28 @@ steps = 10000
 branch = "master"
 
 # ── Checkpoint / log cadence ──
-# How often the trainer logs a step, saves a local .pt, and pushes it
-# to Git LFS. `push_every` was silently regressed to 0 during the DSL
-# rewrite — the legacy train.py pushed after every save. We restore
-# the 500-step cadence here so a box self-destruction (H24 mode of
-# failure) can never eat more than ~500 steps of progress. Set
-# push_every = 0 to disable pushes entirely (back to "save locally
-# only" behaviour).
-log_every = 100
+# Three INDEPENDENT cadences (all measured in training micro-steps):
+#
+#   log_every   → trainer prints a metrics row to stdout AND the
+#                 background scripts/log_pusher.sh commits+pushes the
+#                 live train.log to logs/vast/<YYYYMMDD>/<ARCH>/. The
+#                 pusher polls every 30s and gates the push on the
+#                 step crossing a log_every boundary, so what you see
+#                 in ``brian logs`` is always at most one log_every
+#                 stale (no wall-clock drift).
+#   save_every  → trainer writes a local .pt checkpoint into
+#                 lfs_checkpoints/<RUN>/step<N>.pt. Local only — does
+#                 NOT push.
+#   push_every  → trainer pushes the .pt to the remote backend
+#                 (HuggingFace Hub by default, see push_backend below).
+#                 Pure checkpoint cadence — does NOT touch logs. Set to
+#                 0 to disable remote checkpoint pushes entirely.
+#
+# `push_every` was silently regressed to 0 during the DSL rewrite
+# (the legacy train.py pushed after every save). We restore an
+# explicit value here so a box self-destruction (H24 mode of failure)
+# can never eat more than ~push_every steps of checkpoint progress.
+log_every = 500
 save_every = 500    
 push_every = 2500
 
@@ -126,5 +140,13 @@ preset = "tiny"
 
 [nfg]
 output = ".neuro/nfg.png"
-format = "png"
+# Multi-format render: writes BOTH .png AND .svg in one compile so you
+# can use PNG for inline previews / chat embeds and SVG for zooming
+# without pixelation (SVG is vector, zooms infinitely crisp).
+# Singular ``format = "png"`` still works for backcompat (= one-element list).
+formats = ["png", "svg"]
+# PNG rasterization DPI. Default 96 dpi looks pixelated when zooming;
+# 150 dpi is ~1.56x sharper text/lines at the cost of ~2.4x file size.
+# SVG ignores this (it's vector).
+dpi = 150
 engine = "dot"

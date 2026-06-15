@@ -295,7 +295,12 @@ echo "── bootstrap (pip deps, SKIP_LFS_RESUME=1) ──"
 SKIP_LFS_RESUME=1 bash scripts/vast_bootstrap.sh
 
 echo "── starting log-pusher (background) ──"
-INSTANCE_ID="$(hostname)" PUSH_INTERVAL=300 \\
+# LOG_EVERY makes the pusher step-driven: it polls every 30s and pushes
+# only when the trainer crosses a LOG_EVERY-step boundary, so log
+# pushes line up exactly with the rows printed in the live log
+# (no more "push fires mid-step at a random wall-clock second").
+# PUSH_INTERVAL is kept as a safety fallback when LOG_EVERY=0.
+INSTANCE_ID="$(hostname)" LOG_EVERY={LOG_EVERY} PUSH_INTERVAL=300 \\
     BRANCH='{BRANCH}' REPO_SLUG='{REPO_SLUG}' \\
     ARCH_NAME='{arch_name_for_log}' LABEL='{LABEL}' TOTAL_STEPS='{STEPS}' \\
     nohup bash scripts/log_pusher.sh > /workspace/log_pusher.log 2>&1 &
