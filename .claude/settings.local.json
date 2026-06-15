@@ -75,7 +75,8 @@
       "Bash(mv COLAB_DPO_README.md docs/archive/2026-05-25_colab_dpo_readme.md)",
       "Bash(git rm *)",
       "Bash(.venv/Scripts/brian.exe test *)",
-      "Bash(git fetch *)"
+      "Bash(git fetch *)",
+      "PowerShell(.venv\\\\Scripts\\\\brian.exe compile nfg --current 2>&1)"
     ]
   }
 }

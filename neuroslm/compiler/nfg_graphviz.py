@@ -256,10 +256,14 @@ def _graph_attrs(engine: str) -> dict:
         pad="0.5",
     )
     if engine == "dot":
-        base.update(rankdir="TB", nodesep="0.45", ranksep="0.85",
+        # Portrait layout: width fixed to A4 content area (7.27") and height
+        # allowed up to 60" so the graph expands downward across strata.
+        # Real edges all carry constraint=false; invisible spine edges between
+        # stratum anchors enforce the top→bottom order (see emit_dot_...).
+        base.update(rankdir="TB", nodesep="0.4", ranksep="0.8",
                     overlap="false", splines="spline",
-                    newrank="true", concentrate="true",
-                    page="11.69,8.27", pagedir="TL")
+                    newrank="true",
+                    size="7.27,60")
     elif engine == "neato":
         base.update(overlap="prism", splines="curved", sep="+12")
     elif engine in {"sfdp", "fdp"}:
@@ -338,11 +342,6 @@ def emit_dot_from_hypergraph(
             c.attr(label=style["label"], style="rounded,dashed",
                    color=style["color"], fontsize="13",
                    bgcolor=style["fillcolor"])
-            # rank=same forces all nodes in this cluster to one rank row,
-            # eliminating the large empty interior that appears when nodes
-            # span multiple ranks.
-            ids = " ".join(f'"{n.name}"' for n in nodes_in_region)
-            c.body.append(f"\t{{rank=same; {ids}}}")
             for n in nodes_in_region:
                 # Tint each population's fill by its region so they stay
                 # visually anchored to the cluster even when the layout
@@ -369,10 +368,6 @@ def emit_dot_from_hypergraph(
             c.attr(label=style["label"], style="rounded,solid",
                    color=style["color"], fontsize="13",
                    bgcolor=style["fillcolor"])
-            all_mc = trunk_nodes + expert_nodes
-            if all_mc:
-                ids = " ".join(f'"{n.name}"' for n in all_mc)
-                c.body.append(f"\t{{rank=same; {ids}}}")
             for n in trunk_nodes:
                 trunk_style = dict(_KIND_STYLES["lm_trunk"])
                 c.node(n.name, label=_trunk_label(n), **trunk_style)
@@ -386,8 +381,6 @@ def emit_dot_from_hypergraph(
         with g.subgraph(name="cluster_neurotransmitters") as c:
             c.attr(label="neurotransmitters", style="rounded,dashed",
                    color="#7a6b00", fontsize="14", bgcolor="#fffcec")
-            ids = " ".join(f'"{n.name}"' for n in nt_nodes)
-            c.body.append(f"\t{{rank=same; {ids}}}")
             for n in nt_nodes:
                 style = dict(_KIND_STYLES["neurotransmitter"])
                 # Tint the NT node by its semantic colour so the modulator
@@ -396,6 +389,55 @@ def emit_dot_from_hypergraph(
                 style["color"] = colour
                 g_node = c
                 g_node.node(n.name, label=_nt_label(n), **style)
+
+    # 3b. Explicit anatomical rank strata — forces a top-to-bottom
+    #     brain-like reading order even though this is a recurrent graph.
+    #     All real edges have constraint=false so they don't affect ranking.
+    #     The strata below pin horizontal bands, and invisible "spine" edges
+    #     between stratum anchors enforce the top→bottom inter-stratum order.
+    _RANK_STRATA: list[list[str]] = [
+        # Layer 0 — sensory periphery
+        ["sensory", "association"],
+        # Layer 1 — thalamic relay + geometry
+        ["thalamus", "neural_geometry"],
+        # Layer 2 — hippocampal / cerebellar memory
+        ["hippo", "entorhinal", "cerebellum"],
+        # Layer 3 — cortex experts + trunk
+        ["cortex_code", "cortex_general", "cortex_reasoning", "lm_trunk"],
+        # Layer 4 — executive / prefrontal
+        ["pfc", "acc", "claustrum", "gws", "reasoning_cortex"],
+        # Layer 5 — higher executive / evaluative
+        ["dmn", "forward_m", "evaluator", "thought_transformer"],
+        # Layer 6 — affective / world model
+        ["amygdala", "insula", "world", "self_m", "qualia"],
+        # Layer 7 — basal ganglia / reward
+        ["bg", "vta", "nucleus_accumbens", "substantia_nigra"],
+        # Layer 8 — neuromodulator nuclei + NT cluster
+        ["locus_coeruleus", "raphe_nuclei", "nucleus_basalis",
+         "glutamate", "gaba", "dopamine", "serotonin",
+         "norepinephrine", "acetylcholine", "endocannabinoid"],
+        # Layer 9 — motor output
+        ["motor"],
+    ]
+    all_node_names = {n.name for n in ir.nodes}
+    # Collect one anchor per stratum (first present node in each layer).
+    stratum_anchors: list[str] = []
+    for stratum in _RANK_STRATA:
+        present = [nm for nm in stratum if nm in all_node_names]
+        if not present:
+            continue
+        # rank=same groups co-layer nodes horizontally
+        ids = " ".join(f'"{nm}"' for nm in present)
+        g.body.append(f"\t{{rank=same; {ids}}}")
+        stratum_anchors.append(present[0])
+    # Invisible spine edges enforce vertical ordering between strata.
+    # constraint=true (the default) tells dot to use these for ranking;
+    # style=invis / color=none means they don't appear in the rendered image.
+    for i in range(len(stratum_anchors) - 1):
+        g.body.append(
+            f'\t"{stratum_anchors[i]}" -> "{stratum_anchors[i+1]}" '
+            f'[style=invis, constraint=true]'
+        )
 
     # 4. Synapse edges (solid)
     for edge in ir.hyperedges:
@@ -427,7 +469,8 @@ def emit_dot_from_hypergraph(
                fontcolor=colour,
                fontsize="9",
                penwidth=penwidth,
-               arrowsize="0.7")
+               arrowsize="0.7",
+               constraint="false")
 
     # 5. Modulation edges (dashed, NT-coloured)
     for edge in ir.hyperedges:
@@ -452,7 +495,8 @@ def emit_dot_from_hypergraph(
                style="dashed",
                arrowhead="vee",
                penwidth=penwidth,
-               arrowsize="0.7")
+               arrowsize="0.7",
+               constraint="false")
 
     # 6. Distillation edges (Slot A: KL distillation, expert -> trunk).
     #    Drawn bold purple so they pop out of the population/synapse
@@ -477,7 +521,8 @@ def emit_dot_from_hypergraph(
                style="bold",
                penwidth="2.0",
                arrowsize="0.9",
-               arrowhead="normal")
+               arrowhead="normal",
+               constraint="false")
 
     # 7. Inhibition edges (Slot C: NT-gated α inhibition, trunk -> expert).
     #    Dashed orange with a `tee` arrowhead to read as "blocking".
@@ -499,7 +544,8 @@ def emit_dot_from_hypergraph(
                style="dashed",
                penwidth="1.4",
                arrowsize="0.7",
-               arrowhead="tee")
+               arrowhead="tee",
+               constraint="false")
 
     return g.source
 
