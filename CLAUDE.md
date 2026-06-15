@@ -591,6 +591,21 @@ logs/vast/20260614/arch/20260614T160423Z_af758c381388_arch_889M_abstain-fix-dna-
   (regression: deploy 40923107 silently clobbered 40921910 on
   instance `38569395` before this rule existed).
 
+**Recent log snapshots** (referenced so the `0001_logs_to_run_folders`
+migration's reference gate picks them up — without an explicit mention
+the migration skips them and they stay in `logs/vast/` permanently):
+
+- `20260615T185105Z_41084160_arch_unk_dna-arch_step10kof10k.log` —
+  889M DNA-arch run that pushed step5000 / step7500 / step10000
+  checkpoints to HF. First run after the rebase-first log_pusher fix
+  (f8ebb78) — the snapshot itself was rescued by hand because the
+  push pipeline was still broken at deploy time (gitignore whitelist
+  didn't cover the nested layout — fixed in 29522f9).
+- `20260615T081830Z_6b30c8a74f29_arch_889M_h24-cfd-3k-dna-arch_step3kof3k.log`
+  — 3k-step h24-cfd baseline.
+- `20260615T092922Z_cd3a9493b050_arch_889M_h24-cfd-10k-dna-arch_step3540of10k.log`
+  — h24-cfd 10k-step extension (terminated at step3540).
+
 **Boot stamp format** (enforced by
 `neuroslm/train_dsl.py::_print_boot_stamp`, called from `main()`):
 

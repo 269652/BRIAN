@@ -40,8 +40,9 @@ Thumbs.db
 *.log
 training.err
 training.log
-# Specific logs/ subdirs that are noise; logs/vast and logs/analyzed
-# are intentionally NOT in the blacklist — see whitelist below.
+# Specific logs/ subdirs that are noise; logs/vast / logs/analyzed /
+# logs/<per-run-folder>/ are intentionally NOT in the blacklist — see
+# whitelist below.
 logs/live/
 logs/tmp/
 logs/runs/
@@ -49,12 +50,23 @@ logs/cache/
 # Whitelist raw vast.ai stdout captures and their LLM-produced analyses.
 # These are committed evidence and override the *.log catch-all above.
 #
-# ``**/*.log`` (not ``*.log``) is required because log_pusher.sh writes
-# under the date/arch subfolder layout
-# ``logs/vast/<YYYYMMDD>/<ARCH_NAME>/<stamp>_<instance>_..._stepNofN.log``
-# (the old flat ``logs/vast/<stamp>_..._stepNofN.log`` layout still
-# matches too — ``**`` is zero-or-more directories).
+# Three patterns, one per layout:
+#
+#   ``!logs/vast/**/*.log``       legacy: flat ``logs/vast/<stamp>_..._stepNofN.log``
+#                                  AND nested ``logs/vast/<YYYYMMDD>/<ARCH>/...log``
+#                                  (both still valid for back-compat with
+#                                  pre-2026-06-15 captures, the migration
+#                                  ``0001_logs_to_run_folders`` copies
+#                                  these into the per-run folder below).
+#   ``!logs/**/train.log``        canonical per-run folder layout used
+#                                  by ``scripts/log_pusher.sh`` since
+#                                  2026-06-15: ``logs/<YYYYMMDD>-<HHMMSS>_<arch>_<sha>/train.log``.
+#                                  This is the SAME layout that the
+#                                  migration writes into, so on-box
+#                                  writes are immediately migration-clean.
+#   ``!logs/analyzed/...``         LLM analyses of the above.
 !logs/vast/**/*.log
+!logs/**/train.log
 !logs/analyzed/*.md
 !logs/analyzed/INSTRUCTIONS.md
 

@@ -1,0 +1,1705 @@
+Vast.ai Logo
+Docs
+Clusters
+FAQ
+Hosting
+Blog
+Contact
+Credit: $4.59
+9693707
+Instances (1)
+To prevent accidental interruptions, we recommend setting up automatic billing and adding enough credits to cover multiple days.
+
+All GPUs
+
+All Statuses
+
+All Instances
+
+Auto Sort
+
+
+
+
+All (1)
+
+neuroslm-full-dna-arch (1)
+1x A100 SXM4
+Secure
+212.13.234.23
+ 
+1h 1m
+6 mon
+$0.744/hr
+Instance ID: 41084160
+Datacenter: 224078
+Machine ID: 58670
+Vol: 
+No Volumes
+Max CUDA: 13.1
+15.6 TFLOPS
+VRAM 0/40.0 GB
+1311.3 GB/s
+DLPerf
+95.4 DLPerf
+128.1 DLP/$/hr
+Network
+125 ports
+5028.5 Mbps
+4702.2 Mbps
+CPU
+AMD EPYC 7T83 64-Core Processor
+32.0/256 CPU
+8 / 64.5 GB
+Disk
+Sabrent SB-RKT4P-8TB
+4709.4 MB/s
+35.0 / 60.0 GB
+Motherboard
+ROME2D32GM-2T
+PCIE 4.0/16x
+23.3 GB/s
+neuroslm-full-dna-arch
+GPU: 0% 0°C, CPU: 0%, Status: success, running pytorch/pytorch_2.3.0-cuda12.1-cudnn8-runtime/ssh
+
+Rows per page
+10
+
+1 - 1 of 1
+Logs for instance 41084160
+Search Filter
+ex. Rate Limit Error
+Line Count
+1000
+
+
+  ...ull-dna-arch/step10000.pt:  71%|███████   | 1.04GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  71%|███████   | 1.04GB / 1.47GB, 36.7MB/s  
+
+New Data Upload               :  51%|█████     |  453MB /  886MB, 20.1MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  71%|███████   | 1.05GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  71%|███████   | 1.05GB / 1.47GB, 36.3MB/s  
+
+New Data Upload               :  52%|█████▏    |  458MB /  886MB, 20.0MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  71%|███████   | 1.05GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  71%|███████   | 1.05GB / 1.47GB, 35.9MB/s  
+
+New Data Upload               :  52%|█████▏    |  461MB /  886MB, 19.9MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  71%|███████▏  | 1.05GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  71%|███████▏  | 1.05GB / 1.47GB, 35.3MB/s  
+
+New Data Upload               :  52%|█████▏    |  462MB /  886MB, 19.6MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  72%|███████▏  | 1.06GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  72%|███████▏  | 1.06GB / 1.47GB, 35.2MB/s  
+
+New Data Upload               :  53%|█████▎    |  470MB /  886MB, 19.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  72%|███████▏  | 1.07GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  72%|███████▏  | 1.07GB / 1.47GB, 35.1MB/s  
+
+New Data Upload               :  54%|█████▍    |  478MB /  886MB, 20.0MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  72%|███████▏  | 1.07GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  72%|███████▏  | 1.07GB / 1.47GB, 34.7MB/s  
+
+New Data Upload               :  54%|█████▍    |  480MB /  886MB, 19.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  73%|███████▎  | 1.07GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  73%|███████▎  | 1.07GB / 1.47GB, 34.3MB/s  
+
+New Data Upload               :  55%|█████▍    |  484MB /  886MB, 19.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  73%|███████▎  | 1.08GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  73%|███████▎  | 1.08GB / 1.47GB, 34.0MB/s  
+
+New Data Upload               :  55%|█████▌    |  489MB /  886MB, 19.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  73%|███████▎  | 1.08GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  73%|███████▎  | 1.08GB / 1.47GB, 33.6MB/s  
+
+New Data Upload               :  55%|█████▌    |  491MB /  886MB, 19.6MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  74%|███████▍  | 1.09GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  74%|███████▍  | 1.09GB / 1.47GB, 33.5MB/s  
+
+New Data Upload               :  56%|█████▋    |  499MB /  886MB, 19.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  74%|███████▍  | 1.09GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  74%|███████▍  | 1.09GB / 1.47GB, 33.2MB/s  
+
+New Data Upload               :  57%|█████▋    |  502MB /  886MB, 19.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  74%|███████▍  | 1.09GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  74%|███████▍  | 1.09GB / 1.47GB, 32.9MB/s  
+
+New Data Upload               :  57%|█████▋    |  506MB /  886MB, 19.6MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  75%|███████▍  | 1.10GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  75%|███████▍  | 1.10GB / 1.47GB, 32.9MB/s  
+
+New Data Upload               :  58%|█████▊    |  515MB /  886MB, 19.9MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  75%|███████▌  | 1.11GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  75%|███████▌  | 1.11GB / 1.47GB, 32.6MB/s  
+
+New Data Upload               :  59%|█████▊    |  519MB /  886MB, 19.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  75%|███████▌  | 1.11GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  75%|███████▌  | 1.11GB / 1.47GB, 32.3MB/s  
+
+New Data Upload               :  59%|█████▉    |  523MB /  886MB, 19.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  76%|███████▌  | 1.12GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  76%|███████▌  | 1.12GB / 1.47GB, 32.3MB/s  
+
+New Data Upload               :  60%|██████    |  532MB /  886MB, 20.0MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  76%|███████▋  | 1.12GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  76%|███████▋  | 1.12GB / 1.47GB, 32.0MB/s  
+
+New Data Upload               :  60%|██████    |  536MB /  886MB, 19.9MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  77%|███████▋  | 1.13GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  77%|███████▋  | 1.13GB / 1.47GB, 32.1MB/s  
+
+New Data Upload               :  61%|██████▏   |  545MB /  886MB, 20.2MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  77%|███████▋  | 1.14GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  77%|███████▋  | 1.14GB / 1.47GB, 31.9MB/s  
+
+New Data Upload               :  62%|██████▏   |  549MB /  886MB, 20.2MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  78%|███████▊  | 1.15GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  78%|███████▊  | 1.15GB / 1.47GB, 31.9MB/s  
+
+New Data Upload               :  63%|██████▎   |  558MB /  886MB, 20.4MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  78%|███████▊  | 1.15GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  78%|███████▊  | 1.15GB / 1.47GB, 31.6MB/s  
+
+New Data Upload               :  63%|██████▎   |  562MB /  886MB, 20.4MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  78%|███████▊  | 1.16GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  78%|███████▊  | 1.16GB / 1.47GB, 31.5MB/s  
+
+New Data Upload               :  64%|██████▍   |  568MB /  886MB, 20.4MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  79%|███████▉  | 1.16GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  79%|███████▉  | 1.16GB / 1.47GB, 31.2MB/s  
+
+New Data Upload               :  65%|██████▍   |  572MB /  886MB, 20.4MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  79%|███████▉  | 1.17GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  79%|███████▉  | 1.17GB / 1.47GB, 31.2MB/s  
+
+New Data Upload               :  65%|██████▌   |  579MB /  886MB, 20.5MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  80%|███████▉  | 1.18GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  80%|███████▉  | 1.18GB / 1.47GB, 31.2MB/s  
+
+New Data Upload               :  66%|██████▋   |  588MB /  886MB, 20.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  80%|████████  | 1.18GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  80%|████████  | 1.18GB / 1.47GB, 31.1MB/s  
+
+New Data Upload               :  67%|██████▋   |  593MB /  886MB, 20.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  81%|████████  | 1.19GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  81%|████████  | 1.19GB / 1.47GB, 30.9MB/s  
+
+New Data Upload               :  68%|██████▊   |  599MB /  886MB, 20.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  81%|████████  | 1.19GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  81%|████████  | 1.19GB / 1.47GB, 30.6MB/s  
+
+New Data Upload               :  68%|██████▊   |  603MB /  886MB, 20.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  81%|████████  | 1.20GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  81%|████████  | 1.20GB / 1.47GB, 30.4MB/s  
+
+New Data Upload               :  69%|██████▊   |  607MB /  886MB, 20.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  82%|████████▏ | 1.20GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  82%|████████▏ | 1.20GB / 1.47GB, 30.5MB/s  
+
+New Data Upload               :  70%|██████▉   |  616MB /  886MB, 20.9MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  82%|████████▏ | 1.21GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  82%|████████▏ | 1.21GB / 1.47GB, 30.2MB/s  
+
+New Data Upload               :  70%|██████▉   |  620MB /  886MB, 20.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  82%|████████▏ | 1.21GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  82%|████████▏ | 1.21GB / 1.47GB, 29.9MB/s  
+
+New Data Upload               :  70%|███████   |  623MB /  886MB, 20.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  83%|████████▎ | 1.22GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  83%|████████▎ | 1.22GB / 1.47GB, 29.8MB/s  
+
+New Data Upload               :  71%|███████   |  629MB /  886MB, 20.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  83%|████████▎ | 1.22GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  83%|████████▎ | 1.22GB / 1.47GB, 29.6MB/s  
+
+New Data Upload               :  72%|███████▏  |  634MB /  886MB, 20.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  83%|████████▎ | 1.23GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  83%|████████▎ | 1.23GB / 1.47GB, 29.6MB/s  
+
+New Data Upload               :  72%|███████▏  |  641MB /  886MB, 20.9MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  84%|████████▎ | 1.23GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  84%|████████▎ | 1.23GB / 1.47GB, 29.4MB/s  
+
+New Data Upload               :  73%|███████▎  |  646MB /  886MB, 20.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  84%|████████▍ | 1.24GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  84%|████████▍ | 1.24GB / 1.47GB, 29.2MB/s  
+
+New Data Upload               :  73%|███████▎  |  650MB /  886MB, 20.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  84%|████████▍ | 1.24GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  84%|████████▍ | 1.24GB / 1.47GB, 28.9MB/s  
+
+New Data Upload               :  74%|███████▍  |  654MB /  886MB, 20.6MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  85%|████████▍ | 1.25GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  85%|████████▍ | 1.25GB / 1.47GB, 28.8MB/s  
+
+New Data Upload               :  74%|███████▍  |  659MB /  886MB, 20.6MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  85%|████████▍ | 1.25GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  85%|████████▍ | 1.25GB / 1.47GB, 28.4MB/s  
+
+New Data Upload               :  75%|███████▍  |  661MB /  886MB, 20.4MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  85%|████████▍ | 1.25GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  85%|████████▍ | 1.25GB / 1.47GB, 28.0MB/s  
+
+New Data Upload               :  75%|███████▍  |  662MB /  886MB, 20.2MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  85%|████████▌ | 1.26GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  85%|████████▌ | 1.26GB / 1.47GB, 27.9MB/s  
+
+New Data Upload               :  75%|███████▌  |  668MB /  886MB, 20.2MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  85%|████████▌ | 1.26GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  85%|████████▌ | 1.26GB / 1.47GB, 27.7MB/s  
+
+New Data Upload               :  76%|███████▌  |  672MB /  886MB, 20.1MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  86%|████████▌ | 1.26GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  86%|████████▌ | 1.26GB / 1.47GB, 27.4MB/s  
+
+New Data Upload               :  76%|███████▌  |  675MB /  886MB, 20.0MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  86%|████████▌ | 1.27GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  86%|████████▌ | 1.27GB / 1.47GB, 27.3MB/s  
+
+New Data Upload               :  77%|███████▋  |  680MB /  886MB, 20.0MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  86%|████████▌ | 1.27GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  86%|████████▌ | 1.27GB / 1.47GB, 26.9MB/s  
+
+New Data Upload               :  77%|███████▋  |  681MB /  886MB, 19.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  86%|████████▋ | 1.27GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  86%|████████▋ | 1.27GB / 1.47GB, 26.5MB/s  
+
+New Data Upload               :  77%|███████▋  |  683MB /  886MB, 19.5MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  87%|████████▋ | 1.28GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  87%|████████▋ | 1.28GB / 1.47GB, 26.5MB/s  
+
+New Data Upload               :  78%|███████▊  |  689MB /  886MB, 19.6MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  87%|████████▋ | 1.28GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  87%|████████▋ | 1.28GB / 1.47GB, 26.1MB/s  
+
+New Data Upload               :  78%|███████▊  |  690MB /  886MB, 19.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  87%|████████▋ | 1.28GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  87%|████████▋ | 1.28GB / 1.47GB, 26.0MB/s  
+
+New Data Upload               :  79%|███████▊  |  695MB /  886MB, 19.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  87%|████████▋ | 1.28GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  87%|████████▋ | 1.28GB / 1.47GB, 25.6MB/s  
+
+New Data Upload               :  79%|███████▊  |  697MB /  886MB, 19.1MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  87%|████████▋ | 1.29GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  87%|████████▋ | 1.29GB / 1.47GB, 25.5MB/s  
+
+New Data Upload               :  79%|███████▉  |  701MB /  886MB, 19.1MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  88%|████████▊ | 1.29GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  88%|████████▊ | 1.29GB / 1.47GB, 25.3MB/s  
+
+New Data Upload               :  80%|███████▉  |  704MB /  886MB, 19.0MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  88%|████████▊ | 1.30GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  88%|████████▊ | 1.30GB / 1.47GB, 25.2MB/s  
+
+New Data Upload               :  80%|████████  |  709MB /  886MB, 19.0MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  88%|████████▊ | 1.30GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  88%|████████▊ | 1.30GB / 1.47GB, 24.8MB/s  
+
+New Data Upload               :  80%|████████  |  710MB /  886MB, 18.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  88%|████████▊ | 1.30GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  88%|████████▊ | 1.30GB / 1.47GB, 24.7MB/s  
+
+New Data Upload               :  81%|████████  |  716MB /  886MB, 18.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  89%|████████▊ | 1.30GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  89%|████████▊ | 1.30GB / 1.47GB, 24.3MB/s  
+
+New Data Upload               :  81%|████████  |  716MB /  886MB, 18.5MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  89%|████████▊ | 1.31GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  89%|████████▊ | 1.31GB / 1.47GB, 24.0MB/s  
+
+New Data Upload               :  81%|████████  |  718MB /  886MB, 18.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  89%|████████▊ | 1.31GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  89%|████████▊ | 1.31GB / 1.47GB, 23.7MB/s  
+
+New Data Upload               :  81%|████████  |  718MB /  886MB, 18.0MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  89%|████████▉ | 1.31GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  89%|████████▉ | 1.31GB / 1.47GB, 23.4MB/s  
+
+New Data Upload               :  81%|████████▏ |  721MB /  886MB, 17.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  89%|████████▉ | 1.31GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  89%|████████▉ | 1.31GB / 1.47GB, 23.1MB/s  
+
+New Data Upload               :  82%|████████▏ |  723MB /  886MB, 17.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  89%|████████▉ | 1.31GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  89%|████████▉ | 1.31GB / 1.47GB, 22.8MB/s  
+
+New Data Upload               :  82%|████████▏ |  724MB /  886MB, 17.4MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  89%|████████▉ | 1.31GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  89%|████████▉ | 1.31GB / 1.47GB, 22.5MB/s  
+
+New Data Upload               :  82%|████████▏ |  726MB /  886MB, 17.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  89%|████████▉ | 1.32GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  89%|████████▉ | 1.32GB / 1.47GB, 22.4MB/s  
+
+New Data Upload               :  82%|████████▏ |  729MB /  886MB, 17.2MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  90%|████████▉ | 1.32GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  90%|████████▉ | 1.32GB / 1.47GB, 22.2MB/s  
+
+New Data Upload               :  83%|████████▎ |  732MB /  886MB, 17.1MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  90%|████████▉ | 1.32GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  90%|████████▉ | 1.32GB / 1.47GB, 21.8MB/s  
+
+New Data Upload               :  83%|████████▎ |  732MB /  886MB, 16.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  90%|████████▉ | 1.32GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  90%|████████▉ | 1.32GB / 1.47GB, 21.7MB/s  
+
+New Data Upload               :  83%|████████▎ |  736MB /  886MB, 16.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  90%|█████████ | 1.33GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  90%|█████████ | 1.33GB / 1.47GB, 21.1MB/s  
+
+New Data Upload               :  83%|████████▎ |  739MB /  886MB, 16.4MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  90%|█████████ | 1.33GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  90%|█████████ | 1.33GB / 1.47GB, 20.6MB/s  
+
+New Data Upload               :  84%|████████▍ |  742MB /  886MB, 16.1MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  90%|█████████ | 1.33GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  90%|█████████ | 1.33GB / 1.47GB, 20.4MB/s  
+
+New Data Upload               :  84%|████████▍ |  744MB /  886MB, 15.9MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  91%|█████████ | 1.33GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  91%|█████████ | 1.33GB / 1.47GB, 20.2MB/s  
+
+New Data Upload               :  84%|████████▍ |  747MB /  886MB, 15.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  91%|█████████ | 1.34GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  91%|█████████ | 1.34GB / 1.47GB, 20.0MB/s  
+
+New Data Upload               :  85%|████████▍ |  749MB /  886MB, 15.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  91%|█████████ | 1.34GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  91%|█████████ | 1.34GB / 1.47GB, 19.8MB/s  
+
+New Data Upload               :  85%|████████▍ |  751MB /  886MB, 15.5MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  91%|█████████ | 1.34GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  91%|█████████ | 1.34GB / 1.47GB, 19.5MB/s  
+
+New Data Upload               :  85%|████████▍ |  752MB /  886MB, 15.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  91%|█████████ | 1.34GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  91%|█████████ | 1.34GB / 1.47GB, 19.4MB/s  
+
+New Data Upload               :  85%|████████▌ |  755MB /  886MB, 15.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  91%|█████████▏| 1.35GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  91%|█████████▏| 1.35GB / 1.47GB, 19.2MB/s  
+
+New Data Upload               :  85%|████████▌ |  757MB /  886MB, 15.1MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  91%|█████████▏| 1.35GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  91%|█████████▏| 1.35GB / 1.47GB, 18.9MB/s  
+
+New Data Upload               :  86%|████████▌ |  758MB /  886MB, 15.0MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏| 1.35GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏| 1.35GB / 1.47GB, 18.8MB/s  
+
+New Data Upload               :  86%|████████▌ |  760MB /  886MB, 14.9MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏| 1.35GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏| 1.35GB / 1.47GB, 18.6MB/s  
+
+New Data Upload               :  86%|████████▌ |  763MB /  886MB, 14.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏| 1.35GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏| 1.35GB / 1.47GB, 18.3MB/s  
+
+New Data Upload               :  86%|████████▌ |  763MB /  886MB, 14.6MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏| 1.35GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏| 1.35GB / 1.47GB, 18.1MB/s  
+
+New Data Upload               :  86%|████████▋ |  765MB /  886MB, 14.4MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏| 1.35GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏| 1.35GB / 1.47GB, 17.9MB/s  
+
+New Data Upload               :  87%|████████▋ |  766MB /  886MB, 14.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏| 1.36GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏| 1.36GB / 1.47GB, 17.7MB/s  
+
+New Data Upload               :  87%|████████▋ |  767MB /  886MB, 14.1MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏| 1.36GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏| 1.36GB / 1.47GB, 17.5MB/s  
+
+New Data Upload               :  87%|████████▋ |  770MB /  886MB, 14.0MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏| 1.36GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏| 1.36GB / 1.47GB, 17.4MB/s  
+
+New Data Upload               :  87%|████████▋ |  772MB /  886MB, 13.9MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏| 1.36GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏| 1.36GB / 1.47GB, 17.1MB/s  
+
+New Data Upload               :  87%|████████▋ |  772MB /  886MB, 13.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏| 1.36GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏| 1.36GB / 1.47GB, 16.9MB/s  
+
+New Data Upload               :  87%|████████▋ |  774MB /  886MB, 13.6MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  93%|█████████▎| 1.36GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  93%|█████████▎| 1.36GB / 1.47GB, 16.8MB/s  
+
+New Data Upload               :  88%|████████▊ |  777MB /  886MB, 13.5MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  93%|█████████▎| 1.37GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  93%|█████████▎| 1.37GB / 1.47GB, 16.7MB/s  
+
+New Data Upload               :  88%|████████▊ |  780MB /  886MB, 13.5MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  93%|█████████▎| 1.37GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  93%|█████████▎| 1.37GB / 1.47GB, 16.5MB/s  
+
+New Data Upload               :  88%|████████▊ |  781MB /  886MB, 13.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  93%|█████████▎| 1.37GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  93%|█████████▎| 1.37GB / 1.47GB, 16.4MB/s  
+
+New Data Upload               :  88%|████████▊ |  784MB /  886MB, 13.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  93%|█████████▎| 1.37GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  93%|█████████▎| 1.37GB / 1.47GB, 16.3MB/s  
+
+New Data Upload               :  89%|████████▉ |  786MB /  886MB, 13.2MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  93%|█████████▎| 1.38GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  93%|█████████▎| 1.38GB / 1.47GB, 16.3MB/s  
+
+New Data Upload               :  89%|████████▉ |  790MB /  886MB, 13.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  94%|█████████▎| 1.38GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  94%|█████████▎| 1.38GB / 1.47GB, 16.2MB/s  
+
+New Data Upload               :  90%|████████▉ |  793MB /  886MB, 13.2MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  94%|█████████▍| 1.38GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  94%|█████████▍| 1.38GB / 1.47GB, 16.1MB/s  
+
+New Data Upload               :  90%|████████▉ |  795MB /  886MB, 13.2MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  94%|█████████▍| 1.39GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  94%|█████████▍| 1.39GB / 1.47GB, 16.1MB/s  
+
+New Data Upload               :  90%|█████████ |  799MB /  886MB, 13.2MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  94%|█████████▍| 1.39GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  94%|█████████▍| 1.39GB / 1.47GB, 16.0MB/s  
+
+New Data Upload               :  91%|█████████ |  802MB /  886MB, 13.2MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  95%|█████████▍| 1.40GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  95%|█████████▍| 1.40GB / 1.47GB, 16.1MB/s  
+
+New Data Upload               :  91%|█████████ |  807MB /  886MB, 13.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  95%|█████████▍| 1.40GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  95%|█████████▍| 1.40GB / 1.47GB, 15.9MB/s  
+
+New Data Upload               :  91%|█████████▏|  809MB /  886MB, 13.2MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  95%|█████████▌| 1.40GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  95%|█████████▌| 1.40GB / 1.47GB, 16.0MB/s  
+
+New Data Upload               :  92%|█████████▏|  814MB /  886MB, 13.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  95%|█████████▌| 1.41GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  95%|█████████▌| 1.41GB / 1.47GB, 16.0MB/s  
+
+New Data Upload               :  92%|█████████▏|  818MB /  886MB, 13.4MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  96%|█████████▌| 1.41GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  96%|█████████▌| 1.41GB / 1.47GB, 15.9MB/s  
+
+New Data Upload               :  93%|█████████▎|  821MB /  886MB, 13.4MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  96%|█████████▌| 1.42GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  96%|█████████▌| 1.42GB / 1.47GB, 16.1MB/s  
+
+New Data Upload               :  93%|█████████▎|  827MB /  886MB, 13.5MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  96%|█████████▋| 1.42GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  96%|█████████▋| 1.42GB / 1.47GB, 16.0MB/s  
+
+New Data Upload               :  94%|█████████▍|  831MB /  886MB, 13.6MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  97%|█████████▋| 1.42GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  97%|█████████▋| 1.42GB / 1.47GB, 16.2MB/s  
+
+New Data Upload               :  94%|█████████▍|  836MB /  886MB, 13.7MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  97%|█████████▋| 1.43GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  97%|█████████▋| 1.43GB / 1.47GB, 16.2MB/s  
+
+New Data Upload               :  95%|█████████▍|  841MB /  886MB, 13.8MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  97%|█████████▋| 1.43GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  97%|█████████▋| 1.43GB / 1.47GB, 16.3MB/s  
+
+New Data Upload               :  96%|█████████▌|  846MB /  886MB, 13.9MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  98%|█████████▊| 1.44GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  98%|█████████▊| 1.44GB / 1.47GB, 16.3MB/s  
+
+New Data Upload               :  96%|█████████▌|  851MB /  886MB, 14.0MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  98%|█████████▊| 1.45GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  98%|█████████▊| 1.45GB / 1.47GB, 16.6MB/s  
+
+New Data Upload               :  97%|█████████▋|  859MB /  886MB, 14.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  99%|█████████▊| 1.45GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  99%|█████████▊| 1.45GB / 1.47GB, 16.7MB/s  
+
+New Data Upload               :  98%|█████████▊|  865MB /  886MB, 14.5MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  99%|█████████▉| 1.46GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  99%|█████████▉| 1.46GB / 1.47GB, 16.8MB/s  
+
+New Data Upload               :  98%|█████████▊|  871MB /  886MB, 14.6MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  99%|█████████▉| 1.46GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  99%|█████████▉| 1.46GB / 1.47GB, 16.8MB/s  
+
+New Data Upload               :  99%|█████████▊|  874MB /  886MB, 14.6MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  99%|█████████▉| 1.46GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  99%|█████████▉| 1.46GB / 1.47GB, 16.6MB/s  
+
+New Data Upload               :  99%|█████████▉|  876MB /  886MB, 14.5MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt:  99%|█████████▉| 1.47GB / 1.47GB            [A[A
+Processing Files (0 / 1)      :  99%|█████████▉| 1.47GB / 1.47GB, 16.4MB/s  
+
+New Data Upload               :  99%|█████████▉|  877MB /  886MB, 14.3MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt: 100%|█████████▉| 1.47GB / 1.47GB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉| 1.47GB / 1.47GB, 16.3MB/s  
+
+New Data Upload               :  99%|█████████▉|  879MB /  886MB, 14.2MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt: 100%|█████████▉| 1.47GB / 1.47GB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉| 1.47GB / 1.47GB, 16.1MB/s  
+
+New Data Upload               :  99%|█████████▉|  881MB /  886MB, 14.1MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt: 100%|█████████▉| 1.47GB / 1.47GB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉| 1.47GB / 1.47GB, 16.0MB/s  
+
+New Data Upload               : 100%|█████████▉|  883MB /  886MB, 14.0MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt: 100%|█████████▉| 1.47GB / 1.47GB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉| 1.47GB / 1.47GB, 15.9MB/s  
+
+New Data Upload               : 100%|█████████▉|  885MB /  886MB, 13.9MB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████| 1.47GB / 1.47GB            [A[A
+Processing Files (1 / 1)      : 100%|██████████| 1.47GB / 1.47GB, 14.6MB/s  
+
+New Data Upload               : 100%|██████████|  886MB /  886MB, 12.8MB/s  [A
+Processing Files (1 / 1)      : 100%|██████████| 1.47GB / 1.47GB, 14.6MB/s  
+
+New Data Upload               : 100%|██████████|  886MB /  886MB, 12.8MB/s  
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████| 1.47GB / 1.47GB            
+[ckpt_push] ✓ pushed step10000.pt → hf://moritzroessler/BRIAN/checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt
+[train_dsl] final OOD eval @ step 10000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=155.0  train_ppl=23.6  gap_ratio=6.55  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-175931.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7f9db0003d80 must be current when releasing
+Python runtime state: finalizing (tstate=0x0000000016565150)
+
+Thread 0x00007fa3f08be740 (most recent call first):
+  <no Python frame>
+scripts/vast_train_dna_loop.sh: line 178:   851 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --push_every "$PUSH_EVERY" --push_backend "$PUSH_BACKEND" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 2 @ 18:49:42Z
+[train_dsl] boot @ 2026-06-15T18:49:44Z
+[train_dsl] git_commit c19bf62977e9c51a6ed431227fdfcc3873de423c (master)
+[train_dsl] arch_dsl_sha256 02f0e39582158d2db49d894a9221a9df8ae5ed59622532e4722d7a66f92fc7eb (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,903  (trainable 146,856,815 · frozen 980,097,088)
+  checkpoint = 149,187,774 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt @ step 10000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/20260615-184943_c19bf629_neuroslm-full-dna-arch/step10000.pt
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  ...ull-dna-arch/step10000.pt:   9%|▉         | 55.9MB /  597MB            [A[A
+
+
+  ...ull-dna-arch/step10000.pt:   9%|▉         | 55.9MB /  597MB            [A[A
+Processing Files (0 / 1)      :   9%|▉         | 55.9MB /  597MB, 5.46MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  20%|██        |  120MB /  597MB            [A[A
+Processing Files (0 / 1)      :  20%|██        |  120MB /  597MB, 11.5MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  29%|██▉       |  176MB /  597MB            [A[A
+Processing Files (0 / 1)      :  29%|██▉       |  176MB /  597MB, 16.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  38%|███▊      |  224MB /  597MB            [A[A
+Processing Files (0 / 1)      :  38%|███▊      |  224MB /  597MB, 20.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  46%|████▌     |  272MB /  597MB            [A[A
+Processing Files (0 / 1)      :  46%|████▌     |  272MB /  597MB, 24.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  54%|█████▎    |  320MB /  597MB            [A[A
+Processing Files (0 / 1)      :  54%|█████▎    |  320MB /  597MB, 28.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  62%|██████▏   |  368MB /  597MB            [A[A
+Processing Files (0 / 1)      :  62%|██████▏   |  368MB /  597MB, 32.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  68%|██████▊   |  407MB /  597MB            [A[A
+Processing Files (0 / 1)      :  68%|██████▊   |  407MB /  597MB, 35.6MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  75%|███████▍  |  447MB /  597MB            [A[A
+Processing Files (0 / 1)      :  75%|███████▍  |  447MB /  597MB, 38.4MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  82%|████████▏ |  487MB /  597MB            [A[A
+Processing Files (0 / 1)      :  82%|████████▏ |  487MB /  597MB, 41.3MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  88%|████████▊ |  526MB /  597MB            [A[A
+Processing Files (0 / 1)      :  88%|████████▊ |  526MB /  597MB, 43.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  95%|█████████▍|  565MB /  597MB            [A[A
+Processing Files (0 / 1)      :  95%|█████████▍|  565MB /  597MB, 46.5MB/s  
+
+
+  ...ull-dna-arch/step10000.pt: 100%|█████████▉|  594MB /  597MB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉|  594MB /  597MB, 48.0MB/s  
+
+
+  ...ull-dna-arch/step10000.pt: 100%|█████████▉|  595MB /  597MB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉|  595MB /  597MB, 46.0MB/s  
+
+New Data Upload               :  44%|████▍     | 1.25MB / 2.82MB,  112kB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt: 100%|█████████▉|  597MB /  597MB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉|  597MB /  597MB, 45.1MB/s  
+
+New Data Upload               :  89%|████████▉ | 2.50MB / 2.82MB,  221kB/s  [A
+
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 44.1MB/s  
+
+New Data Upload               : 100%|██████████| 2.82MB / 2.82MB,  244kB/s  [A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 44.1MB/s  
+
+New Data Upload               : 100%|██████████| 2.82MB / 2.82MB,  244kB/s  
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step10000.pt → hf://moritzroessler/BRIAN/checkpoints/20260615-184943_c19bf629_neuroslm-full-dna-arch/step10000.pt
+[train_dsl] final OOD eval @ step 10000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=142.1  train_ppl=nan  gap_ratio=nan  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-184943.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7fe160002f70 must be current when releasing
+Python runtime state: finalizing (tstate=0x00000000078d8150)
+
+Thread 0x00007fe675cb3740 (most recent call first):
+  <no Python frame>
+scripts/vast_train_dna_loop.sh: line 178:  4057 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --push_every "$PUSH_EVERY" --push_backend "$PUSH_BACKEND" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 3 @ 18:51:05Z
+[train_dsl] boot @ 2026-06-15T18:51:06Z
+[train_dsl] git_commit c19bf62977e9c51a6ed431227fdfcc3873de423c (master)
+[train_dsl] arch_dsl_sha256 02f0e39582158d2db49d894a9221a9df8ae5ed59622532e4722d7a66f92fc7eb (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,903  (trainable 146,856,815 · frozen 980,097,088)
+  checkpoint = 149,187,774 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt @ step 10000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/20260615-185105_c19bf629_neuroslm-full-dna-arch/step10000.pt
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  ...ull-dna-arch/step10000.pt:   8%|▊         | 48.0MB /  597MB            [A[A
+
+
+  ...ull-dna-arch/step10000.pt:   8%|▊         | 48.0MB /  597MB            [A[A
+Processing Files (0 / 1)      :   8%|▊         | 48.0MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  13%|█▎        | 80.0MB /  597MB            [A[A
+Processing Files (0 / 1)      :  13%|█▎        | 80.0MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  21%|██▏       |  128MB /  597MB            [A[A
+Processing Files (0 / 1)      :  21%|██▏       |  128MB /  597MB, 12.3MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  28%|██▊       |  168MB /  597MB            [A[A
+Processing Files (0 / 1)      :  28%|██▊       |  168MB /  597MB, 15.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  35%|███▍      |  208MB /  597MB            [A[A
+Processing Files (0 / 1)      :  35%|███▍      |  208MB /  597MB, 19.4MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  42%|████▏     |  248MB /  597MB            [A[A
+Processing Files (0 / 1)      :  42%|████▏     |  248MB /  597MB, 22.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  50%|████▉     |  296MB /  597MB            [A[A
+Processing Files (0 / 1)      :  50%|████▉     |  296MB /  597MB, 26.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  55%|█████▍    |  328MB /  597MB            [A[A
+Processing Files (0 / 1)      :  55%|█████▍    |  328MB /  597MB, 29.1MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  63%|██████▎   |  376MB /  597MB            [A[A
+Processing Files (0 / 1)      :  63%|██████▎   |  376MB /  597MB, 32.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  68%|██████▊   |  408MB /  597MB            [A[A
+Processing Files (0 / 1)      :  68%|██████▊   |  408MB /  597MB, 35.2MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  76%|███████▋  |  456MB /  597MB            [A[A
+Processing Files (0 / 1)      :  76%|███████▋  |  456MB /  597MB, 38.8MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  83%|████████▎ |  496MB /  597MB            [A[A
+Processing Files (0 / 1)      :  83%|████████▎ |  496MB /  597MB, 41.6MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  90%|████████▉ |  536MB /  597MB            [A[A
+Processing Files (0 / 1)      :  90%|████████▉ |  536MB /  597MB, 44.3MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  97%|█████████▋|  576MB /  597MB            [A[A
+Processing Files (0 / 1)      :  97%|█████████▋|  576MB /  597MB, 46.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 47.8MB/s  
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 47.8MB/s  
+
+New Data Upload               : |          |  0.00B /  0.00B,  0.00B/s  
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step10000.pt → hf://moritzroessler/BRIAN/checkpoints/20260615-185105_c19bf629_neuroslm-full-dna-arch/step10000.pt
+[train_dsl] final OOD eval @ step 10000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=142.1  train_ppl=nan  gap_ratio=nan  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-185105.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7fcb04003510 must be current when releasing
+Python runtime state: finalizing (tstate=0x00000000320d7150)
+
+Thread 0x00007fd156096740 (most recent call first):
+  <no Python frame>
+
+Extension modules: mkl._mklinit, mkl._py_mkl_service, numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, torch._C, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, 
+scripts/vast_train_dna_loop.sh: line 178:  4352 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --push_every "$PUSH_EVERY" --push_backend "$PUSH_BACKEND" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 4 @ 18:52:22Z
+[train_dsl] boot @ 2026-06-15T18:52:23Z
+[train_dsl] git_commit c19bf62977e9c51a6ed431227fdfcc3873de423c (master)
+[train_dsl] arch_dsl_sha256 02f0e39582158d2db49d894a9221a9df8ae5ed59622532e4722d7a66f92fc7eb (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,903  (trainable 146,856,815 · frozen 980,097,088)
+  checkpoint = 149,187,774 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt @ step 10000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/20260615-185222_c19bf629_neuroslm-full-dna-arch/step10000.pt
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  ...ull-dna-arch/step10000.pt:   9%|▉         | 55.9MB /  597MB            [A[A
+
+
+  ...ull-dna-arch/step10000.pt:   9%|▉         | 55.9MB /  597MB            [A[A
+Processing Files (0 / 1)      :   9%|▉         | 55.9MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  17%|█▋        |  104MB /  597MB            [A[A
+Processing Files (0 / 1)      :  17%|█▋        |  104MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  27%|██▋       |  160MB /  597MB            [A[A
+Processing Files (0 / 1)      :  27%|██▋       |  160MB /  597MB, 15.4MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  34%|███▎      |  200MB /  597MB            [A[A
+Processing Files (0 / 1)      :  34%|███▎      |  200MB /  597MB, 18.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  40%|████      |  240MB /  597MB            [A[A
+Processing Files (0 / 1)      :  40%|████      |  240MB /  597MB, 22.3MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  48%|████▊     |  288MB /  597MB            [A[A
+Processing Files (0 / 1)      :  48%|████▊     |  288MB /  597MB, 26.3MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  55%|█████▍    |  328MB /  597MB            [A[A
+Processing Files (0 / 1)      :  55%|█████▍    |  328MB /  597MB, 29.5MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  62%|██████▏   |  368MB /  597MB            [A[A
+Processing Files (0 / 1)      :  62%|██████▏   |  368MB /  597MB, 32.6MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  71%|███████   |  424MB /  597MB            [A[A
+Processing Files (0 / 1)      :  71%|███████   |  424MB /  597MB, 37.1MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  79%|███████▉  |  472MB /  597MB            [A[A
+Processing Files (0 / 1)      :  79%|███████▉  |  472MB /  597MB, 40.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  86%|████████▌ |  512MB /  597MB            [A[A
+Processing Files (0 / 1)      :  86%|████████▌ |  512MB /  597MB, 43.5MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏|  552MB /  597MB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏|  552MB /  597MB, 46.1MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  99%|█████████▉|  592MB /  597MB            [A[A
+Processing Files (0 / 1)      :  99%|█████████▉|  592MB /  597MB, 48.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 48.0MB/s  
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 48.0MB/s  
+
+New Data Upload               : |          |  0.00B /  0.00B,  0.00B/s  
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step10000.pt → hf://moritzroessler/BRIAN/checkpoints/20260615-185222_c19bf629_neuroslm-full-dna-arch/step10000.pt
+[train_dsl] final OOD eval @ step 10000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=142.1  train_ppl=nan  gap_ratio=nan  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-185222.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7fa0c4002f70 must be current when releasing
+Python runtime state: finalizing (tstate=0x0000000036c94150)
+
+Thread 0x00007fa5f5dc0740 (most recent call first):
+  <no Python frame>
+scripts/vast_train_dna_loop.sh: line 178:  4619 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --push_every "$PUSH_EVERY" --push_backend "$PUSH_BACKEND" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 5 @ 18:53:38Z
+[train_dsl] boot @ 2026-06-15T18:53:39Z
+[train_dsl] git_commit c19bf62977e9c51a6ed431227fdfcc3873de423c (master)
+[train_dsl] arch_dsl_sha256 02f0e39582158d2db49d894a9221a9df8ae5ed59622532e4722d7a66f92fc7eb (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,903  (trainable 146,856,815 · frozen 980,097,088)
+  checkpoint = 149,187,774 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt @ step 10000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/20260615-185338_c19bf629_neuroslm-full-dna-arch/step10000.pt
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  ...ull-dna-arch/step10000.pt:  11%|█         | 63.9MB /  597MB            [A[A
+
+
+  ...ull-dna-arch/step10000.pt:  11%|█         | 63.9MB /  597MB            [A[A
+Processing Files (0 / 1)      :  11%|█         | 63.9MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  21%|██▏       |  128MB /  597MB            [A[A
+Processing Files (0 / 1)      :  21%|██▏       |  128MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  32%|███▏      |  192MB /  597MB            [A[A
+Processing Files (0 / 1)      :  32%|███▏      |  192MB /  597MB, 18.4MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  40%|████      |  240MB /  597MB            [A[A
+Processing Files (0 / 1)      :  40%|████      |  240MB /  597MB, 22.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  48%|████▊     |  288MB /  597MB            [A[A
+Processing Files (0 / 1)      :  48%|████▊     |  288MB /  597MB, 26.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  56%|█████▋    |  336MB /  597MB            [A[A
+Processing Files (0 / 1)      :  56%|█████▋    |  336MB /  597MB, 30.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  66%|██████▌   |  392MB /  597MB            [A[A
+Processing Files (0 / 1)      :  66%|██████▌   |  392MB /  597MB, 35.3MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  72%|███████▏  |  432MB /  597MB            [A[A
+Processing Files (0 / 1)      :  72%|███████▏  |  432MB /  597MB, 38.2MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  79%|███████▉  |  472MB /  597MB            [A[A
+Processing Files (0 / 1)      :  79%|███████▉  |  472MB /  597MB, 41.1MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  86%|████████▌ |  512MB /  597MB            [A[A
+Processing Files (0 / 1)      :  86%|████████▌ |  512MB /  597MB, 43.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏|  552MB /  597MB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏|  552MB /  597MB, 46.5MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  99%|█████████▉|  592MB /  597MB            [A[A
+Processing Files (0 / 1)      :  99%|█████████▉|  592MB /  597MB, 49.2MB/s  
+
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 48.3MB/s  
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 48.3MB/s  
+
+New Data Upload               : |          |  0.00B /  0.00B,  0.00B/s  
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step10000.pt → hf://moritzroessler/BRIAN/checkpoints/20260615-185338_c19bf629_neuroslm-full-dna-arch/step10000.pt
+[train_dsl] final OOD eval @ step 10000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=142.1  train_ppl=nan  gap_ratio=nan  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-185338.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7f0424002f70 must be current when releasing
+Python runtime state: finalizing (tstate=0x000000003590d150)
+
+Thread 0x00007f08b90a4740 (most recent call first):
+  <no Python frame>
+scripts/vast_train_dna_loop.sh: line 178:  4909 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --push_every "$PUSH_EVERY" --push_backend "$PUSH_BACKEND" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 6 @ 18:54:52Z
+[train_dsl] boot @ 2026-06-15T18:54:54Z
+[train_dsl] git_commit c19bf62977e9c51a6ed431227fdfcc3873de423c (master)
+[train_dsl] arch_dsl_sha256 02f0e39582158d2db49d894a9221a9df8ae5ed59622532e4722d7a66f92fc7eb (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,903  (trainable 146,856,815 · frozen 980,097,088)
+  checkpoint = 149,187,774 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt @ step 10000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/20260615-185452_c19bf629_neuroslm-full-dna-arch/step10000.pt
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  ...ull-dna-arch/step10000.pt:   8%|▊         | 48.0MB /  597MB            [A[A
+
+
+  ...ull-dna-arch/step10000.pt:   8%|▊         | 48.0MB /  597MB            [A[A
+Processing Files (0 / 1)      :   8%|▊         | 48.0MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  15%|█▍        | 88.0MB /  597MB            [A[A
+Processing Files (0 / 1)      :  15%|█▍        | 88.0MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  21%|██▏       |  128MB /  597MB            [A[A
+Processing Files (0 / 1)      :  21%|██▏       |  128MB /  597MB, 12.3MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  29%|██▉       |  176MB /  597MB            [A[A
+Processing Files (0 / 1)      :  29%|██▉       |  176MB /  597MB, 16.6MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  38%|███▊      |  224MB /  597MB            [A[A
+Processing Files (0 / 1)      :  38%|███▊      |  224MB /  597MB, 20.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  44%|████▍     |  264MB /  597MB            [A[A
+Processing Files (0 / 1)      :  44%|████▍     |  264MB /  597MB, 24.2MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  51%|█████     |  304MB /  597MB            [A[A
+Processing Files (0 / 1)      :  51%|█████     |  304MB /  597MB, 27.4MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  59%|█████▉    |  352MB /  597MB            [A[A
+Processing Files (0 / 1)      :  59%|█████▉    |  352MB /  597MB, 31.3MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  70%|██████▉   |  416MB /  597MB            [A[A
+Processing Files (0 / 1)      :  70%|██████▉   |  416MB /  597MB, 36.6MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  78%|███████▊  |  464MB /  597MB            [A[A
+Processing Files (0 / 1)      :  78%|███████▊  |  464MB /  597MB, 40.2MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  84%|████████▍ |  504MB /  597MB            [A[A
+Processing Files (0 / 1)      :  84%|████████▍ |  504MB /  597MB, 43.0MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  91%|█████████ |  544MB /  597MB            [A[A
+Processing Files (0 / 1)      :  91%|█████████ |  544MB /  597MB, 45.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  98%|█████████▊|  584MB /  597MB            [A[A
+Processing Files (0 / 1)      :  98%|█████████▊|  584MB /  597MB, 48.3MB/s  
+
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 48.2MB/s  
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 48.2MB/s  
+
+New Data Upload               : |          |  0.00B /  0.00B,  0.00B/s  
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step10000.pt → hf://moritzroessler/BRIAN/checkpoints/20260615-185452_c19bf629_neuroslm-full-dna-arch/step10000.pt
+[train_dsl] final OOD eval @ step 10000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=142.1  train_ppl=nan  gap_ratio=nan  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-185452.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7f70ac003240 must be current when releasing
+Python runtime state: finalizing (tstate=0x000000002dd50150)
+
+Thread 0x00007f774ed81740 (most recent call first):
+  <no Python frame>
+scripts/vast_train_dna_loop.sh: line 178:  5175 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --push_every "$PUSH_EVERY" --push_backend "$PUSH_BACKEND" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 7 @ 18:56:07Z
+[train_dsl] boot @ 2026-06-15T18:56:09Z
+[train_dsl] git_commit c19bf62977e9c51a6ed431227fdfcc3873de423c (master)
+[train_dsl] arch_dsl_sha256 02f0e39582158d2db49d894a9221a9df8ae5ed59622532e4722d7a66f92fc7eb (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,903  (trainable 146,856,815 · frozen 980,097,088)
+  checkpoint = 149,187,774 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt @ step 10000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/20260615-185607_c19bf629_neuroslm-full-dna-arch/step10000.pt
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  ...ull-dna-arch/step10000.pt:   9%|▉         | 55.9MB /  597MB            [A[A
+
+
+  ...ull-dna-arch/step10000.pt:   9%|▉         | 55.9MB /  597MB            [A[A
+Processing Files (0 / 1)      :   9%|▉         | 55.9MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  19%|█▉        |  112MB /  597MB            [A[A
+Processing Files (0 / 1)      :  19%|█▉        |  112MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  25%|██▌       |  152MB /  597MB            [A[A
+Processing Files (0 / 1)      :  25%|██▌       |  152MB /  597MB, 14.6MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  31%|███       |  184MB /  597MB            [A[A
+Processing Files (0 / 1)      :  31%|███       |  184MB /  597MB, 17.3MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  38%|███▊      |  224MB /  597MB            [A[A
+Processing Files (0 / 1)      :  38%|███▊      |  224MB /  597MB, 20.8MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  43%|████▎     |  256MB /  597MB            [A[A
+Processing Files (0 / 1)      :  43%|████▎     |  256MB /  597MB, 23.3MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  50%|████▉     |  296MB /  597MB            [A[A
+Processing Files (0 / 1)      :  50%|████▉     |  296MB /  597MB, 26.6MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  55%|█████▍    |  328MB /  597MB            [A[A
+Processing Files (0 / 1)      :  55%|█████▍    |  328MB /  597MB, 29.0MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  62%|██████▏   |  368MB /  597MB            [A[A
+Processing Files (0 / 1)      :  62%|██████▏   |  368MB /  597MB, 32.0MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  68%|██████▊   |  408MB /  597MB            [A[A
+Processing Files (0 / 1)      :  68%|██████▊   |  408MB /  597MB, 35.0MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  74%|███████▎  |  440MB /  597MB            [A[A
+Processing Files (0 / 1)      :  74%|███████▎  |  440MB /  597MB, 37.2MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  80%|████████  |  480MB /  597MB            [A[A
+Processing Files (0 / 1)      :  80%|████████  |  480MB /  597MB, 40.0MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  86%|████████▌ |  512MB /  597MB            [A[A
+Processing Files (0 / 1)      :  86%|████████▌ |  512MB /  597MB, 42.0MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  92%|█████████▏|  552MB /  597MB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏|  552MB /  597MB, 44.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 47.8MB/s  
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 47.8MB/s  
+
+New Data Upload               : |          |  0.00B /  0.00B,  0.00B/s  
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step10000.pt → hf://moritzroessler/BRIAN/checkpoints/20260615-185607_c19bf629_neuroslm-full-dna-arch/step10000.pt
+[train_dsl] final OOD eval @ step 10000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=142.1  train_ppl=nan  gap_ratio=nan  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-185607.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7ff1f0002f70 must be current when releasing
+Python runtime state: finalizing (tstate=0x000000003a7c8150)
+
+Thread 0x00007ff72188b740 (most recent call first):
+  <no Python frame>
+scripts/vast_train_dna_loop.sh: line 178:  5466 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --push_every "$PUSH_EVERY" --push_backend "$PUSH_BACKEND" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 8 @ 18:57:24Z
+[train_dsl] boot @ 2026-06-15T18:57:26Z
+[train_dsl] git_commit c19bf62977e9c51a6ed431227fdfcc3873de423c (master)
+[train_dsl] arch_dsl_sha256 02f0e39582158d2db49d894a9221a9df8ae5ed59622532e4722d7a66f92fc7eb (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,903  (trainable 146,856,815 · frozen 980,097,088)
+  checkpoint = 149,187,774 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt @ step 10000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/20260615-185725_c19bf629_neuroslm-full-dna-arch/step10000.pt
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  ...ull-dna-arch/step10000.pt:  11%|█         | 63.9MB /  597MB            [A[A
+
+
+  ...ull-dna-arch/step10000.pt:  11%|█         | 63.9MB /  597MB            [A[A
+Processing Files (0 / 1)      :  11%|█         | 63.9MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  20%|██        |  120MB /  597MB            [A[A
+Processing Files (0 / 1)      :  20%|██        |  120MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  29%|██▉       |  176MB /  597MB            [A[A
+Processing Files (0 / 1)      :  29%|██▉       |  176MB /  597MB, 16.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  40%|████      |  240MB /  597MB            [A[A
+Processing Files (0 / 1)      :  40%|████      |  240MB /  597MB, 22.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  50%|████▉     |  296MB /  597MB            [A[A
+Processing Files (0 / 1)      :  50%|████▉     |  296MB /  597MB, 27.5MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  59%|█████▉    |  352MB /  597MB            [A[A
+Processing Files (0 / 1)      :  59%|█████▉    |  352MB /  597MB, 32.2MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  70%|██████▉   |  416MB /  597MB            [A[A
+Processing Files (0 / 1)      :  70%|██████▉   |  416MB /  597MB, 37.6MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  79%|███████▉  |  472MB /  597MB            [A[A
+Processing Files (0 / 1)      :  79%|███████▉  |  472MB /  597MB, 42.0MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  88%|████████▊ |  528MB /  597MB            [A[A
+Processing Files (0 / 1)      :  88%|████████▊ |  528MB /  597MB, 46.2MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  98%|█████████▊|  584MB /  597MB            [A[A
+Processing Files (0 / 1)      :  98%|█████████▊|  584MB /  597MB, 50.4MB/s  
+
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 50.4MB/s  
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 50.4MB/s  
+
+New Data Upload               : |          |  0.00B /  0.00B,  0.00B/s  
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step10000.pt → hf://moritzroessler/BRIAN/checkpoints/20260615-185725_c19bf629_neuroslm-full-dna-arch/step10000.pt
+[train_dsl] final OOD eval @ step 10000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=142.1  train_ppl=nan  gap_ratio=nan  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-185725.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7f29140037f0 must be current when releasing
+Python runtime state: finalizing (tstate=0x0000000039302150)
+
+Thread 0x00007f2fc4a1f740 (most recent call first):
+  <no Python frame>
+scripts/vast_train_dna_loop.sh: line 178:  5732 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --push_every "$PUSH_EVERY" --push_backend "$PUSH_BACKEND" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 9 @ 18:58:38Z
+[train_dsl] boot @ 2026-06-15T18:58:40Z
+[train_dsl] git_commit c19bf62977e9c51a6ed431227fdfcc3873de423c (master)
+[train_dsl] arch_dsl_sha256 02f0e39582158d2db49d894a9221a9df8ae5ed59622532e4722d7a66f92fc7eb (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,903  (trainable 146,856,815 · frozen 980,097,088)
+  checkpoint = 149,187,774 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt @ step 10000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/20260615-185838_c19bf629_neuroslm-full-dna-arch/step10000.pt
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  ...ull-dna-arch/step10000.pt:   8%|▊         | 48.0MB /  597MB            [A[A
+
+
+  ...ull-dna-arch/step10000.pt:   8%|▊         | 48.0MB /  597MB            [A[A
+Processing Files (0 / 1)      :   8%|▊         | 48.0MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  17%|█▋        |  104MB /  597MB            [A[A
+Processing Files (0 / 1)      :  17%|█▋        |  104MB /  597MB,   ???B/s  
+
+
+  ...ull-dna-arch/step10000.pt:  25%|██▌       |  152MB /  597MB            [A[A
+Processing Files (0 / 1)      :  25%|██▌       |  152MB /  597MB, 14.6MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  35%|███▍      |  208MB /  597MB            [A[A
+Processing Files (0 / 1)      :  35%|███▍      |  208MB /  597MB, 19.7MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  46%|████▌     |  272MB /  597MB            [A[A
+Processing Files (0 / 1)      :  46%|████▌     |  272MB /  597MB, 25.4MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  56%|█████▋    |  336MB /  597MB            [A[A
+Processing Files (0 / 1)      :  56%|█████▋    |  336MB /  597MB, 30.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  68%|██████▊   |  408MB /  597MB            [A[A
+Processing Files (0 / 1)      :  68%|██████▊   |  408MB /  597MB, 37.0MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  79%|███████▉  |  472MB /  597MB            [A[A
+Processing Files (0 / 1)      :  79%|███████▉  |  472MB /  597MB, 42.2MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  91%|█████████ |  544MB /  597MB            [A[A
+Processing Files (0 / 1)      :  91%|█████████ |  544MB /  597MB, 47.9MB/s  
+
+
+  ...ull-dna-arch/step10000.pt:  99%|█████████▉|  592MB /  597MB            [A[A
+Processing Files (0 / 1)      :  99%|█████████▉|  592MB /  597MB, 51.3MB/s  
+
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 50.5MB/s  
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 50.5MB/s  
+
+New Data Upload               : |          |  0.00B /  0.00B,  0.00B/s  
+
+  ...ull-dna-arch/step10000.pt: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step10000.pt → hf://moritzroessler/BRIAN/checkpoints/20260615-185838_c19bf629_neuroslm-full-dna-arch/step10000.pt
+[train_dsl] final OOD eval @ step 10000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=142.1  train_ppl=nan  gap_ratio=nan  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-185838.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7f1ed8002f70 must be current when releasing
+Python runtime state: finalizing (tstate=0x000000002f94c150)
+
+Thread 0x00007f2409065740 (most recent call first):
+  <no Python frame>
+scripts/vast_train_dna_loop.sh: line 178:  6022 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --push_every "$PUSH_EVERY" --push_backend "$PUSH_BACKEND" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...

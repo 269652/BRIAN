@@ -1,5 +1,5 @@
-"""Log-filename naming contract: must include UTC boot timestamp AND
-be placed under logs/vast/<YYYYMMDD>/<ARCH_NAME>/ subdirectories.
+"""Log-filename naming contract: per-run folder layout that matches
+the ``0001_logs_to_run_folders`` migration's output.
 
 Background
 ----------
@@ -11,13 +11,17 @@ relaunch, destroying forensic evidence of the prior crash mode.
 The fix is a UTC timestamp prefix on every log filename so reused
 instance ids never alias.
 
-Additionally, flat logs/vast/ became unwieldy as the number of runs grew.
-Logs are now written into date + arch subdirectories so the repo tree
-groups them naturally:
+Layout history:
 
-    logs/vast/<YYYYMMDD>/<ARCH_NAME>/<UTC_YYYYMMDDTHHMMSSZ>_<instance>_<arch>_<params>_<label>_step<cur>of<target>.log
+    pre-2026-06-15  flat:    logs/vast/<stamp>_<id>_..._stepNofN.log
+    2026-06-15-am   nested:  logs/vast/<YYYYMMDD>/<ARCH>/<stamp>_<id>_..._stepNofN.log
+    2026-06-15-pm   per-run: logs/<YYYYMMDD>-<HHMMSS>_<arch>_<short-sha>/train.log
 
-The YYYYMMDD date is the first 8 characters of BOOT_TIMESTAMP.
+The per-run layout matches what ``brian migrate 0001_logs_to_run_folders``
+writes when normalising old logs, so on-box writes are immediately
+migration-clean and ``git pull`` on a workstation just gets the
+freshly-named folder. Stable filename per run also means no
+``_PREV_LOG`` cleanup race.
 """
 from __future__ import annotations
 
@@ -53,56 +57,73 @@ def test_log_pusher_compose_filename_includes_utc_timestamp_prefix():
 
 
 # ─────────────────────────────────────────────────────────────────
-# Contract N2 — subdirectory layout: logs/vast/<DATE>/<ARCH>/
+# Contract N2 — per-run folder layout: logs/<date>_<arch>_<sha>/train.log
 # ─────────────────────────────────────────────────────────────────
 
-def test_log_pusher_filename_uses_date_subfolder():
-    """_compose_logfile must extract the YYYYMMDD date from BOOT_TIMESTAMP
-    and use it as the first subdirectory under logs/vast/ so runs group
-    by calendar day in the repo tree."""
+def test_log_pusher_uses_per_run_folder_layout():
+    """_compose_logfile must emit a path of the form
+    ``logs/<YYYYMMDD>-<HHMMSS>_<arch>_<sha>/train.log`` matching the
+    ``0001_logs_to_run_folders`` migration's output."""
     body = _read_script()
-    # bash substring: ${BOOT_TIMESTAMP:0:8} → "20260615"
-    assert "${BOOT_TIMESTAMP:0:8}" in body, (
-        "_compose_logfile must slice the YYYYMMDD date from BOOT_TIMESTAMP "
-        "via ${BOOT_TIMESTAMP:0:8} to use as the date subdirectory under "
-        "logs/vast/.  Current script writes logs flat into logs/vast/ instead."
-    )
-
-
-def test_log_pusher_filename_uses_arch_subfolder():
-    """The log path must have the form logs/vast/<date>/<arch>/<file>.log
-    so logs from different architectures land in separate subdirectories."""
-    body = _read_script()
-    # The echo in _compose_logfile should be:
-    #   echo "logs/vast/${date_var}/${ARCH_NAME}/${BOOT_TIMESTAMP}_..."
-    m = re.search(
-        r'echo\s+"logs/vast/\$\{?(\w+)\}?/\$\{?(ARCH[A-Za-z_]*)\}?/',
-        body,
-    )
-    assert m, (
-        "couldn't find 'logs/vast/${date_var}/${ARCH_NAME}/...' in "
-        "_compose_logfile.  Log files must go into "
-        "logs/vast/<date>/<arch>/ subdirectories — current script "
-        "writes them flat."
-    )
-    date_var = m.group(1)
-    assert "date" in date_var.lower() or "timestamp" in date_var.lower(), (
-        f"first subdirectory variable is ${{{date_var}}}, expected a "
-        "date variable (e.g. date_dir extracted from BOOT_TIMESTAMP)"
-    )
-
-
-def test_log_pusher_timestamp_still_in_filename():
-    """BOOT_TIMESTAMP must still appear in the leaf FILENAME (after the
-    subdirs) so files within an arch folder sort chronologically."""
-    body = _read_script()
-    # After the two subdirs the filename must start with BOOT_TIMESTAMP
+    # The echo in _compose_logfile should end with /train.log
     assert re.search(
-        r'logs/vast/[^"]+/[^"]+/\$\{?BOOT_TIMESTAMP\}?_\$\{?INSTANCE',
+        r'echo\s+"\$\{?folder\}?/train\.log"',
         body,
     ), (
-        "the leaf filename inside logs/vast/<date>/<arch>/ must still "
-        "begin with ${BOOT_TIMESTAMP}_${INSTANCE_ID}_… so that "
-        "ls within the arch subfolder sorts chronologically and "
-        "reused instance ids never collide."
+        "_compose_logfile must echo \"${folder}/train.log\" — that's "
+        "the canonical per-run folder layout matching what the "
+        "0001_logs_to_run_folders migration writes. Found neither "
+        "${folder}/train.log nor 'train.log' as the leaf filename."
+    )
+
+
+def test_log_pusher_folder_uses_date_arch_sha_format():
+    """The folder name MUST encode date_token + arch + short-sha so it
+    matches the migration's ``_new_folder_name`` and so two runs of
+    the same arch at different boot times don't alias."""
+    body = _read_script()
+    # Look for the folder assembly: must use BOOT_TIMESTAMP slices for
+    # date+time, ARCH_NAME, and a git short sha (via rev-parse).
+    assert "${BOOT_TIMESTAMP:0:8}" in body, (
+        "_compose_logfile must slice the YYYYMMDD date from "
+        "BOOT_TIMESTAMP via ${BOOT_TIMESTAMP:0:8} for the folder name."
+    )
+    assert "${BOOT_TIMESTAMP:9:6}" in body, (
+        "_compose_logfile must slice the HHMMSS time from BOOT_TIMESTAMP "
+        "via ${BOOT_TIMESTAMP:9:6} (positions 9-14, skipping the 'T') "
+        "so the folder name carries seconds-resolution and matches "
+        "the migration's date_token format."
+    )
+    assert re.search(r'git\s+rev-parse\s+--short=\d+\s+HEAD', body), (
+        "_compose_logfile must include a git short sha (via "
+        "`git rev-parse --short=N HEAD`) in the folder name so the "
+        "folder identifies the exact deployed commit — matches the "
+        "migration's <date>_<arch>_<sha> convention."
+    )
+    assert "${ARCH_NAME}" in body, (
+        "_compose_logfile must include ${ARCH_NAME} in the folder "
+        "name so runs of different architectures land in distinct "
+        "folders."
+    )
+
+
+# ─────────────────────────────────────────────────────────────────
+# Contract N3 — stable filename per run (no _PREV_LOG cleanup)
+# ─────────────────────────────────────────────────────────────────
+
+def test_log_pusher_no_prev_log_cleanup_with_stable_filenames():
+    """Since the new layout has ONE filename per run that never mutates,
+    there must be no ``_PREV_LOG`` tracking variable. Its presence
+    indicates leftover state from the old mutating-filename layout."""
+    body = _read_script()
+    # _PREV_LOG should NOT be referenced anywhere except possibly in a
+    # comment explaining its removal — i.e. it must never appear as a
+    # variable assignment or read.
+    assignment = re.search(r'^\s*_PREV_LOG\s*=', body, re.MULTILINE)
+    dereference = re.search(r'\$\{?_PREV_LOG\}?', body)
+    assert assignment is None and dereference is None, (
+        "_PREV_LOG must not appear in log_pusher.sh — it was used by "
+        "the pre-2026-06-15 mutating-filename layout to track the "
+        "previous step's filename for `git rm` cleanup. With the new "
+        "stable per-run filename, there's nothing to clean up."
     )

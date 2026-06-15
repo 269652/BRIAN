@@ -54,13 +54,25 @@ DESCRIPTION: str = (
 # New format example:
 #   20260614T182653Z_07aba24be2bf_rcc_bowtie_889M_run_step920of10k.log
 # The leading UTC timestamp + sha are anchored; everything between sha
-# and the optional trailing _stepNofM is treated as the architecture
-# token (with underscores preserved).
+# and the optional trailing _stepN[k|m]ofM[k|m] is treated as the
+# architecture token (with underscores preserved).
+#
+# Step suffix grammar: ``_step <digits> [k|m|g] [of <digits> [k|m|g]]``
+# Examples that must all parse:
+#   _step920of10k     (raw → compact)
+#   _step10kof10k     (compact → compact)
+#   _step3540of10k    (raw → compact)
+#   _step3kof3k       (compact → compact)  ← was broken pre-2026-06-15:
+#                       the old grammar required ``of`` immediately
+#                       after the first ``\d+`` group, so ``step3kof3k``
+#                       fell into the arch token instead of being
+#                       stripped. Fix: allow optional ``[kKmMgG]`` after
+#                       each digit run on BOTH sides of ``of``.
 _NEW_FMT = re.compile(
     r"^(?P<date>\d{8})T(?P<time>\d{6})Z_"
     r"(?P<sha>[0-9a-f]{8,16})_"
     r"(?P<arch>.+?)"
-    r"(?:_step\d+(?:of\w+)?)?"
+    r"(?:_step\d+[kKmMgG]?(?:of\d+[kKmMgG]?)?)?"
     r"\.log$",
     re.IGNORECASE,
 )

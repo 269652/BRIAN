@@ -3,10 +3,18 @@
 # log_pusher.sh — periodically commit and push the training log to git.
 #
 # Runs in the background alongside `vast_train_loop.sh` on the vast instance.
-# Copies the current train.log into
-# logs/vast/<YYYYMMDD>/<ARCH_NAME>/<stamp>_<instance>_..._stepNofN.log,
+# Copies the current train.log into the canonical per-run folder layout
+#   logs/<YYYYMMDD>-<HHMMSS>_<arch>_<short-sha>/train.log
 # commits, and pushes to the branch the runner cloned. This makes training
 # progress visible from local clones without SSH'ing into the instance.
+#
+# Path layout (2026-06-15): we now write DIRECTLY into the per-run
+# folder used by ``brian migrate 0001_logs_to_run_folders``. Stable
+# filename per run means we just overwrite the file in place — no
+# need to track ``_PREV_LOG`` and ``git rm`` the previous step's
+# filename. The pre-2026-06-15 layout was
+#   logs/vast/<YYYYMMDD>/<ARCH>/<stamp>_<id>_..._stepNofN.log
+# which had a mutating leaf name (step suffix changes every push).
 #
 # Cadence (2026-06-15): the pusher is now STEP-DRIVEN when ``LOG_EVERY``
 # is exported. The poll is tight (POLL_INTERVAL=30s default) and the
@@ -46,9 +54,8 @@ SOURCE_LOG="${SOURCE_LOG:-/workspace/train.log}"
 REPO_DIR="${REPO_DIR:-/workspace/brian}"
 INSTANCE_ID="${INSTANCE_ID:-$(hostname)}"
 REPO_SLUG="${REPO_SLUG:-269652/BRIAN}"
-# Run identity, used to build a speaking filename like
-# `<UTC_stamp>_<instance>_<arch>_<params>_<label>_step<cur>of<target>.log`
-# Each env var is optional — missing ones get sensible defaults.
+# Run identity, used to build the per-run folder name. Each env var
+# is optional — missing ones get sensible defaults.
 # 2026-06-14: bowtie arch folder renamed rcc_bowtie → master (canonical)
 # with architectures/current as the live working-copy. Default to
 # "current" so log filenames match `brian train` without --arch.
@@ -70,13 +77,37 @@ cd "$REPO_DIR" || { echo "[log_pusher] cannot cd to $REPO_DIR" >&2; exit 1; }
 BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null)}"
 [ -z "$BRANCH" ] && { echo "[log_pusher] no git branch detected" >&2; exit 1; }
 
-mkdir -p "logs/vast"
+# Logs root; per-run folder created on demand inside _compose_logfile.
+mkdir -p "logs"
 
 # ── Filename builder ───────────────────────────────────────────────────
-# Returns a "speaking" path that includes date + arch subdirectories:
-#   logs/vast/<YYYYMMDD>/<ARCH_NAME>/<timestamp>_<instance>_<arch>_<params>_<label>_step<cur>of<target>.log
-# Where params + cur step are parsed live from $SOURCE_LOG (defaults
-# kick in when the log hasn't reported them yet).
+# Returns the canonical per-run folder path used across the project:
+#
+#   logs/<YYYYMMDD>-<HHMMSS>_<arch>_<short-sha>/train.log
+#
+# This is the SAME layout that the ``0001_logs_to_run_folders``
+# migration produces when normalising old flat ``logs/vast/*.log``
+# files. Writing here directly means:
+#   * one stable filename per run (no _PREV_LOG cleanup needed)
+#   * the migration becomes a no-op going forward
+#   * `ls logs/` gives a chronologically-sorted per-run inventory
+#
+# History: pre-2026-06-15 we wrote to the nested layout
+# ``logs/vast/<YYYYMMDD>/<ARCH_NAME>/<stamp>_<id>_..._stepNofN.log``.
+# Two operational problems with that:
+#   1. The filename changed every push (step count in the suffix), so
+#      we had to ``git rm`` the previous path each iteration — a tiny
+#      race that occasionally produced empty commits or stranded
+#      stub files in the index.
+#   2. The deeper nesting didn't survive the ``.gitignore`` whitelist
+#      ``!logs/vast/*.log`` (regression 29522f9 had to add
+#      ``!logs/vast/**/*.log``). The new layout ``logs/<folder>/train.log``
+#      is whitelisted by a clean ``!logs/**/train.log`` pattern.
+#
+# Conversion from BOOT_TIMESTAMP=YYYYMMDDTHHMMSSZ to YYYYMMDD-HHMMSS:
+# strip the trailing 'Z' and replace the 'T' with '-' so it lines up
+# with the migration's folder convention (which uses date_token =
+# "YYYYMMDD-HHMMSS"). bash ${var//pat/repl} handles both substitutions.
 _format_steps() {
     local n="$1"
     # Compact "10000" → "10k", "40000" → "40k", "?" stays "?".
@@ -91,38 +122,24 @@ _format_steps() {
 }
 
 _compose_logfile() {
-    local cur_step="?" params="?"
-    if [ -f "$SOURCE_LOG" ]; then
-        # Latest "step    N" line (number-only field; we take the last hit)
-        cur_step="$(grep -oE "^step[[:space:]]+[0-9]+" "$SOURCE_LOG" \
-                        | tail -1 | awk '{print $2}')"
-        cur_step="${cur_step:-0}"
-        # "DSL-LM parameters: 134.8M" → "134M"
-        params="$(grep -oE "DSL-LM parameters:[[:space:]]+[0-9.]+[MBG]" \
-                        "$SOURCE_LOG" | tail -1 \
-                        | awk '{print $3}' | sed -E 's/\.[0-9]+//')"
-        params="${params:-?}"
-    fi
-    local cur="$(_format_steps "$cur_step")"
-    local tgt="$(_format_steps "$TOTAL_STEPS")"
-    # Strip the leading "neuroslm-full-" the deploy script prepends — it's
-    # redundant with the path prefix logs/vast/. Keep only the suffix.
-    local short_label="${LABEL#neuroslm-full-}"
-    short_label="${short_label#neuroslm-full}"
-    [ -z "$short_label" ] && short_label="run"
-    # Subdirectory layout: logs/vast/<YYYYMMDD>/<ARCH_NAME>/
-    # Date is the first 8 chars of the UTC boot timestamp (YYYYMMDD).
-    # Arch subfolder keeps runs from different architectures separated.
-    local date_dir="${BOOT_TIMESTAMP:0:8}"
-    mkdir -p "logs/vast/${date_dir}/${ARCH_NAME}"
-    # Timestamp prefix MUST still come first in the FILENAME so files
-    # within an arch subfolder sort chronologically and reused vast
-    # instance ids never alias.
-    echo "logs/vast/${date_dir}/${ARCH_NAME}/${BOOT_TIMESTAMP}_${INSTANCE_ID}_${ARCH_NAME}_${params}_${short_label}_step${cur}of${tgt}.log"
+    # Folder name uses fields that DON'T mutate during the run
+    # (boot stamp, arch name, git short sha) so the destination path
+    # is stable from the first push to the final one. Step counts and
+    # params still flow into the *commit message* via the call site,
+    # they just don't go in the filename anymore.
+    local stamp date_part time_part short_sha
+    # 20260615T185105Z → 20260615-185105
+    date_part="${BOOT_TIMESTAMP:0:8}"
+    time_part="${BOOT_TIMESTAMP:9:6}"
+    stamp="${date_part}-${time_part}"
+    # Git short sha of HEAD on the on-box clone. Falls back to "nohead"
+    # if we're somehow not in a repo (the cd at startup already failed
+    # in that case, so this is belt-and-braces).
+    short_sha="$(git rev-parse --short=12 HEAD 2>/dev/null || echo nohead)"
+    local folder="logs/${stamp}_${ARCH_NAME}_${short_sha}"
+    mkdir -p "$folder"
+    echo "${folder}/train.log"
 }
-
-# Previous-file tracker so we can remove an old name when the step bumps.
-_PREV_LOG=""
 
 # In-container git identity for the commits.
 git config user.email "vast-train@brian.local" >/dev/null 2>&1 || true
@@ -247,12 +264,17 @@ if [ "${ONESHOT:-0}" = "1" ]; then
     exit 1
 fi
 
+# Compute the per-run destination once for the startup banner — the
+# banner is informational only, the actual writes go through
+# _compose_logfile every iteration.
+_BANNER_DEST="$(_compose_logfile)"
+
 if [ "$LOG_EVERY" -gt 0 ] 2>/dev/null; then
     echo "[log_pusher] STEP-DRIVEN: push every ${LOG_EVERY} train steps (poll every ${POLL_INTERVAL}s)"
-    echo "[log_pusher] watching $SOURCE_LOG → logs/vast/${BOOT_TIMESTAMP:0:8}/${ARCH_NAME}/${BOOT_TIMESTAMP}_${INSTANCE_ID}_..._stepNofN.log"
+    echo "[log_pusher] watching $SOURCE_LOG → $_BANNER_DEST"
 else
     echo "[log_pusher] TIME-DRIVEN (legacy): push every ${PUSH_INTERVAL}s"
-    echo "[log_pusher] watching $SOURCE_LOG → logs/vast/${BOOT_TIMESTAMP:0:8}/${ARCH_NAME}/${BOOT_TIMESTAMP}_${INSTANCE_ID}_..._stepNofN.log"
+    echo "[log_pusher] watching $SOURCE_LOG → $_BANNER_DEST"
 fi
 
 # ── Step parser ────────────────────────────────────────────────────────
@@ -309,16 +331,11 @@ while true; do
         NEW_BUCKET="$CUR_BUCKET"
     fi
 
-    # Rebuild the filename every iteration — step + params info evolves.
+    # Stable per-run path — same every iteration since BOOT_TIMESTAMP,
+    # ARCH_NAME and git short-sha don't change during the run. Means:
+    # we just overwrite the destination file in place, no need to
+    # ``git rm`` a previous step's filename.
     LOG_REL="$(_compose_logfile)"
-
-    # If the filename changed since last push (step climbed, params learned),
-    # remove the previous file so the directory doesn't accumulate stubs.
-    if [ -n "$_PREV_LOG" ] && [ "$_PREV_LOG" != "$LOG_REL" ] && [ -f "$_PREV_LOG" ]; then
-        git rm -f "$_PREV_LOG" >/dev/null 2>&1 || rm -f "$_PREV_LOG"
-    fi
-    _PREV_LOG="$LOG_REL"
-
     cp -f "$SOURCE_LOG" "$LOG_REL"
 
     git add "$LOG_REL"
