@@ -49,7 +49,7 @@
 # Edit master/ for designed changes; current/ tracks master/ unless an
 # experiment branches it.
 arch = "architectures/current"
-dna  = "./dna/evol/arch.dna"
+# dna  = "./dna/evol/arch.dna"
 
 [defaults]
 # Workspace-wide default preset (used only when no [hardware.<DETECTED>]
@@ -67,6 +67,18 @@ steps = 10000
 # resolves to the current git HEAD). Set to a real branch name to lock
 # every unflagged deploy onto a known integration branch.
 branch = "master"
+
+# ── Checkpoint / log cadence ──
+# How often the trainer logs a step, saves a local .pt, and pushes it
+# to Git LFS. `push_every` was silently regressed to 0 during the DSL
+# rewrite — the legacy train.py pushed after every save. We restore
+# the 500-step cadence here so a box self-destruction (H24 mode of
+# failure) can never eat more than ~500 steps of progress. Set
+# push_every = 0 to disable pushes entirely (back to "save locally
+# only" behaviour).
+log_every = 20
+save_every = 500    
+push_every = 500
 
 [hardware.A100]
 preset = "large"

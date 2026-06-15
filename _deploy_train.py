@@ -48,6 +48,20 @@ VAST_IMAGE = "pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime"
 OOD_EVERY = int(os.environ.get("OOD_EVERY", "500"))
 STEPS = int(os.environ.get("STEPS", "40000"))
 
+# ── Checkpoint / log cadence ──
+# Defaults restored after H24 (instance 41031063) lost all checkpoints
+# when the box self-destroyed before the (then end-of-training-only)
+# push. The legacy ``train.py`` pushed after every save; the DSL
+# trainer rewrite silently dropped that. We now default to a
+# 500-step save+push cadence so a vast.ai outage can never eat more
+# than ~500 steps of progress. ``cli._deploy_dsl`` /
+# ``cli._deploy_dna`` populate these from ``brian.toml [defaults]``.
+# Set ``PUSH_EVERY=0`` to disable Git LFS pushes entirely (local
+# saves only).
+LOG_EVERY = int(os.environ.get("LOG_EVERY", "20"))
+SAVE_EVERY = int(os.environ.get("SAVE_EVERY", "500"))
+PUSH_EVERY = int(os.environ.get("PUSH_EVERY", "500"))
+
 # ── Resolve current arch/DNA from brian.toml (env vars still win) ──
 sys.path.insert(0, str(Path(__file__).parent))
 from neuroslm.project_config import load_project_config
@@ -183,13 +197,17 @@ launch_cmd = ("torchrun --nproc_per_node=" + str(hw.num_gpus)
 if USE_DNA:
     training_cmd = (
         f"ARCH={ARCH} BRIAN_SOURCE_DNA={_source_dna} "
-        f"STEPS={STEPS} OOD_EVERY={OOD_EVERY} FRESH=1 \\\n"
+        f"STEPS={STEPS} OOD_EVERY={OOD_EVERY} "
+        f"LOG_EVERY={LOG_EVERY} SAVE_EVERY={SAVE_EVERY} "
+        f"PUSH_EVERY={PUSH_EVERY} FRESH=1 \\\n"
         f"    bash scripts/vast_train_dna_loop.sh 2>&1 | tee /workspace/train.log"
     )
     arch_name_for_log = dna_arch_name or arch_display
 else:
     training_cmd = (
-        f"ARCH={ARCH} STEPS={STEPS} OOD_EVERY={OOD_EVERY} FRESH=1 \\\n"
+        f"ARCH={ARCH} STEPS={STEPS} OOD_EVERY={OOD_EVERY} "
+        f"LOG_EVERY={LOG_EVERY} SAVE_EVERY={SAVE_EVERY} "
+        f"PUSH_EVERY={PUSH_EVERY} FRESH=1 \\\n"
         f"    bash scripts/vast_train_dsl_loop.sh 2>&1 | tee /workspace/train.log"
     )
     arch_name_for_log = ARCH

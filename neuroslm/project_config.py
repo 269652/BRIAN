@@ -63,6 +63,24 @@ _DEFAULT_STEPS = 0  # 0 = "no opinion — caller picks"
 _DEFAULT_BRANCH = ""  # "" = "no opinion — caller picks" (deploy will
                       # then fall through to _deploy_train.py's own default,
                       # which today is the git HEAD branch)
+# ── checkpoint / log cadence ────────────────────────────────────────
+# These three control how often the trainer logs, saves a local
+# ``.pt``, and pushes it to Git LFS. Defaults restored after the
+# H24 deploy lost a 3 k-step run when the box self-destroyed before
+# the (then end-of-training-only) push. ``push_every`` was silently
+# regressed to 0 during the DSL-trainer rewrite; the legacy
+# ``train.py`` pushed after every save. We default to 500 so every
+# new deploy is automatically protected.
+#
+# Source-of-truth precedence (highest → lowest):
+#   1. CLI flag (``--push_every`` etc. on ``python -m neuroslm.train_dsl``)
+#   2. Env var on the box (``LOG_EVERY``, ``SAVE_EVERY``, ``PUSH_EVERY``)
+#   3. ``BRIAN_DEFAULT_*`` env override locally
+#   4. ``[defaults]`` in ``brian.toml``
+#   5. These constants
+_DEFAULT_LOG_EVERY = 20
+_DEFAULT_SAVE_EVERY = 500
+_DEFAULT_PUSH_EVERY = 500
 
 
 # ─── data class ──────────────────────────────────────────────────────
@@ -96,6 +114,16 @@ class ProjectConfig:
                                                # to ``_deploy_train.py``
                                                # when neither ``--branch``
                                                # nor ``$BRANCH`` is set.
+    # ── Checkpoint / log cadence ──
+    # Propagated via ``cli.cmd_deploy`` as ``LOG_EVERY`` /
+    # ``SAVE_EVERY`` / ``PUSH_EVERY`` env vars all the way down to
+    # ``vast_train_dsl_loop.sh`` which forwards them as
+    # ``--log_every`` / ``--save_every`` / ``--push_every`` to
+    # ``python -m neuroslm.train_dsl``. See module-level docstring
+    # for precedence.
+    default_log_every: int = _DEFAULT_LOG_EVERY
+    default_save_every: int = _DEFAULT_SAVE_EVERY
+    default_push_every: int = _DEFAULT_PUSH_EVERY
     # ── Per-hardware preset map ──
     # ``[hardware.<NAME>] preset = "..."`` sections feed this dict.
     # Looked up by ``cli._resolve_effective_preset`` AFTER the arch's
@@ -276,6 +304,15 @@ def load_project_config(
     )
     default_steps = int(defaults_section.get("steps", _DEFAULT_STEPS))
     default_branch = str(defaults_section.get("branch", _DEFAULT_BRANCH))
+    default_log_every = int(
+        defaults_section.get("log_every", _DEFAULT_LOG_EVERY)
+    )
+    default_save_every = int(
+        defaults_section.get("save_every", _DEFAULT_SAVE_EVERY)
+    )
+    default_push_every = int(
+        defaults_section.get("push_every", _DEFAULT_PUSH_EVERY)
+    )
 
     # ── env-var overrides (BRIAN_ prefix to avoid collisions) ──
     env_arch = os.environ.get("BRIAN_ARCH")
@@ -287,6 +324,9 @@ def load_project_config(
     env_default_hardware = os.environ.get("BRIAN_DEFAULT_HARDWARE")
     env_default_steps = os.environ.get("BRIAN_DEFAULT_STEPS")
     env_default_branch = os.environ.get("BRIAN_DEFAULT_BRANCH")
+    env_default_log_every = os.environ.get("BRIAN_DEFAULT_LOG_EVERY")
+    env_default_save_every = os.environ.get("BRIAN_DEFAULT_SAVE_EVERY")
+    env_default_push_every = os.environ.get("BRIAN_DEFAULT_PUSH_EVERY")
 
     if env_arch:
         arch = env_arch
@@ -315,6 +355,24 @@ def load_project_config(
     if env_default_branch is not None:
         # Allow BRIAN_DEFAULT_BRANCH="" to clear a file setting.
         default_branch = env_default_branch
+    if env_default_log_every:
+        try:
+            default_log_every = int(env_default_log_every)
+        except ValueError:
+            pass
+    if env_default_save_every:
+        try:
+            default_save_every = int(env_default_save_every)
+        except ValueError:
+            pass
+    if env_default_push_every is not None:
+        # Allow BRIAN_DEFAULT_PUSH_EVERY="0" to explicitly *disable*
+        # the push. Empty string keeps the file value.
+        if env_default_push_every != "":
+            try:
+                default_push_every = int(env_default_push_every)
+            except ValueError:
+                pass
 
     return ProjectConfig(
         repo_root=repo_root,
@@ -327,6 +385,9 @@ def load_project_config(
         default_hardware=default_hardware,
         default_steps=default_steps,
         default_branch=default_branch,
+        default_log_every=default_log_every,
+        default_save_every=default_save_every,
+        default_push_every=default_push_every,
         hardware_presets=hardware_presets,
     )
 

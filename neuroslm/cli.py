@@ -846,12 +846,28 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 # ── deploy / deploy-100k / deploy-brain ───────────────────────────────
 
 def _deploy_dsl(steps: int, branch: Optional[str], extra_env: dict,
-                 ood_every: int = 0) -> int:
-    """Run _deploy_train.py with the appropriate env vars for DSL training."""
+                 ood_every: int = 0,
+                 log_every: int = 0, save_every: int = 0,
+                 push_every: int = 0) -> int:
+    """Run _deploy_train.py with the appropriate env vars for DSL training.
+
+    The cadence triple ``(log_every, save_every, push_every)`` propagates
+    via env vars ``LOG_EVERY`` / ``SAVE_EVERY`` / ``PUSH_EVERY`` →
+    ``_deploy_train.py`` bakes them into the ONSTART script →
+    ``vast_train_dsl_loop.sh`` reads them and forwards as ``--log_every``
+    / ``--save_every`` / ``--push_every`` to ``python -m neuroslm.train_dsl``.
+    Zero means "use the trainer's own default".
+    """
     env = os.environ.copy()
     env["STEPS"] = str(steps)
     if ood_every > 0:
         env["OOD_EVERY"] = str(ood_every)
+    if log_every > 0:
+        env["LOG_EVERY"] = str(log_every)
+    if save_every > 0:
+        env["SAVE_EVERY"] = str(save_every)
+    if push_every > 0:
+        env["PUSH_EVERY"] = str(push_every)
     if branch:
         env["BRANCH"] = branch
     env["PYTHONIOENCODING"] = "utf-8"
@@ -864,7 +880,9 @@ def _deploy_dsl(steps: int, branch: Optional[str], extra_env: dict,
 
 
 def _deploy_dna(dna_path: str, steps: int, branch: Optional[str], extra_env: dict,
-                ood_every: int = 0) -> int:
+                ood_every: int = 0,
+                log_every: int = 0, save_every: int = 0,
+                push_every: int = 0) -> int:
     """Deploy a DNA-driven training run on vast.ai through the canonical
     workspace pipeline.
 
@@ -908,6 +926,12 @@ def _deploy_dna(dna_path: str, steps: int, branch: Optional[str], extra_env: dic
     env["STEPS"] = str(steps)
     if ood_every > 0:
         env["OOD_EVERY"] = str(ood_every)
+    if log_every > 0:
+        env["LOG_EVERY"] = str(log_every)
+    if save_every > 0:
+        env["SAVE_EVERY"] = str(save_every)
+    if push_every > 0:
+        env["PUSH_EVERY"] = str(push_every)
     if branch:
         env["BRANCH"] = branch
     env["PYTHONIOENCODING"] = "utf-8"
@@ -996,12 +1020,25 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     if getattr(args, "label", None):
         extra["LABEL_SUFFIX"] = args.label
 
+    # ── Cadence: brian.toml [defaults] > trainer default ──
+    # The trainer treats 0 as "use my own default"; we mirror that.
+    # If a user wants a CLI override later, the place to add it is a
+    # new ``--push-every`` arg on the deploy subcommand; for now the
+    # source of truth is ``brian.toml [defaults]``.
+    log_every = cfg.default_log_every
+    save_every = cfg.default_save_every
+    push_every = cfg.default_push_every
+
     if dna_path:
         return _deploy_dna(dna_path=dna_path, steps=steps,
-                           branch=branch, extra_env=extra, ood_every=ood)
+                           branch=branch, extra_env=extra, ood_every=ood,
+                           log_every=log_every, save_every=save_every,
+                           push_every=push_every)
     else:
         return _deploy_dsl(steps=steps, branch=branch,
-                           extra_env=extra, ood_every=ood)
+                           extra_env=extra, ood_every=ood,
+                           log_every=log_every, save_every=save_every,
+                           push_every=push_every)
 
 
 def cmd_deploy_100k(args: argparse.Namespace) -> int:

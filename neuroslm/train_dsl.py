@@ -48,6 +48,7 @@ _ARCH_LABEL = os.environ.get("DSL_ARCH_LABEL", "run")
 
 import torch
 
+from neuroslm.checkpoint_push import push_checkpoint_to_lfs
 from neuroslm.dsl.codegen import CodeGenerator
 from neuroslm.dsl.multifile import compile_folder
 from neuroslm.dsl.training_config import load_training_config_from_arch
@@ -523,14 +524,37 @@ def checkpoint_path_for_step(
     return ckpt_root / run_dir_name / f"step{step}.pt"
 
 
+_GIT_SHORT_SHA: Optional[str] = None
+
+
+def _cached_git_short_sha() -> str:
+    """Return ``_git_short_sha()`` cached on first call.
+
+    The on-box log-pusher cron commits + pushes ``training.log`` every
+    ~5 minutes, which advances ``HEAD`` mid-run. Calling
+    ``_git_short_sha()`` live at each save therefore produces a
+    DIFFERENT subdir per save (observed in the H24-cfd-10k log:
+    ``…_41072f7b_…/step1000.pt``, ``…_31677927_…/step2000.pt``,
+    ``…_7fdc3ccd_…/step3000.pt``). That scatters checkpoints across N
+    directories and breaks the resume globber's expectation of one
+    canonical run-dir. Caching at first use (which happens during the
+    training-loop save path, AFTER any startup-time commits the box
+    might have made) pins the suffix for the rest of the run.
+    """
+    global _GIT_SHORT_SHA
+    if _GIT_SHORT_SHA is None:
+        _GIT_SHORT_SHA = _git_short_sha()
+    return _GIT_SHORT_SHA
+
+
 def _run_dir_name() -> str:
     """Convenience wrapper: build the per-run dir name from module-level
-    ``_RUN_ID`` + ``_ARCH_LABEL`` + live ``_git_short_sha()``.
+    ``_RUN_ID`` + ``_ARCH_LABEL`` + cached ``_cached_git_short_sha()``.
 
     Computed lazily (not at module import) so a test can monkey-patch
     ``_git_short_sha`` to make the dir deterministic.
     """
-    return build_run_dir_name(_RUN_ID, _git_short_sha(), _ARCH_LABEL)
+    return build_run_dir_name(_RUN_ID, _cached_git_short_sha(), _ARCH_LABEL)
 
 
 def _checkpoint_step(path: Path) -> int:
@@ -878,7 +902,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
           steps: int, log_every: int = 20, save_every: int = 1000,
           ckpt_dir: Optional[Path] = None, start_step: int = 0,
           tokens_per_step: int = 0,
-          ood_every: int = 0) -> None:
+          ood_every: int = 0,
+          push_every: int = 0) -> None:
     """Run train_steps from `start_step+1` to `steps`. Emits the native
     train.py metric format; saves checkpoints.
 
@@ -888,6 +913,13 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
     ood_mid_<RUN_ID>_step{N}.json so it lands in the same per-step
     metrics ledger as the final OOD eval. Lets you SEE generalization
     improving (or not) while training is still running.
+
+    If `push_every > 0`: every save whose step is divisible by
+    `push_every` is followed by a ``git add``/``commit``/``push`` of
+    the checkpoint to Git LFS. Closes the H24 (run 41031063,
+    2026-06-15) loss-hole where the vast box self-destroyed before
+    the end-of-training push and stranded every checkpoint. Defaults
+    to 0 (off) so local-dev runs aren't tied to the git remote.
     """
     if ckpt_dir is not None:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -1037,6 +1069,10 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                     harness.save_checkpoint(str(path), step=step)
                     print(f"[train_dsl] saved early-exit checkpoint {path}",
                           flush=True)
+                    # Always push the early-exit ckpt regardless of
+                    # cadence — it's the LAST artefact of the run.
+                    if push_every > 0:
+                        push_checkpoint_to_lfs(str(path))
                 return
 
         if ckpt_dir is not None and step % save_every == 0:
@@ -1049,6 +1085,12 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                 ckpt_dir, _run_dir_name(), step)
             harness.save_checkpoint(str(path), step=step)
             print(f"[train_dsl] saved checkpoint {path}", flush=True)
+            # Optionally push to Git LFS so an instance crash never
+            # strands artefacts. ``push_every`` is normally either 0
+            # (off) or equal to ``save_every`` (push every save). A
+            # value > save_every pushes less often than it saves.
+            if push_every > 0 and step % push_every == 0:
+                push_checkpoint_to_lfs(str(path))
 
         # Mid-training OOD eval — quick WikiText-103 ppl snapshot so we
         # can SEE generalization moving without waiting for end-of-run.
@@ -1075,6 +1117,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                             harness.save_checkpoint(str(path), step=step)
                             print(f"[train_dsl] saved early-exit "
                                   f"checkpoint {path}", flush=True)
+                            if push_every > 0:
+                                push_checkpoint_to_lfs(str(path))
                         return
             except Exception as e:
                 print(f"[train_dsl] mid-OOD eval failed at step {step}: {e}",
@@ -1093,6 +1137,11 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
             ckpt_dir, _run_dir_name(), final_step)
         harness.save_checkpoint(str(final_path), step=final_step)
         print(f"[train_dsl] saved final checkpoint {final_path}", flush=True)
+        # ALWAYS push the final checkpoint if push_every is on — the
+        # _deploy_train.py end-of-training push exists as belt-and-
+        # braces but the box may self-destroy first (H24).
+        if push_every > 0:
+            push_checkpoint_to_lfs(str(final_path))
 
     # Final OOD pass: a longer WikiText-103 eval (cap=200 windows instead
     # of the mid-OOD cap=50) plus a train-set ppl on the same loader, so
@@ -1188,6 +1237,13 @@ def main():
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--log_every", type=int, default=20)
     parser.add_argument("--save_every", type=int, default=1000)
+    parser.add_argument("--push_every", type=int, default=0,
+                        help="If > 0, push each periodically-saved "
+                             "checkpoint to Git LFS via "
+                             "``git add/commit/push`` so the vast.ai box "
+                             "self-destruction can no longer eat them "
+                             "(H24 loss-hole). Should normally equal "
+                             "--save_every or be a small multiple thereof.")
     parser.add_argument("--ood_every", type=int, default=0,
                         help="If > 0, run a mid-training WikiText-103 OOD "
                              "ppl snapshot every N steps. Writes JSON to "
@@ -1443,6 +1499,7 @@ def main():
         steps=args.steps, log_every=args.log_every,
         save_every=args.save_every, ckpt_dir=ckpt_dir,
         start_step=start_step, ood_every=args.ood_every,
+        push_every=args.push_every,
     )
 
     print("[train_dsl] done.")

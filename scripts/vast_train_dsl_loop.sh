@@ -72,6 +72,14 @@ MODE="${MODE:-mix}"
 CHAT_RATIO="${CHAT_RATIO:-0.6}"
 LOG_EVERY="${LOG_EVERY:-20}"
 SAVE_EVERY="${SAVE_EVERY:-1000}"
+# PUSH_EVERY > 0 → push each periodically-saved checkpoint to Git LFS
+# after writing it locally. Closes the H24 loss-hole (3 k-step run
+# destroyed because we only pushed at end-of-training). Default 0
+# preserves back-compat for callers that still want local-only saves;
+# the canonical entry point (cli.cmd_deploy) sets PUSH_EVERY=500 from
+# brian.toml [defaults].push_every so production deploys are
+# automatically protected.
+PUSH_EVERY="${PUSH_EVERY:-0}"
 # OOD_EVERY > 0 → run a quick WikiText-103 ppl snapshot every N steps
 # during training. Each snapshot writes a JSON to logs/vast/benchmarks/ood/
 # that brian analyze-log picks up. Defaults to 0 (off).
@@ -113,6 +121,7 @@ while [ "$restart" -lt "$MAX_RESTARTS" ]; do
         --device cuda \
         --log_every "$LOG_EVERY" \
         --save_every "$SAVE_EVERY" \
+        --push_every "$PUSH_EVERY" \
         --ood_every "$OOD_EVERY" \
         --ckpt_dir "$CKPT_DIR" \
         --resume
