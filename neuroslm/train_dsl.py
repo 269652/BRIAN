@@ -914,7 +914,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
           tokens_per_step: int = 0,
           ood_every: int = 0,
           push_every: int = 0,
-          push_backend: str = "hf") -> None:
+          push_backend: str = "hf",
+          push_optimizer: bool = False) -> None:
     """Run train_steps from `start_step+1` to `steps`. Emits the native
     train.py metric format; saves checkpoints.
 
@@ -1092,8 +1093,16 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                           flush=True)
                     # Always push the early-exit ckpt regardless of
                     # cadence — it's the LAST artefact of the run.
+                    # Force push_optimizer=True so the HF copy is a
+                    # perfect resume target (no ~500-step LR-warmup
+                    # blip on a fresh-box reload — losing that on a
+                    # final artefact wastes whatever compute the
+                    # early-exit just saved).
                     if push_every > 0:
-                        push_checkpoint(str(path), backend=push_backend)
+                        push_checkpoint(
+                            str(path), backend=push_backend,
+                            push_optimizer=True,
+                        )
                 return
 
         if ckpt_dir is not None and step % save_every == 0:
@@ -1112,8 +1121,15 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
             # (push every save). A value > save_every pushes less
             # often than it saves. ``push_backend`` selects HF Hub
             # (default) or legacy Git LFS — see :func:`push_checkpoint`.
+            # ``push_optimizer`` honours the CLI flag: when False
+            # (default) the HF backend strips Adam state for ~3×
+            # smaller uploads; the local .pt always has the full
+            # payload for same-box crash resume.
             if push_every > 0 and step % push_every == 0:
-                push_checkpoint(str(path), backend=push_backend)
+                push_checkpoint(
+                    str(path), backend=push_backend,
+                    push_optimizer=push_optimizer,
+                )
 
         # Mid-training OOD eval — quick WikiText-103 ppl snapshot so we
         # can SEE generalization moving without waiting for end-of-run.
@@ -1140,9 +1156,16 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                             harness.save_checkpoint(str(path), step=step)
                             print(f"[train_dsl] saved early-exit "
                                   f"checkpoint {path}", flush=True)
+                            # Pass-mark early-exit is a final
+                            # artefact too → push full optimiser
+                            # so the HF copy is a perfect resume
+                            # target (see the matching reasoning
+                            # at the top of the loop).
                             if push_every > 0:
                                 push_checkpoint(
-                                    str(path), backend=push_backend)
+                                    str(path), backend=push_backend,
+                                    push_optimizer=True,
+                                )
                         return
             except Exception as e:
                 print(f"[train_dsl] mid-OOD eval failed at step {step}: {e}",
@@ -1163,9 +1186,16 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
         print(f"[train_dsl] saved final checkpoint {final_path}", flush=True)
         # ALWAYS push the final checkpoint if push_every is on — the
         # _deploy_train.py end-of-training push exists as belt-and-
-        # braces but the box may self-destroy first (H24).
+        # braces but the box may self-destroy first (H24). Force
+        # push_optimizer=True so this canonical resume target is
+        # always complete; the bandwidth saving from the strip is
+        # for the noisy mid-run cadence, not the one ckpt at the
+        # end you actually want to ship.
         if push_every > 0:
-            push_checkpoint(str(final_path), backend=push_backend)
+            push_checkpoint(
+                str(final_path), backend=push_backend,
+                push_optimizer=True,
+            )
 
     # Final OOD pass: a longer WikiText-103 eval (cap=200 windows instead
     # of the mid-OOD cap=50) plus a train-set ppl on the same loader, so
@@ -1279,6 +1309,20 @@ def main():
                              "  none = no remote push (local-dev runs)\n"
                              "Overridden by CHECKPOINT_PUSH_BACKEND env "
                              "on the box.")
+    parser.add_argument("--push_optimizer", action="store_true",
+                        default=False,
+                        help="HF backend only. When set, the FULL "
+                             "ckpt payload (weights + Adam m + Adam "
+                             "v) is uploaded. Default: strip "
+                             "optimizer state, ~2/3 smaller upload "
+                             "(weights + m + v ≈ 1.3 GB for the "
+                             "107M trunk → ~430 MB stripped). The "
+                             "on-disk .pt always has the full state "
+                             "so same-box crash resume is unaffected. "
+                             "Trade-off: a fresh-box resume from the "
+                             "stripped HF copy shows a ~500-step "
+                             "LR-warmup-shape loss blip while Adam's "
+                             "2nd-moment EMA rebuilds from zero.")
     parser.add_argument("--ood_every", type=int, default=0,
                         help="If > 0, run a mid-training WikiText-103 OOD "
                              "ppl snapshot every N steps. Writes JSON to "
@@ -1536,6 +1580,7 @@ def main():
         start_step=start_step, ood_every=args.ood_every,
         push_every=args.push_every,
         push_backend=args.push_backend,
+        push_optimizer=args.push_optimizer,
     )
 
     print("[train_dsl] done.")
