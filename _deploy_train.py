@@ -80,6 +80,29 @@ CHECKPOINT_PUSH_BACKEND = os.environ.get(
     "CHECKPOINT_PUSH_BACKEND", "hf")
 HF_REPO_ID = os.environ.get("HF_REPO_ID", "moritzroessler/BRIAN")
 
+# ── Pre-flight: warn loudly if the chosen backend lacks credentials ──
+# The on-box pusher fails open (prints + skips, never crashes the run),
+# so a missing token would otherwise only surface in the training log
+# 500+ steps in. Catch it here so the user can fix the .env file
+# BEFORE renting a $1.50/hr GPU that produces non-pushable artefacts.
+if CHECKPOINT_PUSH_BACKEND == "hf" and not HF_TOKEN:
+    print(
+        "⚠ HF_TOKEN is empty but push_backend='hf'. The on-box "
+        "trainer will SAVE checkpoints locally but SKIP the HF Hub "
+        "upload (and the box may self-destruct before you can rsync "
+        "them). Fix one of:\n"
+        "    1. Add HF_TOKEN=hf_... to .env "
+        "(see .env.example for the auth chain), or\n"
+        "    2. Set push_backend = 'lfs' in brian.toml [defaults] "
+        "to fall back to Git LFS, or\n"
+        "    3. Set push_backend = 'none' to disable remote push.\n"
+        "    Continuing in 3s — Ctrl-C to abort.",
+        file=sys.stderr,
+        flush=True,
+    )
+    import time as _t
+    _t.sleep(3)
+
 # ── Resolve current arch/DNA from brian.toml (env vars still win) ──
 sys.path.insert(0, str(Path(__file__).parent))
 from neuroslm.project_config import load_project_config

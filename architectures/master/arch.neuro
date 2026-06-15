@@ -719,11 +719,11 @@ training {
 # =============================================================================
 
 param_scope trunk {
-    populations: [sensory, association, thalamus, world, self_m, qualia, gws, neural_geometry, entorhinal, pfc, acc, forward_m, evaluator, dmn, thought_transformer, claustrum, motor, reasoning_cortex, cortex_code, cortex_general, cortex_reasoning]
+    populations: [sensory, association, thalamus, world, self_m, qualia, emotions_vector, gws, neural_geometry, entorhinal, pfc, acc, forward_m, evaluator, dmn, thought_transformer, claustrum, motor, reasoning_cortex, cortex_code, cortex_general, cortex_reasoning]
 }
 
 param_scope bio {
-    populations: [amygdala, insula, hippo, cerebellum, bg, vta, nucleus_accumbens, locus_coeruleus, raphe_nuclei, nucleus_basalis, substantia_nigra],
+    populations: [amygdala, insula, hippo, cerebellum, bg, vta, nucleus_accumbens, locus_coeruleus, raphe_nuclei, nucleus_basalis, substantia_nigra, survival_imperatives],
     gradient: "detached_from_main_loss"
 }
 
@@ -870,7 +870,7 @@ import { sensory, association }                          from "@lib/modules/sens
 import { thalamus }                                       from "@lib/modules/thalamus"
 import { world, self_m }                                  from "@lib/modules/world"
 import { amygdala, insula }                               from "@lib/modules/amygdala"
-import { qualia }                                         from "@lib/modules/qualia"
+import { qualia, emotions_vector, survival_imperatives }  from "@lib/modules/qualia"
 import { gws, neural_geometry }                           from "@lib/modules/gws"
 import { hippo, entorhinal, cerebellum }                  from "@lib/modules/hippocampus"
 import { pfc, acc }                                       from "@lib/modules/pfc"
@@ -933,44 +933,20 @@ synapse thalamus -> cortex_reasoning {
     weight: 0.33, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
-
-# MoE specialists -> PFC (LM trunk) -- the visible representation of
-# TWO concurrent gradient paths from the cortex ensemble into the LM
-# trunk (a.k.a. pfc in the bowtie mapping):
-#
-#   (1) Late-fusion mixture (forward signal):
-#       final_logits = (1 - alpha) * lm_logits + alpha * cortex_logits
-#       where alpha = sigmoid(self.cortex_mix_logit) starts ~0.5 and
-#       decays as the trunk catches up. This is THE path that makes
-#       initial CE drop from ln(V)=10.85 to ~3-5 nats at step 0 (the
-#       experts already speak English; the trunk doesn't yet).
-#       See harness.py::forward lines 1346-1395.
-#
-#   (2) Capacity-Funneled Distillation (gradient signal):
-#       L_distill = lambda_t * T^2 * KL(student || teacher)
-#       Pulls the trunk's logits toward the experts' logits over
-#       time. See lib/LanguageCortex.neuro::funnel teacher_ensemble
-#       and harness.py::_distillation_lambda.
-#
-# weight=0.5 reflects the alpha midpoint of path (1) so the edges are
-# visibly comparable to the other bowtie synapses (gws->pfc=0.8,
-# hippo->pfc=0.5, entorhinal->pfc=0.4). The NT is "glutamate" because
-# the late-fusion is an excitatory bias toward the experts' token
-# distribution. Pinned by tests/test_arch_lm_trunk_wiring.py (Fix A).
+# Forward-gradient mirrors: NFG-visible projections matching the
+# declarative `funnel teacher_ensemble { target: pfc }` gradient.
+# Pinned by test_arch_lm_trunk_wiring.py::TestFixACortexSpecialistsHaveOutgoingEdge.
 synapse cortex_code -> pfc {
-    weight: 0.5, neurotransmitter: "glutamate",
-    equation: @standard_synapse,
-    feature: "late_fusion.edge"
+    weight: 0.33, neurotransmitter: "glutamate",
+    equation: @standard_synapse
 }
 synapse cortex_general -> pfc {
-    weight: 0.5, neurotransmitter: "glutamate",
-    equation: @standard_synapse,
-    feature: "late_fusion.edge"
+    weight: 0.33, neurotransmitter: "glutamate",
+    equation: @standard_synapse
 }
 synapse cortex_reasoning -> pfc {
-    weight: 0.5, neurotransmitter: "glutamate",
-    equation: @standard_synapse,
-    feature: "late_fusion.edge"
+    weight: 0.33, neurotransmitter: "glutamate",
+    equation: @standard_synapse
 }
 
 # State models â†’ workspace
@@ -1115,6 +1091,228 @@ synapse reasoning_cortex -> dmn {
 }
 
 # =============================================================================
+# NEUROMODULATORY NUCLEI — brainstem/midbrain NT source wiring
+#
+# Efferent (nuclei → targets):
+#   VTA          → NAcc, PFC, BG       (mesolimbic + mesocortical DA)
+#   Substantia N → BG                  (nigrostriatal DA)
+#   LC           → thalamus, amygdala, PFC   (NE: arousal / stress)
+#   Raphe        → amygdala, PFC, hippo      (5HT: mood / fear suppression)
+#   NBM          → sensory, hippo, PFC       (ACh: attention / encoding)
+#   NAcc         → BG, motor                 (ventral striatum → action gating)
+#
+# Afferent (targets → nuclei, closing NT feedback loops):
+#   BG        → VTA    (GABA: striatal inhibition, disinhibition = reward)
+#   amygdala  → VTA, LC, raphe  (stress → phasic DA/NE/5HT burst)
+#   evaluator → VTA              (scalar RPE → DA)
+#   ACC       → LC               (conflict/error → NE arousal)
+#   PFC       → NBM              (top-down ACh control)
+#   hippo     → raphe            (memory context → 5HT tone)
+# =============================================================================
+
+# — Mesolimbic DA: VTA → NAcc (reward circuit)
+synapse vta -> nucleus_accumbens {
+    weight: 0.9, neurotransmitter: "dopamine",
+    equation: @standard_synapse
+}
+# — Mesocortical DA: VTA → PFC (motivational signal to executive control)
+synapse vta -> pfc {
+    weight: 0.6, neurotransmitter: "dopamine",
+    equation: @standard_synapse
+}
+# — VTA → BG (reward-salience gating of action selection)
+synapse vta -> bg {
+    weight: 0.7, neurotransmitter: "dopamine",
+    equation: @standard_synapse
+}
+# — Nigrostriatal: SN → BG (classical motor DA pathway)
+synapse substantia_nigra -> bg {
+    weight: 0.8, neurotransmitter: "dopamine",
+    equation: @standard_synapse
+}
+# — Ventral striatum: NAcc → BG (motivational gating of dorsal striatum)
+synapse nucleus_accumbens -> bg {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+# — NAcc → motor (reward-driven action output)
+synapse nucleus_accumbens -> motor {
+    weight: 0.4, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+# — LC → thalamus (NE: arousal amplifies thalamic relay gain)
+synapse locus_coeruleus -> thalamus {
+    weight: 0.5, neurotransmitter: "norepinephrine",
+    equation: @standard_synapse
+}
+# — LC → amygdala (NE: stress arousal amplifies emotional reactivity)
+synapse locus_coeruleus -> amygdala {
+    weight: 0.6, neurotransmitter: "norepinephrine",
+    equation: @standard_synapse
+}
+# — LC → PFC (NE inverted-U: moderate sharpens PFC, high degrades it)
+synapse locus_coeruleus -> pfc {
+    weight: 0.4, neurotransmitter: "norepinephrine",
+    equation: @standard_synapse
+}
+# — Raphe → amygdala (5HT: serotonergic suppression of fear / anxiety)
+synapse raphe_nuclei -> amygdala {
+    weight: 0.7, neurotransmitter: "serotonin",
+    equation: @standard_synapse
+}
+# — Raphe → PFC (5HT: mood-state modulation of executive planning)
+synapse raphe_nuclei -> pfc {
+    weight: 0.5, neurotransmitter: "serotonin",
+    equation: @standard_synapse
+}
+# — Raphe → hippo (5HT: serotonergic memory consolidation gating)
+synapse raphe_nuclei -> hippo {
+    weight: 0.4, neurotransmitter: "serotonin",
+    equation: @standard_synapse
+}
+# — NBM → sensory (ACh: cholinergic top-down attention to sensory cortex)
+synapse nucleus_basalis -> sensory {
+    weight: 0.5, neurotransmitter: "acetylcholine",
+    equation: @standard_synapse
+}
+# — NBM → hippo (ACh: cholinergic encoding gate for episodic memory)
+synapse nucleus_basalis -> hippo {
+    weight: 0.6, neurotransmitter: "acetylcholine",
+    equation: @standard_synapse
+}
+# — NBM → PFC (ACh: cholinergic modulation of working memory)
+synapse nucleus_basalis -> pfc {
+    weight: 0.3, neurotransmitter: "acetylcholine",
+    equation: @standard_synapse
+}
+# — BG → VTA (striatal GABA inhibits VTA; disinhibition = reward signal)
+synapse bg -> vta {
+    weight: 0.4, neurotransmitter: "gaba",
+    equation: @standard_synapse
+}
+# — Amygdala → VTA (stress/fear drives phasic DA burst; fight-or-flight)
+synapse amygdala -> vta {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+# — Amygdala → LC (fear → NE surge; classical stress arousal pathway)
+synapse amygdala -> locus_coeruleus {
+    weight: 0.6, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+# — Amygdala → Raphe (chronic stress → 5HT depletion via raphe suppression)
+synapse amygdala -> raphe_nuclei {
+    weight: 0.4, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+# — Evaluator → VTA (scalar RPE → DA burst; temporal-difference learning)
+synapse evaluator -> vta {
+    weight: 0.7, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+# — ACC → LC (conflict/error monitoring → NE arousal for adaptive gain)
+synapse acc -> locus_coeruleus {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+# — PFC → NBM (top-down cholinergic control: executive-attention coupling)
+synapse pfc -> nucleus_basalis {
+    weight: 0.4, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+# — Hippo → Raphe (memory retrieval context modulates 5HT tone)
+synapse hippo -> raphe_nuclei {
+    weight: 0.3, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+
+# =============================================================================
+# QUALIA — bidirectional wiring (survival, emotion, thought, NT loops)
+#
+# Inputs to Qualia:
+#   amygdala, insula     → qualia  (emotional binding + interoception)
+#   gws                  → qualia  (conscious content → experiential binding)
+#   thought_transformer  → qualia  (thoughts affect qualia)
+#   dmn                  → qualia  (narrative self affects qualia)
+#   survival_imperatives → qualia  (homeostatic drives bias qualia content)
+#   DA / 5HT / NE / eCB modulate qualia tone (receptor effects)
+#
+# Outputs from Qualia:
+#   qualia → emotions_vector        (oscillatory phase encodes affective valence)
+#   emotions_vector → thought_transformer, gws  (latent emotions modulate thought)
+#   qualia → dmn                    (qualia reshapes narrative / self-model)
+#   qualia → vta / raphe / lc       (qualia drives NT release / reuptake)
+#
+# Neuroscientific basis:
+#   Gamma-band binding: Crick & Koch 1990; Singer & Gray 1995
+#   Theta-gamma PAC gates GWS access: Lisman & Jensen 2013
+#   Somatic marker / NT ↔ qualia: Damasio 1999
+#   Interoceptive PC: Craig 2009; Seth & Friston 2016
+# =============================================================================
+
+# — Inputs to Qualia
+synapse amygdala -> qualia {
+    weight: 0.7, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+synapse insula -> qualia {
+    weight: 0.6, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+synapse gws -> qualia {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+synapse thought_transformer -> qualia {
+    weight: 0.4, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+synapse dmn -> qualia {
+    weight: 0.4, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+synapse survival_imperatives -> qualia {
+    weight: 0.6, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+
+# — Qualia → emotions_vector (oscillatory semantic modulation of thought manifold)
+synapse qualia -> emotions_vector {
+    weight: 0.8, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+
+# — Emotions vector → thought / GWS (affective coloring of cognition)
+synapse emotions_vector -> thought_transformer {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+synapse emotions_vector -> gws {
+    weight: 0.4, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+
+# — Qualia → DMN (qualia reshapes self-model and narrative)
+synapse qualia -> dmn {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+
+# — Qualia → NT release (qualia influences neuromodulatory output)
+synapse qualia -> vta {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+synapse qualia -> raphe_nuclei {
+    weight: 0.4, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+synapse qualia -> locus_coeruleus {
+    weight: 0.3, neurotransmitter: "glutamate",
+    equation: @standard_synapse
+}
+
+# =============================================================================
 # NEUROMODULATION (receptor banks â€” fast NT modulation of regions)
 # Equation: y = output * (c * gain)        for multiplicative effects
 # Equation: y = output + (c * gain)        for additive effects
@@ -1205,6 +1403,35 @@ modulation serotonin -> amygdala {
 modulation dopamine -> acc {
     effect: "multiplicative", gain: 0.5,
     equation: @multiplicative_modulation
+}
+
+# Qualia — DA (reward/pleasure → hedonic tone), 5HT (mood baseline),
+#           NE (arousal intensity), eCB (hedonic set-point / analgesia)
+modulation dopamine -> qualia {
+    effect: "additive", gain: 0.6,
+    equation: @additive_modulation
+}
+modulation serotonin -> qualia {
+    effect: "multiplicative", gain: 0.5,
+    equation: @multiplicative_modulation
+}
+modulation norepinephrine -> qualia {
+    effect: "additive", gain: 0.4,
+    equation: @additive_modulation
+}
+modulation endocannabinoid -> qualia {
+    effect: "additive", gain: 0.5,
+    equation: @additive_modulation
+}
+
+# Survival imperatives — DA (reward reinforces drives), NE (stress heightens)
+modulation dopamine -> survival_imperatives {
+    effect: "multiplicative", gain: 0.5,
+    equation: @multiplicative_modulation
+}
+modulation norepinephrine -> survival_imperatives {
+    effect: "additive", gain: 0.4,
+    equation: @additive_modulation
 }
 
 # =============================================================================

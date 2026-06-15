@@ -2236,7 +2236,7 @@ def cmd_train(args: argparse.Namespace) -> int:
         # architectures/rcc_bowtie on 2026-06-14; master/ holds the
         # canonical source-of-truth, current/ is the live arch the
         # trainer consumes by default.
-        cmd.extend(["--arch", "architectures/current"])
+        cmd.extend(["--arch", "architectures/master"])
 
     # ── Resolve effective preset + steps (CLI > arch > global > AUTO) ──
     # Load the arch's parsed training config + the workspace-level
@@ -2253,7 +2253,7 @@ def cmd_train(args: argparse.Namespace) -> int:
         from neuroslm.project_config import load_project_config
         arch_root_for_cfg = (
             workspace.arch_root if workspace is not None
-            else (REPO_ROOT / (args.arch or "architectures/current"))
+            else (REPO_ROOT / (args.arch or "architectures/master"))
         )
         arch_cfg = load_training_config_from_arch(arch_root_for_cfg)
         project_cfg = load_project_config()
