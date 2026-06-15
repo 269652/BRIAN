@@ -49,7 +49,7 @@ def test_language_cortex_module_instantiation_produces_full_ir():
 
     src = (
         "architecture lc_smoke { d_sem: 64 }\n"
-        "population lm_trunk { count: 64 }\n"
+        "population pfc { count: 64 }\n"
         "\n"
         "expert MathExpert { model: \"gpt2\",        role: \"math\"    }\n"
         "expert CodeExpert { model: \"distilgpt2\",  role: \"code\"    }\n"
@@ -72,11 +72,16 @@ def test_language_cortex_module_instantiation_produces_full_ir():
     assert d.temperature == 4.0
     assert d.alpha == 0.7
     assert d.method == "capacity_funneled"
-    # 1 funnel block with all 3 experts wired to the target
+    # 1 funnel block with all 3 experts wired to the target.
+    # The lib's default `target:` is `pfc` (the LM-trunk population
+    # in the canonical bowtie). Pre-2026-06-15 the default was
+    # `lm_trunk` which never appeared in any population roster --
+    # see tests/test_arch_lm_trunk_wiring.py (Fix B) and the
+    # 2026-06-15 NFG cross-alignment audit.
     assert len(prog.funnels) == 1
     f = prog.funnels[0]
     assert set(f.inputs) == {"MathExpert", "CodeExpert", "LangExpert"}
-    assert f.target == "lm_trunk"
+    assert f.target == "pfc"
     assert f.d_bottleneck == 512
     # 1 warmup block with the 10000-step rule
     assert len(prog.warmups) == 1
@@ -96,7 +101,7 @@ def test_language_cortex_with_default_temperature():
 
     src = (
         "architecture lc_defaults { d_sem: 64 }\n"
-        "population lm_trunk { count: 64 }\n"
+        "population pfc { count: 64 }\n"
         "expert MathExpert { model: \"gpt2\", role: \"math\" }\n"
         "\n"
         "module brain = LanguageCortex {\n"

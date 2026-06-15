@@ -16,14 +16,21 @@
 #         cfd_temperature:      4.0,
 #         cfd_alpha:            0.7,
 #         experts:              [MathExpert, CodeExpert, LangExpert],
-#         target:               pfc           # optional, defaults to lm_trunk
+#         target:               pfc           # optional, defaults to pfc
 #     }
 #
 # Required params:
 #   experts              — list of expert block names (declared in caller)
 #
 # Optional params (with defaults shown below):
-#   target               — population name the funnel projects into
+#   target               — population name the funnel projects into.
+#                          Default `pfc` because that is the LM-trunk
+#                          population in the canonical bowtie
+#                          (`architectures/master/`). The legacy
+#                          default was `lm_trunk`, which never existed
+#                          in any population roster — see the
+#                          2026-06-15 NFG cross-alignment audit and
+#                          tests/test_arch_lm_trunk_wiring.py (Fix B).
 #   teacher_warmup_steps — int  — steps to keep teacher live before cutoff
 #   d_bottleneck         — int  — CFD funnel width
 #   cfd_temperature      — float — softmax temperature for KD
@@ -35,7 +42,7 @@ export module LanguageCortex {
         d_bottleneck:         512,
         cfd_temperature:      4.0,
         cfd_alpha:            0.7,
-        target:               lm_trunk,
+        target:               pfc,
         experts:              []
     },
     body: """
