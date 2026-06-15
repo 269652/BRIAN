@@ -34,7 +34,8 @@ from pathlib import Path
 
 env_path = Path(".env")
 for line in env_path.read_text().splitlines():
-    if line.startswith(("VAST_AI=", "GITHUB_PAT=", "VAST_API_KEY=", "GITHUB=")):
+    if line.startswith(("VAST_AI=", "GITHUB_PAT=", "VAST_API_KEY=",
+                         "GITHUB=", "HF_TOKEN=", "HF_REPO_ID=")):
         k, _, v = line.partition("=")
         os.environ.setdefault(k.strip(), v.strip())
 
@@ -61,6 +62,23 @@ STEPS = int(os.environ.get("STEPS", "40000"))
 LOG_EVERY = int(os.environ.get("LOG_EVERY", "20"))
 SAVE_EVERY = int(os.environ.get("SAVE_EVERY", "500"))
 PUSH_EVERY = int(os.environ.get("PUSH_EVERY", "500"))
+
+# ── Checkpoint push backend (2026-06-15) ──
+# Run 41063959 hung at step 500 because the synchronous Git LFS push
+# of a 569 MB object inside the training loop raced the background
+# ``log_pusher.sh`` (both try to ``git push origin master`` to the
+# same repo at the same time). Switching the default to HuggingFace
+# Hub avoids the race entirely — HF uses a single sync HTTPS PUT.
+#
+# These three propagate via the ONSTART export block to the on-box
+# trainer; ``vast_train_dsl_loop.sh`` / ``vast_train_dna_loop.sh``
+# forward them as ``--push_backend`` to ``python -m neuroslm.train_dsl``.
+# ``cli._deploy_dsl`` / ``cli._deploy_dna`` populate them from
+# ``brian.toml [defaults] push_backend`` / ``hf_repo_id``.
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
+CHECKPOINT_PUSH_BACKEND = os.environ.get(
+    "CHECKPOINT_PUSH_BACKEND", "hf")
+HF_REPO_ID = os.environ.get("HF_REPO_ID", "moritzroessler/BRIAN")
 
 # ── Resolve current arch/DNA from brian.toml (env vars still win) ──
 sys.path.insert(0, str(Path(__file__).parent))
@@ -199,7 +217,9 @@ if USE_DNA:
         f"ARCH={ARCH} BRIAN_SOURCE_DNA={_source_dna} "
         f"STEPS={STEPS} OOD_EVERY={OOD_EVERY} "
         f"LOG_EVERY={LOG_EVERY} SAVE_EVERY={SAVE_EVERY} "
-        f"PUSH_EVERY={PUSH_EVERY} FRESH=1 \\\n"
+        f"PUSH_EVERY={PUSH_EVERY} "
+        f"CHECKPOINT_PUSH_BACKEND={CHECKPOINT_PUSH_BACKEND} "
+        f"HF_REPO_ID={HF_REPO_ID} FRESH=1 \\\n"
         f"    bash scripts/vast_train_dna_loop.sh 2>&1 | tee /workspace/train.log"
     )
     arch_name_for_log = dna_arch_name or arch_display
@@ -207,14 +227,18 @@ else:
     training_cmd = (
         f"ARCH={ARCH} STEPS={STEPS} OOD_EVERY={OOD_EVERY} "
         f"LOG_EVERY={LOG_EVERY} SAVE_EVERY={SAVE_EVERY} "
-        f"PUSH_EVERY={PUSH_EVERY} FRESH=1 \\\n"
+        f"PUSH_EVERY={PUSH_EVERY} "
+        f"CHECKPOINT_PUSH_BACKEND={CHECKPOINT_PUSH_BACKEND} "
+        f"HF_REPO_ID={HF_REPO_ID} FRESH=1 \\\n"
         f"    bash scripts/vast_train_dsl_loop.sh 2>&1 | tee /workspace/train.log"
     )
     arch_name_for_log = ARCH
 
 ONSTART = f"""set -eo pipefail
 export DEBIAN_FRONTEND=noninteractive
-export GITHUB='{GITHUB}' HF_TOKEN='' VAST_API_KEY='{VAST_API_KEY}'
+export GITHUB='{GITHUB}' HF_TOKEN='{HF_TOKEN}' VAST_API_KEY='{VAST_API_KEY}'
+export CHECKPOINT_PUSH_BACKEND='{CHECKPOINT_PUSH_BACKEND}'
+export HF_REPO_ID='{HF_REPO_ID}'
 {scale_env}
 export DIST_STRATEGY={hw.dist_strategy}
 export NUM_GPUS={hw.num_gpus}

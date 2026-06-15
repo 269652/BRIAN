@@ -109,6 +109,12 @@ SAVE_EVERY="${SAVE_EVERY:-1000}"
 # entry point (cli.cmd_deploy) sets PUSH_EVERY=500 from brian.toml
 # [defaults].push_every.
 PUSH_EVERY="${PUSH_EVERY:-0}"
+# PUSH_BACKEND picks the uploader: ``hf`` (default after 2026-06-15) →
+# HuggingFace Hub ``upload_file``; ``lfs`` → legacy
+# ``git add``/``commit``/``push``; ``none`` → no remote push. The
+# switch closes the run-41063959 hang (LFS push raced the background
+# log_pusher.sh).
+PUSH_BACKEND="${CHECKPOINT_PUSH_BACKEND:-hf}"
 OOD_EVERY="${OOD_EVERY:-0}"
 CKPT_DIR="${CKPT_DIR:-$REPO_DIR/lfs_checkpoints}"
 MAX_RESTARTS="${MAX_RESTARTS:-1000}"
@@ -155,6 +161,7 @@ while [ "$restart" -lt "$MAX_RESTARTS" ]; do
         --log_every "$LOG_EVERY" \
         --save_every "$SAVE_EVERY" \
         --push_every "$PUSH_EVERY" \
+        --push_backend "$PUSH_BACKEND" \
         --ood_every "$OOD_EVERY" \
         --ckpt_dir "$CKPT_DIR" \
         --resume

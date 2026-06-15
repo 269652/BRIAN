@@ -80,6 +80,17 @@ SAVE_EVERY="${SAVE_EVERY:-1000}"
 # brian.toml [defaults].push_every so production deploys are
 # automatically protected.
 PUSH_EVERY="${PUSH_EVERY:-0}"
+# PUSH_BACKEND picks which uploader the trainer uses for periodic
+# pushes. ``hf`` (default after 2026-06-15) → HuggingFace Hub
+# ``upload_file``; ``lfs`` → legacy ``git add``/``commit``/``push``;
+# ``none`` → no remote push. Set by the deploy-time
+# ``CHECKPOINT_PUSH_BACKEND`` env var (exported by _deploy_train.py
+# ONSTART from brian.toml [defaults].push_backend). Forwarded as
+# ``--push_backend`` to ``neuroslm.train_dsl``. The switch closes
+# the run-41063959 hang: that run wedged at step 500 because the
+# synchronous LFS push of a 569 MB object inside the training loop
+# raced the background ``log_pusher.sh`` git-push.
+PUSH_BACKEND="${CHECKPOINT_PUSH_BACKEND:-hf}"
 # OOD_EVERY > 0 → run a quick WikiText-103 ppl snapshot every N steps
 # during training. Each snapshot writes a JSON to logs/vast/benchmarks/ood/
 # that brian analyze-log picks up. Defaults to 0 (off).
@@ -122,6 +133,7 @@ while [ "$restart" -lt "$MAX_RESTARTS" ]; do
         --log_every "$LOG_EVERY" \
         --save_every "$SAVE_EVERY" \
         --push_every "$PUSH_EVERY" \
+        --push_backend "$PUSH_BACKEND" \
         --ood_every "$OOD_EVERY" \
         --ckpt_dir "$CKPT_DIR" \
         --resume
