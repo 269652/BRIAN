@@ -48,11 +48,14 @@ def _discover_repo_root(start: Path) -> Optional[Path]:
 class PathResolver:
     """Resolve `.neuro` import specifiers to absolute file paths.
 
-    The resolver normalizes three specifier scopes:
+    The resolver normalizes four specifier scopes:
 
       * ``@/<path>``       — anchored at the architecture root.
-      * ``@brian/<path>``  — anchored at the repository's shared
-        ``architectures/lib/`` directory (cross-architecture reuse).
+      * ``@brian/<path>``  — anchored at the repository root (so
+        ``@brian/lib/equations`` resolves to ``<repo>/lib/equations.neuro``,
+        ``@brian/architectures/master/arch`` resolves to that file).
+      * ``@lib/<path>``    — anchored at ``<repo>/lib/`` (shorthand
+        for the shared library; equivalent to ``@brian/lib/<path>``).
       * ``./<path>`` / ``../<path>`` — relative to the importing file.
 
     All forms fall back to ``index.neuro`` when a specifier names a
@@ -62,9 +65,9 @@ class PathResolver:
         arch_root: filesystem path to the architecture root. The ``@/``
             prefix is anchored here.
         repo_root: optional explicit repository root containing the
-            shared ``architectures/lib/`` directory used by
-            ``@brian/...``. If not given, the resolver walks up from
-            ``arch_root`` looking for ``pyproject.toml``.
+            shared ``/lib/`` directory used by ``@lib/...`` and as the
+            anchor for ``@brian/...``. If not given, the resolver walks
+            up from ``arch_root`` looking for ``pyproject.toml``.
     """
 
     def __init__(
@@ -85,7 +88,8 @@ class PathResolver:
 
         Args:
             specifier: the import target, e.g. ``@/lib/dynamics``,
-                ``@brian/features/hyperbolic_attention``, ``./layers``.
+                ``@lib/features/hyperbolic_attention``,
+                ``@brian/lib/equations``, ``./layers``.
             from_file: the file containing the import (required for
                 relative paths; ignored for absolute prefixes).
 
@@ -98,25 +102,19 @@ class PathResolver:
             FileNotFoundError: resolved path doesn't exist (neither as a
                 ``.neuro`` file nor a folder-module).
         """
-        # ── @brian/<path> ── shared lib under architectures/lib/ ─────
+        # ── @brian/<path> ── anchored at <repo_root> ────────────────
         if specifier.startswith("@brian/"):
             rest = specifier[len("@brian/"):]
-            # Canonical source: <repo_root>/architectures/lib/<rest>.
-            # We try this FIRST so dev-mode edits to the shared lib are
-            # always seen (an arch may have a stale local lib/ shadow
-            # from an older multi-file layout that we don't want to
-            # silently override the @brian/ source of truth).
             if self.repo_root is not None:
-                scope_root = self.repo_root / "architectures" / "lib"
+                scope_root = self.repo_root
                 base = scope_root
                 # rest already stripped; fall through to file resolution.
             else:
                 # No repo_root → standalone workspace (typical for
                 # unfolded DNA in pytest tmp dirs, vast.ai boxes, or
-                # colab). Look in the workspace's bundled lib/.
-                # Mirrors neuroslm.compiler.ribosome._spec_to_relpath
-                # which writes @brian/<x> to lib/<x>.neuro at unfold.
-                ws_candidate = (self.arch_root / "lib" / rest).resolve()
+                # colab). Look in the workspace itself as the
+                # "repo-equivalent" root.
+                ws_candidate = (self.arch_root / rest).resolve()
                 ws_resolved = self._try_resolve_file(ws_candidate)
                 if ws_resolved is not None:
                     try:
@@ -125,13 +123,37 @@ class PathResolver:
                     except ValueError:
                         pass  # escapes workspace → error below
                 raise ValueError(
-                    f"specifier {specifier!r} uses the @brian/ prefix but "
-                    f"no repo root was discovered (no pyproject.toml found "
-                    f"by walking up from {self.arch_root}) and no "
-                    f"workspace-local lib/{rest} was found either; either "
-                    f"pass repo_root=... explicitly to PathResolver or "
-                    f"ensure the unfolded workspace contains the bundled "
-                    f"@brian/ files under {self.arch_root / 'lib'}"
+                    f"specifier {specifier!r} uses the @brian/ prefix "
+                    f"but no repo root was discovered (no pyproject.toml "
+                    f"found by walking up from {self.arch_root}) and the "
+                    f"workspace fallback at {self.arch_root / rest!s} "
+                    f"does not exist either; pass repo_root=... "
+                    f"explicitly to PathResolver"
+                )
+        # ── @lib/<path> ── anchored at <repo_root>/lib/ ─────────────
+        elif specifier.startswith("@lib/"):
+            rest = specifier[len("@lib/"):]
+            if self.repo_root is not None:
+                scope_root = self.repo_root / "lib"
+                base = scope_root
+            else:
+                # Standalone-workspace fallback mirrors @brian/'s, but
+                # rooted at <arch_root>/lib/ (where unfolded DNA
+                # places its bundled lib).
+                ws_candidate = (self.arch_root / "lib" / rest).resolve()
+                ws_resolved = self._try_resolve_file(ws_candidate)
+                if ws_resolved is not None:
+                    try:
+                        ws_resolved.relative_to(self.arch_root)
+                        return ws_resolved
+                    except ValueError:
+                        pass
+                raise ValueError(
+                    f"specifier {specifier!r} uses the @lib/ prefix "
+                    f"but no repo root was discovered (no pyproject.toml "
+                    f"found by walking up from {self.arch_root}) and no "
+                    f"workspace-local lib/{rest} was found either; pass "
+                    f"repo_root=... explicitly to PathResolver"
                 )
         elif specifier.startswith("@/"):
             scope_root = self.arch_root
@@ -148,8 +170,8 @@ class PathResolver:
         else:
             raise ValueError(
                 f"unsupported specifier {specifier!r}: must start with "
-                "@/ (architecture-root), @brian/ (shared lib), ./, or "
-                "../ (relative)"
+                "@/ (architecture-root), @brian/ (repo root), @lib/ "
+                "(shared lib), ./, or ../ (relative)"
             )
 
         candidate = (base / rest).resolve()
@@ -299,6 +321,13 @@ _DECL_KEYWORDS_NAMED = (
     "metric",
     # §14 — toggleable mechanism block (see _extract_features in compiler.py)
     "feature",
+    # §15 — LanguageCortex DSL surface (2026-06-15): declarative
+    # expert-ensemble / teacher / CFD wiring. Each keyword maps to
+    # the matching _extract_* in compiler.py.
+    "expert",
+    "distillation",
+    "funnel",
+    "warmup",
 )
 _DECL_KEYWORDS_ARROW = ("synapse", "modulation")
 
@@ -860,12 +889,15 @@ class Resolver:
         self, specifier: str, from_file: Path
     ) -> Optional[Path]:
         """Return the resolved absolute path if ``specifier`` is a
-        shared-lib (``@brian/...``) import, else ``None``.
+        shared-lib (``@brian/...`` or ``@lib/...``) import, else
+        ``None``.
 
         Errors during resolution are re-raised as ``ResolverError`` so
         the caller gets a single, traceable failure mode.
         """
-        if not specifier.startswith("@brian/"):
+        if not (
+            specifier.startswith("@brian/") or specifier.startswith("@lib/")
+        ):
             return None
         try:
             return self.path_resolver.resolve(
@@ -1093,22 +1125,35 @@ def compile_folder(arch_root):
             if kind in kinds:
                 parts.append(decl_text)
 
-    # 0. Auto-include shared equation library (if it exists)
-    # This makes equation definitions available to all modules
+    # 0. Auto-include shared equation library (if it exists).
+    # This makes equation definitions available to all modules.
+    # We check the arch-local ``lib/equations.neuro`` (legacy layout)
+    # first, then the repo-root ``<repo>/lib/equations.neuro``
+    # (2026-06-15 layout). Both are best-effort — the resolver also
+    # lazy-loads any explicitly imported equation files.
     lib_equations_path = Path(arch_root).resolve() / "lib" / "equations.neuro"
     if lib_equations_path.exists():
         try:
             with open(lib_equations_path, 'r') as f:
-                lib_content = f.read()
-                # Only include non-empty lines and skip comments
-                parts.append(lib_content)
+                parts.append(f.read())
         except Exception:
             pass
+    else:
+        repo_root = resolver.path_resolver.repo_root
+        if repo_root is not None:
+            repo_lib_eq = repo_root / "lib" / "equations.neuro"
+            if repo_lib_eq.exists():
+                try:
+                    with open(repo_lib_eq, 'r') as f:
+                        parts.append(f.read())
+                except Exception:
+                    pass
 
-    # 0b. Shared library equations from <repo>/architectures/lib/.
-    # Any `@brian/...` import the resolver pulled in lives in
-    # program.modules and outside the arch root — emit every equation
-    # those files export so they're visible to the single-file compiler.
+    # 0b. Shared library equations from <repo>/lib/.
+    # Any `@brian/...` or `@lib/...` import the resolver pulled in
+    # lives in program.modules and outside the arch root — emit every
+    # equation those files export so they're visible to the single-file
+    # compiler.
     arch_root_resolved = Path(arch_root).resolve()
     for file_path, ast in program.modules.items():
         try:
@@ -1208,8 +1253,31 @@ def compile_folder(arch_root):
     except Exception:
         pass  # If reading fails, continue with partial combined DSL
 
-    # Compile and attach architecture metadata
-    ir = NeuroMLCompiler.compile(combined)
+    # Compile and attach architecture metadata.
+    #
+    # We route through ``compile_with_lib`` (not raw ``compile``) so
+    # that ``module <name> = <Lib> { ... }`` instantiations declared
+    # at the top level of arch.neuro get expanded with the shared
+    # ``<repo>/lib/`` search path. Files without any module
+    # instantiation pay zero overhead — ``compile_with_lib`` falls
+    # through to ``compile`` immediately when no instances are found.
+    #
+    # Search order: arch-local ``lib/`` first (so an arch can shadow
+    # a shared module with a local override), then the canonical
+    # repo-root ``<repo>/lib/`` (2026-06-15 layout — lib moved out
+    # of ``architectures/`` to live at the repo root alongside
+    # ``modules/`` and ``blocks/``).
+    lib_root_local = Path(arch_root).resolve() / "lib"
+    repo_root = resolver.path_resolver.repo_root
+    lib_root_repo = (repo_root / "lib") if repo_root is not None else None
+    search_path = []
+    if lib_root_local.exists():
+        search_path.append(lib_root_local)
+    if lib_root_repo is not None and lib_root_repo.exists() and lib_root_repo != lib_root_local:
+        search_path.append(lib_root_repo)
+    ir = NeuroMLCompiler.compile_with_lib(
+        combined, lib_search_path=search_path or None
+    )
     if architecture_metadata:
         ir.architecture = architecture_metadata
 

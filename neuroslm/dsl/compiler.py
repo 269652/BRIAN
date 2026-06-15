@@ -7,7 +7,8 @@ is implemented separately in phase 1.
 """
 import re
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional, Any
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional, Any, Mapping
 
 
 @dataclass
@@ -495,6 +496,197 @@ class FeatureEndpointIR(NodeIR):
             self.id = self.name
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Expert / Funnel / Distillation / Warmup / ModuleInstance IRs
+#
+# These five blocks form the LanguageCortex DSL surface (2026-06-15).
+# They lift the LM-trunk + expert-ensemble + teacher-cutoff design
+# pattern out of the flat ``multi_cortex { experts: [...] cfd_* ... }``
+# config block into named, referenceable, validatable declarations.
+#
+# Wiring graph at compile time:
+#
+#     [expert MathExpert] ─┐
+#     [expert CodeExpert] ─┼─▶ [funnel ensemble] ──▶ [population lm_trunk]
+#     [expert LangExpert] ─┘            │
+#                                       └─method─▶ [distillation cfd]
+#
+#     [warmup teacher_cutoff] ──target──▶ [funnel ensemble]
+#
+# The compiler validates every cross-block reference (input experts
+# exist, target population exists, distillation method exists) so a
+# typo never reaches the vast.ai box. Pinned by:
+#
+#   tests/dsl/test_expert_block.py
+#   tests/dsl/test_distillation_block.py
+#   tests/dsl/test_funnel_block.py
+#   tests/dsl/test_warmup_block.py
+#   tests/dsl/test_module_instantiation.py
+#   tests/dsl/test_language_cortex_lib.py
+# ──────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class ExpertIR(NodeIR):
+    """Declarative pretrained expert backbone.
+
+    Grammar::
+
+        expert <name> {
+            model:      "<hf_id_or_alias>"      # required
+            role:       "<routing_role>"        # required, unique across arch
+            d_out:      <int>                   # optional, 0 = auto-detect
+            frozen:     true | false            # optional, default true
+            dtype:      "float32"|"float16"|"bfloat16"
+            device:     "<torch_device>"        # empty = trunk device
+            pool:       "last_token"|"mean"|"cls"
+            cache:      "<path>"                # supports %key% / $ENV
+            auth_token: "<str_or_$ENV>"
+        }
+    """
+    name: str = ""
+    id: str = ""
+    model: str = ""
+    role: str = ""
+    d_out: int = 0
+    frozen: bool = True
+    dtype: str = "float32"
+    device: str = ""
+    pool: str = "last_token"
+    cache: str = ""
+    auth_token: str = ""
+
+    def __post_init__(self):
+        if not self.id:
+            self.id = self.name
+
+
+@dataclass
+class DistillationIR(NodeIR):
+    """Named distillation method (referenced by ``funnel.method``).
+
+    Grammar::
+
+        distillation <name> {
+            method:            "capacity_funneled"|"vanilla_kd"|"fitnet"
+            temperature:       <float>           # > 0
+            alpha:             <float>           # in [0, 1]
+            bottleneck:        <int>             # 0 = no bottleneck
+            loss:              "kl_div"|"mse"|"cosine"
+            # CFD-specific (ignored for other methods)
+            topk_start:        <int>             # <= topk_end
+            topk_end:          <int>
+            topk_anneal_steps: <int>
+            temperature_floor: <float>
+        }
+    """
+    name: str = ""
+    id: str = ""
+    method: str = "vanilla_kd"
+    temperature: float = 4.0
+    alpha: float = 0.5
+    bottleneck: int = 0
+    loss: str = "kl_div"
+    topk_start: int = 4
+    topk_end: int = 32
+    topk_anneal_steps: int = 10000
+    temperature_floor: float = 1.0
+
+    def __post_init__(self):
+        if not self.id:
+            self.id = self.name
+
+
+@dataclass
+class FunnelIR(NodeIR):
+    """Wires N experts to a single trunk population via a bottlenecked
+    projection + gating + optional distillation.
+
+    Grammar::
+
+        funnel <name> {
+            inputs:        [<ExpertName>, ...]   # required, non-empty
+            target:        <population_name>     # required
+            d_bottleneck:  <int>                 # 0 = no bottleneck
+            gate:          "mean"|"topk2"|"softmax_router"|"attention"
+            method:        <DistillationName>    # optional
+        }
+    """
+    name: str = ""
+    id: str = ""
+    inputs: List[str] = None
+    target: str = ""
+    d_bottleneck: int = 0
+    gate: str = "mean"
+    method_ref: str = ""
+
+    def __post_init__(self):
+        if self.inputs is None:
+            self.inputs = []
+        if not self.id:
+            self.id = self.name
+
+
+@dataclass
+class WarmupRuleIR(NodeIR):
+    """One condition row inside a ``warmup`` block's ``rules: [...]``."""
+    metric: str = ""
+    op: str = ">="
+    value: float = 0.0
+    window: int = 1
+
+
+@dataclass
+class WarmupIR(NodeIR):
+    """Rule-driven teacher-cutoff controller.
+
+    Grammar::
+
+        warmup <name> {
+            target:     <funnel_name>          # which funnel to detach
+            action:     "detach"|"anneal_alpha"|"gate_to_zero"
+            combinator: "any"|"all"            # default "any"
+            rules: [
+                { metric: <m>, op: <op>, value: <v>, window: <w> }, ...
+            ]
+        }
+    """
+    name: str = ""
+    id: str = ""
+    target: str = ""
+    action: str = "detach"
+    combinator: str = "any"
+    rules: List["WarmupRuleIR"] = None
+
+    def __post_init__(self):
+        if self.rules is None:
+            self.rules = []
+        if not self.id:
+            self.id = self.name
+
+
+@dataclass
+class ModuleInstanceIR(NodeIR):
+    """``module <name> = <Lib> { ... }`` — instantiation of a lib module.
+
+    The compiler stores the call-site params here; the
+    ``compile_with_lib`` entry point reads the lib's template body and
+    expands it with these params substituted via the
+    ``%key%`` interpolation engine, then re-parses the expanded text
+    into the same ProgramIR.
+    """
+    name: str = ""
+    id: str = ""
+    lib: str = ""
+    params: Dict = None
+
+    def __post_init__(self):
+        if self.params is None:
+            self.params = {}
+        if not self.id:
+            self.id = self.name
+
+
 @dataclass
 class ProgramIR(NodeIR):
     id: str = ""
@@ -522,6 +714,15 @@ class ProgramIR(NodeIR):
     # bit to enable/disable a mechanism for an ablation run.
     # Pinned by tests/dsl/test_feature_block.py.
     features: List["FeatureIR"] = None
+    # LanguageCortex DSL surface (2026-06-15). The five lists below
+    # form the expert-ensemble + LM-trunk + teacher-cutoff wiring
+    # graph. Pinned by tests/dsl/test_{expert,distillation,funnel,
+    # warmup,module_instantiation,language_cortex_lib}_block.py.
+    experts: List["ExpertIR"] = None
+    distillations: List["DistillationIR"] = None
+    funnels: List["FunnelIR"] = None
+    warmups: List["WarmupIR"] = None
+    module_instances: List["ModuleInstanceIR"] = None
     # THSD (Topological Hyper-Sheaf Dynamics) primitives
     thsd_complexes: List["ComplexIR"] = None  # From thsd_ir.py
     thsd_sheaves: List["SheafIR"] = None
@@ -560,6 +761,17 @@ class ProgramIR(NodeIR):
             self.sieves = []
         if self.features is None:
             self.features = []
+        # LanguageCortex DSL surface defaults
+        if self.experts is None:
+            self.experts = []
+        if self.distillations is None:
+            self.distillations = []
+        if self.funnels is None:
+            self.funnels = []
+        if self.warmups is None:
+            self.warmups = []
+        if self.module_instances is None:
+            self.module_instances = []
         # THSD initialization
         if self.thsd_complexes is None:
             self.thsd_complexes = []
@@ -808,6 +1020,15 @@ class NeuroMLCompiler:
         # raise at compile time so a typo never reaches the vast.ai box.
         features = _extract_features(source, eq_defs)
 
+        # LanguageCortex DSL surface (2026-06-15) — declarative
+        # expert/teacher/CFD wiring. Each block is independently
+        # parseable; cross-block references validated below.
+        experts = _extract_experts(source)
+        distillations = _extract_distillations(source)
+        funnels = _extract_funnels(source)
+        warmups = _extract_warmups(source)
+        module_instances = _extract_module_instances(source)
+
         ir = ProgramIR(
             id="circuit",
             equation_decls=eq_defs,
@@ -825,13 +1046,112 @@ class NeuroMLCompiler:
             vesicles=vesicles,
             sieves=sieves,
             features=features,
+            experts=experts,
+            distillations=distillations,
+            funnels=funnels,
+            warmups=warmups,
+            module_instances=module_instances,
         )
 
         # Attach THSD blocks to IR
         ir.thsd_complexes = thsd_complexes
         ir.thsd_sheaves = thsd_sheaves
 
+        # Cross-block reference validation for LanguageCortex surface.
+        # (Funnel inputs must reference declared experts, etc.)
+        _validate_languagecortex_refs(ir)
+
         return ir
+
+    @staticmethod
+    def compile_with_lib(
+        source: str,
+        *,
+        lib_root: Optional[Path] = None,
+        lib_search_path: Optional[List[Path]] = None,
+        config: Optional[Dict[str, Any]] = None,
+        env: Optional[Mapping[str, str]] = None,
+    ) -> "ProgramIR":
+        """Compile DSL source with library-module expansion.
+
+        Pipeline:
+          1. Parse ``module <name> = <Lib> { params }`` instantiations.
+          2. For each instance, search ``lib_search_path`` (or
+             ``[lib_root]`` if only ``lib_root`` was passed) for a
+             matching ``<Lib>.neuro`` file.
+          3. Expand the lib's triple-quoted body template via
+             ``resolve_interpolation`` using the instance's params
+             (merged with any ``config`` passed by the caller) and ``env``.
+          4. Append the expanded text to the source.
+          5. Re-call ``NeuroMLCompiler.compile()`` on the augmented source.
+
+        ``lib_root`` defaults to ``<cwd>/lib/`` (the repo-root shared
+        library directory, 2026-06-15 layout).
+        ``lib_search_path`` may pass multiple roots (e.g. arch-local
+        ``lib/`` first, repo-shared ``/lib/`` second).
+        """
+        from neuroslm.dsl.interpolation import resolve_interpolation, InterpolationError
+
+        # Build the search path. Explicit `lib_search_path` wins;
+        # otherwise fall back to `[lib_root]` or the default location.
+        if lib_search_path is not None:
+            search_roots = [Path(p) for p in lib_search_path]
+        elif lib_root is not None:
+            search_roots = [Path(lib_root)]
+        else:
+            search_roots = [Path.cwd() / "lib"]
+
+        config = dict(config or {})
+        env = dict(env or {})
+
+        # Discover instantiations BEFORE compile (so we can expand the source first).
+        instances = _extract_module_instances(source)
+        expanded = source
+
+        for inst in instances:
+            # Search each root in order; first hit wins.
+            lib_path: Optional[Path] = None
+            for root in search_roots:
+                candidate = root / f"{inst.lib}.neuro"
+                if candidate.exists():
+                    lib_path = candidate
+                    break
+            if lib_path is None:
+                raise NeuroMLError(
+                    f"module instantiation '{inst.name}' references unknown lib "
+                    f"'{inst.lib}' (searched: "
+                    f"{[str(r) for r in search_roots]})"
+                )
+            lib_text = lib_path.read_text(encoding="utf-8")
+
+            # Parse `export module <Lib> { params: {...}, body: "..." }`
+            defaults, body_template = _parse_lib_module(lib_text, inst.lib)
+
+            # Merge: defaults < caller-config < instance-params.
+            merged: Dict[str, Any] = {}
+            merged.update(defaults)
+            merged.update(config)
+            merged.update(inst.params)
+
+            # Coerce Python lists to bare comma-joined identifier
+            # sequences so that a template like ``inputs: [%experts%]``
+            # expands to ``inputs: [A, B, C]`` (not ``[['A','B','C']]``).
+            for k, v in list(merged.items()):
+                if isinstance(v, list):
+                    merged[k] = ", ".join(str(x) for x in v)
+
+            try:
+                expanded_body = resolve_interpolation(
+                    body_template, config=merged, env=env
+                )
+            except InterpolationError as exc:
+                raise NeuroMLError(
+                    f"failed to expand module '{inst.name}' (lib={inst.lib}): {exc}"
+                ) from exc
+
+            expanded = expanded + "\n\n" + expanded_body
+
+        return NeuroMLCompiler.compile(expanded)
 
     @staticmethod
     def compile_file(filepath: str) -> ProgramIR:
@@ -1477,4 +1797,560 @@ def _extract_sieves(source: str) -> List[SieveIR]:
             kind=kind,
             gnorm_threshold=gnorm_threshold
         ))
+    return out
+
+
+# ──────────────────────────────────────────────────────────────────────
+# LanguageCortex DSL extractors (2026-06-15)
+#
+# Each ``_extract_X`` function pulls every ``X <name> { ... }`` block
+# out of the source, validates required fields + enum membership, and
+# returns the corresponding IR list. Cross-block reference validation
+# (``funnel.inputs`` ⊂ declared experts, ``warmup.target`` ∈ declared
+# funnels, ``funnel.method`` ∈ declared distillations) happens in
+# :func:`_validate_languagecortex_refs` after every extractor has
+# run, so the error messages can show the full known-name list.
+# ──────────────────────────────────────────────────────────────────────
+
+
+# Allowed enum tables — duplicated in neuroslm.dsl.warmup_rules for the
+# rule engine; kept here for tight error reporting at parse time.
+_EXPERT_POOL_MODES = {"last_token", "mean", "cls"}
+_EXPERT_DTYPES = {"float32", "float16", "bfloat16"}
+_DISTILL_METHODS = {"capacity_funneled", "vanilla_kd", "fitnet"}
+_DISTILL_LOSSES = {"kl_div", "mse", "cosine"}
+_FUNNEL_GATES = {"mean", "topk2", "softmax_router", "attention"}
+_WARMUP_ACTIONS = {"detach", "anneal_alpha", "gate_to_zero"}
+_WARMUP_COMBINATORS = {"any", "all"}
+_WARMUP_OPS = {">=", ">", "<=", "<", "==", "!="}
+
+
+def _extract_experts(source: str) -> List[ExpertIR]:
+    """Extract all ``expert <name> { ... }`` blocks.
+
+    Mandatory fields: ``model``, ``role``. Duplicate ``role`` across
+    experts raises (each routing role must be unique — mirrors the
+    ``_parse_experts_list`` ``duplicate domain`` check)."""
+    source = _strip_line_comments(source)
+    out: List[ExpertIR] = []
+    seen_roles: Dict[str, str] = {}  # role → first expert name using it
+    for name, body in _iter_named_blocks(source, "expert"):
+        props = _parse_properties(body)
+        if "model" not in props or not props["model"].strip().strip('"\''):
+            raise NeuroMLError(
+                f"expert {name!r}: missing required field `model` "
+                "(HF model id or alias)"
+            )
+        if "role" not in props or not props["role"].strip().strip('"\''):
+            raise NeuroMLError(
+                f"expert {name!r}: missing required field `role` "
+                "(routing key — must be unique across all experts)"
+            )
+        model = props["model"].strip().strip('"\'')
+        role = props["role"].strip().strip('"\'')
+        if role in seen_roles:
+            raise NeuroMLError(
+                f"expert {name!r}: duplicate role {role!r} (already "
+                f"claimed by expert {seen_roles[role]!r}); each "
+                "routing role must be unique"
+            )
+        seen_roles[role] = name
+
+        # Optional fields with enum validation.
+        pool = props.get("pool", "last_token").strip().strip('"\'')
+        if pool not in _EXPERT_POOL_MODES:
+            raise NeuroMLError(
+                f"expert {name!r}: unknown pool {pool!r}; "
+                f"must be one of {sorted(_EXPERT_POOL_MODES)}"
+            )
+        dtype = props.get("dtype", "float32").strip().strip('"\'')
+        if dtype not in _EXPERT_DTYPES:
+            raise NeuroMLError(
+                f"expert {name!r}: unknown dtype {dtype!r}; "
+                f"must be one of {sorted(_EXPERT_DTYPES)}"
+            )
+        frozen_raw = props.get("frozen", "true").strip().lower()
+        frozen = frozen_raw != "false"
+
+        out.append(ExpertIR(
+            name=name,
+            id=name,
+            model=model,
+            role=role,
+            d_out=int(props.get("d_out", 0) or 0),
+            frozen=frozen,
+            dtype=dtype,
+            device=props.get("device", "").strip().strip('"\''),
+            pool=pool,
+            cache=props.get("cache", "").strip().strip('"\''),
+            auth_token=props.get("auth_token", "").strip().strip('"\''),
+        ))
+    return out
+
+
+def _extract_distillations(source: str) -> List[DistillationIR]:
+    """Extract all ``distillation <name> { ... }`` blocks."""
+    source = _strip_line_comments(source)
+    out: List[DistillationIR] = []
+    for name, body in _iter_named_blocks(source, "distillation"):
+        props = _parse_properties(body)
+        method = props.get("method", "vanilla_kd").strip().strip('"\'')
+        if method not in _DISTILL_METHODS:
+            raise NeuroMLError(
+                f"distillation {name!r}: unknown method {method!r}; "
+                f"must be one of {sorted(_DISTILL_METHODS)}"
+            )
+        try:
+            temperature = float(props.get("temperature", 4.0))
+        except (TypeError, ValueError):
+            raise NeuroMLError(
+                f"distillation {name!r}: temperature must be a float, "
+                f"got {props.get('temperature')!r}"
+            )
+        if temperature <= 0:
+            raise NeuroMLError(
+                f"distillation {name!r}: temperature must be > 0, "
+                f"got {temperature}"
+            )
+        try:
+            alpha = float(props.get("alpha", 0.5))
+        except (TypeError, ValueError):
+            raise NeuroMLError(
+                f"distillation {name!r}: alpha must be a float, "
+                f"got {props.get('alpha')!r}"
+            )
+        if not (0.0 <= alpha <= 1.0):
+            raise NeuroMLError(
+                f"distillation {name!r}: alpha must be in [0, 1], "
+                f"got {alpha}"
+            )
+        loss = props.get("loss", "kl_div").strip().strip('"\'')
+        if loss not in _DISTILL_LOSSES:
+            raise NeuroMLError(
+                f"distillation {name!r}: unknown loss {loss!r}; "
+                f"must be one of {sorted(_DISTILL_LOSSES)}"
+            )
+        topk_start = int(props.get("topk_start", 4))
+        topk_end = int(props.get("topk_end", 32))
+        if topk_start > topk_end:
+            raise NeuroMLError(
+                f"distillation {name!r}: topk_start ({topk_start}) "
+                f"must be <= topk_end ({topk_end})"
+            )
+
+        out.append(DistillationIR(
+            name=name,
+            id=name,
+            method=method,
+            temperature=temperature,
+            alpha=alpha,
+            bottleneck=int(props.get("bottleneck", 0)),
+            loss=loss,
+            topk_start=topk_start,
+            topk_end=topk_end,
+            topk_anneal_steps=int(props.get("topk_anneal_steps", 10000)),
+            temperature_floor=float(props.get("temperature_floor", 1.0)),
+        ))
+    return out
+
+
+def _parse_identifier_list(raw: str) -> List[str]:
+    """Parse ``[A, B, C]`` into ``["A", "B", "C"]``.
+
+    Whitespace-tolerant. Quote-stripping so quoted variants like
+    ``["A", "B"]`` are accepted too (lib-template expansion may emit
+    either form). Empty list returns ``[]``."""
+    if raw is None:
+        return []
+    s = raw.strip()
+    if not s:
+        return []
+    if s.startswith("[") and s.endswith("]"):
+        s = s[1:-1]
+    out: List[str] = []
+    for item in s.split(","):
+        item = item.strip().strip('"\'')
+        if item:
+            out.append(item)
+    return out
+
+
+def _extract_funnels(source: str) -> List[FunnelIR]:
+    """Extract all ``funnel <name> { ... }`` blocks. Reference
+    validation (inputs ⊂ experts, target ∈ pops, method ∈ distillations)
+    runs separately in :func:`_validate_languagecortex_refs`."""
+    source = _strip_line_comments(source)
+    out: List[FunnelIR] = []
+    for name, body in _iter_named_blocks(source, "funnel"):
+        props = _parse_properties(body)
+        if "inputs" not in props:
+            raise NeuroMLError(
+                f"funnel {name!r}: missing required field `inputs` "
+                "(non-empty list of expert names)"
+            )
+        if "target" not in props or not props["target"].strip():
+            raise NeuroMLError(
+                f"funnel {name!r}: missing required field `target` "
+                "(population name)"
+            )
+        inputs = _parse_identifier_list(props["inputs"])
+        if not inputs:
+            raise NeuroMLError(
+                f"funnel {name!r}: inputs list must be non-empty"
+            )
+        gate = props.get("gate", "mean").strip().strip('"\'')
+        if gate not in _FUNNEL_GATES:
+            raise NeuroMLError(
+                f"funnel {name!r}: unknown gate {gate!r}; "
+                f"must be one of {sorted(_FUNNEL_GATES)}"
+            )
+
+        out.append(FunnelIR(
+            name=name,
+            id=name,
+            inputs=inputs,
+            target=props["target"].strip().strip('"\''),
+            d_bottleneck=int(props.get("d_bottleneck", 0)),
+            gate=gate,
+            method_ref=props.get("method", "").strip().strip('"\''),
+        ))
+    return out
+
+
+def _parse_warmup_rules(raw: str) -> List[WarmupRuleIR]:
+    """Parse ``[ { metric: m, op: o, value: v, window: w }, ... ]``."""
+    s = raw.strip()
+    if not (s.startswith("[") and s.endswith("]")):
+        raise NeuroMLError(
+            f"warmup.rules must be a [...] list, got: {raw[:60]}"
+        )
+    s = s[1:-1].strip()
+    if not s:
+        return []
+    # Split top-level `{...}` rows.
+    rows: List[str] = []
+    depth, in_str, start = 0, None, 0
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if in_str:
+            if ch == in_str:
+                in_str = None
+        elif ch in ('"', "'"):
+            in_str = ch
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                rows.append(s[start:i + 1])
+        i += 1
+
+    out: List[WarmupRuleIR] = []
+    for row in rows:
+        inner = row.strip().lstrip("{").rstrip("}").strip()
+        kv = _parse_properties(inner)
+        for required in ("metric", "op", "value"):
+            if required not in kv:
+                raise NeuroMLError(
+                    f"warmup rule {row!r}: missing required field "
+                    f"`{required}`"
+                )
+        op = kv["op"].strip().strip('"\'')
+        if op not in _WARMUP_OPS:
+            raise NeuroMLError(
+                f"warmup rule {row!r}: unknown op {op!r}; "
+                f"must be one of {sorted(_WARMUP_OPS)}"
+            )
+        try:
+            value = float(kv["value"])
+        except (TypeError, ValueError):
+            raise NeuroMLError(
+                f"warmup rule {row!r}: value must be numeric, "
+                f"got {kv['value']!r}"
+            )
+        out.append(WarmupRuleIR(
+            metric=kv["metric"].strip().strip('"\''),
+            op=op,
+            value=value,
+            window=int(kv.get("window", 1)),
+        ))
+    return out
+
+
+def _extract_warmups(source: str) -> List[WarmupIR]:
+    """Extract all ``warmup <name> { ... }`` blocks."""
+    source = _strip_line_comments(source)
+    out: List[WarmupIR] = []
+    for name, body in _iter_named_blocks(source, "warmup"):
+        props = _parse_properties(body)
+        if "target" not in props or not props["target"].strip():
+            raise NeuroMLError(
+                f"warmup {name!r}: missing required field `target` "
+                "(funnel name)"
+            )
+        action = props.get("action", "detach").strip().strip('"\'')
+        if action not in _WARMUP_ACTIONS:
+            raise NeuroMLError(
+                f"warmup {name!r}: unknown action {action!r}; "
+                f"must be one of {sorted(_WARMUP_ACTIONS)}"
+            )
+        combinator = props.get("combinator", "any").strip().strip('"\'')
+        if combinator not in _WARMUP_COMBINATORS:
+            raise NeuroMLError(
+                f"warmup {name!r}: unknown combinator {combinator!r}; "
+                f"must be one of {sorted(_WARMUP_COMBINATORS)}"
+            )
+        if "rules" not in props:
+            raise NeuroMLError(
+                f"warmup {name!r}: missing required field `rules` "
+                "(non-empty list of rule rows)"
+            )
+        rules = _parse_warmup_rules(props["rules"])
+        if not rules:
+            raise NeuroMLError(
+                f"warmup {name!r}: rules list must be non-empty "
+                "(the whole point of the block is to encode "
+                "cutoff conditions)"
+            )
+
+        out.append(WarmupIR(
+            name=name,
+            id=name,
+            target=props["target"].strip().strip('"\''),
+            action=action,
+            combinator=combinator,
+            rules=rules,
+        ))
+    return out
+
+
+def _extract_module_instances(source: str) -> List[ModuleInstanceIR]:
+    """Extract all ``module <name> = <Lib> { ... }`` instantiations.
+
+    The form is intentionally distinct from the other extractors —
+    the parser must recognise the ``= <LibName>`` between the name
+    and the brace. Validated lazily by :func:`compile_with_lib`,
+    which knows about the lib search path.
+    """
+    source = _strip_line_comments(source)
+    # ``module <name> = <Lib> {``
+    pat = re.compile(r'\bmodule\s+(\w+)\s*=\s*(\w+)\s*\{')
+    out: List[ModuleInstanceIR] = []
+    for m in pat.finditer(source):
+        open_idx = m.end() - 1
+        try:
+            body, _ = _slice_balanced_brace(source, open_idx)
+        except NeuroMLError:
+            continue
+        name, lib = m.group(1), m.group(2)
+        params = _parse_feature_params_dict("{" + body + "}")
+        # `_parse_feature_params_dict` returns _ParamRef for bare
+        # identifiers (so codegen can emit them unquoted). For module
+        # instantiation we want literal names — convert them.
+        cleaned: Dict = {}
+        for k, v in params.items():
+            if isinstance(v, _ParamRef):
+                cleaned[k] = v.expr
+            elif isinstance(v, str) and v.startswith("[") and v.endswith("]"):
+                cleaned[k] = _parse_identifier_list(v)
+            else:
+                cleaned[k] = v
+        # Also parse `experts: [A, B]` style list values that
+        # _parse_feature_params_dict may have dropped on the floor
+        # because it's not a dict-of-dicts parser. Re-extract from the
+        # raw body for any key whose raw value starts with ``[``.
+        list_pat = re.compile(r'(\w+)\s*:\s*(\[[^\]]*\])')
+        for lm in list_pat.finditer(body):
+            k = lm.group(1)
+            if k not in cleaned or not isinstance(cleaned[k], list):
+                cleaned[k] = _parse_identifier_list(lm.group(2))
+        out.append(ModuleInstanceIR(
+            name=name,
+            id=name,
+            lib=lib,
+            params=cleaned,
+        ))
+    return out
+
+
+def _validate_languagecortex_refs(prog: "ProgramIR") -> None:
+    """Cross-block reference validation for the LanguageCortex DSL.
+
+    Pinned by ``tests/dsl/test_funnel_block.py::TestReferenceResolution``
+    and ``tests/dsl/test_warmup_block.py::TestValidation``.
+    """
+    expert_names = {e.name for e in prog.experts}
+    pop_names = {p.name for p in prog.populations}
+    distill_names = {d.name for d in prog.distillations}
+    funnel_names = {f.name for f in prog.funnels}
+
+    for f in prog.funnels:
+        for inp in f.inputs:
+            if inp not in expert_names:
+                raise NeuroMLError(
+                    f"funnel {f.name!r}: input {inp!r} is not a "
+                    "declared `expert` block. Known experts: "
+                    f"{sorted(expert_names) or '[]'}"
+                )
+        if f.target not in pop_names:
+            raise NeuroMLError(
+                f"funnel {f.name!r}: target population {f.target!r} "
+                "is not declared. Known populations: "
+                f"{sorted(pop_names) or '[]'}"
+            )
+        if f.method_ref and f.method_ref not in distill_names:
+            raise NeuroMLError(
+                f"funnel {f.name!r}: method {f.method_ref!r} is not "
+                "a declared `distillation` block. Known: "
+                f"{sorted(distill_names) or '[]'}"
+            )
+
+    for w in prog.warmups:
+        if w.target not in funnel_names:
+            raise NeuroMLError(
+                f"warmup {w.name!r}: target funnel {w.target!r} is "
+                "not declared. Known funnels: "
+                f"{sorted(funnel_names) or '[]'}"
+            )
+
+
+# ── §11 LanguageCortex lib-module parser ──────────────────────────────
+#
+# A library module file (e.g. ``architectures/lib/LanguageCortex.neuro``)
+# declares::
+#
+#     export module LanguageCortex {
+#         params: {
+#             teacher_warmup_steps: 10000,
+#             d_bottleneck:         512,
+#             cfd_temperature:      4.0,
+#             cfd_alpha:            0.7,
+#             experts:              []
+#         },
+#         body: """
+#             distillation cfd { ... %cfd_temperature% ... }
+#             funnel ensemble { inputs: [%experts%], ... }
+#             warmup teacher_cutoff { ... value: %teacher_warmup_steps% }
+#         """
+#     }
+#
+# The parser is intentionally lenient about whitespace and accepts both
+# ``"""...\"""`` triple-string bodies and ``"..."`` single-string bodies.
+
+_LIB_MODULE_RE = re.compile(
+    r"export\s+module\s+(\w+)\s*\{",
+    re.DOTALL,
+)
+_TRIPLE_BODY_RE = re.compile(
+    r'body\s*:\s*"""(.*?)"""',
+    re.DOTALL,
+)
+_SINGLE_BODY_RE = re.compile(
+    r'body\s*:\s*"((?:[^"\\]|\\.)*)"',
+    re.DOTALL,
+)
+_PARAMS_KEY_RE = re.compile(r"params\s*:\s*\{", re.DOTALL)
+
+
+def _parse_lib_module(text: str, expected_name: str) -> Tuple[Dict[str, Any], str]:
+    """Parse a lib-module file (``export module <Name> { params, body }``).
+
+    Returns (defaults_dict, body_template_string). The body template is
+    returned with leading/trailing whitespace stripped but ``%key%`` /
+    ``$ENV`` markers preserved verbatim for downstream interpolation.
+
+    Raises :class:`NeuroMLError` if the module block is missing, the
+    expected name does not match, or the body section is absent.
+    """
+    text = _strip_line_comments(text)
+    m = _LIB_MODULE_RE.search(text)
+    if m is None:
+        raise NeuroMLError(
+            f"lib module file does not contain an `export module` block "
+            f"(expected name: {expected_name!r})"
+        )
+    if m.group(1) != expected_name:
+        raise NeuroMLError(
+            f"lib module name mismatch: file declares "
+            f"{m.group(1)!r} but caller requested {expected_name!r}"
+        )
+
+    open_idx = m.end() - 1
+    body, _ = _slice_balanced_brace(text, open_idx)
+
+    # ── defaults (params: {...}) — optional ──────────────────────
+    defaults: Dict[str, Any] = {}
+    pm = _PARAMS_KEY_RE.search(body)
+    if pm is not None:
+        params_open = pm.end() - 1
+        params_body, _ = _slice_balanced_brace(body, params_open)
+        defaults = _parse_lib_params_dict(params_body)
+
+    # ── body template (body: """...""") ──────────────────────────
+    tm = _TRIPLE_BODY_RE.search(body)
+    if tm is not None:
+        body_template = tm.group(1)
+    else:
+        sm = _SINGLE_BODY_RE.search(body)
+        if sm is None:
+            raise NeuroMLError(
+                f"lib module {expected_name!r}: missing `body:` section"
+            )
+        body_template = sm.group(1).encode("utf-8").decode("unicode_escape")
+
+    return defaults, body_template.strip("\n")
+
+
+def _parse_lib_params_dict(raw: str) -> Dict[str, Any]:
+    """Parse the ``params: {...}`` dict from a lib module.
+
+    Values may be int / float / quoted-string / bare-identifier /
+    list-of-identifiers. Identifiers and identifier-lists are returned
+    as their string form so the interpolator emits them verbatim into
+    the expanded template (where they will be re-parsed by the main
+    compiler).
+    """
+    out: Dict[str, Any] = {}
+    for piece in _split_top_level(raw):
+        piece = piece.strip().rstrip(",").strip()
+        if not piece or ":" not in piece:
+            continue
+        k, v = piece.split(":", 1)
+        key = k.strip()
+        val = v.strip().rstrip(",").strip()
+        if not key:
+            continue
+
+        # Quoted string.
+        if (val.startswith('"') and val.endswith('"')) or (
+            val.startswith("'") and val.endswith("'")
+        ):
+            out[key] = val[1:-1]
+            continue
+
+        # List literal — keep brackets so interpolation emits a
+        # comma-joined identifier sequence verbatim.
+        if val.startswith("[") and val.endswith("]"):
+            inner = val[1:-1].strip()
+            # Default: empty list expands to empty string (the
+            # template author is expected to provide override).
+            out[key] = inner
+            continue
+
+        # Numeric.
+        try:
+            if "." in val or "e" in val or "E" in val:
+                out[key] = float(val)
+            else:
+                out[key] = int(val)
+            continue
+        except ValueError:
+            pass
+
+        # Bare identifier — store verbatim.
+        out[key] = val
+
     return out

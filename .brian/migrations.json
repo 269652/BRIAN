@@ -1,0 +1,11 @@
+{
+  "applied": {
+    "0001_logs_to_run_folders": {
+      "applied_at_utc": "2026-06-14T21:17:51Z",
+      "commit": "6805e49fe8953d5f4450cf33a66ce8a298d68819",
+      "host": "WKWZTZk8PFOFztu",
+      "ops_applied": 50
+    }
+  },
+  "version": 1
+}

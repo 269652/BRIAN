@@ -1,8 +1,0 @@
-════════════════════════════════════════════════════════════════
-  DSL-driven training loop
-  arch=rcc_bowtie (folder: architectures/rcc_bowtie)
-  steps=40000 batch=16 seq_len=2048 d_sem=384
-  ckpt_dir=/workspace/brian/lfs_checkpoints
-════════════════════════════════════════════════════════════════
-
-▶ launch attempt 1 @ 08:15:18Z

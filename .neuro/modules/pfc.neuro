@@ -1,0 +1,22 @@
+# Stage 7 — Cognitive control: PFC + ACC
+#
+# Prefrontal cortex (PFC): conflict monitoring, planning, top-down bias.
+# Anterior cingulate (ACC): error monitoring, attention allocation.
+# Both rate-coded at 20ms timescale. NT modulation (DA/5HT/ACh/GABA on
+# PFC; DA on ACC) is wired in arch.neuro.
+
+export population pfc {
+    count: 256,
+    dynamics: "rate_code",
+    equation: "y = ReLU(x)",
+    timescale: 0.02,
+    capacity: 1.0
+}
+
+export population acc {
+    count: 256,
+    dynamics: "rate_code",
+    equation: "y = ReLU(x)",
+    timescale: 0.02,
+    capacity: 1.0
+}

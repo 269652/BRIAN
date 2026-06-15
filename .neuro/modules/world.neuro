@@ -1,0 +1,21 @@
+# Stage 2 — Predictive state models
+#
+# World model (external state) and self model (internal state). Both
+# rate-coded with slow timescales (50ms) — they accumulate predictions
+# rather than respond to immediate input.
+
+export population world {
+    count: 256,
+    dynamics: "rate_code",
+    equation: "y = ReLU(x)",
+    timescale: 0.05,
+    capacity: 1.0
+}
+
+export population self_m {
+    count: 256,
+    dynamics: "rate_code",
+    equation: "y = ReLU(x)",
+    timescale: 0.05,
+    capacity: 1.0
+}

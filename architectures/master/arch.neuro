@@ -1,5 +1,5 @@
-    # -*- coding: utf-8 -*-
-# RCC Bowtie (master) — package config + global wiring
+﻿    # -*- coding: utf-8 -*-
+# RCC Bowtie (master) â€” package config + global wiring
 #
 # This `arch.neuro` is the architecture's entry point. It sets runtime
 # defaults, declares the 7 classical neurotransmitter systems globally,
@@ -10,19 +10,19 @@
 # and (optionally) their local internal wiring. Shared mechanics live
 # under lib/.
 #
-# Topology: bowtie with re-entry (sensory → thalamus → GWS → PFC → ...
-# → thalamus). IIT 4.0 compliant (every part has both causes and effects
-# in the system → Φ > 0).
+# Topology: bowtie with re-entry (sensory â†’ thalamus â†’ GWS â†’ PFC â†’ ...
+# â†’ thalamus). IIT 4.0 compliant (every part has both causes and effects
+# in the system â†’ Î¦ > 0).
 #
-# References — Dehaene (2011), Baars (2005), Doya (1999), Tononi (2016),
+# References â€” Dehaene (2011), Baars (2005), Doya (1999), Tononi (2016),
 # Mashour (2020).
 #
 # Folder layout (2026-06-14):
-#   architectures/master/   — canonical, hand-edited source of truth
+#   architectures/master/   â€” canonical, hand-edited source of truth
 #                              (this file). Renamed from rcc_bowtie/ on
 #                              2026-06-14; the topology and findings
 #                              still reference the RCC-Bowtie name.
-#   architectures/current/  — working-copy / active arch consumed by
+#   architectures/current/  â€” working-copy / active arch consumed by
 #                              `brian train` by default. Should track
 #                              master/ unless an experiment branches.
 
@@ -36,7 +36,7 @@ architecture master {
 }
 
 # =============================================================================
-# TRAINING — pipeline behavior the BRIAN harness applies on top of the
+# TRAINING â€” pipeline behavior the BRIAN harness applies on top of the
 # compiled DSL circuit. Loss clipping here is the declarative form of the
 # p4 architectural fix (was: cfg.loss_clip_robust=True, factor=3.0).
 # =============================================================================
@@ -49,94 +49,94 @@ training {
     loss_clipping: { enabled: true, method: "per_sample", factor: 3.0 }
     quantization:  { enabled: false, bits: 8 }
     optimizer:     "adamw"
-    learning_rate: 0.0005      # was 3e-4 — pushed up after fair-fight run
+    learning_rate: 0.0005      # was 3e-4 â€” pushed up after fair-fight run
                                 # showed lots of headroom (gnorm stable at
                                 # 1-2, no instability); 5e-4 is GPT-2-medium-class
-    # ╔══════════════════════════════════════════════════════════════╗
-    # ║  PRETRAIN-FRIENDLY RECIPE  (Jun 2026 surgery)                ║
-    # ║                                                              ║
-    # ║  The previous values (wd=0.12 dropout=0.12 llrd=0.85         ║
-    # ║  flooding=4.0 label_smooth=0.05) were tuned to NARROW the    ║
-    # ║  train→WikiText OOD gap after ~10k steps of an already-      ║
-    # ║  pretrained checkpoint. Applied from-scratch they suppress   ║
-    # ║  early learning catastrophically:                            ║
-    # ║    • flooding=4.0 hard-caps train ppl at ≈55 — model is      ║
-    # ║      contractually forbidden from improving below ln(55)≈4   ║
-    # ║    • LLRD=0.85 over 8 depth + adapters (~170 groups) starves ║
-    # ║      bottom layers at 0.85^20 ≈ 4% of base LR                ║
-    # ║    • dropout=0.12 + wd=0.12 are anti-regularisers when the   ║
-    # ║      model is severely under-fit (train ppl 500+)            ║
-    # ║                                                              ║
-    # ║  New values are GPT-2 / LLaMA pretraining defaults. Once the ║
-    # ║  trunk reaches its capacity ceiling (train ppl < ~30), the   ║
-    # ║  OOD-narrowing knobs can be re-enabled via the PR2           ║
-    # ║  regularization controller (DAR/PCC/iso/CMD) which is        ║
-    # ║  designed to compose additively without poisoning early      ║
-    # ║  training. See docs/PRETRAIN_RECIPE.md.                      ║
-    # ╚══════════════════════════════════════════════════════════════╝
-    weight_decay:  0.01        # was 0.12 — GPT-2/LLaMA use 0.01–0.1
-    grad_accum:    8           # was 1 — batch=4 × ctx=2048 × accum=8 = 65k
+    # â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+    # â•‘  PRETRAIN-FRIENDLY RECIPE  (Jun 2026 surgery)                â•‘
+    # â•‘                                                              â•‘
+    # â•‘  The previous values (wd=0.12 dropout=0.12 llrd=0.85         â•‘
+    # â•‘  flooding=4.0 label_smooth=0.05) were tuned to NARROW the    â•‘
+    # â•‘  trainâ†’WikiText OOD gap after ~10k steps of an already-      â•‘
+    # â•‘  pretrained checkpoint. Applied from-scratch they suppress   â•‘
+    # â•‘  early learning catastrophically:                            â•‘
+    # â•‘    â€¢ flooding=4.0 hard-caps train ppl at â‰ˆ55 â€” model is      â•‘
+    # â•‘      contractually forbidden from improving below ln(55)â‰ˆ4   â•‘
+    # â•‘    â€¢ LLRD=0.85 over 8 depth + adapters (~170 groups) starves â•‘
+    # â•‘      bottom layers at 0.85^20 â‰ˆ 4% of base LR                â•‘
+    # â•‘    â€¢ dropout=0.12 + wd=0.12 are anti-regularisers when the   â•‘
+    # â•‘      model is severely under-fit (train ppl 500+)            â•‘
+    # â•‘                                                              â•‘
+    # â•‘  New values are GPT-2 / LLaMA pretraining defaults. Once the â•‘
+    # â•‘  trunk reaches its capacity ceiling (train ppl < ~30), the   â•‘
+    # â•‘  OOD-narrowing knobs can be re-enabled via the PR2           â•‘
+    # â•‘  regularization controller (DAR/PCC/iso/CMD) which is        â•‘
+    # â•‘  designed to compose additively without poisoning early      â•‘
+    # â•‘  training. See docs/PRETRAIN_RECIPE.md.                      â•‘
+    # â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    weight_decay:  0.01        # was 0.12 â€” GPT-2/LLaMA use 0.01â€“0.1
+    grad_accum:    8           # was 1 â€” batch=4 Ã— ctx=2048 Ã— accum=8 = 65k
                                 # tok/step (~12% of GPT-2's 524k). Prior
-                                # 8k tok/step caused ±35% loss swings from
+                                # 8k tok/step caused Â±35% loss swings from
                                 # micro-batch noise; this kills the jitter
                                 # at zero VRAM cost (one extra fwd+bwd, no
                                 # extra activations stored).
     grad_clip:     1.0
-    label_smoothing: 0.0       # was 0.05 — inflates raw PPL, off for pretrain
-    dropout:       0.0         # was 0.12 — model is under-fit, no overfit yet
-    flooding_level: 0.0        # was 4.0 — DEATH SENTENCE for pretraining
-    stochastic_depth: 0.0      # was 0.1  — reduces effective depth
-    z_loss: 0.0001             # keep — cheap PaLM-style logit stabiliser
-    llrd: 1.0                  # was 0.85 — LLRD is for FINE-TUNING, not pretrain
+    label_smoothing: 0.0       # was 0.05 â€” inflates raw PPL, off for pretrain
+    dropout:       0.0         # was 0.12 â€” model is under-fit, no overfit yet
+    flooding_level: 0.0        # was 4.0 â€” DEATH SENTENCE for pretraining
+    stochastic_depth: 0.0      # was 0.1  â€” reduces effective depth
+    z_loss: 0.0001             # keep â€” cheap PaLM-style logit stabiliser
+    llrd: 1.0                  # was 0.85 â€” LLRD is for FINE-TUNING, not pretrain
     pct_trunk:     0.0
     pct_strength:  0.0
-    # ── HPB Phases 1-5 — novel-topology mechanisms ACTIVATED ──
+    # â”€â”€ HPB Phases 1-5 â€” novel-topology mechanisms ACTIVATED â”€â”€
     # All zero-init: first forward is bit-identical to baseline; behaviour
-    # emerges as the gates lift off zero under LM loss. Composable —
+    # emerges as the gates lift off zero under LM loss. Composable â€”
     # H19 monitors surprise (read by H15 for analytics when write_gate
     # is "surprise"; currently "all" for the Phase-5 uniform-writes
     # baseline before the wake/sleep replay loop (Phase 6) lands.
     #
     # HPB Phase 1 + Phase 2: H16 multi-scale grid-cell positions.
-    # K=4 scales at φ-ratio (Sargolini 2006; Stensola 2012) — provable
+    # K=4 scales at Ï†-ratio (Sargolini 2006; Stensola 2012) â€” provable
     # length-OOD extrapolation. Activates the dormant code path; the
     # 2K=8 raw features project to d_model via a zero-init head, so the
     # first forward is bit-identical to baseline (Phase 1 contract).
     grid_positions: { enabled: true, n_scales: 4, scale_ratio: 1.6180339887, base_period: 16.0 }
     # HPB Phase 5: H19 local-context surprise head (Mismatch Negativity).
-    # Exposes per-token surprise = nll_local − nll_global on every
+    # Exposes per-token surprise = nll_local âˆ’ nll_global on every
     # train forward; harness logs it for diagnostics. Composes with
     # H15's write gate when write_gate = "surprise".
     surprise_head:  { enabled: true, dim: 128, local_window: 64 }
     # HPB Phase 5: H15 episodic kNN memory (Memorizing Transformers /
     # RETRO). Uniform writes (write_gate="all") for the Phase-5
     # baseline; surprise-gating + wake/sleep replay come in Phase 6.
-    # alpha_init=0 ⇒ ReZero start: first forward bit-identical to
-    # baseline; the value blend only activates as α lifts off zero
+    # alpha_init=0 â‡’ ReZero start: first forward bit-identical to
+    # baseline; the value blend only activates as Î± lifts off zero
     # under LM gradient pressure.
     episodic_memory: { enabled: true, slots: 4096, k: 32, alpha_init: 0.0,
                        write_gate: "all", write_quantile: 0.8 }
-    # HPB Phase 3 — Multi-Scale Predictive Coding Cascade.  Applies the
-    # MDRV-VBB free-energy at every adjacent layer pair (ℓ, ℓ+1) of the
-    # trunk, with geometric weight decay λ_ℓ = base_weight · 0.5^((L-1)-ℓ)
+    # HPB Phase 3 â€” Multi-Scale Predictive Coding Cascade.  Applies the
+    # MDRV-VBB free-energy at every adjacent layer pair (â„“, â„“+1) of the
+    # trunk, with geometric weight decay Î»_â„“ = base_weight Â· 0.5^((L-1)-â„“)
     # so the deepest (bowtie waist) pair dominates and the shallowest
     # pair contributes a small but non-zero compositional regulariser.
     # Shares all VBB hyperparameters (alpha / free_bits / beta_max / eta).
     # Composes additively with the single-waist VBB above.
     mspcc: { enabled: true, base_weight: 0.02, layer_weight_decay: 0.5 }
-    # HPB Phase 4 — Hyperbolic Bowtie Waist (HBW). Curvature c=1.0 of
-    # the Poincaré ball on which the VBB posterior is wrapped. The KL
+    # HPB Phase 4 â€” Hyperbolic Bowtie Waist (HBW). Curvature c=1.0 of
+    # the PoincarÃ© ball on which the VBB posterior is wrapped. The KL
     # closed form picks up a Jacobian-log-det correction that strictly
-    # upper-bounds the Euclidean KL for any non-zero ‖μ‖ — making
-    # σ-collapse harder by the construction of the geometry itself.
-    # Composes with all MDRV stabilisers (free-bits, β-ceiling, PEC).
+    # upper-bounds the Euclidean KL for any non-zero â€–Î¼â€– â€” making
+    # Ïƒ-collapse harder by the construction of the geometry itself.
+    # Composes with all MDRV stabilisers (free-bits, Î²-ceiling, PEC).
     vbb_curvature: 1.0
-    # ── Multi-Trunk-v2: thalamic multi-cortex routing (see §5.7) ──
+    # â”€â”€ Multi-Trunk-v2: thalamic multi-cortex routing (see Â§5.7) â”€â”€
     # Four specialist language cortices (math / code / chat / general)
     # mixed per token by neuroslm.cortex.ThalamicRouter.  The router
     # combines a deterministic lexical-bias prior (`lexical_bias_weight`
     # added to logits for the matching domain) with a zero-init
-    # learnable head (ReZero contract — at step 0, routing = pure
+    # learnable head (ReZero contract â€” at step 0, routing = pure
     # lexical), and optionally damps per-batch oscillations through
     # a BEMA running mean (`bema_tau`).
     #
@@ -151,20 +151,20 @@ training {
     # tests/test_ensemble_routing.py::test_pure_math_sequence_*).
     #
     # `weights` selects the production sub-cortex backend:
-    #     "stub" — random-init StubSubCortex (cold-start, no download)
-    #     "gpt2" — HuggingFace GPT-2 family, see DEFAULT_GPT2_VARIANTS
+    #     "stub" â€” random-init StubSubCortex (cold-start, no download)
+    #     "gpt2" â€” HuggingFace GPT-2 family, see DEFAULT_GPT2_VARIANTS
     #              in neuroslm/cortex.py (gpt2-medium for math,
     #              distilgpt2 for code, gpt2 for chat + general).
     # `freeze_weights = true` keeps the GPT-2 backbones frozen and
     # trains only the router + per-cortex projections in the cold-start
     # phase.  Set to false to fine-tune all cortices end-to-end.
     #
-    # ── Mixture-of-Experts (`experts: [...]`) supersedes `weights:` ──
+    # â”€â”€ Mixture-of-Experts (`experts: [...]`) supersedes `weights:` â”€â”€
     # Setting `experts: [...]` replaces the legacy single-`weights`
     # field with an explicit per-expert roster. Each expert returns
     # logits DIRECTLY in trunk-vocab space via its OWN pretrained LM
-    # head — bypassing the random Xavier `cortex_lm_head` projection
-    # that previously sat at the catastrophic `loss ≈ ln(V)` ceiling
+    # head â€” bypassing the random Xavier `cortex_lm_head` projection
+    # that previously sat at the catastrophic `loss â‰ˆ ln(V)` ceiling
     # (see scripts/diagnose_cortex_init.py for the in-vitro repro).
     # When `experts:` is set, `n_cortices` and `domains:` are
     # auto-derived from the roster (still listed below for human
@@ -178,20 +178,20 @@ training {
         domains:             ["general", "code", "reasoning"],
         # Per-expert roster (new MoE path). Each row binds a HuggingFace
         # model id to a routing domain. The expert's pretrained LM head
-        # produces trunk-vocab logits directly via VocabBridge — no
+        # produces trunk-vocab logits directly via VocabBridge â€” no
         # random projection chain, no rogue-dim band-aid LayerNorm.
         #
         # 2026-06-14 (H23 post-mortem): the `general` slot was REVERTED
-        # from `smollm2_360m` back to `gpt2`. H22 swapped gpt2 →
+        # from `smollm2_360m` back to `gpt2`. H22 swapped gpt2 â†’
         # smollm2_360m chasing better per-token capacity; H23 fixed
         # the bridge alignment shift (commit a976fee) and isolated
         # SmolLM2 bridge CE (2.798) BEAT gpt2 (3.016) on the held-out
-        # paragraph — but actual training PPL/OOD got dramatically
+        # paragraph â€” but actual training PPL/OOD got dramatically
         # worse. Forensic in docs/FINDINGS.md "Run 40968510" identified
         # TWO compounding mechanisms:
         #   (1) **F.kl_div(reduction="batchmean") bug** in
         #       neuroslm.harness._cortex_fusion_aux_step makes the
-        #       distillation loss ~T=512× too strong relative to the
+        #       distillation loss ~T=512Ã— too strong relative to the
         #       LM loss. With gpt2 teacher this is survivable; with
         #       SmolLM2 teacher (sharper distribution) it dominates.
         #       See scripts/diagnose_kl_distill_blowup.py.
@@ -199,10 +199,14 @@ training {
         #       cannot efficiently learn to imitate a teacher with a
         #       different tokenizer + positional encoding. The KL
         #       gradient points to an unreachable target distribution.
-        # Until the reduction bug is fixed + ablated (FINDINGS Followup
-        # F1), the safe roster is the all-gpt2-family H21 baseline.
+        # 2026-06-15: re-armed `general` slot back to `smollm2_360m`
+        # to match the deploy ensemble pinned by README / technical
+        # report / the new declarative `expert GeneralExpert` block at
+        # the bottom of this file. The Followup F1 bug (KL reduction)
+        # is now handled by the CFD funnel (top-K + entropy-matched T)
+        # which is what makes the SmolLM2 teacher safe to re-introduce.
         experts: [
-            { id: "gpt2",                       domain: "general",   freeze: true },
+            { id: "smollm2_360m",               domain: "general",   freeze: true },
             { id: "microsoft/CodeGPT-small-py", domain: "code",      freeze: true },
             { id: "Qwen/Qwen2.5-0.5B",          domain: "reasoning", freeze: true }
         ],
@@ -212,12 +216,12 @@ training {
         bema_tau:            0.5,
         router_d_model:      256,
 
-        # ── Slot A: KL-distillation aux loss ──
+        # â”€â”€ Slot A: KL-distillation aux loss â”€â”€
         # The trunk learns FROM the cortex by matching its full output
-        # distribution, not just argmax targets. λ_t is a piecewise-
+        # distribution, not just argmax targets. Î»_t is a piecewise-
         # linear ramp in the EMA gap (lm_loss - cortex_loss); when the
-        # trunk has caught up (gap ≤ floor) distillation goes idle.
-        # See docs/formal_framework.md §9 (admission criterion) and
+        # trunk has caught up (gap â‰¤ floor) distillation goes idle.
+        # See docs/formal_framework.md Â§9 (admission criterion) and
         # tests/training/test_cortex_distillation_and_gating.py.
         distillation_enabled:      true,
         distillation_lambda_max:   1.0,
@@ -225,105 +229,105 @@ training {
         distillation_gap_floor:    0.1,
         distillation_gap_ceiling:  2.0,
 
-        # ── H006: Capacity-Funneled Distillation (CFD) ──
+        # â”€â”€ H006: Capacity-Funneled Distillation (CFD) â”€â”€
         # 2026-06-15: New, behind a feature flag. Replaces the naive
         # batch-mean KL on the WHOLE V-token softmax (which has the
-        # "teacher too strong" pathology — see docs/FINDINGS.md
+        # "teacher too strong" pathology â€” see docs/FINDINGS.md
         # post-mortems #3 and "Run pre-H24") with a three-stage funnel:
         #   (1) top-K rank-preserving sparsification: only K teacher
         #       modes survive, the rest get uniform tail mass. Student
         #       gets a *reachable* target.
-        #   (2) entropy-matched temperature: T_eff = T0 · max(1, H_s/H_t).
+        #   (2) entropy-matched temperature: T_eff = T0 Â· max(1, H_s/H_t).
         #       Teacher's sharpness is softened to a level the student
         #       can plausibly match, then comes back into focus as the
         #       student catches up.
-        #   (3) gradient-alignment gate: λ_eff = λ0 · (1+cos)/2 on a
+        #   (3) gradient-alignment gate: Î»_eff = Î»0 Â· (1+cos)/2 on a
         #       cheap last-bias probe. Distillation that fights the LM
         #       gradient is automatically zeroed. Mechanical no-harm
         #       floor.
         # Per-token reduction is fixed as a side-effect (the F1 bug).
-        # See docs/formal_framework.md §13 and
+        # See docs/formal_framework.md Â§13 and
         # hypothesis/H006_capacity_funneled_distillation_implode.md.
-        # H24 schedule: anneal K=4→32 over 1500 steps (matches 3k run).
+        # H24 schedule: anneal K=4â†’32 over 1500 steps (matches 3k run).
         cfd_enabled:            true,
         cfd_topk_start:         4,
         cfd_topk_end:           32,
         cfd_topk_anneal_steps:  1500,
         cfd_temperature_floor:  1.0,
 
-        # ── Slot C: NT-mediated α gating ──
-        # α_eff = α · (1 - cortex_inhibition_level). The inhibition
+        # â”€â”€ Slot C: NT-mediated Î± gating â”€â”€
+        # Î±_eff = Î± Â· (1 - cortex_inhibition_level). The inhibition
         # level rises smoothly as the trunk outperforms the cortex
         # (acts like a GABA-inhibitory NT released by the trunk into
         # the cortex region). Once saturated near 1 the cortex
         # contributes ~nothing and inference can skip the cortex
-        # forward entirely (~20× FLOP savings at the rcc_bowtie_30m_p4
+        # forward entirely (~20Ã— FLOP savings at the rcc_bowtie_30m_p4
         # scale).
         inhibition_enabled:        true,
         inhibition_ema_alpha:      0.05,
         inhibition_temperature:    1.0,
 
-        # ── Item 2 (Jun 2026): NE → router temperature ──
+        # â”€â”€ Item 2 (Jun 2026): NE â†’ router temperature â”€â”€
         # The locus coeruleus (NE) is the brain's gain channel. With
         # this gain > 0 the harness pushes the live NE level into the
         # router each step; logits are multiplied by
-        #   mult = clamp(1 + k_NE·z_NE, 0.1, 10.0)
+        #   mult = clamp(1 + k_NEÂ·z_NE, 0.1, 10.0)
         # before softmax. mult > 1 sharpens routing (winner-take-most),
-        # mult < 1 softens it. k_NE = 0.5 gives a ±50% logit-scale
-        # swing across NE ∈ [0, 1], plenty to register without ever
+        # mult < 1 softens it. k_NE = 0.5 gives a Â±50% logit-scale
+        # swing across NE âˆˆ [0, 1], plenty to register without ever
         # collapsing the softmax to a one-hot.
         router_temp_nt_gain:       0.5,
 
-        # ── Item 3 (Jun 2026): 5HT/DA → distillation λ ──
-        # The gap-ramp λ is multiplied by
-        #   nt_mult = clamp(1 + k_5HT·z_5HT − k_DA·z_DA, 0, 2)
+        # â”€â”€ Item 3 (Jun 2026): 5HT/DA â†’ distillation Î» â”€â”€
+        # The gap-ramp Î» is multiplied by
+        #   nt_mult = clamp(1 + k_5HTÂ·z_5HT âˆ’ k_DAÂ·z_DA, 0, 2)
         # so the trunk LEANS HARDER on the cortex when 5HT is high
-        # (stress / conservatism — trust the teacher) and LESS when
-        # DA is high (reward / explore — go your own way). Identical
+        # (stress / conservatism â€” trust the teacher) and LESS when
+        # DA is high (reward / explore â€” go your own way). Identical
         # gains (0.4) keep the two channels balanced; an asymmetric
         # split would prejudge the policy.
         distillation_5ht_gain:     0.4,
         distillation_da_gain:      0.4,
 
-        # ── Item 4 (Jun 2026): GABA → lateral expert inhibition ──
-        # κ_eff = κ_base · GABA. With κ_base = 0.5 and GABA at its
-        # baseline (~0.15) the effective inhibition is ~0.075 — a
+        # â”€â”€ Item 4 (Jun 2026): GABA â†’ lateral expert inhibition â”€â”€
+        # Îº_eff = Îº_base Â· GABA. With Îº_base = 0.5 and GABA at its
+        # baseline (~0.15) the effective inhibition is ~0.075 â€” a
         # gentle nudge toward specialisation that ramps as the
         # homeostat raises GABA during high-ignition phases. The
         # divisive normalisation is unconditionally on the simplex
-        # so the routing weights stay well-formed regardless of κ.
+        # so the routing weights stay well-formed regardless of Îº.
         lateral_inhibition_kappa:  0.5
     }
-    # ── Synthetic HPA axis — slow homeostatic stress damping ──────
+    # â”€â”€ Synthetic HPA axis â€” slow homeostatic stress damping â”€â”€â”€â”€â”€â”€
     # The existing neuromod stack has fast feedback (Homeostasis bumps
     # GABA on grad spikes) but NO slow integrator. Result: NE can run
-    # away unchecked over ~40 steps (run 38470012: NE 0.20→0.93,
-    # gnorm 10→24, loss 12.6→15.4 between steps 460-500).
+    # away unchecked over ~40 steps (run 38470012: NE 0.20â†’0.93,
+    # gnorm 10â†’24, loss 12.6â†’15.4 between steps 460-500).
     #
-    # `allostasis { ... }` adds the missing piece — a synthetic HPA
+    # `allostasis { ... }` adds the missing piece â€” a synthetic HPA
     # axis with two state vars:
-    #   load(t) — fast EMA (τ≈10) of multi-modal stress (NE/GABA
+    #   load(t) â€” fast EMA (Ï„â‰ˆ10) of multi-modal stress (NE/GABA
     #             excess, loss volatility, grad spikes), saturating.
-    #   cort(t) — slow EMA (τ≈34) of `load` — the cortisol integrator
-    #             that separates acute (single bad batch — leave alone)
-    #             from chronic (sustained — engage dampers).
+    #   cort(t) â€” slow EMA (Ï„â‰ˆ34) of `load` â€” the cortisol integrator
+    #             that separates acute (single bad batch â€” leave alone)
+    #             from chronic (sustained â€” engage dampers).
     #
     # Three downstream multipliers, all in [0, 1] and applied each step:
-    #   ne_mult  = 1 - γ_NE  · cort  → caps NE release (closes the
+    #   ne_mult  = 1 - Î³_NE  Â· cort  â†’ caps NE release (closes the
     #                                   LC positive-feedback loop)
-    #   troph_mult = 1 - γ_T · cort  → halts BDNF growth during crisis
+    #   troph_mult = 1 - Î³_T Â· cort  â†’ halts BDNF growth during crisis
     #                                   (consolidate, don't sprout)
-    #   lr_mult  = 1 - γ_LR · cort   → damps optimizer LR (don't keep
+    #   lr_mult  = 1 - Î³_LR Â· cort   â†’ damps optimizer LR (don't keep
     #                                   updating chaotically)
     #
-    # The 5× HPA ratio (α_load=0.10, α_cort=0.02) makes brief spikes
-    # (1 bad batch + 99 calm) leave cort ≈ 0 — no damping for transient
-    # surprise — while sustained 200-step stress patterns drive cort
+    # The 5Ã— HPA ratio (Î±_load=0.10, Î±_cort=0.02) makes brief spikes
+    # (1 bad batch + 99 calm) leave cort â‰ˆ 0 â€” no damping for transient
+    # surprise â€” while sustained 200-step stress patterns drive cort
     # past 0.25 where dampers begin to bite.
     #
     # See docs/findings.md H21 + tests/training/test_allostasis.py
     # (38 contracts pinned including the smoking-gun replay of the
-    # actual 460→500 runaway trajectory).
+    # actual 460â†’500 runaway trajectory).
     allostasis: {
         enabled:           true,
         load_ema_alpha:    0.10,
@@ -335,7 +339,7 @@ training {
         w_loss:            0.30,
         w_grad:            0.20,
         # Above-baseline thresholds (below these levels the channel
-        # contributes ZERO stress — tonic NT firing isn't pathological).
+        # contributes ZERO stress â€” tonic NT firing isn't pathological).
         ne_baseline:       0.25,
         gaba_baseline:     0.20,
         grad_norm_ceiling: 5.0,
@@ -366,22 +370,22 @@ training {
     batch_size:   16
     seq_len:      2048
     steps:        40000
-    warmup_steps: 2400         # was 300 — scales with grad_accum=8 so we
+    warmup_steps: 2400         # was 300 â€” scales with grad_accum=8 so we
                                 # still get 300 OPTIMIZER updates of warmup
                                 # (logged "step" counts micro-batches, not
                                 # opt updates). Prior 300 micro-batches =
-                                # 37 opt updates → too short, caused early
+                                # 37 opt updates â†’ too short, caused early
                                 # lurches at full LR.
     min_lr_ratio: 0.1
 
-    # ── C3 reentry as NT-gated trunk loss (Jun 2026) ──
+    # â”€â”€ C3 reentry as NT-gated trunk loss (Jun 2026) â”€â”€
     # The PC reentry probe (predicting sensory hidden state from motor
     # hidden state via a learned projection W) is no longer telemetry
-    # only — its residual is added to the LM loss, gradient flowing
+    # only â€” its residual is added to the LM loss, gradient flowing
     # through BOTH populations so the trunk learns to make motor and
     # sensory hidden states mutually predictive (a soft cycle-consistency
     # / world-model constraint). Gating by neuromodulators:
-    #   gate = clip(1 + 0.5·DA − 0.7·GABA, 0, ∞)
+    #   gate = clip(1 + 0.5Â·DA âˆ’ 0.7Â·GABA, 0, âˆž)
     # so the loss strengthens when DA is high (curiosity / reward) and
     # weakens under GABA (cortical inhibition). eCB/5HT/Glu/etc. are
     # left agnostic to avoid double-counting (they already modulate
@@ -389,57 +393,57 @@ training {
     pc_reentry_weight:  0.1
     pc_reentry_nt_gate: true
 
-    # ── Item 6 (Jun 2026): trainable NT coupling matrix W ──
-    # When true, the DrivenNTSystem exposes its 7×5 driver→channel
+    # â”€â”€ Item 6 (Jun 2026): trainable NT coupling matrix W â”€â”€
+    # When true, the DrivenNTSystem exposes its 7Ã—5 driverâ†’channel
     # coupling matrix as an nn.Parameter (35 extra trainable scalars
-    # vs ~900M trunk + cortex params — negligible). The float OU
+    # vs ~900M trunk + cortex params â€” negligible). The float OU
     # dynamics in step_full() remain unchanged, so this flag never
     # alters the numerical trajectory of `levels()` on its own.
     # Gradient flows back to W_param only through differentiable
-    # downstream uses (router temperature, distillation λ, lateral
-    # inhibition κ) via predict_nt_tensor().
+    # downstream uses (router temperature, distillation Î», lateral
+    # inhibition Îº) via predict_nt_tensor().
     #
     # SHIPPED DISABLED for the B5 sweep: Items 2/3/4 push float NT
     # values into their consumers via plain dict `levels()`, which is
     # all the optimisation signal we need to validate the GABA / NE /
     # 5HT / DA mechanisms in isolation. Flipping this to `true` would
     # add 35 trainable scalars whose gradient path is not yet wired
-    # to the consumers (would receive identically-zero grad → adds
+    # to the consumers (would receive identically-zero grad â†’ adds
     # noise without learning signal). Re-enable once predict_nt_tensor
     # is plumbed into the router / inhibition / distillation modules.
     nt_w_trainable:     false
 
-    # ── Variational Bowtie Bottleneck (VBB) — Jun 2026 surgery ──
+    # â”€â”€ Variational Bowtie Bottleneck (VBB) â€” Jun 2026 surgery â”€â”€
     # The plain C3 PC-reentry residual was acting as a self-distillation
-    # amplifier: by step 4000 train ppl had halved (738→426) while wiki
-    # ppl barely budged (3234→2899), pushing the gap ratio from 4.3 → 6.8.
+    # amplifier: by step 4000 train ppl had halved (738â†’426) while wiki
+    # ppl barely budged (3234â†’2899), pushing the gap ratio from 4.3 â†’ 6.8.
     # VBB upgrades the residual into a Friston-style variational free
     # energy at the bowtie waist:
-    #     L = γ_NT · ( β·‖s − W·(μ + σ·ε)‖² − log β + α·KL[q ‖ N(0,I)] )
-    # with q(h_m|x) = N(μ, σ²I), μ = h_motor, log σ² = sigma_head(μ).
+    #     L = Î³_NT Â· ( Î²Â·â€–s âˆ’ WÂ·(Î¼ + ÏƒÂ·Îµ)â€–Â² âˆ’ log Î² + Î±Â·KL[q â€– N(0,I)] )
+    # with q(h_m|x) = N(Î¼, ÏƒÂ²I), Î¼ = h_motor, log ÏƒÂ² = sigma_head(Î¼).
     # Three coupled mechanisms emerge:
-    #   1. KL[q ‖ N(0,I)] is an Information Bottleneck at the narrowest
-    #      cross-section of the network — caps I(X; h_m), forbids
+    #   1. KL[q â€– N(0,I)] is an Information Bottleneck at the narrowest
+    #      cross-section of the network â€” caps I(X; h_m), forbids
     #      memorisation of training-distribution attractors.
-    #   2. β = softplus(log_beta) self-throttles at β* = 1/(2·E[r]) via
-    #      the −log β log-normaliser. The loop stops being an amplifier
+    #   2. Î² = softplus(log_beta) self-throttles at Î²* = 1/(2Â·E[r]) via
+    #      the âˆ’log Î² log-normaliser. The loop stops being an amplifier
     #      and becomes a calibrated generative model.
     #   3. Reparam noise at the C3 read-site is structurally placed
-    #      stochastic gradient Langevin — biases SGD toward flat minima.
+    #      stochastic gradient Langevin â€” biases SGD toward flat minima.
     # Param overhead at d_sem=512: one Linear (262k) + one scalar = 0.21%.
     # See harness._compute_pc_reentry_loss for the full math derivation.
     vbb_alpha:     0.001
     vbb_beta_init: 1.0
-    # ── MDRV-VBB anti-collapse stabilisers (VBB-v2, Jun 2026) ──────
-    # Three interlocking mechanisms that prevent the β↑/σ↓ co-collapse
-    # observed in the VBB-v1 run (gap 3.99→6.68 by step 4000):
+    # â”€â”€ MDRV-VBB anti-collapse stabilisers (VBB-v2, Jun 2026) â”€â”€â”€â”€â”€â”€
+    # Three interlocking mechanisms that prevent the Î²â†‘/Ïƒâ†“ co-collapse
+    # observed in the VBB-v1 run (gap 3.99â†’6.68 by step 4000):
     #
-    #  1. Free-bits KL floor: guarantees ≥0.1 nats/dim of posterior
-    #     information — σ→0 becomes provably non-optimal.
-    #  2. β-ceiling: clamps log β ≤ 4.0 (β ≤ ~4.0) — breaks the
-    #     joint β↑/σ↓ equilibrium that erased the bottleneck.
+    #  1. Free-bits KL floor: guarantees â‰¥0.1 nats/dim of posterior
+    #     information â€” Ïƒâ†’0 becomes provably non-optimal.
+    #  2. Î²-ceiling: clamps log Î² â‰¤ 4.0 (Î² â‰¤ ~4.0) â€” breaks the
+    #     joint Î²â†‘/Ïƒâ†“ equilibrium that erased the bottleneck.
     #  3. PEC (Posterior Entropy Commitment): Jeffreys prior on each
-    #     σ_d — as σ→0, PEC→+∞, making collapse Lyapunov-unstable.
+    #     Ïƒ_d â€” as Ïƒâ†’0, PECâ†’+âˆž, making collapse Lyapunov-unstable.
     vbb_free_bits:    0.1
     vbb_log_beta_max: 4.0
     vbb_entropy_eta:  0.001
@@ -455,25 +459,25 @@ training {
     # MAT-phase-gated mechanisms disabled for the 100M-genetics run.
     # The MAT-ramp regularization was crippling early LM convergence
     # (134M with phase-gated dropout active was 100+ ppl behind the 30M
-    # baseline at step 2500). Targets: loss<4, ppl<100 by step 10k —
+    # baseline at step 2500). Targets: loss<4, ppl<100 by step 10k â€”
     # pure-baseline trunk is closest to the 30M-on-30M run that hit
     # them. Genetics still active but selected for LM-loss (below).
     mechanisms: {}
 
     # Declarative early-exit conditions. First rule to fire saves a
     # checkpoint and exits the training loop. NOTE: only the "OOD keeps
-    # falling" rule is active — the step-thresholded fail-fast rules were
+    # falling" rule is active â€” the step-thresholded fail-fast rules were
     # removed (they were triggering on early-training noise).
     #
     # Rule: exit when OOD-ppl trend stalls. Compares min(OOD) in the first
     # half of the window vs min(OOD) in the second half. Requires
     # `min_evals` data points before it can fire, so transient single-eval
     # noise (~3% on a 50-window WikiText eval) can't trigger exit on its
-    # own. `tol: 0.02` = require a real ≥2% improvement.
+    # own. `tol: 0.02` = require a real â‰¥2% improvement.
     pass_marks: {
         # Hard target: ppl < 100 at step 10k.
         ppl_at_10k:   { metric: "train_ppl", at_step: 10000, max: 100 }
-        # OOD trend rule (loose — 5 evals, 2% tol) as the success-exit.
+        # OOD trend rule (loose â€” 5 evals, 2% tol) as the success-exit.
         ood_not_falling: {
             metric: "ood_ppl",
             window: 4000,
@@ -483,9 +487,9 @@ training {
         }
     }
 
-    # ── §6.5 Genetics ──
-    # optimize_for: "lm_loss" — genes train ONLY through the cortex's
-    # alpha_nt → LM gradient path. No -Phi aux term (phi_weight forced
+    # â”€â”€ Â§6.5 Genetics â”€â”€
+    # optimize_for: "lm_loss" â€” genes train ONLY through the cortex's
+    # alpha_nt â†’ LM gradient path. No -Phi aux term (phi_weight forced
     # to 0). This avoids the prior failure mode where genes were pulled
     # toward Phi-good but LM-bad configurations during early training,
     # hurting the LM convergence rate.
@@ -501,7 +505,7 @@ training {
         diagnostics_every:  50
     }
 
-    # ── Hardware envelope ──
+    # â”€â”€ Hardware envelope â”€â”€
     # Deploy script filters vast.ai offers by these constraints.
     # `dist_strategy`: "single" | "ddp" | "fsdp". Picked per scale below
     # (large scales auto-override). Precision = bf16 (A100/H100 native).
@@ -518,7 +522,7 @@ training {
         precision:       "bf16"
     }
 
-    # ── Multi-scale variants of the same architecture ──
+    # â”€â”€ Multi-scale variants of the same architecture â”€â”€
     # Pick at deploy time via env SCALE=<name>. Each variant inherits
     # the global `hardware` block unless it declares its own override.
     # approx_params is informational (rough trunk-only count).
@@ -530,27 +534,27 @@ training {
             depth:         8
             n_heads:       8
             max_ctx:       2048
-            batch_size:    1       # T4 GPU memory: 16 GiB fits 1×512 ctx comfortably
-            seq_len:       512     # reduces attn memory (O(T²) per head); was 2048
+            batch_size:    1       # T4 GPU memory: 16 GiB fits 1Ã—512 ctx comfortably
+            seq_len:       512     # reduces attn memory (O(TÂ²) per head); was 2048
             grad_accum:    4       # compensates for batch=1; maintains training signal
             approx_params: "30M"
         }
 
-        # ── Cheap-hardware 2k smoke run ─────────────────────────────
+        # â”€â”€ Cheap-hardware 2k smoke run â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # Target: short (~2 hour) end-to-end smoke run on a $0.15-0.30/hr
-        # vast.ai instance — RTX 3090 / RTX 4090 / A5000 / RTX 4000 Ada.
+        # vast.ai instance â€” RTX 3090 / RTX 4090 / A5000 / RTX 4000 Ada.
         # Used to verify that a DSL/DNA change boots cleanly + the MoE
         # experts ensemble produces real loss before paying for full A100
-        # runs. NOT a research run; trajectories ≤2k steps are noise.
-        # Per CLAUDE.md §10, even smoke runs are recorded as findings.
+        # runs. NOT a research run; trajectories â‰¤2k steps are noise.
+        # Per CLAUDE.md Â§10, even smoke runs are recorded as findings.
         cheap_2k: {
             d_model:       512
             depth:         8
             n_heads:       8
-            max_ctx:       1024   # 2× the 30m_p4 ctx; still fits ~10 GiB
+            max_ctx:       1024   # 2Ã— the 30m_p4 ctx; still fits ~10 GiB
             batch_size:    2      # double the signal/step of 30m_p4
             seq_len:       1024
-            grad_accum:    2      # 4k tok/step — enough to dampen jitter
+            grad_accum:    2      # 4k tok/step â€” enough to dampen jitter
             approx_params: "30M"
             hardware: {
                 # RTX 3090 is the sweet spot: 24 GiB headroom for the
@@ -567,12 +571,12 @@ training {
         }
 
         100m: {
-            # Honest ~100M: trunk + embedding + lm_head ≈ 103M.
+            # Honest ~100M: trunk + embedding + lm_head â‰ˆ 103M.
             # (The previous 768/10 config was 204M because embedding +
             #  lm_head + diff-block doublings added ~94M on top.)
-            # Layout: depth=8 with i%3 pattern → 3 std + 3 diff + 2 mod
-            # blocks. 3 diff-attention blocks each need 2 × (B, H, T, T)
-            # softmax tensors — at B=4 H=10 T=2048 bf16 that's ~1.6 GiB
+            # Layout: depth=8 with i%3 pattern â†’ 3 std + 3 diff + 2 mod
+            # blocks. 3 diff-attention blocks each need 2 Ã— (B, H, T, T)
+            # softmax tensors â€” at B=4 H=10 T=2048 bf16 that's ~1.6 GiB
             # per block, ~5 GiB total. Comfortable on a 40 GiB A100.
             d_model:       640
             depth:         8
@@ -643,45 +647,45 @@ training {
     }
 
     # =========================================================================
-    # OOD INTERVENTIONS (regularization {})  — see docs/technical_report.md §3
+    # OOD INTERVENTIONS (regularization {})  â€” see docs/technical_report.md Â§3
     # Math-first definitions live in lib/regularizers.neuro.
     #
     # 2026-06-03 GROUND-TRUTH BASELINE
-    # ────────────────────────────────────
-    # ALL interventions disabled. Four iterations of "fixes" (warmup ramp →
-    # PR-A1 direction flip → neuromechanical stabilisation) each closed one
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ALL interventions disabled. Four iterations of "fixes" (warmup ramp â†’
+    # PR-A1 direction flip â†’ neuromechanical stabilisation) each closed one
     # failure mode and opened another. We never measured what vanilla
     # training looks like at this scale, so we have no baseline to fix
     # against. This run establishes that baseline.
     #
     # Re-enable individual interventions ONLY after we know what
-    # `wikitext gap_ratio` looks like with no interventions at chat_ratio≈0.3.
+    # `wikitext gap_ratio` looks like with no interventions at chat_ratioâ‰ˆ0.3.
     # =========================================================================
     regularization: {
-        # ── WARMUP RAMP — REMOVED 2026-06-03 ──
-        # warmup_steps controlled a linear 0→1 ramp on all aux loss
+        # â”€â”€ WARMUP RAMP â€” REMOVED 2026-06-03 â”€â”€
+        # warmup_steps controlled a linear 0â†’1 ramp on all aux loss
         # contributions. With every intervention disabled in this
         # baseline config there is nothing to ramp, so the field has
         # been removed to make the no-op explicit. When re-enabling
         # any of (dar, pcc, isotropy, cmd, adaptive_mixture, cdga)
         # restore `warmup_steps: 2000` here.
 
-        # A. Distributional Adversarial Reweighting — DISABLED for baseline.
+        # A. Distributional Adversarial Reweighting â€” DISABLED for baseline.
         dar: { enabled: false, lambda: 1.0, hidden: 64, grl_alpha: 0.1,
                weight: 0.1 }
 
-        # B. Predictive Contrastive Coding — DISABLED for baseline.
+        # B. Predictive Contrastive Coding â€” DISABLED for baseline.
         pcc: { enabled: false, k: 4, n_negatives: 64, tau: 0.1, layers: [],
                weight: 0.1 }
 
-        # C. Isotropy whitening — DISABLED for baseline.
+        # C. Isotropy whitening â€” DISABLED for baseline.
         isotropy: { enabled: false, weight: 0.01, buffer: 4096, distance: "frobenius" }
 
-        # D. Cross-Module Disagreement — DISABLED (OOM at this batch+seq).
+        # D. Cross-Module Disagreement â€” DISABLED (OOM at this batch+seq).
         cmd: { enabled: false, weight: 0.05, divergence: "jsd",
                heads: ["lm", "narrative"] }
 
-        # E. Adaptive mixture controller — DISABLED for baseline.
+        # E. Adaptive mixture controller â€” DISABLED for baseline.
         #    (The controller is architecturally blind to prose: it sees
         #    entropy of the MIXED training batch, dominated by chat. It
         #    cannot detect the prose-ppl collapse we observed at step
@@ -695,11 +699,11 @@ training {
                             max_step_delta: 0.03,
                             entropy_ema_alpha: 0.1 }
 
-        # F. Frequency-balanced cross-entropy — DISABLED (needs corpus scan).
+        # F. Frequency-balanced cross-entropy â€” DISABLED (needs corpus scan).
         freq_balance: { enabled: false, beta: 0.5,
                         w_min: 0.2, w_max: 5.0 }
 
-        # G. Cross-Distribution Gradient Alignment (CDGA) — DISABLED
+        # G. Cross-Distribution Gradient Alignment (CDGA) â€” DISABLED
         #    (research-grade, kept off until ground-truth baseline is
         #    established and an anchor batch loader is wired in).
         cdga: { enabled: false, alpha_max: 1.0,
@@ -708,7 +712,7 @@ training {
 }
 
 # =============================================================================
-# PARAMETER SCOPES — declarative gradient isolation (the p3 architectural
+# PARAMETER SCOPES â€” declarative gradient isolation (the p3 architectural
 # fix). Bio-side populations are detached from the main LM loss; they're
 # driven by their own auxiliary objectives (Phase D), not by token CE.
 # The trunk carries the language-modeling gradient.
@@ -724,7 +728,7 @@ param_scope bio {
 }
 
 # =============================================================================
-# NEUROTRANSMITTER SYSTEMS (7 classical) — globally visible
+# NEUROTRANSMITTER SYSTEMS (7 classical) â€” globally visible
 # =============================================================================
 
 neurotransmitter dopamine {
@@ -777,40 +781,40 @@ neurotransmitter gaba {
 }
 
 # =============================================================================
-# LIBRARY IMPORTS — shared equations, constraints, regularization
+# LIBRARY IMPORTS â€” shared equations, constraints, regularization
 # =============================================================================
 
 # Canonical shared lib. The 3 standard equations live in @brian/equations
 # alongside the 5 feature-toggleable equations (hyperbolic_attention_eq,
 # rope_torus_eq, hrr_memory_eq, predictive_coding_residual_eq,
-# surprise_gated_moe_eq) — importing the whole shared registry from one
+# surprise_gated_moe_eq) â€” importing the whole shared registry from one
 # place avoids the local-shadow conflict that arose when both
 # `@/lib/equations` and `@brian/equations` resolved to the same bundled
 # `lib/equations.neuro` at unfold time and the local 3-symbol shadow
 # silently overwrote the canonical 8-symbol source of truth.
-import { standard_synapse, multiplicative_modulation, additive_modulation } from "@brian/equations"
-# Regularizer & CDGA equation libraries — math-first declarative specs
+import { standard_synapse, multiplicative_modulation, additive_modulation } from "@lib/equations"
+# Regularizer & CDGA equation libraries â€” math-first declarative specs
 # for the OOD interventions (PR2 + PR-A + PR-B). The Python lowerings
 # live in neuroslm/regularizers.py and read their hyperparameters from
 # the `regularization { ... }` block above.
-import { adaptive_mixture_update, freq_balance_loss, freq_balance_weight } from "@/lib/regularizers"
-import { cdga_conflict_coef, cdga_aligned_gradient, cdga_strength_schedule } from "@/lib/cdga"
+import { adaptive_mixture_update, freq_balance_loss, freq_balance_weight } from "@lib/regularizers"
+import { cdga_conflict_coef, cdga_aligned_gradient, cdga_strength_schedule } from "@lib/cdga"
 
-# Emergent-topology library — math-first declarations for the six
-# closed-loop telemetry mechanisms (C1–C6) introduced in RCC-Bowtie v2.
+# Emergent-topology library â€” math-first declarations for the six
+# closed-loop telemetry mechanisms (C1â€“C6) introduced in RCC-Bowtie v2.
 # See docs/EMERGENT_TOPOLOGY.md for the design rationale. The Python
 # lowering lives in neuroslm/emergent/ and is wired into the metric
 # observer by default. Telemetry-only in this PR; promotion of any
 # mechanism into a forward-pass aux loss is a future PR.
-import { nt_driver_standardise, nt_homeostat_step, nt_homeostat_readout } from "@/lib/emergent"
-import { metastable_ignition_gate, metastable_ignition_event, metastable_threshold_update } from "@/lib/emergent"
-import { pc_reentry_predict, pc_reentry_residual } from "@/lib/emergent"
-import { topological_unit_field, topological_complex_pair, topological_phase_increment, topological_charge_total, topological_wall_indicator } from "@/lib/emergent"
-import { lattice_slice_winner, lattice_specialisation_index } from "@/lib/emergent"
-import { pac_bandpass_analytic, pac_phase_and_amplitude, pac_modulation_index } from "@/lib/emergent"
+import { nt_driver_standardise, nt_homeostat_step, nt_homeostat_readout } from "@lib/emergent"
+import { metastable_ignition_gate, metastable_ignition_event, metastable_threshold_update } from "@lib/emergent"
+import { pc_reentry_predict, pc_reentry_residual } from "@lib/emergent"
+import { topological_unit_field, topological_complex_pair, topological_phase_increment, topological_charge_total, topological_wall_indicator } from "@lib/emergent"
+import { lattice_slice_winner, lattice_specialisation_index } from "@lib/emergent"
+import { pac_bandpass_analytic, pac_phase_and_amplitude, pac_modulation_index } from "@lib/emergent"
 
 # =============================================================================
-# TOGGLEABLE MECHANISMS (§14 — declared inactive; activation = ablation)
+# TOGGLEABLE MECHANISMS (Â§14 â€” declared inactive; activation = ablation)
 # =============================================================================
 # Five toggleable mechanisms from the shared @brian library. Each pairs
 # a real PyTorch impl (under neuroslm/modules/) with TDD-pinned math
@@ -821,18 +825,18 @@ import { pac_bandpass_analytic, pac_phase_and_amplitude, pac_modulation_index } 
 # below and flip `active: true` (and optionally tune its `params:`).
 #
 # See docs/features/<name>.md for hypothesis + math + wiring example.
-import { hyperbolic_attention }          from "@brian/features/hyperbolic_attention"
-import { rope_torus }                    from "@brian/features/rope_torus"
-import { hrr_memory }                    from "@brian/features/hrr_memory"
-import { predictive_coding_residual }    from "@brian/features/predictive_coding_residual"
-import { surprise_gated_moe }            from "@brian/features/surprise_gated_moe"
+import { hyperbolic_attention }          from "@lib/features/hyperbolic_attention"
+import { rope_torus }                    from "@lib/features/rope_torus"
+import { hrr_memory }                    from "@lib/features/hrr_memory"
+import { predictive_coding_residual }    from "@lib/features/predictive_coding_residual"
+import { surprise_gated_moe }            from "@lib/features/surprise_gated_moe"
 
 # =============================================================================
-# §14 FEATURE ACTIVATION — flip mechanisms ON for this architecture
+# Â§14 FEATURE ACTIVATION â€” flip mechanisms ON for this architecture
 # =============================================================================
-# Per CLAUDE.md §14 the shared lib defines every feature with
+# Per CLAUDE.md Â§14 the shared lib defines every feature with
 # `active: false` (clean baseline). The arch-local re-declarations
-# below override only the `active` flag — impl/params/endpoints are
+# below override only the `active` flag â€” impl/params/endpoints are
 # inherited from the lib spec via the compiler's merge-by-name pass.
 # To run an ablation just delete (or comment out) the matching block
 # to revert that mechanism to its bypassed baseline.
@@ -859,32 +863,32 @@ feature surprise_gated_moe {
 }
 
 # =============================================================================
-# MODULE IMPORTS — every brain region this architecture comprises
+# MODULE IMPORTS â€” every brain region this architecture comprises
 # =============================================================================
 
-import { sensory, association }                          from "@/modules/sensory"
-import { thalamus }                                       from "@/modules/thalamus"
-import { world, self_m }                                  from "@/modules/world"
-import { amygdala, insula }                               from "@/modules/amygdala"
-import { qualia }                                         from "@/modules/qualia"
-import { gws, neural_geometry }                           from "@/modules/gws"
-import { hippo, entorhinal, cerebellum }                  from "@/modules/hippocampus"
-import { pfc, acc }                                       from "@/modules/pfc"
-import { bg, forward_m, evaluator }                       from "@/modules/bg"
-import { dmn, thought_transformer, claustrum }            from "@/modules/dmn"
-import { motor }                                          from "@/modules/motor"
-import { vta, nucleus_accumbens, locus_coeruleus, raphe_nuclei, nucleus_basalis, substantia_nigra } from "@/modules/nuclei"
-import { reasoning_cortex }                               from "@/modules/reasoning_cortex"
-# Multi-Trunk-v2 specialist language cortices — see Section 5.7 of
+import { sensory, association }                          from "@lib/modules/sensory"
+import { thalamus }                                       from "@lib/modules/thalamus"
+import { world, self_m }                                  from "@lib/modules/world"
+import { amygdala, insula }                               from "@lib/modules/amygdala"
+import { qualia }                                         from "@lib/modules/qualia"
+import { gws, neural_geometry }                           from "@lib/modules/gws"
+import { hippo, entorhinal, cerebellum }                  from "@lib/modules/hippocampus"
+import { pfc, acc }                                       from "@lib/modules/pfc"
+import { bg, forward_m, evaluator }                       from "@lib/modules/bg"
+import { dmn, thought_transformer, claustrum }            from "@lib/modules/dmn"
+import { motor }                                          from "@lib/modules/motor"
+import { vta, nucleus_accumbens, locus_coeruleus, raphe_nuclei, nucleus_basalis, substantia_nigra } from "@lib/modules/nuclei"
+import { reasoning_cortex }                               from "@lib/modules/reasoning_cortex"
+# Multi-Trunk-v2 specialist language cortices â€” see Section 5.7 of
 # docs/architecture.md.  The dynamic per-token routing lives in
 # neuroslm/cortex.py (ThalamicRouter); the DSL declarations below
 # expose the four cortices to the analyser, the param_scope, and the
 # bowtie's synaptic wiring.
-import { cortex_math, cortex_code, cortex_chat, cortex_general } from "@/modules/cortex_specialists"
+import { cortex_math, cortex_code, cortex_chat, cortex_general } from "@lib/modules/cortex_specialists"
 
 # =============================================================================
 # ANATOMICAL PROJECTIONS (cross-module synaptic wiring)
-# Equation: y = weight * (x_pre @ W) — PyTorch-batched linear projection.
+# Equation: y = weight * (x_pre @ W) â€” PyTorch-batched linear projection.
 # =============================================================================
 
 # Thalamic gating (sensory bottleneck control)
@@ -893,9 +897,9 @@ synapse thalamus -> gws {
     equation: @standard_synapse
 }
 
-# ── Multi-Trunk-v2 thalamic routing (see §5.7 of docs/architecture.md) ──
+# â”€â”€ Multi-Trunk-v2 thalamic routing (see Â§5.7 of docs/architecture.md) â”€â”€
 # Four parallel projections from the thalamus to the specialist
-# language cortices.  Static `weight: 0.25` declares a uniform Δ^4 prior
+# language cortices.  Static `weight: 0.25` declares a uniform Î”^4 prior
 # at the DSL level; the per-token, content-dependent weights are
 # computed at run-time by `neuroslm.cortex.ThalamicRouter` (lexical
 # bias + zero-init learnable head + optional BEMA biological damping)
@@ -922,12 +926,12 @@ synapse thalamus -> cortex_general {
     equation: @standard_synapse
 }
 
-# State models → workspace
+# State models â†’ workspace
 synapse world -> gws {
     weight: 0.6, neurotransmitter: "glutamate",
     equation: @standard_synapse,
-    # ── §14 mechanism #4: predictive-coding residual ──
-    # World-model → conscious-workspace edge is the canonical sensory
+    # â”€â”€ Â§14 mechanism #4: predictive-coding residual â”€â”€
+    # World-model â†’ conscious-workspace edge is the canonical sensory
     # surface in PC (Rao-Ballard 1999). The trunk prediction g(x) is
     # subtracted out; only the surprise (x - g(x)), scaled by alpha=0.1,
     # propagates forward. See docs/features/predictive_coding_residual.md.
@@ -938,21 +942,21 @@ synapse self_m -> gws {
     equation: @standard_synapse
 }
 
-# GWS → memory (every conscious access broadcasts to hippocampus)
+# GWS â†’ memory (every conscious access broadcasts to hippocampus)
 synapse gws -> hippo {
     weight: 0.7, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 
-# GWS → cognitive control (top-down planning)
+# GWS â†’ cognitive control (top-down planning)
 synapse gws -> pfc {
     weight: 0.8, neurotransmitter: "glutamate",
     equation: @standard_synapse,
-    # ── §14 mechanism #1: hyperbolic attention ──
+    # â”€â”€ Â§14 mechanism #1: hyperbolic attention â”€â”€
     # The semantic broadcast from the conscious workspace to executive
     # control carries tree-shaped context (task hierarchy, plan
-    # subgoals); a Poincaré-disc metric (volume ∝ e^r) is the natural
-    # geometry. Ganea/Bécigneul/Hofmann 2018.
+    # subgoals); a PoincarÃ©-disc metric (volume âˆ e^r) is the natural
+    # geometry. Ganea/BÃ©cigneul/Hofmann 2018.
     feature: "hyperbolic_attention.edge"
 }
 synapse gws -> acc {
@@ -960,11 +964,11 @@ synapse gws -> acc {
     equation: @standard_synapse
 }
 
-# PFC → basal ganglia (action selection)
+# PFC â†’ basal ganglia (action selection)
 synapse pfc -> bg {
     weight: 0.6, neurotransmitter: "glutamate",
     equation: @standard_synapse,
-    # ── §14 mechanism #5: surprise-gated MoE ──
+    # â”€â”€ Â§14 mechanism #5: surprise-gated MoE â”€â”€
     # Action-selection cost should scale with how uncertain the policy
     # is. SurpriseGatedMoE routes confident tokens to k_min=1 expert
     # (cheap) and uncertain tokens to k_max=4 (rich mixture). Free-
@@ -972,7 +976,7 @@ synapse pfc -> bg {
     feature: "surprise_gated_moe.edge"
 }
 
-# Basal ganglia → motor (action execution; GABAergic disinhibition)
+# Basal ganglia â†’ motor (action execution; GABAergic disinhibition)
 synapse bg -> motor {
     weight: 0.8, neurotransmitter: "gaba",
     equation: @standard_synapse
@@ -984,14 +988,14 @@ synapse forward_m -> evaluator {
     equation: @standard_synapse
 }
 
-# Memory feedback → PFC (recall-guided planning)
+# Memory feedback â†’ PFC (recall-guided planning)
 synapse hippo -> pfc {
     weight: 0.5, neurotransmitter: "glutamate",
     equation: @standard_synapse,
-    # ── §14 mechanism #3: HRR-bound holographic memory ──
+    # â”€â”€ Â§14 mechanism #3: HRR-bound holographic memory â”€â”€
     # The hippocampus-to-PFC recall edge is exactly the content-
     # addressable retrieval HRR was invented for (Plate 1995). Per-batch
-    # memory M = Σ_t bind(k_t, v_t); per-token query unbinds the
+    # memory M = Î£_t bind(k_t, v_t); per-token query unbinds the
     # superposition.
     feature: "hrr_memory.edge"
 }
@@ -1000,25 +1004,25 @@ synapse entorhinal -> pfc {
     equation: @standard_synapse
 }
 
-# Re-entry loop: PFC back to thalamus (bowtie closure → Φ > 0)
+# Re-entry loop: PFC back to thalamus (bowtie closure â†’ Î¦ > 0)
 synapse pfc -> thalamus {
     weight: 0.3, neurotransmitter: "glutamate",
     equation: @standard_synapse,
-    # ── §14 mechanism #2: RoPE-on-Torus ──
+    # â”€â”€ Â§14 mechanism #2: RoPE-on-Torus â”€â”€
     # The bowtie closure carries iteration position around the re-entry
-    # loop — naturally cyclic, naturally multi-scale (token, episode,
+    # loop â€” naturally cyclic, naturally multi-scale (token, episode,
     # session). Per-slice torus periods (Su et al. 2024, generalised)
     # encode this directly into the transmission.
     feature: "rope_torus.edge"
 }
 
-# DMN → GWS (narrative broadcasts to conscious access)
+# DMN â†’ GWS (narrative broadcasts to conscious access)
 synapse dmn -> gws {
     weight: 0.5, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 
-# Cerebellum → forward model (classical conditioning, motor learning)
+# Cerebellum â†’ forward model (classical conditioning, motor learning)
 synapse cerebellum -> forward_m {
     weight: 0.6, neurotransmitter: "gaba",
     equation: @standard_synapse
@@ -1064,13 +1068,13 @@ synapse reasoning_cortex -> dmn {
 }
 
 # =============================================================================
-# NEUROMODULATION (receptor banks — fast NT modulation of regions)
+# NEUROMODULATION (receptor banks â€” fast NT modulation of regions)
 # Equation: y = output * (c * gain)        for multiplicative effects
 # Equation: y = output + (c * gain)        for additive effects
 # c = NT concentration in nt_levels dict   gain = receptor sensitivity
 # =============================================================================
 
-# PFC — DA (motivation), 5HT (impulse control), ACh (attention), GABA (inhibition)
+# PFC â€” DA (motivation), 5HT (impulse control), ACh (attention), GABA (inhibition)
 modulation dopamine -> pfc {
     effect: "multiplicative", gain: 0.6,
     equation: @multiplicative_modulation
@@ -1088,7 +1092,7 @@ modulation gaba -> pfc {
     equation: @multiplicative_modulation
 }
 
-# Hippocampus — ACh (encoding), Glu (binding)
+# Hippocampus â€” ACh (encoding), Glu (binding)
 modulation acetylcholine -> hippo {
     effect: "multiplicative", gain: 0.5,
     equation: @multiplicative_modulation
@@ -1098,7 +1102,7 @@ modulation glutamate -> hippo {
     equation: @additive_modulation
 }
 
-# Basal ganglia — DA (motivation), GABA (competition)
+# Basal ganglia â€” DA (motivation), GABA (competition)
 modulation dopamine -> bg {
     effect: "multiplicative", gain: 0.7,
     equation: @multiplicative_modulation
@@ -1108,7 +1112,7 @@ modulation gaba -> bg {
     equation: @multiplicative_modulation
 }
 
-# Thalamus — NE (arousal), GABA (relay control)
+# Thalamus â€” NE (arousal), GABA (relay control)
 modulation norepinephrine -> thalamus {
     effect: "multiplicative", gain: 0.5,
     equation: @multiplicative_modulation
@@ -1118,7 +1122,7 @@ modulation gaba -> thalamus {
     equation: @multiplicative_modulation
 }
 
-# Sensory — ACh (attention), eCB (inhibition)
+# Sensory â€” ACh (attention), eCB (inhibition)
 modulation acetylcholine -> sensory {
     effect: "multiplicative", gain: 0.3,
     equation: @multiplicative_modulation
@@ -1128,7 +1132,7 @@ modulation endocannabinoid -> sensory {
     equation: @multiplicative_modulation
 }
 
-# DMN — 5HT (introspection dampening), ACh (attention)
+# DMN â€” 5HT (introspection dampening), ACh (attention)
 modulation serotonin -> dmn {
     effect: "multiplicative", gain: 0.6,
     equation: @multiplicative_modulation
@@ -1138,30 +1142,30 @@ modulation acetylcholine -> dmn {
     equation: @multiplicative_modulation
 }
 
-# GWS — DA (salience boost)
+# GWS â€” DA (salience boost)
 modulation dopamine -> gws {
     effect: "additive", gain: 0.5,
     equation: @additive_modulation
 }
 
-# Amygdala — 5HT (fear suppression via raphe)
+# Amygdala â€” 5HT (fear suppression via raphe)
 modulation serotonin -> amygdala {
     effect: "multiplicative", gain: 0.7,
     equation: @multiplicative_modulation
 }
 
-# ACC — DA (motivation)
+# ACC â€” DA (motivation)
 modulation dopamine -> acc {
     effect: "multiplicative", gain: 0.5,
     equation: @multiplicative_modulation
 }
 
 # =============================================================================
-# FORMAL CONSTRAINT SYSTEMS — imported from lib/constraints.neuro
+# FORMAL CONSTRAINT SYSTEMS â€” imported from lib/constraints.neuro
 # =============================================================================
 # Three core constraints that govern topology and ensure biological realism:
 #   1. Narrative Consistency (sheaf cohomology proxy for narrative coherence)
-#   2. Integrated Information (Φ > 0 per Tononi 4.0 formalism)
+#   2. Integrated Information (Î¦ > 0 per Tononi 4.0 formalism)
 #   3. Bowtie Topology (narrowing-widening structure with re-entry)
 #
 # Math-first definitions live in lib/constraints.neuro. The linter verifies
@@ -1169,15 +1173,15 @@ modulation dopamine -> acc {
 # =============================================================================
 
 # =============================================================================
-# THSD (Topological Hyper-Sheaf Dynamics) — Brain Regions as Simplicial Complexes
+# THSD (Topological Hyper-Sheaf Dynamics) â€” Brain Regions as Simplicial Complexes
 # =============================================================================
-# Each brain region is formalized as a simplicial complex σᵈᵢ with:
+# Each brain region is formalized as a simplicial complex Ïƒáµˆáµ¢ with:
 #   - SheafStalk: local representation space with Fisher information metric
-#   - Topology: Tonnetz manifold with spectral gap λ₁ > 0.3
-#   - FormalSpec: cohomological constraints H¹(K;F), Φ maximization
+#   - Topology: Tonnetz manifold with spectral gap Î»â‚ > 0.3
+#   - FormalSpec: cohomological constraints HÂ¹(K;F), Î¦ maximization
 #   - Dynamics: vesicle-based mutations, NEMORI consolidation
 
-# Sensory input layer — thalamic gateway to conscious access
+# Sensory input layer â€” thalamic gateway to conscious access
 complex Thalamus {
     stalk {
         representation_dim: 256,
@@ -1214,7 +1218,7 @@ complex Thalamus {
     }
 }
 
-# Global workspace (conscious space) — recurrent amplification & integration
+# Global workspace (conscious space) â€” recurrent amplification & integration
 complex GlobalWorkspace {
     stalk {
         representation_dim: 512,
@@ -1256,7 +1260,7 @@ complex GlobalWorkspace {
     }
 }
 
-# Prefrontal cortex (executive control) — planning & decision-making
+# Prefrontal cortex (executive control) â€” planning & decision-making
 complex PrefrontalCortex {
     stalk {
         representation_dim: 384,
@@ -1293,7 +1297,7 @@ complex PrefrontalCortex {
     }
 }
 
-# Motor output layer — action generation
+# Motor output layer â€” action generation
 complex MotorCortex {
     stalk {
         representation_dim: 192,
@@ -1321,27 +1325,27 @@ complex MotorCortex {
 }
 
 # =============================================================================
-# TRIPLE GUARD — live admission gate for auto-evolution
+# TRIPLE GUARD â€” live admission gate for auto-evolution
 # =============================================================================
-# Normative reference: docs/formal_framework.md §7.
+# Normative reference: docs/formal_framework.md Â§7.
 #
 # Every mutation proposed during training (rank-one DNA patches, structural
-# rewires, gene drifts) is gated by the (Φ ∧ H¹ ∧ λ₁) admission criteria
+# rewires, gene drifts) is gated by the (Î¦ âˆ§ HÂ¹ âˆ§ Î»â‚) admission criteria
 # below.  Mutations that *would* drive any of the three scores out-of-band
 # are dropped before they reach disk; rejected mutations are persisted to
 # a sibling `step_<N>.rejected.json` audit file so the human + the
 # evolutionary loop can both see what the architecture refused to become.
 #
 # The thresholds below are intentionally PERMISSIVE for pretraining (see
-# the "PRETRAIN-FRIENDLY RECIPE" note further up — early infancy must be
+# the "PRETRAIN-FRIENDLY RECIPE" note further up â€” early infancy must be
 # allowed to wander).  They are the *safety net*, not yet the *fitness
 # pressure*; tighten them after the trunk reaches its capacity ceiling.
 #
-#   phi_min     — minimum admissible Φ after mutation; 0.0 disables.
-#   h1_max      — maximum admissible ‖H¹(K;F)‖ proxy; matches the default
+#   phi_min     â€” minimum admissible Î¦ after mutation; 0.0 disables.
+#   h1_max      â€” maximum admissible â€–HÂ¹(K;F)â€– proxy; matches the default
 #                 hallucination_threshold in CohomologyValidator (5.0).
-#   lambda_min  — minimum admissible spectral-gap proxy λ₁; 0.0 disables
-#                 until the §4.2 Tonnetz Resonance Filter lands as a real
+#   lambda_min  â€” minimum admissible spectral-gap proxy Î»â‚; 0.0 disables
+#                 until the Â§4.2 Tonnetz Resonance Filter lands as a real
 #                 Laplacian computation.
 #
 # Code path: TripleGuard.from_arch_neuro(arch_path) reads this block;
@@ -1356,4 +1360,83 @@ export formal_spec triple_guard_admission {
     lambda_min: 0.0
 }
 
-import { sheaf_narrative_consistency, formal_phi_integration, formal_bowtie_topology } from "@/lib/constraints"
+import { sheaf_narrative_consistency, formal_phi_integration, formal_bowtie_topology } from "@lib/constraints"
+
+# =============================================================================
+# LANGUAGE CORTEX â€” declarative expert/teacher/CFD wiring (2026-06-15)
+# =============================================================================
+# Normative reference: docs/formal_framework.md Â§13 (Capacity-Funneled
+# Distillation), DSL surface pinned by tests/dsl/test_*_block.py and
+# tests/dsl/test_language_cortex_lib.py.
+#
+# Historical:
+#   The old `multi_cortex { experts: [...], cfd_*: ..., distillation_*: ... }`
+#   block above (â‰ˆ120 lines) was the H21-H24 procedural surface. Every
+#   parameter was a magic key on a 1200-line god-block. This new
+#   declarative surface â€” `expert` / `distillation` / `funnel` / `warmup`
+#   blocks + a single `module brain = LanguageCortex {...}` instantiation
+#   â€” replaces ALL of the cfd_* and distillation_* keys in the legacy
+#   block with reusable, validated, linter-aware IR rows.
+#
+# The legacy `multi_cortex { ... }` block is preserved for now because
+# the harness's neuromodulator stack (lateral_inhibition_kappa,
+# router_temp_nt_gain, distillation_5ht_gain, etc.) reads from it
+# directly. A follow-up PR will migrate those NT-mod parameters to
+# their own declarative blocks and yank the legacy `multi_cortex` glue
+# entirely. For now: NEW IR rows are produced AND the legacy block
+# still drives the harness â€” the two surfaces co-exist by design.
+#
+# Wiring (matches the H22 deploy roster â€” `general` swapped from
+# `gpt2` to `smollm2_360m` on 2026-06-14; CodeGPT + Qwen2.5 unchanged):
+#   GeneralExpert    (smollm2_360m â†’ HuggingFaceTB/SmolLM2-360M)  â”€â”
+#   CodeExpert       (microsoft/CodeGPT-small-py)                  â”€â”¼â”€â–º teacher_ensemble â”€â–º pfc trunk â”€â–º
+#   ReasoningExpert  (Qwen/Qwen2.5-0.5B)                           â”€â”˜   (CFD funnel, d=512, T=4, Î±=1)
+#
+# These three experts are the ensemble used in the H22 10k-step deploy
+# (run 40952126, log: logs/vast/20260614T184807Zâ€¦_h22-smollm2-â€¦_step7800of10k.log).
+# `smollm2_360m` is a short alias resolved by `neuroslm.experts.EXPERT_ALIASES`
+# to `HuggingFaceTB/SmolLM2-360M` (360M params, 4T tokens of FineWeb-Edu
+# + SmolLM-corpus + Cosmopedia, late 2024). README.md, technical_report.md
+# and FINDINGS.md "H22 Followup" all pin this roster as the active
+# baseline. DO NOT change without re-running the bridge-CE / PPL ablation.
+
+expert GeneralExpert {
+    model:  "smollm2_360m",
+    role:   "general",
+    frozen: true
+}
+
+expert CodeExpert {
+    model:  "microsoft/CodeGPT-small-py",
+    role:   "code",
+    frozen: true
+}
+
+expert ReasoningExpert {
+    model:  "Qwen/Qwen2.5-0.5B",
+    role:   "reasoning",
+    frozen: true
+}
+
+# LanguageCortex bundles the {distillation, funnel, warmup} triplet so
+# the arch stays declarative â€” one line, not 60. See
+# /lib/LanguageCortex.neuro for the template body.
+#
+# `target: pfc` projects the funnel into the prefrontal cortex
+# population (declared in /lib/modules/pfc.neuro) â€” this is the
+# bowtie's "LM trunk" in the consciousness-architecture mapping.
+#
+# Hyperparameters preserve the legacy `multi_cortex` semantics 1:1:
+#   distillation_lambda_max:  1.0 â†’ cfd_alpha:       1.0
+#   distillation_temperature: 4.0 â†’ cfd_temperature: 4.0
+#   (d_bottleneck = 512 matches the operative trunk d_model in
+#    rcc_bowtie_30m_p4; the funnel is a no-op projection for the
+#    legacy KL path but becomes load-bearing under CFD top-K.)
+module brain = LanguageCortex {
+    teacher_warmup_steps: 10000,
+    d_bottleneck:         512,
+    cfd_temperature:      4.0,
+    cfd_alpha:            1.0,
+    target:               pfc,
+    experts:              [GeneralExpert, CodeExpert, ReasoningExpert]
+}

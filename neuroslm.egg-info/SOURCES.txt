@@ -4,6 +4,7 @@ setup.py
 neuroslm/__init__.py
 neuroslm/benchmarks.py
 neuroslm/brain.py
+neuroslm/checkpoint_push.py
 neuroslm/cli.py
 neuroslm/cli_metrics.py
 neuroslm/config.py
@@ -22,6 +23,7 @@ neuroslm/learned_opt.py
 neuroslm/learning.py
 neuroslm/lora.py
 neuroslm/project_config.py
+neuroslm/references.py
 neuroslm/regularizers.py
 neuroslm/tokenizer.py
 neuroslm/train.py
@@ -71,6 +73,7 @@ neuroslm/dsl/fast_weights.py
 neuroslm/dsl/fitness.py
 neuroslm/dsl/hypergraph_ir.py
 neuroslm/dsl/hypershape.py
+neuroslm/dsl/interpolation.py
 neuroslm/dsl/layout_intent.py
 neuroslm/dsl/maturity.py
 neuroslm/dsl/metrics.py
@@ -94,6 +97,7 @@ neuroslm/dsl/thsd_ir.py
 neuroslm/dsl/thsd_parser.py
 neuroslm/dsl/thsd_plasticity.py
 neuroslm/dsl/training_config.py
+neuroslm/dsl/warmup_rules.py
 neuroslm/dsl/wolfram.py
 neuroslm/dsl/subsystems/__init__.py
 neuroslm/dsl/subsystems/forward_model.py
@@ -148,6 +152,9 @@ neuroslm/memory/relational_graph.py
 neuroslm/memory/sheaf.py
 neuroslm/memory/sleep_cycle.py
 neuroslm/memory/store.py
+neuroslm/migrations/0001_logs_to_run_folders.py
+neuroslm/migrations/__init__.py
+neuroslm/migrations/_framework.py
 neuroslm/modules/__init__.py
 neuroslm/modules/active_dendrite.py
 neuroslm/modules/actual_causation.py
@@ -233,6 +240,7 @@ neuroslm/neurochem/vesicles.py
 neuroslm/thsd/__init__.py
 neuroslm/thsd/engine.py
 neuroslm/tools/clean.py
+neuroslm/tools/clean_lfs.py
 neuroslm/tools/compare_ckpts.py
 neuroslm/tools/model_selector.py
 neuroslm/tools/prune_ckpts.py
@@ -246,9 +254,14 @@ tests/test_adaptive_mixture_direction.py
 tests/test_adaptive_mixture_stability.py
 tests/test_brain_forward.py
 tests/test_branching_ema.py
+tests/test_brian_deploy_defaults.py
 tests/test_brian_harness.py
+tests/test_brian_logs.py
 tests/test_cdga.py
+tests/test_checkpoint_path_layout.py
+tests/test_checkpoint_push_cadence.py
 tests/test_clean.py
+tests/test_clean_lfs.py
 tests/test_cli_commands.py
 tests/test_codon_table.py
 tests/test_cognitive_closure.py
@@ -306,6 +319,8 @@ tests/test_lean_no_sorry.py
 tests/test_maturation.py
 tests/test_memory.py
 tests/test_mid_ood_uses_lm_only_loss.py
+tests/test_migrate_framework.py
+tests/test_migration_0001.py
 tests/test_module_bundler_basic.py
 tests/test_module_bundler_es6.py
 tests/test_modules.py
@@ -329,6 +344,7 @@ tests/test_predictive_coding_residual.py
 tests/test_project_config.py
 tests/test_proposal_gate.py
 tests/test_recursive_reasoning.py
+tests/test_references_exact_only.py
 tests/test_regularizer_warmup.py
 tests/test_regularizers.py
 tests/test_ribosome_genome_integration.py

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""End-to-end: the real ``architectures/lib/`` shared library compiles.
+"""End-to-end: the real ``<repo>/lib/`` shared library compiles.
 
-This is the integration smoke test for the canonical layout:
+This is the integration smoke test for the canonical 2026-06-15 layout:
 
-    architectures/
+    <repo>/
         lib/
             equations.neuro
             features/
@@ -16,8 +16,7 @@ equation extraction, feature extraction, endpoint parsing — all the way
 through ``compile_folder`` returns a coherent ``ProgramIR``.
 
 If this test ever breaks, the wiring of a new mechanism has drifted from
-the layout convention documented in
-``architectures/lib/equations.neuro``.
+the layout convention documented in ``<repo>/lib/equations.neuro``.
 """
 
 from __future__ import annotations
@@ -31,15 +30,15 @@ from neuroslm.dsl.multifile import compile_folder
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SHARED_LIB = REPO_ROOT / "architectures" / "lib"
+SHARED_LIB = REPO_ROOT / "lib"
 
 
 @pytest.fixture
 def consumer_arch(tmp_path: Path) -> Iterator[Path]:
     """Build a minimal arch dir whose arch.neuro imports the real
     shared feature. The arch lives under the real repo's
-    ``architectures/`` so ``@brian/`` resolution finds the real
-    shared lib."""
+    ``architectures/`` so ``@lib/`` resolution finds the real
+    shared lib at ``<repo>/lib/``."""
     # Place the consumer arch under the real architectures/ dir so
     # repo_root auto-discovery finds the real pyproject.toml.
     arch_dir = REPO_ROOT / "architectures" / "_test_consumer_tmp"
@@ -47,7 +46,7 @@ def consumer_arch(tmp_path: Path) -> Iterator[Path]:
     arch_file = arch_dir / "arch.neuro"
     arch_file.write_text(
         """
-        import { hyperbolic_attention } from "@brian/features/hyperbolic_attention"
+        import { hyperbolic_attention } from "@lib/features/hyperbolic_attention"
 
         architecture consumer {
             d_sem: 64,
@@ -85,7 +84,7 @@ class TestSharedLibIntegration:
     def test_consumer_arch_compiles_with_shared_feature(self, consumer_arch):
         program = compile_folder(consumer_arch)
         # The hyperbolic_attention_eq equation was loaded from
-        # @brian/equations (transitively, via the feature file).
+        # @lib/equations (transitively, via the feature file).
         eq_names = {e.name for e in program.equation_decls}
         assert "hyperbolic_attention_eq" in eq_names, (
             f"shared equation missing; got {sorted(eq_names)}"

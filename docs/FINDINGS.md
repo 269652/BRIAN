@@ -954,7 +954,7 @@ These remain real concerns even with the alignment fix:
 
 
 
-## Run 40968510 — 2026-06-14 23:30 UTC — H23 post-mortem #3 (the REAL mechanism)
+## Run 40968510 ï¿½ 2026-06-14 23:30 UTC ï¿½ H23 post-mortem #3 (the REAL mechanism)
 
 **Hypothesis.** H22 SmolLM2 swap regressed PPL/OOD because the
 exact-end alignment fix (commit `a976fee`) was *necessary but not

@@ -1,0 +1,67 @@
+# -*- coding: utf-8 -*-
+# LanguageCortex — reusable LM-trunk + expert-ensemble + teacher-cutoff.
+#
+# Pinned by ``tests/dsl/test_language_cortex_lib.py``. This module
+# wires a Capacity-Funneled Distillation (CFD) loop:
+#
+#   experts ──► funnel(bottleneck=%d_bottleneck%) ──► %target%
+#                       │
+#                       └── warmup: detach teacher after %teacher_warmup_steps% steps
+#
+# Call sites instantiate it with ::
+#
+#     module brain = LanguageCortex {
+#         teacher_warmup_steps: 10000,
+#         d_bottleneck:         512,
+#         cfd_temperature:      4.0,
+#         cfd_alpha:            0.7,
+#         experts:              [MathExpert, CodeExpert, LangExpert],
+#         target:               pfc           # optional, defaults to lm_trunk
+#     }
+#
+# Required params:
+#   experts              — list of expert block names (declared in caller)
+#
+# Optional params (with defaults shown below):
+#   target               — population name the funnel projects into
+#   teacher_warmup_steps — int  — steps to keep teacher live before cutoff
+#   d_bottleneck         — int  — CFD funnel width
+#   cfd_temperature      — float — softmax temperature for KD
+#   cfd_alpha            — float — KD weight in the combined loss
+
+export module LanguageCortex {
+    params: {
+        teacher_warmup_steps: 10000,
+        d_bottleneck:         512,
+        cfd_temperature:      4.0,
+        cfd_alpha:            0.7,
+        target:               lm_trunk,
+        experts:              []
+    },
+    body: """
+distillation cfd_loss {
+    method:      "capacity_funneled",
+    temperature: %cfd_temperature%,
+    alpha:       %cfd_alpha%,
+    bottleneck:  %d_bottleneck%,
+    loss:        "kl_div"
+}
+
+funnel teacher_ensemble {
+    inputs:       [%experts%],
+    target:       %target%,
+    d_bottleneck: %d_bottleneck%,
+    gate:         "softmax_router",
+    method:       cfd_loss
+}
+
+warmup teacher_cutoff {
+    target:     teacher_ensemble,
+    action:     "detach",
+    combinator: "any",
+    rules: [
+        { metric: "step", op: ">=", value: %teacher_warmup_steps% }
+    ]
+}
+"""
+}
