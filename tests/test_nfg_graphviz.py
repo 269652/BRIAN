@@ -227,6 +227,64 @@ class TestEmitDotFromHypergraph:
         assert rgba_pat.search(dot), "opacity<1.0 must produce #RRGGBBAA hex in DOT"
 
 
+class TestShowPanels:
+    """show_panels=False must suppress all cluster_ subgraphs; nodes still present."""
+
+    def _ir(self):
+        from neuroslm.compiler.hypergraph_ir import lift_arch_to_hypergraph
+        return lift_arch_to_hypergraph(RCC_ARCH)
+
+    def test_show_panels_true_emits_clusters(self):
+        from neuroslm.compiler.nfg_graphviz import emit_dot_from_hypergraph
+        dot = emit_dot_from_hypergraph(self._ir(), show_panels=True)
+        assert "subgraph cluster_" in dot
+
+    def test_show_panels_false_no_cluster_subgraphs(self):
+        from neuroslm.compiler.nfg_graphviz import emit_dot_from_hypergraph
+        dot = emit_dot_from_hypergraph(self._ir(), show_panels=False)
+        assert "subgraph cluster_" not in dot
+
+    def test_show_panels_false_nodes_still_present(self):
+        """All populations must still appear as nodes even without panels."""
+        import re
+        from neuroslm.compiler.nfg_graphviz import emit_dot_from_hypergraph
+        ir = self._ir()
+        dot = emit_dot_from_hypergraph(ir, show_panels=False)
+        for n in ir.nodes:
+            if n.kind == "population":
+                pat = re.compile(
+                    rf'(^|\n)\s*("?){re.escape(n.name)}\2\s*\[',
+                    re.MULTILINE,
+                )
+                assert pat.search(dot), \
+                    f"population {n.name} missing when show_panels=False"
+
+    def test_show_panels_default_is_true(self):
+        """Omitting show_panels keeps clusters (backward compat)."""
+        from neuroslm.compiler.nfg_graphviz import emit_dot_from_hypergraph
+        dot = emit_dot_from_hypergraph(self._ir())
+        assert "subgraph cluster_" in dot
+
+    def test_config_show_panels_false_parsed(self, tmp_path):
+        """ProjectConfig reads show_panels=false from brian.toml."""
+        import tomllib
+        from neuroslm.project_config import load_project_config
+        (tmp_path / "brian.toml").write_bytes(
+            b"[current]\narch = \"architectures/master\"\n"
+            b"[nfg]\nshow_panels = false\n"
+        )
+        cfg = load_project_config(tmp_path)
+        assert cfg.nfg_show_panels is False
+
+    def test_config_show_panels_default_true(self, tmp_path):
+        (tmp_path / "brian.toml").write_bytes(
+            b"[current]\narch = \"architectures/master\"\n"
+        )
+        from neuroslm.project_config import load_project_config
+        cfg = load_project_config(tmp_path)
+        assert cfg.nfg_show_panels is True
+
+
 class TestHexWithAlpha:
     """Unit tests for the _hex_with_alpha colour helper."""
 

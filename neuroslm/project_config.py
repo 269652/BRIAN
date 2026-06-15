@@ -73,6 +73,8 @@ _DEFAULT_NFG_ENGINE = "dot"
 _DEFAULT_NFG_SPRING_GAIN = 0.9
 # Cluster panel background opacity (0.0 = transparent, 1.0 = opaque).
 _DEFAULT_NFG_PANEL_OPACITY = 1.0
+# Show/hide cluster panel background rectangles entirely.
+_DEFAULT_NFG_SHOW_PANELS = True
 _DEFAULT_PRESET = ""
 _DEFAULT_HARDWARE = ""
 _DEFAULT_STEPS = 0  # 0 = "no opinion — caller picks"
@@ -152,6 +154,8 @@ class ProjectConfig:
     nfg_spring_gain: float = _DEFAULT_NFG_SPRING_GAIN
     # Cluster panel background alpha (0.0–1.0).
     nfg_panel_opacity: float = _DEFAULT_NFG_PANEL_OPACITY
+    # Whether to render cluster panel background rectangles at all.
+    nfg_show_panels: bool = _DEFAULT_NFG_SHOW_PANELS
     # ── Global training defaults ──
     # Read from the ``[defaults]`` section of ``brian.toml``. Empty means
     # "no opinion — let the arch or CLI decide". Merged into a parsed
@@ -430,6 +434,7 @@ def load_project_config(
     nfg_engine = str(nfg_section.get("engine", _DEFAULT_NFG_ENGINE))
     nfg_spring_gain = float(nfg_section.get("spring_gain", _DEFAULT_NFG_SPRING_GAIN))
     nfg_panel_opacity = float(nfg_section.get("panel_opacity", _DEFAULT_NFG_PANEL_OPACITY))
+    nfg_show_panels = bool(nfg_section.get("show_panels", _DEFAULT_NFG_SHOW_PANELS))
     default_preset = str(defaults_section.get("preset", _DEFAULT_PRESET))
     default_hardware = str(
         defaults_section.get("hardware", _DEFAULT_HARDWARE)
@@ -467,6 +472,7 @@ def load_project_config(
     env_nfg_engine = os.environ.get("BRIAN_NFG_ENGINE")
     env_nfg_spring_gain = os.environ.get("BRIAN_NFG_SPRING_GAIN")
     env_nfg_panel_opacity = os.environ.get("BRIAN_NFG_PANEL_OPACITY")
+    env_nfg_show_panels = os.environ.get("BRIAN_NFG_SHOW_PANELS")
     env_default_preset = os.environ.get("BRIAN_DEFAULT_PRESET")
     env_default_hardware = os.environ.get("BRIAN_DEFAULT_HARDWARE")
     env_default_steps = os.environ.get("BRIAN_DEFAULT_STEPS")
@@ -529,6 +535,8 @@ def load_project_config(
             nfg_panel_opacity = float(env_nfg_panel_opacity)
         except ValueError:
             pass
+    if env_nfg_show_panels is not None and env_nfg_show_panels != "":
+        nfg_show_panels = env_nfg_show_panels.strip().lower() not in ("0", "false", "no", "off")
     if env_default_preset is not None:
         default_preset = env_default_preset
     if env_default_hardware is not None:
@@ -585,6 +593,7 @@ def load_project_config(
         nfg_engine=nfg_engine,
         nfg_spring_gain=nfg_spring_gain,
         nfg_panel_opacity=nfg_panel_opacity,
+        nfg_show_panels=nfg_show_panels,
         default_preset=default_preset,
         default_hardware=default_hardware,
         default_steps=default_steps,

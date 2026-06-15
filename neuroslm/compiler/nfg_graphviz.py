@@ -31,7 +31,8 @@ with 30+ populations, 7 NT systems, 40+ edges):
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from contextlib import contextmanager
+from typing import Any, Dict, Generator, Iterable, List, Optional
 
 from neuroslm.compiler.hypergraph_ir import HypergraphIR, HyperNode, HyperEdge
 
@@ -433,6 +434,21 @@ def _compute_back_edges(ir: HypergraphIR) -> set:
     return back_edges
 
 
+@contextmanager
+def _panel(g, name: str, show: bool, **cluster_attrs) -> Generator:
+    """Yield a cluster subgraph (show=True) or the parent graph (show=False).
+
+    When show=False every node/attr call goes straight to g so the diagram
+    keeps all nodes but drops the coloured background rectangles.
+    """
+    if show:
+        with g.subgraph(name=name) as c:
+            c.attr(**cluster_attrs)
+            yield c
+    else:
+        yield g
+
+
 def emit_dot_from_hypergraph(
     ir: HypergraphIR,
     *,
@@ -442,6 +458,7 @@ def emit_dot_from_hypergraph(
     dpi: int = 96,
     spring_gain: float = 0.9,
     panel_opacity: float = 1.0,
+    show_panels: bool = True,
 ) -> str:
     """Build a DOT-string view of the hypergraph.
 
@@ -468,6 +485,11 @@ def emit_dot_from_hypergraph(
                        transparent, 1.0 = fully opaque). Useful with
                        ``circo``/``fdp`` where clusters can overlap.
                        Configurable via ``[nfg].panel_opacity`` in brian.toml.
+        show_panels:   When False, all cluster subgraph wrappers are omitted —
+                       nodes are emitted directly into the main digraph, so no
+                       coloured background rectangles appear. Edges and labels
+                       are unaffected. Configurable via ``[nfg].show_panels``
+                       in brian.toml (default True).
 
     Returns:
         A complete DOT source string ready for ``dot -Tpng`` or
@@ -494,10 +516,10 @@ def emit_dot_from_hypergraph(
     # 1. Architecture cluster (single node, top)
     arch_nodes = [n for n in ir.nodes if n.kind == "architecture"]
     if arch_nodes:
-        with g.subgraph(name="cluster_architecture") as c:
-            c.attr(label="architecture", style="rounded,dashed",
-                   color="#888888", fontsize="14",
-                   bgcolor=_hex_with_alpha("#fafafa", panel_opacity))
+        with _panel(g, "cluster_architecture", show_panels,
+                    label="architecture", style="rounded,dashed",
+                    color="#888888", fontsize="14",
+                    bgcolor=_hex_with_alpha("#fafafa", panel_opacity)) as c:
             for n in arch_nodes:
                 style = _KIND_STYLES["architecture"]
                 c.node(n.name, label=_arch_label(n), **style)
@@ -513,16 +535,12 @@ def emit_dot_from_hypergraph(
         if not nodes_in_region:
             continue
         style = _REGION_STYLES.get(region, _REGION_STYLES["other_trunk"])
-        with g.subgraph(name=f"cluster_{region}") as c:
-            c.attr(label=style["label"], style="rounded,dashed",
-                   color=style["color"], fontsize="13",
-                   bgcolor=_hex_with_alpha(style["fillcolor"], panel_opacity))
-            # rank=same forces all nodes in this anatomical region onto
-            # a single horizontal row (the cluster becomes a wide
-            # horizontal band). With pack=true at the graph level,
-            # narrow clusters get tiled side-by-side rather than
-            # leaving white space around centered single rows.
-            c.attr(rank="same")
+        with _panel(g, f"cluster_{region}", show_panels,
+                    label=style["label"], style="rounded,dashed",
+                    color=style["color"], fontsize="13",
+                    bgcolor=_hex_with_alpha(style["fillcolor"], panel_opacity)) as c:
+            if show_panels:
+                c.attr(rank="same")
             for n in nodes_in_region:
                 # Tint each population's fill by its region so they stay
                 # visually anchored to the cluster even when the layout
@@ -545,13 +563,12 @@ def emit_dot_from_hypergraph(
     trunk_nodes  = [n for n in ir.nodes if n.kind == "lm_trunk"]
     if expert_nodes or trunk_nodes:
         style = _REGION_STYLES["multi_cortex"]
-        with g.subgraph(name="cluster_multi_cortex") as c:
-            c.attr(label=style["label"], style="rounded,solid",
-                   color=style["color"], fontsize="13",
-                   bgcolor=_hex_with_alpha(style["fillcolor"], panel_opacity))
-            # Single horizontal row: lm_trunk + cortex experts side
-            # by side (same rationale as the anatomical regions above).
-            c.attr(rank="same")
+        with _panel(g, "cluster_multi_cortex", show_panels,
+                    label=style["label"], style="rounded,solid",
+                    color=style["color"], fontsize="13",
+                    bgcolor=_hex_with_alpha(style["fillcolor"], panel_opacity)) as c:
+            if show_panels:
+                c.attr(rank="same")
             for n in trunk_nodes:
                 trunk_style = dict(_KIND_STYLES["lm_trunk"])
                 c.node(n.name, label=_trunk_label(n), **trunk_style)
@@ -562,14 +579,12 @@ def emit_dot_from_hypergraph(
     # 3. Neurotransmitter cluster
     nt_nodes = [n for n in ir.nodes if n.kind == "neurotransmitter"]
     if nt_nodes:
-        with g.subgraph(name="cluster_neurotransmitters") as c:
-            c.attr(label="neurotransmitters", style="rounded,dashed",
-                   color="#7a6b00", fontsize="14",
-                   bgcolor=_hex_with_alpha("#fffcec", panel_opacity))
-            # 7 NTs sit at the top as a single broadcast-bus row —
-            # matches the brain's "neuromodulators are global, not
-            # hierarchical" mental model.
-            c.attr(rank="same")
+        with _panel(g, "cluster_neurotransmitters", show_panels,
+                    label="neurotransmitters", style="rounded,dashed",
+                    color="#7a6b00", fontsize="14",
+                    bgcolor=_hex_with_alpha("#fffcec", panel_opacity)) as c:
+            if show_panels:
+                c.attr(rank="same")
             for n in nt_nodes:
                 style = dict(_KIND_STYLES["neurotransmitter"])
                 # Tint the NT node by its semantic colour so the modulator
@@ -719,6 +734,7 @@ def render_hypergraph(
     dpi: int = 96,
     spring_gain: float = 0.9,
     panel_opacity: float = 1.0,
+    show_panels: bool = True,
 ) -> str:
     """Render the hypergraph to disk.
 
@@ -735,6 +751,7 @@ def render_hypergraph(
         dpi:           PNG rasterization DPI (default 96). Ignored by SVG/PDF.
         spring_gain:   K parameter for spring-based engines (fdp/sfdp/neato).
         panel_opacity: Alpha for cluster panel backgrounds (0.0–1.0).
+        show_panels:   When False, cluster background panels are omitted.
 
     Returns:
         Absolute path to the file actually written.
@@ -743,7 +760,8 @@ def render_hypergraph(
 
     dot_src = emit_dot_from_hypergraph(
         ir, engine=engine, title=title, heat=heat, dpi=dpi,
-        spring_gain=spring_gain, panel_opacity=panel_opacity)
+        spring_gain=spring_gain, panel_opacity=panel_opacity,
+        show_panels=show_panels)
     out = _Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -778,6 +796,7 @@ def render_arch(
     dpi: int = 96,
     spring_gain: float = 0.9,
     panel_opacity: float = 1.0,
+    show_panels: bool = True,
 ) -> str:
     """Convenience: lift an arch folder and render in one call."""
     from neuroslm.compiler.hypergraph_ir import lift_arch_to_hypergraph
@@ -790,4 +809,5 @@ def render_arch(
             title = None
     return render_hypergraph(ir, out_path, format=format,
                              engine=engine, title=title, heat=heat, dpi=dpi,
-                             spring_gain=spring_gain, panel_opacity=panel_opacity)
+                             spring_gain=spring_gain, panel_opacity=panel_opacity,
+                             show_panels=show_panels)

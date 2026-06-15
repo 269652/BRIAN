@@ -166,3 +166,4 @@ spring_gain = 0.9
 # Useful with circo / fdp where anatomical region panels can overlap.
 # SVG and PNG both honour RGBA hex colours (#RRGGBBAA) from Graphviz 2.x onward.
 panel_opacity = 0.40
+show_panels = false

@@ -10,66 +10,6 @@
 <title>nfg</title>
 <polygon fill="white" stroke="none" points="-36,36 -36,-3035.8 2058.98,-3035.8 2058.98,36 -36,36"/>
 <text xml:space="preserve" text-anchor="middle" x="1011.49" y="-2974.9" font-family="Helvetica,sans-Serif" font-size="22.00">NFG · master</text>
-<g id="clust1" class="cluster">
-<title>cluster_architecture</title>
-<path fill="#fafafa" fill-opacity="0.400000" stroke="#888888" stroke-dasharray="5,2" d="M1767,-702C1767,-702 1867,-702 1867,-702 1873,-702 1879,-708 1879,-714 1879,-714 1879,-747.5 1879,-747.5 1879,-753.5 1873,-759.5 1867,-759.5 1867,-759.5 1767,-759.5 1767,-759.5 1761,-759.5 1755,-753.5 1755,-747.5 1755,-747.5 1755,-714 1755,-714 1755,-708 1761,-702 1767,-702"/>
-<text xml:space="preserve" text-anchor="middle" x="1817" y="-742.2" font-family="Helvetica,sans-Serif" font-size="14.00">architecture</text>
-</g>
-<g id="clust2" class="cluster">
-<title>cluster_sensory_motor</title>
-<path fill="#e8f1fb" fill-opacity="0.400000" stroke="#1f4d75" stroke-dasharray="5,2" d="M714,-696.69C714,-696.69 1869.23,-696.69 1869.23,-696.69 1875.23,-696.69 1881.23,-702.69 1881.23,-708.69 1881.23,-708.69 1881.23,-2051 1881.23,-2051 1881.23,-2057 1875.23,-2063 1869.23,-2063 1869.23,-2063 714,-2063 714,-2063 708,-2063 702,-2057 702,-2051 702,-2051 702,-708.69 702,-708.69 702,-702.69 708,-696.69 714,-696.69"/>
-<text xml:space="preserve" text-anchor="middle" x="1291.62" y="-2046.65" font-family="Helvetica,sans-Serif" font-size="13.00">sensory · motor</text>
-</g>
-<g id="clust3" class="cluster">
-<title>cluster_executive</title>
-<path fill="#eef3f9" fill-opacity="0.400000" stroke="#244466" stroke-dasharray="5,2" d="M274.19,-795.3C274.19,-795.3 1752.25,-795.3 1752.25,-795.3 1758.25,-795.3 1764.25,-801.3 1764.25,-807.3 1764.25,-807.3 1764.25,-2536.37 1764.25,-2536.37 1764.25,-2542.37 1758.25,-2548.37 1752.25,-2548.37 1752.25,-2548.37 274.19,-2548.37 274.19,-2548.37 268.19,-2548.37 262.19,-2542.37 262.19,-2536.37 262.19,-2536.37 262.19,-807.3 262.19,-807.3 262.19,-801.3 268.19,-795.3 274.19,-795.3"/>
-<text xml:space="preserve" text-anchor="middle" x="1013.22" y="-2532.02" font-family="Helvetica,sans-Serif" font-size="13.00">executive trunk</text>
-</g>
-<g id="clust4" class="cluster">
-<title>cluster_self_world</title>
-<path fill="#f4f4f4" fill-opacity="0.400000" stroke="#444444" stroke-dasharray="5,2" d="M12,-497.63C12,-497.63 727.83,-497.63 727.83,-497.63 733.83,-497.63 739.83,-503.63 739.83,-509.63 739.83,-509.63 739.83,-2285 739.83,-2285 739.83,-2291 733.83,-2297 727.83,-2297 727.83,-2297 12,-2297 12,-2297 6,-2297 0,-2291 0,-2285 0,-2285 0,-509.63 0,-509.63 0,-503.63 6,-497.63 12,-497.63"/>
-<text xml:space="preserve" text-anchor="middle" x="369.91" y="-2280.65" font-family="Helvetica,sans-Serif" font-size="13.00">self · world models</text>
-</g>
-<g id="clust5" class="cluster">
-<title>cluster_memory</title>
-<path fill="#e7fbf0" fill-opacity="0.400000" stroke="#0a6e3d" stroke-dasharray="5,2" d="M687.27,-450.35C687.27,-450.35 1437.62,-450.35 1437.62,-450.35 1443.62,-450.35 1449.62,-456.35 1449.62,-462.35 1449.62,-462.35 1449.62,-2954.3 1449.62,-2954.3 1449.62,-2960.3 1443.62,-2966.3 1437.62,-2966.3 1437.62,-2966.3 687.27,-2966.3 687.27,-2966.3 681.27,-2966.3 675.27,-2960.3 675.27,-2954.3 675.27,-2954.3 675.27,-462.35 675.27,-462.35 675.27,-456.35 681.27,-450.35 687.27,-450.35"/>
-<text xml:space="preserve" text-anchor="middle" x="1062.44" y="-2949.95" font-family="Helvetica,sans-Serif" font-size="13.00">memory system (hippo · entorhinal · cerebellum)</text>
-</g>
-<g id="clust6" class="cluster">
-<title>cluster_limbic</title>
-<path fill="#ffe8f3" fill-opacity="0.400000" stroke="#b00060" stroke-dasharray="5,2" d="M140.69,-1616.96C140.69,-1616.96 840.1,-1616.96 840.1,-1616.96 846.1,-1616.96 852.1,-1622.96 852.1,-1628.96 852.1,-1628.96 852.1,-1808.21 852.1,-1808.21 852.1,-1814.21 846.1,-1820.21 840.1,-1820.21 840.1,-1820.21 140.69,-1820.21 140.69,-1820.21 134.69,-1820.21 128.69,-1814.21 128.69,-1808.21 128.69,-1808.21 128.69,-1628.96 128.69,-1628.96 128.69,-1622.96 134.69,-1616.96 140.69,-1616.96"/>
-<text xml:space="preserve" text-anchor="middle" x="490.39" y="-1803.86" font-family="Helvetica,sans-Serif" font-size="13.00">limbic</text>
-</g>
-<g id="clust7" class="cluster">
-<title>cluster_basal_ganglia</title>
-<path fill="#fff0e0" fill-opacity="0.400000" stroke="#cc4400" stroke-dasharray="5,2" d="M1055.61,-1120.42C1055.61,-1120.42 2010.98,-1120.42 2010.98,-1120.42 2016.98,-1120.42 2022.98,-1126.42 2022.98,-1132.42 2022.98,-1132.42 2022.98,-1766.83 2022.98,-1766.83 2022.98,-1772.83 2016.98,-1778.83 2010.98,-1778.83 2010.98,-1778.83 1055.61,-1778.83 1055.61,-1778.83 1049.61,-1778.83 1043.61,-1772.83 1043.61,-1766.83 1043.61,-1766.83 1043.61,-1132.42 1043.61,-1132.42 1043.61,-1126.42 1049.61,-1120.42 1055.61,-1120.42"/>
-<text xml:space="preserve" text-anchor="middle" x="1533.3" y="-1762.48" font-family="Helvetica,sans-Serif" font-size="13.00">basal ganglia</text>
-</g>
-<g id="clust8" class="cluster">
-<title>cluster_nuclei</title>
-<path fill="#fffbe6" fill-opacity="0.400000" stroke="#7a6b00" stroke-dasharray="5,2" d="M565.47,-903.54C565.47,-903.54 1630.02,-903.54 1630.02,-903.54 1636.02,-903.54 1642.02,-909.54 1642.02,-915.54 1642.02,-915.54 1642.02,-1250.26 1642.02,-1250.26 1642.02,-1256.26 1636.02,-1262.26 1630.02,-1262.26 1630.02,-1262.26 565.47,-1262.26 565.47,-1262.26 559.47,-1262.26 553.47,-1256.26 553.47,-1250.26 553.47,-1250.26 553.47,-915.54 553.47,-915.54 553.47,-909.54 559.47,-903.54 565.47,-903.54"/>
-<text xml:space="preserve" text-anchor="middle" x="1097.74" y="-1245.91" font-family="Helvetica,sans-Serif" font-size="13.00">neuromodulator nuclei</text>
-</g>
-<g id="clust9" class="cluster">
-<title>cluster_other_trunk</title>
-<path fill="#f7f7f7" fill-opacity="0.400000" stroke="#666666" stroke-dasharray="5,2" d="M197.4,-1408.25C197.4,-1408.25 316.9,-1408.25 316.9,-1408.25 322.9,-1408.25 328.9,-1414.25 328.9,-1420.25 328.9,-1420.25 328.9,-1470.25 328.9,-1470.25 328.9,-1476.25 322.9,-1482.25 316.9,-1482.25 316.9,-1482.25 197.4,-1482.25 197.4,-1482.25 191.4,-1482.25 185.4,-1476.25 185.4,-1470.25 185.4,-1470.25 185.4,-1420.25 185.4,-1420.25 185.4,-1414.25 191.4,-1408.25 197.4,-1408.25"/>
-<text xml:space="preserve" text-anchor="middle" x="257.15" y="-1465.9" font-family="Helvetica,sans-Serif" font-size="13.00">other trunk</text>
-</g>
-<g id="clust10" class="cluster">
-<title>cluster_other_bio</title>
-<path fill="#fff5ec" fill-opacity="0.400000" stroke="#aa5500" stroke-dasharray="5,2" d="M233.97,-1310.18C233.97,-1310.18 374.47,-1310.18 374.47,-1310.18 380.47,-1310.18 386.47,-1316.18 386.47,-1322.18 386.47,-1322.18 386.47,-1372.18 386.47,-1372.18 386.47,-1378.18 380.47,-1384.18 374.47,-1384.18 374.47,-1384.18 233.97,-1384.18 233.97,-1384.18 227.97,-1384.18 221.97,-1378.18 221.97,-1372.18 221.97,-1372.18 221.97,-1322.18 221.97,-1322.18 221.97,-1316.18 227.97,-1310.18 233.97,-1310.18"/>
-<text xml:space="preserve" text-anchor="middle" x="304.22" y="-1367.83" font-family="Helvetica,sans-Serif" font-size="13.00">other bio</text>
-</g>
-<g id="clust11" class="cluster">
-<title>cluster_multi_cortex</title>
-<path fill="#f5e8ff" fill-opacity="0.400000" stroke="#7a2b9c" d="M864.58,0C864.58,0 1369.58,0 1369.58,0 1375.58,0 1381.58,-6 1381.58,-12 1381.58,-12 1381.58,-539.37 1381.58,-539.37 1381.58,-545.37 1375.58,-551.37 1369.58,-551.37 1369.58,-551.37 864.58,-551.37 864.58,-551.37 858.58,-551.37 852.58,-545.37 852.58,-539.37 852.58,-539.37 852.58,-12 852.58,-12 852.58,-6 858.58,0 864.58,0"/>
-<text xml:space="preserve" text-anchor="middle" x="1117.08" y="-535.02" font-family="Helvetica,sans-Serif" font-size="13.00">multi&#45;cortex (GPT&#45;2 experts)</text>
-</g>
-<g id="clust12" class="cluster">
-<title>cluster_neurotransmitters</title>
-<path fill="#fffcec" fill-opacity="0.400000" stroke="#7a6b00" stroke-dasharray="5,2" d="M287.75,-328.59C287.75,-328.59 1649.49,-328.59 1649.49,-328.59 1655.49,-328.59 1661.49,-334.59 1661.49,-340.59 1661.49,-340.59 1661.49,-1925.27 1661.49,-1925.27 1661.49,-1931.27 1655.49,-1937.27 1649.49,-1937.27 1649.49,-1937.27 287.75,-1937.27 287.75,-1937.27 281.75,-1937.27 275.75,-1931.27 275.75,-1925.27 275.75,-1925.27 275.75,-340.59 275.75,-340.59 275.75,-334.59 281.75,-328.59 287.75,-328.59"/>
-<text xml:space="preserve" text-anchor="middle" x="968.62" y="-1919.97" font-family="Helvetica,sans-Serif" font-size="14.00">neurotransmitters</text>
-</g>
 <!-- master -->
 <g id="node1" class="node">
 <title>master</title>
@@ -882,9 +822,9 @@
 <title>cortex_reasoning&#45;&gt;lm_trunk</title>
 <path fill="none" stroke="#7a2b9c" stroke-width="2" d="M1125.94,-405.21C1142.57,-322.46 1170.57,-149.04 1180.01,-69.81"/>
 <polygon fill="#7a2b9c" stroke="#7a2b9c" stroke-width="2" points="1183.13,-70.24 1181.02,-60.94 1176.87,-69.52 1183.13,-70.24"/>
-<text xml:space="preserve" text-anchor="start" x="1115.83" y="-255.04" font-family="Times New Roman,serif" font-size="9.00" fill="#7a2b9c">KL distill</text>
-<text xml:space="preserve" text-anchor="start" x="1115.83" y="-244.54" font-family="Times New Roman,serif" font-size="9.00" fill="#7a2b9c">λ_max=1.0</text>
-<text xml:space="preserve" text-anchor="middle" x="1136.08" y="-234.04" font-family="Times New Roman,serif" font-size="9.00" fill="#7a2b9c">T=4.0</text>
+<text xml:space="preserve" text-anchor="start" x="1156.33" y="-255.04" font-family="Times New Roman,serif" font-size="9.00" fill="#7a2b9c">KL distill</text>
+<text xml:space="preserve" text-anchor="start" x="1156.33" y="-244.54" font-family="Times New Roman,serif" font-size="9.00" fill="#7a2b9c">λ_max=1.0</text>
+<text xml:space="preserve" text-anchor="middle" x="1176.58" y="-234.04" font-family="Times New Roman,serif" font-size="9.00" fill="#7a2b9c">T=4.0</text>
 </g>
 <!-- dopamine -->
 <g id="node37" class="node">
