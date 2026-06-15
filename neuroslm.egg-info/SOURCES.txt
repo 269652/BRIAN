@@ -18,6 +18,7 @@ neuroslm/genome.py
 neuroslm/genomes.py
 neuroslm/hardware.py
 neuroslm/harness.py
+neuroslm/hooks.py
 neuroslm/interactive.py
 neuroslm/learned_opt.py
 neuroslm/learning.py
@@ -258,6 +259,7 @@ tests/test_brian_deploy_defaults.py
 tests/test_brian_harness.py
 tests/test_brian_logs.py
 tests/test_cdga.py
+tests/test_checkpoint_excludes_frozen_experts.py
 tests/test_checkpoint_path_layout.py
 tests/test_checkpoint_push_cadence.py
 tests/test_clean.py
@@ -269,6 +271,7 @@ tests/test_colab_integration.py
 tests/test_config_presets.py
 tests/test_consciousness.py
 tests/test_data_adaptive_mixture.py
+tests/test_deploy_failure_safety.py
 tests/test_deploy_uses_run_workspace.py
 tests/test_discoveries_lean.py
 tests/test_discoveries_records.py
@@ -289,6 +292,7 @@ tests/test_evol_dna_has_experts.py
 tests/test_evolution_pipeline_e2e.py
 tests/test_evolution_pressure_gate.py
 tests/test_evolution_training_loop.py
+tests/test_feature_flag_ablation.py
 tests/test_fitness_composer.py
 tests/test_fitness_configuration.py
 tests/test_fitness_load_or_default.py
@@ -303,6 +307,7 @@ tests/test_hardware_aware_preset_selection.py
 tests/test_harness_heatmap_hook.py
 tests/test_harness_schedule.py
 tests/test_heatmap_publisher.py
+tests/test_hooks.py
 tests/test_hotpath_mutator.py
 tests/test_hpb_phase1_grid.py
 tests/test_hpb_phase2_msgra.py

@@ -63,6 +63,62 @@ per change and saves ~2 hours per regression. Always pay the 2 minutes.
 
 ---
 
+## 1c. Use `brian test`, not raw `pytest`
+
+The repo has a unified test driver — **always** use it instead of
+calling `pytest` directly. The three subcommands match the loop you
+actually want:
+
+| Command            | What it runs                                    | When to use it                                              |
+| ------------------ | ----------------------------------------------- | ----------------------------------------------------------- |
+| `brian test quick` | The 30 most-recently-modified test files (mtime) | After editing a handful of tests — re-checks your active edits |
+| `brian test fast`  | The 30 fastest individual tests (cached durations) | Near-zero-cost smoke check; loads most of the import graph in <5 s |
+| `brian test full`  | Canonical full sweep + refresh duration cache   | Before commit / push; ~8 min on a workstation               |
+| `brian test PATH`  | (legacy) pytest on a path/pattern               | Targeted re-runs of a single file or directory              |
+
+Why this matters:
+
+- **One source of truth for the exclusion list.** Files like
+  `tests/test_feature_flag_ablation.py`, `tests/test_brian_compile.py`,
+  and `tests/training/` are excluded by `full` (they're broken or very
+  slow) and ALSO skipped by `quick`/`fast` so they never block your loop.
+  Raw `pytest` calls don't share this list and routinely trip on the
+  same broken files.
+- **`fast` is free**. The duration cache at `.neuro/test_durations.json`
+  is rewritten on every `brian test full`. After one full sweep you get
+  a 30-test smoke check for the price of about 5 seconds of wall time.
+- **`quick` tracks your work**. Picks files by mtime, so the moment you
+  edit a test file it jumps into the next `quick` run automatically —
+  no need to remember to pass `-k` or a path.
+- **No more "I ran pytest on a subset and missed a regression"**. The
+  `full` sweep is the same invocation every time, on every machine.
+
+**Forbidden patterns** (will produce drift between contributors):
+
+```
+# DON'T:
+pytest tests/foo.py
+.venv\Scripts\python.exe -m pytest tests/ -q
+python -m pytest tests/dsl -k something
+
+# DO:
+brian test tests/foo.py            # targeted
+brian test full                    # canonical sweep
+brian test quick                   # what I'm actively editing
+brian test fast                    # smoke check after rebase
+```
+
+The only legitimate reason to invoke `pytest` directly is **inside**
+the CLI driver itself (`neuroslm/cli.py::cmd_test_*`). Everywhere else
+— shell sessions, CI scripts, doc snippets, agent commands — go
+through `brian test`.
+
+When writing new tests, RED-confirm them with
+`brian test tests/path/to/new_test.py` (legacy form), then GREEN-confirm
+with the same. Don't reach for `pytest`.
+
+---
+
 ## 2. No sycophancy
 
 - Don't preface answers with "Great question!", "You're absolutely
@@ -670,7 +726,7 @@ canonical venv.
 1. `Remove-Item .venv -Recurse -Force` (or `rm -rf .venv` on Linux).
 2. `py -3.13 -m venv .venv` (Windows) or `python3.13 -m venv .venv`.
 3. `.venv\Scripts\python.exe -m pip install -e .[ml,dev]`.
-4. Verify: `.venv\Scripts\python.exe -m pytest tests/ -x` runs.
+4. Verify: `brian test full` (or `brian test quick` for a fast spot-check) runs.
 
 That sequence is the **only** way to get a fresh environment. Adding a
 new venv next to the old one is never the answer — it just hides the
@@ -717,7 +773,8 @@ return x` as a substitute for actually building the mechanism.
    edge cases the test checks). It must run end-to-end on CPU at minimum
    (CUDA-only code is not allowed until a CPU fallback is tested).
 4. **Run the contract — confirm GREEN.** Plus the surrounding suite
-   (`pytest tests/<area>/ -q`) to confirm no regression.
+   (`brian test tests/<area>/`) to confirm no regression. Never call
+   `pytest` directly — see §1c.
 5. **Wire it in.** The `feature` block in `arch.neuro` references the
    real equation; the mechanism is reachable from the model. If the
    feature defaults to `active: false`, that's a research choice (clean

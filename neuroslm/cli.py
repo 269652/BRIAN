@@ -42,13 +42,14 @@ training run finishes.
 """
 from __future__ import annotations
 import argparse
+import json
 import os
 import re
 import subprocess
 import shutil
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # ── Locate the repo root so commands work from any cwd ────────────────
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -78,6 +79,35 @@ def _run(cmd: List[str], **kw) -> int:
     """Run a subprocess and stream its output. Returns exit code."""
     print(f"$ {' '.join(cmd)}")
     return subprocess.call(cmd, cwd=str(REPO_ROOT), **kw)
+
+
+def _run_tee(cmd: List[str]) -> Tuple[int, str]:
+    """Run ``cmd`` while teeing its combined stdout/stderr to our own
+    stdout AND collecting it into a returned string.
+
+    Used by :func:`cmd_test_full` to refresh the duration cache from
+    the same pytest invocation the developer is watching live — no
+    double-runs, no waste. Returns ``(exit_code, captured_text)``.
+    """
+    print(f"$ {' '.join(cmd)}")
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=str(REPO_ROOT),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        )
+    except FileNotFoundError as e:
+        print(f"[run_tee] cannot start {cmd[0]}: {e}")
+        return 1, ""
+
+    collected: list[str] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        collected.append(line)
+    rc = proc.wait()
+    return rc, "".join(collected)
 
 
 def _bash() -> str:
@@ -2287,6 +2317,238 @@ def cmd_test(args: argparse.Namespace) -> int:
     return _run(cli)
 
 
+# ──────────────────────────────────────────────────────────────────────
+# `brian test {quick,fast,full}` — unified test driver
+#
+# Policy: contributors (human + AI) should NEVER invoke `pytest`
+# directly. Instead use one of:
+#   brian test quick   30 most-recently-modified test files (by mtime)
+#   brian test fast    30 fastest tests by cached durations
+#   brian test full    canonical full sweep (excludes the known-slow
+#                      files; rewrites the duration cache on success)
+#
+# Centralising the invocation means the exclusion list, the duration
+# cache, and the "what's hot right now" heuristic all live in one
+# place — no more drift between contributors' shell histories.
+#
+# Contracts pinned by tests/test_brian_test_subcommands.py.
+# ──────────────────────────────────────────────────────────────────────
+
+
+# Persistent per-nodeid wall-time cache. Populated by `brian test full`,
+# consumed by `brian test fast`. Lives under .neuro/ so it stays out
+# of the repo root (and so the existing `.neuro/` gitignore line covers
+# it without a new rule).
+TEST_DURATIONS_CACHE: Path = REPO_ROOT / ".neuro" / "test_durations.json"
+
+# Canonical exclusion list for `brian test full`. Anyone removing one
+# of these must also update the corresponding test in
+# tests/test_brian_test_subcommands.py — and prove the removed file
+# is fast enough to belong in the default sweep.
+_FULL_SWEEP_IGNORES: tuple[str, ...] = (
+    "tests/test_feature_flag_ablation.py",
+    "tests/test_brian_compile.py",
+    "tests/training",
+)
+
+# Limits — tweak here, not in the command bodies.
+_QUICK_TOP_N: int = 30
+_FAST_TOP_N: int = 30
+
+
+def _list_test_files(tests_root: Path) -> List[Path]:
+    """Return every ``test_*.py`` file under ``tests_root`` (recursively).
+
+    Files named ``conftest.py``, ``__init__.py``, or anything that
+    doesn't match ``test_*.py`` are excluded — they don't carry
+    test cases themselves and pytest collects them automatically when
+    a sibling test file is passed.
+
+    The canonical :data:`_FULL_SWEEP_IGNORES` files / dirs are also
+    excluded so ``quick`` and ``fast`` modes never trip on the same
+    pre-existing slow / broken files that ``full`` already skips.
+    Without this, e.g. the broken ``test_feature_flag_ablation.py``
+    file would block ``brian test quick`` even though it's been on
+    the canonical ignore list for months.
+    """
+    if not tests_root.is_dir():
+        return []
+    # Resolve every exclusion to an absolute path so the membership
+    # check is robust to relative-vs-absolute caller paths.
+    ignored_abs: set[Path] = set()
+    for entry in _FULL_SWEEP_IGNORES:
+        ignored_abs.add((tests_root.parent / entry).resolve())
+    out: List[Path] = []
+    for path in tests_root.rglob("test_*.py"):
+        if not path.is_file() or path.name == "__init__.py":
+            continue
+        resolved = path.resolve()
+        # Skip if this file IS an ignored path, or lives under an
+        # ignored directory.
+        skip = False
+        for ig in ignored_abs:
+            if resolved == ig or ig in resolved.parents:
+                skip = True
+                break
+        if skip:
+            continue
+        out.append(path)
+    return out
+
+
+def _most_recent_test_files(repo_root: Path, n: int) -> List[Path]:
+    """Pick the ``n`` test files with the newest mtime under ``<repo>/tests/``."""
+    tests_root = repo_root / "tests"
+    files = _list_test_files(tests_root)
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return files[:n]
+
+
+def _parse_pytest_durations(output: str) -> Dict[str, float]:
+    """Parse pytest's ``--durations=0`` block into ``{nodeid: seconds}``.
+
+    Each duration line has the shape:
+
+        ``0.42s call     tests/foo.py::test_bar``
+
+    pytest prints three lines per nodeid (``call`` + ``setup`` +
+    ``teardown``); we keep the MAX so a slow fixture isn't masked by
+    a fast call. Non-duration lines (headers, hidden-row footer,
+    final ``N passed in ...``) are skipped silently.
+    """
+    durations: Dict[str, float] = {}
+    # Compiled inline because the helper is rarely called.
+    line_re = re.compile(
+        r"^\s*([\d.]+)s\s+(call|setup|teardown)\s+(\S+::\S+)\s*$"
+    )
+    for line in output.splitlines():
+        m = line_re.match(line)
+        if not m:
+            continue
+        secs = float(m.group(1))
+        nodeid = m.group(3)
+        prev = durations.get(nodeid)
+        if prev is None or secs > prev:
+            durations[nodeid] = secs
+    return durations
+
+
+def _save_durations_cache(durations: Dict[str, float]) -> None:
+    """Persist ``durations`` to :data:`TEST_DURATIONS_CACHE` as JSON."""
+    TEST_DURATIONS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    TEST_DURATIONS_CACHE.write_text(
+        json.dumps(durations, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def _load_durations_cache() -> Dict[str, float]:
+    """Read :data:`TEST_DURATIONS_CACHE`; return ``{}`` if missing/invalid."""
+    if not TEST_DURATIONS_CACHE.is_file():
+        return {}
+    try:
+        raw = TEST_DURATIONS_CACHE.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return {}
+        return {str(k): float(v) for k, v in data.items()}
+    except (OSError, ValueError):
+        return {}
+
+
+def cmd_test_quick(args: argparse.Namespace) -> int:
+    """Run pytest on the 30 most-recently-modified test files.
+
+    Designed for "I just edited a couple of test files, re-check
+    them" — much faster than the full sweep, and tracks active work
+    automatically via mtime.
+    """
+    files = _most_recent_test_files(REPO_ROOT, _QUICK_TOP_N)
+    if not files:
+        print("[test quick] no test files found under tests/")
+        return 1
+    cli = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    if getattr(args, "verbose", False):
+        cli.append("-v")
+    cli.extend(str(p) for p in files)
+    print(f"[test quick] {len(files)} most-recently-modified test files")
+    return _run(cli)
+
+
+def cmd_test_fast(args: argparse.Namespace) -> int:
+    """Run the 30 fastest individual tests (by cached duration).
+
+    Falls back to ``cmd_test_quick`` when no duration cache exists
+    yet — that way a fresh clone still gets a useful smoke check
+    even before any ``brian test full`` has populated the cache.
+    """
+    durations = _load_durations_cache()
+    if not durations:
+        print(
+            "[test fast] no duration cache yet "
+            f"({TEST_DURATIONS_CACHE.relative_to(REPO_ROOT) if TEST_DURATIONS_CACHE.is_absolute() else TEST_DURATIONS_CACHE});"
+            " falling back to quick mode. Run `brian test full` once "
+            "to populate it."
+        )
+        return cmd_test_quick(args)
+    # Sort ascending by duration; pick the fastest _FAST_TOP_N.
+    fastest = sorted(durations.items(), key=lambda kv: kv[1])[:_FAST_TOP_N]
+    cli = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    if getattr(args, "verbose", False):
+        cli.append("-v")
+    cli.extend(nodeid for nodeid, _ in fastest)
+    total_s = sum(s for _, s in fastest)
+    print(
+        f"[test fast] {len(fastest)} fastest tests "
+        f"(total cached time ≈ {total_s:.2f}s)"
+    )
+    return _run(cli)
+
+
+def cmd_test_full(args: argparse.Namespace) -> int:
+    """Run the canonical full sweep + refresh the duration cache.
+
+    Mirrors the invocation that emerged from the 2026-06-15
+    NFG-cleanup sweep:
+
+        pytest tests/ -q --ignore=<known-slow> -p no:cacheprovider
+
+    plus ``--durations=0`` so we capture every nodeid's wall time
+    and dump it into :data:`TEST_DURATIONS_CACHE` for the next
+    ``brian test fast`` invocation.
+
+    The execution goes through :func:`_run_tee` so we get a single
+    pytest invocation that the developer sees live AND whose output
+    we parse for the duration cache — no double-runs.
+    """
+    cli = [
+        sys.executable, "-m", "pytest", "tests/", "-q",
+        "-p", "no:cacheprovider", "--durations=0",
+    ]
+    for ignored in _FULL_SWEEP_IGNORES:
+        cli.append(f"--ignore={ignored}")
+    if getattr(args, "verbose", False):
+        cli.append("-v")
+
+    rc, captured = _run_tee(cli)
+
+    # Refresh the cache on best-effort basis — parse failures are
+    # silent (the cache is a perf hint, not a correctness contract).
+    try:
+        durations = _parse_pytest_durations(captured)
+        if durations:
+            _save_durations_cache(durations)
+            print(
+                f"[test full] cached {len(durations)} test durations → "
+                f"{TEST_DURATIONS_CACHE}"
+            )
+    except (OSError, ValueError) as e:
+        print(f"[test full] could not refresh duration cache: {e}")
+
+    return rc
+
+
+
 def cmd_push(args: argparse.Namespace) -> int:
     """Push the current branch using the PAT from .env (avoids credential helper)."""
     env_path = REPO_ROOT / ".env"
@@ -2954,14 +3216,68 @@ def _build_parser() -> argparse.ArgumentParser:
     str_train.add_argument("--d_sem", type=int, help="semantic dimension")
     str_train.set_defaults(func=cmd_train, ood_every=500)
 
-    # test
-    st = sub.add_parser("test", help="Run the DSL test suite (or a subset)")
-    st.add_argument("pattern", nargs="?",
-                    help="optional pytest path/file pattern")
-    st.add_argument("-v", "--verbose", action="store_true")
+    # test (group: `brian test {quick,fast,full}` plus the legacy
+    # `brian test [pattern]` form for backward compatibility).
+    #
+    # Dispatch is manual (no add_subparsers) because the legacy form
+    # accepts an arbitrary path/pattern as the first positional, which
+    # argparse's subparsers won't tolerate.
+    st = sub.add_parser(
+        "test",
+        help="Run pytest — use quick/fast/full instead of bare pytest. "
+             "(See CLAUDE.md: contributors must NOT call pytest directly.)",
+        description=(
+            "Unified test driver. Use one of the subcommands below "
+            "instead of running pytest directly:\n\n"
+            "  brian test quick   run the 30 most-recently-modified test files\n"
+            "  brian test fast    run the 30 fastest tests (cached durations)\n"
+            "  brian test full    canonical full sweep + refresh duration cache\n"
+            "  brian test [PATH]  (legacy) pytest on tests/dsl/ or PATH"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    st.add_argument(
+        "kind_or_pattern", nargs="?", default=None,
+        help="one of {quick, fast, full}, or a legacy pytest path/pattern",
+    )
+    st.add_argument("-v", "--verbose", action="store_true",
+                    help="verbose pytest output")
     st.add_argument("--slow", action="store_true",
-                    help="include slow tests (by default slow tests are skipped)")
-    st.set_defaults(func=cmd_test, slow=False)
+                    help="(legacy only) include slow tests "
+                         "(by default slow tests are skipped)")
+
+    # ``add_subparsers`` is intentionally NOT used; we still need to
+    # advertise the magic words in --help (already done in
+    # description=) and synthesise a Namespace with the legacy
+    # ``pattern`` attr the legacy ``cmd_test`` expects.
+    #
+    # The dispatch table maps to function NAMES (not callables) so
+    # ``monkeypatch.setattr(cli, 'cmd_test_full', ...)`` in tests
+    # actually rebinds the call target — a callable lookup would
+    # capture the pre-patch reference at parser-build time.
+    _TEST_SUBCOMMANDS = {
+        "quick": "cmd_test_quick",
+        "fast":  "cmd_test_fast",
+        "full":  "cmd_test_full",
+    }
+
+    def _dispatch_test(a):
+        kop = a.kind_or_pattern
+        # Magic word → dedicated subcommand. Look up the live module
+        # attribute so monkeypatch works in tests.
+        if kop in _TEST_SUBCOMMANDS:
+            import neuroslm.cli as _self_mod
+            func = getattr(_self_mod, _TEST_SUBCOMMANDS[kop])
+            return func(argparse.Namespace(
+                verbose=a.verbose, test_kind=kop,
+            ))
+        # Else: legacy form. ``cmd_test`` expects ``pattern`` + ``slow``
+        # attrs; synthesise them from kind_or_pattern.
+        return cmd_test(argparse.Namespace(
+            pattern=kop, verbose=a.verbose, slow=a.slow,
+        ))
+
+    st.set_defaults(func=_dispatch_test)
 
     # push
     sp = sub.add_parser("push",
