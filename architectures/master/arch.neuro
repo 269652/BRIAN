@@ -934,6 +934,45 @@ synapse thalamus -> cortex_reasoning {
     equation: @standard_synapse
 }
 
+# MoE specialists -> PFC (LM trunk) -- the visible representation of
+# TWO concurrent gradient paths from the cortex ensemble into the LM
+# trunk (a.k.a. pfc in the bowtie mapping):
+#
+#   (1) Late-fusion mixture (forward signal):
+#       final_logits = (1 - alpha) * lm_logits + alpha * cortex_logits
+#       where alpha = sigmoid(self.cortex_mix_logit) starts ~0.5 and
+#       decays as the trunk catches up. This is THE path that makes
+#       initial CE drop from ln(V)=10.85 to ~3-5 nats at step 0 (the
+#       experts already speak English; the trunk doesn't yet).
+#       See harness.py::forward lines 1346-1395.
+#
+#   (2) Capacity-Funneled Distillation (gradient signal):
+#       L_distill = lambda_t * T^2 * KL(student || teacher)
+#       Pulls the trunk's logits toward the experts' logits over
+#       time. See lib/LanguageCortex.neuro::funnel teacher_ensemble
+#       and harness.py::_distillation_lambda.
+#
+# weight=0.5 reflects the alpha midpoint of path (1) so the edges are
+# visibly comparable to the other bowtie synapses (gws->pfc=0.8,
+# hippo->pfc=0.5, entorhinal->pfc=0.4). The NT is "glutamate" because
+# the late-fusion is an excitatory bias toward the experts' token
+# distribution. Pinned by tests/test_arch_lm_trunk_wiring.py (Fix A).
+synapse cortex_code -> pfc {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: @standard_synapse,
+    feature: "late_fusion.edge"
+}
+synapse cortex_general -> pfc {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: @standard_synapse,
+    feature: "late_fusion.edge"
+}
+synapse cortex_reasoning -> pfc {
+    weight: 0.5, neurotransmitter: "glutamate",
+    equation: @standard_synapse,
+    feature: "late_fusion.edge"
+}
+
 # State models â†’ workspace
 synapse world -> gws {
     weight: 0.6, neurotransmitter: "glutamate",
