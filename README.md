@@ -15,7 +15,7 @@ BRIAN is a research prototype combining **bowtie topology with re-entry loops**,
 
 **Current status:**
 - ✅ **Layer A (mechanisms):** 20+ core properties verified via 1511 unit tests across `tests/` (`tests/dsl/` alone runs 620). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
-- 🟡 **Layer B (generalization):** PCT variant achieves **4.51 gap_ratio** on WikiText-103-v1 OOD (26% better than flat-transformer baseline at 6.12), but baseline still wins absolute PPL 3–4× due to 11× more training compute. Matched-compute comparison pending. 30M-P4 multi-cortex run now trains stably from step 0 (previously diverged with loss=13.84 > ln(50257)=10.82 at init due to GPT-2 anisotropy in the tied LM head — fixed in `6b36012`).
+- 🟡 **Layer B (generalization):** Multi-cortex B4 achieves **2.87 gap_ratio** on WikiText-103-v1 OOD (53% better than flat-transformer baseline at 6.12) — first BRIAN variant under gap_ratio 3.0. B5 (10k rerun, step 3000 mid-run): gap_ratio 2.89, train PPL 45.0, OOD PPL 130.1 — absolute quality dramatically better, gap stable. B6 (SmolLM2 upgrade, 10k complete): train PPL 23.6 (lowest seen), but gap_ratio regresses to 6.55 — larger expert accelerates in-distribution fit at cost of generalisation. Active: stronger regularisation with SmolLM2 to recover gap. See [`docs/findings.md`](docs/findings.md) ::H21–H23.
 
 Code, math, and tensor shapes: [`docs/architecture.md`](docs/architecture.md). Full evidence ledger: [`docs/findings.md`](docs/findings.md).
 

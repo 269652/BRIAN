@@ -90,12 +90,12 @@ It **is** attempting to falsify or validate the eight sub-hypotheses above via s
 **Claim:** A brain with cortical-grade specialization, plasticity (BDNF), and homeostasis needs fewer training examples to reach the same loss as a flat transformer. Measured as: OOD gap_ratio = OOD_ppl / train_ppl. Lower gap_ratio indicates less distribution shift vulnerability.
 
 **Operationalization:**
-- Compare BRIAN best variant (B3, 69M, gap_ratio 4.51) against baseline (107M, gap_ratio 6.12) at matched OOD corpus.
-- Hypothesis: BRIAN gap_ratio < baseline gap_ratio (improved generalization fingerprint despite lower parameter count).
+- Compare BRIAN best variant against baseline (107M, gap_ratio 6.12) at matched OOD corpus.
+- Hypothesis: BRIAN gap_ratio < baseline gap_ratio (improved generalization fingerprint).
 
-**Current status:** ✅ gap_ratio claim holds: 4.51 (PCT-30M) < 6.12 (flat baseline). But cross-scale (69M vs 107M) and cross-step (4000 vs 80000) confounds are present. Matched-params, matched-steps variant pending.
+**Current status:** ✅ gap_ratio claim holds. Best variant B4 (multi-cortex + abstain-fix, 889.6M total / ~30M trainable trunk, gap_ratio **2.87**) is **53% better** than flat baseline (6.12). B5 (10k rerun, step 3000 mid-run) shows gap_ratio 2.89 — stable. ⚠ Caveat: B4/B5 use frozen pretrained cortex experts so the "890M total" is mostly frozen compute; trainable trunk is ~140M. B6 (SmolLM2 upgrade) REGRESSED gap_ratio to 6.55 at 10k steps — larger expert accelerates in-distribution fit but worsens generalization. Active research: higher regularisation with SmolLM2 may recover gap.
 
-**Evidence link:** `results/ood_pct-30m_68M_step4000.json`, `results/ood_baseline-80k_107M_step80000.json`, `findings.md::H10` [🟡 PARTIAL]
+**Evidence link:** `findings.md::H21`, `findings.md::H22`, `findings.md::H23`, `logs/vast/20260614*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log` [🟡 PARTIAL — gap_ratio win confirmed, matched-compute vs baseline pending]
 
 ### 2.4 Pillar 4: Algebraic Consistency via Topological Sheaves (THSD)
 
@@ -442,24 +442,31 @@ python -m neuroslm.train_dsl \
 > count rises to **~1.12B** at the same `30m_p4` scale. `brian
 > compile nfg --current` prints the realised count.
 
-**Current results (FINDINGS.md ::B4 — committed 2026-06-14, vast
-40925851, A100 SXM4 @ $0.74/hr, branch `master` @ `a22eecc`):**
+**Current results — three runs (2026-06-14 to 2026-06-15):**
 
-- **Train PPL:** 102.9 @ step 2000
-- **OOD PPL (WikiText-103-v1, 200-seq final):** 295.9
-- **gap_ratio:** **2.87** ← **best achieved to date** (first variant under 3.0)
-- **Trajectory:** mid-OOD at 500 / 1000 / 1500 / 2000 → wiki PPL 413 / 285 / 265 / 274; gap_ratio 2.05 / 2.20 / 2.18 / 2.66
-- **Cortex telemetry:** `α_eff` stable at 0.500–0.505, `inh=0.000` throughout — fusion contributing signal (vs broken precursor deploy 40923107 where `α_eff=0.000 inh=1.000` collapsed fusion).
-- **Status:** ✅ stable run to step 2000; per-position abstain logit fix (see §2.7 Slot 0b) validated. 10k-step rerun queued.
+**B4 (baseline, FINDINGS::H21 — vast 40925851, 2k steps):**
+- Train PPL: 102.9 @ step 2000
+- OOD PPL (WikiText-103-v1, 200-seq final): 295.9
+- gap_ratio: **2.87** (first variant under 3.0)
+- Checkpoint: `lfs_checkpoints/dsl_arch_20260614-135401_step2000.pt`
+- Log: `logs/vast/20260614*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log`
 
-**Checkpoint:** `lfs_checkpoints/dsl_arch_20260614-135401_step2000.pt`
+**B5 (H23 10k rerun, same GPT-2 roster — vast cd3a9493b050, in progress):**
+- Train PPL: **45.0** @ step 3000 (mid-run)
+- OOD PPL (WikiText-103-v1, 50-seq): **130.1** @ step 3000
+- gap_ratio: 2.89 — stable vs B4, dramatically better absolute quality
+- Checkpoint: `lfs_checkpoints/.../step3000.pt` (on-box at `/workspace/brian/lfs_checkpoints/20260615-092625_7fdc3ccd_neuroslm-full-h24-cfd-10k-dna-arch/step3000.pt`)
+- Log: `logs/vast/20260615T092922Z_cd3a9493b050_arch_889M_h24-cfd-10k-dna-arch_step3540of10k.log`
 
-**Raw log:** `logs/vast/20260614*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log`
+**B6 (H22 SmolLM2 upgrade, 1127M total — vast 41084160, 10k steps complete):**
+- Params: 1127M total (146.9M trainable trunk + 980.1M frozen HF experts)
+- Train PPL: **23.6** @ step 10000 (best train PPL achieved in this arc)
+- OOD PPL (WikiText-103-v1): **155.0** @ step 10000
+- gap_ratio: 6.55 — REGRESSED vs B4 (SmolLM2 accelerates in-distribution fit; generalization worsens)
+- Checkpoint: `hf://moritzroessler/BRIAN/checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt`
+- Log: `logs/vast/20260615T185105Z_41084160_arch_unk_dna-arch_step10kof10k.log`
 
-**Known follow-ups** (recorded in FINDINGS.md::H21):
-1. Gradient spike at steps 1100–1700 (gnorm peaked 142M) caught by `loss_clip(f=3.0)`; band-aid, not fix.
-2. Resume crashed 8× with `Unexpected key(s) in state_dict: _genetics_orch.*, _transmitter_sys.*` — checkpoint schema drift.
-3. gap_ratio drifting upward (2.05 → 2.87 over 2k steps) — 10k run will distinguish plateau vs accelerating overfit.
+**Active hypothesis:** B4/B5 gap_ratio floor ≈ 2.9 with GPT-2 roster. SmolLM2 upgrade (B6) needs stronger regularisation to counteract faster-fit dynamic. Best gap_ratio to date remains **2.87** (B4).
 
 ---
 

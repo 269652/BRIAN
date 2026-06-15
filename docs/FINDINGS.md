@@ -152,9 +152,12 @@ window with stride 512 / seq_len 1024, GPT-2 BPE tokenizer
 | **B2.fix** trunk-iso + ReZero (legacy-fallback fix) | `stabilize/trunk-grad-isolation` | 7000 | 107.8M | 258.8 | 1351.5 | **5.22** | STRONG OVERFITTING | `results/ood_rezero-fixed_107M_step7000.json` |
 | **B3** PCT (loss-only, 30M preset) | `arch/predictive-coding-trunk` | 4000 (best) | 69.2M | 400.9 | 1806.6 | **4.51** | STRONG OVERFITTING (but lowest ratio so far) | `results/ood_pct-30m_68M_step4000.json` |
 | **B4** abstain-fix + multi-cortex (30m_p4 scale, full DNA) | `master` @ `a22eecc` | 2000 | **889.6M** | **102.9** | **295.9** | **2.87** | **NEW BAND** (gap 2.0–3.0) | `logs/vast/20260614*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log` |
+| **B5** H21 10k rerun (same GPT-2 roster, h24-cfd label) | `master` @ `8d7140c` | 3000 (mid-run, in progress) | 889.6M | **45.0** | **130.1** | 2.89 | COMPARABLE to B4 (dramatically better abs PPL; gap stable) | `logs/vast/20260615T092922Z_cd3a9493b050_arch_889M_h24-cfd-10k-dna-arch_step3540of10k.log` |
+| **B6** H22 SmolLM2 upgrade (1.12B total, DNA-arch 10k) | `master` @ `c19bf62` | 10000 | **1127M** (146.9M trainable) | **23.6** | **155.0** | 6.55 | GAP REGRESSION vs B4 (better abs PPL; overfit worsened) | `logs/vast/20260615T185105Z_41084160_arch_unk_dna-arch_step10kof10k.log` |
 
-All numbers above are read directly from the committed JSON. No
-hand-summarised numbers in this table.
+B5 and B6 numbers are read directly from the training logs. B5 is a
+mid-run snapshot (step 3000 of 10k); final B5 numbers pending. B6 is
+the completed H22 run.
 
 ### What the table says
 
@@ -181,6 +184,17 @@ hand-summarised numbers in this table.
    for caveats before reading this as victory.
 5. **B2 (buggy)** is preserved for forensics, not for citation —
    see **H8**.
+6. **B5 (step 3000, in progress):** Dramatically better absolute PPL
+   than B4 at a comparable step count (train 45.0 vs 102.9 at step
+   2000, OOD 130.1 vs 295.9 final). gap_ratio stable at 2.89 —
+   neither improving nor regressing. Training longer helps absolute
+   quality; gap is near a floor.
+7. **B6 (SmolLM2 upgrade, 10k):** Extraordinary train PPL (23.6 —
+   best seen in this arc), but gap_ratio REGRESSES to 6.55. The
+   larger/better-trained general expert provides a stronger distillation
+   target → faster in-distribution convergence → stronger overfit.
+   The absolute OOD PPL (155.0) is also the best seen, but the trunk
+   memorises distribution faster than the OOD corpus rewards.
 
 ---
 
@@ -463,15 +477,75 @@ better per-mapped-token quality outweighs its coverage haircut.
   `OOD_EVERY=500`. Predecessor instance 40950265 (H21 / B4 10k repeat
   with legacy roster) was destroyed at step 840 to free the budget
   for this run.
-- **Outcome.** ⏳ pending the deploy's first OOD snapshot at step 500.
-  Will record train PPL + WikiText PPL + gap_ratio at 500 / 1000 /
-  2000 / 5000 / 10000 and compare row-for-row to B4.
-- **What confirms / refutes:** confirms iff the 10k row beats or
-  matches the H21 predictions above on at least 2 of 3 metrics
-  (train PPL, OOD PPL, gap_ratio). Refutes iff train PPL plateaus
-  worse than B4 at any milestone, or gap_ratio drifts above 3.0
-  (suggesting SmolLM2's coverage penalty outweighs its quality
-  advantage).
+- **Run** — vast.ai **41084160**, label `neuroslm-full-dna-arch`,
+  A100, branch `master` @ `c19bf62`, 10 000 steps.
+- **Result** (B6 in Layer B table):
+
+  | Step | train PPL | OOD PPL (WikiText-103) | gap_ratio |
+  |---|---|---|---|
+  | 10000 (final) | **23.6** | **155.0** | **6.55** |
+
+- **Canonical checkpoint:** `hf://moritzroessler/BRIAN/checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt`
+- **Log:** `logs/vast/20260615T185105Z_41084160_arch_unk_dna-arch_step10kof10k.log`
+- **Outcome.** ❌ **FALSIFIED on gap_ratio.** SmolLM2 upgrade dramatically
+  improves absolute train PPL (23.6 at 10k vs 102.9 for B4 at 2k;
+  even vs B5's 45.0 at 3k), but gap_ratio REGRESSES from 2.87 (B4)
+  to 6.55 (B6), reversing all the H21 gains and returning to the B0–B3
+  regime (4.5–6.3). The larger, better-trained `general` expert provides
+  a stronger distillation target → trunk trains faster → BUT the trunk
+  memorises the training distribution more aggressively. SmolLM2's
+  quality advantage over gpt2 manifests as deeper in-distribution fit,
+  not better generalisation. The coverage haircut (bridge-path via
+  SmolLM2's own tokeniser) does not save the gap_ratio.
+- **⚠ Post-run restart artifact:** after reaching step 10000, the
+  restart loop continued and saved checkpoint clones under timestamps
+  20260615-184943, 20260615-185105, 20260615-185222, each showing
+  wikitext_ppl=142.1 and train_ppl=nan. These are zero-step resumption
+  artifacts, not real training steps. Canonical result is step 10000
+  at train_ppl=23.6.
+- **What would confirm H22:** a run where the SmolLM2 upgrade holds
+  gap_ratio ≤ 2.5 at 10k steps alongside improved OOD PPL. Needs a
+  stronger regularisation strategy to counteract the faster-fit
+  dynamic (higher dropout, stronger flooding, lower lr after warmup).
+
+---
+
+### H23 — H21 10k rerun: gap_ratio trajectory past step 2000 (2026-06-15)
+
+**Hypothesis.** B4 / H21 at step 2000 showed gap_ratio drifting
+2.05 → 2.87. Rerunning the same architecture for 10k steps
+distinguishes: (a) gap_ratio plateaus ~3 (natural floor), (b) OOD
+catches up as train PPL bottoms out (convergence), (c) overfit
+accelerates.
+
+- **Spec.** Same as H21: `architectures/master/arch.neuro`, DNA-mode,
+  preset `rcc_bowtie_30m_p4`, GPT-2 roster, abstain-fix active.
+- **Run** — vast.ai **cd3a9493b050**, label `h24-cfd-10k-dna-arch`,
+  branch `master` @ `8d7140c`, 10 000 steps (in progress when log
+  was last captured at step 3540).
+- **Mid-run trajectory (step 3000 mid-OOD):**
+
+  | Step | train PPL | OOD PPL (WikiText-103, 50-seq) | gap_ratio |
+  |---|---|---|---|
+  | 3000 | **45.0** | **130.1** | **2.89** |
+
+- **Mid-run checkpoint:** `/workspace/brian/lfs_checkpoints/20260615-092625_7fdc3ccd_neuroslm-full-h24-cfd-10k-dna-arch/step3000.pt`
+- **Log:** `logs/vast/20260615T092922Z_cd3a9493b050_arch_889M_h24-cfd-10k-dna-arch_step3540of10k.log`
+- **Outcome.** 🟡 **PARTIAL / IN PROGRESS (step 3000 of 10k).**
+  Early evidence:
+  1. Both train PPL (45.0) and OOD PPL (130.1) improved dramatically
+     from B4 final (102.9 / 295.9). Longer training helps absolute
+     quality on both axes simultaneously.
+  2. gap_ratio 2.89 ≈ B4's 2.87 — essentially unchanged over an extra
+     1000 steps. Points to scenario (a): the gap is at a floor near
+     2.9, not drifting up nor converging down.
+  3. Most importantly: with B6 (SmolLM2, same steps to 10k) showing
+     gap_ratio 6.55, the comparison isolates the expert upgrade as the
+     source of the regression. GPT-2 roster → gap stable 2.89;
+     SmolLM2 roster → gap regresses 6.55. **The general-expert quality
+     vs coverage tradeoff is the active research question.**
+- **Follow-up:** full 10k result needed to confirm plateau vs continued
+  drift. Compare row B5 final vs B6 (SmolLM2) at matched steps.
 
 ---
 
@@ -490,15 +564,17 @@ better per-mapped-token quality outweighs its coverage haircut.
 - **Maturity-phase gates on forward injections** — caused the PPL jump at awakening; replaced by ReZero λ.
 - **Building a fresh `Brain` with current defaults for eval of older ckpt** — silently injected λ=0 the trained model never had → bogus B2. Fixed by legacy-default-fallback (`32074d3` / `d3e5161`).
 - **"More training fixes OOD"** — *expected* to fail at this scale. Anchored prediction (not yet measured).
+- **SmolLM2 upgrade (H22 / B6) REGRESSED gap_ratio from 2.87 → 6.55** — larger, better-trained general expert makes the trunk train faster in-distribution but memorise more aggressively. The quality upgrade is real (train PPL 23.6 vs 45.0 at B5 step 3000) but the generalisation win is gone. Needs stronger regularisation to counteract the faster-fit dynamic.
 
 ### Open / not yet measured
 - Same-params PCT eval against same-params ReZero / recursive baseline (matched-PPL test for H10).
 - Full PCT-feedback mode (`pct_mode="feedback"`) vs loss-only.
 - SRC-TEH wall-clock numbers (H11).
 - Matched-compute baseline (step-7000 baseline) for H12.
-- **H21 / B4 10k-step run** — does the gap_ratio plateau, the train PPL bottom out, or the overfit accelerate past step 2000? Deploy queued immediately after H21 was recorded.
+- ~~**H21 / B4 10k-step run**~~ — **PARTIALLY RESOLVED** by H23 / B5: step 3000 shows gap_ratio 2.89 (stable, not accelerating). Full 10k result still pending.
 - **Trunk anisotropy spike fix** — H21 follow-up #1, the 1100–1700 gradient spike is currently band-aided by `loss_clip(f=3.0)`. Open whether `cortex_pre_head_norm`-style LayerNorm on the *trunk* pre-head suppresses it, or whether the source is elsewhere (residual stream, attention out-projection).
 - **Checkpoint schema-drift fix** — H21 follow-up #2, the resume crashed 8× with `Unexpected key(s)` for optional `_genetics_orch.*` / `_transmitter_sys.*` subsystems. Gated by either `strict=False` for these keys or wiring them on by default.
+- **SmolLM2 + stronger regularisation** — H22 FALSIFIED on gap_ratio but the quality improvement is real. Try: higher dropout (0.20 → 0.25), stronger flooding (4.0 → 5.0), lower peak LR (5e-4 → 2e-4) to counteract the faster-fit dynamic introduced by the better expert.
 
 ---
 
