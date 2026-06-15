@@ -69,6 +69,20 @@ from pathlib import Path
 from typing import Mapping, Optional
 
 
+# Force UTF-8 stdout/stderr so YAML descriptions and hook output that
+# contain non-cp1252 chars (e.g. arrows like → that we use liberally
+# in banners) don't crash the Windows default console codepage. The
+# `reconfigure` API exists on TextIOWrapper since 3.7; we guard the
+# call because patched stdouts (pytest's capsys) may not expose it.
+for _stream_name in ("stdout", "stderr"):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
 @dataclass(frozen=True)
 class Hook:
     """In-memory representation of a parsed ``hooks/<name>.yaml`` file.
