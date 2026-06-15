@@ -1,0 +1,40 @@
+── compiling DNA → DSL → HypergraphIR workspace ──
+  workspace: /workspace/brian/.neuro/arch/temp
+  source:    dna=/workspace/brian/dna/master/arch.dna
+  IR:        43 nodes, 90 edges
+════════════════════════════════════════════════════════════════
+  DNA-driven training loop (canonical pipeline)
+  dna=./dna/master/arch.dna  ->  workspace=/workspace/brian/.neuro/arch/temp  (arch=master)
+  steps=10000 batch=16 seq_len=512 d_sem=384
+  ckpt_dir=/workspace/brian/lfs_checkpoints
+════════════════════════════════════════════════════════════════
+
+▶ launch attempt 1 @ 19:35:26Z
+[train_dsl] boot @ 2026-06-15T19:35:27Z
+[train_dsl] git_commit 6994185455cbd680dd60f4dd1952d2c2db4c92a1 (master)
+[train_dsl] arch_dsl_sha256 02f0e39582158d2db49d894a9221a9df8ae5ed59622532e4722d7a66f92fc7eb (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,903  (trainable 146,856,815 · frozen 980,097,088)
+  checkpoint = 149,187,774 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[data:chat] using OpenHermes-2.5 (teknium/OpenHermes-2.5)
+step   100 | loss 8.8019 | lm 6.2110 | ppl 498.2 | gnorm 8.688 | lr 2.08e-05 | 632 tok/s | Φ 0.893 | λ₁ 0.075 | ign 0.76 | mesoLG 0.50 | troph 8/8 μ1.27 | NT[DA=0.26 NE=0.03 5HT=0.43 ACh=0.19 eCB=0.04 Glu=0.37 GABA=0.06] | osc[δ=0.338 θ=0.361 γ=0.301] | em[C2:ρ=0.08/τ=0.33/s=0.76 C4:Q=-0.5 W=1 pl=255 C3:pc=0.241 VBB:β=1.00 σ=0.0184 kl=23681.283 C5:lat=1.49 C6:pac=0.01] | cortex[α_eff=0.500 inh=0.000 λ=0.901 kl=-0.055 lm_ema=10.81 cx_ema=3.78] | hpa[load=0.13 cort=0.02 NE×0.99 T×0.98 LR×0.99]
+step   200 | loss 8.3803 | lm 6.1240 | ppl 456.7 | gnorm 10.316 | lr 4.06e-05 | 2107 tok/s | Φ 0.915 | λ₁ 0.075 | ign 0.71 | mesoLG 0.49 | troph 8/8 μ1.21 | NT[DA=0.22 NE=0.12 5HT=0.47 ACh=0.19 eCB=0.03 Glu=0.29 GABA=0.10] | osc[δ=0.324 θ=0.281 γ=0.395] | em[C2:ρ=0.11/τ=0.28/s=0.71 C4:Q=-0.5 W=1 pl=255 C3:pc=0.196 VBB:β=1.00 σ=0.0186 kl=18061.127 C5:lat=1.55 C6:pac=0.02] | cortex[α_eff=0.500 inh=0.000 λ=0.840 kl=-0.057 lm_ema=10.72 cx_ema=3.98] | hpa[load=0.18 cort=0.05 NE×0.96 T×0.95 LR×0.97]
