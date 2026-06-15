@@ -130,6 +130,92 @@ git config user.name  "vast-train"             >/dev/null 2>&1 || true
 
 PUSH_URL="https://x-access-token:${GITHUB}@github.com/${REPO_SLUG}.git"
 
+# ── Observability markers (2026-06-15) ─────────────────────────────────
+# /workspace/log_pusher.log is invisible to ``brian logs`` (it goes to a
+# separate file, not the trainer's stdout) AND `vastai execute` blocks
+# `cat`/`tail` on running instances. So we drop empty marker files at
+# well-known paths that `vastai execute id 'ls /workspace/log_pusher_*'`
+# CAN list. The mtime tells you when each phase last happened.
+#
+# Marker contract:
+#   /workspace/log_pusher_alive          touched every poll iteration
+#   /workspace/log_pusher_last_push_OK   touched on every successful push
+#                                          (rename of _last_push_FAIL if any)
+#   /workspace/log_pusher_last_push_FAIL touched on every push failure;
+#                                          contains the git error message
+#                                          (last 4KB) — readable via `du`
+# When the user sees `du -h /workspace/log_pusher_last_push_FAIL` come
+# back > 0 bytes, they know push is failing and can extract more info
+# by stopping the instance + `vastai execute` (cat is allowed on stopped).
+_MARK_ALIVE=/workspace/log_pusher_alive
+_MARK_OK=/workspace/log_pusher_last_push_OK
+_MARK_FAIL=/workspace/log_pusher_last_push_FAIL
+# Persist the last 4KB of any push error so the user can post-mortem it
+# after stopping the instance — vastai execute can't cat live but ls/du
+# CAN reveal the file size as a "did push fail" signal.
+_mark_fail() {
+    local msg="$1"
+    printf '%s\n' "$msg" | tail -c 4096 > "$_MARK_FAIL" 2>/dev/null || true
+    rm -f "$_MARK_OK" 2>/dev/null || true
+}
+_mark_ok() {
+    touch "$_MARK_OK" 2>/dev/null || true
+    rm -f "$_MARK_FAIL" 2>/dev/null || true
+}
+
+# ── Defensive push helper (2026-06-15) ────────────────────────────────
+# The previous "push-optimistically-rebase-on-fail" flow was the actual
+# bug behind instance 41084160's silent push failure: the on-box repo
+# was 3 commits behind origin (deploy commit + later NFG iterations),
+# every push got rejected non-fast-forward, and the rebase retry had
+# subtle interactions with untracked lfs_checkpoints/<RUN>/step*.pt
+# files (matched by .gitattributes `*.pt filter=lfs`) that made the
+# rebase silently fail too.
+#
+# The fix is to ALWAYS rebase --autostash BEFORE the commit, so the
+# log file is committed on top of a known-fresh origin tip. Push is
+# then guaranteed fast-forward.
+#
+# Returns 0 on push success, 1 on push failure (with $_MARK_FAIL
+# populated). Caller is responsible for staging the file FIRST.
+_safe_push() {
+    local commit_msg="$1"
+    # Step A: rebase any local commits onto origin/$BRANCH, stashing
+    # working-tree changes (untracked lfs_checkpoints, modified
+    # pointer files, etc.) so the rebase is clean. --autostash
+    # re-applies the stash after a successful rebase.
+    local pull_out
+    if ! pull_out="$(git pull --rebase --autostash \
+                        "$PUSH_URL" "$BRANCH" 2>&1 \
+                        | sed -E "s#${GITHUB}#***#g")"; then
+        echo "[log_pusher] git pull --rebase --autostash FAILED:"
+        echo "$pull_out"
+        _mark_fail "pull-rebase failed:\n$pull_out"
+        return 1
+    fi
+    # Step B: commit the staged log file (caller already did `git add`).
+    if git diff --cached --quiet 2>/dev/null; then
+        echo "[log_pusher] nothing staged after rebase, skipping push"
+        return 0
+    fi
+    if ! git commit -m "$commit_msg" >/dev/null 2>&1; then
+        echo "[log_pusher] commit failed"
+        _mark_fail "commit failed: $commit_msg"
+        return 1
+    fi
+    # Step C: push — now guaranteed fast-forward.
+    local push_out
+    if push_out="$(git push "$PUSH_URL" "${BRANCH}:${BRANCH}" 2>&1 \
+                       | sed -E "s#${GITHUB}#***#g")"; then
+        _mark_ok
+        return 0
+    fi
+    echo "[log_pusher] git push FAILED:"
+    echo "$push_out"
+    _mark_fail "push failed:\n$push_out"
+    return 1
+}
+
 # ── ONESHOT mode (deterministic exit code for the deploy gate) ─────
 # 2026-06-15: instance 41048619 trace showed `timeout 120 log_pusher
 # | head -30` always returned 141 (SIGPIPE) — turning a successful
@@ -151,22 +237,13 @@ if [ "${ONESHOT:-0}" = "1" ]; then
         exit 0
     fi
     SIZE="$(wc -c <"$LOG_REL")"
-    if ! git commit -m "logs($(basename "$LOG_REL" .log)): final sync @ $(date -u +%H:%M:%SZ) (${SIZE} B)" >/dev/null 2>&1; then
-        echo "[log_pusher] ONESHOT: commit failed"
-        exit 1
-    fi
-    if git push "$PUSH_URL" "${BRANCH}:${BRANCH}" 2>&1 | sed -E "s#${GITHUB}#***#g"; then
+    # Re-stage AFTER the rebase (rebase may have changed HEAD and
+    # unstaged us). The _safe_push helper does the commit itself.
+    if _safe_push "logs($(basename "$LOG_REL" .log)): final sync @ $(date -u +%H:%M:%SZ) (${SIZE} B)"; then
         echo "[log_pusher] ONESHOT: pushed (${SIZE} B)"
         exit 0
     fi
-    # Push rejected — try rebase + retry ONCE before giving up.
-    echo "[log_pusher] ONESHOT: push rejected, attempting rebase + retry"
-    if git pull --rebase "$PUSH_URL" "$BRANCH" 2>&1 | sed -E "s#${GITHUB}#***#g" \
-        && git push "$PUSH_URL" "${BRANCH}:${BRANCH}" 2>&1 | sed -E "s#${GITHUB}#***#g"; then
-        echo "[log_pusher] ONESHOT: pushed after rebase (${SIZE} B)"
-        exit 0
-    fi
-    echo "[log_pusher] ONESHOT: push failed after rebase retry"
+    echo "[log_pusher] ONESHOT: push failed (see $_MARK_FAIL on box)"
     exit 1
 fi
 
@@ -203,6 +280,11 @@ while true; do
     else
         sleep "$PUSH_INTERVAL"
     fi
+
+    # Liveness marker — touched every iteration, so the user can
+    # `vastai execute id 'ls -la /workspace/log_pusher_alive'` and see
+    # whether the bg process is still alive (mtime ≈ now).
+    touch "$_MARK_ALIVE" 2>/dev/null || true
 
     if [ ! -f "$SOURCE_LOG" ]; then
         echo "[log_pusher] $(date -u +%H:%M:%SZ) source log not present yet"
@@ -246,32 +328,21 @@ while true; do
     fi
 
     SIZE="$(wc -c <"$LOG_REL")"
-    git commit -m "logs($(basename "$LOG_REL" .log)): tail sync @ $(date -u +%H:%M:%SZ) (${SIZE} B)" \
-        >/dev/null 2>&1 || {
-            echo "[log_pusher] $(date -u +%H:%M:%SZ) commit failed (probably nothing to commit)"
-            continue
-        }
 
-    # Push, mask the PAT in any output. We attempt a fast push first; if
-    # it's rejected (remote moved), pull --rebase the log path only and
-    # retry. We don't touch any other files.
+    # Push via the defensive rebase-first helper. It internally:
+    #   1. git pull --rebase --autostash (always succeeds since the
+    #      trainer doesn't modify tracked files)
+    #   2. commits the staged log file
+    #   3. git push (guaranteed fast-forward after step 1)
+    # On failure, it populates /workspace/log_pusher_last_push_FAIL
+    # with the git error and clears /workspace/log_pusher_last_push_OK
+    # so the user can detect the regression via `vastai execute … 'ls'`.
     PUSH_OK=0
-    if git push "$PUSH_URL" "${BRANCH}:${BRANCH}" 2>&1 | sed -E "s#${GITHUB}#***#g"; then
+    if _safe_push "logs($(basename "$LOG_REL" .log)): tail sync @ $(date -u +%H:%M:%SZ) (${SIZE} B)"; then
         echo "[log_pusher] $(date -u +%H:%M:%SZ) pushed (${SIZE} B)"
         PUSH_OK=1
     else
-        echo "[log_pusher] $(date -u +%H:%M:%SZ) push failed; pulling+retrying"
-        if git pull --rebase "$PUSH_URL" "$BRANCH" 2>&1 | sed -E "s#${GITHUB}#***#g"; then
-            if git push "$PUSH_URL" "${BRANCH}:${BRANCH}" 2>&1 | sed -E "s#${GITHUB}#***#g"; then
-                PUSH_OK=1
-            else
-                echo "[log_pusher] retry push also failed, will try again next cycle"
-            fi
-        else
-            echo "[log_pusher] rebase failed; will try next cycle"
-            # Reset the log commit so we don't accumulate broken state
-            git reset --hard HEAD~1 >/dev/null 2>&1 || true
-        fi
+        echo "[log_pusher] $(date -u +%H:%M:%SZ) push failed; will retry next cycle"
     fi
 
     # Only advance the bucket tracker on a SUCCESSFUL push. A transient

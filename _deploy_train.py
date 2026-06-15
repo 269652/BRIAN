@@ -305,6 +305,23 @@ INSTANCE_ID="$(hostname)" LOG_EVERY={LOG_EVERY} PUSH_INTERVAL=300 \\
     ARCH_NAME='{arch_name_for_log}' LABEL='{LABEL}' TOTAL_STEPS='{STEPS}' \\
     nohup bash scripts/log_pusher.sh > /workspace/log_pusher.log 2>&1 &
 LOG_PUSHER_PID=$!
+# Echo the pid + initial liveness so `brian logs <id>` makes it clear
+# the background pusher actually launched (without this, a crash on
+# startup is silent — bug 41084160 was undiagnosable for hours). The
+# pusher itself drops marker files at /workspace/log_pusher_alive,
+# log_pusher_last_push_OK, log_pusher_last_push_FAIL that the user
+# can list via `vastai execute <id> 'ls -la /workspace/log_pusher_*'`
+# to detect health/failure mode without SSH (which vast.ai often
+# firewalls from the operator's network).
+echo "    log_pusher pid=$LOG_PUSHER_PID"
+sleep 2  # give it a moment to write its first marker
+if kill -0 "$LOG_PUSHER_PID" 2>/dev/null; then
+    echo "    log_pusher: still alive after 2s ✓"
+else
+    echo "    log_pusher: ✗ DIED on startup — log_pusher.log tail:"
+    tail -20 /workspace/log_pusher.log 2>/dev/null \\
+        | sed 's/^/      /' || echo "      (no log_pusher.log yet)"
+fi
 
 echo "── starting {'DNA' if USE_DNA else 'DSL'} training (scale={scale_name}, dist={hw.dist_strategy}, {STEPS} steps, mid-OOD every {OOD_EVERY}) ──"
 # Disable -e around the training pipe so we can capture the LEFT-side
