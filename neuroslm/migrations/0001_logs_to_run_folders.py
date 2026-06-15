@@ -131,12 +131,29 @@ def parse_log_basename(
 
 
 def _new_folder_name(p: _ParsedName) -> str:
-    """The destination folder name for a parsed log.
+    """The destination folder path for a parsed log, relative to ``logs/``.
 
-    Format: ``<YYYYMMDD>-<HHMMSS>_<arch>_<sha>``
-    Example: ``20260614-182653_rcc_bowtie_889M_run_07aba24be2bf``
+    Format (3-level hierarchy): ``<YYYYMMDD>/<arch>/<HHMMSS>_<sha>``
+    Example: ``20260614/rcc_bowtie_889M_run/182653_07aba24be2bf``
+
+    Why 3 levels instead of a flat ``<date>-<time>_<arch>_<sha>`` folder?
+    The hierarchy mirrors how a human searches: ``ls logs/`` shows days,
+    ``ls logs/<day>/`` shows architectures that ran that day,
+    ``ls logs/<day>/<arch>/`` shows individual runs with their boot times.
+    A flat layout collapses all three axes into one undifferentiated
+    string, which is unreadable past ~10 runs.
     """
-    return f"{p.date_token}_{p.arch}_{p.sha}"
+    # date_token is "YYYYMMDD-HHMMSS" (hyphen-joined). Split into day +
+    # time-of-day so they can become separate directory levels.
+    if "-" in p.date_token:
+        day, time_of_day = p.date_token.split("-", 1)
+    else:
+        # Fallback for legacy date_tokens that lack the hyphen: assume the
+        # whole token is the day and there's no time component. Shouldn't
+        # happen with current _parse_filename outputs but keeps the
+        # function total in case the data model evolves.
+        day, time_of_day = p.date_token, "000000"
+    return f"{day}/{p.arch}/{time_of_day}_{p.sha}"
 
 
 def _destination(root: Path, fp: Path) -> Path:

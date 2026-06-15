@@ -4,17 +4,25 @@
 #
 # Runs in the background alongside `vast_train_loop.sh` on the vast instance.
 # Copies the current train.log into the canonical per-run folder layout
-#   logs/<YYYYMMDD>-<HHMMSS>_<arch>_<short-sha>/train.log
+#   logs/<YYYYMMDD>/<arch>/<HHMMSS>_<short-sha>/train.log
 # commits, and pushes to the branch the runner cloned. This makes training
 # progress visible from local clones without SSH'ing into the instance.
 #
-# Path layout (2026-06-15): we now write DIRECTLY into the per-run
-# folder used by ``brian migrate 0001_logs_to_run_folders``. Stable
-# filename per run means we just overwrite the file in place — no
-# need to track ``_PREV_LOG`` and ``git rm`` the previous step's
-# filename. The pre-2026-06-15 layout was
-#   logs/vast/<YYYYMMDD>/<ARCH>/<stamp>_<id>_..._stepNofN.log
-# which had a mutating leaf name (step suffix changes every push).
+# Path layout (2026-06-15-eve): 3-level hierarchy — day → arch → per-run
+# leaf. We write DIRECTLY into the folder used by ``brian migrate
+# 0001_logs_to_run_folders``. Stable filename per run (always
+# ``train.log``) means we just overwrite the file in place — no need
+# to track ``_PREV_LOG`` and ``git rm`` the previous step's filename.
+#
+# Layout history:
+#   pre-2026-06-15  flat:      logs/vast/<stamp>_<id>_..._stepNofN.log
+#   2026-06-15-am   nested:    logs/vast/<YYYYMMDD>/<ARCH>/<stamp>_<id>_..._stepNofN.log
+#   2026-06-15-pm   per-run:   logs/<YYYYMMDD>-<HHMMSS>_<arch>_<sha>/train.log (flat)
+#   2026-06-15-eve hierarchy:  logs/<YYYYMMDD>/<arch>/<HHMMSS>_<sha>/train.log (3-level)
+#
+# The hierarchy puts day first because that's how humans search
+# ("which day was that crash?"), arch second because it's the next-
+# most-common search axis, and ``<time>_<sha>`` last as a per-run leaf.
 #
 # Cadence (2026-06-15): the pusher is now STEP-DRIVEN when ``LOG_EVERY``
 # is exported. The poll is tight (POLL_INTERVAL=30s default) and the
@@ -83,14 +91,15 @@ mkdir -p "logs"
 # ── Filename builder ───────────────────────────────────────────────────
 # Returns the canonical per-run folder path used across the project:
 #
-#   logs/<YYYYMMDD>-<HHMMSS>_<arch>_<short-sha>/train.log
+#   logs/<YYYYMMDD>/<arch>/<HHMMSS>_<short-sha>/train.log
 #
 # This is the SAME layout that the ``0001_logs_to_run_folders``
 # migration produces when normalising old flat ``logs/vast/*.log``
 # files. Writing here directly means:
 #   * one stable filename per run (no _PREV_LOG cleanup needed)
 #   * the migration becomes a no-op going forward
-#   * `ls logs/` gives a chronologically-sorted per-run inventory
+#   * ``ls logs/`` groups by day, ``ls logs/<day>/`` groups by arch —
+#     matches how a human searches the directory tree
 #
 # History: pre-2026-06-15 we wrote to the nested layout
 # ``logs/vast/<YYYYMMDD>/<ARCH_NAME>/<stamp>_<id>_..._stepNofN.log``.
@@ -104,10 +113,15 @@ mkdir -p "logs"
 #      ``!logs/vast/**/*.log``). The new layout ``logs/<folder>/train.log``
 #      is whitelisted by a clean ``!logs/**/train.log`` pattern.
 #
-# Conversion from BOOT_TIMESTAMP=YYYYMMDDTHHMMSSZ to YYYYMMDD-HHMMSS:
-# strip the trailing 'Z' and replace the 'T' with '-' so it lines up
-# with the migration's folder convention (which uses date_token =
-# "YYYYMMDD-HHMMSS"). bash ${var//pat/repl} handles both substitutions.
+# The 2026-06-15-eve refactor split the per-run folder name from
+# ``<date>-<time>_<arch>_<sha>`` (flat, all-in-one) into a 3-level
+# hierarchy ``<date>/<arch>/<time>_<sha>`` (day → arch → leaf) so
+# ``ls logs/`` is a short list of days instead of a long undifferentiated
+# dump of run folders.
+#
+# BOOT_TIMESTAMP slicing: BOOT_TIMESTAMP=YYYYMMDDTHHMMSSZ →
+#   day            = ${BOOT_TIMESTAMP:0:8}   # YYYYMMDD
+#   time_of_day    = ${BOOT_TIMESTAMP:9:6}   # HHMMSS  (skips the 'T')
 _format_steps() {
     local n="$1"
     # Compact "10000" → "10k", "40000" → "40k", "?" stays "?".
@@ -127,16 +141,26 @@ _compose_logfile() {
     # is stable from the first push to the final one. Step counts and
     # params still flow into the *commit message* via the call site,
     # they just don't go in the filename anymore.
-    local stamp date_part time_part short_sha
-    # 20260615T185105Z → 20260615-185105
-    date_part="${BOOT_TIMESTAMP:0:8}"
-    time_part="${BOOT_TIMESTAMP:9:6}"
-    stamp="${date_part}-${time_part}"
+    #
+    # Layout (3-level hierarchy: day → arch → per-run leaf):
+    #   logs/<YYYYMMDD>/<arch>/<HHMMSS>_<short-sha>/train.log
+    #
+    # This matches neuroslm/migrations/0001_logs_to_run_folders.py
+    # ::_new_folder_name exactly, so 'brian migrate 0001' is a no-op
+    # after a deploy — the pusher already writes the canonical path.
+    # The day/arch levels let `ls logs/` group runs by what humans
+    # actually search by (which day was this? which arch?). Previously
+    # the layout was flat ``logs/<date>-<time>_<arch>_<sha>/`` which
+    # made ``ls logs/`` a long undifferentiated dump.
+    local day time_of_day short_sha
+    # 20260615T185105Z → day=20260615  time_of_day=185105
+    day="${BOOT_TIMESTAMP:0:8}"
+    time_of_day="${BOOT_TIMESTAMP:9:6}"
     # Git short sha of HEAD on the on-box clone. Falls back to "nohead"
     # if we're somehow not in a repo (the cd at startup already failed
     # in that case, so this is belt-and-braces).
     short_sha="$(git rev-parse --short=12 HEAD 2>/dev/null || echo nohead)"
-    local folder="logs/${stamp}_${ARCH_NAME}_${short_sha}"
+    local folder="logs/${day}/${ARCH_NAME}/${time_of_day}_${short_sha}"
     mkdir -p "$folder"
     echo "${folder}/train.log"
 }

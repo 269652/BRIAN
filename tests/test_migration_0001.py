@@ -10,8 +10,8 @@ Contract under test:
      `logs/_unsorted_legacy/<original>`.
   4. Only logs whose basename is referenced anywhere in the repo
      (per `ReferenceIndex.references`) are included in plan().
-  5. Output folder format:
-       `logs/<YYYYMMDD>-<HHMMSS>_<arch>_<sha>/train.log`
+  5. Output folder format (3-level hierarchy):
+       `logs/<YYYYMMDD>/<arch>/<HHMMSS>_<sha>/train.log`
   6. `plan()` is idempotent — if the destination file already exists,
      no Op is emitted.
   7. `apply()` actually copies (not moves) and creates parent dirs.
@@ -136,7 +136,8 @@ def test_new_folder_name_format() -> None:
         source="new",
     )
     folder = m._new_folder_name(p)
-    assert folder == "20260614-182653_rcc_bowtie_889M_run_07aba24be2bf"
+    # 3-level hierarchy: <YYYYMMDD>/<arch>/<HHMMSS>_<sha>
+    assert folder == "20260614/rcc_bowtie_889M_run/182653_07aba24be2bf"
 
 
 # ── 4. Reference gating ────────────────────────────────────────────────
@@ -163,11 +164,12 @@ def test_plan_only_emits_ops_for_referenced_logs(repo: Path) -> None:
 
 
 def test_plan_skips_logs_in_already_migrated_folders(repo: Path) -> None:
-    """Logs already inside `logs/<folder>/` (not `logs/vast/`) are
-    NEVER candidates — they've been migrated."""
+    """Logs already inside `logs/<day>/<arch>/<run>/` (not `logs/vast/`)
+    are NEVER candidates — they've been migrated."""
     m = _load_migration()
+    # v4 3-level hierarchy: logs/<day>/<arch>/<time>_<sha>/train.log
     _make_log(
-        repo / "logs" / "20260614-182653_rcc_889M_07aba24be2bf",
+        repo / "logs" / "20260614" / "rcc_889M" / "182653_07aba24be2bf",
         "train.log",
     )
     ctx = _make_ctx(repo)
@@ -191,10 +193,14 @@ def test_plan_destination_matches_format(repo: Path) -> None:
     assert len(ops) == 1
     op = ops[0]
     dst = op.dst
-    # logs/20260614-182653_arch_889M_07aba24be2bf/train.log
-    assert dst.parent.name == "20260614-182653_arch_889M_07aba24be2bf"
+    # 3-level hierarchy: logs/<day>/<arch>/<time>_<sha>/train.log
+    # Walking parents from train.log upward:
+    #   train.log -> 182653_07aba24be2bf -> arch_889M -> 20260614 -> logs
     assert dst.name == "train.log"
-    assert dst.parent.parent.name == "logs"
+    assert dst.parent.name == "182653_07aba24be2bf"
+    assert dst.parent.parent.name == "arch_889M"
+    assert dst.parent.parent.parent.name == "20260614"
+    assert dst.parent.parent.parent.parent.name == "logs"
 
 
 def test_plan_unsortable_goes_to_unsorted_legacy(repo: Path) -> None:
@@ -222,8 +228,8 @@ def test_plan_skips_when_destination_already_exists(repo: Path) -> None:
     (repo / "docs" / "FINDINGS.md").write_text(
         f"see `{name}`", encoding="utf-8"
     )
-    # Pre-create the destination
-    dst_folder = repo / "logs" / "20260614-182653_arch_889M_07aba24be2bf"
+    # Pre-create the destination in the v4 3-level hierarchy
+    dst_folder = repo / "logs" / "20260614" / "arch_889M" / "182653_07aba24be2bf"
     _make_log(dst_folder, "train.log")
     ctx = _make_ctx(repo)
     ops = m.plan(ctx)
@@ -246,7 +252,11 @@ def test_apply_copies_files_and_creates_parents(repo: Path) -> None:
     assert len(ops) == 1
     n = m.apply(ctx, ops)
     assert n == 1
-    dst = repo / "logs" / "20260614-182653_arch_889M_07aba24be2bf" / "train.log"
+    # v4 3-level hierarchy: logs/<day>/<arch>/<time>_<sha>/train.log
+    dst = (
+        repo / "logs" / "20260614" / "arch_889M"
+        / "182653_07aba24be2bf" / "train.log"
+    )
     assert dst.exists()
     assert dst.read_text(encoding="utf-8") == "real training output\n"
     # Source must STILL exist (copy, not move)

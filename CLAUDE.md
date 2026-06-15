@@ -121,13 +121,29 @@ with the same. Don't reach for `pytest`.
 
 ## 1d. Use the existing `.venv` — **never** create a new one
 
+> **STRICT RULE — ONE VENV, ONE NAME, NO EXCEPTIONS.**
+> The only Python environment that exists for this repo is
+> **`./.venv/`**. You may not create, suggest, configure, switch to,
+> or "temporarily try" *any* other Python environment under *any*
+> circumstance. Not `venv/`, not `env/`, not `.venv2/`, not a conda
+> env, not `uv venv`, not `poetry shell`, not a "fresh interpreter
+> just to test something". If `.venv/` exists, **use it**. If it
+> doesn't, **re-create it at the exact path `./.venv/`** with
+> `python -m venv .venv && .venv\Scripts\pip.exe install -e .` and
+> then use it. There is no second case.
+>
+> This rule applies to **tool calls too**: do not call any tool
+> that would create, register, or activate a new environment
+> (`configure_python_environment` against a fresh path, `uv venv`,
+> `python -m venv <anything but .venv>`, `conda create`, etc.).
+> When asked to "set up the environment", the answer is always
+> "use `./.venv/`".
+
 The repo ships a single, canonical virtual environment at
 `./.venv/` with every dependency the project needs (torch, transformers,
 pytest, vastai, the editable `brian` console script, etc.). **Always
-use it.** Do not create `venv/`, `env/`, `.venv2/`, `conda` envs,
-`uv venv`, `poetry shell`, or any sibling environment "just for this
-task". Every drift between environments has, historically, produced a
-day of "works on my machine" debugging.
+use it.** Every drift between environments has, historically, produced
+a day of "works on my machine" debugging.
 
 **The one and only Python interpreter for this repo:**
 
@@ -152,8 +168,13 @@ day of "works on my machine" debugging.
 # DON'T:
 python -m venv venv              # creates a SECOND env
 python -m venv .venv2            # same problem, different name
+python -m venv ./env             # same problem, different name
 uv venv                          # ditto
+uv venv .venv-new                # ditto
+poetry shell                     # creates a poetry-managed env
+poetry install                   # ditto (installs into poetry's env, not .venv)
 conda create -n brian ...        # ditto
+mamba create -n brian ...        # ditto
 python script.py                 # bare `python` -> whichever python is on PATH (often Python 2.7 or a system python)
 pip install foo                  # bare `pip` -> installs into the wrong env
 
@@ -161,6 +182,22 @@ pip install foo                  # bare `pip` -> installs into the wrong env
 .venv\Scripts\python.exe script.py
 .venv\Scripts\pip.exe install foo
 .venv\Scripts\brian.exe test quick
+```
+
+**Tool-call equivalents that are equally forbidden** (the rule applies
+to *any* path that materialises a second environment, including via
+agent tools and IDE configuration):
+
+```
+# DON'T (tool-shaped):
+configure_python_environment  → pointed at a fresh path (creates a new venv)
+install_python_packages       → into anything other than the resolved .venv
+create_and_run_task           → that invokes `python -m venv ...` for a non-.venv path
+notebook_install_packages     → into a kernel whose interpreter is not .venv
+
+# DO (tool-shaped):
+configure_python_environment  → only when the resolved env is already ./.venv/
+install_python_packages       → only after confirming the active env is ./.venv/
 ```
 
 The bare command `python` on Windows frequently resolves to
@@ -558,38 +595,64 @@ Anti-patterns to refuse:
 
 ### 10.1 Log naming + boot-stamp forensics (audit trail contract)
 
-**Every** `logs/vast/*.log` filename **must** start with a UTC boot
-timestamp and **every** log body **must** open with a 3-line boot
-stamp. This is the contract that makes a deploy auditable months later
-without git archaeology.
+**Every** training log **must** live in a per-run folder named with a
+UTC boot timestamp and **every** log body **must** open with a 3-line
+boot stamp. This is the contract that makes a deploy auditable months
+later without git archaeology.
 
-**Filename format** (enforced by `scripts/log_pusher.sh::_compose_logfile`):
+**Folder + filename format** (enforced by
+`scripts/log_pusher.sh::_compose_logfile` and the
+`0001_logs_to_run_folders` migration's `_new_folder_name`):
 
 ```
-logs/vast/<YYYYMMDD>/<arch>/<UTC_YYYYMMDDTHHMMSSZ>_<instance>_<arch>_<params>_<label>_step<cur>of<target>.log
+logs/<YYYYMMDD>/<arch>/<HHMMSS>_<short-sha>/train.log
 ```
 
-The `YYYYMMDD` date subfolder is the first 8 chars of `BOOT_TIMESTAMP`
-(`${BOOT_TIMESTAMP:0:8}`). The `<arch>` subfolder is `ARCH_NAME` so runs
-from different architectures are separated. Within the arch folder the leaf
-filename still starts with the full UTC boot timestamp so files sort
-chronologically and reused vast.ai instance ids never alias.
+Three-level hierarchy: **day → arch → per-run leaf**. The day comes
+from `${BOOT_TIMESTAMP:0:8}`, the arch from `$ARCH_NAME` (the same
+value used by `brian train --arch <name>`), and the leaf from
+`${BOOT_TIMESTAMP:9:6}_<git-short-sha-12>`. The leaf filename is
+always `train.log` (stable per run — no `_PREV_LOG` cleanup race).
+
+The hierarchy mirrors how a human searches the directory: `ls logs/`
+shows the days, `ls logs/<day>/` shows which architectures ran that
+day, `ls logs/<day>/<arch>/` shows each individual run with its boot
+time and exact deployed commit.
 
 Worked example:
 
 ```
-logs/vast/20260614/arch/20260614T160423Z_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log
+logs/20260614/arch_889M/160423_af758c381388/train.log
+└──── day ──┴── arch ──┴─ time ─┴── short sha ─┘
 ```
 
-- The leading `UTC_…Z` is `$BOOT_TIMESTAMP`, set ONCE in
-  `scripts/vast_train.sh` via `date -u +%Y%m%dT%H%M%SZ` and propagated
-  as an env var to both the background `log_pusher.sh` and the final
-  one-shot push. The same timestamp prefixes every snapshot from the
-  same run so `ls logs/vast/` groups them visually.
-- The timestamp comes **first** so directory listings sort
-  chronologically and reused vast.ai instance ids never alias
-  (regression: deploy 40923107 silently clobbered 40921910 on
-  instance `38569395` before this rule existed).
+- The 12-char short sha pins the **exact deployed commit** (a 7-char
+  abbreviation collides too often once the repo has > ~10k commits).
+- The HHMMSS time means two runs of the same arch on the same day still
+  land in distinct leaf folders without coordinating run-ids.
+- `BOOT_TIMESTAMP` is set ONCE in `scripts/vast_train.sh` via
+  `date -u +%Y%m%dT%H%M%SZ` and propagated as an env var to both the
+  background `log_pusher.sh` and the final one-shot push. The same
+  timestamp is used by `_print_boot_stamp` line 1 so the folder name
+  and the log body agree exactly.
+- The day prefix means directory listings sort chronologically and
+  reused vast.ai instance ids never alias (regression: deploy 40923107
+  silently clobbered 40921910 on instance `38569395` before this rule
+  existed).
+
+**Layout history** (kept here so legacy log paths still parse):
+
+| Era                | Path                                                                                     |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| pre-2026-06-15     | `logs/vast/<stamp>_<id>_..._stepNofN.log` (flat)                                         |
+| 2026-06-15-am      | `logs/vast/<YYYYMMDD>/<ARCH>/<stamp>_<id>_..._stepNofN.log` (nested, mutating leaf name) |
+| 2026-06-15-pm      | `logs/<YYYYMMDD>-<HHMMSS>_<arch>_<sha>/train.log` (flat per-run folder)                  |
+| 2026-06-15-eve     | `logs/<YYYYMMDD>/<arch>/<HHMMSS>_<sha>/train.log` (3-level hierarchy — **current**)      |
+
+The `0001_logs_to_run_folders` migration normalises everything from
+the first three eras into the current layout. Re-running it is
+idempotent (the ledger at `.brian/migrations.json` tracks APPLIED
+status).
 
 **Recent log snapshots** (referenced so the `0001_logs_to_run_folders`
 migration's reference gate picks them up — without an explicit mention
@@ -634,10 +697,14 @@ DSL shas but different metrics → a non-DSL change (data, seed, tokeniser).
 **Pre-commit check.** Boot stamp + filename are pinned by:
 
 - `tests/training/test_train_dsl_boot_stamp.py` (9 contracts)
-- `tests/training/test_log_pusher_naming.py` (2 contracts)
+- `tests/training/test_log_pusher_naming.py` (4 contracts: timestamp
+  prefix, per-run folder layout, day→arch→`<time>_<sha>` hierarchy,
+  no `_PREV_LOG` cleanup)
+- `tests/test_migration_0001.py` (14 contracts: parsing, planning,
+  reference gate, applying — same folder shape as the pusher writes)
 
-Both must stay GREEN. If you rename a helper, update the test. If you
-change the format, write the new contract first (TDD per §1) — the
+All three must stay GREEN. If you rename a helper, update the test. If
+you change the format, write the new contract first (TDD per §1) — the
 forensic value is the format itself, not the implementation.
 
 **Anti-patterns to refuse:**
