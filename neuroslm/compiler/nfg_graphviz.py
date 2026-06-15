@@ -392,110 +392,6 @@ def _compute_back_edges(ir: HypergraphIR) -> set:
     return back_edges
 
 
-# ── Cluster row-wrapping ───────────────────────────────────────────────
-#
-# Clusters with too many populations (e.g. "executive" has 9 modules:
-# evaluator / forward_m / reasoning_cortex / pfc / acc / dmn / gws /
-# claustrum / thought_transformer) make the canvas painfully wide when
-# laid out as a single horizontal row. We wrap into multiple rank=same
-# rows once the cluster crosses ``_WRAP_THRESHOLD`` nodes — invisible
-# constraint edges between row anchors force vertical stacking inside
-# the cluster, so the cluster grows DOWNWARD instead of stretching
-# rightward off the canvas.
-#
-# Threshold = 5 keeps clusters comfortably wide while preventing the
-# "one cluster takes 60 % of the canvas width" problem. To change
-# globally, edit this constant; to expose per-cluster, promote to
-# ``[nfg].wrap_threshold`` in brian.toml and thread through.
-_WRAP_THRESHOLD = 5
-
-
-def _emit_cluster_rows(c, items: List, prefix: str,
-                       engine: str = "dot",
-                       wrap: int = _WRAP_THRESHOLD) -> None:
-    """Emit ``items`` into the cluster subgraph ``c``, wrapping rows
-    once ``len(items)`` exceeds ``wrap``.
-
-    Parameters
-    ----------
-    c
-        The cluster's :class:`graphviz.Digraph` subgraph context.
-    items
-        List of ``(name, label, style_dict)`` tuples. ``name`` is the
-        node id, ``label`` the rendered label string, ``style_dict``
-        the kwargs passed to ``c.node(...)``.
-    prefix
-        Unique string used to name the nested anonymous row subgraphs
-        (e.g. ``"executive"`` → ``"_row_executive_0"``). Must be unique
-        per cluster to avoid name collisions.
-    engine
-        The layout engine — controls whether to apply the rank/glue
-        machinery. ``"dot"`` is hierarchical so it needs the explicit
-        rank+glue to wrap correctly. Force-directed engines
-        (``"fdp"`` / ``"sfdp"`` / ``"neato"``) handle row wrapping
-        naturally via spring relaxation — the rank attr is silently
-        ignored but the high-weight invisible glue edges would
-        DISTORT the spring layout by pulling row anchors together.
-        For non-dot engines we bail to plain emission so the layout
-        engine is free to do its job.
-    wrap
-        Maximum nodes per row (only consulted in dot mode).
-        Defaults to :data:`_WRAP_THRESHOLD`.
-
-    Behaviour (dot only)
-    --------------------
-    * ``len(items) <= wrap`` → single ``rank=same`` row inside the
-      cluster (unchanged from the pre-wrap behaviour).
-    * ``len(items) >  wrap`` → ⌈len/wrap⌉ rank-bands stacked
-      vertically; invisible high-weight edges between consecutive
-      rows' first nodes constrain the ordering so dot lays them top
-      to bottom inside the cluster bounding box.
-
-    Behaviour (fdp / sfdp / neato)
-    ------------------------------
-    Plain emission — let spring forces arrange the nodes inside the
-    cluster's bounding hull. No rank, no glue.
-    """
-    # Force-directed engines: skip all the dot-specific scaffolding
-    # (rank=same is a no-op there, and the high-weight invisible glue
-    # edges would warp the spring layout by pulling cluster anchors
-    # together).
-    if engine != "dot":
-        for name, label, style in items:
-            c.node(name, label=label, **style)
-        return
-
-    if len(items) <= wrap:
-        # Fast path — preserves the original single-row behaviour
-        # exactly (no nested subgraph, no invisible glue edges).
-        c.attr(rank="same")
-        for name, label, style in items:
-            c.node(name, label=label, **style)
-        return
-
-    # Wrap path — chunk into rows of `wrap` and emit each as its own
-    # anonymous rank=same subgraph nested inside the cluster.
-    chunks = [items[i:i + wrap] for i in range(0, len(items), wrap)]
-    for ci, chunk in enumerate(chunks):
-        with c.subgraph(name=f"_row_{prefix}_{ci}") as row:
-            row.attr(rank="same")
-            for name, label, style in chunk:
-                row.node(name, label=label, **style)
-
-    # Invisible glue between row anchors. Without this, dot is free
-    # to put both rows on the same actual rank (defeating the wrap),
-    # or to flip them. weight=100 makes the constraint near-rigid;
-    # style=invis keeps the line out of the final image; minlen=1
-    # gives one rank's worth of vertical separation between rows.
-    for ci in range(len(chunks) - 1):
-        c.edge(chunks[ci][0][0],            # name = items[ci][0][0]
-               chunks[ci + 1][0][0],
-               style="invis",
-               constraint="true",
-               weight="100",
-               minlen="1")
-
-
 def emit_dot_from_hypergraph(
     ir: HypergraphIR,
     *,
@@ -551,14 +447,6 @@ def emit_dot_from_hypergraph(
         with g.subgraph(name="cluster_architecture") as c:
             c.attr(label="architecture", style="rounded,dashed",
                    color="#888888", fontsize="14", bgcolor="#fafafa")
-            # rank=same is a dot-specific layered-layout hint —
-            # forces multiple nodes onto a single horizontal row.
-            # Force-directed engines (fdp/sfdp/neato) ignore the
-            # attribute. With only one architecture node it's a
-            # no-op in either case, but gated for symmetry with
-            # the other clusters.
-            if engine == "dot":
-                c.attr(rank="same")
             for n in arch_nodes:
                 style = _KIND_STYLES["architecture"]
                 c.node(n.name, label=_arch_label(n), **style)
@@ -578,12 +466,10 @@ def emit_dot_from_hypergraph(
             c.attr(label=style["label"], style="rounded,dashed",
                    color=style["color"], fontsize="13",
                    bgcolor=style["fillcolor"])
-            # Build (name, label, style_dict) items for the helper.
-            # Tint each population's fill by its region so they stay
-            # visually anchored to the cluster even when the layout
-            # engine routes edges across cluster boundaries.
-            region_items: List = []
             for n in nodes_in_region:
+                # Tint each population's fill by its region so they stay
+                # visually anchored to the cluster even when the layout
+                # engine routes edges across cluster boundaries.
                 pop_style = dict(_KIND_STYLES["population"])
                 pop_style["color"]     = style["color"]
                 pop_style["fillcolor"] = style["fillcolor"]
@@ -591,13 +477,7 @@ def emit_dot_from_hypergraph(
                 eid = f"population:{n.name}"
                 if eid in heat_map and heat_map[eid] > 0.0:
                     pop_style["fillcolor"] = heat_to_fillcolor(heat_map[eid])
-                region_items.append(
-                    (n.name, _population_label(n), pop_style))
-            # Wraps to multiple rows when len > _WRAP_THRESHOLD.
-            # "executive" (9 modules) wraps to 5+4 = 2 rows; smaller
-            # clusters stay as a single horizontal band.
-            _emit_cluster_rows(c, region_items, prefix=region,
-                               engine=engine)
+                c.node(n.name, label=_population_label(n), **pop_style)
 
     # 2b. Multi-cortex cluster — cortex_expert nodes + lm_trunk anchor.
     #     This is the visual home of the GPT-2 ensemble plus the
@@ -612,21 +492,12 @@ def emit_dot_from_hypergraph(
             c.attr(label=style["label"], style="rounded,solid",
                    color=style["color"], fontsize="13",
                    bgcolor=style["fillcolor"])
-            # Build (name, label, style_dict) items — trunk first so
-            # it anchors the row, then the cortex experts. Goes
-            # through _emit_cluster_rows so behaviour is uniform
-            # with the anatomical region clusters above.
-            cortex_items: List = []
             for n in trunk_nodes:
                 trunk_style = dict(_KIND_STYLES["lm_trunk"])
-                cortex_items.append(
-                    (n.name, _trunk_label(n), trunk_style))
+                c.node(n.name, label=_trunk_label(n), **trunk_style)
             for n in expert_nodes:
                 expert_style = dict(_KIND_STYLES["cortex_expert"])
-                cortex_items.append(
-                    (n.name, _expert_label(n), expert_style))
-            _emit_cluster_rows(c, cortex_items, prefix="multi_cortex",
-                               engine=engine)
+                c.node(n.name, label=_expert_label(n), **expert_style)
 
     # 3. Neurotransmitter cluster
     nt_nodes = [n for n in ir.nodes if n.kind == "neurotransmitter"]
@@ -634,17 +505,13 @@ def emit_dot_from_hypergraph(
         with g.subgraph(name="cluster_neurotransmitters") as c:
             c.attr(label="neurotransmitters", style="rounded,dashed",
                    color="#7a6b00", fontsize="14", bgcolor="#fffcec")
-            # Build (name, label, style_dict) items — each NT keeps
-            # its semantic colour so the modulator arrows it emits
-            # stay visually anchored. 7 NTs > _WRAP_THRESHOLD (5),
-            # so the cluster wraps to 5+2 across 2 rows.
-            nt_items: List = []
             for n in nt_nodes:
-                nt_style = dict(_KIND_STYLES["neurotransmitter"])
-                nt_style["color"] = _nt_colour(n.name)
-                nt_items.append((n.name, _nt_label(n), nt_style))
-            _emit_cluster_rows(c, nt_items, prefix="neurotransmitters",
-                               engine=engine)
+                style = dict(_KIND_STYLES["neurotransmitter"])
+                # Tint the NT node by its semantic colour so the modulator
+                # arrows it emits stay visually anchored.
+                colour = _nt_colour(n.name)
+                style["color"] = colour
+                c.node(n.name, label=_nt_label(n), **style)
 
     # 3b. Cycle-breaking — let dot rank from the real synapse DAG.
     #
