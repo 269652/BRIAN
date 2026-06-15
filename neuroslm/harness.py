@@ -2599,6 +2599,34 @@ class BRIANHarness(nn.Module):
 
     # ── Checkpoint ───────────────────────────────────────────────────
 
+    # Subtrees whose source-of-truth lives outside the checkpoint and
+    # therefore must NOT be serialised. Adding 1+ GB of frozen HF
+    # weights on every save blew past GitHub LFS's 2 GiB per-file
+    # limit on instance 41049651 (2026-06-15). The experts are
+    # re-attached by ``_build_multi_cortex`` on resume — from the
+    # local HF cache, which is byte-for-byte identical.
+    # Regression-pinned by
+    # ``tests/test_checkpoint_excludes_frozen_experts.py``.
+    _CKPT_EXTERNAL_PREFIXES: tuple = (
+        "multi_cortex.experts.",
+    )
+
+    @classmethod
+    def _is_external_key(cls, key: str) -> bool:
+        """True iff ``key`` points into a subtree whose weights are
+        sourced externally (HuggingFace cache, etc.) and so must be
+        excluded from save and tolerated as missing on load."""
+        return any(key.startswith(p) for p in cls._CKPT_EXTERNAL_PREFIXES)
+
+    def _persistable_state_dict(self) -> Dict[str, Any]:
+        """``state_dict()`` with externally-sourced subtrees filtered
+        out. Used by ``save_checkpoint`` to keep the on-disk payload
+        below GitHub LFS's 2 GiB single-file ceiling."""
+        return {
+            k: v for k, v in self.state_dict().items()
+            if not self._is_external_key(k)
+        }
+
     def save_checkpoint(self, path: str, step: int = 0,
                         extra: Optional[Dict[str, Any]] = None) -> None:
         """Persist model + optimizer state + step. Mirrors Brain's format
@@ -2611,6 +2639,15 @@ class BRIANHarness(nn.Module):
         otherwise. Regression-pinned by
         ``tests/test_checkpoint_path_layout.py``
         ::``TestCheckpointDirLayout::test_save_checkpoint_writes_into_run_subdir``.
+
+        Externally-sourced subtrees (frozen HF experts, see
+        ``_CKPT_EXTERNAL_PREFIXES``) are filtered out of the saved
+        state-dict; they're re-attached on resume by
+        ``_build_multi_cortex`` from the local HuggingFace cache. This
+        keeps the on-disk file under GitHub LFS's 2 GiB per-file hard
+        limit and saves ~1 GB per checkpoint in the production
+        ``rcc_bowtie_30m_p4`` config. Regression-pinned by
+        ``tests/test_checkpoint_excludes_frozen_experts.py``.
         """
         import os as _os
         parent = _os.path.dirname(_os.fspath(path))
@@ -2618,7 +2655,7 @@ class BRIANHarness(nn.Module):
             _os.makedirs(parent, exist_ok=True)
         payload = {
             "step": step,
-            "model": self.state_dict(),
+            "model": self._persistable_state_dict(),
             "vocab_size": self.vocab_size,
             "d_sem": self.d_sem,
             "sink_population": self.sink_population,
@@ -2641,6 +2678,16 @@ class BRIANHarness(nn.Module):
         harness has them as ``None``. Regression-pinned by
         ``tests/test_checkpoint_path_layout.py``
         ::``TestStateDictRoundTripAfterTraining``.
+
+        Loads with ``strict=False`` but enforces a narrow tolerance:
+        missing keys are only allowed when they belong to an
+        externally-sourced subtree (``_CKPT_EXTERNAL_PREFIXES`` — i.e.
+        frozen HF experts that the live harness already owns from
+        ``_build_multi_cortex``). Any other missing key raises so
+        accidental cross-architecture loads stay loud. Unexpected
+        keys (the back-compat case where an OLD checkpoint still
+        carries expert weights) are silently dropped — the live
+        experts are the source of truth on resume.
         """
         payload = torch.load(path, map_location=device, weights_only=False)
         model_keys = payload["model"].keys()
@@ -2671,7 +2718,30 @@ class BRIANHarness(nn.Module):
             cur_bs = int(self._transmitter_sys.level.shape[0])
             if saved_bs != cur_bs:
                 self._transmitter_sys.reset(saved_bs, device)
-        self.load_state_dict(payload["model"])
+        # strict=False so the new (filtered) format loads cleanly even
+        # though the live harness has the frozen-expert submodules
+        # attached. Then narrow the tolerance: any MISSING key that is
+        # NOT under an external prefix is still a hard error — that's
+        # the cross-architecture / wrong-checkpoint guard.
+        result = self.load_state_dict(payload["model"], strict=False)
+        # ``IncompatibleKeys`` is a named tuple
+        # ``(missing_keys, unexpected_keys)``; pre-PyTorch-1.5 returns
+        # ``None``. Guard for both.
+        if result is not None:
+            real_missing = [
+                k for k in getattr(result, "missing_keys", [])
+                if not self._is_external_key(k)
+            ]
+            if real_missing:
+                raise RuntimeError(
+                    "load_checkpoint: missing keys outside the allow-listed "
+                    f"external subtree (first 5): {real_missing[:5]}. "
+                    "This usually means the checkpoint was produced by a "
+                    "different architecture than the live harness."
+                )
+            # Unexpected keys (e.g. old-format payload carrying full
+            # expert weights) are intentionally ignored: the live
+            # experts attached at init are the source of truth.
         if "optimizer" in payload and self._optimizer is not None:
             self._optimizer.load_state_dict(payload["optimizer"])
         return int(payload.get("step", 0))
