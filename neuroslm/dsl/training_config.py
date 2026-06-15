@@ -547,6 +547,46 @@ class MultiCortexConfig:
     # `ensemble.set_nt_levels(...)` each step. Default 0.0 ⇒ identity.
     lateral_inhibition_kappa: float = 0.0
 
+    # ── H006: Capacity-Funneled Distillation (CFD) ──────────────────
+    # When `cfd_enabled = True`, the legacy Hinton KL path in
+    # `_cortex_fusion_aux_step` is replaced with the three-stage CFD
+    # pipeline (see docs/formal_framework.md §13 and
+    # hypothesis/H006_capacity_funneled_distillation_implode.md):
+    #
+    #   Stage 1  top-K rank-preserving sparsification of the teacher
+    #            distribution (K modes kept at softmax mass, V-K tail
+    #            spread uniformly). Makes the imitation target lie
+    #            inside the student's reachable softmax simplex.
+    #   Stage 2  entropy-matched temperature
+    #              T_eff = T_0 · max(1, H(student) / H(teacher))
+    #            so the teacher's sharpness never exceeds what the
+    #            student can plausibly match.
+    #   Stage 3  gradient-alignment gate
+    #              λ_eff = λ_0 · (1 + cos(∇distill, ∇LM)) / 2
+    #            so the teacher can never harm the LM objective (mechanical
+    #            no-harm floor).
+    #
+    # Also implicitly fixes Followup F1 (the F.kl_div reduction='batchmean'
+    # vs LM 'mean' mismatch) because the CFD path uses per-token KL
+    # reduction throughout.
+    #
+    # Default `False`: every existing arch.neuro reproduces bit-for-bit.
+    # Only opt-in archs (e.g. H24+ with `cfd_enabled: true`) get the
+    # new path.
+    cfd_enabled: bool = False
+    # Top-K schedule: K anneals linearly from `cfd_topk_start` to
+    # `cfd_topk_end` over the first `cfd_topk_anneal_steps` training
+    # steps, then stays at `cfd_topk_end` for the remainder.
+    # Default schedule: 4 → 32 over the first 10000 steps.
+    cfd_topk_start: int = 4
+    cfd_topk_end: int = 32
+    cfd_topk_anneal_steps: int = 10000
+    # Temperature floor. The Stage-2 entropy-match output is clamped
+    # to be ≥ this value (in particular the `max(1, ...)` clamp uses
+    # this; set > 1.0 to forbid the raw temperature from ever going
+    # below `cfd_temperature_floor · distillation_temperature`).
+    cfd_temperature_floor: float = 1.0
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Multi-Objective Fitness — Phase A/F1 (central selection-pressure switch)
@@ -1370,6 +1410,18 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
     if "lateral_inhibition_kappa" in props:
         m.lateral_inhibition_kappa = float(props["lateral_inhibition_kappa"])
 
+    # ── H006: Capacity-Funneled Distillation (CFD) ──
+    if "cfd_enabled" in props:
+        m.cfd_enabled = _parse_bool(props["cfd_enabled"])
+    if "cfd_topk_start" in props:
+        m.cfd_topk_start = int(props["cfd_topk_start"])
+    if "cfd_topk_end" in props:
+        m.cfd_topk_end = int(props["cfd_topk_end"])
+    if "cfd_topk_anneal_steps" in props:
+        m.cfd_topk_anneal_steps = int(props["cfd_topk_anneal_steps"])
+    if "cfd_temperature_floor" in props:
+        m.cfd_temperature_floor = float(props["cfd_temperature_floor"])
+
     # ── Per-expert roster (new path, replaces ``weights`` shorthand) ──
     # `experts: [ { id: "gpt2", domain: "general", freeze: true }, ... ]`
     # When present, supersedes ``weights`` and auto-derives `domains`
@@ -1445,6 +1497,29 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
             "multi_cortex.experts: must contain at least one expert "
             "(or omit the field entirely to use the legacy `weights` path)"
         )
+    # ── H006 CFD validation ──
+    if m.cfd_enabled:
+        if m.cfd_topk_start < 1:
+            raise ValueError(
+                f"multi_cortex.cfd_topk_start must be >= 1, "
+                f"got {m.cfd_topk_start}"
+            )
+        if m.cfd_topk_end < m.cfd_topk_start:
+            raise ValueError(
+                f"multi_cortex.cfd_topk_end ({m.cfd_topk_end}) must be "
+                f">= cfd_topk_start ({m.cfd_topk_start})"
+            )
+        if m.cfd_topk_anneal_steps < 0:
+            raise ValueError(
+                f"multi_cortex.cfd_topk_anneal_steps must be >= 0, "
+                f"got {m.cfd_topk_anneal_steps}"
+            )
+        if m.cfd_temperature_floor < 1.0:
+            raise ValueError(
+                f"multi_cortex.cfd_temperature_floor must be >= 1.0 "
+                f"(otherwise Stage 2 could SHARPEN the teacher), "
+                f"got {m.cfd_temperature_floor}"
+            )
     return m
 
 

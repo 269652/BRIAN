@@ -40,6 +40,14 @@
       "status": "stated",
       "theorem_name": "Brian.ImprovementGateWelch",
       "title": "ImprovementGate Welch correctness"
+    },
+    {
+      "file": "H006_capacity_funneled_distillation_implode.md",
+      "id": "H006",
+      "proof_status": "missing",
+      "status": "draft",
+      "theorem_name": "Brian.CapacityFunneledDistillationImplode",
+      "title": "Capacity-Funneled Distillation produces monotone-implode PPL in teacher capacity"
     }
   ],
   "version": 1

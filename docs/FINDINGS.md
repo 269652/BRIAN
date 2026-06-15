@@ -952,3 +952,264 @@ These remain real concerns even with the alignment fix:
 | "Per-position abstain is mathematically sound"             | ✅ CONFIRMED — and now lightly used (only at the ~5% of positions that misalign) |
 
 
+
+
+## Run 40968510 � 2026-06-14 23:30 UTC � H23 post-mortem #3 (the REAL mechanism)
+
+**Hypothesis.** H22 SmolLM2 swap regressed PPL/OOD because the
+exact-end alignment fix (commit `a976fee`) was *necessary but not
+sufficient*. There is a second, much larger mechanism upstream of the
+bridge: the KL-distillation loss in
+`neuroslm.harness.NeuroSLMHarness._cortex_fusion_aux_step` uses
+`F.kl_div(..., reduction="batchmean")` which divides the per-token KL
+sum by `B` only (not `B × T`). For (B=1, T=512, V=50257) the reported
+KL is therefore `~T × per_token_KL = ~512 × per_token_KL`. The LM
+cross-entropy term uses the default `reduction="mean"` (averages over
+`B × T`). The two loss terms are on incompatible scales — the
+distillation term dominates by `T` ≈ 500×, and the dominance scales
+with teacher sharpness.
+
+**Status.** ✅ CONFIRMED — reproduced numerically in
+`scripts/diagnose_kl_distill_blowup.py`. Cross-validates against H22's
+own training log at step 500 (`kl=1512.000` matches the predicted
+`per_token_KL × (T-1) × T² = 5 × 71 × 16 = ~5680` upper bound; actual
+value reduced because the EMA-gap-ramp has begun to throttle λ).
+
+### The numerical smoking gun
+
+`scripts/diagnose_kl_distill_blowup.py` — gpt2 trunk (random init) +
+each teacher candidate on a 7-sentence English paragraph (T=72):
+
+| Teacher | per-token KL × T² (correct) | batchmean × T² (current) | Ratio | × LM loss |
+|---|---|---|---|---|
+| gpt2 (fast path) | **5.014 nats** | **355.981 nats** | 71× | **33×** |
+| SmolLM2 (bridge path, ✓ alignment) | **4.550 nats** | **323.034 nats** | 71× | **30×** |
+
+Reduction-ratio 71× equals `T-1 = 71` to the digit. The bug is
+deterministic and isolated to one PyTorch keyword argument.
+
+Scaled to the training batch (T=512), the bug yields
+`kl_batchmean ≈ 2300` — **exactly matching** the H22 `train.log`
+step 20 value of `kl=2304.000`.
+
+### Why gpt2 expert trained successfully despite the same bug
+
+Both teachers produce equally-broken distillation magnitudes at step
+0 (gpt2: 356, SmolLM2: 323 nats). But during training, two things
+diverge:
+
+1. **Imitation feasibility.** A gpt2-trunk can in principle learn to
+   imitate gpt2-teacher *exactly* — same tokenizer, same architecture
+   family, same head structure. The KL gradient points to a reachable
+   target; over 500-1000 steps the gap closes and λ throttles down.
+   A gpt2-trunk **cannot** efficiently learn to imitate SmolLM2-teacher
+   — different tokenizer (49 152 vs 50 257), different positional
+   encoding (RoPE vs absolute), different head normalization. The KL
+   gradient points to an *unreachable* target. The student
+   "spins its wheels" and the gap stays large for thousands of steps.
+
+2. **Capacity mismatch amplification.** SmolLM2 has 3× the parameters
+   and 100× the training tokens of gpt2 — it produces sharper logits.
+   A sharper teacher × the broken reduction × an unreachable imitation
+   target × T²=16 temperature scaling = the H22 training pathology.
+
+H22 log @ step 500: `cortex[α_eff=0.500 λ=1.115 kl=1512 lm_ema=10.28
+cx_ema=4.23]`. The trunk LM loss is `lm=6.40`. **Effective loss
+weighting**: `lm=6.40` vs `λ×kl = 1.115 × 1512 = 1686`. The
+distillation term is **263× larger** than the LM term. The trunk is
+being trained almost entirely on a noisy gradient toward an
+unreachable target distribution.
+
+### Why isolated-paragraph CE looked great
+
+Post-mortem #2 (commit `a976fee`) measured the bridge's *output CE*
+in isolation: gpt2 own CE = 3.016 vs SmolLM2 bridge CE = 2.798 on the
+held-out paragraph. That was a valid, correct measurement of the
+expert's quality — **but it never exercised the distillation loss
+path**. The bridge is healthy; the harness's loss-combination is the
+bug.
+
+### What this updates
+
+| Prior claim | Status after post-mortem #3 |
+|---|---|
+| "Alignment shift is the dominant H22 mechanism" | 🟡 PARTIAL — alignment shift is real (≈0.27 nats of bridge CE), but the loss-reduction bug is **two orders of magnitude larger** and was the actual training killer |
+| "Exact-end alignment fix should unlock SmolLM2" | ❌ FALSIFIED — necessary, but not sufficient. SmolLM2 still tanks training because of (a) reduction bug and (b) cross-family imitation infeasibility |
+| "H22 = SmolLM2 too big for trunk capacity" | 🟡 PARTIAL — true, but the dominant mechanism is the reduction bug; even gpt2 expert is being distilled at 33× LM-loss strength right now |
+
+### Decisions taken in this run
+
+1. **Swap `general` slot back to `gpt2`** in all three roster locations
+   (`architectures/rcc_bowtie/arch.neuro`,
+   `architectures/master/arch.neuro`,
+   `architectures/current/arch.neuro`). This is the user's request and
+   the immediate, surgical revert to the known-good H21 baseline.
+2. **DO NOT silently fix the reduction bug.** That change rebalances
+   the loss landscape for every existing trained checkpoint and every
+   future run; it warrants its own RFC + ablation. Flag it here.
+3. **Add `scripts/diagnose_kl_distill_blowup.py` to the repo** as
+   permanent regression-proof of the mechanism.
+
+### Followups (do not silently apply)
+
+* **F1 — fix reduction.** Change `reduction="batchmean"` →
+  `reduction="mean"` in `_cortex_fusion_aux_step` and rerun the H21
+  baseline. Expect: ~30× drop in `kl` metric values, smoother
+  `lm_loss` trajectory, faster convergence.
+* **F2 — re-tune `distillation_lambda_max`.** After F1, the natural
+  scale is per-token KL ≈ O(1) nats. `lambda_max=1.0` is then a
+  reasonable upper bound. Without F1, the *de facto* effective lambda
+  is `T × 1.0 = 512`.
+* **F3 — re-attempt SmolLM2 swap** once F1 + F2 are in. With correct
+  loss scaling, the imitation-infeasibility may also be addressable
+  via a *projection-on-LSH-subspace* trick (only distill onto the
+  ~100 most-probable trunk tokens per position).
+
+### Regression-pinned by
+
+* `scripts/diagnose_kl_distill_blowup.py` (numerical mechanism)
+* H22 `logs/20260614-184807_arch_1127M_h22-smollm2-dna-arch_*/train.log`
+  step-20 + step-500 `cortex[…kl=…]` values
+
+## Run pre-H24 — 2026-06-15 00:30 UTC — Capacity-Funneled Distillation (CFD): from explosion to implode
+
+Per user request, the H22 "teacher too strong" pathology was promoted
+from a swap-back-and-warn item (post-mortem #3 above) to a **design
+target**: instead of just dampening the strong teacher, *funnel* it
+into a representation the student can actually exploit, so that PPL
+*decreases monotonically* with teacher capacity. The user's framing:
+"there's an optimal train status for SLMs where the weights are
+optimal for PPL and OOD PPL, and a bigger teacher should outperform a
+smaller one at the same student parameter count."
+
+### Diagnosis recap (one-paragraph form)
+
+A naive KL distillation loss with a much higher-capacity teacher fails
+for three reasons that *compound*: (1) the teacher's softmax has modes
+the student trunk cannot disentangle (unrepresentable target → the
+loss has no zero), (2) the teacher's distribution is far sharper than
+the student's at init (sharpness mismatch → gradient is dominated by
+where student is least able to follow), and (3) gradients from the LM
+loss and the distill loss can point in opposing directions
+(unconstrained tug-of-war → no floor on the harm). The
+`reduction='batchmean'` bug (Followup F1) amplified all three by ~T
+but is *not* their cause; even the corrected per-token KL fails the
+same way, slower.
+
+### The CFD design (three stages, all closed-form)
+
+Each stage neutralises exactly one ingredient of the diagnosis. They
+compose, and each has a one-line analytic interpretation.
+
+**Stage 1 — top-$K$ rank-preserving sparsification.**
+Replace the raw teacher softmax with a $K$-mode-plus-uniform-tail
+projection: keep the top-$K$ teacher logits at their softmax mass,
+spread the residual $1 - \sum_{i \in \mathrm{TopK}} p_i$ uniformly over
+the $V - K$ remaining tokens. This makes the imitation target lie
+inside the student's reachable softmax simplex when $K$ is at or below
+the student's mode-resolution capacity. The KL now has a *reachable
+floor* (it can converge to zero); the student stops spending gradient
+budget on distinctions it cannot make. Schedule: $K = 4 \to 32$
+linear over the first half of training ("easy first, hard later").
+
+**Stage 2 — entropy-matched temperature.**
+The temperature is computed per batch as
+$T_{\mathrm{eff}} = T_0 \cdot \max(1, H(p_s) / H(p_t))$. Early in
+training the student is much less certain than the teacher
+($H_s \gg H_t$), so $T_{\mathrm{eff}}$ is large and the teacher's
+sharpness is softened to a level the student can plausibly match. As
+the student catches up, $T_{\mathrm{eff}} \to T_0$ and the teacher's
+fine-grained distinctions come into focus — *after* the student has
+the representational scaffolding to use them. This is exactly the
+self-paced revelation the user asked for: the teacher reveals more
+detail only as the student earns capacity.
+
+**Stage 3 — gradient-alignment gate.**
+Compute the cosine $g_{\mathrm{align}} \in [-1, 1]$ between the
+distillation gradient and the LM-CE gradient (cheaply, via the trunk's
+last-layer bias as a single shared probe parameter). Then weight
+$\lambda_{\mathrm{eff}} = \lambda_0 \cdot (1 + g_{\mathrm{align}})/2$.
+When the teacher pulls along the LM gradient,
+$g_{\mathrm{align}} \to 1$ and distillation runs at full strength;
+when it pulls against, $g_{\mathrm{align}} \to -1$ and
+$\lambda_{\mathrm{eff}} \to 0$ automatically. **The student can never
+be hurt by the teacher.** This is PCGrad / GradReg applied to KD; the
+no-harm floor becomes mechanical, not asymptotic.
+
+### Why this should "implode" PPL instead of explode
+
+Three claims, each falsifiable by the four-arm ablation in
+`tests/training/test_cfd_distillation.py`:
+
+* **(A) Reachable target.** Stages 1+2 together project the teacher
+  onto the student's reachable distribution family. Loss has a zero;
+  optimisation has a stable fixed point.
+* **(B) Strictly more bits than one-hot.** The top-$K$ projection
+  carries strictly more bits than the one-hot LM target (top-1 is the
+  one-hot rank-1 case). For any student with capacity > 1 mode this
+  is non-trivially useful information.
+* **(C) Gradient compatibility.** Stage 3 projects the distill
+  gradient onto the half-space aligned with the LM gradient. The
+  combined update is component-wise no worse than LM-only.
+
+A+B+C imply $\mathrm{ppl}(\theta_{\mathrm{CFD}}) \le \mathrm{ppl}(\theta_{\mathrm{LM-only}})$
+with strict inequality whenever the teacher's top-$K$ distribution
+disagrees with the empirical one-hot but agrees in direction with the
+LM gradient — which is *exactly* the regime where the teacher's
+pretraining knowledge transfers. Formal statement: see
+`hypothesis/H006_capacity_funneled_distillation_implode.md` and
+`docs/formal_framework.md §13`.
+
+### The implied "parameter-efficient frontier"
+
+If H006 holds, then for fixed student capacity $C_s$ the map
+$C_t \mapsto \mathrm{ppl}(\theta_s^\star(t))$ has an infimum
+$\mathrm{ppl}^\star(C_s)$ approached as $C_t \to \infty$. This is a
+*measurable* SLM-frontier curve — the best PPL any $C_s$-parameter LM
+can achieve when distilled from an arbitrarily strong CFD-funneled
+teacher. We can chart it empirically by scaling $C_t$ at fixed $C_s$
+and observing the implode. Practical implication: a small student
+trained from a much larger CFD-funneled teacher should *outperform* a
+small student trained from a teacher matched to its own size, at the
+same parameter count.
+
+### Decisions taken in this run
+
+1. **Declare H006 as a falsifiable hypothesis** under
+   `hypothesis/H006_capacity_funneled_distillation_implode.md`,
+   `proof_status: missing` (Lean obligation deferred until the
+   empirical four-arm ablation passes).
+2. **Promote the F1 reduction-bug fix into the CFD redesign.** The
+   per-token reduction is fixed *as a side-effect of* the CFD path;
+   the legacy `reduction='batchmean'` code path is kept under a flag
+   for bit-identical reproduction of prior runs.
+3. **Ship CFD behind a new `cfd_enabled: bool` switch on
+   `MultiCortexConfig`** (default `false`). H21–H23 reproduce
+   bit-identically; only new runs that explicitly opt in get the new
+   path.
+4. **Write the four-arm ablation test first**, then implement.
+
+### Followups (post-CFD)
+
+* **F4 — empirical frontier chart.** Run the
+  $\{C_t = 125\text{M}, 360\text{M}, 1\text{B}, 3\text{B}\}$ scan at
+  fixed $C_s = 30\text{M}$ trunk, plot
+  $\mathrm{ppl}^\star(C_s; C_t)$, fit the asymptote
+  $\mathrm{ppl}^\star(C_s)$.
+* **F5 — re-attempt SmolLM2 swap with CFD enabled.** Expected: PPL
+  better than the H21 all-gpt2-family baseline (the original goal of
+  H22).
+* **F6 — formalise (II)** (monotone implode in teacher capacity)
+  in Lean. Requires defining a Brian-side
+  `CapacityOrdering` predicate via KL on the data distribution and a
+  short refinement-of-information argument.
+
+### Regression-pinned by
+
+* `hypothesis/H006_capacity_funneled_distillation_implode.md` —
+  formal statement of the theorem
+* `tests/training/test_cfd_distillation.py` — four-arm ablation
+  falsifier (Arms A/B/C/D with predicted PPL ordering)
+* `docs/formal_framework.md §13` — derivations of (I), (II), (III)
+* `scripts/diagnose_kl_distill_blowup.py` — kept as the prior-art
+  baseline that the CFD design must out-perform

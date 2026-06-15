@@ -139,6 +139,196 @@ def _llrd_param_groups(model, base_lr: float, wd: float, factor: float):
     return groups
 
 
+# ── H006: Capacity-Funneled Distillation (CFD) helpers ─────────────────
+#
+# These three free functions implement the three CFD stages described in
+# docs/formal_framework.md §13 and the hypothesis card
+# hypothesis/H006_capacity_funneled_distillation_implode.md. They are
+# at module level (not on BRIANHarness) so they can be unit-tested
+# independently of the harness state machine.
+#
+# Wiring into the training loop is conditional on
+# MultiCortexConfig.cfd_enabled and lives inside
+# BRIANHarness._cortex_fusion_aux_step below.
+
+
+def cfd_topk_target(
+    teacher_logits: torch.Tensor, K: int, T: float
+) -> torch.Tensor:
+    """Stage 1 — top-K rank-preserving sparsification.
+
+    Replace the raw teacher softmax with a K-modes-plus-uniform-tail
+    projection:
+
+      * Keep the top-K teacher logits at their `softmax(teacher / T)`
+        mass.
+      * Spread the residual `1 - sum(top-K mass)` UNIFORMLY over the
+        remaining V-K modes.
+
+    This puts the imitation target inside the student's reachable
+    softmax simplex whenever K ≤ student mode-resolution capacity, so
+    the distillation KL has a reachable zero (not the asymptotic
+    "always-positive" floor of naive Hinton).
+
+    Args:
+        teacher_logits: (..., V) raw teacher logits.
+        K: number of top modes to keep (1 ≤ K ≤ V).
+        T: temperature for the softmax. Same value as used by the
+            downstream KL.
+
+    Returns:
+        target: (..., V) probability distribution. Sums to 1 along
+        the last axis, exactly preserves the top-K masses of
+        `softmax(teacher_logits / T)`, has uniform tail.
+    """
+    V = teacher_logits.size(-1)
+    if K < 1 or K > V:
+        raise ValueError(f"K must be in [1, {V}], got {K}")
+
+    raw = F.softmax(teacher_logits / float(T), dim=-1)
+    if K == V:
+        # Tail is empty; nothing to redistribute.
+        return raw
+
+    topk_vals, topk_idx = teacher_logits.topk(K, dim=-1)
+    # Mass on the top-K under the raw softmax (same indices).
+    topk_mass = raw.gather(-1, topk_idx)
+    # Residual mass to spread uniformly over the V-K tail.
+    residual = (1.0 - topk_mass.sum(dim=-1, keepdim=True)).clamp_min(0.0)
+    tail_uniform = residual / float(V - K)
+
+    # Build target: start with uniform tail value everywhere, then
+    # overwrite the top-K positions with their raw mass.
+    target = tail_uniform.expand_as(raw).clone()
+    target.scatter_(-1, topk_idx, topk_mass)
+    return target
+
+
+def cfd_effective_temperature(
+    student_logits: torch.Tensor,
+    teacher_logits: torch.Tensor,
+    T_0: float,
+    floor_multiplier: float = 1.0,
+    eps: float = 1e-6,
+) -> float:
+    """Stage 2 — entropy-matched temperature.
+
+    Compute the per-batch effective temperature
+
+        T_eff = T_0 · max(floor_multiplier, H(p_s) / H(p_t))
+
+    where H is Shannon entropy of `softmax(. / T_0)` per row, averaged
+    over the batch (under no_grad).
+
+    When the student is at least as confident as the teacher
+    (H(p_s) ≤ H(p_t)) the multiplier collapses to `floor_multiplier`
+    (default 1.0, so T_eff = T_0). When the student is more uncertain,
+    T_eff > T_0, softening the teacher's distribution to a level the
+    student can plausibly match. This is the self-paced curriculum
+    that reveals teacher detail as the student earns capacity.
+
+    Args:
+        student_logits: (..., V) student logits (any shape; entropy
+            averaged over leading dims).
+        teacher_logits: (..., V) teacher logits (same shape).
+        T_0: base temperature.
+        floor_multiplier: lower bound on the entropy ratio (default 1.0
+            so T_eff ≥ T_0 always; set > 1.0 to enforce a minimum
+            softening).
+        eps: numerical guard against H(p_t) → 0.
+
+    Returns:
+        T_eff: scalar Python float (so it can be used as a multiplier
+        in subsequent softmax calls without re-entering autograd).
+    """
+    with torch.no_grad():
+        s_soft = F.softmax(student_logits / float(T_0), dim=-1)
+        t_soft = F.softmax(teacher_logits / float(T_0), dim=-1)
+        # Per-position entropy then mean over leading dims.
+        log_s = F.log_softmax(student_logits / float(T_0), dim=-1)
+        log_t = F.log_softmax(teacher_logits / float(T_0), dim=-1)
+        H_s = -(s_soft * log_s).sum(dim=-1).mean().item()
+        H_t = -(t_soft * log_t).sum(dim=-1).mean().item()
+    ratio = H_s / max(H_t, eps)
+    multiplier = max(float(floor_multiplier), ratio)
+    return float(T_0) * multiplier
+
+
+def cfd_grad_alignment_gate(
+    distill_term: torch.Tensor,
+    lm_logits: torch.Tensor,
+    targets: torch.Tensor,
+    lam_0: float,
+) -> tuple[float, float]:
+    """Stage 3 — gradient-alignment gate.
+
+    Compute the cosine alignment between the distillation gradient and
+    the LM-CE gradient measured at the pre-fusion logit tensor:
+
+        g_align = cos(∇_{lm_logits} distill_term,
+                      ∇_{lm_logits} CE(lm_logits, targets))
+
+    Then the effective λ is
+
+        λ_eff = λ_0 · (1 + g_align) / 2 ∈ [0, λ_0].
+
+    By construction λ_eff = 0 when the teacher pulls AGAINST the LM
+    objective (anti-aligned gradients) and λ_eff = λ_0 when fully
+    aligned. This is the mechanical "no-harm floor" of the H006
+    theorem (I).
+
+    Args:
+        distill_term: scalar tensor — the distillation KL term BEFORE
+            multiplication by λ. Must have grad_fn pointing to
+            `lm_logits` (or share a common subgraph with `lm_logits`).
+        lm_logits: (B, T, V) — the PRE-FUSION student logits. Must be
+            a non-leaf tensor (the grad-alignment is measured here).
+        targets: (B, T) — token ids for the LM-CE gradient.
+        lam_0: base λ value (the pre-Stage-3 scale).
+
+    Returns:
+        (lam_eff, g_align): lam_eff is the gated scalar to multiply
+        the distill term by; g_align ∈ [-1, 1] is the cosine for
+        telemetry.
+    """
+    V = lm_logits.size(-1)
+    flat_t = targets.reshape(-1)
+    lm_ce = F.cross_entropy(lm_logits.reshape(-1, V), flat_t)
+    # retain_graph so the caller can still .backward() on the
+    # downstream loss.
+    g_l = torch.autograd.grad(
+        lm_ce, lm_logits, retain_graph=True, create_graph=False
+    )[0]
+    g_d = torch.autograd.grad(
+        distill_term, lm_logits, retain_graph=True, create_graph=False
+    )[0]
+    # Cosine over the full flattened logit-gradient field. Cheap (one
+    # vector cosine) compared to the gradient computation itself.
+    cos = F.cosine_similarity(
+        g_l.reshape(1, -1), g_d.reshape(1, -1), dim=-1, eps=1e-8
+    ).item()
+    # Numerical guard — cosine_similarity can drift very slightly out
+    # of [-1, 1] due to fp16/fp32 mixed precision.
+    cos = max(-1.0, min(1.0, cos))
+    lam_eff = float(lam_0) * 0.5 * (1.0 + cos)
+    return lam_eff, cos
+
+
+def cfd_topk_schedule(
+    step: int, K_start: int, K_end: int, anneal_steps: int
+) -> int:
+    """Linear top-K anneal: K_start at step 0 → K_end at `anneal_steps`,
+    then stays at K_end. Always returns an int ≥ 1.
+    """
+    if anneal_steps <= 0 or step >= anneal_steps:
+        return int(K_end)
+    if step <= 0:
+        return int(K_start)
+    progress = step / anneal_steps  # in (0, 1)
+    K = K_start + (K_end - K_start) * progress
+    return max(1, int(round(K)))
+
+
 class BRIANHarness(nn.Module):
     """Wrap a DSL-compiled circuit for end-to-end LM training.
 
@@ -929,21 +1119,68 @@ class BRIANHarness(nn.Module):
         lam = self._distillation_lambda(gap_for_lambda)
         if lam > 0.0 and getattr(cfg, "distillation_enabled", False):
             T_dist = float(cfg.distillation_temperature)
-            # KL(softmax(teacher/T) || softmax(student/T))
-            # F.kl_div expects student as log-probs, teacher as probs.
-            teacher = cortex_logits.detach()
-            student = lm_logits
-            log_student = F.log_softmax(student / T_dist, dim=-1)
-            soft_teacher = F.softmax(teacher / T_dist, dim=-1)
-            kl = F.kl_div(
-                log_student, soft_teacher, reduction="batchmean"
-            ) * (T_dist ** 2)
-            total = total + lam * kl
-            self._metrics["distill_kl"] = float(kl.detach().item())
-            self._metrics["distill_lambda"] = float(lam)
+            # H006: when `cfd_enabled = True`, use the three-stage
+            # Capacity-Funneled Distillation path instead of legacy
+            # Hinton KL. Otherwise fall through to the legacy code for
+            # bit-identical reproduction of pre-H24 runs.
+            if getattr(cfg, "cfd_enabled", False):
+                # ── CFD: Stage 1 + Stage 2 + Stage 3 ──
+                teacher = cortex_logits.detach()
+                student = lm_logits
+                # Stage 1 prep: top-K schedule
+                K_t = cfd_topk_schedule(
+                    step=self._global_step,
+                    K_start=int(cfg.cfd_topk_start),
+                    K_end=int(cfg.cfd_topk_end),
+                    anneal_steps=int(cfg.cfd_topk_anneal_steps),
+                )
+                # Stage 2: entropy-matched effective temperature
+                T_eff = cfd_effective_temperature(
+                    student, teacher, T_dist,
+                    floor_multiplier=float(cfg.cfd_temperature_floor),
+                )
+                # Stage 1: top-K rank-preserving sparsified target
+                target_pdf = cfd_topk_target(teacher, K=K_t, T=T_eff)
+                # Per-token KL (correct reduction — fixes Followup F1
+                # by construction since we never go through batchmean
+                # for the CFD path).
+                log_student = F.log_softmax(student / T_eff, dim=-1)
+                kl_per_tok = F.kl_div(
+                    log_student, target_pdf, reduction="none"
+                ).sum(-1).mean()
+                kl_term = kl_per_tok * (T_eff ** 2)
+                # Stage 3: gradient-alignment gate
+                lam_eff, g_align = cfd_grad_alignment_gate(
+                    kl_term, student, targets, lam_0=lam
+                )
+                total = total + lam_eff * kl_term
+                self._metrics["distill_kl"] = float(kl_term.detach().item())
+                self._metrics["distill_lambda"] = float(lam_eff)
+                self._metrics["cfd_T_eff"] = float(T_eff)
+                self._metrics["cfd_K"] = int(K_t)
+                self._metrics["cfd_g_align"] = float(g_align)
+            else:
+                # Legacy Hinton KL (the H21–H23 path; reproduces
+                # bit-for-bit).
+                teacher = cortex_logits.detach()
+                student = lm_logits
+                log_student = F.log_softmax(student / T_dist, dim=-1)
+                soft_teacher = F.softmax(teacher / T_dist, dim=-1)
+                kl = F.kl_div(
+                    log_student, soft_teacher, reduction="batchmean"
+                ) * (T_dist ** 2)
+                total = total + lam * kl
+                self._metrics["distill_kl"] = float(kl.detach().item())
+                self._metrics["distill_lambda"] = float(lam)
         else:
             self._metrics["distill_kl"] = 0.0
             self._metrics["distill_lambda"] = float(lam)
+            # Clear CFD telemetry when distillation is off so log
+            # consumers don't see stale values from prior steps.
+            if getattr(cfg, "cfd_enabled", False):
+                self._metrics["cfd_T_eff"] = 0.0
+                self._metrics["cfd_K"] = 0
+                self._metrics["cfd_g_align"] = 0.0
 
         # ── Slot C: NT-mediated inhibition update ──
         # Drive signal: gap = cortex - lm (positive ⇒ trunk overtook

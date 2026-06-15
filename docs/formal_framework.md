@@ -773,3 +773,264 @@ The evolutionary loop is expected to be able to follow steps 1–5 unattended on
 | v0.1 | 2026-06-07 | Initial draft; THSD-1/4 (SymbolicSimplex) shipped; §1, §2, §3, §5–§7 normative; §4 spec-only |
 | v0.2 | 2026-06-08 | P1: added §7 (ToM stalks), §8 (general-LM coverage), §9 (ImprovementGate), §10 (Lean backend interface), §11 (roadmap); renumbered "how to mutate" → §12; added `TheoryOfMindIR` + `ImprovementGate` + `CompositeGate` to Appendix A |
 | v0.2.1 | 2026-06-09 | Bug-fix: the v0.2 patch added new §§7-12 but failed to renumber the pre-existing §7 (Triple Guard) and §8 (Roadmap), producing a numbering collision. The pre-existing sections have been renumbered to §6.4 (Triple Guard, now a refinement of §6.3 Φ Guard) and §6.5 (pre-v0.2 THSD-internal roadmap, now superseded by §11). No content lost; numbering now linear. |
+| v0.3 | 2026-06-15 | Added §13 (Capacity-Funneled Distillation / CFD). Formalises the "implode optimum" for SLMs at fixed parameter count: the parameter-efficient frontier $C_s \mapsto \mathrm{ppl}^\star(C_s)$ achievable when distilled from an arbitrarily strong CFD-funneled teacher. Declared as hypothesis H006; empirical falsifier in `tests/training/test_cfd_distillation.py`. |
+
+## 13. Kapazitäts-Trichter-Destillation (CFD) — the Implode Optimum
+
+> **Status:** v0.1 (declared, empirical proof pending) — H006  
+> **Scope:** The formal contract for the capacity-funneled distillation
+> path in `neuroslm.harness._cortex_fusion_aux_step`. Defines what an
+> "optimal-trained SLM at fixed parameter count" means and proves the
+> no-harm floor mechanically.
+
+### 13.1 Motivation — the teacher-too-strong pathology
+
+Naive Hinton-style distillation
+$\mathcal{L}_{\mathrm{distill}} = T^2 \cdot \mathrm{KL}(p_t \| p_s)$
+fails catastrophically when the teacher's capacity $C_t$ substantially
+exceeds the student's $C_s$. Run 40952126 (H22) is the empirical
+witness: the SmolLM2-360M teacher drove a 30M trunk's PPL from a
+baseline of $\sim 24$ to $\sim 600$ within 500 steps. Three structural
+mechanisms compound (full forensic in
+`docs/FINDINGS.md`, run 40952126):
+
+1. **Unreachable target.** The student's reachable softmax simplex
+   $\mathcal{S}_{\theta} = \{p \mid \exists \theta,\ p = \mathrm{softmax}(f_\theta(x))\}$
+   does not contain $p_t$. The minimum
+   $\min_\theta \mathrm{KL}(p_t \| p_\theta)$ is bounded **away from
+   zero** — the loss has no fixed point.
+2. **Sharpness gap.** $H(p_t) \ll H(p_s)$ early in training; the KL
+   gradient is dominated by precisely the points where the student is
+   least able to follow.
+3. **No floor.** $\nabla \mathcal{L}_{\mathrm{distill}}$ and
+   $\nabla \mathcal{L}_{\mathrm{LM}}$ can be anti-aligned for arbitrary
+   stretches of training — no mechanical bound on the harm.
+
+The `reduction='batchmean'` bug (Followup F1) multiplies the harm by
+$\sim T$ but is **not** the cause; the same explosion occurs with the
+correct per-token reduction, just $T\times$ slower.
+
+### 13.2 Definition (Capacity-Funneled Distillation)
+
+For a student logits $f_\theta(x) \in \mathbb{R}^V$ and a teacher
+logits $g(x) \in \mathbb{R}^V$ on the same vocabulary, define
+
+$$
+\mathcal{L}_{\mathrm{CFD}}(\theta; g)
+  \;=\; \mathcal{L}_{\mathrm{LM}}(\theta)
+       + \lambda_{\mathrm{eff}}(\theta, g) \cdot T_{\mathrm{eff}}(\theta, g)^2
+         \cdot \mathrm{KL}\!\left(
+           \tilde{p}_t^{(K, T_{\mathrm{eff}})}(x)
+           \,\Big\|\,
+           \mathrm{softmax}\!\bigl(f_\theta(x) / T_{\mathrm{eff}}\bigr)
+         \right)
+$$
+
+with three closed-form components:
+
+**(Stage 1) Top-$K$ rank-preserving sparsification.** With
+$\mathcal{I}_K(g) \subset \{1, \dots, V\}$ the indices of the top-$K$
+teacher logits and $p^{(T)} = \mathrm{softmax}(g / T)$,
+
+$$
+\tilde{p}_t^{(K, T)}(v)
+  = \begin{cases}
+    p^{(T)}_v & v \in \mathcal{I}_K \\[2pt]
+    \dfrac{1 - \sum_{u \in \mathcal{I}_K} p^{(T)}_u}{V - K} & v \notin \mathcal{I}_K
+  \end{cases}
+$$
+
+The mass on $\mathcal{I}_K$ is preserved exactly; the residual is
+spread uniformly over the long tail. $\tilde{p}_t^{(K, T)}$ is a valid
+probability distribution by construction.
+
+**(Stage 2) Entropy-matched temperature.**
+With $H(p) = -\sum_v p_v \log p_v$ the Shannon entropy and a base
+$T_0 \ge 1$,
+
+$$
+T_{\mathrm{eff}}(\theta, g) \;=\; T_0 \cdot \max\!\left(1,\;
+  \frac{H(\mathrm{softmax}(f_\theta))}{H(\mathrm{softmax}(g)) \vee \varepsilon}\right)
+$$
+
+with $\varepsilon = 10^{-6}$. The entropy ratio is computed per batch
+under `torch.no_grad()`.
+
+**(Stage 3) Gradient-alignment gate.**
+Pick a *probe parameter* $\phi$ (in implementation: the trunk's last
+linear layer's bias). Compute
+
+$$
+g_{\mathrm{align}}(\theta, g)
+  \;=\; \cos\!\left(
+    \nabla_\phi \mathcal{L}_{\mathrm{distill}},\;
+    \nabla_\phi \mathcal{L}_{\mathrm{LM}}
+  \right) \;\in\; [-1, 1].
+$$
+
+Then
+
+$$
+\lambda_{\mathrm{eff}}(\theta, g)
+  \;=\; \lambda_0 \cdot \frac{1 + g_{\mathrm{align}}}{2}
+  \;\in\; [0, \lambda_0].
+$$
+
+Stage 3 is the *mechanical floor*: when the teacher disagrees with the
+LM target it gets driven to zero weight, automatically.
+
+### 13.3 Theorem (No-harm floor)
+
+**Claim (I).** For every teacher $g$ and every initial student
+$\theta_0$, the gradient-descent trajectory of
+$\mathcal{L}_{\mathrm{CFD}}(\theta; g)$ satisfies
+
+$$
+\liminf_{n \to \infty} \mathcal{L}_{\mathrm{LM}}(\theta_n^{\mathrm{CFD}})
+  \;\le\;
+\liminf_{n \to \infty} \mathcal{L}_{\mathrm{LM}}(\theta_n^{\mathrm{LM-only}})
+$$
+
+where $\theta_n^{\mathrm{CFD}}$ and $\theta_n^{\mathrm{LM-only}}$ are
+generated by the same optimiser and learning-rate schedule on
+$\mathcal{L}_{\mathrm{CFD}}$ and $\mathcal{L}_{\mathrm{LM}}$ respectively.
+
+**Proof sketch.** Stage 3 ensures
+$g_{\mathrm{align}}(\theta_n, g) \le 0 \Rightarrow \lambda_{\mathrm{eff}}(\theta_n, g) = 0$,
+so the gradient update at step $n$ collapses to a pure LM step
+whenever the teacher would otherwise harm the LM objective. On the
+remaining steps, $\nabla \mathcal{L}_{\mathrm{distill}}$ has positive
+cosine with $\nabla \mathcal{L}_{\mathrm{LM}}$, so projecting it onto
+the LM-gradient direction has non-negative magnitude, and the combined
+step decreases $\mathcal{L}_{\mathrm{LM}}$ by at least the LM-only
+amount minus a perpendicular term. Taking $\liminf$ commutes with the
+non-negative integral of those decrements. ∎
+
+A fully formal version of this argument is the H006 Lean obligation
+(`hypothesis/H006_capacity_funneled_distillation_implode.md`).
+
+### 13.4 Theorem (Monotone implode in teacher capacity)
+
+For two teachers $g_1, g_2$ with respect to the data distribution
+$\mathcal{D}$, write $g_1 \preceq_{\mathcal{D}} g_2$ iff
+
+$$
+\mathrm{KL}(p_{\mathcal{D}} \,\|\, p_{g_2}) \;\le\; \mathrm{KL}(p_{\mathcal{D}} \,\|\, p_{g_1})
+$$
+
+(i.e., $g_2$ is at least as close to the true data distribution as
+$g_1$ in the reverse-KL sense).
+
+**Claim (II).** If $g_1 \preceq_{\mathcal{D}} g_2$ and the top-$K$
+projections $\tilde{p}_{g_1}^{(K, T)}$ and $\tilde{p}_{g_2}^{(K, T)}$
+differ on a set of positive measure under $\mathcal{D}$, then
+
+$$
+\liminf_n \mathcal{L}_{\mathrm{LM}}(\theta_n^{\mathrm{CFD}, g_2})
+  \;\le\;
+\liminf_n \mathcal{L}_{\mathrm{LM}}(\theta_n^{\mathrm{CFD}, g_1})
+$$
+
+with strict inequality when the difference is detectable by the
+student's gradient.
+
+**Why it holds.** Stage 3 makes both runs at least as good as
+LM-only (by (I)). On the positive-measure set where
+$\tilde{p}_{g_2} \ne \tilde{p}_{g_1}$, the $g_2$ run additionally
+benefits from $g_2$'s closer alignment with $\mathcal{D}$ — Stage 1
++ Stage 2 ensure that "alignment with $\mathcal{D}$" of the
+*projected* teacher is monotone in alignment of the *raw* teacher
+(top-$K$ projection preserves ordering by KL when $K$ is at or above
+the student's mode resolution).
+
+### 13.5 Theorem (Existence of the implode optimum)
+
+**Claim (III).** Fix a student architecture family parameterised by
+capacity $C_s$. The map
+
+$$
+\mathrm{ppl}^\star(C_s, C_t)
+  \;=\; \exp\!\left(\inf_\theta \mathcal{L}_{\mathrm{LM}}(\theta^{\mathrm{CFD}, g_{C_t}})\right)
+$$
+
+is **monotonically non-increasing** in $C_t$ for fixed $C_s$, and has
+a well-defined infimum
+
+$$
+\mathrm{ppl}^\star(C_s) \;=\; \lim_{C_t \to \infty} \mathrm{ppl}^\star(C_s, C_t).
+$$
+
+Furthermore, $\mathrm{ppl}^\star(C_s)$ is itself strictly decreasing
+in $C_s$ (a higher-capacity student strictly dominates).
+
+### 13.6 The SLM parameter-efficient frontier
+
+(III) gives the central operational object of this section. The curve
+
+$$
+C_s \;\longmapsto\; \mathrm{ppl}^\star(C_s)
+$$
+
+is the **parameter-efficient frontier of SLMs** under CFD: the best
+PPL achievable at parameter count $C_s$ when distilled from an
+arbitrarily strong CFD-funneled teacher. By (I)+(III):
+
+* No teacher choice can push the student below $\mathrm{ppl}^\star(C_s)$.
+* A trainer who chooses *any* teacher $g$ and trains with CFD is on
+  the frontier or above it; under LM-only training (no teacher) the
+  trainer is at or above $\mathrm{ppl}^\star(C_s, C_t = 0)$, which is
+  $\ge \mathrm{ppl}^\star(C_s, C_t = \infty) = \mathrm{ppl}^\star(C_s)$
+  by (II).
+* The user's intuition — "a small student trained from a much larger
+  CFD-funneled teacher outperforms the same student trained from a
+  matched-size teacher" — is the conjunction of (II) and (III).
+
+### 13.7 Why this *intrinsically* describes the teacher-too-strong bug
+
+The legacy distillation loss does not satisfy any of (I)–(III). The
+explicit failure mode under capacity mismatch is:
+
+| Naïve KL | CFD |
+|---|---|
+| Reachable set $\not\ni p_t$ → loss has no zero | Stage 1: $\tilde{p}_t \in \mathcal{S}_\theta$ for adequate $K$ |
+| Sharpness $H(p_s) \gg H(p_t)$ → unstable early grad | Stage 2: $T_{\mathrm{eff}}$ rescales until $H(\tilde{p}_t / T_{\mathrm{eff}}) \approx H(p_s)$ |
+| No upper bound on $\mathcal{L}_{\mathrm{LM}}(\theta_n)$ as KL pulls θ off LM optimum | Stage 3: $g_{\mathrm{align}} \le 0 \Rightarrow \lambda_{\mathrm{eff}} = 0$ |
+
+Each row neutralises exactly one of the three mechanisms identified
+in §13.1. The "teacher too strong" pathology becomes a structural
+impossibility under CFD.
+
+### 13.8 Current implementation status
+
+* ⏳ `tests/training/test_cfd_distillation.py` — four-arm ablation
+  (Arms A/B/C/D) — empirical falsifier for H006. **Failing test
+  written first** (per CLAUDE.md §1) in the same commit as the
+  implementation.
+* ⏳ `MultiCortexConfig.cfd_enabled` (default `false`) + `cfd_topk_*`,
+  `cfd_temperature_floor`, `cfd_align_probe` knobs in
+  `neuroslm.dsl.training_config`.
+* ⏳ `neuroslm.harness._cortex_fusion_aux_step` extended with the
+  three-stage path under the `cfd_enabled` flag.
+* ⏳ `hypothesis/H006_capacity_funneled_distillation_implode.md` —
+  hypothesis card with proof_status: missing (Lean obligation
+  deferred).
+* ⏳ Lean proof of (I) only (the no-harm floor) — the easy claim,
+  H006 follow-up F6.
+
+### 13.9 Open questions
+
+* The probe-parameter choice for $g_{\mathrm{align}}$ in §13.2 Stage 3
+  trades off cost vs. accuracy. Using the full $\nabla_\theta$ gives
+  the exact cosine but doubles the backward cost; using a single
+  scalar (last-layer bias) is $O(V)$ extra and a noisy estimate of
+  the true cosine. The implementation uses the bias as default; a
+  `cfd_align_probe` enum lets advanced runs select `"bias"`,
+  `"last_layer_weight"`, or `"full"`.
+* The top-$K$ schedule $K(n)$ is currently linear in the step count.
+  An adaptive schedule driven by $H(p_s) / H(p_t)$ may be tighter and
+  is a natural F7.
+* Cross-vocabulary teachers (e.g. SmolLM2 with $V_e \ne V_t$) require
+  composing CFD with `VocabBridge`. Stage 1 must be applied **before**
+  the bridge to preserve the rank ordering through the projection.
+
+

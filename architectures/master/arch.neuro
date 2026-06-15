@@ -225,6 +225,32 @@ training {
         distillation_gap_floor:    0.1,
         distillation_gap_ceiling:  2.0,
 
+        # ── H006: Capacity-Funneled Distillation (CFD) ──
+        # 2026-06-15: New, behind a feature flag. Replaces the naive
+        # batch-mean KL on the WHOLE V-token softmax (which has the
+        # "teacher too strong" pathology — see docs/FINDINGS.md
+        # post-mortems #3 and "Run pre-H24") with a three-stage funnel:
+        #   (1) top-K rank-preserving sparsification: only K teacher
+        #       modes survive, the rest get uniform tail mass. Student
+        #       gets a *reachable* target.
+        #   (2) entropy-matched temperature: T_eff = T0 · max(1, H_s/H_t).
+        #       Teacher's sharpness is softened to a level the student
+        #       can plausibly match, then comes back into focus as the
+        #       student catches up.
+        #   (3) gradient-alignment gate: λ_eff = λ0 · (1+cos)/2 on a
+        #       cheap last-bias probe. Distillation that fights the LM
+        #       gradient is automatically zeroed. Mechanical no-harm
+        #       floor.
+        # Per-token reduction is fixed as a side-effect (the F1 bug).
+        # See docs/formal_framework.md §13 and
+        # hypothesis/H006_capacity_funneled_distillation_implode.md.
+        # H24 schedule: anneal K=4→32 over 1500 steps (matches 3k run).
+        cfd_enabled:            true,
+        cfd_topk_start:         4,
+        cfd_topk_end:           32,
+        cfd_topk_anneal_steps:  1500,
+        cfd_temperature_floor:  1.0,
+
         # ── Slot C: NT-mediated α gating ──
         # α_eff = α · (1 - cortex_inhibition_level). The inhibition
         # level rises smoothly as the trunk outperforms the cortex
