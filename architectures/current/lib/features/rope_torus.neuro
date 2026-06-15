@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-# RoPE-on-a-Torus — wiring spec.
+﻿# -*- coding: utf-8 -*-
+# RoPE-on-a-Torus â€” wiring spec.
 #
 # Multi-frequency rotary positional encoding on the product manifold
 # T^n = (S^1)^n. Each 2D embedding slice rotates by an angle whose
@@ -10,18 +10,18 @@
 # Contracts:      tests/test_rope_torus.py (19)
 # Docs:           docs/features/rope_torus.md
 
-import { rope_torus_eq } from "@brian/equations"
+import { rope_torus_eq } from "@lib/equations"
 
 export feature rope_torus {
     equation: rope_torus_eq,
     active:   false,
     impl:     "neuroslm.modules.rope_torus.RoPETorus",
 
-    # ── Per-arch defaults; override in arch.neuro's re-declaration. ──
-    # `d_model: d_sem` is a bare-identifier reference — codegen emits it
+    # â”€â”€ Per-arch defaults; override in arch.neuro's re-declaration. â”€â”€
+    # `d_model: d_sem` is a bare-identifier reference â€” codegen emits it
     # unquoted so the cos/sin tables track the runtime trunk width.
-    # max_seq_len caps the precomputed cos/sin table — longer seqs are
-    # recomputed on the fly (cheap, ~T·d_pair flops).
+    # max_seq_len caps the precomputed cos/sin table â€” longer seqs are
+    # recomputed on the fly (cheap, ~TÂ·d_pair flops).
     params: {
         d_model:           d_sem,
         max_seq_len:       2048,

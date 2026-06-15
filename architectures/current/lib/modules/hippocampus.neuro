@@ -1,0 +1,35 @@
+# Stage 6 — Memory: storage & consolidation
+#
+# Hippocampus: attractor network with leak rate alpha=0.1. New input
+# decays the persistent state s toward the input pattern:
+#   y = (1-alpha) * s + alpha * ReLU(x)
+# (Pattern-completion semantics — partial cues retrieve full memories.)
+#
+# Entorhinal: rate-coded indexing/binding layer between hippocampus and
+# cortex.
+#
+# Cerebellum: rate-coded predictive error signal (very fast, 5ms).
+
+export population hippo {
+    count: 4096,
+    dynamics: "attractor_network",
+    equation: "y = (1 - alpha) * s + alpha * ReLU(x)",
+    timescale: 0.1,
+    capacity: 1.0
+}
+
+export population entorhinal {
+    count: 256,
+    dynamics: "rate_code",
+    equation: "y = ReLU(x)",
+    timescale: 0.05,
+    capacity: 1.0
+}
+
+export population cerebellum {
+    count: 256,
+    dynamics: "rate_code",
+    equation: "y = ReLU(x)",
+    timescale: 0.005,
+    capacity: 1.0
+}

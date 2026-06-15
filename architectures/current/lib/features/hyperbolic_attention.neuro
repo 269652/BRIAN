@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-# Hyperbolic (Poincaré-disc) multi-head attention — wiring spec.
+﻿# -*- coding: utf-8 -*-
+# Hyperbolic (PoincarÃ©-disc) multi-head attention â€” wiring spec.
 #
 # Imports the canonical equation from @brian/equations, binds it to the
 # Python implementation class, and exposes one wiring endpoint
@@ -13,15 +13,15 @@
 # any arch importing this is opt-in.
 #
 # References:
-#   * Ganea, Bécigneul, Hofmann — "Hyperbolic Neural Networks"
-#     (NeurIPS 2018) — the Möbius gyrovector formulation.
-#   * Ungar 2005 — Poincaré ball Möbius operations.
+#   * Ganea, BÃ©cigneul, Hofmann â€” "Hyperbolic Neural Networks"
+#     (NeurIPS 2018) â€” the MÃ¶bius gyrovector formulation.
+#   * Ungar 2005 â€” PoincarÃ© ball MÃ¶bius operations.
 #
 # Implementation: neuroslm/modules/hyperbolic_attention.py
 # Contracts:      tests/test_hyperbolic_attention.py
 # Docs:           docs/features/hyperbolic_attention.md
 
-import { hyperbolic_attention_eq } from "@brian/equations"
+import { hyperbolic_attention_eq } from "@lib/equations"
 
 export feature hyperbolic_attention {
     equation: hyperbolic_attention_eq,
@@ -30,7 +30,7 @@ export feature hyperbolic_attention {
 
     # Feature-level defaults; an arch may override these in its own
     # `feature hyperbolic_attention { params: { ... } }` re-declaration.
-    # `d_model: d_sem` is a bare-identifier reference — codegen emits it
+    # `d_model: d_sem` is a bare-identifier reference â€” codegen emits it
     # unquoted so the impl receives the runtime trunk width.
     params: {
         d_model: d_sem,

@@ -1,0 +1,33 @@
+# Stage 8 — Executive: action selection + learning
+#
+# Basal ganglia (BG): another winner-take-all, this time over a discrete
+# action lattice (capacity 4). softmax temperature 0.1 keeps the
+# selection sharp.
+#
+# Forward model: predicted next-state representation, rate-coded.
+# Evaluator: scalar value estimate for the current action; rate-coded
+# fast (10ms) for tight RPE timing.
+
+export population bg {
+    count: 256,
+    dynamics: "winner_take_all",
+    equation: "y = softmax(x / 0.1) * d_sem",
+    timescale: 0.01,
+    capacity: 4.0
+}
+
+export population forward_m {
+    count: 256,
+    dynamics: "rate_code",
+    equation: "y = ReLU(x)",
+    timescale: 0.02,
+    capacity: 1.0
+}
+
+export population evaluator {
+    count: 256,
+    dynamics: "rate_code",
+    equation: "y = ReLU(x)",
+    timescale: 0.01,
+    capacity: 1.0
+}
