@@ -1,0 +1,358 @@
+── compiling DNA → DSL → HypergraphIR workspace ──
+  workspace: /workspace/brian/.neuro/arch/temp
+  source:    dna=/workspace/brian/dna/master/arch.dna
+  IR:        43 nodes, 90 edges
+════════════════════════════════════════════════════════════════
+  DNA-driven training loop (canonical pipeline)
+  dna=./dna/master/arch.dna  ->  workspace=/workspace/brian/.neuro/arch/temp  (arch=master)
+  steps=10000 batch=16 seq_len=512 d_sem=384
+  ckpt_dir=/workspace/brian/lfs_checkpoints
+════════════════════════════════════════════════════════════════
+
+▶ launch attempt 1 @ 19:49:00Z
+[train_dsl] boot @ 2026-06-15T19:49:01Z
+[train_dsl] git_commit d2cd95c3ac1f37526f3847964d6aaa4db4a33d82 (master)
+[train_dsl] arch_dsl_sha256 02f0e39582158d2db49d894a9221a9df8ae5ed59622532e4722d7a66f92fc7eb (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,903  (trainable 146,856,815 · frozen 980,097,088)
+  checkpoint = 149,187,774 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[data:chat] using OpenHermes-2.5 (teknium/OpenHermes-2.5)
+step   500 | loss 7.8242 | lm 6.0884 | ppl 440.7 | gnorm 7.167 | lr 1.04e-04 | 1271 tok/s | Φ 0.880 | λ₁ 0.075 | ign 0.61 | mesoLG 0.52 | troph 8/8 μ1.40 | NT[DA=0.23 NE=0.11 5HT=0.51 ACh=0.11 eCB=0.02 Glu=0.21 GABA=0.23] | osc[δ=0.477 θ=0.206 γ=0.317] | em[C2:ρ=0.61/τ=0.10/s=0.61 C4:Q=-0.5 W=1 pl=255 C3:pc=0.628 VBB:β=1.00 σ=0.0200 kl=5711.652 C5:lat=1.00 C6:pac=0.03] | cortex[α_eff=0.501 inh=0.000 λ=0.880 kl=-0.121 lm_ema=10.09 cx_ema=4.33] | hpa[load=0.12 cort=0.11 NE×0.93 T×0.89 LR×0.95]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step500.pt
+[mid-ood] step 500: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 500: wikitext ppl=597.5 gap_ratio=1.36 (train_ppl=440.7) (50 seq, 6430 tok)
+step  1000 | loss 5.7310 | lm 5.2267 | ppl 186.2 | gnorm 5.570 | lr 1.98e-04 | 1756 tok/s | Φ 0.730 | λ₁ 0.075 | ign 0.58 | mesoLG 0.52 | troph 8/8 μ1.60 | NT[DA=0.24 NE=0.15 5HT=0.43 ACh=0.11 eCB=0.04 Glu=0.37 GABA=0.28] | osc[δ=0.388 θ=0.276 γ=0.335] | em[C2:ρ=0.56/τ=0.25/s=0.58 C4:Q=0.5 W=1 pl=255 C3:pc=0.234 VBB:β=1.01 σ=0.0265 kl=3910.786 C5:lat=1.49 C6:pac=0.01] | cortex[α_eff=0.498 inh=0.011 λ=0.806 kl=0.209 lm_ema=7.91 cx_ema=3.76] | hpa[load=0.12 cort=0.10 NE×0.93 T×0.90 LR×0.95]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step1000.pt
+[mid-ood] step 1000: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 1000: wikitext ppl=344.2 gap_ratio=1.85 (train_ppl=186.2) (50 seq, 6430 tok)
+step  1500 | loss 5.0408 | lm 4.5359 | ppl 93.3 | gnorm 7.232 | lr 3.13e-04 | 1724 tok/s | Φ 0.668 | λ₁ 0.075 | ign 0.59 | mesoLG 0.51 | troph 8/8 μ1.54 | NT[DA=0.20 NE=0.29 5HT=0.41 ACh=0.18 eCB=0.06 Glu=0.52 GABA=0.16] | osc[δ=0.435 θ=0.303 γ=0.262] | em[C2:ρ=0.22/τ=0.19/s=0.59 C4:Q=-0.5 W=1 pl=255 C3:pc=0.207 VBB:β=1.02 σ=0.0420 kl=4581.202 C5:lat=1.00 C6:pac=0.02] | cortex[α_eff=0.503 inh=0.004 λ=0.807 kl=0.342 lm_ema=7.68 cx_ema=3.66] | hpa[load=0.12 cort=0.11 NE×0.92 T×0.89 LR×0.95]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step1500.pt
+[mid-ood] step 1500: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 1500: wikitext ppl=236.9 gap_ratio=2.54 (train_ppl=93.3) (50 seq, 6430 tok)
+step  2000 | loss 4.5913 | lm 4.0970 | ppl 60.2 | gnorm 8.218 | lr 3.95e-04 | 1768 tok/s | Φ 0.784 | λ₁ 0.075 | ign 0.64 | mesoLG 0.56 | troph 8/8 μ1.42 | NT[DA=0.07 NE=0.10 5HT=0.36 ACh=0.30 eCB=0.05 Glu=0.34 GABA=0.04] | osc[δ=0.320 θ=0.354 γ=0.326] | em[C2:ρ=0.02/τ=0.04/s=0.64 C4:Q=0.5 W=1 pl=255 C3:pc=0.221 VBB:β=1.04 σ=0.0263 kl=2478.567 C5:lat=1.00 C6:pac=0.02] | cortex[α_eff=0.491 inh=0.037 λ=0.789 kl=-0.006 lm_ema=7.65 cx_ema=3.63] | hpa[load=0.12 cort=0.10 NE×0.93 T×0.90 LR×0.95]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step2000.pt
+[mid-ood] step 2000: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 2000: wikitext ppl=208.8 gap_ratio=3.47 (train_ppl=60.2) (50 seq, 6430 tok)
+step  2500 | loss 4.3795 | lm 3.8888 | ppl 48.9 | gnorm 5.422 | lr 5.00e-04 | 1748 tok/s | Φ 0.661 | λ₁ 0.075 | ign 0.66 | mesoLG 0.47 | troph 8/8 μ1.32 | NT[DA=0.09 NE=0.11 5HT=0.30 ACh=0.28 eCB=0.10 Glu=0.71 GABA=0.05] | osc[δ=0.430 θ=0.276 γ=0.294] | em[C2:ρ=0.05/τ=0.08/s=0.66 C4:Q=-1.2 W=37 pl=13 C3:pc=0.189 VBB:β=1.06 σ=0.0693 kl=5277.360 C5:lat=1.75 C6:pac=0.02] | cortex[α_eff=0.516 inh=0.002 λ=0.902 kl=0.071 lm_ema=8.23 cx_ema=3.42] | hpa[load=0.12 cort=0.11 NE×0.92 T×0.89 LR×0.95]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step2500.pt
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+  ...rch/step2500.pt.strip.tmp:   0%|          | 18.1kB /  597MB            [A[A
+
+  ...rch/step2500.pt.strip.tmp:   0%|          | 18.1kB /  597MB            [A[AProcessing Files (0 / 1)      :   0%|          | 18.1kB /  597MB, 1.75kB/s  
+
+  ...rch/step2500.pt.strip.tmp:   0%|          | 18.1kB /  597MB            [A[A
+
+  ...rch/step2500.pt.strip.tmp:   5%|▌         | 30.6MB /  597MB            [A[AProcessing Files (0 / 1)      :   5%|▌         | 30.6MB /  597MB, 2.93MB/s  
+
+  ...rch/step2500.pt.strip.tmp:  20%|█▉        |  119MB /  597MB            [A[AProcessing Files (0 / 1)      :  20%|█▉        |  119MB /  597MB, 11.3MB/s  
+New Data Upload               :   1%|          |  556kB / 67.0MB, 52.8kB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  27%|██▋       |  162MB /  597MB            [A[AProcessing Files (0 / 1)      :  27%|██▋       |  162MB /  597MB, 15.0MB/s  
+New Data Upload               :   3%|▎         | 2.22MB / 67.0MB,  209kB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  28%|██▊       |  165MB /  597MB            [A[AProcessing Files (0 / 1)      :  28%|██▊       |  165MB /  597MB, 14.9MB/s  
+New Data Upload               :   7%|▋         | 5.00MB / 67.0MB,  465kB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  29%|██▉       |  174MB /  597MB            [A[AProcessing Files (0 / 1)      :  29%|██▉       |  174MB /  597MB, 15.5MB/s  
+New Data Upload               :  22%|██▏       | 14.4MB / 67.0MB, 1.33MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  30%|███       |  181MB /  597MB            [A[AProcessing Files (0 / 1)      :  30%|███       |  181MB /  597MB, 15.8MB/s  
+New Data Upload               :  16%|█▌        | 21.7MB /  134MB, 1.97MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  32%|███▏      |  191MB /  597MB            [A[AProcessing Files (0 / 1)      :  32%|███▏      |  191MB /  597MB, 16.3MB/s  
+New Data Upload               :  15%|█▌        | 31.1MB /  201MB, 2.80MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  33%|███▎      |  200MB /  597MB            [A[AProcessing Files (0 / 1)      :  33%|███▎      |  200MB /  597MB, 16.7MB/s  
+New Data Upload               :  20%|█▉        | 40.0MB /  201MB, 3.55MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  36%|███▌      |  212MB /  597MB            [A[AProcessing Files (0 / 1)      :  36%|███▌      |  212MB /  597MB, 17.5MB/s  
+New Data Upload               :  26%|██▌       | 52.4MB /  201MB, 4.60MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  38%|███▊      |  228MB /  597MB            [A[AProcessing Files (0 / 1)      :  38%|███▊      |  228MB /  597MB, 18.6MB/s  
+New Data Upload               :  34%|███▍      | 68.7MB /  201MB, 5.97MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  41%|████      |  245MB /  597MB            [A[AProcessing Files (0 / 1)      :  41%|████      |  245MB /  597MB, 19.6MB/s  
+New Data Upload               :  42%|████▏     | 85.1MB /  201MB, 7.31MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  43%|████▎     |  256MB /  597MB            [A[AProcessing Files (0 / 1)      :  43%|████▎     |  256MB /  597MB, 20.2MB/s  
+New Data Upload               :  48%|████▊     | 96.5MB /  201MB, 8.17MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  44%|████▍     |  264MB /  597MB            [A[AProcessing Files (0 / 1)      :  44%|████▍     |  264MB /  597MB, 20.5MB/s  
+New Data Upload               :  52%|█████▏    |  105MB /  201MB, 8.71MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  46%|████▌     |  276MB /  597MB            [A[AProcessing Files (0 / 1)      :  46%|████▌     |  276MB /  597MB, 21.0MB/s  
+New Data Upload               :  58%|█████▊    |  116MB /  201MB, 9.53MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  48%|████▊     |  284MB /  597MB            [A[AProcessing Files (0 / 1)      :  48%|████▊     |  284MB /  597MB, 21.3MB/s  
+New Data Upload               :  62%|██████▏   |  124MB /  201MB, 10.0MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  49%|████▉     |  292MB /  597MB            [A[AProcessing Files (0 / 1)      :  49%|████▉     |  292MB /  597MB, 21.6MB/s  
+New Data Upload               :  66%|██████▌   |  133MB /  201MB, 10.6MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  49%|████▉     |  293MB /  597MB            [A[AProcessing Files (0 / 1)      :  49%|████▉     |  293MB /  597MB, 21.2MB/s  
+New Data Upload               :  66%|██████▋   |  134MB /  201MB, 10.4MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  50%|█████     |  299MB /  597MB            [A[AProcessing Files (0 / 1)      :  50%|█████     |  299MB /  597MB, 21.2MB/s  
+New Data Upload               :  52%|█████▏    |  139MB /  268MB, 10.7MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  51%|█████     |  304MB /  597MB            [A[AProcessing Files (0 / 1)      :  51%|█████     |  304MB /  597MB, 21.2MB/s  
+New Data Upload               :  54%|█████▍    |  145MB /  268MB, 10.9MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  53%|█████▎    |  314MB /  597MB            [A[AProcessing Files (0 / 1)      :  53%|█████▎    |  314MB /  597MB, 21.6MB/s  
+New Data Upload               :  58%|█████▊    |  155MB /  268MB, 11.5MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  54%|█████▍    |  324MB /  597MB            [A[AProcessing Files (0 / 1)      :  54%|█████▍    |  324MB /  597MB, 22.0MB/s  
+New Data Upload               :  49%|████▉     |  165MB /  335MB, 12.1MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  56%|█████▌    |  334MB /  597MB            [A[AProcessing Files (0 / 1)      :  56%|█████▌    |  334MB /  597MB, 22.4MB/s  
+New Data Upload               :  52%|█████▏    |  175MB /  335MB, 12.7MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  59%|█████▉    |  353MB /  597MB            [A[AProcessing Files (0 / 1)      :  59%|█████▉    |  353MB /  597MB, 23.5MB/s  
+New Data Upload               :  48%|████▊     |  193MB /  402MB, 14.0MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  63%|██████▎   |  375MB /  597MB            [A[AProcessing Files (0 / 1)      :  63%|██████▎   |  375MB /  597MB, 24.9MB/s  
+New Data Upload               :  49%|████▉     |  216MB /  437MB, 15.7MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  67%|██████▋   |  400MB /  597MB            [A[AProcessing Files (0 / 1)      :  67%|██████▋   |  400MB /  597MB, 26.5MB/s  
+New Data Upload               :  55%|█████▌    |  241MB /  437MB, 17.5MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  70%|███████   |  419MB /  597MB            [A[AProcessing Files (0 / 1)      :  70%|███████   |  419MB /  597MB, 27.5MB/s  
+New Data Upload               :  59%|█████▉    |  260MB /  437MB, 18.7MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  74%|███████▎  |  439MB /  597MB            [A[AProcessing Files (0 / 1)      :  74%|███████▎  |  439MB /  597MB, 28.7MB/s  
+New Data Upload               :  64%|██████▍   |  280MB /  437MB, 20.0MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  79%|███████▊  |  469MB /  597MB            [A[AProcessing Files (0 / 1)      :  79%|███████▊  |  469MB /  597MB, 30.5MB/s  
+New Data Upload               :  71%|███████   |  309MB /  437MB, 22.0MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  83%|████████▎ |  493MB /  597MB            [A[AProcessing Files (0 / 1)      :  83%|████████▎ |  493MB /  597MB, 31.8MB/s  
+New Data Upload               :  76%|███████▌  |  333MB /  437MB, 23.5MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  86%|████████▋ |  515MB /  597MB            [A[AProcessing Files (0 / 1)      :  86%|████████▋ |  515MB /  597MB, 33.1MB/s  
+New Data Upload               :  81%|████████▏ |  356MB /  437MB, 24.9MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  90%|████████▉ |  535MB /  597MB            [A[AProcessing Files (0 / 1)      :  90%|████████▉ |  535MB /  597MB, 34.0MB/s  
+New Data Upload               :  86%|████████▌ |  375MB /  437MB, 26.0MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  93%|█████████▎|  555MB /  597MB            [A[AProcessing Files (0 / 1)      :  93%|█████████▎|  555MB /  597MB, 35.0MB/s  
+New Data Upload               :  90%|█████████ |  396MB /  437MB, 27.2MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  96%|█████████▋|  575MB /  597MB            [A[AProcessing Files (0 / 1)      :  96%|█████████▋|  575MB /  597MB, 35.9MB/s  
+New Data Upload               :  95%|█████████▌|  416MB /  437MB, 28.2MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp:  99%|█████████▉|  590MB /  597MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉|  590MB /  597MB, 36.4MB/s  
+New Data Upload               :  98%|█████████▊|  431MB /  437MB, 28.9MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp: 100%|█████████▉|  596MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  596MB /  597MB, 36.1MB/s  
+New Data Upload               : 100%|█████████▉|  436MB /  437MB, 28.8MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp: 100%|█████████▉|  596MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  596MB /  597MB, 35.4MB/s  
+New Data Upload               : 100%|█████████▉|  437MB /  437MB, 28.2MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp: 100%|█████████▉|  597MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  597MB /  597MB, 34.0MB/s  
+New Data Upload               : 100%|█████████▉|  437MB /  437MB, 27.1MB/s  [A
+
+  ...rch/step2500.pt.strip.tmp: 100%|██████████|  597MB /  597MB            [A[AProcessing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 33.3MB/s  
+New Data Upload               : 100%|██████████|  437MB /  437MB, 26.6MB/s  [AProcessing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 33.3MB/s  
+New Data Upload               : 100%|██████████|  437MB /  437MB, 26.6MB/s  
+  ...rch/step2500.pt.strip.tmp: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step2500.pt (optimizer stripped) → hf://moritzroessler/BRIAN/checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step2500.pt
+[mid-ood] step 2500: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 2500: wikitext ppl=199.3 gap_ratio=4.08 (train_ppl=48.9) (50 seq, 6430 tok)
+step  3000 | loss 4.3513 | lm 3.8784 | ppl 48.3 | gnorm 4.207 | lr 4.66e-04 | 1632 tok/s | Φ 0.529 | λ₁ 0.075 | ign 0.60 | mesoLG 0.53 | troph 8/8 μ1.26 | NT[DA=0.31 NE=0.07 5HT=0.30 ACh=0.20 eCB=0.05 Glu=0.39 GABA=0.08] | osc[δ=0.589 θ=0.183 γ=0.228] | em[C2:ρ=0.20/τ=0.08/s=0.60 C4:Q=2.5 W=21 pl=23 C3:pc=0.166 VBB:β=1.08 σ=0.0695 kl=3375.305 C5:lat=1.00 C6:pac=0.02] | cortex[α_eff=0.520 inh=0.009 λ=0.699 kl=0.192 lm_ema=7.69 cx_ema=3.07] | hpa[load=0.11 cort=0.11 NE×0.92 T×0.89 LR×0.94]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step3000.pt
+[mid-ood] step 3000: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 3000: wikitext ppl=152.1 gap_ratio=3.15 (train_ppl=48.3) (50 seq, 6430 tok)
+step  3500 | loss 4.0303 | lm 3.6319 | ppl 37.8 | gnorm 3.078 | lr 4.77e-04 | 1903 tok/s | Φ 0.609 | λ₁ 0.075 | ign 0.71 | mesoLG 0.51 | troph 8/8 μ1.18 | NT[DA=0.16 NE=0.08 5HT=0.34 ACh=0.30 eCB=0.02 Glu=0.20 GABA=0.04] | osc[δ=0.361 θ=0.322 γ=0.317] | em[C2:ρ=0.00/τ=0.08/s=0.71 C4:Q=1.2 W=67 pl=7 C3:pc=0.128 VBB:β=1.11 σ=0.0352 kl=1702.011 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.530 inh=0.004 λ=0.814 kl=0.132 lm_ema=7.76 cx_ema=2.76] | hpa[load=0.13 cort=0.10 NE×0.93 T×0.90 LR×0.95]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step3500.pt
+[mid-ood] step 3500: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 3500: wikitext ppl=151.8 gap_ratio=4.02 (train_ppl=37.8) (50 seq, 6430 tok)
+step  4000 | loss 3.8353 | lm 3.4765 | ppl 32.3 | gnorm 4.072 | lr 4.30e-04 | 1942 tok/s | Φ 0.547 | λ₁ 0.075 | ign 0.68 | mesoLG 0.49 | troph 8/8 μ1.16 | NT[DA=0.11 NE=0.09 5HT=0.29 ACh=0.23 eCB=0.07 Glu=0.46 GABA=0.07] | osc[δ=0.467 θ=0.189 γ=0.344] | em[C2:ρ=0.19/τ=0.23/s=0.68 C4:Q=-4.4 W=110 pl=4 C3:pc=0.132 VBB:β=1.13 σ=0.0533 kl=2163.497 C5:lat=1.31 C6:pac=0.01] | cortex[α_eff=0.537 inh=0.004 λ=0.801 kl=0.172 lm_ema=7.49 cx_ema=3.20] | hpa[load=0.11 cort=0.10 NE×0.93 T×0.90 LR×0.95]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step4000.pt
+[mid-ood] step 4000: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 4000: wikitext ppl=133.9 gap_ratio=4.14 (train_ppl=32.3) (50 seq, 6430 tok)
+step  4500 | loss 3.7742 | lm 3.4514 | ppl 31.5 | gnorm 5.070 | lr 4.20e-04 | 1914 tok/s | Φ 0.447 | λ₁ 0.075 | ign 0.62 | mesoLG 0.50 | troph 8/8 μ1.12 | NT[DA=0.09 NE=0.33 5HT=0.31 ACh=0.12 eCB=0.07 Glu=0.50 GABA=0.31] | osc[δ=0.556 θ=0.229 γ=0.215] | em[C2:ρ=0.45/τ=0.23/s=0.62 C4:Q=-0.5 W=45 pl=11 C3:pc=0.103 VBB:β=1.15 σ=0.0608 kl=2055.685 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.545 inh=0.001 λ=0.814 kl=0.238 lm_ema=7.80 cx_ema=3.07] | hpa[load=0.13 cort=0.09 NE×0.94 T×0.91 LR×0.95]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step4500.pt
+[mid-ood] step 4500: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 4500: wikitext ppl=129.1 gap_ratio=4.09 (train_ppl=31.5) (50 seq, 6430 tok)
+step  5000 | loss 3.7219 | lm 3.4230 | ppl 30.7 | gnorm 3.783 | lr 3.62e-04 | 1776 tok/s | Φ 0.590 | λ₁ 0.075 | ign 0.68 | mesoLG 0.53 | troph 8/8 μ1.08 | NT[DA=0.08 NE=0.18 5HT=0.32 ACh=0.22 eCB=0.03 Glu=0.21 GABA=0.09] | osc[δ=0.349 θ=0.297 γ=0.355] | em[C2:ρ=0.20/τ=0.06/s=0.68 C4:Q=1.5 W=82 pl=6 C3:pc=0.108 VBB:β=1.17 σ=0.0379 kl=1040.040 C5:lat=1.00 C6:pac=0.01] | cortex[α_eff=0.543 inh=0.016 λ=0.793 kl=0.095 lm_ema=7.38 cx_ema=3.17] | hpa[load=0.11 cort=0.10 NE×0.93 T×0.90 LR×0.95]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step5000.pt
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+  ...rch/step5000.pt.strip.tmp:   0%|          | 18.1kB /  597MB            [A[A
+
+  ...rch/step5000.pt.strip.tmp:   0%|          | 18.1kB /  597MB            [A[AProcessing Files (0 / 1)      :   0%|          | 18.1kB /  597MB, 1.74kB/s  
+
+  ...rch/step5000.pt.strip.tmp:   4%|▍         | 22.7MB /  597MB            [A[AProcessing Files (0 / 1)      :   4%|▍         | 22.7MB /  597MB, 2.17MB/s  
+
+  ...rch/step5000.pt.strip.tmp:  19%|█▊        |  111MB /  597MB            [A[AProcessing Files (0 / 1)      :  19%|█▊        |  111MB /  597MB, 10.5MB/s  
+New Data Upload               :   1%|          |  556kB / 67.1MB, 52.8kB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  27%|██▋       |  162MB /  597MB            [A[AProcessing Files (0 / 1)      :  27%|██▋       |  162MB /  597MB, 15.1MB/s  
+New Data Upload               :   4%|▍         | 2.78MB / 67.1MB,  262kB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  28%|██▊       |  165MB /  597MB            [A[AProcessing Files (0 / 1)      :  28%|██▊       |  165MB /  597MB, 15.0MB/s  
+New Data Upload               :   8%|▊         | 5.56MB / 67.1MB,  516kB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  29%|██▉       |  172MB /  597MB            [A[AProcessing Files (0 / 1)      :  29%|██▉       |  172MB /  597MB, 15.3MB/s  
+New Data Upload               :  10%|▉         | 12.8MB /  134MB, 1.18MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  30%|███       |  182MB /  597MB            [A[AProcessing Files (0 / 1)      :  30%|███       |  182MB /  597MB, 15.9MB/s  
+New Data Upload               :  17%|█▋        | 22.2MB /  134MB, 2.03MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  32%|███▏      |  191MB /  597MB            [A[AProcessing Files (0 / 1)      :  32%|███▏      |  191MB /  597MB, 16.3MB/s  
+New Data Upload               :  23%|██▎       | 31.2MB /  134MB, 2.80MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  34%|███▍      |  203MB /  597MB            [A[AProcessing Files (0 / 1)      :  34%|███▍      |  203MB /  597MB, 17.1MB/s  
+New Data Upload               :  22%|██▏       | 44.0MB /  201MB, 3.91MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  36%|███▋      |  216MB /  597MB            [A[AProcessing Files (0 / 1)      :  36%|███▋      |  216MB /  597MB, 17.9MB/s  
+New Data Upload               :  28%|██▊       | 56.9MB /  201MB, 5.00MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  39%|███▉      |  234MB /  597MB            [A[AProcessing Files (0 / 1)      :  39%|███▉      |  234MB /  597MB, 19.1MB/s  
+New Data Upload               :  37%|███▋      | 74.4MB /  201MB, 6.47MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  42%|████▏     |  252MB /  597MB            [A[AProcessing Files (0 / 1)      :  42%|████▏     |  252MB /  597MB, 20.3MB/s  
+New Data Upload               :  46%|████▌     | 92.5MB /  201MB, 7.96MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  44%|████▍     |  262MB /  597MB            [A[AProcessing Files (0 / 1)      :  44%|████▍     |  262MB /  597MB, 20.7MB/s  
+New Data Upload               :  51%|█████     |  102MB /  201MB, 8.66MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  45%|████▌     |  272MB /  597MB            [A[AProcessing Files (0 / 1)      :  45%|████▌     |  272MB /  597MB, 21.1MB/s  
+New Data Upload               :  56%|█████▌    |  112MB /  201MB, 9.33MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  47%|████▋     |  281MB /  597MB            [A[AProcessing Files (0 / 1)      :  47%|████▋     |  281MB /  597MB, 21.5MB/s  
+New Data Upload               :  60%|██████    |  121MB /  201MB, 9.94MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  49%|████▊     |  290MB /  597MB            [A[AProcessing Files (0 / 1)      :  49%|████▊     |  290MB /  597MB, 21.8MB/s  
+New Data Upload               :  65%|██████▍   |  130MB /  201MB, 10.5MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  49%|████▉     |  293MB /  597MB            [A[AProcessing Files (0 / 1)      :  49%|████▉     |  293MB /  597MB, 21.6MB/s  
+New Data Upload               :  66%|██████▋   |  134MB /  201MB, 10.6MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  50%|█████     |  299MB /  597MB            [A[AProcessing Files (0 / 1)      :  50%|█████     |  299MB /  597MB, 21.6MB/s  
+New Data Upload               :  52%|█████▏    |  139MB /  268MB, 10.8MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  51%|█████     |  305MB /  597MB            [A[AProcessing Files (0 / 1)      :  51%|█████     |  305MB /  597MB, 21.7MB/s  
+New Data Upload               :  54%|█████▍    |  145MB /  268MB, 11.1MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  53%|█████▎    |  315MB /  597MB            [A[AProcessing Files (0 / 1)      :  53%|█████▎    |  315MB /  597MB, 22.1MB/s  
+New Data Upload               :  58%|█████▊    |  156MB /  268MB, 11.8MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  55%|█████▍    |  327MB /  597MB            [A[AProcessing Files (0 / 1)      :  55%|█████▍    |  327MB /  597MB, 22.6MB/s  
+New Data Upload               :  50%|████▉     |  167MB /  335MB, 12.6MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  57%|█████▋    |  340MB /  597MB            [A[AProcessing Files (0 / 1)      :  57%|█████▋    |  340MB /  597MB, 23.3MB/s  
+New Data Upload               :  45%|████▍     |  181MB /  402MB, 13.4MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  60%|██████    |  359MB /  597MB            [A[AProcessing Files (0 / 1)      :  60%|██████    |  359MB /  597MB, 24.4MB/s  
+New Data Upload               :  49%|████▉     |  199MB /  402MB, 14.7MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  65%|██████▍   |  385MB /  597MB            [A[AProcessing Files (0 / 1)      :  65%|██████▍   |  385MB /  597MB, 26.1MB/s  
+New Data Upload               :  52%|█████▏    |  226MB /  437MB, 16.7MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  68%|██████▊   |  406MB /  597MB            [A[AProcessing Files (0 / 1)      :  68%|██████▊   |  406MB /  597MB, 27.4MB/s  
+New Data Upload               :  56%|█████▋    |  247MB /  437MB, 18.1MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  72%|███████▏  |  427MB /  597MB            [A[AProcessing Files (0 / 1)      :  72%|███████▏  |  427MB /  597MB, 28.5MB/s  
+New Data Upload               :  61%|██████    |  268MB /  437MB, 19.5MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  76%|███████▌  |  454MB /  597MB            [A[AProcessing Files (0 / 1)      :  76%|███████▌  |  454MB /  597MB, 30.2MB/s  
+New Data Upload               :  67%|██████▋   |  294MB /  437MB, 21.3MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  80%|████████  |  480MB /  597MB            [A[AProcessing Files (0 / 1)      :  80%|████████  |  480MB /  597MB, 31.8MB/s  
+New Data Upload               :  73%|███████▎  |  321MB /  437MB, 23.1MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  84%|████████▍ |  500MB /  597MB            [A[AProcessing Files (0 / 1)      :  84%|████████▍ |  500MB /  597MB, 32.8MB/s  
+New Data Upload               :  78%|███████▊  |  341MB /  437MB, 24.3MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  88%|████████▊ |  527MB /  597MB            [A[AProcessing Files (0 / 1)      :  88%|████████▊ |  527MB /  597MB, 34.3MB/s  
+New Data Upload               :  84%|████████▍ |  367MB /  437MB, 26.0MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  91%|█████████ |  543MB /  597MB            [A[AProcessing Files (0 / 1)      :  91%|█████████ |  543MB /  597MB, 34.9MB/s  
+New Data Upload               :  88%|████████▊ |  384MB /  437MB, 26.8MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  95%|█████████▍|  567MB /  597MB            [A[AProcessing Files (0 / 1)      :  95%|█████████▍|  567MB /  597MB, 36.2MB/s  
+New Data Upload               :  93%|█████████▎|  407MB /  437MB, 28.2MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp:  98%|█████████▊|  587MB /  597MB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊|  587MB /  597MB, 37.1MB/s  
+New Data Upload               :  98%|█████████▊|  427MB /  437MB, 29.3MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp: 100%|█████████▉|  596MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  596MB /  597MB, 37.1MB/s  
+New Data Upload               : 100%|█████████▉|  436MB /  437MB, 29.4MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp: 100%|█████████▉|  596MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  596MB /  597MB, 36.3MB/s  
+New Data Upload               : 100%|█████████▉|  437MB /  437MB, 28.8MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp: 100%|█████████▉|  596MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  596MB /  597MB, 34.2MB/s  
+New Data Upload               : 100%|█████████▉|  437MB /  437MB, 27.1MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp: 100%|█████████▉|  597MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  597MB /  597MB, 32.8MB/s  
+New Data Upload               : 100%|█████████▉|  437MB /  437MB, 26.1MB/s  [A
+
+  ...rch/step5000.pt.strip.tmp: 100%|██████████|  597MB /  597MB            [A[AProcessing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 32.2MB/s  
+New Data Upload               : 100%|██████████|  437MB /  437MB, 25.5MB/s  [AProcessing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 32.2MB/s  
+New Data Upload               : 100%|██████████|  437MB /  437MB, 25.5MB/s  
+  ...rch/step5000.pt.strip.tmp: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step5000.pt (optimizer stripped) → hf://moritzroessler/BRIAN/checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step5000.pt
+[mid-ood] step 5000: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 5000: wikitext ppl=124.9 gap_ratio=4.07 (train_ppl=30.7) (50 seq, 6430 tok)
+step  5500 | loss 3.7103 | lm 3.4378 | ppl 31.1 | gnorm 4.025 | lr 3.39e-04 | 1565 tok/s | Φ 0.566 | λ₁ 0.075 | ign 0.63 | mesoLG 0.52 | troph 8/8 μ1.05 | NT[DA=0.05 NE=0.13 5HT=0.29 ACh=0.13 eCB=0.04 Glu=0.30 GABA=0.19] | osc[δ=0.358 θ=0.254 γ=0.388] | em[C2:ρ=0.36/τ=0.18/s=0.63 C4:Q=-2.9 W=85 pl=5 C3:pc=0.086 VBB:β=1.19 σ=0.0389 kl=1081.466 C5:lat=1.00 C6:pac=0.02] | cortex[α_eff=0.549 inh=0.013 λ=0.790 kl=0.096 lm_ema=7.86 cx_ema=3.35] | hpa[load=0.11 cort=0.11 NE×0.92 T×0.89 LR×0.95]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step5500.pt
+[mid-ood] step 5500: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 5500: wikitext ppl=121.0 gap_ratio=3.89 (train_ppl=31.1) (50 seq, 6430 tok)
