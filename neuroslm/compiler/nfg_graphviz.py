@@ -232,8 +232,17 @@ def _edge_label(edge: HyperEdge) -> str:
 
 
 def _nt_colour(name: str) -> str:
-    """Look up a deterministic colour for a neurotransmitter name."""
-    key = (name or "").lower()
+    """Look up a deterministic colour for a neurotransmitter name.
+
+    The DSL stores NT names as quoted strings
+    (``neurotransmitter: "glutamate"``) and the raw attr value carries
+    those quotes through to the hypergraph IR. Without stripping them
+    here, every glutamate synapse in the master arch silently falls
+    through to ``_DEFAULT_MOD_COLOUR`` (grey) instead of rendering as
+    the proper blue ``#1f77b4`` — which is exactly the visual bug
+    surfaced by the NFG audit on ``nfg_rcc_bowtie.png``.
+    """
+    key = (name or "").lower().strip().strip('"').strip("'")
     return _NT_COLOURS.get(key, _DEFAULT_MOD_COLOUR)
 
 
