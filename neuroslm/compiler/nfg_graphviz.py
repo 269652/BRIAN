@@ -466,6 +466,17 @@ def emit_dot_from_hypergraph(
             c.attr(label=style["label"], style="rounded,dashed",
                    color=style["color"], fontsize="13",
                    bgcolor=style["fillcolor"])
+            # rank=same forces all nodes in this anatomical region onto
+            # a single horizontal row (the cluster becomes a wide
+            # horizontal band). Combined with rankdir=TB at the graph
+            # level, the clusters stack top-to-bottom as horizontal
+            # strata → landscape canvas. Without this, dot lays each
+            # cluster's nodes onto distinct ranks (turning every
+            # cluster into a vertical column, breaking the readable
+            # left→right flow the user wants). No glue / wrap helper
+            # this time — accept that wide clusters (e.g. executive
+            # with 9 modules) make the canvas wider, that's fine.
+            c.attr(rank="same")
             for n in nodes_in_region:
                 # Tint each population's fill by its region so they stay
                 # visually anchored to the cluster even when the layout
@@ -492,6 +503,9 @@ def emit_dot_from_hypergraph(
             c.attr(label=style["label"], style="rounded,solid",
                    color=style["color"], fontsize="13",
                    bgcolor=style["fillcolor"])
+            # Single horizontal row: lm_trunk + cortex experts side
+            # by side (same rationale as the anatomical regions above).
+            c.attr(rank="same")
             for n in trunk_nodes:
                 trunk_style = dict(_KIND_STYLES["lm_trunk"])
                 c.node(n.name, label=_trunk_label(n), **trunk_style)
@@ -505,6 +519,10 @@ def emit_dot_from_hypergraph(
         with g.subgraph(name="cluster_neurotransmitters") as c:
             c.attr(label="neurotransmitters", style="rounded,dashed",
                    color="#7a6b00", fontsize="14", bgcolor="#fffcec")
+            # 7 NTs sit at the top as a single broadcast-bus row —
+            # matches the brain's "neuromodulators are global, not
+            # hierarchical" mental model.
+            c.attr(rank="same")
             for n in nt_nodes:
                 style = dict(_KIND_STYLES["neurotransmitter"])
                 # Tint the NT node by its semantic colour so the modulator
