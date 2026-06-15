@@ -2,7 +2,7 @@
 
 > *A 230M-parameter language model optimized for integrated information (Φ) and mechanistic consciousness-like properties. Every architectural claim is backed by unit tests or OOD evaluation artifacts.*
 
-[![tests](https://img.shields.io/badge/tests-2514%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-1068%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
@@ -14,7 +14,7 @@
 BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained causal-LM cortex experts (SmolLM2-360M for general English, CodeGPT-small-py for code, Qwen2.5-0.5B for reasoning).
 
 **Current status:**
-- ✅ **Layer A (mechanisms):** 20+ core properties verified via 2514 unit tests across `tests/` (`tests/dsl/` alone runs 620). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
+- ✅ **Layer A (mechanisms):** 20+ core properties verified via 1068 unit tests across `tests/` (`tests/dsl/` alone runs 620). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
 - 🟡 **Layer B (generalization):** Best variant B4 achieves **2.87 gap_ratio** on WikiText-103-v1 OOD (53% better than flat-transformer baseline at 6.12). Best run: train_ppl 102.9, OOD_ppl 295.9. See [`docs/findings.md`](docs/findings.md) for full Layer B arc.
 
 Code, math, and tensor shapes: [`docs/architecture.md`](docs/architecture.md). Full evidence ledger: [`docs/findings.md`](docs/findings.md).

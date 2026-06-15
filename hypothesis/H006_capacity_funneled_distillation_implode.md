@@ -10,7 +10,7 @@ tags: [distillation, capacity, implode, slm, kl, teacher-student]
 test_refs: [tests/training/test_cfd_distillation.py]
 theorem_name: Brian.CapacityFunneledDistillationImplode
 title: Capacity-Funneled Distillation produces monotone-implode PPL in teacher capacity
-updated_at: "2026-06-15T00:30:00Z"
+updated_at: "2026-06-15T22:00:00Z"
 ---
 
 ## Statement
@@ -125,3 +125,64 @@ Bregman-divergence landscape of CFD; the Lean stub at
 will formalise (I) first (the no-harm floor) since (II) needs an
 information-theoretic hypothesis on $t_2 \succeq t_1$ that is itself
 non-trivial to discharge.
+
+## v2 — Generalisation-Funneled Distillation (GFD)
+
+The H22/B6 run falsified the implicit assumption that part (II) of
+the theorem (monotone-implode in teacher capacity, measured on the
+training distribution) implies a *corresponding* implode on
+out-of-distribution data. With SmolLM2-360M replacing GPT-2 as the
+expert, otherwise identical config:
+
+| variant         | train PPL | OOD PPL  | gap_ratio (OOD/train) |
+|-----------------|-----------|----------|-----------------------|
+| GPT-2 expert    | 38.4      | 110.2    | 2.87                  |
+| SmolLM2 expert  | **23.6**  | **155.0** | **6.55** (REGRESSED) |
+
+A stronger teacher accelerates *memorisation* of corpus-specific
+patterns (the unigram marginal carries most of this signal). CFDv1's
+top-K projection treats all positions identically — there is no
+mechanism to down-weight frequency-driven peaks vs context-driven peaks.
+
+GFD adds two mechanisms (docs/formal_framework.md §14):
+
+* **M2 (prior-residual sparsification)**: subtract $\gamma \log p_{\mathrm{uni}}$
+  from teacher logits before Stage 1. $\gamma = 0$ is bit-identical
+  to CFDv1; $\gamma = 1$ removes the unigram floor entirely so the
+  distillation channel only carries PMI signal.
+* **M4 (pointwise-K from teacher PMI)**: $K(t) = \mathrm{clip}(K_{\max} \cdot \exp(-\mathrm{PMI}(t)/\sigma), K_{\min}, K_{\max})$
+  per position. High-PMI positions (sharp peaks on rare-prior tokens)
+  get small K → concentrate the signal; low-PMI positions (peaks on
+  common tokens) get large K → soft regulariser.
+
+### v2 falsifier — extended four-arm ablation
+
+| Arm | Teacher        | Distill mode      | γ    | pointwise-K | Predicted (vs Arm D) |
+|-----|----------------|-------------------|------|-------------|----------------------|
+| A   | none           | LM-only           | —    | —           | $P_{\mathrm{LM}}$    |
+| C   | adversarial    | naive KL          | —    | —           | explosion            |
+| D   | adversarial    | CFDv1             | 0.0  | off         | $\le P_A$ (no-harm)  |
+| E   | adversarial    | CFDv1 + **M2**    | 0.5  | off         | $\le P_D$ on training, $<$ OOD gap |
+| F   | adversarial    | CFDv1 + **M2+M4** | 0.5  | on          | $\le P_E$, smallest train↔OOD gap   |
+
+Theorems (IV) (M2 preserves no-harm floor) and (V) (M2 strictly
+reduces the marginal-imitation gradient) are stated in
+`docs/formal_framework.md §14.2`. The v2 contract tests
+(`TestCFDv2*` in `tests/training/test_cfd_distillation.py`, 15
+cases) verify:
+
+* M2 is identity at γ=0 (bit-identical back-compat)
+* M2 downweights common tokens and boosts contextual peaks on rare tokens
+* M4's K(t) is monotone-non-increasing in PMI(t) and respects $[K_{\min}, K_{\max}]$
+* Variable-K top-K projection collapses to scalar top-K when K is constant
+
+Arms E and F require a real H22/B6-style sweep with the GPT-2/SmolLM2
+expert pair to confirm. Deferred to a CDGA experiment.
+
+### v2 hypothesis is **refuted** if any of:
+
+* (IV) $P_E^{(\text{train})} > P_D^{(\text{train})} \cdot 1.05$
+  (M2 violates the no-harm floor in practice)
+* (V) On the H22/B6 setup, $\mathrm{gap}_E \ge \mathrm{gap}_D$
+  (M2 fails to close the train↔OOD gap)
+* (VI) $\mathrm{gap}_F > \mathrm{gap}_E$ (M4 makes things worse)

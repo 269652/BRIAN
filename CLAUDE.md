@@ -214,6 +214,83 @@ never to create it under a different name.
 
 ---
 
+## 1e. **NEVER** deploy to vast.ai without explicit permission
+
+> **STRICT RULE — NO UNAUTHORISED VAST.AI DEPLOY, EVER.**
+> You may not, under *any* circumstance, launch, rent, provision,
+> resume, restart, or otherwise spend money on a vast.ai instance
+> without the user explicitly saying so in the **current** turn.
+> "The user said yes 20 turns ago" does **not** count. "It looks
+> like the obvious next step" does **not** count. "I'll just spin
+> up a tiny one to test the deploy script" does **not** count.
+> "The previous run died and I'll just relaunch it" does **not**
+> count. **Every** vast.ai launch is a fresh, explicit, in-turn
+> authorisation — or it does not happen.
+
+This rule applies to **every** path that costs real money on vast.ai:
+
+```
+# DON'T (any of these without explicit "yes, deploy" in the current turn):
+.venv\Scripts\brian.exe deploy ...
+.venv\Scripts\brian.exe vast launch ...
+.venv\Scripts\brian.exe vast resume ...
+.venv\Scripts\brian.exe vast restart ...
+vastai create instance ...
+vastai start instance ...
+python deploy/train_dsl.py            # any path that ssh-launches a remote run
+python _deploy_train.py
+bash deploy/*.sh                       # any deploy shell script
+ssh root@<vast-ip> ...                 # provisioning / rsync into a running instance
+rsync ... root@<vast-ip>:...           # ditto
+```
+
+Tool-call equivalents that are equally forbidden without explicit
+in-turn permission:
+
+```
+# DON'T (tool-shaped, without explicit "deploy" / "launch" / "rent" in this turn):
+run_in_terminal  → invoking `brian deploy`, `brian vast launch/resume/restart`,
+                    `vastai create/start instance`, `python _deploy_train.py`,
+                    any `ssh root@<vast-ip>`, any `rsync ... root@<vast-ip>:`
+create_and_run_task → that wraps any of the above
+```
+
+**Safe operations** (read-only, no spend, never need permission):
+
+```
+# OK any time:
+.venv\Scripts\brian.exe vast list           # list instances
+.venv\Scripts\brian.exe vast status         # status of a running instance
+.venv\Scripts\brian.exe vast logs --latest  # tail the most-recent run's log
+.venv\Scripts\brian.exe vast tail ...       # tail a specific log
+vastai show instances                       # raw list
+ssh root@<vast-ip> 'tail -f /workspace/training.log'   # read-only inspection
+```
+
+**Stop / destroy** also requires explicit permission (it interrupts a
+paid run that may be the user's most expensive resource of the day):
+
+```
+# DON'T without explicit "stop" / "destroy" / "kill" in the current turn:
+.venv\Scripts\brian.exe vast stop ...
+.venv\Scripts\brian.exe vast destroy ...
+vastai destroy instance ...
+```
+
+If you *think* a deploy is the obvious next step — **say so in the
+conversation and stop**. Wait for the user to say "yes, deploy" (or
+equivalent unambiguous green light) in the **same** turn before
+invoking any spend-incurring tool. The cost of a wrongly-launched
+H100 is non-trivial; the cost of asking one clarifying question is
+zero.
+
+Why this matters: agent action that costs real money is the single
+category of mistake that cannot be undone by a `git revert`. Treat
+every vast.ai spend as load-bearing on the user's wallet — because
+it is.
+
+---
+
 ## 2. No sycophancy
 
 - Don't preface answers with "Great question!", "You're absolutely

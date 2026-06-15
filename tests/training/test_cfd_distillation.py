@@ -57,6 +57,10 @@ from neuroslm.harness import (
     cfd_topk_target,
     cfd_effective_temperature,
     cfd_grad_alignment_gate,
+    # CFDv2 (M2 + M4):
+    cfd_prior_residual,
+    cfd_pointwise_k_from_pmi,
+    cfd_topk_target_var_k,
 )
 
 
@@ -580,3 +584,316 @@ class TestFourArmAblation:
             f"the Stage-3 grad gate is not firing strongly enough; "
             f"investigate g_align telemetry."
         )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# CFDv2 — Mechanism M2: prior-residual sparsification
+# ══════════════════════════════════════════════════════════════════════
+#
+# Hypothesis (see docs/formal_framework.md §14 — to be added):
+#   The H22/B6 regression (gap_ratio 2.87 → 6.55 on SmolLM2 swap) is
+#   driven by the teacher's *frequency-biased* high-confidence
+#   predictions (e.g. "the", "and", "of" follow-on patterns). A
+#   stronger teacher fires more sharply on these → student learns the
+#   corpus's first-order statistics faster → train PPL implodes but
+#   OOD PPL diverges.
+#
+#   M2 removes this fuel by reshaping the teacher distribution:
+#         p_t^residual(v|c) ∝ p_t(v|c) / p_uni(v)^γ
+#   with γ ∈ [0, 1]. γ=0 ⇒ identity (v1 behaviour). γ=1 ⇒ full
+#   removal of marginal — the distillation channel only carries
+#   *contextual* information (PMI signal).
+#
+#   The implementation works in log-space: subtract γ * log_prior
+#   from the teacher logits BEFORE Stage-1 top-K projection.
+
+class TestCFDv2PriorResidual:
+    """`cfd_prior_residual(teacher_logits, log_prior, gamma)` returns
+    teacher logits shifted by `-gamma * log_prior` so that the
+    subsequent softmax yields `p_t(v|c) / p_uni(v)^gamma` (up to
+    normalisation)."""
+
+    def test_returns_tensor_of_correct_shape(self) -> None:
+        teacher = _make_logits(seed=1, sharpness=3.0)
+        log_prior = torch.log(torch.ones(VOCAB) / VOCAB)
+        adjusted = cfd_prior_residual(teacher, log_prior, gamma=0.5)
+        assert adjusted.shape == teacher.shape
+
+    def test_gamma_zero_is_noop(self) -> None:
+        """γ=0 ⇒ output equals input (no prior compensation, full
+        back-compat with CFDv1)."""
+        teacher = _make_logits(seed=2, sharpness=2.0)
+        # Non-uniform prior would shift the logits if γ > 0
+        g = torch.Generator().manual_seed(2)
+        prior_logits = torch.randn(VOCAB, generator=g)
+        log_prior = F.log_softmax(prior_logits, dim=-1)
+        adjusted = cfd_prior_residual(teacher, log_prior, gamma=0.0)
+        assert torch.allclose(adjusted, teacher, atol=1e-6)
+
+    def test_downweights_common_tokens(self) -> None:
+        """With prior peaked on token 0 and γ=1, the softmax of the
+        residual must put LESS mass on token 0 than the raw softmax
+        of the teacher (averaged across batch×seq)."""
+        teacher = _make_logits(seed=3, sharpness=1.0)
+        peaked = torch.zeros(VOCAB)
+        peaked[0] = 8.0  # very common token
+        log_prior = F.log_softmax(peaked, dim=-1)
+
+        raw_softmax = F.softmax(teacher, dim=-1)
+        adjusted = cfd_prior_residual(teacher, log_prior, gamma=1.0)
+        residual_softmax = F.softmax(adjusted, dim=-1)
+
+        raw_mass_0 = raw_softmax[..., 0].mean().item()
+        res_mass_0 = residual_softmax[..., 0].mean().item()
+        assert res_mass_0 < raw_mass_0, (
+            f"prior-residual did not downweight common token 0: "
+            f"raw={raw_mass_0:.4f}, residual={res_mass_0:.4f}"
+        )
+
+    def test_boosts_contextual_peaks_on_rare_tokens(self) -> None:
+        """When the teacher's peak is on a token the prior says is
+        RARE, the residual must BOOST that peak (the contextual
+        signal is genuine, not a frequency artifact)."""
+        teacher = torch.full((1, 1, VOCAB), -3.0)
+        teacher[0, 0, VOCAB - 1] = 8.0  # sharp peak on a rare token
+        # Prior with last token very rare
+        prior_logits = torch.zeros(VOCAB)
+        prior_logits[VOCAB - 1] = -8.0
+        log_prior = F.log_softmax(prior_logits, dim=-1)
+
+        raw_softmax = F.softmax(teacher, dim=-1)
+        adjusted = cfd_prior_residual(teacher, log_prior, gamma=1.0)
+        residual_softmax = F.softmax(adjusted, dim=-1)
+
+        raw_peak = raw_softmax[0, 0, VOCAB - 1].item()
+        res_peak = residual_softmax[0, 0, VOCAB - 1].item()
+        assert res_peak > raw_peak, (
+            f"prior-residual should BOOST contextual peaks on rare "
+            f"tokens; got raw_peak={raw_peak:.4f}, "
+            f"res_peak={res_peak:.4f}"
+        )
+
+    def test_composes_with_topk_to_valid_pdf(self) -> None:
+        """The full pipeline residual → top-K must yield a valid
+        per-position pdf (sums to 1, non-negative)."""
+        teacher = _make_logits(seed=5, sharpness=2.0)
+        g = torch.Generator().manual_seed(5)
+        prior_logits = torch.randn(VOCAB, generator=g)
+        log_prior = F.log_softmax(prior_logits, dim=-1)
+
+        adjusted = cfd_prior_residual(teacher, log_prior, gamma=0.5)
+        target = cfd_topk_target(adjusted, K=8, T=4.0)
+
+        sums = target.sum(dim=-1)
+        assert torch.allclose(
+            sums, torch.ones_like(sums), atol=1e-5
+        ), f"prior-residual + topk not a valid pdf: sums={sums}"
+        assert (target >= 0).all()
+
+    def test_gamma_clamped_to_unit_interval(self) -> None:
+        """γ outside [0, 1] should raise (defensive contract)."""
+        teacher = _make_logits(seed=7, sharpness=1.0)
+        log_prior = torch.log(torch.ones(VOCAB) / VOCAB)
+        with pytest.raises(ValueError):
+            cfd_prior_residual(teacher, log_prior, gamma=-0.1)
+        with pytest.raises(ValueError):
+            cfd_prior_residual(teacher, log_prior, gamma=1.5)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# CFDv2 — Mechanism M4: pointwise K via teacher-PMI
+# ══════════════════════════════════════════════════════════════════════
+#
+# Hypothesis (see docs/formal_framework.md §14):
+#   A single global K (CFDv1) treats all positions identically. But
+#   not all teacher predictions are equally informative:
+#     * sharply contextual peaks ("if" → "then") deserve a SMALL K
+#       (peak the distillation signal on the few correct alternatives),
+#     * frequency-driven peaks ("the" anywhere) deserve a LARGE K
+#       (broaden into a soft regulariser, do not over-commit).
+#
+#   M4 implements this with a per-position K(t) function of the
+#   pointwise mutual information of the teacher's top-1 token:
+#         PMI(t) = log p_t(top1 | c_t) − log p_uni(top1)
+#         K(t)    = clamp( K_max · exp(−max(PMI(t), 0) / scale),
+#                          K_min, K_max )
+#   so K(t) ∈ [K_min, K_max], monotone-decreasing in PMI.
+
+class TestCFDv2PointwiseK:
+    """`cfd_pointwise_k_from_pmi(teacher_logits, log_prior, K_min,
+    K_max)` returns a per-position K tensor based on PMI of the
+    teacher's top-1 prediction with the unigram prior."""
+
+    def test_output_shape_and_range(self) -> None:
+        teacher = _make_logits(seed=11, sharpness=3.0)
+        g = torch.Generator().manual_seed(11)
+        log_prior = F.log_softmax(torch.randn(VOCAB, generator=g), dim=-1)
+
+        K_per_pos = cfd_pointwise_k_from_pmi(
+            teacher, log_prior, K_min=4, K_max=32,
+        )
+
+        assert K_per_pos.shape == teacher.shape[:-1]
+        assert K_per_pos.dtype in (torch.long, torch.int64, torch.int32)
+        assert (K_per_pos >= 4).all()
+        assert (K_per_pos <= 32).all()
+
+    def test_high_pmi_yields_small_k(self) -> None:
+        """A sharply contextual prediction (top-1 mass ≫ prior on
+        that token) ⇒ K close to K_min."""
+        # Single position; teacher peaks on rare token V-1
+        teacher = torch.full((1, 1, VOCAB), -5.0)
+        teacher[0, 0, VOCAB - 1] = 10.0
+        # Prior says token V-1 is rare
+        prior = torch.zeros(VOCAB)
+        prior[VOCAB - 1] = -8.0
+        log_prior = F.log_softmax(prior, dim=-1)
+
+        K_hi = cfd_pointwise_k_from_pmi(
+            teacher, log_prior, K_min=2, K_max=32,
+        )
+        assert K_hi[0, 0].item() <= 8, (
+            f"high-PMI position should get small K, got K="
+            f"{K_hi[0, 0].item()}"
+        )
+
+    def test_low_pmi_yields_large_k(self) -> None:
+        """An uninformative prediction (uniform teacher, uniform
+        prior ⇒ PMI = 0) ⇒ K = K_max."""
+        teacher = torch.zeros(1, 1, VOCAB)
+        log_prior = torch.log(torch.ones(VOCAB) / VOCAB)
+        K_lo = cfd_pointwise_k_from_pmi(
+            teacher, log_prior, K_min=2, K_max=32,
+        )
+        assert K_lo[0, 0].item() >= 24, (
+            f"low-PMI position should get large K, got K="
+            f"{K_lo[0, 0].item()}"
+        )
+
+    def test_monotone_in_pmi(self) -> None:
+        """K(t) is monotone-non-increasing in PMI(t): comparing two
+        positions, the one with higher top-1-vs-prior ratio gets a
+        K no larger than the other."""
+        # Position 0: high PMI (rare-token peak)
+        # Position 1: low PMI (common-token peak)
+        teacher = torch.full((1, 2, VOCAB), -5.0)
+        teacher[0, 0, VOCAB - 1] = 10.0   # rare-token peak
+        teacher[0, 1, 0] = 10.0            # common-token peak
+        prior = torch.zeros(VOCAB)
+        prior[0] = 8.0                     # token 0 common
+        prior[VOCAB - 1] = -8.0            # token V-1 rare
+        log_prior = F.log_softmax(prior, dim=-1)
+
+        K = cfd_pointwise_k_from_pmi(
+            teacher, log_prior, K_min=2, K_max=32,
+        )
+        assert K[0, 0].item() <= K[0, 1].item(), (
+            f"K should be monotone-decreasing in PMI: "
+            f"K(high_pmi)={K[0, 0].item()} > K(low_pmi)="
+            f"{K[0, 1].item()}"
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# CFDv2 — variable-K top-K target (per-position K projection)
+# ══════════════════════════════════════════════════════════════════════
+
+class TestCFDv2VariableKTopK:
+    """`cfd_topk_target_var_k(teacher_logits, K_per_pos, T)` is the
+    variable-K analogue of `cfd_topk_target`: each (batch, position)
+    slot uses its own K from the `K_per_pos` tensor."""
+
+    def test_valid_pdf(self) -> None:
+        teacher = _make_logits(seed=21, sharpness=2.0)
+        K_per_pos = torch.full(
+            teacher.shape[:-1], 4, dtype=torch.long,
+        )
+        K_per_pos[:, 0] = 16
+        target = cfd_topk_target_var_k(teacher, K_per_pos, T=4.0)
+        sums = target.sum(dim=-1)
+        assert torch.allclose(sums, torch.ones_like(sums), atol=1e-5)
+        assert (target >= 0).all()
+
+    def test_matches_scalar_topk_when_uniform_k(self) -> None:
+        """When `K_per_pos` is a constant K everywhere, var-K must
+        produce a target bit-identical to scalar `cfd_topk_target`."""
+        teacher = _make_logits(seed=22, sharpness=1.5)
+        K = 6
+        K_per_pos = torch.full(
+            teacher.shape[:-1], K, dtype=torch.long,
+        )
+        target_var = cfd_topk_target_var_k(teacher, K_per_pos, T=4.0)
+        target_scalar = cfd_topk_target(teacher, K=K, T=4.0)
+        assert torch.allclose(target_var, target_scalar, atol=1e-5), (
+            f"var-K with constant K must equal scalar K result"
+        )
+
+    def test_smaller_k_keeps_fewer_modes(self) -> None:
+        """Smaller K ⇒ more aggressive sparsification: the top-1 mass
+        is preserved (a contract of the v1 projection that v2 inherits),
+        but the rank-3..K_large positions are demoted to the uniform
+        tail under K_small. So the SUM of the top-K_large masses is
+        strictly smaller under K_small than under K_large."""
+        teacher = _make_logits(seed=23, sharpness=5.0)
+        K_small_val, K_large_val = 2, 16
+        K_small = torch.full(
+            teacher.shape[:-1], K_small_val, dtype=torch.long,
+        )
+        K_large = torch.full(
+            teacher.shape[:-1], K_large_val, dtype=torch.long,
+        )
+        t_small = cfd_topk_target_var_k(teacher, K_small, T=2.0)
+        t_large = cfd_topk_target_var_k(teacher, K_large, T=2.0)
+
+        # Top-1 mass is invariant under K (Stage-1 contract).
+        top1_small = t_small.max(dim=-1).values
+        top1_large = t_large.max(dim=-1).values
+        assert torch.allclose(top1_small, top1_large, atol=1e-5), (
+            "top-1 mass must be invariant in K (CFDv1 contract)"
+        )
+
+        # Sum of the top-K_large masses must be STRICTLY smaller under
+        # K_small (because positions K_small+1..K_large are tail-uniform
+        # under K_small but retained under K_large for a sharp teacher).
+        top_klarge_small = t_small.topk(K_large_val, dim=-1).values.sum(
+            dim=-1,
+        ).mean().item()
+        top_klarge_large = t_large.topk(K_large_val, dim=-1).values.sum(
+            dim=-1,
+        ).mean().item()
+        assert top_klarge_small < top_klarge_large, (
+            f"smaller K should demote rank-{K_small_val + 1}..{K_large_val} "
+            f"positions to the uniform tail: "
+            f"top{K_large_val}_small={top_klarge_small:.4f}, "
+            f"top{K_large_val}_large={top_klarge_large:.4f}"
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# CFDv2 — back-compat: defaults produce CFDv1-identical pipeline
+# ══════════════════════════════════════════════════════════════════════
+
+class TestCFDv2BackCompat:
+    """When all v2 knobs are at their defaults (γ=0, pointwise-K off),
+    the composed pipeline must be observationally identical to v1."""
+
+    def test_gamma_zero_then_topk_matches_v1(self) -> None:
+        teacher = _make_logits(seed=31, sharpness=2.0)
+        g = torch.Generator().manual_seed(31)
+        log_prior = F.log_softmax(
+            torch.randn(VOCAB, generator=g), dim=-1,
+        )
+        adjusted = cfd_prior_residual(teacher, log_prior, gamma=0.0)
+        v2_target = cfd_topk_target(adjusted, K=8, T=4.0)
+        v1_target = cfd_topk_target(teacher, K=8, T=4.0)
+        assert torch.allclose(v2_target, v1_target, atol=1e-6)
+
+    def test_constant_k_var_topk_matches_v1(self) -> None:
+        teacher = _make_logits(seed=32, sharpness=2.0)
+        K = 8
+        K_per_pos = torch.full(
+            teacher.shape[:-1], K, dtype=torch.long,
+        )
+        v2_target = cfd_topk_target_var_k(teacher, K_per_pos, T=4.0)
+        v1_target = cfd_topk_target(teacher, K=K, T=4.0)
+        assert torch.allclose(v2_target, v1_target, atol=1e-6)

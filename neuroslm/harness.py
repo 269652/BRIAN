@@ -329,6 +329,217 @@ def cfd_topk_schedule(
     return max(1, int(round(K)))
 
 
+# ── CFDv2 — Generalisation-Funneled Distillation (GFD) helpers ─────────
+#
+# Two additional free functions extending CFD with the M2 (prior-residual
+# sparsification) and M4 (pointwise-K via teacher PMI) mechanisms from
+# docs/formal_framework.md §14. Plus a variable-K version of the Stage-1
+# top-K projection that consumes the M4 K-per-position tensor.
+#
+# Design philosophy (see hypothesis/H006 v2 falsifier table):
+#   * γ = 0 ⇒ M2 is a noop (full back-compat with CFDv1).
+#   * Constant K ⇒ var-K top-K is bit-identical to scalar top-K.
+# So enabling the v2 knobs at their defaults preserves H006's no-harm
+# floor; the v2 mechanisms only *bias the funnel toward generalisation*,
+# they cannot violate Stage-3's cosine-gate argument.
+
+
+def cfd_prior_residual(
+    teacher_logits: torch.Tensor,
+    log_prior: torch.Tensor,
+    gamma: float,
+) -> torch.Tensor:
+    """M2 — prior-residual sparsification of the teacher distribution.
+
+    Returns adjusted teacher logits such that the subsequent softmax
+    yields the prior-residual distribution
+
+        p_t^residual(v | c) ∝ p_t(v | c) / p_uni(v)^γ
+
+    by linearity of log-softmax: subtract `γ · log p_uni(v)` from each
+    teacher logit before the softmax normaliser.
+
+    Args:
+        teacher_logits: (..., V) raw teacher logits.
+        log_prior: (V,) log-probabilities of the unigram prior over the
+            shared vocabulary (must satisfy `logsumexp(log_prior) ≈ 0`,
+            though we do not strictly enforce it — any constant shift
+            cancels in the next softmax).
+        gamma: residual strength in [0, 1]. 0 = identity (CFDv1 path),
+            1 = full removal of unigram floor.
+
+    Returns:
+        adjusted: (..., V) logits with `−γ · log_prior` broadcast on
+        the last axis. Pass into `cfd_topk_target` /
+        `cfd_topk_target_var_k` (or any downstream Stage-1 op) exactly
+        as if it were the raw teacher.
+    """
+    if not (0.0 <= float(gamma) <= 1.0):
+        raise ValueError(
+            f"cfd_prior_residual: gamma must be in [0, 1], got {gamma}"
+        )
+    if log_prior.dim() != 1 or log_prior.size(0) != teacher_logits.size(-1):
+        raise ValueError(
+            f"cfd_prior_residual: log_prior shape "
+            f"{tuple(log_prior.shape)} incompatible with teacher_logits "
+            f"vocab dim {teacher_logits.size(-1)}"
+        )
+    if float(gamma) == 0.0:
+        # Bit-identical noop branch — preserves back-compat numerically.
+        return teacher_logits
+    # log_prior broadcasts on the vocab axis. Cast to teacher dtype to
+    # avoid spurious upcasts in mixed-precision training.
+    return teacher_logits - float(gamma) * log_prior.to(
+        teacher_logits.dtype
+    ).to(teacher_logits.device)
+
+
+def cfd_pointwise_k_from_pmi(
+    teacher_logits: torch.Tensor,
+    log_prior: torch.Tensor,
+    K_min: int,
+    K_max: int,
+    scale: float = 2.0,
+) -> torch.Tensor:
+    """M4 — per-position top-K from the teacher's pointwise mutual
+    information with the unigram prior.
+
+    For each (batch, position) slot t, let v* = argmax_v p_t(v | c_t)
+    be the teacher's top-1 token. Define
+
+        PMI(t) := log p_t(v* | c_t) − log p_uni(v*)
+
+    and the per-position K
+
+        K(t) := clamp( K_max · exp( −max(PMI(t), 0) / scale ),
+                       K_min, K_max )
+
+    so K(t) ∈ [K_min, K_max], monotone-non-increasing in PMI(t):
+
+      * high PMI (sharp contextual peak on a rare-prior token)
+        ⇒ K close to K_min — concentrate the distillation signal,
+      * low / zero PMI (uniform teacher or top-1 = a common token)
+        ⇒ K close to K_max — broaden into a soft regulariser.
+
+    Args:
+        teacher_logits: (..., V).
+        log_prior: (V,) unigram log-probabilities.
+        K_min: lower bound on per-position K (must be ≥ 1).
+        K_max: upper bound on per-position K (must be ≥ K_min, ≤ V).
+        scale: PMI decay scale (nats). Default 2.0 gives a smooth
+            interpolation across the typical PMI range of a language
+            model (∼0–5 nats for high-entropy contexts).
+
+    Returns:
+        K_per_pos: integer tensor of shape `teacher_logits.shape[:-1]`,
+        each entry in [K_min, K_max]. dtype = torch.long.
+    """
+    V = teacher_logits.size(-1)
+    if K_min < 1:
+        raise ValueError(f"cfd_pointwise_k_from_pmi: K_min ≥ 1, got {K_min}")
+    if K_max < K_min:
+        raise ValueError(
+            f"cfd_pointwise_k_from_pmi: K_max ≥ K_min, got "
+            f"K_min={K_min}, K_max={K_max}"
+        )
+    if K_max > V:
+        raise ValueError(
+            f"cfd_pointwise_k_from_pmi: K_max ≤ V, got "
+            f"K_max={K_max}, V={V}"
+        )
+    if log_prior.dim() != 1 or log_prior.size(0) != V:
+        raise ValueError(
+            f"cfd_pointwise_k_from_pmi: log_prior shape "
+            f"{tuple(log_prior.shape)} incompatible with V={V}"
+        )
+
+    with torch.no_grad():
+        log_p_t = F.log_softmax(teacher_logits, dim=-1)
+        # top-1 value & index per position
+        top1_logp, top1_idx = log_p_t.max(dim=-1)
+        # Gather prior log-prob at the top-1 token
+        prior_logp = log_prior.to(teacher_logits.device).gather(
+            0, top1_idx.reshape(-1)
+        ).reshape(top1_idx.shape)
+        pmi = (top1_logp - prior_logp).clamp_min(0.0)
+        # K(t) = K_max · exp(−PMI / scale), then clamp to [K_min, K_max]
+        K_real = float(K_max) * torch.exp(-pmi / float(scale))
+        K_clamped = K_real.clamp(min=float(K_min), max=float(K_max))
+        # Round to nearest int; dtype long so downstream gather/scatter
+        # treats it as indices.
+        return K_clamped.round().long()
+
+
+def cfd_topk_target_var_k(
+    teacher_logits: torch.Tensor,
+    K_per_pos: torch.Tensor,
+    T: float,
+) -> torch.Tensor:
+    """Variable-K analogue of `cfd_topk_target` — each (batch,
+    position) slot uses its own K from `K_per_pos`.
+
+    For each slot t with K(t) modes:
+      * keep the top-K(t) teacher softmax masses at their raw values,
+      * spread the residual `1 − Σ top-K(t) mass` uniformly over the
+        remaining V − K(t) tail.
+
+    Implementation: build a full top-V-sorted softmax once, then for
+    each slot mask the entries with rank ≥ K(t) and replace them with
+    `(1 − retained_mass) / (V − K(t))`. Vectorised — O(B·T·V) time,
+    no Python loop over positions.
+
+    Args:
+        teacher_logits: (..., V).
+        K_per_pos: integer tensor with shape `teacher_logits.shape[:-1]`,
+            each entry in [1, V]. Typically produced by
+            `cfd_pointwise_k_from_pmi`.
+        T: temperature.
+
+    Returns:
+        target: (..., V) probability distribution. Each per-position
+        row sums to 1, has non-negative entries, exactly preserves the
+        top-K(t) softmax masses, has uniform tail of size V − K(t).
+    """
+    V = teacher_logits.size(-1)
+    if K_per_pos.shape != teacher_logits.shape[:-1]:
+        raise ValueError(
+            f"cfd_topk_target_var_k: K_per_pos shape "
+            f"{tuple(K_per_pos.shape)} does not match leading dims of "
+            f"teacher_logits {tuple(teacher_logits.shape[:-1])}"
+        )
+    if K_per_pos.min().item() < 1 or K_per_pos.max().item() > V:
+        raise ValueError(
+            f"cfd_topk_target_var_k: K_per_pos out of range, got "
+            f"min={K_per_pos.min().item()}, max={K_per_pos.max().item()}, "
+            f"V={V}"
+        )
+
+    raw = F.softmax(teacher_logits / float(T), dim=-1)
+    # Sort descending → use rank position to compare against K(t).
+    sorted_vals, sorted_idx = raw.sort(dim=-1, descending=True)
+    # rank: (..., V) with values 0..V-1 along last axis
+    rank = torch.arange(V, device=raw.device).expand_as(sorted_vals)
+    # K_expand: (..., 1) → broadcasts on V axis
+    K_expand = K_per_pos.unsqueeze(-1)
+    keep_mask_sorted = rank < K_expand  # (..., V) bool
+    # Retained per-position mass (sum of the kept ranks)
+    retained = (sorted_vals * keep_mask_sorted).sum(dim=-1, keepdim=True)
+    # Tail size per position = V − K(t)
+    tail_size = (V - K_expand).clamp_min(1).to(raw.dtype)
+    residual = (1.0 - retained).clamp_min(0.0)
+    tail_uniform = residual / tail_size  # (..., 1) — broadcasts on V
+
+    # Build target IN SORTED ORDER first, then un-sort with scatter.
+    target_sorted = torch.where(
+        keep_mask_sorted, sorted_vals, tail_uniform.expand_as(sorted_vals)
+    )
+    # Un-sort: place target_sorted[..., r] back at the original index
+    # sorted_idx[..., r].
+    target = torch.empty_like(raw)
+    target.scatter_(-1, sorted_idx, target_sorted)
+    return target
+
+
 class BRIANHarness(nn.Module):
     """Wrap a DSL-compiled circuit for end-to-end LM training.
 
@@ -1139,8 +1350,80 @@ class BRIANHarness(nn.Module):
                     student, teacher, T_dist,
                     floor_multiplier=float(cfg.cfd_temperature_floor),
                 )
-                # Stage 1: top-K rank-preserving sparsified target
-                target_pdf = cfd_topk_target(teacher, K=K_t, T=T_eff)
+
+                # ── CFDv2 (GFD): build / update unigram prior ──
+                # Maintain an EMA of the observed target distribution
+                # over training tokens. This is the cheap, training-
+                # corpus-derived estimate of p_uni(v). Used by both M2
+                # (prior-residual subtraction in log-space) and M4
+                # (PMI-based per-position K).
+                #
+                # Activated only when at least one v2 mechanism is on;
+                # otherwise the v1 path stays bit-identical.
+                gamma = float(getattr(cfg, "cfd_prior_gamma", 0.0))
+                use_pointwise_k = bool(
+                    getattr(cfg, "cfd_pointwise_k_enabled", False)
+                )
+                if gamma > 0.0 or use_pointwise_k:
+                    V_full = student.size(-1)
+                    # EMA update — counts smoothed with 1/V additive
+                    # prior so log_prior is always well-defined.
+                    with torch.no_grad():
+                        counts = torch.bincount(
+                            targets.reshape(-1).to(student.device),
+                            minlength=V_full,
+                        ).to(student.dtype)
+                        batch_prior = (counts + 1.0) / (
+                            counts.sum() + float(V_full)
+                        )
+                        if (
+                            getattr(self, "_cfd_unigram_ema", None) is None
+                            or self._cfd_unigram_ema.numel() != V_full
+                        ):
+                            # First step OR vocab changed → seed.
+                            self._cfd_unigram_ema = batch_prior.clone()
+                        else:
+                            ema_p = 0.05  # slow — prior stabilises fast
+                            self._cfd_unigram_ema = (
+                                (1.0 - ema_p) * self._cfd_unigram_ema
+                                + ema_p * batch_prior
+                            )
+                        log_prior = torch.log(
+                            self._cfd_unigram_ema.clamp_min(1e-12)
+                        )
+
+                    # M2 — prior-residual sparsification (γ > 0 only;
+                    # γ = 0 is a noop branch inside the helper).
+                    teacher_v2 = cfd_prior_residual(
+                        teacher, log_prior, gamma=gamma
+                    )
+                    # M4 — per-position K from teacher PMI.
+                    if use_pointwise_k:
+                        K_per_pos = cfd_pointwise_k_from_pmi(
+                            teacher_v2,
+                            log_prior,
+                            K_min=int(cfg.cfd_pointwise_k_min),
+                            K_max=int(cfg.cfd_pointwise_k_max),
+                            scale=float(
+                                getattr(cfg, "cfd_pmi_scale", 2.0)
+                            ),
+                        )
+                        target_pdf = cfd_topk_target_var_k(
+                            teacher_v2, K_per_pos, T=T_eff
+                        )
+                        K_telemetry = float(K_per_pos.float().mean().item())
+                    else:
+                        target_pdf = cfd_topk_target(
+                            teacher_v2, K=K_t, T=T_eff
+                        )
+                        K_telemetry = float(K_t)
+                else:
+                    # v1 path: raw teacher, global K.
+                    target_pdf = cfd_topk_target(
+                        teacher, K=K_t, T=T_eff
+                    )
+                    K_telemetry = float(K_t)
+
                 # Per-token KL (correct reduction — fixes Followup F1
                 # by construction since we never go through batchmean
                 # for the CFD path).
@@ -1157,8 +1440,13 @@ class BRIANHarness(nn.Module):
                 self._metrics["distill_kl"] = float(kl_term.detach().item())
                 self._metrics["distill_lambda"] = float(lam_eff)
                 self._metrics["cfd_T_eff"] = float(T_eff)
-                self._metrics["cfd_K"] = int(K_t)
+                self._metrics["cfd_K"] = float(K_telemetry)
                 self._metrics["cfd_g_align"] = float(g_align)
+                # v2 telemetry — only meaningful when v2 path active
+                self._metrics["cfd_prior_gamma"] = float(gamma)
+                self._metrics["cfd_pointwise_k"] = (
+                    1.0 if use_pointwise_k else 0.0
+                )
             else:
                 # Legacy Hinton KL (the H21–H23 path; reproduces
                 # bit-for-bit).
@@ -1181,6 +1469,8 @@ class BRIANHarness(nn.Module):
                 self._metrics["cfd_T_eff"] = 0.0
                 self._metrics["cfd_K"] = 0
                 self._metrics["cfd_g_align"] = 0.0
+                self._metrics["cfd_prior_gamma"] = 0.0
+                self._metrics["cfd_pointwise_k"] = 0.0
 
         # ── Slot C: NT-mediated inhibition update ──
         # Drive signal: gap = cortex - lm (positive ⇒ trunk overtook

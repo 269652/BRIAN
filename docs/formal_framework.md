@@ -1033,4 +1033,197 @@ impossibility under CFD.
   composing CFD with `VocabBridge`. Stage 1 must be applied **before**
   the bridge to preserve the rank ordering through the projection.
 
+---
+
+## 14. Generalisation-Funneled Distillation (GFD) — closing the train↔OOD gap
+
+### 14.0 Motivation: the H22/B6 falsification of CFDv1
+
+The H006 theorem (§13.3) bounds the training-distribution loss
+$\mathcal L_{\mathrm{LM}}(p_s)$ under the no-harm floor $\lambda_{\mathrm{eff}} \in [0, \lambda_0]$.
+But the theorem is **silent on the train↔OOD gap**:
+
+$$
+\mathrm{gap}(p_s) := \mathcal L_{\mathrm{LM}}^{(\text{OOD})}(p_s) - \mathcal L_{\mathrm{LM}}^{(\text{train})}(p_s).
+$$
+
+The H22/B6 run (SmolLM2-360M expert swap, otherwise identical config)
+falsified the implicit assumption that "implode train PPL ⇒ implode
+OOD PPL":
+
+| variant         | train PPL | OOD PPL | gap_ratio |
+|-----------------|-----------|---------|-----------|
+| GPT-2 expert    | 38.4      | 110.2   | 2.87      |
+| SmolLM2 expert  | **23.6**  | **155.0** | **6.55** |
+
+A *stronger* teacher fires more confidently on frequency-driven
+patterns ("the", "and", "of" follow-ons). CFDv1 treats every
+(context, target) pair as equally informative — so the student
+absorbs the corpus's first-order statistics faster, train PPL implodes,
+but the residual *contextual* signal degrades because the high-PMI
+positions get the same K as the low-PMI ones.
+
+### 14.1 Decomposition of the distillation gradient
+
+For a single position with teacher distribution $p_t(\cdot \mid c)$,
+the KL gradient at the student logits decomposes as
+
+$$
+\nabla_z \mathrm{KL}(p_t \,\|\, p_s) = -(p_t - p_s) = -\bigl[\underbrace{p_{\mathrm{uni}}}_{\text{marginal}} + \underbrace{(p_t - p_{\mathrm{uni}})}_{\text{contextual residual}}\bigr] + p_s.
+$$
+
+The marginal component pulls the student toward $p_{\mathrm{uni}}$
+**regardless of context** — it is precisely the frequency-imitation
+fuel that drives the train↔OOD gap. The contextual residual is the
+generalisation-positive signal (it encodes how the *context* shifts
+the distribution away from the marginal).
+
+GFD removes the marginal component from the distillation channel
+without touching the LM channel (the LM-CE term still sees the full
+$p_{\mathrm{true}}$).
+
+### 14.2 Mechanism M2: prior-residual sparsification
+
+**Definition.** Let $p_{\mathrm{uni}}(v) > 0$ be a smoothed unigram
+prior over the shared vocabulary $\mathcal V$ (in implementation:
+EMA over training-batch target counts, with $+1$ Laplace smoothing).
+For $\gamma \in [0, 1]$ the **prior-residual teacher** is
+
+$$
+\tilde p_t^{(\gamma)}(v \mid c) \;\propto\; \frac{p_t(v \mid c)}{p_{\mathrm{uni}}(v)^\gamma}.
+$$
+
+In log-space this is the trivial shift
+$\tilde z_t = z_t - \gamma \log p_{\mathrm{uni}}$ — implemented as a
+single broadcast subtraction on the teacher logits **before** the
+Stage-1 top-K projection.
+
+**Limits.** $\gamma = 0$ recovers CFDv1 exactly. $\gamma = 1$ fully
+removes the unigram floor: the distillation channel only carries
+$\log(p_t / p_{\mathrm{uni}})$, i.e. the pointwise mutual
+information signal.
+
+**Theorem (IV) — M2 preserves the H006 no-harm floor.**
+
+The Stage-3 cosine gate
+$\lambda_{\mathrm{eff}} = \lambda_0 \cdot (1 + \cos(\nabla_{z} L_{\mathrm{distill}}, \nabla_{z} L_{\mathrm{LM}})) / 2$
+depends only on the *direction* of the distillation gradient at the
+pre-fusion logits. M2 replaces $p_t$ with $\tilde p_t^{(\gamma)}$ but
+the gate is still computed on the resulting term — so for any teacher
+that pulls anti-aligned with the LM after M2, $\lambda_{\mathrm{eff}} \to 0$
+exactly as in §13.3. Hence M2 cannot violate (I): $\mathcal L_{\mathrm{LM}}$
+on the training distribution is still upper-bounded by the LM-only
+baseline. $\square$
+
+**Theorem (V) — M2 reduces the marginal-imitation gradient.**
+
+Let $g_{\mathrm{marg}}(z; p_t) := \mathbb E_{v \sim p_{\mathrm{uni}}}[\nabla_z \log p_s(v)]$
+be the projection of the distillation gradient onto the
+marginal-imitation direction. Then for $\gamma > 0$ and any
+non-trivial teacher (i.e. $p_t \not\propto p_{\mathrm{uni}}$),
+
+$$
+\bigl\| g_{\mathrm{marg}}(z; \tilde p_t^{(\gamma)}) \bigr\| \;<\; \bigl\| g_{\mathrm{marg}}(z; p_t) \bigr\|.
+$$
+
+*Proof sketch.* By construction $\tilde p_t^{(\gamma)}(v) \propto p_t(v) \cdot p_{\mathrm{uni}}(v)^{-\gamma}$,
+which strictly down-weights every $v$ for which $p_t(v) > p_{\mathrm{uni}}(v)$
+above what it down-weights $v$ for which $p_t(v) < p_{\mathrm{uni}}(v)$.
+After normalisation, the inner product $\langle \tilde p_t^{(\gamma)}, \log p_{\mathrm{uni}} \rangle$
+is strictly smaller than $\langle p_t, \log p_{\mathrm{uni}} \rangle$
+for any $\gamma > 0$ unless $p_t = p_{\mathrm{uni}}$ exactly.
+The gradient projection inherits this contraction monotonically. $\square$
+
+### 14.3 Mechanism M4: pointwise K from teacher PMI
+
+**Definition.** For each position $t$ let $v^*_t := \arg\max_v p_t(v \mid c_t)$
+be the teacher's top-1 token and define the **pointwise mutual
+information**
+
+$$
+\mathrm{PMI}(t) := \log p_t(v^*_t \mid c_t) - \log p_{\mathrm{uni}}(v^*_t).
+$$
+
+Then the per-position K is
+
+$$
+K(t) := \mathrm{clip}\Bigl(K_{\max} \cdot \exp\bigl(-\max(\mathrm{PMI}(t), 0) / \sigma \bigr), K_{\min}, K_{\max}\Bigr) \in \mathbb Z \cap [K_{\min}, K_{\max}].
+$$
+
+The decay scale $\sigma > 0$ controls how aggressively K drops with
+PMI; default $\sigma = 2$ nats spans the typical PMI range of a
+modest LM. The CFD Stage-1 projection then uses this per-position $K$
+via `cfd_topk_target_var_k`, which is bit-identical to the scalar
+version whenever $K(t)$ is constant.
+
+**Interpretation.** $K(t)$ is *small* when the teacher fires
+confidently on a token the prior says is rare — these are the
+contextually informative positions and we want to concentrate the
+distillation signal on the few correct alternatives. $K(t)$ is
+*large* when the teacher's top-1 is a high-prior token (the teacher
+is just echoing the marginal) — we soften the projection so the
+distillation term degrades gracefully into a broad regulariser.
+
+**Back-compat.** Setting $K_{\min} = K_{\max} = K^\star$ recovers a
+constant-K projection bit-identical to CFDv1 with the same $K^\star$.
+
+### 14.4 Composition with CFDv1
+
+The full GFD pipeline at each training step is:
+
+1. **Build prior**: EMA-update $p_{\mathrm{uni}}$ from the batch
+   target counts (cost: one `bincount`, $O(B \cdot T)$).
+2. **M2**: $\tilde z_t \leftarrow z_t - \gamma \log p_{\mathrm{uni}}$.
+3. **M4** (if enabled): $K(t) \leftarrow$ §14.3 from $\tilde z_t$.
+4. **Stage 1**: top-K target $\hat p_t \leftarrow$ either
+   `cfd_topk_target(z̃, K_t, T_eff)` (legacy global K) or
+   `cfd_topk_target_var_k(z̃, K(t), T_eff)`.
+5. **Stage 2**: $T_{\mathrm{eff}} \leftarrow$ §13.2.2 (unchanged).
+6. **Stage 3**: $\lambda_{\mathrm{eff}} \leftarrow$ §13.2.3 (unchanged,
+   gate measured on the post-M2-post-M4 KL term).
+
+When $\gamma = 0$ and pointwise-K is disabled, the pipeline collapses
+bit-identically to CFDv1 (verified by `TestCFDv2BackCompat`).
+
+### 14.5 Predicted falsifier
+
+| Arm | γ   | pointwise-K | Prediction (vs Arm D)             |
+|-----|-----|-------------|-----------------------------------|
+| D   | 0.0 | off         | CFDv1 baseline                    |
+| E   | 0.5 | off         | $\mathcal L_E^{(\text{OOD})} \le \mathcal L_D^{(\text{OOD})}$ on H22/B6 setup |
+| F   | 0.5 | on          | $\mathrm{gap}_F \le \mathrm{gap}_E$ (both train and OOD) |
+
+The synthetic-fixture test suite (`TestCFDv2*`) verifies the
+*contract* (back-compat, monotonicity, well-formed PDFs). The
+falsifier above requires a real H22/B6-style training run and is
+deferred to a CDGA sweep.
+
+### 14.6 Implementation summary
+
+* `neuroslm.harness.cfd_prior_residual(teacher_logits, log_prior, gamma)` —
+  M2 helper (single broadcast subtraction, $O(B \cdot T \cdot V)$).
+* `neuroslm.harness.cfd_pointwise_k_from_pmi(teacher_logits, log_prior, K_min, K_max, scale)` —
+  M4 helper (one `max` + `exp` + `clip` per position).
+* `neuroslm.harness.cfd_topk_target_var_k(teacher_logits, K_per_pos, T)` —
+  variable-K Stage-1 projection (vectorised, no Python loop).
+* DSL knobs on `MultiCortexConfig`:
+  `cfd_prior_gamma: float = 0.0`,
+  `cfd_pointwise_k_enabled: bool = False`,
+  `cfd_pointwise_k_min: int = 2`,
+  `cfd_pointwise_k_max: int = 32`,
+  `cfd_pmi_scale: float = 2.0`.
+* Telemetry: `cfd_prior_gamma`, `cfd_pointwise_k` flags + mean K
+  surfaced via `cfd_K` (now a float — average per-position K under M4).
+
+### 14.7 Open questions for v2.1+
+
+* **M1** (generalisation-tagged token weights): offline pre-pass
+  computes per-(context-hash, target) generalisation scores via
+  consistency under paraphrase; per-token $\lambda_{\mathrm{eff}}$
+  multiplier. Promised in the v2.1 roadmap.
+* **M3** (hippocampal-replay scheduler): per-token revisit cadence
+  driven by surprise + spacing law. Deferred to v2.2.
+* **M5** (FitNets hidden-state alignment): learned bottleneck on
+  intermediate teacher activations. Deferred to v3.0.
+
 

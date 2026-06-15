@@ -587,6 +587,47 @@ class MultiCortexConfig:
     # below `cfd_temperature_floor · distillation_temperature`).
     cfd_temperature_floor: float = 1.0
 
+    # ── CFDv2: Generalisation-Funneled Distillation (GFD) extensions ──
+    # See docs/formal_framework.md §14 and the v2 falsifier rows in
+    # hypothesis/H006_capacity_funneled_distillation_implode.md.
+    #
+    # Motivation: CFDv1's three stages bound the *training* loss but
+    # cannot reduce the train↔OOD gap because all (context, target)
+    # pairs are weighted equally. A stronger teacher fires sharper on
+    # corpus-specific patterns ("the", "and" follow-ons) → student
+    # learns the marginal faster → train PPL implodes but OOD diverges
+    # (the H22/B6 SmolLM2 swap result: gap_ratio 2.87 → 6.55).
+    #
+    # v2 adds two cheap mechanisms that bias the funnel toward
+    # *generalisation* signal without weakening the no-harm floor:
+    #
+    #   M2 — prior-residual sparsification
+    #         Subtract γ · log p_uni(v) from the teacher logits before
+    #         Stage 1. γ ∈ [0, 1]: 0 = noop (full back-compat), 1 =
+    #         full removal of the unigram marginal so the distillation
+    #         channel only carries CONTEXTUAL PMI signal.
+    #
+    #   M4 — pointwise K (PMI-driven, per-position)
+    #         Replace the global K schedule with a per-position K(t)
+    #         decreasing in the teacher's top-1 PMI:
+    #            K(t) = clamp(K_max · exp(-PMI(t) / scale),
+    #                         K_min, K_max)
+    #         High-PMI positions (sharp contextual peaks on rare-prior
+    #         tokens) get small K → concentrate the signal.
+    #         Low-PMI positions (uniform teacher or peak-on-common)
+    #         get large K → soft regulariser, do not over-commit.
+    #
+    # Defaults: γ=0 and pointwise_k_enabled=False ⇒ v2 is a no-op
+    # (legacy global K-anneal schedule + raw teacher logits).
+    cfd_prior_gamma: float = 0.0
+    cfd_pointwise_k_enabled: bool = False
+    cfd_pointwise_k_min: int = 2
+    cfd_pointwise_k_max: int = 32
+    # PMI decay scale in nats — controls how aggressively K drops with
+    # increasing teacher PMI. Default 2.0 ≈ smooth interpolation across
+    # typical LM context entropies. Smaller value ⇒ sharper drop.
+    cfd_pmi_scale: float = 2.0
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Multi-Objective Fitness — Phase A/F1 (central selection-pressure switch)
@@ -1410,7 +1451,7 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
     if "lateral_inhibition_kappa" in props:
         m.lateral_inhibition_kappa = float(props["lateral_inhibition_kappa"])
 
-    # ── H006: Capacity-Funneled Distillation (CFD) ──
+    # ── H006 CFD ──
     if "cfd_enabled" in props:
         m.cfd_enabled = _parse_bool(props["cfd_enabled"])
     if "cfd_topk_start" in props:
@@ -1421,6 +1462,20 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
         m.cfd_topk_anneal_steps = int(props["cfd_topk_anneal_steps"])
     if "cfd_temperature_floor" in props:
         m.cfd_temperature_floor = float(props["cfd_temperature_floor"])
+
+    # ── CFDv2 (GFD) ──
+    if "cfd_prior_gamma" in props:
+        m.cfd_prior_gamma = float(props["cfd_prior_gamma"])
+    if "cfd_pointwise_k_enabled" in props:
+        m.cfd_pointwise_k_enabled = _parse_bool(
+            props["cfd_pointwise_k_enabled"]
+        )
+    if "cfd_pointwise_k_min" in props:
+        m.cfd_pointwise_k_min = int(props["cfd_pointwise_k_min"])
+    if "cfd_pointwise_k_max" in props:
+        m.cfd_pointwise_k_max = int(props["cfd_pointwise_k_max"])
+    if "cfd_pmi_scale" in props:
+        m.cfd_pmi_scale = float(props["cfd_pmi_scale"])
 
     # ── Per-expert roster (new path, replaces ``weights`` shorthand) ──
     # `experts: [ { id: "gpt2", domain: "general", freeze: true }, ... ]`
@@ -1520,6 +1575,29 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
                 f"(otherwise Stage 2 could SHARPEN the teacher), "
                 f"got {m.cfd_temperature_floor}"
             )
+        # ── CFDv2 (GFD) validation ──
+        if not (0.0 <= m.cfd_prior_gamma <= 1.0):
+            raise ValueError(
+                f"multi_cortex.cfd_prior_gamma must be in [0.0, 1.0], "
+                f"got {m.cfd_prior_gamma}"
+            )
+        if m.cfd_pointwise_k_enabled:
+            if m.cfd_pointwise_k_min < 1:
+                raise ValueError(
+                    f"multi_cortex.cfd_pointwise_k_min must be >= 1, "
+                    f"got {m.cfd_pointwise_k_min}"
+                )
+            if m.cfd_pointwise_k_max < m.cfd_pointwise_k_min:
+                raise ValueError(
+                    f"multi_cortex.cfd_pointwise_k_max "
+                    f"({m.cfd_pointwise_k_max}) must be >= "
+                    f"cfd_pointwise_k_min ({m.cfd_pointwise_k_min})"
+                )
+            if m.cfd_pmi_scale <= 0.0:
+                raise ValueError(
+                    f"multi_cortex.cfd_pmi_scale must be > 0.0, "
+                    f"got {m.cfd_pmi_scale}"
+                )
     return m
 
 
