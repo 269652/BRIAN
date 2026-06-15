@@ -71,7 +71,7 @@ Every box is a learnable module. Every arrow is a documented tensor operation. F
 
 **Visual blueprint:** The full bowtie with all 28 populations, 19 synapses, 7 neurotransmitter systems, and training config are rendered in the Neural Flow Graph (NFG):
 
-![Neural Flow Graph — current architecture](.neuro/nfg.png)
+![Neural Flow Graph — current architecture](.neuro/nfg.svg)
 
 *Every node, edge, and modulation shown in the NFG is declared in `arch.neuro` and compiled to PyTorch. The diagram is the source of truth for wiring.*
 
