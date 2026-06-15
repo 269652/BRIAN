@@ -105,23 +105,29 @@ class PathResolver:
         # ── @brian/<path> ── anchored at <repo_root> ────────────────
         if specifier.startswith("@brian/"):
             rest = specifier[len("@brian/"):]
+            # Workspace-local copy ALWAYS wins when present. A workspace
+            # that bundles its own files (typical for unfolded DNAs:
+            # ribosome writes everything under ``<arch_root>/...``) is
+            # self-contained; routing the import to the repo copy
+            # instead would produce TWO entries in ``program.modules``
+            # for the same logical file (one via ``rglob``, one via the
+            # repo redirect) and the IR lifter would create duplicate
+            # nodes for every population declared in the shared file.
+            # Honour the workspace copy first; only fall back to repo
+            # when the workspace has no copy.
+            ws_candidate = (self.arch_root / rest).resolve()
+            ws_resolved = self._try_resolve_file(ws_candidate)
+            if ws_resolved is not None:
+                try:
+                    ws_resolved.relative_to(self.arch_root)
+                    return ws_resolved
+                except ValueError:
+                    pass  # escapes workspace → fall through
             if self.repo_root is not None:
                 scope_root = self.repo_root
                 base = scope_root
                 # rest already stripped; fall through to file resolution.
             else:
-                # No repo_root → standalone workspace (typical for
-                # unfolded DNA in pytest tmp dirs, vast.ai boxes, or
-                # colab). Look in the workspace itself as the
-                # "repo-equivalent" root.
-                ws_candidate = (self.arch_root / rest).resolve()
-                ws_resolved = self._try_resolve_file(ws_candidate)
-                if ws_resolved is not None:
-                    try:
-                        ws_resolved.relative_to(self.arch_root)
-                        return ws_resolved
-                    except ValueError:
-                        pass  # escapes workspace → error below
                 raise ValueError(
                     f"specifier {specifier!r} uses the @brian/ prefix "
                     f"but no repo root was discovered (no pyproject.toml "
@@ -133,21 +139,22 @@ class PathResolver:
         # ── @lib/<path> ── anchored at <repo_root>/lib/ ─────────────
         elif specifier.startswith("@lib/"):
             rest = specifier[len("@lib/"):]
+            # Same workspace-first rule as @brian/ above — the unfolded
+            # DNA bundles its lib copy under ``<arch_root>/lib/``;
+            # routing through repo_root in addition would duplicate
+            # every population the file declares.
+            ws_candidate = (self.arch_root / "lib" / rest).resolve()
+            ws_resolved = self._try_resolve_file(ws_candidate)
+            if ws_resolved is not None:
+                try:
+                    ws_resolved.relative_to(self.arch_root)
+                    return ws_resolved
+                except ValueError:
+                    pass
             if self.repo_root is not None:
                 scope_root = self.repo_root / "lib"
                 base = scope_root
             else:
-                # Standalone-workspace fallback mirrors @brian/'s, but
-                # rooted at <arch_root>/lib/ (where unfolded DNA
-                # places its bundled lib).
-                ws_candidate = (self.arch_root / "lib" / rest).resolve()
-                ws_resolved = self._try_resolve_file(ws_candidate)
-                if ws_resolved is not None:
-                    try:
-                        ws_resolved.relative_to(self.arch_root)
-                        return ws_resolved
-                    except ValueError:
-                        pass
                 raise ValueError(
                     f"specifier {specifier!r} uses the @lib/ prefix "
                     f"but no repo root was discovered (no pyproject.toml "
@@ -746,12 +753,25 @@ class Resolver:
     Use:
         program = Resolver(arch_root).resolve()
         decl = program.lookup(file_path, "some_name")
+
+    Args:
+        arch_root: filesystem path to the architecture root (the dir
+            holding ``arch.neuro``).
+        repo_root: optional explicit repo root for ``@brian/`` /
+            ``@lib/`` resolution. When ``None`` (default), the inner
+            :class:`PathResolver` walks up from ``arch_root`` looking
+            for ``pyproject.toml``. Pass this explicitly when the
+            architecture has been unpacked into a workspace (e.g.
+            ``.neuro/arch/temp/``) and the canonical ``<repo>/lib/``
+            lives elsewhere — ``prepare_run_workspace`` does this so
+            ``@lib/equations`` resolves correctly even in pytest tmp
+            dirs that have no ``pyproject.toml`` ancestor.
     """
 
-    def __init__(self, arch_root: Path):
+    def __init__(self, arch_root: Path, repo_root: Optional[Path] = None):
         self.arch_root = Path(arch_root).resolve()
         self.loader = FolderLoader(self.arch_root)
-        self.path_resolver = PathResolver(self.arch_root)
+        self.path_resolver = PathResolver(self.arch_root, repo_root=repo_root)
 
     def resolve(self) -> ResolvedProgram:
         if not self.loader.has_arch_root():

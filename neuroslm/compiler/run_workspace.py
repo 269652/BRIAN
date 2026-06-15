@@ -73,6 +73,7 @@ def prepare_run_workspace(
     dna: Optional[str] = None,
     arch: Optional[str] = None,
     workspace_dir: Optional[Path] = None,
+    repo_root: Optional[Path] = None,
 ) -> RunWorkspace:
     """Unpack a DNA snapshot or architecture folder into ``.neuro/arch/temp/``.
 
@@ -82,21 +83,30 @@ def prepare_run_workspace(
     ----------
     dna : str, optional
         Path to a ``.dna`` snapshot (typically
-        ``dna/evol/arch.dna``). The DNA is unfolded with
+        ``dna/master/arch.dna``). The DNA is unfolded with
         :class:`~neuroslm.compiler.ribosome.RibosomeCompiler.unfold_file`
         — preserving the full modular tree (modules/, lib/) — so the
         run sees an identical layout to the source architecture.
     arch : str, optional
         Either:
           * An architecture folder containing ``arch.neuro``
-            (e.g. ``architectures/evol``)
+            (e.g. ``architectures/master``)
           * A path to an ``arch.neuro`` file (we use its parent)
-          * A bare architecture name (``evol``) which resolves to
+          * A bare architecture name (``master``) which resolves to
             ``./architectures/<name>/`` relative to the current
             working directory.
     workspace_dir : Path, optional
         Override the default ``.neuro/arch/temp`` location. Mostly
         useful for tests; production callers should leave this unset.
+    repo_root : Path, optional
+        Override the auto-discovered repo root used to resolve
+        ``@lib/...`` and ``@brian/...`` shared-lib imports. By default
+        the helper walks up from the source path (and then CWD) looking
+        for ``pyproject.toml``. Pass this explicitly when running in
+        an isolated workspace that has no ``pyproject.toml`` of its own
+        (tests, sandboxed evaluators, multi-repo setups). Per the
+        canonical semantics: ``@lib/X`` ≡ ``<repo_root>/lib/X`` and
+        ``@brian/X`` ≡ ``<repo_root>/X``.
 
     Returns
     -------
@@ -161,7 +171,25 @@ def prepare_run_workspace(
     from neuroslm.compiler.hypergraph_ir import lift_arch_to_hypergraph
     from neuroslm.dsl.training_config import load_training_config_from_arch
 
-    hypergraph_ir = lift_arch_to_hypergraph(target)
+    # Discover the repo root once. The workspace is typically
+    # ``.neuro/arch/temp`` under cwd — which itself may NOT contain
+    # ``pyproject.toml``. The CANONICAL ``@lib`` and ``@brian`` anchors
+    # are the real repo, so we walk up from both the source path and
+    # the current working directory to find ``pyproject.toml`` and
+    # pass it through to the resolver explicitly.
+    #
+    # If the caller supplied an explicit ``repo_root``, honour it
+    # verbatim — this is the escape hatch for isolated test workspaces
+    # and multi-repo setups where auto-discovery cannot work.
+    if repo_root is not None:
+        resolved_repo_root: Optional[Path] = Path(repo_root).resolve()
+    else:
+        resolved_repo_root = (
+            _discover_repo_root(source_path)
+            or _discover_repo_root(Path.cwd())
+        )
+
+    hypergraph_ir = lift_arch_to_hypergraph(target, repo_root=resolved_repo_root)
     training_config = load_training_config_from_arch(target)
 
     return RunWorkspace(
@@ -228,6 +256,14 @@ def _copy_arch_tree(src_root: Path, target: Path) -> None:
 
     Top-level ``fitness.json`` / ``fitness.neuro`` are copied too so
     fitness gating still works.
+
+    Note: ``@lib/...`` and ``@brian/...`` imports are NOT bundled into
+    the workspace — they resolve to ``<repo_root>/lib/...`` and
+    ``<repo_root>/...`` at lift-time via the :class:`PathResolver`'s
+    repo-root walk (which finds ``pyproject.toml`` at the real repo).
+    The workspace stays small and references the canonical shared
+    libraries by location. This matches the design: ``@lib`` ≡
+    ``<repo>/lib`` regardless of where the unfolded arch lives.
     """
     # arch.neuro is mandatory; resolver fails without it
     shutil.copyfile(src_root / "arch.neuro", target / "arch.neuro")
@@ -242,3 +278,20 @@ def _copy_arch_tree(src_root: Path, target: Path) -> None:
         f = src_root / name
         if f.is_file():
             shutil.copyfile(f, target / name)
+
+
+def _discover_repo_root(start: Path) -> Optional[Path]:
+    """Walk up from ``start`` looking for a ``pyproject.toml`` marker.
+
+    Mirrors :func:`neuroslm.dsl.multifile._discover_repo_root` so the
+    workspace helper picks up the shared ``<repo>/lib/`` exactly when
+    the runtime resolver would. Returns the directory containing the
+    first ``pyproject.toml`` found, or ``None``.
+    """
+    cur = Path(start).resolve()
+    if cur.is_file():
+        cur = cur.parent
+    for candidate in (cur, *cur.parents):
+        if (candidate / "pyproject.toml").is_file():
+            return candidate
+    return None

@@ -197,7 +197,7 @@ def lift_dsl_to_hypergraph(source: str) -> HypergraphIR:
 
 # ── DSL -> hypergraph lifting (multi-file) ───────────────────────────────
 
-def lift_arch_to_hypergraph(arch_root) -> HypergraphIR:
+def lift_arch_to_hypergraph(arch_root, *, repo_root=None) -> HypergraphIR:
     """Lift a multi-file architecture (arch.neuro + imported modules) into
     a single :class:`HypergraphIR`.
 
@@ -208,6 +208,13 @@ def lift_arch_to_hypergraph(arch_root) -> HypergraphIR:
     Args:
         arch_root: ``str`` or ``Path`` pointing at the architecture folder
                    (must contain ``arch.neuro``).
+        repo_root: optional explicit repo root for ``@brian/`` / ``@lib/``
+                   import resolution. When ``None`` the resolver walks
+                   up from ``arch_root`` looking for ``pyproject.toml``.
+                   Pass this explicitly when ``arch_root`` lives outside
+                   the repo tree (e.g. a workspace tmp dir, vast.ai box,
+                   colab) so ``@lib/equations`` resolves to
+                   ``<repo>/lib/equations.neuro`` instead of failing.
 
     Returns:
         ``HypergraphIR`` whose ``source_map`` concatenates all module
@@ -226,7 +233,7 @@ def lift_arch_to_hypergraph(arch_root) -> HypergraphIR:
     from neuroslm.dsl.multifile import Resolver
 
     arch_root = _Path(arch_root)
-    program = Resolver(arch_root).resolve()
+    program = Resolver(arch_root, repo_root=repo_root).resolve()
 
     # Concatenate every module's text with a separator that includes the
     # relative path — this makes spans easy to debug while keeping all

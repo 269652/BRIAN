@@ -95,38 +95,51 @@ class TestRccBowtieModularUnfold:
             assert (out_root / "arch.neuro").read_text(encoding="utf-8") == \
                 (arch_root / "arch.neuro").read_text(encoding="utf-8")
 
-            # At least the module + lib trees exist with several files each.
-            assert (out_root / "modules").is_dir()
+            # ── Module + lib layout ────────────────────────────────
+            # master/arch.neuro imports everything via the @lib/
+            # prefix (anchored at <repo>/lib/). After unfold, the
+            # bundler writes them under <out_root>/lib/ — both the
+            # shared lib files (equations, regularizers, …) AND the
+            # per-region modules (since they're addressed as
+            # @lib/modules/sensory etc.).
+            #
+            # We don't enforce a particular sub-layout (the unfold is
+            # allowed to mirror the @-prefix exactly), but we DO
+            # require that the lib tree exists, with several files,
+            # and that at least the module subtree is present.
             assert (out_root / "lib").is_dir()
-            n_modules = len(list((out_root / "modules").glob("*.neuro")))
-            n_lib = len(list((out_root / "lib").glob("*.neuro")))
-            assert n_modules >= 5, f"expected several module files, got {n_modules}"
-            assert n_lib >= 3, f"expected several lib files, got {n_lib}"
-
-            # Spot-check one reconstructed module is bit-identical to source.
-            # `modules/gws.neuro` is arch-local (`@/modules/...`) and
-            # roundtrips against its arch-relative source.
-            # `lib/equations.neuro` now comes from the canonical
-            # `@brian/equations` (under <repo>/architectures/lib/), not
-            # from the local `<arch>/lib/equations.neuro` shadow — the
-            # arch.neuro switched to `@brian/equations` so its 5
-            # feature equations are picked up. Compare against the
-            # canonical path to keep the bit-identical guarantee where
-            # it matters (the source of truth on disk).
-            local_checks = [
-                ("modules/gws.neuro", arch_root / "modules/gws.neuro"),
-            ]
-            canonical_lib = (
-                arch_root.parent / "lib" / "equations.neuro"
+            assert (out_root / "lib" / "modules").is_dir(), (
+                f"expected lib/modules/ tree under {out_root}, contents: "
+                f"{list((out_root / 'lib').iterdir()) if (out_root / 'lib').is_dir() else 'NO lib dir'}"
             )
-            if canonical_lib.is_file():
-                local_checks.append(("lib/equations.neuro", canonical_lib))
-            for rel, src_file in local_checks:
+            n_modules = len(list(
+                (out_root / "lib" / "modules").glob("*.neuro")
+            ))
+            n_lib = len(list((out_root / "lib").glob("*.neuro")))
+            assert n_modules >= 5, (
+                f"expected several module files under lib/modules/, "
+                f"got {n_modules}"
+            )
+            assert n_lib >= 3, (
+                f"expected several lib files under lib/, got {n_lib}"
+            )
+
+            # Spot-check that reconstructed files are bit-identical to
+            # their source-of-truth under the shared <repo>/lib/ tree.
+            # The bundler reads from <repo>/lib/, the unfolder writes
+            # to <out_root>/lib/ — both should round-trip exactly.
+            repo_lib = arch_root.parent.parent / "lib"
+            checks = [
+                ("lib/modules/gws.neuro", repo_lib / "modules" / "gws.neuro"),
+                ("lib/equations.neuro",   repo_lib / "equations.neuro"),
+            ]
+            for rel, src_file in checks:
                 out_file = out_root / rel
                 if src_file.exists():
-                    assert out_file.exists(), f"missing {rel}"
-                    assert out_file.read_text(encoding="utf-8") == \
-                        src_file.read_text(encoding="utf-8"), (
-                            f"unfold of {rel} drifted from its source "
-                            f"of truth {src_file}"
-                        )
+                    assert out_file.exists(), (
+                        f"missing {rel} in unfolded tree under {out_root}"
+                    )
+                    assert out_file.read_bytes() == src_file.read_bytes(), (
+                        f"unfold of {rel} drifted from its source of "
+                        f"truth {src_file}"
+                    )

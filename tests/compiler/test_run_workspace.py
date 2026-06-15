@@ -58,11 +58,16 @@ def isolated_workspace(tmp_path, monkeypatch):
 
 @pytest.fixture
 def evol_dna_copy(isolated_workspace):
-    """Make a copy of dna/evol/arch.dna inside the isolated workspace."""
-    src = REPO_ROOT / "dna" / "evol" / "arch.dna"
+    """Make a copy of the canonical DNA inside the isolated workspace.
+
+    Fixture name preserved for git-log continuity — the test set used to
+    target ``dna/evol/arch.dna`` before the 2026-06-15 cleanup that
+    retired ``dna/evol/``. The canonical DNA is now ``dna/master/arch.dna``
+    and lives at ``<repo>/dna/master/``."""
+    src = REPO_ROOT / "dna" / "master" / "arch.dna"
     if not src.is_file():
         pytest.skip(f"{src} not present — run the recompile first")
-    dst_dir = isolated_workspace / "dna" / "evol"
+    dst_dir = isolated_workspace / "dna" / "master"
     dst_dir.mkdir(parents=True, exist_ok=True)
     dst = dst_dir / "arch.dna"
     dst.write_bytes(src.read_bytes())
@@ -71,12 +76,15 @@ def evol_dna_copy(isolated_workspace):
 
 @pytest.fixture
 def evol_arch_copy(isolated_workspace):
-    """Make a copy of architectures/evol/ inside the isolated workspace."""
+    """Make a copy of architectures/master/ inside the isolated workspace.
+
+    Fixture name preserved for git-log continuity — used to target
+    ``architectures/evol/`` before the 2026-06-15 cleanup."""
     import shutil
-    src = REPO_ROOT / "architectures" / "evol"
+    src = REPO_ROOT / "architectures" / "master"
     if not src.is_dir():
         pytest.skip(f"{src} not present")
-    dst = isolated_workspace / "architectures" / "evol"
+    dst = isolated_workspace / "architectures" / "master"
     shutil.copytree(src, dst)
     return dst
 
@@ -172,11 +180,23 @@ class TestArchMode:
     def test_copies_arch_folder(self, evol_arch_copy):
         from neuroslm.compiler.run_workspace import prepare_run_workspace
 
-        ws = prepare_run_workspace(arch=str(evol_arch_copy))
+        # Pass the real repo as ``repo_root`` so ``@lib/...`` imports
+        # resolve against the canonical shared library (the isolated
+        # workspace fixture deliberately has no ``pyproject.toml``).
+        ws = prepare_run_workspace(
+            arch=str(evol_arch_copy),
+            repo_root=REPO_ROOT,
+        )
         assert ws.arch_neuro.is_file()
-        # The modules/ tree must be copied over too — without it,
-        # multifile lift fails.
-        assert (ws.arch_root / "modules").is_dir()
+        # End-to-end proof the multifile lift succeeded: a non-empty
+        # IR means every ``@lib/modules/...`` import resolved against
+        # the real repo's ``lib/`` (whether or not there's a local
+        # ``modules/`` next to arch.neuro — master uses ``@lib/modules/``
+        # exclusively, current/evol may also have a local ``modules/``).
+        assert len(ws.hypergraph_ir.nodes) > 0, (
+            "workspace's hypergraph IR has zero nodes — arch.neuro's "
+            "module imports failed to resolve"
+        )
         assert ws.source_kind == "arch"
 
     def test_resolves_arch_name(self, isolated_workspace):
@@ -191,19 +211,25 @@ class TestArchMode:
             pytest.skip("evol arch not present")
         shutil.copytree(src, isolated_workspace / "architectures" / "evol")
 
-        ws = prepare_run_workspace(arch="evol")
+        ws = prepare_run_workspace(arch="evol", repo_root=REPO_ROOT)
         assert ws.arch_neuro.is_file()
 
     def test_clears_temp_between_runs(self, evol_arch_copy):
         from neuroslm.compiler.run_workspace import prepare_run_workspace
 
-        ws = prepare_run_workspace(arch=str(evol_arch_copy))
+        ws = prepare_run_workspace(
+            arch=str(evol_arch_copy),
+            repo_root=REPO_ROOT,
+        )
         # Leave a stray file in the temp dir
         stray = ws.arch_root / "stray.txt"
         stray.write_text("should be cleaned next run", encoding="utf-8")
         assert stray.is_file()
         # Second run on same input — stray must be gone
-        ws2 = prepare_run_workspace(arch=str(evol_arch_copy))
+        ws2 = prepare_run_workspace(
+            arch=str(evol_arch_copy),
+            repo_root=REPO_ROOT,
+        )
         assert not stray.is_file(), (
             "prepare_run_workspace must clean the temp dir on each call "
             "to avoid stale modules leaking between runs"

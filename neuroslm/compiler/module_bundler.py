@@ -209,32 +209,63 @@ class ModuleBundler:
     def resolve_import(self, specifier: str, from_file: Optional[Path]) -> Optional[Path]:
         """Resolve an import specifier to an absolute file path.
 
-        Handles @/, @brian/, ./, and ../ style paths.
+        Handles ``@/``, ``@lib/``, ``@brian/``, ``./``, and ``../``
+        style paths.
 
-        ``@brian/<rest>`` resolves under ``<repo_root>/architectures/lib/``
-        (the shared "brian lib" — same anchor used by the runtime
-        ``PathResolver``). The repo root is auto-discovered by walking
-        up from ``arch_root`` looking for ``pyproject.toml``. This MUST
-        match the runtime resolver semantics, or DNA roundtrip is lossy:
-        a feature imported via ``@brian/features/foo`` would be silently
-        dropped at bundle time and the unfolded arch would reference a
-        non-existent module.
+        Prefix semantics — MUST match
+        :class:`neuroslm.dsl.multifile.PathResolver` exactly, or DNA
+        round-trip is lossy: any specifier the bundler can't resolve
+        gets silently dropped on ``compile_file`` and re-appears on
+        unfold as a phantom import to a non-existent module. Pinned by
+        ``tests/test_module_bundler_at_lib_alignment.py``.
+
+        * ``@brian/<rest>``  →  ``<repo_root>/<rest>``
+          (so ``@brian/lib/equations`` →
+          ``<repo>/lib/equations.neuro``).
+        * ``@lib/<rest>``    →  ``<repo_root>/lib/<rest>``
+          (shorthand for ``@brian/lib/<rest>``).
+        * ``@/<rest>``       →  ``<arch_root>/<rest>``.
+        * ``./<rest>`` / ``../<rest>``  →  relative to ``from_file``.
+        * Bare specifier     →  relative to ``from_file``.
+
+        The repo root is auto-discovered by walking up from ``arch_root``
+        looking for ``pyproject.toml``. When no repo root is found
+        (standalone workspaces — unfolded DNA in pytest tmp dirs,
+        vast.ai boxes, colab), ``@brian/`` and ``@lib/`` fall back to
+        the workspace itself (``<arch_root>/`` and
+        ``<arch_root>/lib/`` respectively), mirroring the runtime
+        resolver's fallback.
 
         Returns:
             Absolute path to the file, or None if resolution fails.
         """
         try:
             if specifier.startswith("@brian/"):
-                # Anchor at <repo_root>/architectures/lib/ — must mirror
+                # Anchor at <repo_root> — mirror
                 # neuroslm.dsl.multifile.PathResolver to keep DNA<->DSL
                 # roundtrip lossless.
-                repo_root = _discover_repo_root(self.arch_root)
-                if repo_root is None:
-                    return None
-                base = repo_root / "architectures" / "lib"
                 rest = specifier[len("@brian/"):]
+                repo_root = _discover_repo_root(self.arch_root)
+                if repo_root is not None:
+                    base = repo_root
+                else:
+                    # Standalone-workspace fallback: <arch_root>/<rest>
+                    base = self.arch_root
                 # @brian/ targets escape arch_root by definition, so we
                 # bypass the arch_root containment check below.
+                allow_escape = True
+            elif specifier.startswith("@lib/"):
+                # Anchor at <repo_root>/lib/ — shorthand for
+                # @brian/lib/<rest>; matches PathResolver.
+                rest = specifier[len("@lib/"):]
+                repo_root = _discover_repo_root(self.arch_root)
+                if repo_root is not None:
+                    base = repo_root / "lib"
+                else:
+                    # Standalone-workspace fallback: <arch_root>/lib/<rest>
+                    base = self.arch_root / "lib"
+                # @lib/ targets are in the shared lib tree, outside
+                # arch_root, so they escape too.
                 allow_escape = True
             elif specifier.startswith("@/"):
                 base = self.arch_root
@@ -250,7 +281,7 @@ class ModuleBundler:
                 # Bare specifier like "lib/cortex" — try as relative
                 if from_file:
                     base = Path(from_file).resolve().parent
-                    rest = rest if "/" in specifier else f"./{specifier}"
+                    rest = specifier if "/" in specifier else f"./{specifier}"
                     allow_escape = False
                 else:
                     return None

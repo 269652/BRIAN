@@ -30,20 +30,31 @@ def _spec_to_relpath(spec: str) -> str:
 
     ``"@/lib/equations"``          → ``"lib/equations.neuro"``
     ``"@/modules/cortex"``         → ``"modules/cortex.neuro"``
+    ``"@lib/equations"``           → ``"lib/equations.neuro"``
+    ``"@lib/modules/sensory"``     → ``"lib/modules/sensory.neuro"``
     ``"@brian/features/hyperbolic_attention"`` → ``"lib/features/hyperbolic_attention.neuro"``
+    ``"@brian/lib/equations"``     → ``"lib/equations.neuro"``
 
-    The ``@brian/`` prefix is mapped under ``lib/`` so the DNA stays
-    self-contained: on unfold, every bundled feature ends up alongside
-    the rest of the shared lib inside the workspace tree (instead of
-    requiring the runtime resolver to walk up to a host-wide repo
-    root). Mirrors the contract enforced by
-    :class:`neuroslm.compiler.module_bundler.ModuleBundler.resolve_import`.
+    The ``@brian/`` and ``@lib/`` prefixes both land under ``lib/`` so
+    the DNA stays self-contained: on unfold, every bundled feature ends
+    up alongside the rest of the shared lib inside the workspace tree
+    (instead of requiring the runtime resolver to walk up to a host-wide
+    repo root). Mirrors the contract enforced by
+    :class:`neuroslm.compiler.module_bundler.ModuleBundler.resolve_import`
+    and pinned by ``tests/test_module_bundler_at_lib_alignment.py``.
     """
     s = spec
     if s.startswith("@brian/"):
-        # @brian/features/foo → lib/features/foo  (parallel to runtime
-        # PathResolver anchoring @brian/ at <repo>/architectures/lib/).
-        s = "lib/" + s[len("@brian/"):]
+        # @brian/lib/foo → lib/foo  (mirror PathResolver: @brian/
+        # anchors at repo root, so @brian/lib/* lives at <ws>/lib/*).
+        # @brian/features/foo → lib/features/foo (legacy prefix; the
+        # bundled lib/features tree is where features end up on disk).
+        rest = s[len("@brian/"):]
+        s = rest if rest.startswith("lib/") else "lib/" + rest
+    elif s.startswith("@lib/"):
+        # @lib/<rest> → lib/<rest>  (the @lib/ prefix is shorthand for
+        # @brian/lib/<rest>, so it maps to the same on-disk location).
+        s = "lib/" + s[len("@lib/"):]
     elif s.startswith("@/"):
         s = s[2:]
     elif s.startswith("./"):
