@@ -285,8 +285,42 @@ def _graph_attrs(engine: str, dpi: int = 96) -> dict:
     elif engine == "neato":
         base.update(overlap="prism", splines="curved", sep="+12")
     elif engine in {"sfdp", "fdp"}:
-        base.update(overlap="prism", splines="curved", K="1.4", sep="+10",
-                    size="16,20", ratio="compress")
+        # Force-directed cluster-aware layout. ``fdp`` (vs ``neato`` /
+        # ``sfdp``) is the only force-directed engine that honours
+        # ``cluster_*`` subgraphs — it draws the anatomical region
+        # boundary boxes and pulls populations inside a region towards
+        # each other via stronger intra-cluster spring forces.
+        #
+        # Tuning:
+        #   K=0.9        ideal edge length (inches). Lower = denser
+        #                clusters / tighter layout. Tuned for the 31-
+        #                population master arch: too low (≤0.5) makes
+        #                labels collide; too high (≥1.5) blows the
+        #                canvas up to multi-foot dimensions.
+        #   sep="+15"    extra padding around each node so labels
+        #                don't visually overlap with cluster borders.
+        #   size="24,15" cap canvas at 24x15 inches (landscape). No
+        #                "!" suffix so dot scales-to-fit instead of
+        #                cropping; combined with ratio=compress this
+        #                shrinks the spring-relaxed layout into the
+        #                bbox preserving relative positions.
+        #   ratio=compress  squeeze the relaxed layout into ``size``.
+        #                Critical for fdp on big graphs — without it,
+        #                the natural canvas is whatever the relaxation
+        #                converges to, which can be ~140 inches wide
+        #                (= 21k pixels @ 150 dpi = 8 MB PNG).
+        #   overlap=prism  voronoi-prism removes residual node overlaps
+        #                after spring relaxation.
+        #   splines=curved smoothly route edges around nodes.
+        #   maxiter=1500  bumped from default 600 for tighter
+        #                convergence (visually cleaner clusters at
+        #                the cost of ~2× layout time, still <1s).
+        base.update(
+            overlap="prism", splines="curved",
+            K="0.9", sep="+15",
+            size="24,15", ratio="compress",
+            maxiter="1500",
+        )
     return base
 
 
@@ -377,6 +411,7 @@ _WRAP_THRESHOLD = 5
 
 
 def _emit_cluster_rows(c, items: List, prefix: str,
+                       engine: str = "dot",
                        wrap: int = _WRAP_THRESHOLD) -> None:
     """Emit ``items`` into the cluster subgraph ``c``, wrapping rows
     once ``len(items)`` exceeds ``wrap``.
@@ -393,18 +428,43 @@ def _emit_cluster_rows(c, items: List, prefix: str,
         Unique string used to name the nested anonymous row subgraphs
         (e.g. ``"executive"`` → ``"_row_executive_0"``). Must be unique
         per cluster to avoid name collisions.
+    engine
+        The layout engine — controls whether to apply the rank/glue
+        machinery. ``"dot"`` is hierarchical so it needs the explicit
+        rank+glue to wrap correctly. Force-directed engines
+        (``"fdp"`` / ``"sfdp"`` / ``"neato"``) handle row wrapping
+        naturally via spring relaxation — the rank attr is silently
+        ignored but the high-weight invisible glue edges would
+        DISTORT the spring layout by pulling row anchors together.
+        For non-dot engines we bail to plain emission so the layout
+        engine is free to do its job.
     wrap
-        Maximum nodes per row. Defaults to :data:`_WRAP_THRESHOLD`.
+        Maximum nodes per row (only consulted in dot mode).
+        Defaults to :data:`_WRAP_THRESHOLD`.
 
-    Behaviour
-    ---------
+    Behaviour (dot only)
+    --------------------
     * ``len(items) <= wrap`` → single ``rank=same`` row inside the
       cluster (unchanged from the pre-wrap behaviour).
     * ``len(items) >  wrap`` → ⌈len/wrap⌉ rank-bands stacked
       vertically; invisible high-weight edges between consecutive
       rows' first nodes constrain the ordering so dot lays them top
       to bottom inside the cluster bounding box.
+
+    Behaviour (fdp / sfdp / neato)
+    ------------------------------
+    Plain emission — let spring forces arrange the nodes inside the
+    cluster's bounding hull. No rank, no glue.
     """
+    # Force-directed engines: skip all the dot-specific scaffolding
+    # (rank=same is a no-op there, and the high-weight invisible glue
+    # edges would warp the spring layout by pulling cluster anchors
+    # together).
+    if engine != "dot":
+        for name, label, style in items:
+            c.node(name, label=label, **style)
+        return
+
     if len(items) <= wrap:
         # Fast path — preserves the original single-row behaviour
         # exactly (no nested subgraph, no invisible glue edges).
@@ -491,14 +551,14 @@ def emit_dot_from_hypergraph(
         with g.subgraph(name="cluster_architecture") as c:
             c.attr(label="architecture", style="rounded,dashed",
                    color="#888888", fontsize="14", bgcolor="#fafafa")
-            # rank=same forces all nodes in this cluster onto a single
-            # horizontal row (the cluster becomes a wide horizontal
-            # band). Combined with rankdir=TB at the graph level, the
-            # clusters STACK top-to-bottom as horizontal strata →
-            # landscape canvas. Without rank=same, dot lays each
-            # cluster's nodes onto distinct ranks (turning every
-            # cluster into a vertical column → portrait canvas).
-            c.attr(rank="same")
+            # rank=same is a dot-specific layered-layout hint —
+            # forces multiple nodes onto a single horizontal row.
+            # Force-directed engines (fdp/sfdp/neato) ignore the
+            # attribute. With only one architecture node it's a
+            # no-op in either case, but gated for symmetry with
+            # the other clusters.
+            if engine == "dot":
+                c.attr(rank="same")
             for n in arch_nodes:
                 style = _KIND_STYLES["architecture"]
                 c.node(n.name, label=_arch_label(n), **style)
@@ -536,7 +596,8 @@ def emit_dot_from_hypergraph(
             # Wraps to multiple rows when len > _WRAP_THRESHOLD.
             # "executive" (9 modules) wraps to 5+4 = 2 rows; smaller
             # clusters stay as a single horizontal band.
-            _emit_cluster_rows(c, region_items, prefix=region)
+            _emit_cluster_rows(c, region_items, prefix=region,
+                               engine=engine)
 
     # 2b. Multi-cortex cluster — cortex_expert nodes + lm_trunk anchor.
     #     This is the visual home of the GPT-2 ensemble plus the
@@ -564,7 +625,8 @@ def emit_dot_from_hypergraph(
                 expert_style = dict(_KIND_STYLES["cortex_expert"])
                 cortex_items.append(
                     (n.name, _expert_label(n), expert_style))
-            _emit_cluster_rows(c, cortex_items, prefix="multi_cortex")
+            _emit_cluster_rows(c, cortex_items, prefix="multi_cortex",
+                               engine=engine)
 
     # 3. Neurotransmitter cluster
     nt_nodes = [n for n in ir.nodes if n.kind == "neurotransmitter"]
@@ -581,7 +643,8 @@ def emit_dot_from_hypergraph(
                 nt_style = dict(_KIND_STYLES["neurotransmitter"])
                 nt_style["color"] = _nt_colour(n.name)
                 nt_items.append((n.name, _nt_label(n), nt_style))
-            _emit_cluster_rows(c, nt_items, prefix="neurotransmitters")
+            _emit_cluster_rows(c, nt_items, prefix="neurotransmitters",
+                               engine=engine)
 
     # 3b. Cycle-breaking — let dot rank from the real synapse DAG.
     #

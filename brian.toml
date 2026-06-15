@@ -149,4 +149,13 @@ formats = ["png", "svg"]
 # 150 dpi is ~1.56x sharper text/lines at the cost of ~2.4x file size.
 # SVG ignores this (it's vector).
 dpi = 150
-engine = "dot"
+# Layout engine — ``"fdp"`` is the cluster-aware force-directed
+# (spring) layout. It draws the anatomical region bounding boxes
+# AND lets spring forces arrange the nodes inside each cluster, so
+# cyclic / heavily-interconnected architectures (like the master
+# bowtie with 23 modulation cycles) don't fight the layout. ``"dot"``
+# is the hierarchical alternative — better for strict DAGs but
+# requires manual rank=same forcing for wide clusters. ``"neato"``
+# and ``"sfdp"`` are also force-directed but IGNORE clusters (the
+# anatomical region boxes disappear).
+engine = "fdp"
