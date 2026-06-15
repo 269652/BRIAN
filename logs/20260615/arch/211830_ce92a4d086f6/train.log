@@ -1,0 +1,19 @@
+── compiling DNA → DSL → HypergraphIR workspace ──
+  workspace: /workspace/brian/.neuro/arch/temp
+  source:    dna=/workspace/brian/dna/master/arch.dna
+  IR:        43 nodes, 90 edges
+════════════════════════════════════════════════════════════════
+  DNA-driven training loop (canonical pipeline)
+  dna=./dna/master/arch.dna  ->  workspace=/workspace/brian/.neuro/arch/temp  (arch=master)
+  steps=10000 batch=16 seq_len=512 d_sem=384
+  ckpt_dir=/workspace/brian/lfs_checkpoints
+════════════════════════════════════════════════════════════════
+
+▶ launch attempt 1 @ 21:18:35Z
+[train_dsl] boot @ 2026-06-15T21:18:37Z
+[train_dsl] git_commit ce92a4d086f68017250be3650e346cdb6aa3d135 (master)
+[train_dsl] arch_dsl_sha256 02f0e39582158d2db49d894a9221a9df8ae5ed59622532e4722d7a66f92fc7eb (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
