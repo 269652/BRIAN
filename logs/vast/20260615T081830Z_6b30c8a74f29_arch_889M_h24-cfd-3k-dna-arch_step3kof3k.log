@@ -3440,3 +3440,213 @@ BRIANHarness:
   optimizer = adamw (lr=0.0005)
 [train_dsl] device=cuda, warmup=2400/3000
 [train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1342, in <module>
+    main()
+  File "/workspace/brian/neuroslm/train_dsl.py", line 1275, in main
+    start_step = _maybe_resume(harness, ckpt_dir)
+  File "/workspace/brian/neuroslm/train_dsl.py", line 497, in _maybe_resume
+    step = harness.load_checkpoint(str(latest))
+  File "/workspace/brian/neuroslm/harness.py", line 2622, in load_checkpoint
+    self.load_state_dict(payload["model"])
+  File "/opt/conda/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2189, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for BRIANHarness:
+	Unexpected key(s) in state_dict: "_genetics_orch.lib.genes", "_genetics_orch.lib.reg_in_norm.weight", "_genetics_orch.lib.reg_in_norm.bias", "_genetics_orch.lib.reg_in_proj.weight", "_genetics_orch.lib.reg_in_proj.bias", "_genetics_orch.head_baseline.weight", "_genetics_orch.head_tau.weight", "_genetics_orch.head_release.weight", "_transmitter_sys.bias", "_transmitter_sys.gain", "_transmitter_sys.level", "_transmitter_sys.vesicles", "_transmitter_sys.module_baseline_off", "_transmitter_sys.module_tau_shift", "_transmitter_sys._train_step". 
+⚠ training exited with code 1 — restarting in 15s...
+
+▶ launch attempt 83 @ 09:24:18Z
+[train_dsl] boot @ 2026-06-15T09:24:19Z
+[train_dsl] git_commit 8d7140c95576e176846ae3ee53f64fc378448070 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/dsl_arch_20260615-081833_step3000.pt @ step 3000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/20260615-092418_8d7140c9_run/step3000.pt
+[train_dsl] final OOD eval @ step 3000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=174.2  train_ppl=nan  gap_ratio=nan  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-092418.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7f4898002f70 must be current when releasing
+Python runtime state: finalizing (tstate=0x00000000385aab70)
+
+Thread 0x00007f4dcbb1a740 (most recent call first):
+  <no Python frame>
+
+Extension modules: mkl._mklinit, mkl._py_mkl_service, numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, torch._C, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, gmpy2.gmpy2, _brotli, zstandard.backend_c, yaml._yaml, regex._regex, markupsafe._speedups, PIL._imaging, PIL._imagingft, pyarrow.lib, pandas._libs.tslibs.ccalendar, pandas._libs.tslibs.np_datetime, pandas._libs.tslibs.dtypes, pandas._libs.tslibs.base, pandas._libs.tslibs.nattype, pandas._libs.tslibs.timezones, pandas._libs.tslibs.fields, pandas._libs.tslibs.timedeltas, pandas._libs.tslibs.tzconversion, pandas._libs.tslibs.timestamps, pandas._libs.properties, pandas._libs.tslibs.offsets, pandas._libs.tslibs.strptime, pandas._libs.tslibs.parsing, pandas._libs.tslibs.conversion, pandas._libs.tslibs.period, pandas._libs.tslibs.vectorized, pandas._libs.ops_dispatch, pandas._libs.missing, pandas._libs.hashtable, pandas._libs.algos, pandas._libs.interval, pandas._libs.lib, pyarrow._compute, pandas._libs.ops, pandas._libs.hashing, pandas._libs.arrays, pandas._libs.tslib, pandas._libs.sparse, pandas._libs.internals, pandas._libs.indexing, pandas._libs.index, pandas._libs.writers, pandas._libs.join, pandas._libs.window.aggregations, pandas._libs.window.indexers, pandas._libs.reshape, pandas._libs.groupby, pandas._libs.json, pandas._libs.parsers, pandas._libs.testing, pyarrow._acero, pyarrow._fs, pyarrow._csv, pyarrow._json, pyarrow._substrait, pyarrow._dataset, pyarrow._dataset_orc, pyarrow._parquet, pyarrow._azurefs, pyarrow._hdfs, pyarrow._gcsfs, pyarrow._s3fs, pyarrow._parquet_encryption, pyarrow._dataset_parquet_encryption, pyarrow._dataset_parquet, multidict._multidict, yarl._quoting_c, propcache._helpers_c, aiohttp._http_writer, aiohttp._http_parser, aiohttp._websocket.mask, aiohttp._websocket.reader_c, frozenlist._frozenlist, xxhash._xxhash (total: 96)
+scripts/vast_train_dna_loop.sh: line 163: 16026 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 84 @ 09:25:23Z
+[train_dsl] boot @ 2026-06-15T09:25:24Z
+[train_dsl] git_commit 8d7140c95576e176846ae3ee53f64fc378448070 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/dsl_arch_20260615-081833_step3000.pt @ step 3000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/20260615-092523_8d7140c9_run/step3000.pt
+[train_dsl] final OOD eval @ step 3000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=174.2  train_ppl=nan  gap_ratio=nan  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-092523.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7ff67c002f70 must be current when releasing
+Python runtime state: finalizing (tstate=0x000000002f3bfb70)
+
+Thread 0x00007ffa89405740 (most recent call first):
+  <no Python frame>
+scripts/vast_train_dna_loop.sh: line 163: 16208 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 85 @ 09:26:30Z
+[train_dsl] boot @ 2026-06-15T09:26:31Z
+[train_dsl] git_commit 8d7140c95576e176846ae3ee53f64fc378448070 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/dsl_arch_20260615-081833_step3000.pt @ step 3000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/20260615-092630_8d7140c9_run/step3000.pt
+[train_dsl] final OOD eval @ step 3000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=174.2  train_ppl=nan  gap_ratio=nan  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-092630.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7fa634002f70 must be current when releasing
+Python runtime state: finalizing (tstate=0x000000003cfc4b70)
+
+Thread 0x00007fabbd89b740 (most recent call first):
+  <no Python frame>
+scripts/vast_train_dna_loop.sh: line 163: 16391 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 86 @ 09:27:35Z
+[train_dsl] boot @ 2026-06-15T09:27:36Z
+[train_dsl] git_commit 8d7140c95576e176846ae3ee53f64fc378448070 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/dsl_arch_20260615-081833_step3000.pt @ step 3000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[train_dsl] saved final checkpoint /workspace/brian/lfs_checkpoints/20260615-092735_8d7140c9_run/step3000.pt
+[train_dsl] final OOD eval @ step 3000 (WikiText-103, cap=200)...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] final OOD: wikitext ppl=174.2  train_ppl=nan  gap_ratio=nan  (200 seq, 32914 tok)
+[train_dsl] wrote final OOD result → logs/vast/benchmarks/ood/ood_final_20260615-092735.json
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7f479e6ad270 must be current when releasing
+Python runtime state: finalizing (tstate=0x000000002df53b70)
+
+Thread 0x00007f4affa85740 (most recent call first):
+  <no Python frame>
+scripts/vast_train_dna_loop.sh: line 163: 16574 Aborted                 python -u -m neuroslm.train_dsl --arch "$WORKSPACE_DIR" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 87 @ 09:28:41Z
+[train_dsl] boot @ 2026-06-15T09:28:42Z
+[train_dsl] git_commit 8d7140c95576e176846ae3ee53f64fc378448070 (master)
+[train_dsl] arch_dsl_sha256 d8088094915a7d17413a3ed0cf428a309b4e32b60f1a6ff82b2a6619e70133d3 (/workspace/brian/.neuro/arch/temp)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: 889.6M
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 889,572,591
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/3000
+[train_dsl] skipping 15 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
