@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit — auto-render README.md from scripts/README.template
+#
+# Activated by running once (from repo root):
+#   git config core.hooksPath .githooks
+#
+# Works on both Windows (Git Bash) and Linux/macOS. Uses the repo's .venv
+# Python so render_readme.py always finds neuroslm.readme_metrics.
+
+set -e
+
+REPO="$(git rev-parse --show-toplevel)"
+PYTHON="$REPO/.venv/Scripts/python.exe"
+
+# Fall back to Unix path on Linux/macOS
+if [ ! -f "$PYTHON" ]; then
+  PYTHON="$REPO/.venv/bin/python"
+fi
+
+if [ ! -f "$PYTHON" ]; then
+  echo "[pre-commit] .venv not found — skipping README render" >&2
+  exit 0
+fi
+
+"$PYTHON" "$REPO/scripts/render_readme.py"
+
+# Stage README.md if the renderer changed it
+if ! git diff --quiet README.md 2>/dev/null; then
+  git add README.md
+  echo "[pre-commit] README.md staged"
+fi

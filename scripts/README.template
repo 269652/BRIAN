@@ -2,7 +2,7 @@
 
 > *A 230M-parameter language model optimized for integrated information (Φ) and mechanistic consciousness-like properties. Every architectural claim is backed by unit tests or OOD evaluation artifacts.*
 
-[![tests](https://img.shields.io/badge/tests-2514%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-${LAYER_A_TEST_COUNT}%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
@@ -14,8 +14,8 @@
 BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained causal-LM cortex experts (SmolLM2-360M for general English, CodeGPT-small-py for code, Qwen2.5-0.5B for reasoning).
 
 **Current status:**
-- ✅ **Layer A (mechanisms):** 20+ core properties verified via 2514 unit tests across `tests/` (`tests/dsl/` alone runs 620). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
-- 🟡 **Layer B (generalization):** Best variant B4 achieves **2.87 gap_ratio** on WikiText-103-v1 OOD (53% better than flat-transformer baseline at 6.12). Best run: train_ppl 102.9, OOD_ppl 295.9. See [`docs/findings.md`](docs/findings.md) for full Layer B arc.
+- ✅ **Layer A (mechanisms):** 20+ core properties verified via ${LAYER_A_TEST_COUNT} unit tests across `tests/` (`tests/dsl/` alone runs 620). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
+- 🟡 **Layer B (generalization):** Best variant ${LAYER_B_BEST_ROW} achieves **${LAYER_B_BEST_GAP_RATIO} gap_ratio** on WikiText-103-v1 OOD (${LAYER_B_IMPROVEMENT_PCT}% better than flat-transformer baseline at ${LAYER_B_BASELINE_GAP_RATIO}). Best run: train_ppl ${LAYER_B_BEST_TRAIN_PPL}, OOD_ppl ${LAYER_B_BEST_OOD_PPL}. See [`docs/findings.md`](docs/findings.md) for full Layer B arc.
 
 Code, math, and tensor shapes: [`docs/architecture.md`](docs/architecture.md). Full evidence ledger: [`docs/findings.md`](docs/findings.md).
 
@@ -197,7 +197,7 @@ The GPT-2 cortex tokenizer covers only a subset of the trunk's 50,257-vocab. Whe
 
 **The fix** (committed in `a22eecc`): per-position formula
 
-$\text{abstain}_t = \max\big(\text{mapped\_logits}_t\big) - \ln(V_{\text{trunk}})$
+$$\text{abstain}_t = \max\big(\text{mapped\_logits}_t\big) - \ln(V_{\text{trunk}})$$
 
 This keeps unmapped slots at the *uniform-distribution baseline* relative to the slots the cortex did populate. Standalone-cortex CE on a random batch drops from **17.37 nats (pre-fix)** to **4.03 nats (post-fix)**.
 
@@ -217,11 +217,11 @@ Pinned by `tests/training/test_lm_expert_abstain_safety.py` (5 contracts). Code:
 
 The trunk should learn from the cortex experts, not just be averaged with them. Each step:
 
-$\mathcal{L}_{\text{KL}} = T^2 \cdot \mathrm{KL}\big(\mathrm{softmax}(\text{cortex}_{\text{logits}}/T) \,\big\|\, \mathrm{softmax}(\text{lm}_{\text{logits}}/T)\big)$
+$$\mathcal{L}_{\text{KL}} = T^2 \cdot \mathrm{KL}\big(\mathrm{softmax}(\text{cortex}_{\text{logits}}/T) \,\big\|\, \mathrm{softmax}(\text{lm}_{\text{logits}}/T)\big)$$
 
 with cortex logits **detached** (gradient only into trunk). The mixing weight is a piecewise-linear ramp over the EMA gap between cortex and trunk losses:
 
-$\lambda_t = \lambda_{\max} \cdot \mathrm{clip}\big(\tfrac{\text{gap}_t - \text{floor}}{\text{ceiling} - \text{floor}}, 0, 1\big)$
+$$\lambda_t = \lambda_{\max} \cdot \mathrm{clip}\big(\tfrac{\text{gap}_t - \text{floor}}{\text{ceiling} - \text{floor}}, 0, 1\big)$$
 
 When the trunk is much worse than the cortex (large positive gap), λ saturates at `lambda_max` (default 1.0) and distillation kicks in hard. When the gap is small or negative, λ → 0 and distillation switches off automatically. Defaults: `T=4.0`, `gap_floor=0.1`, `gap_ceiling=2.0`. Code: `BRIANHarness._distillation_lambda` and `_cortex_fusion_aux_step` in `neuroslm/harness.py`.
 
@@ -229,9 +229,9 @@ When the trunk is much worse than the cortex (large positive gap), λ saturates 
 
 Fusion uses convex combination `logits = (1−α)·lm_logits + α·cortex_logits`. But once the trunk surpasses the cortex, holding cortex contribution constant becomes a drag. So we modulate α through a **neurotransmitter-like inhibitory signal**:
 
-$\text{inhibition}_t = (1-\beta) \cdot \text{inhibition}_{t-1} + \beta \cdot \sigma\big((\text{cortex\_loss\_ema} - \text{lm\_loss\_ema}) / T_{\text{inh}}\big)$
+$$\text{inhibition}_t = (1-\beta) \cdot \text{inhibition}_{t-1} + \beta \cdot \sigma\big((\text{cortex\_loss\_ema} - \text{lm\_loss\_ema}) / T_{\text{inh}}\big)$$
 
-$\alpha_{\text{eff}} = \alpha \cdot (1 - \text{inhibition}_t)$
+$$\alpha_{\text{eff}} = \alpha \cdot (1 - \text{inhibition}_t)$$
 
 with `β = 0.05` (EMA rate), `T_inh = 1.0`. As the trunk's EMA loss drops below the cortex's, inhibition rises toward 1, and α_eff → 0 — cortex effectively retires and the bowtie trunk takes over LM duty. The reverse is also true: if the trunk regresses, inhibition falls and cortex contribution returns. Code: `BRIANHarness._update_cortex_inhibition` and `_effective_alpha`.
 
