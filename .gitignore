@@ -48,7 +48,13 @@ logs/runs/
 logs/cache/
 # Whitelist raw vast.ai stdout captures and their LLM-produced analyses.
 # These are committed evidence and override the *.log catch-all above.
-!logs/vast/*.log
+#
+# ``**/*.log`` (not ``*.log``) is required because log_pusher.sh writes
+# under the date/arch subfolder layout
+# ``logs/vast/<YYYYMMDD>/<ARCH_NAME>/<stamp>_<instance>_..._stepNofN.log``
+# (the old flat ``logs/vast/<stamp>_..._stepNofN.log`` layout still
+# matches too — ``**`` is zero-or-more directories).
+!logs/vast/**/*.log
 !logs/analyzed/*.md
 !logs/analyzed/INSTRUCTIONS.md
 
