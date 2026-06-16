@@ -8,8 +8,8 @@
 #   1. Refuse if the working tree is dirty (caller must commit / stash
 #      first — otherwise the roundtrip commit would smuggle their WIP
 #      under our chore message).
-#   2. Compile  architectures/master → dna/master/arch.dna
-#   3. git add <dna> + commit "chore: recompile master architecture"
+#   2. Compile the brian.toml [current].arch → dna/<leaf>/arch.dna
+#   3. git add <dna> + commit "chore: recompile <arch> architecture"
 #      (no-op if compile produced byte-identical output).
 #   4. git push.    Only on a successful push does the hook return 0
 #      -> cmd_deploy proceeds to provision vast.ai.  Any non-zero exit
@@ -34,6 +34,21 @@ $python = if (Test-Path '.\.venv\Scripts\python.exe') {
     'python'
 }
 
+# ── Resolve arch from brian.toml [current].arch ──────────────────
+# Read the arch path from brian.toml so the hook always compiles
+# whatever the workspace is configured to deploy — not a hardcoded
+# folder. Falls back to "architectures/master" for back-compat.
+$archPath = & $python -c "
+from neuroslm.project_config import load_project_config
+cfg = load_project_config()
+print(cfg.arch)
+" 2>$null
+if (-not $archPath -or $LASTEXITCODE -ne 0) {
+    $archPath = "architectures/master"
+}
+$archLeaf = ($archPath -split '/')[-1]
+$dnaPath = "dna/$archLeaf/arch.dna"
+
 # ── Step 1/4: Working tree must be clean ─────────────────────────
 Write-Host "[pre-deploy] step 1/4: checking working tree is clean"
 $dirty = git status --porcelain
@@ -44,14 +59,14 @@ if ($dirty) {
     exit 1
 }
 
-# ── Step 2/4: Compile master arch -> canonical DNA ───────────────
-Write-Host "[pre-deploy] step 2/4: brian dna compile (architectures/master -> dna/master/arch.dna)"
-& $python -m neuroslm.cli dna compile architectures/master --output dna/master/arch.dna
+# ── Step 2/4: Compile arch -> canonical DNA ──────────────────────
+Write-Host "[pre-deploy] step 2/4: brian dna compile ($archPath -> $dnaPath)"
+& $python -m neuroslm.cli dna compile $archPath --output $dnaPath
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # ── Step 3/4: Stage + commit the DNA ─────────────────────────────
 Write-Host "[pre-deploy] step 3/4: staging + committing recompiled DNA"
-git add dna/master/arch.dna
+git add $dnaPath
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 git diff --quiet --cached
@@ -62,7 +77,7 @@ if ($diffRc -eq 0) {
     $gitName  = if ($env:BRIAN_GIT_NAME)  { $env:BRIAN_GIT_NAME }  else { 'BRIAN pre-deploy hook' }
     $gitEmail = if ($env:BRIAN_GIT_EMAIL) { $env:BRIAN_GIT_EMAIL } else { 'brian-pre-deploy@local' }
     git -c "user.name=$gitName" -c "user.email=$gitEmail" `
-        commit -m "chore: recompile master architecture"
+        commit -m "chore: recompile $archLeaf architecture"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } else {
     exit $diffRc
@@ -73,5 +88,5 @@ Write-Host "[pre-deploy] step 4/4: pushing to origin"
 git push
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "[pre-deploy] ok - master -> dna/master/arch.dna compiled, committed, pushed"
+Write-Host "[pre-deploy] ok - $archLeaf -> $dnaPath compiled, committed, pushed"
 exit 0

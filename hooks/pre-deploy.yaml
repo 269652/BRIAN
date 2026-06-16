@@ -27,7 +27,7 @@
 # ──────────────────────────────────────────────────────────────────
 
 name: pre-deploy
-description: Recompile architectures/master → dna/master/arch.dna, commit, push
+description: Recompile brian.toml [current].arch → dna/<arch>/arch.dna, commit, push
 
 enabled: true
 

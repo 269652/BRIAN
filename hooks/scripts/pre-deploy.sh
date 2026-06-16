@@ -9,8 +9,8 @@
 #   1. Refuse if the working tree is dirty (caller must commit / stash
 #      first — otherwise the roundtrip commit would smuggle their WIP
 #      under our chore message).
-#   2. Compile  architectures/master → dna/master/arch.dna
-#   3. git add <dna> + commit "chore: recompile master architecture"
+#   2. Compile the brian.toml [current].arch → dna/<leaf>/arch.dna
+#   3. git add <dna> + commit "chore: recompile <arch> architecture"
 #      (no-op if compile produced byte-identical output).
 #   4. git push.    Only on a successful push does the hook return 0
 #      → cmd_deploy proceeds to provision vast.ai.   Any non-zero exit
@@ -42,23 +42,35 @@ else
     python="python"
 fi
 
-# ── Step 2/4: Compile master arch → canonical DNA ────────────────
-echo "[pre-deploy] step 2/4: brian dna compile (architectures/master → dna/master/arch.dna)"
-"$python" -m neuroslm.cli dna compile architectures/master --output dna/master/arch.dna
+# ── Resolve arch from brian.toml [current].arch ──────────────────
+# Read the arch path from brian.toml so the hook always compiles
+# whatever the workspace is configured to deploy — not a hardcoded
+# folder. Falls back to "architectures/master" for back-compat.
+arch_path=$("$python" -c "
+from neuroslm.project_config import load_project_config
+cfg = load_project_config()
+print(cfg.arch)
+" 2>/dev/null || echo "architectures/master")
+arch_leaf="${arch_path##*/}"
+dna_path="dna/${arch_leaf}/arch.dna"
+
+# ── Step 2/4: Compile arch → canonical DNA ───────────────────────
+echo "[pre-deploy] step 2/4: brian dna compile ($arch_path → $dna_path)"
+"$python" -m neuroslm.cli dna compile "$arch_path" --output "$dna_path"
 
 # ── Step 3/4: Stage + commit the DNA ────────────────────────────
 echo "[pre-deploy] step 3/4: staging + committing recompiled DNA"
-git add dna/master/arch.dna
+git add "$dna_path"
 if git diff --quiet --cached; then
     echo "[pre-deploy] no DNA diff — already up to date."
 else
     git -c user.name="${BRIAN_GIT_NAME:-BRIAN pre-deploy hook}" \
         -c user.email="${BRIAN_GIT_EMAIL:-brian-pre-deploy@local}" \
-        commit -m "chore: recompile master architecture"
+        commit -m "chore: recompile $arch_leaf architecture"
 fi
 
 # ── Step 4/4: Push — only success here unblocks the deploy ───────
 echo "[pre-deploy] step 4/4: pushing to origin"
 git push
 
-echo "[pre-deploy] ok — master → dna/master/arch.dna compiled, committed, pushed"
+echo "[pre-deploy] ok — $arch_leaf → $dna_path compiled, committed, pushed"
