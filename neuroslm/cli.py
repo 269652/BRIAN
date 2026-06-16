@@ -2903,26 +2903,41 @@ def cmd_lint(args: argparse.Namespace) -> int:
 # ── update-readme ──────────────────────────────────────────────────────
 
 def cmd_update_readme(args: argparse.Namespace) -> int:
-    """Render README.template.md → README.md using docs/readme_metrics.toml.
+    """Render README.template.md → README.md using docs/readme_metrics.toml
+    merged with arch.neuro # @export values from .neuro/exports.toml.
 
     ``brian update-readme``         — write README.md in place.
-    ``brian update-readme --check`` — compare only; exit 1 if stale (pre-commit use).
+    ``brian update-readme --check`` — compare only; exit 1 if stale (pre-commit).
     """
     from neuroslm.readme_renderer_v2 import (
-    ReadmeRenderError,
-    MissingMetricError,
-    MissingClaimError,
-    LogNotFoundError,
-    render_readme
-)
+        ReadmeRenderError,
+        render_readme,
+    )
+    from neuroslm.arch_exports import collect_arch_exports, write_neuro_exports
 
-    template = REPO_ROOT / "README.template.md"
-    metrics  = REPO_ROOT / "docs" / "readme_metrics.toml"
-    output   = REPO_ROOT / "README.md"
+    template        = REPO_ROOT / "README.template.md"
+    metrics         = REPO_ROOT / "docs" / "readme_metrics.toml"
+    output          = REPO_ROOT / "README.md"
+    neuro_dir       = REPO_ROOT / ".neuro"
+    neuro_exports   = neuro_dir / "exports.toml"
+    arch_neuro      = REPO_ROOT / "architectures" / "master" / "arch.neuro"
+
+    # Collect arch exports from arch.neuro and write .neuro/exports.toml.
+    # Best-effort: if the arch file is missing or unreadable, skip silently.
+    if arch_neuro.exists():
+        try:
+            exports = collect_arch_exports(arch_neuro)
+            write_neuro_exports(exports, neuro_dir)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[update-readme] warning: could not collect arch exports: {exc}",
+                  file=sys.stderr)
 
     try:
         rendered, is_clean = render_readme(
-            template, metrics, output, check=args.check
+            template, metrics, output,
+            check=args.check,
+            repo_root=REPO_ROOT,
+            neuro_exports_path=neuro_exports,
         )
     except FileNotFoundError as exc:
         print(f"[update-readme] error: {exc}", file=sys.stderr)

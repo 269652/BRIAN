@@ -1692,6 +1692,27 @@ expert ReasoningExpert {
     frozen: true
 }
 
+# ── README template exports ───────────────────────────────────────────
+# These # @export annotations are NOT DSL syntax — they are metadata read
+# by `brian update-readme` (neuroslm/arch_exports.py) to keep README.md
+# in sync with this arch file. Do not remove or reformat these lines.
+#
+# Expert model IDs (resolved from the expert blocks above):
+# @export EXPERT_GENERAL_MODEL  = GeneralExpert.model
+# @export EXPERT_GENERAL_ROLE   = GeneralExpert.role
+# @export EXPERT_CODE_MODEL     = CodeExpert.model
+# @export EXPERT_CODE_ROLE      = CodeExpert.role
+# @export EXPERT_REASONING_MODEL = ReasoningExpert.model
+# @export EXPERT_REASONING_ROLE  = ReasoningExpert.role
+#
+# Parameter counts (manually maintained — update after each preset change):
+# @export TRUNK_TRAINABLE_PARAMS   = "~147M"
+# @export EXPERT_GENERAL_PARAMS    = "~360M"
+# @export EXPERT_CODE_PARAMS       = "~125M"
+# @export EXPERT_REASONING_PARAMS  = "~500M"
+# @export TOTAL_FROZEN_PARAMS      = "~985M"
+# ─────────────────────────────────────────────────────────────────────
+
 # LanguageCortex bundles the {distillation, funnel, warmup} triplet so
 # the arch stays declarative â€” one line, not 60. See
 # /lib/LanguageCortex.neuro for the template body.
