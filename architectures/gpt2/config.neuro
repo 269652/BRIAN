@@ -1,0 +1,92 @@
+# -*- coding: utf-8 -*-
+# config.neuro — per-architecture miscellaneous configuration
+#
+# This file holds runtime configuration that is NOT architectural wiring
+# (that lives in arch.neuro) but IS architecture-specific. Think of it as
+# the "deployment manifest" for this architecture:
+#
+#   - Checkpoint storage backend + credentials
+#   - Data sources
+#   - Hardware-specific overrides
+#   - External service endpoints
+#
+# The compiler reads this alongside arch.neuro; the harness + deploy
+# scripts resolve values via the cascade:
+#   1. ENV var (always wins)
+#   2. config.neuro (this file)
+#   3. brian.toml [defaults] (workspace fallback)
+#
+# All ENV var names are UPPER_SNAKE derived from the dotted key path:
+#   checkpoint.push_backend → CHECKPOINT_PUSH_BACKEND
+#   checkpoint.hf_repo_id  → HF_REPO_ID
+#   checkpoint.hf_token    → HF_TOKEN
+#
+# =============================================================================
+
+# ─── CHECKPOINT STORAGE ─────────────────────────────────────────────────────
+# Defines where trained checkpoints are pushed during and after training.
+# Switched from Git LFS to HuggingFace Hub on 2026-06-15 after run 41063959
+# hung on a synchronous `git push` of a 569 MB LFS object inside the
+# training loop.
+
+checkpoint {
+    # Backend: "hf" (HuggingFace Hub), "lfs" (Git LFS, legacy), "none" (local only)
+    push_backend: "hf"
+
+    # HuggingFace Hub configuration (only used when push_backend = "hf")
+    hf_repo_id: "moritzroessler/BRIAN"
+
+    # Token source (env var name that holds the HF write token).
+    # The actual secret lives in .env / CI secrets / ~/.huggingface/token —
+    # NEVER hardcode a token in this file.
+    hf_token_env: "HF_TOKEN"
+
+    # Checkpoint cadence (training micro-steps)
+    save_every: 500       # Write local .pt
+    push_every: 2500      # Push to remote backend
+
+    # Strip Adam state (m+v) before HF push to save ~2/3 upload size.
+    # Trade-off: resume from HF copy shows a ~500-step Adam warmup blip.
+    # Same-box crash resume always has full state (local .pt).
+    push_optimizer: false
+
+    # Remote path template inside the HF repo.
+    # Available variables: {date}, {git_sha}, {arch_name}, {step}
+    path_template: "checkpoints/{date}_{git_sha}_{arch_name}/step{step}.pt"
+}
+
+# ─── LOG STORAGE ────────────────────────────────────────────────────────────
+# Where training logs are pushed. The background log_pusher.sh uses this.
+
+logging {
+    # Backend: "git" (push to logs/ in this repo), "hf" (push to HF dataset)
+    push_backend: "git"
+
+    # Cadence: trainer prints a metrics row every N steps
+    log_every: 500
+
+    # Local log path template (relative to repo root)
+    # Available variables: {date}, {arch_name}, {instance_id}
+    path_template: "logs/{date}/{arch_name}/{instance_id}"
+}
+
+# ─── DATA SOURCES ───────────────────────────────────────────────────────────
+# Declares which datasets the training harness should load.
+
+data {
+    # Primary text dataset (HuggingFace dataset ID)
+    text_dataset: "HuggingFaceFW/fineweb-edu:sample-10BT"
+
+    # Tokenizer (must match the trunk's vocabulary)
+    tokenizer: "gpt2"
+}
+
+# ─── HARDWARE PRESETS ───────────────────────────────────────────────────────
+# Per-hardware defaults. These override brian.toml [hardware.*] when this
+# architecture is active (arch-specific tuning takes priority over global).
+
+hardware {
+    A100  { preset: "large", batch_size: 4 }
+    T4    { preset: "large", batch_size: 2 }
+    CPU   { preset: "tiny",  batch_size: 2 }
+}
