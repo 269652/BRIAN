@@ -22,6 +22,34 @@ Hypothesis ledger with artifact links: [`docs/findings.md`](docs/findings.md).
 
 ## Evidence
 
+$claim{
+  id: "B6_BEST_OOD",
+  train_ppl: "23.6",
+  ood_ppl: "155.0",
+  gap_ratio: "6.55",
+  steps: "10,000",
+  desc: "B6 achieved the best absolute OOD PPL in the arc (155.0) at 10k steps with SmolLM2 cortex, but gap_ratio regressed to 6.55 vs B4's 2.87"
+}
+
+$claim{
+  id: "B4_GAP_BREAKTHROUGH",
+  train_ppl: "102.9",
+  ood_ppl: "295.9",
+  gap_ratio: "2.87",
+  steps: "2,000",
+  improvement: "First BRIAN variant under gap_ratio 3.0",
+  desc: "B4 broke the gap_ratio barrier at 2.87 through the abstain-fix enabling multi-cortex fusion"
+}
+
+$claim{
+  id: "H21_ABSTAIN_FIX",
+  ce_before: "17.37",
+  ce_after: "4.03",
+  train_improvement: "14×",
+  ood_improvement: "17×",
+  desc: "Per-position abstain logit fix reduced standalone-cortex CE from 17.37 to 4.03 nats, enabling stable multi-cortex fusion"
+}
+
 ### Layer A — mechanisms work as specified ✅
 
 These tests assert a constructed `Brain` carries out the mechanism described in `docs/architecture.md`. They prove the primitive exists and computes as written. They say nothing about whether the primitive improves OOD generalization — that is Layer B's job.
@@ -60,19 +88,19 @@ Params split: **trainable** (trunk only, in checkpoint) / **frozen** (expert wei
 | **B1** trunk-iso + recursive | bowtie | ${B1_STEPS} | ${B1_TRAINABLE} | — | ${B1_TRAIN_PPL} | ${B1_OOD_PPL} | ${B1_GAP_RATIO} | [`${B1_ARTIFACT}`](${B1_ARTIFACT}) |
 | **B2.fix** trunk-iso + ReZero | bowtie | ${B2FIX_STEPS} | ${B2FIX_TRAINABLE} | — | ${B2FIX_TRAIN_PPL} | ${B2FIX_OOD_PPL} | ${B2FIX_GAP_RATIO} | [`${B2FIX_ARTIFACT}`](${B2FIX_ARTIFACT}) |
 | **B3** PCT trunk | bowtie | ${B3_STEPS} | ${B3_TRAINABLE} | — | ${B3_TRAIN_PPL} | ${B3_OOD_PPL} | ${B3_GAP_RATIO} | [`${B3_ARTIFACT}`](${B3_ARTIFACT}) |
-| **B4** abstain-fix + multi-cortex | bowtie + GPT-2/CodeGPT/Qwen | ${B4_STEPS} | **${B4_TRAINABLE}** | ${B4_FROZEN} | ${B4_TRAIN_PPL} | ${B4_OOD_PPL} | **${B4_GAP_RATIO}** | vast `${B4_VAST_ID}` @ `${B4_GIT_SHA}` — [log](logs/vast/) `${B4_LOG}` |
+| **B4** abstain-fix + multi-cortex | bowtie + GPT-2/CodeGPT/Qwen | ${claim.B4_GAP_BREAKTHROUGH.steps} | **${B4_TRAINABLE}** | ${B4_FROZEN} | ${claim.B4_GAP_BREAKTHROUGH.train_ppl} | ${claim.B4_GAP_BREAKTHROUGH.ood_ppl} | **${claim.B4_GAP_BREAKTHROUGH.gap_ratio}** | vast `${B4_VAST_ID}` @ `${B4_GIT_SHA}` — [log](logs/vast/) `${B4_LOG}` |
 | **B5** B4 rerun, 10k (mid-run step 3k†) | same as B4, GPT-2 roster | ${B5_STEPS} | ${B5_TRAINABLE} | ${B5_FROZEN} | ${B5_TRAIN_PPL} | ${B5_OOD_PPL} | ${B5_GAP_RATIO} | `${B5_LOG}` |
-| **B6** SmolLM2 `general` upgrade | bowtie + SmolLM2/CodeGPT/Qwen | ${B6_STEPS} | **${B6_TRAINABLE}** | ${B6_FROZEN} | **${B6_TRAIN_PPL}** | **${B6_OOD_PPL}** | ${B6_GAP_RATIO} | `${B6_LOG}`; ckpt HF `${B6_HF_CKPT}` |
+| **B6** SmolLM2 `general` upgrade | bowtie + SmolLM2/CodeGPT/Qwen | ${claim.B6_BEST_OOD.steps} | **${B6_TRAINABLE}** | ${B6_FROZEN} | **${claim.B6_BEST_OOD.train_ppl}** | **${claim.B6_BEST_OOD.ood_ppl}** | ${claim.B6_BEST_OOD.gap_ratio} | `${B6_LOG}`; ckpt HF `${B6_HF_CKPT}` |
 
 †B5 is a mid-run snapshot; final 10k numbers pending.
 
 **What the table says:**
 
-1. **B4 is the first BRIAN variant under gap_ratio 3.0** (${B4_GAP_RATIO} vs ≥${B3_GAP_RATIO} for B0–B3), driven entirely by the per-position abstain fix (H21) unblocking multi-cortex fusion. The broken precursor (vast `${H21_BROKEN_VAST_ID}`, identical arch) ran with `α_eff=0, cortex_loss_ema≈${H21_BROKEN_CX_EMA}` — fusion collapsed, trunk trained alone, giving train PPL ${H21_BROKEN_TRAIN_PPL} and OOD PPL ${H21_BROKEN_OOD_PPL}. The fix dropped those to ${B4_TRAIN_PPL} and ${B4_OOD_PPL} (${H21_IMPROVEMENT_TRAIN_X} and ${H21_IMPROVEMENT_OOD_X} respectively). Pinned by `tests/training/test_lm_expert_abstain_safety.py`.
+1. **${claim.B4_GAP_BREAKTHROUGH.improvement}** (${claim.B4_GAP_BREAKTHROUGH.gap_ratio} vs ≥${B3_GAP_RATIO} for B0–B3), driven entirely by the per-position abstain fix (H21) unblocking multi-cortex fusion. The broken precursor (vast `${H21_BROKEN_VAST_ID}`, identical arch) ran with `α_eff=0, cortex_loss_ema≈${H21_BROKEN_CX_EMA}` — fusion collapsed, trunk trained alone, giving train PPL ${H21_BROKEN_TRAIN_PPL} and OOD PPL ${H21_BROKEN_OOD_PPL}. The fix dropped those to ${claim.B4_GAP_BREAKTHROUGH.train_ppl} and ${claim.B4_GAP_BREAKTHROUGH.ood_ppl} (${claim.H21_ABSTAIN_FIX.train_improvement} and ${claim.H21_ABSTAIN_FIX.ood_improvement} respectively). Pinned by `tests/training/test_lm_expert_abstain_safety.py`.
 
-2. **B5 (mid-run, step 3k)** shows a gap_ratio plateau: ${B5_GAP_RATIO}, essentially unchanged from B4's ${B4_GAP_RATIO}, while absolute PPL continues improving on both axes (train ${B5_TRAIN_PPL}, OOD ${B5_OOD_PPL}). Longer training helps absolute quality without widening the gap — at the GPT-2 roster scale.
+2. **B5 (mid-run, step 3k)** shows a gap_ratio plateau: ${B5_GAP_RATIO}, essentially unchanged from B4's ${claim.B4_GAP_BREAKTHROUGH.gap_ratio}, while absolute PPL continues improving on both axes (train ${B5_TRAIN_PPL}, OOD ${B5_OOD_PPL}). Longer training helps absolute quality without widening the gap — at the GPT-2 roster scale.
 
-3. **B6 (SmolLM2 upgrade, H22):** H22 set four explicit targets. Three were met — train PPL ≤ ${B6_H22_TRAIN_TARGET} ✅ (${B6_TRAIN_PPL}), OOD PPL ≤ ${B6_H22_OOD_TARGET} ✅ (${B6_OOD_PPL}, the **best absolute OOD in the arc**), throughput within 15% ✅ — but gap_ratio ≤ ${B6_H22_GAP_TARGET} ❌ (got ${B6_GAP_RATIO}). The absolute OOD result is genuine progress; what regressed is the *ratio*: train PPL fell much faster than OOD PPL, meaning the trunk memorizes the training distribution more aggressively with a stronger teacher. findings.md records this as "falsified on gap_ratio." GFD v2 (commit `${GFD_V2_COMMIT}`) is designed to address the mechanism — stronger teachers should improve generalization proportionally, not just in-distribution fit. See findings.md H22 and run-${H22_POSTMORTEM_VAST_ID} post-mortem for the root-cause chain.
+3. **B6 (SmolLM2 upgrade, H22):** H22 set four explicit targets. Three were met — train PPL ≤ ${B6_H22_TRAIN_TARGET} ✅ (${claim.B6_BEST_OOD.train_ppl}), OOD PPL ≤ ${B6_H22_OOD_TARGET} ✅ (${claim.B6_BEST_OOD.ood_ppl}, the **best absolute OOD in the arc**), throughput within 15% ✅ — but gap_ratio ≤ ${B6_H22_GAP_TARGET} ❌ (got ${claim.B6_BEST_OOD.gap_ratio}). The absolute OOD result is genuine progress; what regressed is the *ratio*: train PPL fell much faster than OOD PPL, meaning the trunk memorizes the training distribution more aggressively with a stronger teacher. findings.md records this as "falsified on gap_ratio." GFD v2 (commit `${GFD_V2_COMMIT}`) is designed to address the mechanism — stronger teachers should improve generalization proportionally, not just in-distribution fit. See findings.md H22 and run-${H22_POSTMORTEM_VAST_ID} post-mortem for the root-cause chain.
 
 4. **BRIAN has not been shown to outperform the flat baseline at matched compute.** B0 used ${B0_STEPS} steps; B1–B4 used 2–7k steps. The 3–4× absolute-PPL gap at this snapshot is within the range that compute asymmetry alone can explain — a 100M trunk at step 7k is nowhere near converged. gap_ratio (where BRIAN wins by 15–50%) is the only fair comparison axis given the step-count mismatch. Matched-compute baseline (step-7k flat transformer) remains the missing experiment; see findings.md H12.
 
@@ -161,12 +189,12 @@ Trunk-vocab IDs the cortex never produces must be filled with an abstain value. 
 abstain_t = max(mapped_logits_t) − ln(V_trunk)
 ```
 
-Standalone-cortex CE: **${H21_ABSTAIN_CE_BEFORE} → ${H21_ABSTAIN_CE_AFTER} nats** on a random batch. Training impact on `30m_p4` preset (2k steps, A100 SXM4, `vast ${B4_VAST_ID}` vs broken precursor `${H21_BROKEN_VAST_ID}`):
+Standalone-cortex CE: **${claim.H21_ABSTAIN_FIX.ce_before} → ${claim.H21_ABSTAIN_FIX.ce_after} nats** on a random batch. Training impact on `30m_p4` preset (2k steps, A100 SXM4, `vast ${B4_VAST_ID}` vs broken precursor `${H21_BROKEN_VAST_ID}`):
 
 | | broken (${H21_BROKEN_VAST_ID}) | fixed (${B4_VAST_ID}) |
 |---|---|---|
-| train PPL @ step 2000 | ${H21_BROKEN_TRAIN_PPL} | **${B4_TRAIN_PPL}** |
-| OOD PPL (WikiText-103) | ${H21_BROKEN_OOD_PPL} | **${B4_OOD_PPL}** |
+| train PPL @ step 2000 | ${H21_BROKEN_TRAIN_PPL} | **${claim.B4_GAP_BREAKTHROUGH.train_ppl}** |
+| OOD PPL (WikiText-103) | ${H21_BROKEN_OOD_PPL} | **${claim.B4_GAP_BREAKTHROUGH.ood_ppl}** |
 | `α_eff` | 0.000 (collapsed) | **0.500** (stable) |
 
 Pinned by `tests/training/test_lm_expert_abstain_safety.py` (5 contracts). Code: `neuroslm/experts.py::LMExpertEnsemble._project_to_trunk_vocab`.
@@ -315,7 +343,7 @@ Checkpoints contain only **trainable** (trunk) parameters. Frozen expert weights
 The active research questions, in priority order:
 
 1. **Does GFD v2 fix the SmolLM2 gap_ratio regression?** B7 (GFD v2 + SmolLM2 + 10k steps) is the next planned run.
-2. **Does the gap_ratio plateau at ~2.9 or does it drift upward?** B5 at step 3k shows ${B5_GAP_RATIO} ≈ B4's ${B4_GAP_RATIO}, consistent with a floor. Full B5 (10k) needed to confirm.
+2. **Does the gap_ratio plateau at ~2.9 or does it drift upward?** B5 at step 3k shows ${B5_GAP_RATIO} ≈ B4's ${claim.B4_GAP_BREAKTHROUGH.gap_ratio}, consistent with a floor. Full B5 (10k) needed to confirm.
 3. **Can BRIAN beat the flat baseline at matched compute?** B0 used ${B0_STEPS} steps; no BRIAN variant has been trained that long at this scale. A step-7k flat baseline eval would give the true matched-compute comparison for H12.
 4. **Does the `reduction='batchmean'` bug (Followup F1) explain why GPT-2 experts work while SmolLM2 doesn't?** GFD v2 fixes the reduction in the new path; we need an ablation that isolates F1 from M2/M4.
 
