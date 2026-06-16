@@ -79,3 +79,54 @@ export equation gif_isotropy_schedule {
     params: [step, weight_max, ramp_start, ramp_end],
     formula: "weight = weight_max * clip((step - ramp_start) / (ramp_end - ramp_start), 0, 1)"
 }
+
+# ─────────────────────────────────────────────────────────────────────
+# GIF-4: Gap-driven label smoothing (Bayesian shrinkage)
+# ─────────────────────────────────────────────────────────────────────
+# When the generalisation gap exceeds the target, slide the CE target
+# from the one-hot simplex vertex toward the interior (uniform prior).
+# Self-correcting: as gap falls back to target, smoothing withdraws
+# to zero. Saturates at ε₀ when gap ≥ 2× target.
+#
+# Geometric interpretation: the one-hot target is a vertex of the
+# probability simplex. Label smoothing moves the target toward the
+# barycentre by ε, preventing the model from concentrating probability
+# mass on a single vocabulary token (the confidence asymmetry that
+# causes train-PPL to keep falling while OOD-PPL plateaus).
+#
+# Python backing: GIFController.label_smoothing in neuroslm/emergent/gif.py
+# Contracts: tests/dsl/test_gif_config.py::TestGapDrivenLabelSmoothing
+
+export equation gif_label_smoothing {
+    params: [gap_ratio, target_gap, epsilon_max],
+    formula: "epsilon = epsilon_max * clip(gap_ratio / target_gap - 1, 0, 1)"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# GIF-5: Attention head diversity loss
+# ─────────────────────────────────────────────────────────────────────
+# Pairwise cosine-similarity penalty across attention heads. Forces
+# heads to attend to structurally different features, preventing
+# encoder-side redundancy collapse (all heads converge to the same
+# domain-specific co-occurrence detectors from FineWeb-Edu).
+#
+# Only positive cosine similarity is penalized — anti-correlated heads
+# are functionally diverse and left alone. Squaring concentrates
+# gradient on near-identical heads.
+#
+# Gap-reactive weighting uses Riemannian log-softening (same family
+# as GIF-1/GIF-3): lifts off zero when the gap exceeds the target,
+# compresses unbounded gap ratios sublinearly.
+#
+# Python backing: compute_head_diversity_loss in neuroslm/emergent/gif.py
+# Contracts: tests/dsl/test_gif_head_diversity.py
+
+export equation gif_head_diversity_loss {
+    params: [Q, H],
+    formula: "L_div = (2 / (H * (H - 1))) * sum_{i<j}( max(0, cos(flatten(Q_i), flatten(Q_j)))^2 )"
+}
+
+export equation gif_head_diversity_weight {
+    params: [w0, gap_ratio, target_gap],
+    formula: "w = w0 * log(1 + gap_ratio / target_gap)"
+}

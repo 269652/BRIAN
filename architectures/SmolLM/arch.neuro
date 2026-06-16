@@ -845,7 +845,7 @@ neurotransmitter gaba {
 import { standard_synapse, multiplicative_modulation, additive_modulation } from "@lib/equations"
 # Geometric Information Funnel (GIF) — scheduled IB + OOD probe + isotropy.
 # See lib/gif.neuro for canonical equations.
-import { gif_vbb_alpha_schedule, gif_ood_probe_ema, gif_isotropy_schedule } from "@lib/gif"
+import { gif_vbb_alpha_schedule, gif_ood_probe_ema, gif_isotropy_schedule, gif_label_smoothing, gif_head_diversity_loss, gif_head_diversity_weight } from "@lib/gif"
 # Regularizer & CDGA equation libraries â€” math-first declarative specs
 # for the OOD interventions (PR2 + PR-A + PR-B). The Python lowerings
 # live in neuroslm/regularizers.py and read their hyperparameters from
