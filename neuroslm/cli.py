@@ -22,7 +22,7 @@ Commands (run `brian <cmd> -h` for per-command help):
   Training (local or remote)
     train [--preset=tiny]     Local training (tiny=CPU minimal, default=30M DSL)
     train --dna=path/to.dna   Train from evolved DNA with fitness config
-    deploy [--steps N]        Launch DSL training run on vast (default 10k)
+    deploy [arch] [--steps N] Launch DSL training run on vast (default 10k)
     deploy-100k               Long DSL run (100k steps)
     deploy-brain [...]        Launch a Brain (non-DSL) training run
     logs <id>                 Tail container logs
@@ -1130,6 +1130,13 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     ood = args.ood if args.ood else 0
     extra = {}
+    # ── Arch: CLI positional > brian.toml [current].arch ──
+    # Resolve folder from file path if user passed arch.neuro directly.
+    if args.arch:
+        arch_path = Path(args.arch)
+        if arch_path.is_file():
+            arch_path = arch_path.parent
+        extra["ARCH"] = str(arch_path)
     if args.scale:
         extra["SCALE"] = args.scale
     if getattr(args, "label", None):
@@ -3186,6 +3193,13 @@ def _build_parser() -> argparse.ArgumentParser:
     # deploy
     sd = sub.add_parser("deploy",
                         help="Launch a DSL or DNA training run on vast.ai")
+    # Optional positional: path to an arch.neuro or architecture folder.
+    # When given, sets ARCH env var so _deploy_train.py uses this arch
+    # instead of brian.toml [current].arch. Accepts both folder paths
+    # (e.g. architectures/gpt2) and file paths (architectures/gpt2/arch.neuro).
+    sd.add_argument("arch", nargs="?", default=None,
+                    help="Architecture path (folder or arch.neuro file). "
+                         "Overrides brian.toml [current].arch.")
     # Default=None lets cmd_deploy distinguish "user didn't say" (fall
     # through to brian.toml [defaults].steps) from "user explicitly
     # asked for N steps" (always wins). The hardcoded final fallback
