@@ -67,6 +67,10 @@ def _resolve_arch(arg: str) -> str:
     if arg is None:
         raise ValueError("Architecture argument is required")
     p = Path(arg)
+    # If the user passed a file (e.g. arch.neuro or config.neuro),
+    # resolve to the containing directory.
+    if p.is_file() and p.parent.is_dir() and (p.parent / "arch.neuro").is_file():
+        return str(p.parent)
     if p.is_dir() and (p / "arch.neuro").is_file():
         return str(p)
     short = REPO_ROOT / "architectures" / arg
