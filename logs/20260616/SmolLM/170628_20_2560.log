@@ -483,3 +483,50 @@ step  2500 | loss 9.4522 | lm 5.0837 | ppl 161.4 | gnorm 120.284 | lr 5.00e-04 |
 
   ...ull/step2500.pt.strip.tmp:  97%|█████████▋|  577MB /  597MB            [A[AProcessing Files (0 / 1)      :  97%|█████████▋|  577MB /  597MB, 13.0MB/s  
 New Data Upload               :  96%|█████████▌|  426MB /  446MB, 11.1MB/s  [A
+
+  ...ull/step2500.pt.strip.tmp:  97%|█████████▋|  579MB /  597MB            [A[AProcessing Files (0 / 1)      :  97%|█████████▋|  579MB /  597MB, 12.9MB/s  
+New Data Upload               :  96%|█████████▌|  428MB /  446MB, 11.0MB/s  [A
+
+  ...ull/step2500.pt.strip.tmp:  97%|█████████▋|  580MB /  597MB            [A[AProcessing Files (0 / 1)      :  97%|█████████▋|  580MB /  597MB, 12.8MB/s  
+New Data Upload               :  96%|█████████▌|  429MB /  446MB, 10.9MB/s  [A
+
+  ...ull/step2500.pt.strip.tmp:  98%|█████████▊|  583MB /  597MB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊|  583MB /  597MB, 12.8MB/s  
+New Data Upload               :  97%|█████████▋|  432MB /  446MB, 10.9MB/s  [A
+
+  ...ull/step2500.pt.strip.tmp:  98%|█████████▊|  584MB /  597MB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊|  584MB /  597MB, 12.6MB/s  
+New Data Upload               :  97%|█████████▋|  433MB /  446MB, 10.8MB/s  [A
+
+  ...ull/step2500.pt.strip.tmp:  98%|█████████▊|  586MB /  597MB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊|  586MB /  597MB, 12.5MB/s  
+New Data Upload               :  98%|█████████▊|  435MB /  446MB, 10.7MB/s  [A
+
+  ...ull/step2500.pt.strip.tmp:  98%|█████████▊|  588MB /  597MB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊|  588MB /  597MB, 12.4MB/s  
+New Data Upload               :  98%|█████████▊|  437MB /  446MB, 10.6MB/s  [A
+
+  ...ull/step2500.pt.strip.tmp:  99%|█████████▊|  589MB /  597MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▊|  589MB /  597MB, 12.3MB/s  
+New Data Upload               :  98%|█████████▊|  438MB /  446MB, 10.6MB/s  [A
+
+  ...ull/step2500.pt.strip.tmp:  99%|█████████▉|  590MB /  597MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉|  590MB /  597MB, 12.2MB/s  
+New Data Upload               :  99%|█████████▊|  440MB /  446MB, 10.5MB/s  [A
+
+  ...ull/step2500.pt.strip.tmp:  99%|█████████▉|  592MB /  597MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉|  592MB /  597MB, 12.1MB/s  
+New Data Upload               :  99%|█████████▉|  441MB /  446MB, 10.4MB/s  [A
+
+  ...ull/step2500.pt.strip.tmp: 100%|█████████▉|  595MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  595MB /  597MB, 12.1MB/s  
+New Data Upload               : 100%|█████████▉|  445MB /  446MB, 10.4MB/s  [A
+
+  ...ull/step2500.pt.strip.tmp: 100%|█████████▉|  596MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  596MB /  597MB, 11.9MB/s  
+New Data Upload               : 100%|█████████▉|  446MB /  446MB, 10.3MB/s  [A
+
+  ...ull/step2500.pt.strip.tmp: 100%|██████████|  597MB /  597MB            [A[AProcessing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 10.9MB/s  
+New Data Upload               : 100%|██████████|  446MB /  446MB, 9.47MB/s  [AProcessing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 10.9MB/s  
+New Data Upload               : 100%|██████████|  446MB /  446MB, 9.47MB/s  
+  ...ull/step2500.pt.strip.tmp: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step2500.pt (optimizer stripped) → hf://moritzroessler/BRIAN/checkpoints/20260616-170630_9bf5434c_neuroslm-full/step2500.pt
+[mid-ood] step 2500: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 2500: wikitext ppl=347.3 gap_ratio=2.15 (train_ppl=161.4) (50 seq, 6430 tok)
+step  2520 | loss 9.3328 | lm 5.1351 | ppl 169.9 | gnorm 115.209 | lr 4.44e-04 | 219 tok/s | Φ 0.887 | λ₁ 0.075 | ign 0.59 | mesoLG 0.50 | troph 8/8 μ1.58 | NT[DA=0.14 NE=0.26 5HT=0.22 ACh=0.18 eCB=0.02 Glu=0.15 GABA=0.15] | osc[δ=0.461 θ=0.285 γ=0.254] | em[C2:ρ=0.30/τ=0.07/s=0.59 C4:Q=0.4 W=1 pl=255 C3:pc=0.631 VBB:β=1.01 σ=0.0201 kl=905.080 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0065 cmd=0.000 Σ=0.006 w=1.00 chat=0.60] | cortex[α_eff=0.505 inh=0.000 λ=0.748 kl=-0.041 lm_ema=9.71 cx_ema=3.48] | gif[α=0.0406 p=0.808 ood_ema=0.00 ood_ce=0.00 iso_w=0.0081] | hpa[load=0.22 cort=0.22 NE×0.84 T×0.78 LR×0.89]
+step  2540 | loss 9.3840 | lm 4.9221 | ppl 137.3 | gnorm 109.087 | lr 5.00e-04 | 1917 tok/s | Φ 0.775 | λ₁ 0.075 | ign 0.59 | mesoLG 0.51 | troph 8/8 μ1.58 | NT[DA=0.11 NE=0.17 5HT=0.23 ACh=0.10 eCB=0.03 Glu=0.32 GABA=0.30] | osc[δ=0.487 θ=0.265 γ=0.248] | em[C2:ρ=0.44/τ=0.11/s=0.59 C4:Q=0.5 W=1 pl=255 C3:pc=0.618 VBB:β=1.01 σ=0.0227 kl=1150.550 C5:lat=1.46 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0075 cmd=0.000 Σ=0.007 w=1.00 chat=0.60] | cortex[α_eff=0.505 inh=0.000 λ=0.780 kl=0.138 lm_ema=9.39 cx_ema=3.35] | gif[α=0.0410 p=0.816 ood_ema=0.00 ood_ce=0.00 iso_w=0.0082] | hpa[load=0.22 cort=0.22 NE×0.84 T×0.78 LR×0.89]
+step  2560 | loss 9.3651 | lm 4.8610 | ppl 129.1 | gnorm 127.672 | lr 4.44e-04 | 1799 tok/s | Φ 0.880 | λ₁ 0.075 | ign 0.58 | mesoLG 0.47 | troph 8/8 μ1.58 | NT[DA=0.08 NE=0.25 5HT=0.24 ACh=0.09 eCB=0.04 Glu=0.39 GABA=0.39] | osc[δ=0.475 θ=0.271 γ=0.254] | em[C2:ρ=0.50/τ=0.16/s=0.58 C4:Q=-0.4 W=1 pl=255 C3:pc=0.601 VBB:β=1.01 σ=0.0219 kl=1186.681 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0072 cmd=0.000 Σ=0.007 w=1.00 chat=0.60] | cortex[α_eff=0.505 inh=0.000 λ=0.774 kl=0.013 lm_ema=9.34 cx_ema=3.20] | gif[α=0.0414 p=0.824 ood_ema=0.00 ood_ce=0.00 iso_w=0.0082] | hpa[load=0.23 cort=0.22 NE×0.84 T×0.78 LR×0.89]
