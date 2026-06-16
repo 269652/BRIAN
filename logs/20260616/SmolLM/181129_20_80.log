@@ -1,0 +1,45 @@
+════════════════════════════════════════════════════════════════
+  DSL-driven training loop
+  arch=SmolLM (folder: architectures/SmolLM)
+  steps=10000 batch=16 seq_len=512 d_sem=384
+  ckpt_dir=/workspace/brian/lfs_checkpoints
+════════════════════════════════════════════════════════════════
+
+▶ launch attempt 1 @ 18:11:31Z
+[train_dsl] boot @ 2026-06-16T18:11:32Z
+[train_dsl] git_commit dd27f1754e591b32a9e580d6b533dc539004c031 (master)
+[train_dsl] arch_dsl_sha256 7e3a5bae8a360bbef0e0c1d226164c56483f2dcf9c91d5f512b983cd6c5fa625 (/workspace/brian/architectures/SmolLM)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+Generating test split:   0%|          | 0/4358 [00:00<?, ? examples/s]Generating test split: 100%|██████████| 4358/4358 [00:00<00:00, 240409.00 examples/s]
+Generating train split:   0%|          | 0/1801350 [00:00<?, ? examples/s]Generating train split:   2%|▏         | 30000/1801350 [00:00<00:06, 292989.71 examples/s]Generating train split:   5%|▌         | 98000/1801350 [00:00<00:03, 511651.08 examples/s]Generating train split:   9%|▉         | 164000/1801350 [00:00<00:02, 573848.01 examples/s]Generating train split:  13%|█▎        | 229000/1801350 [00:00<00:02, 524931.85 examples/s]Generating train split:  17%|█▋        | 298000/1801350 [00:00<00:02, 574921.61 examples/s]Generating train split:  20%|██        | 366000/1801350 [00:00<00:02, 604967.71 examples/s]Generating train split:  25%|██▌       | 458000/1801350 [00:00<00:02, 566861.12 examples/s]Generating train split:  29%|██▉       | 526000/1801350 [00:00<00:02, 595674.82 examples/s]Generating train split:  34%|███▍      | 617000/1801350 [00:01<00:02, 550316.56 examples/s]Generating train split:  38%|███▊      | 684000/1801350 [00:01<00:01, 577316.01 examples/s]Generating train split:  42%|████▏     | 748000/1801350 [00:01<00:01, 592370.59 examples/s]Generating train split:  47%|████▋     | 843000/1801350 [00:01<00:01, 573695.60 examples/s]Generating train split:  52%|█████▏    | 934675/1801350 [00:01<00:01, 514182.87 examples/s]Generating train split:  56%|█████▌    | 1003675/1801350 [00:01<00:01, 549228.96 examples/s]Generating train split:  59%|█████▉    | 1067675/1801350 [00:01<00:01, 564366.28 examples/s]Generating train split:  63%|██████▎   | 1128675/1801350 [00:02<00:01, 565069.28 examples/s]Generating train split:  66%|██████▋   | 1194675/1801350 [00:02<00:01, 587159.22 examples/s]Generating train split:  70%|██████▉   | 1259675/1801350 [00:02<00:00, 602979.06 examples/s]Generating train split:  73%|███████▎  | 1321675/1801350 [00:02<00:00, 558896.55 examples/s]Generating train split:  77%|███████▋  | 1380675/1801350 [00:02<00:00, 563032.02 examples/s]Generating train split:  80%|████████  | 1444675/1801350 [00:02<00:00, 582379.84 examples/s]Generating train split:  84%|████████▍ | 1516675/1801350 [00:02<00:00, 540798.88 examples/s]Generating train split:  88%|████████▊ | 1582675/1801350 [00:02<00:00, 567521.51 examples/s]Generating train split:  91%|█████████▏| 1644675/1801350 [00:02<00:00, 580344.51 examples/s]Generating train split:  95%|█████████▍| 1706675/1801350 [00:03<00:00, 558068.45 examples/s]Generating train split:  98%|█████████▊| 1773675/1801350 [00:03<00:00, 584446.20 examples/s]Generating train split: 100%|██████████| 1801350/1801350 [00:03<00:00, 560934.45 examples/s]
+Generating validation split:   0%|          | 0/3760 [00:00<?, ? examples/s]Generating validation split: 100%|██████████| 3760/3760 [00:00<00:00, 346758.64 examples/s]
+[train_dsl] GIF OOD probe armed
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,903  (trainable 146,856,815 · frozen 980,097,088)
+  checkpoint = 149,187,774 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[data:chat] using OpenHermes-2.5 (teknium/OpenHermes-2.5)
+step    20 | loss 6.3305 | lm 5.8973 | ppl 364.1 | gnorm 2.563 | lr 4.17e-06 | 145 tok/s | Φ 0.896 | λ₁ 0.075 | ign 0.00 | mesoLG 0.52 | troph 8/8 μ0.83 | NT[DA=0.40 NE=0.07 5HT=0.34 ACh=0.20 eCB=0.05 Glu=0.39 GABA=0.08] | osc[δ=0.347 θ=0.319 γ=0.334] | em[C2:ρ=0.00/τ=0.47/s=0.00 C4:Q=0.4 W=1 pl=255 C3:pc=3.815 VBB:β=1.00 σ=0.0183 kl=25993.877 C5:lat=1.00 C6:pac=0.00] | cortex[α_eff=0.500 inh=0.000 λ=0.662 kl=0.013 lm_ema=10.84 cx_ema=3.59] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | hpa[load=0.00 cort=0.00 NE×1.00 T×1.00 LR×1.00]
+step    40 | loss 6.4030 | lm 6.1950 | ppl 490.3 | gnorm 2.197 | lr 8.33e-06 | 2037 tok/s | Φ 0.915 | λ₁ 0.075 | ign 0.00 | mesoLG 0.49 | troph 8/8 μ1.12 | NT[DA=0.21 NE=0.04 5HT=0.37 ACh=0.20 eCB=0.05 Glu=0.39 GABA=0.06] | osc[δ=0.281 θ=0.315 γ=0.404] | em[C2:ρ=0.00/τ=0.43/s=0.00 C4:Q=0.5 W=1 pl=255 C3:pc=1.595 VBB:β=1.00 σ=0.0183 kl=25867.691 C5:lat=1.00 C6:pac=0.04] | cortex[α_eff=0.500 inh=0.000 λ=0.767 kl=0.057 lm_ema=10.83 cx_ema=3.91] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | hpa[load=0.01 cort=0.00 NE×1.00 T×1.00 LR×1.00]
+step    60 | loss 6.8903 | lm 6.6952 | ppl 808.5 | gnorm 5.012 | lr 1.25e-05 | 2113 tok/s | Φ 0.904 | λ₁ 0.075 | ign 0.62 | mesoLG 0.54 | troph 8/8 μ1.26 | NT[DA=0.19 NE=0.31 5HT=0.37 ACh=0.20 eCB=0.05 Glu=0.39 GABA=0.12] | osc[δ=0.366 θ=0.354 γ=0.281] | em[C2:ρ=0.03/τ=0.40/s=0.62 C4:Q=-0.4 W=1 pl=255 C3:pc=0.744 VBB:β=1.00 σ=0.0183 kl=24691.311 C5:lat=1.78 C6:pac=0.02] | cortex[α_eff=0.500 inh=0.000 λ=0.894 kl=-0.005 lm_ema=10.81 cx_ema=4.43] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | hpa[load=0.02 cort=0.00 NE×1.00 T×1.00 LR×1.00]
+step    80 | loss 6.3483 | lm 6.1728 | ppl 479.5 | gnorm 2.072 | lr 1.67e-05 | 2032 tok/s | Φ 0.915 | λ₁ 0.075 | ign 0.62 | mesoLG 0.50 | troph 8/8 μ1.28 | NT[DA=0.25 NE=0.04 5HT=0.39 ACh=0.20 eCB=0.05 Glu=0.38 GABA=0.07] | osc[δ=0.327 θ=0.402 γ=0.270] | em[C2:ρ=0.03/τ=0.36/s=0.62 C4:Q=-0.5 W=1 pl=255 C3:pc=0.378 VBB:β=1.00 σ=0.0184 kl=25402.848 C5:lat=1.00 C6:pac=0.02] | cortex[α_eff=0.500 inh=0.000 λ=0.746 kl=-0.004 lm_ema=10.81 cx_ema=3.96] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | hpa[load=0.02 cort=0.00 NE×1.00 T×1.00 LR×1.00]
