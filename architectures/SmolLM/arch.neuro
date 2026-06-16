@@ -434,6 +434,38 @@ training {
     # See harness._compute_pc_reentry_loss for the full math derivation.
     vbb_alpha:     0.001
     vbb_beta_init: 1.0
+
+    # ── Geometric Information Funnel (GIF) ─────────────────────────
+    # Three interlocking mechanisms that fix the train-PPL / OOD-PPL
+    # gap divergence observed in every 10k run so far:
+    #
+    #  GIF-1  VBB α schedule: ramp α from 0.001 → 0.05 over steps
+    #         2000-5000.  Fixes the decorative IB (α=0.001 × KL~5000
+    #         ≈ 5 nats, swamped by LM loss ~3-4).
+    #
+    #  GIF-2  OOD probe EMA: cache 50 WikiText-103 seqs, evaluate
+    #         trunk CE every 100 steps, maintain EMA(β=0.9).
+    #         Replaces the frozen pre-fusion lm_ema with a REAL
+    #         generalisation signal for the distillation λ-ramp
+    #         and cortex inhibition gate.
+    #
+    #  GIF-3  Isotropy schedule: ramp isotropy weight 0 → 0.01 in
+    #         lockstep with VBB α.  Adds a regularisation force that
+    #         survives aux-loss collapse.
+    #
+    # See lib/gif.neuro for the canonical DSL equations and
+    # neuroslm/emergent/gif.py for the Python backing.
+    gif: {
+      enabled:       true
+      vbb_alpha_min: 0.001
+      vbb_alpha_max: 0.05
+      vbb_ramp_start: 2000
+      vbb_ramp_end:   5000
+      probe_n_seqs:   50
+      probe_every:    100
+      probe_ema_beta: 0.9
+      iso_weight_max: 0.01
+    }
     # â”€â”€ MDRV-VBB anti-collapse stabilisers (VBB-v2, Jun 2026) â”€â”€â”€â”€â”€â”€
     # Three interlocking mechanisms that prevent the Î²â†‘/Ïƒâ†“ co-collapse
     # observed in the VBB-v1 run (gap 3.99â†’6.68 by step 4000):
@@ -793,6 +825,9 @@ neurotransmitter gaba {
 # `lib/equations.neuro` at unfold time and the local 3-symbol shadow
 # silently overwrote the canonical 8-symbol source of truth.
 import { standard_synapse, multiplicative_modulation, additive_modulation } from "@lib/equations"
+# Geometric Information Funnel (GIF) — scheduled IB + OOD probe + isotropy.
+# See lib/gif.neuro for canonical equations.
+import { gif_vbb_alpha_schedule, gif_ood_probe_ema, gif_isotropy_schedule } from "@lib/gif"
 # Regularizer & CDGA equation libraries â€” math-first declarative specs
 # for the OOD interventions (PR2 + PR-A + PR-B). The Python lowerings
 # live in neuroslm/regularizers.py and read their hyperparameters from
