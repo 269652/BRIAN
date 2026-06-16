@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# .githooks/pre-commit — auto-render README.md from README.template.md
+# .githooks/pre-commit — tests + auto-render README.md
 #
 # Activated by running once (from repo root):
 #   git config core.hooksPath .githooks
@@ -16,15 +16,37 @@ if [ -f "$REPO/.venv/Scripts/python.exe" ]; then
 elif [ -f "$REPO/.venv/bin/python" ]; then
   PYTHON="$REPO/.venv/bin/python"
 else
-  echo "[pre-commit] .venv not found — skipping README render" >&2
+  echo "[pre-commit] .venv not found — skipping hook" >&2
   exit 0
 fi
 
-# Use brian CLI to render README
+# ── 1. Run DSL tests ──────────────────────────────────────────────────
+echo "[pre-commit] Running DSL tests..."
+"$PYTHON" -m pytest tests/dsl/ -q -m "not slow"
+
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "[pre-commit] Tests failed. Commit rejected." >&2
+  exit 1
+fi
+
+echo "[pre-commit] Tests passed."
+
+# ── 2. Auto-render README.md ──────────────────────────────────────────
+echo "[pre-commit] Rendering README.md..."
 "$PYTHON" -m neuroslm.cli update-readme
+
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "[pre-commit] README render failed. Commit rejected." >&2
+  exit 1
+fi
 
 # Stage README.md if it changed
 if ! git diff --quiet README.md 2>/dev/null; then
   git add README.md
   echo "[pre-commit] README.md staged"
 fi
+
+echo "[pre-commit] All checks passed."
+exit 0
