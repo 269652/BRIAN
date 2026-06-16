@@ -2287,7 +2287,29 @@ class BRIANHarness(nn.Module):
         if gcfg.enabled:
             pre_phi_loss = self._step_genetics_pre(ids.shape[0], ids.device)
 
+        # ── GIF-5: activate Q-stash if diversity loss is enabled ──
+        _gif = getattr(self, "_gif", None)
+        _div_active = (
+            _gif is not None
+            and _gif.enabled
+            and _gif.attn_div_weight > 0.0
+            and _gif.head_diversity_weight > 0.0
+        )
+        if _div_active:
+            from neuroslm.dsl import nn_ops as _nn_ops
+            _nn_ops._DIVERSITY_STASH = []
+
         logits = self(ids, nt_levels=nt_levels)
+
+        # ── GIF-5: compute + drain diversity stash ──
+        _div_loss = None
+        if _div_active:
+            from neuroslm.dsl import nn_ops as _nn_ops
+            from neuroslm.emergent.gif import compute_head_diversity_loss
+            q_tensors = _nn_ops._DIVERSITY_STASH or []
+            _nn_ops._DIVERSITY_STASH = None  # always drain
+            if q_tensors:
+                _div_loss = compute_head_diversity_loss(q_tensors)
 
         # ── PR2-F: frequency-balanced CE replacement ──
         # If freq_balance is enabled AND statistics have been loaded
@@ -2320,6 +2342,14 @@ class BRIANHarness(nn.Module):
 
         total = self.total_loss_config.w_lm * loss_lm
         mat = self.maturity.value()
+
+        # ── GIF-5: add gap-reactive attention head diversity loss ──
+        if _div_loss is not None and _gif is not None:
+            w_div = _gif.head_diversity_weight
+            if w_div > 0.0:
+                total = total + w_div * _div_loss
+                self._metrics["gif_head_div_loss"] = float(_div_loss.detach().item())
+                self._metrics["gif_head_div_weight"] = w_div
 
         # ── PR2: OOD-intervention controller ──
         # Pulls the final non-detached hidden state out of the language

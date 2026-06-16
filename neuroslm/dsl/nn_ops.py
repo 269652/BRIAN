@@ -18,6 +18,14 @@ import torch
 import torch.nn.functional as F
 
 
+# ── GIF-5: Attention head diversity stash ──────────────────────────────
+# When set to a list, causal_self_attention appends per-head Q tensors
+# (with grad) for post-hoc diversity loss computation. Set to None to
+# disable. Thread-unsafe; fine for single-GPU training.
+from typing import List as _List
+_DIVERSITY_STASH: Optional[_List[torch.Tensor]] = None
+
+
 # ── Linear / embedding ─────────────────────────────────────────────────
 
 def linear(x: torch.Tensor, weight: torch.Tensor,
@@ -172,6 +180,11 @@ def causal_self_attention(x: torch.Tensor,
                           device=x.device, dtype=x.dtype)
     q = rope(q, cos.to(q.dtype), sin.to(q.dtype))
     k = rope(k, cos.to(k.dtype), sin.to(k.dtype))
+
+    # GIF-5: stash post-RoPE Q for attention head diversity loss.
+    # q shape: (B, n_heads, T, head_dim) — with gradient.
+    if _DIVERSITY_STASH is not None:
+        _DIVERSITY_STASH.append(q)
 
     # GQA: expand KV heads to match Q heads
     if n_groups > 1:

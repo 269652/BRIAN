@@ -353,6 +353,7 @@ class GIFController:
     ramp_gain: float = 0.0002         # progress per unit gap error per step
     min_ramp_speed: float = 0.00005   # minimum Δp per step (prevents stall)
     label_smooth_max: float = 0.0     # GIF-4: max gap-driven label smoothing ε₀
+    attn_div_weight: float = 0.0     # GIF-5: attention head diversity base weight w₀
     _progress: float = 0.0            # shared ramp progress 0→1
     _last_gap_ratio: float = 0.0      # for telemetry
 
@@ -395,6 +396,25 @@ class GIFController:
             return 0.0
         excess = self._last_gap_ratio / self.target_gap_ratio - 1.0
         return self.label_smooth_max * max(0.0, min(1.0, excess))
+
+    @property
+    def head_diversity_weight(self) -> float:
+        """GIF-5: gap-reactive attention head diversity weight.
+
+        w_div = w₀ · log(1 + gap_ratio / target)
+
+        Riemannian log-softening: lifts off zero when the gap exceeds
+        target, compresses unbounded gap ratios sublinearly. When gap=0
+        (no OOD data) or w₀=0, returns 0 (disabled).
+        """
+        if (not self.adaptive
+                or self.attn_div_weight <= 0.0
+                or self._last_gap_ratio <= 0.0
+                or self.target_gap_ratio <= 0.0):
+            return 0.0
+        return self.attn_div_weight * math.log(
+            1.0 + self._last_gap_ratio / self.target_gap_ratio
+        )
 
     def update(self, step: int, lm_loss_ema: float) -> None:
         """Advance the adaptive ramp based on current gap ratio.
@@ -452,6 +472,7 @@ class GIFController:
         gain = float(gif.get("ramp_gain", 0.0002))
         min_speed = float(gif.get("min_ramp_speed", 0.00005))
         ls_max = float(gif.get("label_smooth_max", 0.0))
+        adw = float(gif.get("attn_div_weight", 0.0))
 
         return cls(
             vbb_schedule=VBBAlphaSchedule.from_config(cfg),
@@ -463,4 +484,61 @@ class GIFController:
             ramp_gain=gain,
             min_ramp_speed=min_speed,
             label_smooth_max=ls_max,
+            attn_div_weight=adw,
         )
+
+
+# ── GIF-5: Attention Head Diversity Loss ───────────────────────────────
+
+def compute_head_diversity_loss(
+    q_tensors: List[torch.Tensor],
+) -> torch.Tensor:
+    """Pairwise cosine-similarity penalty across attention heads.
+
+    Args:
+        q_tensors: list of Q tensors, one per layer. Each has shape
+            (B, H, T, d_head) where H = n_heads.
+
+    Returns:
+        Scalar loss:  L = (2/H(H-1)) Σ_{i<j} max(0, cos(q_i, q_j))²
+
+    averaged over layers and batch. Only positive cosine similarity
+    is penalized — anti-correlated heads are functionally diverse and
+    left alone. Squaring concentrates gradient on near-identical heads.
+    """
+    if not q_tensors:
+        return torch.zeros((), requires_grad=False)
+
+    device = q_tensors[0].device
+    layer_losses = []
+
+    for q in q_tensors:
+        B, H, T, d_head = q.shape
+        if H < 2:
+            layer_losses.append(torch.zeros((), device=device))
+            continue
+
+        # Flatten each head's queries: (B, H, T*d_head)
+        q_flat = q.reshape(B, H, T * d_head)
+
+        # L2-normalize for cosine similarity: (B, H, T*d_head)
+        q_norm = F.normalize(q_flat, dim=-1)
+
+        # Pairwise cosine: (B, H, H)
+        cos_matrix = torch.bmm(q_norm, q_norm.transpose(1, 2))
+
+        # Extract upper triangle (i < j pairs), exclude diagonal
+        mask = torch.triu(torch.ones(H, H, device=device, dtype=torch.bool), diagonal=1)
+        # (B, n_pairs)
+        pairwise_cos = cos_matrix[:, mask]
+
+        # ReLU + square: only penalize positive similarity
+        loss_per_pair = torch.clamp(pairwise_cos, min=0.0) ** 2
+
+        # Mean over pairs and batch
+        layer_losses.append(loss_per_pair.mean())
+
+    if not layer_losses:
+        return torch.zeros((), device=device)
+
+    return torch.stack(layer_losses).mean()

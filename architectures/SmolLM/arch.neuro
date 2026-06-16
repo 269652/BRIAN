@@ -477,6 +477,12 @@ training {
       # as gap falls, smoothing withdraws.  Saturates at ε₀ when
       # gap ≥ 2× target.
       label_smooth_max: 0.05
+      # GIF-5: Attention head diversity loss.
+      # L_div = (2/H(H-1)) Σ_{i<j} max(0, cos(q_i,q_j))².
+      # Gap-reactive: w = w₀·log(1 + gap/target).
+      # Forces heads to attend to structurally different features,
+      # preventing encoder-side redundancy collapse.
+      attn_div_weight: 0.01
     }
     # â”€â”€ MDRV-VBB anti-collapse stabilisers (VBB-v2, Jun 2026) â”€â”€â”€â”€â”€â”€
     # Three interlocking mechanisms that prevent the Î²â†‘/Ïƒâ†“ co-collapse
