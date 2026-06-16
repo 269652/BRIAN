@@ -9,10 +9,32 @@
 # as strings so the renderer substitutes them verbatim without float
 # formatting surprises (e.g. 66.0 stays "66.0", not "66").
 
-# ── meta ──────────────────────────────────────────────────────────────
-[meta]
-TEST_COUNT = "2870"
-LAYER_A_TEST_COUNT = "2870"
+# ── Top-level metrics (used throughout README) ────────────────────────
+
+# Model param counts
+TRUNK_TRAINABLE_PARAMS = "146.9M"
+TOTAL_FROZEN_PARAMS = "~980M"
+
+# Test suite metrics
+TOTAL_TESTS = "1511"
+DSL_TESTS = "620"
+LAYER_A_TEST_COUNT = "1511"
+TEST_RUNTIME_SECONDS = "~110"
+
+# Core mechanism counts
+CORE_PROPERTIES_COUNT = "20+"
+CORE_MECHANISMS_COUNT = "15"
+
+# Multi-cortex expert roster
+EXPERT_GENERAL_MODEL = "HuggingFaceTB/SmolLM2-360M"
+EXPERT_GENERAL_PARAMS = "360M"
+EXPERT_GENERAL_ROLE = "general"
+EXPERT_CODE_MODEL = "microsoft/phi-1_5"
+EXPERT_CODE_PARAMS = "1.3B"
+EXPERT_CODE_ROLE = "code"
+EXPERT_REASONING_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
+EXPERT_REASONING_PARAMS = "0.5B"
+EXPERT_REASONING_ROLE = "reasoning"
 
 # Layer B summary (best results from B4)
 LAYER_B_BEST_ROW = "B4"
@@ -26,8 +48,9 @@ LAYER_B_IMPROVEMENT_PCT = "53"
 GFD_V2_COMMIT     = "83db76b"
 GFD_V2_TEST_COUNT = "37"
 
-# ── B0 flat baseline (80k steps, results/ood_baseline-80k_107M_step80000.json) ──
+# ── Per-variant details (TOML tables below) ───────────────────────────# ── B0 flat baseline (80k steps, results/ood_baseline-80k_107M_step80000.json) ──
 [b0]
+B0_VARIANT_NAME = "Flat Transformer (Baseline)"
 B0_STEPS      = "80,000"
 B0_TRAINABLE  = "106.9M"
 B0_TRAIN_PPL  = "66.0"
@@ -37,6 +60,7 @@ B0_ARTIFACT   = "results/ood_baseline-80k_107M_step80000.json"
 
 # ── B1 trunk-iso + recursive (results/ood_recursive_108M_step5000.json) ──
 [b1]
+B1_VARIANT_NAME = "BRIAN (Trunk + Recursive)"
 B1_STEPS      = "5,000"
 B1_TRAINABLE  = "108.2M"
 B1_TRAIN_PPL  = "216.5"
@@ -46,6 +70,7 @@ B1_ARTIFACT   = "results/ood_recursive_108M_step5000.json"
 
 # ── B2.fix trunk-iso + ReZero (results/ood_rezero-fixed_107M_step7000.json) ──
 [b2fix]
+B2FIX_VARIANT_NAME = "BRIAN (Trunk + ReZero)"
 B2FIX_STEPS      = "7,000"
 B2FIX_TRAINABLE  = "107.8M"
 B2FIX_TRAIN_PPL  = "258.8"
@@ -55,6 +80,7 @@ B2FIX_ARTIFACT   = "results/ood_rezero-fixed_107M_step7000.json"
 
 # ── B3 PCT trunk (results/ood_pct-30m_68M_step4000.json) ──
 [b3]
+B3_VARIANT_NAME = "BRIAN (PCT trunk)"
 B3_STEPS      = "4,000"
 B3_TRAINABLE  = "69.2M"
 B3_TRAIN_PPL  = "400.9"
@@ -65,8 +91,9 @@ B3_ARTIFACT   = "results/ood_pct-30m_68M_step4000.json"
 # ── B4 abstain-fix + multi-cortex (vast 40925851 @ a22eecc, step 2000) ──
 # Log: logs/vast/20260614*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log
 [b4]
+B4_VARIANT_NAME = "BRIAN (abstain-fix + multi-cortex, B4)"
 B4_STEPS      = "2,000"
-B4_TRAINABLE  = "~147M"
+B4_TRAINABLE  = "889.6M"
 B4_FROZEN     = "~743M"
 B4_TRAIN_PPL  = "102.9"
 B4_OOD_PPL    = "295.9"
@@ -74,6 +101,12 @@ B4_GAP_RATIO  = "2.87"
 B4_VAST_ID    = "40925851"
 B4_GIT_SHA    = "a22eecc"
 B4_LOG        = "*af758c381388*_step2kof2k.log"
+B4_GAP_THRESHOLD = "3.0"
+B4_IMPROVEMENT_VS_B3 = "53"
+B4_GAP_STEP500 = "2.05"
+B4_COMPUTE_RATIO_VS_B0 = "40×"
+B4_GPU_TYPE = "A100 SXM4"
+B4_GPU_COST = "$0.74/hr"
 
 # ── B5 GPT-2 roster 10k rerun — mid-run snapshot at step 3000 ──
 # Log: logs/vast/20260615T092922Z_cd3a9493b050_arch_889M_h24-cfd-10k-dna-arch_step3540of10k.log

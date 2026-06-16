@@ -335,7 +335,7 @@ def load_metrics(metrics_path: Path) -> dict[str, str]:
     """Load metrics TOML and return flat {KEY: value} dict."""
     if not metrics_path.exists():
         raise FileNotFoundError(f"Metrics not found: {metrics_path}")
-    
+
     try:
         import tomllib
     except ImportError:
@@ -343,71 +343,46 @@ def load_metrics(metrics_path: Path) -> dict[str, str]:
             import tomli as tomllib  # type: ignore[no-redef]
         except ImportError:
             raise ImportError("Need tomllib (Python 3.11+) or tomli package")
-    
+
     with open(metrics_path, "rb") as f:
         raw = tomllib.load(f)
-    
+
     # Flatten all sections into one namespace
+    # Top-level keys go directly, nested sections are also flattened
     flat: dict[str, str] = {}
-    for section in raw.values():
-        if isinstance(section, dict):
-            for key, value in section.items():
-                # Convert to string
-                if isinstance(value, bool):
-                    flat[key] = str(value).lower()
-                elif isinstance(value, (int, float)):
-                    flat[key] = str(value)
-                else:
-                    flat[key] = str(value)
     
+    for key, value in raw.items():
+        if isinstance(value, dict):
+            # It's a [section] - flatten it
+            for sub_key, sub_value in value.items():
+                if isinstance(sub_value, bool):
+                    flat[sub_key] = str(sub_value).lower()
+                elif isinstance(sub_value, (int, float)):
+                    flat[sub_key] = str(sub_value)
+                else:
+                    flat[sub_key] = str(sub_value)
+        else:
+            # It's a top-level key - add directly
+            if isinstance(value, bool):
+                flat[key] = str(value).lower()
+            elif isinstance(value, (int, float)):
+                flat[key] = str(value)
+            else:
+                flat[key] = str(value)
+
     return flat
 
 
-def render_readme(
-    template_path: Path,
-    metrics_path: Path,
-    output_path: Path,
-    repo_root: Optional[Path] = None
-) -> None:
-    """Render README.template → README.md with full templating."""
-    if repo_root is None:
-        repo_root = template_path.parent.parent
-    
-    # Load inputs
-    template = template_path.read_text(encoding='utf-8')
-    metrics = load_metrics(metrics_path)
-    
-    # Render
-    renderer = TemplateRenderer(repo_root, metrics)
-    output = renderer.render(template)
-    
-    # Write
-    output_path.write_text(output, encoding='utf-8')
+def load_arch_exports(neuro_exports_path: Path) -> dict[str, str]:
+    """Load .neuro/exports.toml (arch-derived values) if it exists.
 
-
-def check_readme_stale(
-    template_path: Path,
-    metrics_path: Path,
-    readme_path: Path,
-    repo_root: Optional[Path] = None
-) -> bool:
-    """Return True if README.md is stale (needs regeneration)."""
-    if not readme_path.exists():
-        return True
-    
-    if repo_root is None:
-        repo_root = template_path.parent.parent
-    
-    # Render to temp
-    template = template_path.read_text(encoding='utf-8')
-    metrics = load_metrics(metrics_path)
-    
-    renderer = TemplateRenderer(repo_root, metrics)
-    rendered = renderer.render(template)
-    
-    # Compare
-    current = readme_path.read_text(encoding='utf-8')
-    return rendered.strip() != current.strip()
+    Returns an empty dict if the file is absent — arch exports are
+    optional. Static metrics in docs/readme_metrics.toml always win
+    if both define the same key (caller merges exports first, then metrics).
+    """
+    if not neuro_exports_path.exists():
+        return {}
+    return load_metrics(neuro_exports_path)
 
 
 def render_readme(
@@ -416,14 +391,15 @@ def render_readme(
     output_path: Optional[Path] = None,
     *,
     check: bool = False,
-    repo_root: Optional[Path] = None
+    repo_root: Optional[Path] = None,
+    neuro_exports_path: Optional[Path] = None,
 ) -> tuple[str, bool]:
     """Render README template with full v2 templating (compatible with v1 API).
 
     Parameters
     ----------
     template_path:
-        Path to template file (docs/README.template.md)
+        Path to template file (README.template.md)
     metrics_path:
         Path to metrics TOML (docs/readme_metrics.toml)
     output_path:
@@ -435,7 +411,11 @@ def render_readme(
         is_clean is True iff the file already matches.
     repo_root:
         Repository root for resolving log paths.
-        Defaults to template_path.parent.parent
+        Defaults to template_path.parent
+    neuro_exports_path:
+        Optional path to .neuro/exports.toml generated from arch.neuro
+        # @export directives.  When present its values are merged into
+        the metrics dict *before* the static TOML, so static values win.
 
     Returns
     -------
@@ -450,13 +430,21 @@ def render_readme(
         If template or metrics file does not exist
     """
     if repo_root is None:
-        repo_root = template_path.parent.parent
-    
+        repo_root = template_path.parent
+
+    # Load static metrics
+    metrics = load_metrics(metrics_path)
+
+    # Merge arch exports (arch values are overridden by static metrics)
+    if neuro_exports_path is not None:
+        arch_exports = load_arch_exports(neuro_exports_path)
+        merged = {**arch_exports, **metrics}  # static wins on conflict
+    else:
+        merged = metrics
+
     # Load and render
     template = template_path.read_text(encoding='utf-8')
-    metrics = load_metrics(metrics_path)
-    
-    renderer = TemplateRenderer(repo_root, metrics)
+    renderer = TemplateRenderer(repo_root, merged)
     rendered = renderer.render(template)
 
     # Check mode: compare without writing

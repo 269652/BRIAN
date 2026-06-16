@@ -14,7 +14,7 @@
 BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained causal-LM cortex experts (`${EXPERT_GENERAL_MODEL}` for ${EXPERT_GENERAL_ROLE}, `${EXPERT_CODE_MODEL}` for ${EXPERT_CODE_ROLE}, `${EXPERT_REASONING_MODEL}` for ${EXPERT_REASONING_ROLE}).
 
 **Current status:**
-- ✅ **Layer A (mechanisms):** 20+ core properties verified via ${LAYER_A_TEST_COUNT} unit tests across `tests/` (`tests/dsl/` alone runs 620). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
+- ✅ **Layer A (mechanisms):** ${CORE_PROPERTIES_COUNT} core properties verified via ${LAYER_A_TEST_COUNT} unit tests across `tests/` (`tests/dsl/` alone runs ${DSL_TESTS}). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
 - 🟡 **Layer B (generalization):** Best variant ${LAYER_B_BEST_ROW} achieves **${LAYER_B_BEST_GAP_RATIO} gap_ratio** on WikiText-103-v1 OOD (${LAYER_B_IMPROVEMENT_PCT}% better than flat-transformer baseline at ${LAYER_B_BASELINE_GAP_RATIO}). Best run: train_ppl ${LAYER_B_BEST_TRAIN_PPL}, OOD_ppl ${LAYER_B_BEST_OOD_PPL}. See [`docs/findings.md`](docs/findings.md) for full Layer B arc.
 
 Code, math, and tensor shapes: [`docs/architecture.md`](docs/architecture.md). Full evidence ledger: [`docs/findings.md`](docs/findings.md).
@@ -105,7 +105,7 @@ modulation dopamine -> pfc {
 }
 ```
 
-**Why?** Hand-written PyTorch is error-prone for biologically-plausible models; math specs are checkable. The DSL codegen produces torch modules with **byte-equivalent forward passes** (verified by 620 DSL tests in `tests/dsl/`) and enables symbolic analysis (fixed-point, stability, sensitivity). The DNA layer (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) supports **module bundling with source maps** and **byte-identity round-trip** verification (`tests/test_dna_roundtrip_byte_identity.py`).
+**Why?** Hand-written PyTorch is error-prone for biologically-plausible models; math specs are checkable. The DSL codegen produces torch modules with **byte-equivalent forward passes** (verified by ${DSL_TESTS} DSL tests in `tests/dsl/`) and enables symbolic analysis (fixed-point, stability, sensitivity). The DNA layer (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) supports **module bundling with source maps** and **byte-identity round-trip** verification (`tests/test_dna_roundtrip_byte_identity.py`).
 
 **Folder layout:** `arch.neuro` (package config + wiring), `modules/*.neuro` (per-region specs), `lib/` (shared mechanics). Import paths: `@/` = absolute, `./` = relative.
 
@@ -117,7 +117,7 @@ Full reference: [`docs/dsl.md`](docs/dsl.md). Context: [`docs/architecture.md` �
 
 ### Layer A — Mechanism Verification (Unit Tests) ✅
 
-All 15 core mechanisms confirmed to implement as specified:
+All ${CORE_MECHANISMS_COUNT} core mechanisms confirmed to implement as specified:
 
 | Hypothesis | Test | Result |
 |-----------|------|--------|
@@ -139,31 +139,31 @@ All 15 core mechanisms confirmed to implement as specified:
 | **H20** — `TheoryOfMindIR` represents nested agent beliefs as stalk vectors over a sheaf | `tests/thsd/test_theory_of_mind_ir.py` (9) | ✅ `d_belief`, `max_agents`, `belief_decay ∈ [0,1]`, `order ≥ 1`, `false_belief_threshold ∈ [0,1]` all validated; stalk dimension scales with recursion `order` (k-th order ToM has `stalk_dim = d_belief × max_agents^(k-1)`). |
 | **H21** — Per-position abstain logit unlocks multi-cortex fusion | `tests/training/test_lm_expert_abstain_safety.py` (5) | ✅ Replacing flat `_ABSTAIN_LOGIT = -1e4` with `abstain = max(mapped_logits) − ln(V_trunk)` keeps unmapped trunk-vocab slots at uniform baseline. Standalone-cortex CE on a random batch drops from 17.37 nats (pre-fix) to 4.03 nats (post-fix); on deploy 40925851 the fusion gate `α_eff` stays at 0.50 throughout instead of collapsing to 0 → **14× train-PPL / 17× OOD-PPL improvement** vs the broken precursor 40923107. |
 
-**Run all:** `py -3 -m pytest tests/ -v` (1511 tests, ~110 seconds on CPU)
+**Run all:** `py -3 -m pytest tests/ -v` (${TOTAL_TESTS} tests, ${TEST_RUNTIME_SECONDS} seconds on CPU)
 
 ### Layer B — OOD Generalization (The Open Question) 🟡
 
-Evaluated on WikiText-103-v1 held-out set. **Best result: B4 (abstain-fix + multi-cortex + DNA-arch) achieves 2.87 gap_ratio at step 2000 — first BRIAN variant under 3.0, 53% better than flat baseline.**
+Evaluated on WikiText-103-v1 held-out set. **Best result: ${LAYER_B_BEST_ROW} (abstain-fix + multi-cortex + DNA-arch) achieves ${LAYER_B_BEST_GAP_RATIO} gap_ratio at step ${B4_STEPS} — first BRIAN variant under ${B4_GAP_THRESHOLD}, ${LAYER_B_IMPROVEMENT_PCT}% better than flat baseline.**
 
 | Variant | Params | Train Steps | train_ppl | OOD_ppl | **gap_ratio** | Data |
 |---------|--------|-------------|-----------|---------|---|---|
-| **Flat Transformer (Baseline)** | 106.9M | 80,000 | 66.0 | 404.0 | **6.12** | [`ood_baseline-80k_107M_step80000.json`](results/ood_baseline-80k_107M_step80000.json) |
-| **BRIAN (Trunk + Recursive)** | 108.2M | 5,000 | 216.5 | 1372.8 | 6.34 | [`ood_recursive_108M_step5000.json`](results/ood_recursive_108M_step5000.json) |
-| **BRIAN (Trunk + ReZero)** | 107.8M | 7,000 | 258.8 | 1351.5 | 5.22 | [`ood_rezero-fixed_107M_step7000.json`](results/ood_rezero-fixed_107M_step7000.json) |
-| **BRIAN (PCT trunk)** | 69.2M | 4,000 | 400.9 | 1806.6 | **4.51** | [`ood_pct-30m_68M_step4000.json`](results/ood_pct-30m_68M_step4000.json) |
-| **BRIAN (abstain-fix + multi-cortex, B4)** | **889.6M** | **2,000** | **102.9** | **295.9** | **2.87** | [vast 40925851 log](logs/vast/) — `*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log` |
+| **${B0_VARIANT_NAME}** | ${B0_TRAINABLE} | ${B0_STEPS} | ${B0_TRAIN_PPL} | ${B0_OOD_PPL} | **${B0_GAP_RATIO}** | [`ood_baseline-80k_107M_step80000.json`](results/ood_baseline-80k_107M_step80000.json) |
+| **${B1_VARIANT_NAME}** | ${B1_TRAINABLE} | ${B1_STEPS} | ${B1_TRAIN_PPL} | ${B1_OOD_PPL} | ${B1_GAP_RATIO} | [`ood_recursive_108M_step5000.json`](results/ood_recursive_108M_step5000.json) |
+| **${B2FIX_VARIANT_NAME}** | ${B2FIX_TRAINABLE} | ${B2FIX_STEPS} | ${B2FIX_TRAIN_PPL} | ${B2FIX_OOD_PPL} | ${B2FIX_GAP_RATIO} | [`ood_rezero-fixed_107M_step7000.json`](results/ood_rezero-fixed_107M_step7000.json) |
+| **${B3_VARIANT_NAME}** | ${B3_TRAINABLE} | ${B3_STEPS} | ${B3_TRAIN_PPL} | ${B3_OOD_PPL} | **${B3_GAP_RATIO}** | [`ood_pct-30m_68M_step4000.json`](results/ood_pct-30m_68M_step4000.json) |
+| **${B4_VARIANT_NAME}** | **${B4_TRAINABLE}** | **${B4_STEPS}** | **${B4_TRAIN_PPL}** | **${B4_OOD_PPL}** | **${B4_GAP_RATIO}** | [vast ${B4_VAST_ID} log](logs/vast/) — `*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log` |
 
 **What the table says:**
-1. **B4 wins absolute OOD PPL among BRIAN variants** (295.9 vs ≥1351 for B1–B3). The abstain fix unblocks the multi-cortex fusion pathway, and the full 889M DNA-compiled `BRIANHarness` (3 frozen causal-LM cortex experts + bowtie trunk + every wired module) now contributes signal that earlier variants couldn't access. *B4 used the legacy gpt2/CodeGPT/Qwen2.5 roster; the post-H22 roster (`${EXPERT_GENERAL_MODEL}` + `${EXPERT_CODE_MODEL}` + `${EXPERT_REASONING_MODEL}`) is the 10k follow-up baseline.*
-2. **B4 is also the first BRIAN variant with gap_ratio < 3.0** (2.87, vs 4.51 best prior). The drop from B3's 4.51 to B4's 2.87 is larger than any single prior step in the arc.
-3. **B4 still trails the flat baseline on absolute PPL** (295.9 OOD vs 404.0), but with 40× fewer training steps (2k vs 80k). Matched-compute comparison is the next experiment.
-4. **gap_ratio is drifting upward within B4** (2.05 → 2.87 between step 500 and step 2000). The 10k rerun queued immediately after H21 will distinguish plateau vs accelerating overfit. [See H21 in findings.md for the full trajectory, telemetry, and adjacent issues.](docs/FINDINGS.md#h21--per-position-abstain-logit-fixes-catastrophic-cortex-ce-2026-06-14)
+1. **B4 wins absolute OOD PPL among BRIAN variants** (${B4_OOD_PPL} vs ≥${B2FIX_OOD_PPL} for B1–B3). The abstain fix unblocks the multi-cortex fusion pathway, and the full ${B4_TRAINABLE} DNA-compiled `BRIANHarness` (3 frozen causal-LM cortex experts + bowtie trunk + every wired module) now contributes signal that earlier variants couldn't access. *B4 used the legacy gpt2/CodeGPT/Qwen2.5 roster; the post-H22 roster (`${EXPERT_GENERAL_MODEL}` + `${EXPERT_CODE_MODEL}` + `${EXPERT_REASONING_MODEL}`) is the 10k follow-up baseline.*
+2. **B4 is also the first BRIAN variant with gap_ratio < ${B4_GAP_THRESHOLD}** (${B4_GAP_RATIO}, vs ${B3_GAP_RATIO} best prior). The drop from B3's ${B3_GAP_RATIO} to B4's ${B4_GAP_RATIO} is larger than any single prior step in the arc.
+3. **B4 still trails the flat baseline on absolute PPL** (${B4_OOD_PPL} OOD vs ${B0_OOD_PPL}), but with ${B4_COMPUTE_RATIO_VS_B0} fewer training steps (${B4_STEPS} vs ${B0_STEPS}). Matched-compute comparison is the next experiment.
+4. **gap_ratio is drifting upward within B4** (${B4_GAP_STEP500} → ${B4_GAP_RATIO} between step 500 and step ${B4_STEPS}). The 10k rerun queued immediately after H21 will distinguish plateau vs accelerating overfit. [See H21 in findings.md for the full trajectory, telemetry, and adjacent issues.](docs/FINDINGS.md#h21--per-position-abstain-logit-fixes-catastrophic-cortex-ce-2026-06-14)
 
-**Latest stable full-scale run:** B4 — vast 40925851, A100 SXM4 @ $0.74/hr, branch `master` @ `a22eecc`, completed 2k steps with PPL 102.9 / OOD 295.9 / gap 2.87.
+**Latest stable full-scale run:** B4 — vast ${B4_VAST_ID}, ${B4_GPU_TYPE} @ ${B4_GPU_COST}, branch `master` @ `${B4_GIT_SHA}`, completed ${B4_STEPS} steps with PPL ${B4_TRAIN_PPL} / OOD ${B4_OOD_PPL} / gap ${B4_GAP_RATIO}.
 
 ### Implementation Status
 
-- **1511/1515 tests passing** in `tests/` (4 deselected; ~110s on CPU); breakdown: **620 in `tests/dsl/`** (DSL parsing + codegen + byte-equivalence), **65 in `tests/training/`** (harness, multi-cortex, distillation, gating), plus verification, THSD, evolution, narrative, qualia, neurochem subsuites.
+- **${TOTAL_TESTS}/1515 tests passing** in `tests/` (4 deselected; ${TEST_RUNTIME_SECONDS}s on CPU); breakdown: **${DSL_TESTS} in `tests/dsl/`** (DSL parsing + codegen + byte-equivalence), **65 in `tests/training/`** (harness, multi-cortex, distillation, gating), plus verification, THSD, evolution, narrative, qualia, neurochem subsuites.
 - Training with optimizer-partitioned checkpoint streaming
 - DSL-based architecture specs compile to byte-equivalent PyTorch models with **source maps** (`neuroslm/compiler/module_bundler.py`) and **byte-identity round-trip** verification
 - Real-time architecture evolution via RAID-5 protected DNA mutations, gated by **`ImprovementGate`** (Welch's t-test) — no mutation lands without statistically significant fitness gain

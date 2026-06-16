@@ -624,6 +624,22 @@ to auto-archive known stale files. Then commit the archive move.
 technically accurate. The README is the first thing external visitors
 see. Incorrect claims damage credibility.
 
+**Data-driven requirement:** Every number, metric, or empirical claim in
+`README.template.md` MUST use a `${METRIC}` placeholder from
+`docs/readme_metrics.toml`. NO hardcoded numbers except:
+- Version numbers (Python 3.10+, PyTorch 2.x, IIT 4.0)
+- Architectural constants (11-stage bowtie, 10×10 GridWorld, 28 populations)
+- Code example literals (count: 32, gain: 0.6)
+- Section/anchor references (§12, #12-the-neuro)
+- Hypothesis IDs (H1, H6.5, H22)
+
+**Smoke test enforcement:** Run `pytest tests/test_readme_quality.py` before
+committing README changes. The tests enforce:
+1. No hardcoded empirical claims (use ${METRIC})
+2. All ${METRIC} exist in readme_metrics.toml
+3. No unrendered ${...} in final README.md
+4. All metrics are properly formatted
+
 **Common errors to avoid:**
 
 1. **Wrong compilation pipeline:**
@@ -638,15 +654,17 @@ see. Incorrect claims damage credibility.
      flows trunk-only)"
    - Precision matters. The mechanism must match the actual code.
 
-3. **Stale metrics or results:**
-   - Always use `${METRIC}` placeholders from `docs/readme_metrics.toml`
-   - Never hardcode numbers that will drift (test counts, PPL, params)
+3. **Hardcoded numbers instead of metrics:**
+   - ❌ "1511 tests passing"
+   - ✅ "${TOTAL_TESTS} tests passing" (in template) → "1511 tests passing" (in rendered README)
+   - Update `docs/readme_metrics.toml` when results change
 
 **Proofreading checklist before editing README.template.md:**
 
 - [ ] Is this claim actually true? Check the code/tests/logs.
 - [ ] Does the compilation pipeline match reality? (arch.neuro → IR → PyTorch)
 - [ ] Are all metrics using `${...}` placeholders from readme_metrics.toml?
+- [ ] Did I run `pytest tests/test_readme_quality.py` and fix all violations?
 - [ ] Would a first-time visitor misunderstand this sentence?
 - [ ] Does the code snippet actually run against current HEAD?
 
