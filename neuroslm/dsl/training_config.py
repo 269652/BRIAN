@@ -961,6 +961,9 @@ class TrainingConfig:
     # neuroslm.dsl.regularization.parse_regularization_block; harness
     # consumption lands in PR2.
     regularization: Any = None  # filled with RegularizationConfig in parse_training_config
+    # Geometric Information Funnel (GIF) — 3-mechanism OOD-PPL fix.
+    # Parsed as a raw dict; consumed by neuroslm.emergent.gif.GIFController.
+    gif: Optional[dict] = None
     # Field names the arch declared with a trailing ``!`` (e.g.
     # ``preset!: "cheap_2k"``). These resist global-default merging in
     # :func:`apply_global_defaults`. Never set by users directly —
@@ -1122,6 +1125,8 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.allostasis = _parse_allostasis(props["allostasis"])
     if "fitness" in props:
         cfg.fitness = _parse_fitness(props["fitness"])
+    if "gif" in props:
+        cfg.gif = _parse_novel_topology_dict(props["gif"])
     if "hardware" in props:
         cfg.hardware = _parse_hardware(props["hardware"])
     if "scales" in props:

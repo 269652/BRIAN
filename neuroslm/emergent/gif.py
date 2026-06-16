@@ -47,14 +47,22 @@ class VBBAlphaSchedule:
 
     @classmethod
     def from_config(cls, cfg) -> "VBBAlphaSchedule":
-        """Build from a training_config that has gif_vbb_alpha_* keys."""
+        """Build from a training_config that has gif.* keys.
+
+        Accepts both the Python-native names (vbb_alpha_start/end) and
+        the DSL-friendly names (vbb_alpha_min/max) for resilience.
+        """
         gif = getattr(cfg, "gif", None) or {}
         if isinstance(gif, dict):
             return cls(
-                alpha_start=float(gif.get("vbb_alpha_start", 0.001)),
-                alpha_end=float(gif.get("vbb_alpha_end", 0.05)),
-                ramp_start=int(gif.get("vbb_alpha_ramp_start", 2000)),
-                ramp_end=int(gif.get("vbb_alpha_ramp_end", 5000)),
+                alpha_start=float(gif.get("vbb_alpha_start",
+                                   gif.get("vbb_alpha_min", 0.001))),
+                alpha_end=float(gif.get("vbb_alpha_end",
+                                 gif.get("vbb_alpha_max", 0.05))),
+                ramp_start=int(gif.get("vbb_alpha_ramp_start",
+                                gif.get("vbb_ramp_start", 2000))),
+                ramp_end=int(gif.get("vbb_alpha_ramp_end",
+                              gif.get("vbb_ramp_end", 5000))),
             )
         return cls()
 
@@ -101,14 +109,21 @@ class OODProbe:
 
     @classmethod
     def from_config(cls, cfg) -> "OODProbe":
-        """Build from training_config.gif dict."""
+        """Build from training_config.gif dict.
+
+        Accepts both Python-native names (ood_probe_seqs/every/ema_alpha)
+        and the DSL-friendly names (probe_n_seqs/probe_every/probe_ema_beta).
+        """
         gif = getattr(cfg, "gif", None) or {}
         if isinstance(gif, dict):
             return cls(
-                n_seqs=int(gif.get("ood_probe_seqs", 50)),
+                n_seqs=int(gif.get("ood_probe_seqs",
+                            gif.get("probe_n_seqs", 50))),
                 max_len=int(gif.get("ood_probe_max_len", 512)),
-                probe_every=int(gif.get("ood_probe_every", 100)),
-                ema_alpha=float(gif.get("ood_probe_ema_alpha", 0.1)),
+                probe_every=int(gif.get("ood_probe_every",
+                                 gif.get("probe_every", 100))),
+                ema_alpha=float(gif.get("ood_probe_ema_alpha",
+                                 1.0 - float(gif.get("probe_ema_beta", 0.9)))),
             )
         return cls()
 
@@ -263,9 +278,12 @@ class IsotropySchedule:
         gif = getattr(cfg, "gif", None) or {}
         if isinstance(gif, dict):
             return cls(
-                weight_max=float(gif.get("isotropy_weight_max", 0.01)),
-                ramp_start=int(gif.get("isotropy_ramp_start", 2000)),
-                ramp_end=int(gif.get("isotropy_ramp_end", 5000)),
+                weight_max=float(gif.get("isotropy_weight_max",
+                                  gif.get("iso_weight_max", 0.01))),
+                ramp_start=int(gif.get("isotropy_ramp_start",
+                                gif.get("vbb_ramp_start", 2000))),
+                ramp_end=int(gif.get("isotropy_ramp_end",
+                              gif.get("vbb_ramp_end", 5000))),
             )
         return cls()
 
