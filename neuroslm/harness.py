@@ -693,6 +693,15 @@ class BRIANHarness(nn.Module):
         self.allostasis = None
         self._build_allostasis()
 
+        # ── Geometric Information Funnel (GIF) ──
+        # Three interlocking mechanisms that fix the train-PPL / OOD-PPL
+        # gap divergence: (1) VBB α schedule, (2) OOD probe EMA,
+        # (3) isotropy schedule. Disabled-config ⇒ all three are no-ops,
+        # bit-identical to legacy behaviour. See lib/gif.neuro +
+        # neuroslm/emergent/gif.py for math + rationale.
+        self._gif = None
+        self._build_gif()
+
     @classmethod
     def from_language_model(cls, language_model: nn.Module,
                             vocab_size: int, d_sem: int,
@@ -756,6 +765,9 @@ class BRIANHarness(nn.Module):
         # Synthetic HPA axis (allostasis) — see __init__.
         h.allostasis = None
         h._build_allostasis()
+        # GIF controller — see __init__.
+        h._gif = None
+        h._build_gif()
         return h
 
     # ── Distributed training wrapping (DDP / FSDP) ────────────────────
@@ -1076,6 +1088,24 @@ class BRIANHarness(nn.Module):
         from neuroslm.neurochem.allostasis import AllostaticController
         self.allostasis = AllostaticController(cfg)
 
+    def _build_gif(self) -> None:
+        """Construct the GIFController if enabled in the config.
+
+        When ``cfg.gif.enabled = False`` (default), ``self._gif`` stays
+        ``None`` and every later check short-circuits — bit-identical to
+        legacy behaviour.
+        """
+        gif_cfg = getattr(self.training_config, "gif", None)
+        if gif_cfg is None:
+            self._gif = None
+            return
+        enabled = gif_cfg.get("enabled", False) if isinstance(gif_cfg, dict) else False
+        if not enabled:
+            self._gif = None
+            return
+        from neuroslm.emergent.gif import GIFController
+        self._gif = GIFController.from_config(self.training_config)
+
     def _read_ne_gaba_levels(self) -> tuple[float, float]:
         """Sample current per-batch-mean NE and GABA levels.
 
@@ -1326,7 +1356,16 @@ class BRIANHarness(nn.Module):
         # ── Slot A: KL distillation ──
         # Hinton 2015: scale by T² so the gradient magnitude is
         # comparable to the CE term across different temperatures.
-        gap_for_lambda = self._lm_loss_ema - self._cortex_loss_ema
+        #
+        # GIF-2: when OOD probe is ready, use probe EMA instead of
+        # pre-fusion lm_ema for the gap computation. This gives the
+        # distillation/inhibition gates a TRUE generalisation signal
+        # rather than the systematically-inflated pre-fusion CE.
+        lm_ema_for_gap = self._lm_loss_ema
+        if (self._gif is not None and self._gif.enabled
+                and self._gif.ood_probe.is_ready):
+            lm_ema_for_gap = self._gif.ood_probe.ema
+        gap_for_lambda = lm_ema_for_gap - self._cortex_loss_ema
         lam = self._distillation_lambda(gap_for_lambda)
         if lam > 0.0 and getattr(cfg, "distillation_enabled", False):
             T_dist = float(cfg.distillation_temperature)
@@ -1476,13 +1515,22 @@ class BRIANHarness(nn.Module):
         # Drive signal: gap = cortex - lm (positive ⇒ trunk overtook
         # cortex ⇒ inhibition should rise). Update is a no-op when
         # inhibition_enabled=False (back-compat).
+        #
+        # GIF-2: when OOD probe is ready, use probe EMA as the trunk's
+        # "true" loss so the inhibition gate tracks real generalisation.
+        lm_for_inh = ce_lm
+        if (self._gif is not None and self._gif.enabled
+                and self._gif.ood_probe.is_ready):
+            lm_for_inh = self._gif.ood_probe.ema
         self._update_cortex_inhibition(
-            lm_loss=ce_lm, cortex_loss=ce_cx,
+            lm_loss=lm_for_inh, cortex_loss=ce_cx,
         )
 
         # ── Telemetry ──
         self._metrics["lm_loss_ema"] = float(self._lm_loss_ema)
         self._metrics["cortex_loss_ema"] = float(self._cortex_loss_ema)
+        if self._gif is not None and self._gif.enabled and self._gif.ood_probe.is_ready:
+            self._metrics["gif_ood_probe_ema"] = float(self._gif.ood_probe.ema)
         self._metrics["cortex_inhibition"] = float(self._cortex_inhibition_level)
         self._metrics["alpha_effective"] = self._effective_alpha()
 
@@ -1893,7 +1941,13 @@ class BRIANHarness(nn.Module):
                 gate_scalar = max(0.0, 1.0 + 0.5 * da - 0.7 * gaba)
 
         # ── Branch on VBB ────────────────────────────────────────────
-        alpha = float(getattr(self.training_config, "vbb_alpha", 0.0))
+        # GIF-1: when GIF is enabled, use the scheduled α instead of
+        # the static config value. The schedule ramps from α_start
+        # (loose, 0.001) to α_end (tight, 0.05) over training.
+        if self._gif is not None and self._gif.enabled:
+            alpha = self._gif.vbb_alpha(self._global_step)
+        else:
+            alpha = float(getattr(self.training_config, "vbb_alpha", 0.0))
         use_vbb = (alpha > 0.0
                    and self._vbb_sigma_head is not None
                    and self._vbb_log_beta is not None)
@@ -2010,6 +2064,7 @@ class BRIANHarness(nn.Module):
             self._metrics["pc_reentry_loss"] = float(residual.detach())
             self._metrics["pc_reentry_gate"] = float(gate_scalar)
             self._metrics["pc_reentry_eff_weight"] = float(eff_w)
+            self._metrics["vbb_alpha"] = float(alpha)
             self._metrics["vbb_beta"] = float(beta.detach())
             self._metrics["vbb_kl"] = float(kl.detach())
             self._metrics["vbb_sigma_mean"] = float(sigma.detach().mean())
@@ -2064,7 +2119,11 @@ class BRIANHarness(nn.Module):
         base_w = float(base_weight) if base_weight and float(base_weight) > 0 \
             else float(mspcc_cfg.get("base_weight", 0.05))
         decay = float(mspcc_cfg.get("layer_weight_decay", 0.5))
-        alpha = float(getattr(self.training_config, "vbb_alpha", 0.001))
+        # GIF-1: use scheduled α when GIF is enabled.
+        if self._gif is not None and self._gif.enabled:
+            alpha = self._gif.vbb_alpha(self._global_step)
+        else:
+            alpha = float(getattr(self.training_config, "vbb_alpha", 0.001))
         free_bits = float(getattr(self.training_config, "vbb_free_bits", 0.0))
         log_beta_max = float(getattr(self.training_config,
                                      "vbb_log_beta_max", 0.0))
@@ -2229,7 +2288,20 @@ class BRIANHarness(nn.Module):
         # (DAR / PCC / Isotropy / CMD) to `total`. AdaptiveMixture
         # observes the logits but contributes no loss term (the dataloader
         # reads its ratio via `harness.current_chat_ratio()`).
+        #
+        # GIF-3: when GIF is enabled, override the isotropy weight with
+        # the scheduled value. This activates isotropy even when the
+        # static config says `enabled: false` — GIF takes ownership.
         reg_cfg = getattr(self.training_config, "regularization", None)
+
+        if self._gif is not None and self._gif.enabled and reg_cfg is not None:
+            gif_iso_w = self._gif.isotropy_weight(self._global_step)
+            if gif_iso_w > 0.0:
+                iso_cfg = getattr(reg_cfg, "isotropy", None)
+                if iso_cfg is not None:
+                    iso_cfg.enabled = True
+                    iso_cfg.weight = gif_iso_w
+                    self._metrics["gif_isotropy_weight"] = gif_iso_w
 
         if (reg_cfg is not None and reg_cfg.any_enabled()
                 and self.language_model is not None):
@@ -2626,6 +2698,19 @@ class BRIANHarness(nn.Module):
             )
             for group in optimizer.param_groups:
                 group["lr"] = lr
+
+        # ── GIF-2: OOD probe evaluation ──
+        # Run the held-out OOD CE probe every N steps. The resulting
+        # EMA is used by _cortex_fusion_aux_step to drive the
+        # distillation λ-ramp and inhibition gate with a TRUE
+        # generalisation signal instead of the pre-fusion EMA.
+        if (self._gif is not None and self._gif.enabled
+                and self._gif.ood_probe.should_eval(self._global_step)):
+            if self.language_model is not None:
+                device = ids.device if ids is not None else torch.device("cpu")
+                ce = self._gif.ood_probe.evaluate(
+                    self.language_model, device)
+                self._metrics["gif_ood_probe_ce"] = ce
 
         loss = self.compute_loss(ids, targets, nt_levels=nt_levels)
         accum = max(1, self.training_config.grad_accum)

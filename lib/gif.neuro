@@ -1,0 +1,81 @@
+# -*- coding: utf-8 -*-
+# lib/gif.neuro — Geometric Information Funnel (GIF)
+#
+# Three interlocking mechanisms that fix the train-PPL / OOD-PPL gap
+# divergence identified in the GPT-2 vs SmolLM2 10k forensic
+# (2026-06-16). The root cause is a triple failure:
+#
+#   1. Pre-fusion EMA gives the distillation/inhibition gates a
+#      systematically wrong signal (trunk looks ~7 nats when it's
+#      actually at ~3 nats). Fix: OOD probe EMA.
+#   2. VBB information bottleneck at α=0.001 passes ~5000 nats at
+#      init — the IB is decorative. Fix: scheduled α tightening.
+#   3. Zero OOD regularisation after aux losses collapse to ~3% of
+#      total. Fix: isotropy whitening (cheapest, geometry-dual of Φ).
+#
+# Each equation here is the canonical mathematical statement. Python
+# backing: neuroslm/emergent/gif.py. Contracts: tests/test_gif.py.
+#
+# References:
+#   - Tishby (2000) — Information Bottleneck
+#   - Tononi (2016) — IIT 4.0 (Φ requires compressed representations)
+#   - Mu & Viswanath (2018) — isotropy as OOD robustness proxy
+#   - Friston (2010) — free energy at the bowtie waist
+#   - Skopek et al. (2020) — wrapped Gaussians on Poincaré balls
+
+# ─────────────────────────────────────────────────────────────────────
+# GIF-1: VBB α schedule — maturational IB tightening
+# ─────────────────────────────────────────────────────────────────────
+# The IB should be loose during infancy (let the trunk learn language
+# statistics) and tighten at maturity (force integrated, generalisable
+# representations). This is the developmental analogue of cortical
+# myelination reducing channel capacity.
+#
+# Schedule: piecewise-linear ramp
+#   step < ramp_start   →  α_start  (loose: 0.001)
+#   ramp_start ≤ step ≤ ramp_end  →  linear interpolation
+#   step > ramp_end     →  α_end    (tight: 0.05)
+
+export equation gif_vbb_alpha_schedule {
+    params: [step, alpha_start, alpha_end, ramp_start, ramp_end],
+    formula: "alpha = alpha_start + (alpha_end - alpha_start) * clip((step - ramp_start) / (ramp_end - ramp_start), 0, 1)"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# GIF-2: OOD probe EMA — true generalisation signal for cortex gates
+# ─────────────────────────────────────────────────────────────────────
+# Replace the pre-fusion lm_ema (which tracks the trunk's *unfused*
+# logits — systematically worse than the trunk's real ability) with a
+# held-out OOD CE probe. The probe evaluates the trunk's *post-LM-head*
+# cross-entropy on a cached set of OOD sequences every N steps.
+#
+# The resulting lm_ema_ood is used by:
+#   - _distillation_lambda (gap_nats = lm_ema_ood - cx_ema)
+#   - _update_cortex_inhibition (lm_loss = lm_ema_ood)
+#
+# This makes the cortex retirement gate track the trunk's ACTUAL
+# generalisation, not its raw pre-fusion CE on a single training batch.
+
+export equation gif_ood_probe_ema {
+    params: [ce_ood, ema_prev, alpha_ema],
+    formula: "ema_next = (1 - alpha_ema) * ema_prev + alpha_ema * ce_ood"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# GIF-3: Isotropy commitment at maturity
+# ─────────────────────────────────────────────────────────────────────
+# The isotropy regulariser pushes hidden representations toward an
+# isotropic distribution. This is the Euclidean dual of Φ maximisation:
+# maximally integrated representations have maximal entropy in the
+# directions orthogonal to the task-relevant subspace.
+#
+# We reuse the existing isotropy_loss from lib/regularizers.neuro;
+# the GIF contribution is the *schedule*: isotropy is inactive during
+# infancy and ramps to full weight at maturity, in lockstep with the
+# VBB tightening. This prevents isotropy from fighting early LM
+# learning (the pre-H24 failure mode that disabled all regularisers).
+
+export equation gif_isotropy_schedule {
+    params: [step, weight_max, ramp_start, ramp_end],
+    formula: "weight = weight_max * clip((step - ramp_start) / (ramp_end - ramp_start), 0, 1)"
+}
