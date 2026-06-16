@@ -157,25 +157,42 @@ def _enumerate_logs(root: Path) -> List[Path]:
     p = root / "docs" / "debug.log"
     if p.is_file():
         out.append(p)
-    # Per-run log FOLDERS produced by the 0001 logs-layout migration
-    # (``logs/<YYYYMMDD-HHMMSS>_<arch>_<params>[_<label>]_<instance>/``).
-    # The whole folder is the unit of pruning: a folder is "referenced"
-    # iff its full date-prefixed name appears verbatim somewhere in the
-    # repo (the contained ``train.log`` basename is identical across
-    # every run and so cannot be used as a discriminator). Folder names
-    # are seeded into ``idx.exact`` via ``_FOLDER_TOKEN_RE`` in
-    # ``neuroslm.references``. The folder must contain a ``train.log``
-    # to count — anything else parked under ``logs/`` (vast/, archive/,
-    # ad-hoc dirs the user created) is left alone.
+    
+    # New format (2026-06-16): logs/<YYYYMMDD>/<arch>/<HHMMSS>_<start>_<end>.log
+    # Each .log file is individually enumerated and referenced by its full path.
+    # Pattern: 8-digit date / arch name / 6-digit time + step range
     logs_dir = root / "logs"
+    if logs_dir.is_dir():
+        for date_dir in sorted(logs_dir.iterdir()):
+            if not date_dir.is_dir():
+                continue
+            # Skip non-date folders (vast/, _unsorted_legacy/, etc.)
+            if not date_dir.name.isdigit() or len(date_dir.name) != 8:
+                continue
+            
+            for arch_dir in sorted(date_dir.iterdir()):
+                if not arch_dir.is_dir():
+                    continue
+                
+                # Enumerate all .log files in this arch directory
+                for log_file in sorted(arch_dir.glob("*.log")):
+                    if log_file.is_file():
+                        out.append(log_file)
+    
+    # Legacy per-run log FOLDERS (for backward compatibility during transition)
+    # Format: logs/<YYYYMMDD-HHMMSS>_<arch>_<params>/train.log
+    # or: logs/<YYYYMMDD>/<arch>/<HHMMSS>_<sha>/train.log
     if logs_dir.is_dir():
         for child in sorted(logs_dir.iterdir()):
             if not child.is_dir():
                 continue
-            if child.name == "vast":
-                continue  # legacy flat-layout subdir, walked above
+            if child.name == "vast" or child.name == "_unsorted_legacy":
+                continue
+            if child.name.isdigit() and len(child.name) == 8:
+                continue  # Already handled above (new format date dirs)
             if (child / "train.log").is_file():
                 out.append(child)
+    
     return out
 
 

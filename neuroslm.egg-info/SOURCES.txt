@@ -24,6 +24,7 @@ neuroslm/learned_opt.py
 neuroslm/learning.py
 neuroslm/lora.py
 neuroslm/project_config.py
+neuroslm/readme_metrics.py
 neuroslm/references.py
 neuroslm/regularizers.py
 neuroslm/tokenizer.py
@@ -358,6 +359,7 @@ tests/test_predictive_coding_residual.py
 tests/test_project_config.py
 tests/test_proposal_gate.py
 tests/test_qualia_affective_wiring.py
+tests/test_readme_metrics.py
 tests/test_recursive_reasoning.py
 tests/test_references_exact_only.py
 tests/test_regularizer_warmup.py

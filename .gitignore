@@ -50,19 +50,16 @@ logs/cache/
 # Whitelist raw vast.ai stdout captures and their LLM-produced analyses.
 # These are committed evidence and override the *.log catch-all above.
 #
-# Two patterns:
+# Patterns (2026-06-16 refactor):
 #
-#   ``!logs/vast/**/*.log``       legacy: flat ``logs/vast/<stamp>_..._stepNofN.log``
-#                                  (pre-2026-06-15 captures in the old flat logs/vast/ tree)
-#   ``!logs/????????/*/*/train.log``  canonical 3-level per-run folder layout:
-#                                  ``logs/<YYYYMMDD>/<arch_name>/<HHMMSS>_<sha>/train.log``
-#                                  Exactly 3 path segments after logs/ — this excludes:
-#                                  - flat ``logs/YYYYMMDD-HHMMSS_arch_sha/train.log`` (1 segment)
-#                                  - bare ``logs/YYYYMMDD/arch/HHMMSS_sha/train.log``
-#                                    where arch="arch" (not a real arch name; produced by
-#                                    old log_pusher versions that don't set $ARCH_NAME)
-#   ``!logs/analyzed/...``         LLM analyses of the above.
+#   ``!logs/vast/**/*.log``           legacy flat layout (pre-2026-06-15)
+#   ``!logs/????????/*/*.log``        NEW: logs/<YYYYMMDD>/<arch>/<HHMMSS>_<start>_<end>.log
+#                                     Each .log file directly in arch folders
+#   ``!logs/????????/*/*/train.log``  legacy 3-level: logs/<date>/<arch>/<folder>/train.log
+#                                     (transition period support)
+#   ``!logs/analyzed/...``            LLM analyses
 !logs/vast/**/*.log
+!logs/????????/*/*.log
 !logs/????????/*/*/train.log
 !logs/analyzed/*.md
 !logs/analyzed/INSTRUCTIONS.md

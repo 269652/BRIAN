@@ -153,7 +153,7 @@ window with stride 512 / seq_len 1024, GPT-2 BPE tokenizer
 | **B3** PCT (loss-only, 30M preset) | `arch/predictive-coding-trunk` | 4000 (best) | 69.2M | 400.9 | 1806.6 | **4.51** | STRONG OVERFITTING (but lowest ratio so far) | `results/ood_pct-30m_68M_step4000.json` |
 | **B4** abstain-fix + multi-cortex (30m_p4 scale, full DNA) | `master` @ `a22eecc` | 2000 | **889.6M** | **102.9** | **295.9** | **2.87** | **NEW BAND** (gap 2.0–3.0) | `logs/vast/20260614*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log` |
 | **B5** H21 10k rerun (same GPT-2 roster, h24-cfd label) | `master` @ `8d7140c` | 3000 (mid-run, in progress) | 889.6M | **45.0** | **130.1** | 2.89 | COMPARABLE to B4 (dramatically better abs PPL; gap stable) | `logs/vast/20260615T092922Z_cd3a9493b050_arch_889M_h24-cfd-10k-dna-arch_step3540of10k.log` |
-| **B6** H22 SmolLM2 upgrade (1.12B total, DNA-arch 10k) | `master` @ `c19bf62` | 10000 | **1127M** (146.9M trainable) | **23.6** | **155.0** | 6.55 | GAP REGRESSION vs B4 (better abs PPL; overfit worsened) | `logs/vast/20260615T185105Z_41084160_arch_unk_dna-arch_step10kof10k.log` |
+| **B6** H22 SmolLM2 upgrade (1.12B total, DNA-arch 10k) | `master` @ `c19bf62` | 10000 | **1127M** (146.9M trainable) | **23.6** | **155.0** | 6.55 | GAP REGRESSION vs B4 (better abs PPL; overfit worsened) | `logs/20260615/neuroslm-full-dna-arch/175931_0_10000.log` |
 
 B5 and B6 numbers are read directly from the training logs. B5 is a
 mid-run snapshot (step 3000 of 10k); final B5 numbers pending. B6 is
@@ -486,7 +486,7 @@ better per-mapped-token quality outweighs its coverage haircut.
   | 10000 (final) | **23.6** | **155.0** | **6.55** |
 
 - **Canonical checkpoint:** `hf://moritzroessler/BRIAN/checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt`
-- **Log:** `logs/vast/20260615T185105Z_41084160_arch_unk_dna-arch_step10kof10k.log`
+- **Log:** `logs/20260615/neuroslm-full-dna-arch/175931_0_10000.log`
 - **Outcome.** ❌ **FALSIFIED on gap_ratio.** SmolLM2 upgrade dramatically
   improves absolute train PPL (23.6 at 10k vs 102.9 for B4 at 2k;
   even vs B5's 45.0 at 3k), but gap_ratio REGRESSES from 2.87 (B4)

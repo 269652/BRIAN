@@ -135,34 +135,41 @@ _format_steps() {
     fi
 }
 
+_start_step() {
+    # Extract the FIRST "step N" from the log (for resumed runs this will
+    # be > 0). Returns 0 if log is empty or unparseable.
+    local n
+    n="$(grep -oE "^step[[:space:]]+[0-9]+" "$SOURCE_LOG" 2>/dev/null \
+                | head -1 | awk '{print $2}')"
+    echo "${n:-0}"
+}
+
 _compose_logfile() {
-    # Folder name uses fields that DON'T mutate during the run
-    # (boot stamp, arch name, git short sha) so the destination path
-    # is stable from the first push to the final one. Step counts and
-    # params still flow into the *commit message* via the call site,
-    # they just don't go in the filename anymore.
+    # New layout (2026-06-16): step range in filename, not generic train.log
     #
-    # Layout (3-level hierarchy: day → arch → per-run leaf):
-    #   logs/<YYYYMMDD>/<arch>/<HHMMSS>_<short-sha>/train.log
+    # Layout (2-level hierarchy: day → arch):
+    #   logs/<YYYYMMDD>/<arch>/<HHMMSS>_<start>_<end>.log
     #
-    # This matches neuroslm/migrations/0001_logs_to_run_folders.py
-    # ::_new_folder_name exactly, so 'brian migrate 0001' is a no-op
-    # after a deploy — the pusher already writes the canonical path.
-    # The day/arch levels let `ls logs/` group runs by what humans
-    # actually search by (which day was this? which arch?). Previously
-    # the layout was flat ``logs/<date>-<time>_<arch>_<sha>/`` which
-    # made ``ls logs/`` a long undifferentiated dump.
-    local day time_of_day short_sha
+    # Where:
+    #   HHMMSS = boot time (UTC)
+    #   start  = first step in log (0 for fresh runs, >0 for resumed)
+    #   end    = current/final step
+    #
+    # The filename updates with each push as the step count advances.
+    # Previous filenames are removed (git rm) to avoid accumulating
+    # <time>_0_1000.log, <time>_0_2000.log, etc.
+    local day time_of_day start_step cur_step
     # 20260615T185105Z → day=20260615  time_of_day=185105
     day="${BOOT_TIMESTAMP:0:8}"
     time_of_day="${BOOT_TIMESTAMP:9:6}"
-    # Git short sha of HEAD on the on-box clone. Falls back to "nohead"
-    # if we're somehow not in a repo (the cd at startup already failed
-    # in that case, so this is belt-and-braces).
-    short_sha="$(git rev-parse --short=12 HEAD 2>/dev/null || echo nohead)"
-    local folder="logs/${day}/${ARCH_NAME}/${time_of_day}_${short_sha}"
+    
+    # Determine step range from log content
+    start_step="$(_start_step)"
+    cur_step="$(_current_step)"
+    
+    local folder="logs/${day}/${ARCH_NAME}"
     mkdir -p "$folder"
-    echo "${folder}/train.log"
+    echo "${folder}/${time_of_day}_${start_step}_${cur_step}.log"
 }
 
 # In-container git identity for the commits.
@@ -355,11 +362,21 @@ while true; do
         NEW_BUCKET="$CUR_BUCKET"
     fi
 
-    # Stable per-run path — same every iteration since BOOT_TIMESTAMP,
-    # ARCH_NAME and git short-sha don't change during the run. Means:
-    # we just overwrite the destination file in place, no need to
-    # ``git rm`` a previous step's filename.
+    # Compute new log path with current step range
     LOG_REL="$(_compose_logfile)"
+    
+    # Remove any previous log files for this run (same boot time, different step range)
+    # Pattern: logs/<day>/<arch>/<boot_time>_*_*.log
+    day="${BOOT_TIMESTAMP:0:8}"
+    time_of_day="${BOOT_TIMESTAMP:9:6}"
+    OLD_PATTERN="logs/${day}/${ARCH_NAME}/${time_of_day}_*_*.log"
+    for old_log in $OLD_PATTERN; do
+        if [ -f "$old_log" ] && [ "$old_log" != "$LOG_REL" ]; then
+            git rm -f "$old_log" 2>/dev/null || rm -f "$old_log"
+        fi
+    done
+    
+    # Copy current log to new path
     cp -f "$SOURCE_LOG" "$LOG_REL"
 
     git add "$LOG_REL"

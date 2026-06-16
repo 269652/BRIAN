@@ -672,79 +672,69 @@ Anti-patterns to refuse:
 
 ### 10.1 Log naming + boot-stamp forensics (audit trail contract)
 
-**Every** training log **must** live in a per-run folder named with a
-UTC boot timestamp and **every** log body **must** open with a 3-line
-boot stamp. This is the contract that makes a deploy auditable months
-later without git archaeology.
+**Every** training log **must** be named with step range in the filename
+and **every** log body **must** open with a 3-line boot stamp. This is
+the contract that makes a deploy auditable months later without git
+archaeology.
 
-**Folder + filename format** (enforced by
-`scripts/log_pusher.sh::_compose_logfile` and the
-`0001_logs_to_run_folders` migration's `_new_folder_name`):
+**Filename format** (enforced by `scripts/log_pusher.sh::_compose_logfile`
+and the `0002_log_name_refactor` migration):
 
 ```
-logs/<YYYYMMDD>/<arch>/<HHMMSS>_<short-sha>/train.log
+logs/<YYYYMMDD>/<arch>/<HHMMSS>_<start>_<end>.log
 ```
 
-Three-level hierarchy: **day → arch → per-run leaf**. The day comes
-from `${BOOT_TIMESTAMP:0:8}`, the arch from `$ARCH_NAME` (the same
-value used by `brian train --arch <name>`), and the leaf from
-`${BOOT_TIMESTAMP:9:6}_<git-short-sha-12>`. The leaf filename is
-always `train.log` (stable per run — no `_PREV_LOG` cleanup race).
+Two-level hierarchy: **day → arch**, with step-range filenames. The day
+comes from `${BOOT_TIMESTAMP:0:8}`, the arch from `$ARCH_NAME` (the same
+value used by `brian train --arch <name>`), and the filename encodes:
+- `HHMMSS` = boot time (UTC) from `${BOOT_TIMESTAMP:9:6}`
+- `start` = first step number (0 for fresh runs, >0 for resumed)
+- `end` = last/current step number
 
 The hierarchy mirrors how a human searches the directory: `ls logs/`
 shows the days, `ls logs/<day>/` shows which architectures ran that
-day, `ls logs/<day>/<arch>/` shows each individual run with its boot
-time and exact deployed commit.
+day, `ls logs/<day>/<arch>/` shows each run with its boot time and
+step range visible at a glance.
 
 Worked example:
 
 ```
-logs/20260614/arch_889M/160423_af758c381388/train.log
-└──── day ──┴── arch ──┴─ time ─┴── short sha ─┘
+logs/20260615/neuroslm-full-dna-arch/175931_0_10000.log
+└─── day ─┴──────── arch ────────┴─ time ─┴─ steps ─┘
 ```
 
-- The 12-char short sha pins the **exact deployed commit** (a 7-char
-  abbreviation collides too often once the repo has > ~10k commits).
-- The HHMMSS time means two runs of the same arch on the same day still
-  land in distinct leaf folders without coordinating run-ids.
+- The HHMMSS boot time provides unique per-run identity (two runs on
+  the same day still get distinct filenames without coordinating ids).
+- The step range makes completion status immediately visible without
+  opening the file (e.g., `175931_0_7800.log` vs `175931_0_10000.log`).
+- The filename updates on each push as training progresses — old files
+  with lower step counts are removed automatically.
 - `BOOT_TIMESTAMP` is set ONCE in `scripts/vast_train.sh` via
   `date -u +%Y%m%dT%H%M%SZ` and propagated as an env var to both the
-  background `log_pusher.sh` and the final one-shot push. The same
-  timestamp is used by `_print_boot_stamp` line 1 so the folder name
-  and the log body agree exactly.
-- The day prefix means directory listings sort chronologically and
-  reused vast.ai instance ids never alias (regression: deploy 40923107
-  silently clobbered 40921910 on instance `38569395` before this rule
-  existed).
+  background `log_pusher.sh` and the final one-shot push.
 
 **Layout history** (kept here so legacy log paths still parse):
 
-| Era                | Path                                                                                     |
-| ------------------ | ---------------------------------------------------------------------------------------- |
-| pre-2026-06-15     | `logs/vast/<stamp>_<id>_..._stepNofN.log` (flat)                                         |
-| 2026-06-15-am      | `logs/vast/<YYYYMMDD>/<ARCH>/<stamp>_<id>_..._stepNofN.log` (nested, mutating leaf name) |
-| 2026-06-15-pm      | `logs/<YYYYMMDD>-<HHMMSS>_<arch>_<sha>/train.log` (flat per-run folder)                  |
-| 2026-06-15-eve     | `logs/<YYYYMMDD>/<arch>/<HHMMSS>_<sha>/train.log` (3-level hierarchy — **current**)      |
+| Era                | Path                                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| pre-2026-06-15     | `logs/vast/<stamp>_<id>_..._stepNofN.log` (flat)                                                             |
+| 2026-06-15-am      | `logs/vast/<YYYYMMDD>/<ARCH>/<stamp>_<id>_..._stepNofN.log` (nested, mutating leaf name)                     |
+| 2026-06-15-pm      | `logs/<YYYYMMDD>-<HHMMSS>_<arch>_<sha>/train.log` (flat per-run folder)                                      |
+| 2026-06-15-eve     | `logs/<YYYYMMDD>/<arch>/<HHMMSS>_<sha>/train.log` (3-level hierarchy)                                        |
+| 2026-06-16         | `logs/<YYYYMMDD>/<arch>/<HHMMSS>_<start>_<end>.log` (step-range filename — **current**)                     |
 
-The `0001_logs_to_run_folders` migration normalises everything from
-the first three eras into the current layout. Re-running it is
-idempotent (the ledger at `.brian/migrations.json` tracks APPLIED
-status).
+The `0001_logs_to_run_folders` migration normalised eras 1-3 into the
+3-level layout. The `0002_log_name_refactor` migration converts era 4
+into the current step-range format. Both are idempotent (tracked in
+`.brian/migrations.json`).
 
-**Recent log snapshots** (referenced so the `0001_logs_to_run_folders`
-migration's reference gate picks them up — without an explicit mention
-the migration skips them and they stay in `logs/vast/` permanently):
+**Key log reference** (for migration/clean protection):
 
-- `20260615T185105Z_41084160_arch_unk_dna-arch_step10kof10k.log` —
-  889M DNA-arch run that pushed step5000 / step7500 / step10000
-  checkpoints to HF. First run after the rebase-first log_pusher fix
-  (f8ebb78) — the snapshot itself was rescued by hand because the
-  push pipeline was still broken at deploy time (gitignore whitelist
-  didn't cover the nested layout — fixed in 29522f9).
-- `20260615T081830Z_6b30c8a74f29_arch_889M_h24-cfd-3k-dna-arch_step3kof3k.log`
-  — 3k-step h24-cfd baseline.
-- `20260615T092922Z_cd3a9493b050_arch_889M_h24-cfd-10k-dna-arch_step3540of10k.log`
-  — h24-cfd 10k-step extension (terminated at step3540).
+- `logs/20260615/neuroslm-full-dna-arch/175931_0_10000.log` —
+  H22 SmolLM2 upgrade run, 1.12B total params (146.9M trainable),
+  WikiText-103 PPL 155.0, train PPL 23.6, gap_ratio 6.55. First
+  complete 10k run with the new cortex fusion stack. Checkpoint:
+  `hf://moritzroessler/BRIAN/checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt`
 
 **Boot stamp format** (enforced by
 `neuroslm/train_dsl.py::_print_boot_stamp`, called from `main()`):

@@ -5,6 +5,12 @@
       "commit": "527891e05033fdf754dd4662f5342a790caf1897",
       "host": "WKWZTZk8PFOFztu",
       "ops_applied": 0
+    },
+    "0002_log_name_refactor": {
+      "applied_at_utc": "2026-06-16T08:54:33Z",
+      "commit": "83db76b7350935eee2061d31d2060b82fbdd07ba",
+      "host": "WKWZTZk8PFOFztu",
+      "ops_applied": 15
     }
   },
   "version": 1
