@@ -465,6 +465,11 @@ training {
       probe_every:      100
       probe_ema_beta:   0.9
       iso_weight_max:   0.01
+      # Log-normalized IB (Riemannian softening):
+      # eff_kl = κ·log(1 + KL/κ). Compresses the enormous early KL
+      # (25000→κ·ln(250)≈1100) while letting small KL pass through
+      # linearly. Eliminates the schedule-vs-KL magnitude mismatch.
+      kl_kappa:         200
     }
     # â”€â”€ MDRV-VBB anti-collapse stabilisers (VBB-v2, Jun 2026) â”€â”€â”€â”€â”€â”€
     # Three interlocking mechanisms that prevent the Î²â†‘/Ïƒâ†“ co-collapse

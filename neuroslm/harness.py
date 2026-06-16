@@ -2057,8 +2057,23 @@ class BRIANHarness(nn.Module):
         if entropy_eta > 0.0:
             pec_term = -entropy_eta * 0.5 * log_var.mean()
 
-        # ── Free energy: β·r − log β + α·KL + PEC ────────────────────
-        free_energy = beta * residual - torch.log(beta) + alpha * kl + pec_term
+        # ── Free energy: β·r − log β + α·KL_norm + PEC ───────────────
+        # GIF Log-Normalized IB (Riemannian softening):
+        # Instead of α·KL (Euclidean), use α·κ·log(1 + KL/κ).
+        # This is the natural metric on the divergence manifold:
+        #   - KL ≪ κ (compressed): eff_kl ≈ KL  (full linear pressure)
+        #   - KL ≫ κ (early/chaotic): eff_kl ≈ κ·ln(KL/κ) (log compression)
+        # Eliminates the need for α-schedules: the geometry IS the schedule.
+        # κ (kappa) = crossover scale ≈ target KL/dim × d_model.
+        gif_kappa = float(getattr(self.training_config, "vbb_kl_kappa", 0.0))
+        if gif_kappa <= 0.0 and self._gif is not None and self._gif.enabled:
+            gif_cfg = getattr(self.training_config, "gif", None) or {}
+            gif_kappa = float(gif_cfg.get("kl_kappa", 0.0))
+        if gif_kappa > 0.0:
+            kl_norm = gif_kappa * torch.log1p(kl / gif_kappa)
+        else:
+            kl_norm = kl
+        free_energy = beta * residual - torch.log(beta) + alpha * kl_norm + pec_term
 
         eff_w = base_weight * gate_scalar
         try:
@@ -2070,6 +2085,8 @@ class BRIANHarness(nn.Module):
             self._metrics["vbb_kl"] = float(kl.detach())
             self._metrics["vbb_sigma_mean"] = float(sigma.detach().mean())
             self._metrics["vbb_free_energy"] = float(free_energy.detach())
+            if gif_kappa > 0.0:
+                self._metrics["vbb_kl_norm"] = float(kl_norm.detach())
             if entropy_eta > 0.0:
                 pec_val = pec_term if isinstance(pec_term, float) \
                     else float(pec_term.detach())
@@ -2131,6 +2148,11 @@ class BRIANHarness(nn.Module):
                                      "vbb_log_beta_max", 0.0))
         entropy_eta = float(getattr(self.training_config,
                                     "vbb_entropy_eta", 0.0))
+        # Resolve kl_kappa for the log-normalized IB.
+        mspcc_kappa = float(getattr(self.training_config, "vbb_kl_kappa", 0.0))
+        if mspcc_kappa <= 0.0 and self._gif is not None and self._gif.enabled:
+            gif_cfg = getattr(self.training_config, "gif", None) or {}
+            mspcc_kappa = float(gif_cfg.get("kl_kappa", 0.0))
         loss = compute_mspcc_loss(
             layer_outs,
             base_weight=base_w,
@@ -2139,6 +2161,7 @@ class BRIANHarness(nn.Module):
             free_bits=free_bits,
             log_beta_max=log_beta_max,
             entropy_eta=entropy_eta,
+            kl_kappa=mspcc_kappa,
         )
         if loss is None:
             return None

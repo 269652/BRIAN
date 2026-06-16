@@ -74,7 +74,8 @@ def _vbb_layer_term(h_low: torch.Tensor,
                     alpha: float,
                     free_bits: float,
                     log_beta_max: float,
-                    entropy_eta: float) -> torch.Tensor:
+                    entropy_eta: float,
+                    kl_kappa: float = 0.0) -> torch.Tensor:
     """Compute one layer-pair's free-energy term.
 
     No learned predictor W here — we use the identity predictor
@@ -128,8 +129,18 @@ def _vbb_layer_term(h_low: torch.Tensor,
     if entropy_eta > 0.0:
         pec = -entropy_eta * 0.5 * log_var.mean()
 
+    # ── Log-normalized KL (Riemannian softening) ──────────────────
+    # When kl_kappa > 0, compress the KL contribution via
+    #   eff_kl = κ·log(1 + KL/κ)
+    # which saturates at κ·ln(KL/κ) for large KL and is ≈ KL for
+    # small KL, making the IB pressure intrinsically scale-invariant.
+    if kl_kappa > 0.0:
+        kl_eff = kl_kappa * torch.log1p(kl / kl_kappa)
+    else:
+        kl_eff = kl
+
     # Free energy.
-    return beta * residual - log_beta + alpha * kl + pec
+    return beta * residual - log_beta + alpha * kl_eff + pec
 
 
 def compute_mspcc_loss(layer_outputs: List[torch.Tensor],
@@ -138,7 +149,8 @@ def compute_mspcc_loss(layer_outputs: List[torch.Tensor],
                        alpha: float,
                        free_bits: float,
                        log_beta_max: float,
-                       entropy_eta: float
+                       entropy_eta: float,
+                       kl_kappa: float = 0.0
                        ) -> Optional[torch.Tensor]:
     """Multi-Scale Predictive Coding Cascade loss.
 
@@ -197,7 +209,8 @@ def compute_mspcc_loss(layer_outputs: List[torch.Tensor],
         else:
             h_high_aligned = h_high
         term = _vbb_layer_term(h_low, h_high_aligned, alpha,
-                               free_bits, log_beta_max, entropy_eta)
+                               free_bits, log_beta_max, entropy_eta,
+                               kl_kappa)
         w = float(weights[ell])
         # Convert to tensor on the right device for the multiplication.
         w_t = torch.as_tensor(w, device=device, dtype=dtype)
