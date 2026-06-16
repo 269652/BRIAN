@@ -464,6 +464,7 @@ training {
       probe_ema_beta:   0.9
       iso_weight_max:   0.01
       kl_kappa:         200
+      label_smooth_max: 0.05
     }
     # â”€â”€ MDRV-VBB anti-collapse stabilisers (VBB-v2, Jun 2026) â”€â”€â”€â”€â”€â”€
     # Three interlocking mechanisms that prevent the Î²â†‘/Ïƒâ†“ co-collapse

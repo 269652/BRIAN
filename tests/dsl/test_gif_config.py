@@ -551,5 +551,155 @@ class TestAdaptiveGIFRamp:
         )
 
 
+# ════════════════════════════════════════════════════════════════════
+# GIF-4: Gap-Driven Label Smoothing
+# ════════════════════════════════════════════════════════════════════
+
+
+class TestGapDrivenLabelSmoothing:
+    """Gap-driven label smoothing: ε = ε₀ · clamp(gap/target − 1, 0, 1).
+
+    Geometric interpretation: as the gap ratio exceeds the target, the
+    CE target moves from the simplex vertex (one-hot) toward the interior
+    (uniform prior). Self-correcting: as gap falls, smoothing withdraws.
+    """
+
+    def _make_ctrl(self, label_smooth_max=0.05, target=1.5, **kw):
+        return GIFController(
+            vbb_schedule=VBBAlphaSchedule(
+                alpha_start=0.001, alpha_end=0.05,
+                ramp_start=500, ramp_end=3000,
+            ),
+            isotropy_schedule=IsotropySchedule(),
+            enabled=True,
+            adaptive=True,
+            target_gap_ratio=target,
+            label_smooth_max=label_smooth_max,
+            **kw,
+        )
+
+    # ── Config parsing ──
+
+    def test_label_smooth_max_default_zero(self):
+        """Disabled by default — zero smoothing when key absent."""
+        ctrl = GIFController(enabled=True, adaptive=True)
+        assert ctrl.label_smooth_max == 0.0
+        assert ctrl.label_smoothing == 0.0
+
+    def test_label_smooth_max_from_config(self):
+        """Config key gif.label_smooth_max is parsed."""
+        cfg = type("C", (), {"gif": {
+            "enabled": True, "adaptive": True,
+            "label_smooth_max": 0.08,
+            "vbb_alpha_min": 0.001, "vbb_alpha_max": 0.05,
+            "vbb_ramp_start": 500, "vbb_ramp_end": 3000,
+        }})()
+        ctrl = GIFController.from_config(cfg)
+        assert ctrl.label_smooth_max == pytest.approx(0.08)
+
+    # ── Formula: ε = ε₀ · clamp(gap/target − 1, 0, 1) ──
+
+    def test_zero_when_no_gap_data(self):
+        """Before any OOD eval, gap_ratio is 0 → ε = 0."""
+        ctrl = self._make_ctrl()
+        assert ctrl.label_smoothing == pytest.approx(0.0)
+
+    def test_zero_when_gap_at_target(self):
+        """gap_ratio = target → excess = 0 → ε = 0."""
+        ctrl = self._make_ctrl(target=1.5)
+        ctrl._last_gap_ratio = 1.5
+        assert ctrl.label_smoothing == pytest.approx(0.0)
+
+    def test_zero_when_gap_below_target(self):
+        """gap_ratio < target → ε = 0."""
+        ctrl = self._make_ctrl(target=1.5)
+        ctrl._last_gap_ratio = 1.2
+        assert ctrl.label_smoothing == pytest.approx(0.0)
+
+    def test_half_max_at_midpoint(self):
+        """gap_ratio = 1.5 × target → excess = 0.5 → ε = 0.5 × ε₀."""
+        ctrl = self._make_ctrl(label_smooth_max=0.06, target=2.0)
+        ctrl._last_gap_ratio = 3.0  # 1.5 × target
+        assert ctrl.label_smoothing == pytest.approx(0.03)
+
+    def test_full_max_at_double_target(self):
+        """gap_ratio = 2 × target → excess = 1 → ε = ε₀ (saturates)."""
+        ctrl = self._make_ctrl(label_smooth_max=0.05, target=1.5)
+        ctrl._last_gap_ratio = 3.0  # 2 × 1.5
+        assert ctrl.label_smoothing == pytest.approx(0.05)
+
+    def test_clamped_above_double_target(self):
+        """gap_ratio = 5 × target → still ε = ε₀ (clamped)."""
+        ctrl = self._make_ctrl(label_smooth_max=0.05, target=1.5)
+        ctrl._last_gap_ratio = 7.5  # 5 × target
+        assert ctrl.label_smoothing == pytest.approx(0.05)
+
+    def test_linear_scaling_in_active_region(self):
+        """Between target and 2×target, ε scales linearly."""
+        ctrl = self._make_ctrl(label_smooth_max=0.10, target=2.0)
+        # gap=2.5 → excess = 2.5/2.0 - 1 = 0.25 → ε = 0.025
+        ctrl._last_gap_ratio = 2.5
+        assert ctrl.label_smoothing == pytest.approx(0.025)
+        # gap=3.0 → excess = 0.5 → ε = 0.05
+        ctrl._last_gap_ratio = 3.0
+        assert ctrl.label_smoothing == pytest.approx(0.05)
+        # gap=3.5 → excess = 0.75 → ε = 0.075
+        ctrl._last_gap_ratio = 3.5
+        assert ctrl.label_smoothing == pytest.approx(0.075)
+
+    def test_disabled_when_max_zero(self):
+        """label_smooth_max = 0 → always 0, regardless of gap."""
+        ctrl = self._make_ctrl(label_smooth_max=0.0)
+        ctrl._last_gap_ratio = 10.0
+        assert ctrl.label_smoothing == pytest.approx(0.0)
+
+    def test_disabled_when_not_adaptive(self):
+        """Non-adaptive GIF → label_smoothing always 0."""
+        ctrl = GIFController(
+            enabled=True, adaptive=False,
+            label_smooth_max=0.05,
+            target_gap_ratio=1.5,
+        )
+        ctrl._last_gap_ratio = 5.0
+        assert ctrl.label_smoothing == pytest.approx(0.0)
+
+    # ── Integration with update() ──
+
+    def test_smoothing_responds_to_update(self):
+        """After update() computes a gap ratio, label_smoothing reflects it."""
+        ctrl = self._make_ctrl(label_smooth_max=0.05, target=1.5)
+        ctrl.ood_probe._n_evals = 1
+        ctrl.ood_probe._ema = 5.5   # OOD CE
+        ctrl.update(step=1000, lm_loss_ema=4.5)
+        # gap = exp(5.5 - 4.5) = e ≈ 2.718
+        # excess = 2.718/1.5 - 1 = 0.812
+        # ε = 0.05 * clamp(0.812, 0, 1) = 0.0406
+        expected_gap = math.exp(1.0)
+        expected_excess = expected_gap / 1.5 - 1.0
+        expected_eps = 0.05 * max(0.0, min(1.0, expected_excess))
+        assert ctrl.label_smoothing == pytest.approx(expected_eps, rel=1e-3)
+
+    def test_smoothing_drops_when_gap_falls(self):
+        """If gap improves (drops below target), smoothing goes to zero."""
+        ctrl = self._make_ctrl(label_smooth_max=0.05, target=1.5)
+        # First: gap above target
+        ctrl._last_gap_ratio = 2.5
+        assert ctrl.label_smoothing > 0
+        # Then: gap drops to 1.2 (below target)
+        ctrl._last_gap_ratio = 1.2
+        assert ctrl.label_smoothing == pytest.approx(0.0)
+
+    def test_live_smollm_has_label_smooth_max(self):
+        """Pin: SmolLM arch declares gap-driven label smoothing."""
+        arch_root = Path(__file__).resolve().parents[2] / "architectures" / "SmolLM"
+        if not (arch_root / "arch.neuro").is_file():
+            pytest.skip("SmolLM arch not present")
+        cfg = load_training_config_from_arch(arch_root)
+        ctrl = GIFController.from_config(cfg)
+        assert ctrl.label_smooth_max > 0, (
+            "SmolLM GIF must have label_smooth_max > 0 — check arch.neuro"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

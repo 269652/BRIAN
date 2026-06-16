@@ -470,6 +470,13 @@ training {
       # (25000→κ·ln(250)≈1100) while letting small KL pass through
       # linearly. Eliminates the schedule-vs-KL magnitude mismatch.
       kl_kappa:         200
+      # GIF-4: Gap-driven label smoothing (Bayesian shrinkage).
+      # ε = ε₀ · clamp(gap_ratio/target − 1, 0, 1).
+      # Moves CE target from simplex vertex toward interior when
+      # the generalisation gap exceeds target.  Self-correcting:
+      # as gap falls, smoothing withdraws.  Saturates at ε₀ when
+      # gap ≥ 2× target.
+      label_smooth_max: 0.05
     }
     # â”€â”€ MDRV-VBB anti-collapse stabilisers (VBB-v2, Jun 2026) â”€â”€â”€â”€â”€â”€
     # Three interlocking mechanisms that prevent the Î²â†‘/Ïƒâ†“ co-collapse

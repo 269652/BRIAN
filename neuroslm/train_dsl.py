@@ -750,6 +750,8 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
         parts.append(f"ood_ema={m.get('gif_ood_probe_ema', 0.0):.2f}")
         parts.append(f"ood_ce={m.get('gif_ood_probe_ce', 0.0):.2f}")
         parts.append(f"iso_w={m.get('gif_isotropy_weight', 0.0):.4f}")
+        if "gif_label_smooth" in m:
+            parts.append(f"ls={m['gif_label_smooth']:.3f}")
         gif_str = " | gif[" + " ".join(parts) + "]"
     # Emergent C1–C6 telemetry tail (printed only when those keys are
     # present, so legacy runs without enable_emergent see no change).

@@ -465,7 +465,8 @@ training {
         isotropy_weight_max:    0.01,
         isotropy_ramp_start:    500,
         isotropy_ramp_end:      3000,
-        kl_kappa:               200
+        kl_kappa:               200,
+        label_smooth_max:       0.05
     }
     # â”€â”€ MDRV-VBB anti-collapse stabilisers (VBB-v2, Jun 2026) â”€â”€â”€â”€â”€â”€
     # Three interlocking mechanisms that prevent the Î²â†‘/Ïƒâ†“ co-collapse

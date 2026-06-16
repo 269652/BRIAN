@@ -2665,6 +2665,15 @@ class BRIANHarness(nn.Module):
         """
         batch, seq_len, vocab = logits.shape
         ls = self.training_config.label_smoothing
+        # GIF-4: gap-driven label smoothing overrides static config.
+        # ε = ε₀ · clamp(gap_ratio/target − 1, 0, 1).
+        # Self-correcting: as gap falls, smoothing withdraws to zero.
+        _gif = getattr(self, "_gif", None)
+        if _gif is not None and _gif.enabled:
+            gif_ls = _gif.label_smoothing
+            if gif_ls > ls:
+                ls = gif_ls
+                self._metrics["gif_label_smooth"] = ls
         clip = self.training_config.loss_clipping
         z_w = self.training_config.z_loss
         flat_logits = logits.reshape(-1, vocab)

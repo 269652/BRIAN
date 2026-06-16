@@ -352,6 +352,7 @@ class GIFController:
     target_gap_ratio: float = 1.5     # desired PPL gap ceiling
     ramp_gain: float = 0.0002         # progress per unit gap error per step
     min_ramp_speed: float = 0.00005   # minimum Δp per step (prevents stall)
+    label_smooth_max: float = 0.0     # GIF-4: max gap-driven label smoothing ε₀
     _progress: float = 0.0            # shared ramp progress 0→1
     _last_gap_ratio: float = 0.0      # for telemetry
 
@@ -374,6 +375,26 @@ class GIFController:
     def last_gap_ratio(self) -> float:
         """Most recent gap ratio used by the adaptive controller."""
         return self._last_gap_ratio
+
+    @property
+    def label_smoothing(self) -> float:
+        """GIF-4: gap-driven label smoothing.
+
+        ε = ε₀ · clamp(gap_ratio / target − 1, 0, 1)
+
+        Geometric interpretation: as the gap ratio exceeds the target,
+        the CE target slides from the one-hot simplex vertex toward the
+        interior (uniform prior), penalising over-confident predictions.
+        Saturates at ε₀ when gap ≥ 2× target.  Self-correcting: as
+        gap falls back to target, smoothing withdraws to zero.
+        """
+        if (not self.adaptive
+                or self.label_smooth_max <= 0.0
+                or self._last_gap_ratio <= 0.0
+                or self.target_gap_ratio <= 0.0):
+            return 0.0
+        excess = self._last_gap_ratio / self.target_gap_ratio - 1.0
+        return self.label_smooth_max * max(0.0, min(1.0, excess))
 
     def update(self, step: int, lm_loss_ema: float) -> None:
         """Advance the adaptive ramp based on current gap ratio.
@@ -430,6 +451,7 @@ class GIFController:
         target_gap = float(gif.get("target_gap_ratio", 1.5))
         gain = float(gif.get("ramp_gain", 0.0002))
         min_speed = float(gif.get("min_ramp_speed", 0.00005))
+        ls_max = float(gif.get("label_smooth_max", 0.0))
 
         return cls(
             vbb_schedule=VBBAlphaSchedule.from_config(cfg),
@@ -440,4 +462,5 @@ class GIFController:
             target_gap_ratio=target_gap,
             ramp_gain=gain,
             min_ramp_speed=min_speed,
+            label_smooth_max=ls_max,
         )
