@@ -12,6 +12,15 @@
 # ── meta ──────────────────────────────────────────────────────────────
 [meta]
 TEST_COUNT = "2870"
+LAYER_A_TEST_COUNT = "2870"
+
+# Layer B summary (best results from B4)
+LAYER_B_BEST_ROW = "B4"
+LAYER_B_BEST_GAP_RATIO = "2.87"
+LAYER_B_BEST_TRAIN_PPL = "102.9"
+LAYER_B_BEST_OOD_PPL = "295.9"
+LAYER_B_BASELINE_GAP_RATIO = "6.12"
+LAYER_B_IMPROVEMENT_PCT = "53"
 
 # Current GFD v2 commit (update when GFD gets a new eval run)
 GFD_V2_COMMIT     = "83db76b"

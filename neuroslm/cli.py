@@ -2903,7 +2903,7 @@ def cmd_lint(args: argparse.Namespace) -> int:
 # ── update-readme ──────────────────────────────────────────────────────
 
 def cmd_update_readme(args: argparse.Namespace) -> int:
-    """Render scripts/README.template → README.md using docs/readme_metrics.toml.
+    """Render README.template.md → README.md using docs/readme_metrics.toml.
 
     ``brian update-readme``         — write README.md in place.
     ``brian update-readme --check`` — compare only; exit 1 if stale (pre-commit use).
@@ -2916,7 +2916,7 @@ def cmd_update_readme(args: argparse.Namespace) -> int:
     render_readme
 )
 
-    template = REPO_ROOT / "scripts" / "README.template"
+    template = REPO_ROOT / "README.template.md"
     metrics  = REPO_ROOT / "docs" / "readme_metrics.toml"
     output   = REPO_ROOT / "README.md"
 
