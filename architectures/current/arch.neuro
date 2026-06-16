@@ -439,34 +439,30 @@ training {
     # Three interlocking mechanisms that fix the train-PPL / OOD-PPL
     # gap divergence observed in every 10k run so far:
     #
-    #  GIF-1  VBB α schedule: ramp α from 0.001 → 0.05 over steps
-    #         500-3000.  Fixes the decorative IB (α=0.001 × KL~5000
-    #         ≈ 5 nats, swamped by LM loss ~3-4).
-    #         Pulled to step 500 (from 2000) because gap_ratio
-    #         already reaches 2.63 by step 1000.
+    #  GIF-1  VBB α schedule: ramp α from 0.001 → 0.05.
+    #  GIF-2  OOD probe EMA: 50 WikiText-103 seqs, eval every 100
+    #         steps, EMA(β=0.9).  True generalisation signal.
+    #  GIF-3  Isotropy schedule: ramp 0 → 0.01 in lockstep.
     #
-    #  GIF-2  OOD probe EMA: cache 50 WikiText-103 seqs, evaluate
-    #         trunk CE every 100 steps, maintain EMA(β=0.9).
-    #         Replaces the frozen pre-fusion lm_ema with a REAL
-    #         generalisation signal for the distillation λ-ramp
-    #         and cortex inhibition gate.
+    #  Adaptive mode (adaptive: true):
+    #    Progress advances proportional to how much the PPL gap ratio
+    #    exceeds target_gap_ratio.  Static ramp 500-3000 is the floor.
     #
-    #  GIF-3  Isotropy schedule: ramp isotropy weight 0 → 0.01 in
-    #         lockstep with VBB α.  Adds a regularisation force that
-    #         survives aux-loss collapse.
-    #
-    # See lib/gif.neuro for the canonical DSL equations and
-    # neuroslm/emergent/gif.py for the Python backing.
+    # See lib/gif.neuro + neuroslm/emergent/gif.py.
     gif: {
-      enabled:       true
-      vbb_alpha_min: 0.001
-      vbb_alpha_max: 0.05
-      vbb_ramp_start: 500
-      vbb_ramp_end:   3000
-      probe_n_seqs:   50
-      probe_every:    100
-      probe_ema_beta: 0.9
-      iso_weight_max: 0.01
+      enabled:          true
+      adaptive:         true
+      target_gap_ratio: 1.5
+      ramp_gain:        0.0002
+      min_ramp_speed:   0.00005
+      vbb_alpha_min:    0.001
+      vbb_alpha_max:    0.05
+      vbb_ramp_start:   500
+      vbb_ramp_end:     3000
+      probe_n_seqs:     50
+      probe_every:      100
+      probe_ema_beta:   0.9
+      iso_weight_max:   0.01
     }
     # â”€â”€ MDRV-VBB anti-collapse stabilisers (VBB-v2, Jun 2026) â”€â”€â”€â”€â”€â”€
     # Three interlocking mechanisms that prevent the Î²â†‘/Ïƒâ†“ co-collapse

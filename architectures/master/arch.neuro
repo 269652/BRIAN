@@ -438,17 +438,22 @@ training {
     # Three interlocking mechanisms that fix the train-PPL / OOD-PPL
     # gap divergence identified in the GPT-2 vs SmolLM2 10k forensic:
     #
-    #  GIF-1: VBB α schedule — ramp from 0.001 (loose, infancy) to
-    #         0.05 (tight, maturity) between steps 500–3000.
-    #         Pulled to step 500 (from 2000) — gap_ratio already 2.63
-    #         by step 1000 on instance 41211499.
-    #  GIF-2: OOD probe EMA — cache 50 WikiText-103 seqs at startup,
-    #         eval trunk CE every 100 steps. Replaces pre-fusion EMA.
+    #  GIF-1: VBB α schedule — ramp from 0.001 to 0.05.
+    #  GIF-2: OOD probe EMA — 50 WikiText-103 seqs, eval every 100
+    #         steps.  Replaces pre-fusion EMA.
     #  GIF-3: Isotropy schedule — ramp from 0 to 0.01 in lockstep.
+    #
+    #  Adaptive mode: progress driven by gap ratio P-controller.
+    #  target_gap_ratio=1.5: if gap < 1.5, ramp creeps at min speed.
+    #  Static ramp 500–3000 is the floor.
     #
     # See lib/gif.neuro + neuroslm/emergent/gif.py.
     gif: {
         enabled:                true,
+        adaptive:               true,
+        target_gap_ratio:       1.5,
+        ramp_gain:              0.0002,
+        min_ramp_speed:         0.00005,
         vbb_alpha_start:        0.001,
         vbb_alpha_end:          0.05,
         vbb_alpha_ramp_start:   500,

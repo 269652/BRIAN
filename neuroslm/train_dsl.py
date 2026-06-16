@@ -718,15 +718,21 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
     # GIF is active. Surfaces the three mechanism read-outs so we can
     # confirm the funnel is actually operating: vbb_α (IB tightness),
     # ood_ema (true-generalisation probe EMA), iso_w (isotropy weight).
+    # Adaptive mode adds: p (progress 0→1), gap (PPL gap ratio).
     gif_str = ""
     gif_keys = ("gif_ood_probe_ema", "gif_ood_probe_ce",
-                "gif_isotropy_weight", "gif_vbb_alpha")
+                "gif_isotropy_weight", "gif_vbb_alpha",
+                "gif_progress", "gif_gap_ratio")
     if any(k in m for k in gif_keys):
-        gif_str = (" | gif["
-                   f"α={m.get('gif_vbb_alpha', 0.0):.4f} "
-                   f"ood_ema={m.get('gif_ood_probe_ema', 0.0):.2f} "
-                   f"ood_ce={m.get('gif_ood_probe_ce', 0.0):.2f} "
-                   f"iso_w={m.get('gif_isotropy_weight', 0.0):.4f}]")
+        parts = [f"α={m.get('gif_vbb_alpha', 0.0):.4f}"]
+        if "gif_progress" in m:
+            parts.append(f"p={m['gif_progress']:.3f}")
+        if "gif_gap_ratio" in m:
+            parts.append(f"gap={m['gif_gap_ratio']:.2f}")
+        parts.append(f"ood_ema={m.get('gif_ood_probe_ema', 0.0):.2f}")
+        parts.append(f"ood_ce={m.get('gif_ood_probe_ce', 0.0):.2f}")
+        parts.append(f"iso_w={m.get('gif_isotropy_weight', 0.0):.4f}")
+        gif_str = " | gif[" + " ".join(parts) + "]"
     # Emergent C1–C6 telemetry tail (printed only when those keys are
     # present, so legacy runs without enable_emergent see no change).
     em_str = ""

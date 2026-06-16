@@ -98,6 +98,19 @@ class TestGIFBlockParsing:
         cfg = parse_training_config(body)
         assert cfg.gif is not None, "gif:{} block must still be parsed even when disabled"
 
+    def test_gif_adaptive_flag_preserved(self):
+        body = """
+            gif: {
+                enabled: true
+                adaptive: true
+                target_gap_ratio: 1.5
+                ramp_gain: 0.0002
+            }
+        """
+        cfg = parse_training_config(body)
+        assert cfg.gif is not None
+        assert cfg.gif.get("adaptive") in (True, "true")
+
 
 # ── 2. GIFController.from_config — DSL key names ────────────────────
 
@@ -311,7 +324,7 @@ class TestVBBAlphaSchedule:
     def test_default_schedule(self):
         s = VBBAlphaSchedule()
         assert s(0) == pytest.approx(0.001)
-        assert s(5000) == pytest.approx(0.05)
+        assert s(3000) == pytest.approx(0.05)
 
     def test_clamps_below_start(self):
         s = VBBAlphaSchedule(ramp_start=100, ramp_end=200)
@@ -329,6 +342,19 @@ class TestVBBAlphaSchedule:
             assert cur >= prev, f"alpha must be monotonic: step {step}"
             prev = cur
 
+    def test_progress_kwarg_overrides_step(self):
+        """When progress= is given, step is ignored."""
+        s = VBBAlphaSchedule(ramp_start=500, ramp_end=3000)
+        # progress=0.5 → midpoint regardless of step
+        mid = s(0, progress=0.5)
+        expected = 0.001 + (0.05 - 0.001) * 0.5
+        assert mid == pytest.approx(expected, abs=1e-6)
+
+    def test_progress_clamps_to_01(self):
+        s = VBBAlphaSchedule()
+        assert s(0, progress=-1.0) == pytest.approx(0.001)
+        assert s(0, progress=2.0) == pytest.approx(0.05)
+
 
 # ── 6. IsotropySchedule unit contracts ───────────────────────────────
 
@@ -336,11 +362,11 @@ class TestIsotropySchedule:
     def test_zero_before_ramp(self):
         s = IsotropySchedule()
         assert s(0) == pytest.approx(0.0)
-        assert s(1999) == pytest.approx(0.0)
+        assert s(499) == pytest.approx(0.0)
 
     def test_max_at_ramp_end(self):
         s = IsotropySchedule()
-        assert s(5000) == pytest.approx(0.01)
+        assert s(3000) == pytest.approx(0.01)
 
     def test_clamped_after_ramp(self):
         s = IsotropySchedule()
@@ -353,6 +379,163 @@ class TestIsotropySchedule:
             cur = s(step)
             assert cur >= prev, f"isotropy must be monotonic: step {step}"
             prev = cur
+
+    def test_progress_kwarg(self):
+        s = IsotropySchedule(weight_max=0.02)
+        assert s(0, progress=0.5) == pytest.approx(0.01)
+
+
+# ── 7. Adaptive GIF ramp ────────────────────────────────────────────
+
+class TestAdaptiveGIFRamp:
+    """Tests for the gap-ratio-driven adaptive ramp controller."""
+
+    def _make_adaptive_ctrl(self, **overrides):
+        gif = {
+            "enabled": True,
+            "adaptive": True,
+            "target_gap_ratio": 1.5,
+            "ramp_gain": 0.001,       # high gain for test visibility
+            "min_ramp_speed": 0.0001,
+            "vbb_alpha_min": 0.001,
+            "vbb_alpha_max": 0.05,
+            "vbb_ramp_start": 500,
+            "vbb_ramp_end": 3000,
+            "probe_n_seqs": 10,
+            "probe_every": 100,
+            "probe_ema_beta": 0.9,
+            "iso_weight_max": 0.01,
+        }
+        gif.update(overrides)
+        cfg = TrainingConfig()
+        cfg.gif = gif
+        return GIFController.from_config(cfg)
+
+    def test_adaptive_flag_parsed(self):
+        ctrl = self._make_adaptive_ctrl()
+        assert ctrl.adaptive is True
+
+    def test_static_mode_default(self):
+        """adaptive defaults to False when not specified."""
+        cfg = TrainingConfig()
+        cfg.gif = {"enabled": True, "vbb_alpha_min": 0.001}
+        ctrl = GIFController.from_config(cfg)
+        assert ctrl.adaptive is False
+
+    def test_progress_starts_at_zero(self):
+        ctrl = self._make_adaptive_ctrl()
+        assert ctrl.progress == 0.0
+
+    def test_update_advances_progress(self):
+        ctrl = self._make_adaptive_ctrl()
+        # Simulate: OOD probe returns CE=6.0, train EMA=4.0
+        # gap_ratio = exp(6-4) = exp(2) ≈ 7.39  >> target 1.5
+        ctrl.ood_probe._n_evals = 1
+        ctrl.ood_probe._ema = 6.0
+        ctrl.update(step=100, lm_loss_ema=4.0)
+        assert ctrl.progress > 0.0, "progress must advance when gap > target"
+
+    def test_progress_monotonically_increasing(self):
+        """Progress should never decrease across updates."""
+        ctrl = self._make_adaptive_ctrl()
+        ctrl.ood_probe._n_evals = 1
+        ctrl.ood_probe._ema = 5.5
+        prev = ctrl.progress
+        for step in range(100, 1100, 100):
+            ctrl.update(step=step, lm_loss_ema=4.0)
+            assert ctrl.progress >= prev, (
+                f"progress must be monotonic: step {step}"
+            )
+            prev = ctrl.progress
+
+    def test_high_gap_accelerates_ramp(self):
+        """With a large gap, progress should advance faster."""
+        ctrl_high = self._make_adaptive_ctrl()
+        ctrl_low = self._make_adaptive_ctrl()
+
+        # Both have probe data
+        ctrl_high.ood_probe._n_evals = 1
+        ctrl_low.ood_probe._n_evals = 1
+
+        # High gap: OOD=7.0, train=4.0 → gap=exp(3)≈20
+        ctrl_high.ood_probe._ema = 7.0
+        ctrl_high.update(step=100, lm_loss_ema=4.0)
+
+        # Low gap: OOD=4.5, train=4.0 → gap=exp(0.5)≈1.65
+        ctrl_low.ood_probe._ema = 4.5
+        ctrl_low.update(step=100, lm_loss_ema=4.0)
+
+        assert ctrl_high.progress > ctrl_low.progress, (
+            "higher gap ratio must produce faster ramp advancement"
+        )
+
+    def test_gap_below_target_creeps(self):
+        """When gap < target, only min_ramp_speed advances progress."""
+        ctrl = self._make_adaptive_ctrl(min_ramp_speed=0.001)
+        ctrl.ood_probe._n_evals = 1
+        # gap = exp(4.2 - 4.0) = exp(0.2) ≈ 1.22 < target 1.5
+        ctrl.ood_probe._ema = 4.2
+        ctrl.update(step=100, lm_loss_ema=4.0)
+        assert ctrl.progress == pytest.approx(0.001, abs=1e-6), (
+            "with gap < target, only min_ramp_speed should apply"
+        )
+
+    def test_static_floor_respected(self):
+        """Progress never falls below the static step-based schedule."""
+        ctrl = self._make_adaptive_ctrl(min_ramp_speed=0.0)
+        # At step 1750 (50% through 500-3000 ramp), static floor = 0.5
+        ctrl.update(step=1750, lm_loss_ema=4.0)
+        assert ctrl.progress >= 0.5 - 1e-6, (
+            "progress must respect the static floor"
+        )
+
+    def test_vbb_alpha_uses_progress(self):
+        """In adaptive mode, vbb_alpha uses the progress variable."""
+        ctrl = self._make_adaptive_ctrl()
+        ctrl._progress = 0.5
+        alpha = ctrl.vbb_alpha(0)  # step doesn't matter in adaptive
+        expected = 0.001 + (0.05 - 0.001) * 0.5
+        assert alpha == pytest.approx(expected, abs=1e-6)
+
+    def test_isotropy_uses_progress(self):
+        ctrl = self._make_adaptive_ctrl()
+        ctrl._progress = 1.0
+        assert ctrl.isotropy_weight(0) == pytest.approx(0.01)
+
+    def test_progress_clamped_at_1(self):
+        ctrl = self._make_adaptive_ctrl(ramp_gain=1.0)
+        ctrl.ood_probe._n_evals = 1
+        ctrl.ood_probe._ema = 10.0  # massive gap
+        for _ in range(100):
+            ctrl.update(step=5000, lm_loss_ema=2.0)
+        assert ctrl.progress == pytest.approx(1.0), (
+            "progress must clamp at 1.0"
+        )
+
+    def test_gap_ratio_telemetry(self):
+        ctrl = self._make_adaptive_ctrl()
+        ctrl.ood_probe._n_evals = 1
+        ctrl.ood_probe._ema = 5.0
+        ctrl.update(step=100, lm_loss_ema=4.0)
+        expected_gap = math.exp(5.0 - 4.0)
+        assert ctrl.last_gap_ratio == pytest.approx(expected_gap, rel=1e-3)
+
+    def test_no_ood_data_uses_min_speed(self):
+        """Before probe loads, only min_ramp_speed advances."""
+        ctrl = self._make_adaptive_ctrl(min_ramp_speed=0.01)
+        ctrl.update(step=100, lm_loss_ema=4.0)
+        assert ctrl.progress == pytest.approx(0.01, abs=1e-6)
+
+    def test_live_smollm_arch_is_adaptive(self):
+        """Pin: SmolLM must deploy with adaptive GIF."""
+        arch_root = Path(__file__).resolve().parents[2] / "architectures" / "SmolLM"
+        if not (arch_root / "arch.neuro").is_file():
+            pytest.skip("SmolLM arch not present")
+        cfg = load_training_config_from_arch(arch_root)
+        ctrl = GIFController.from_config(cfg)
+        assert ctrl.adaptive is True, (
+            "SmolLM GIF must be adaptive — check gif.adaptive in arch.neuro"
+        )
 
 
 if __name__ == "__main__":

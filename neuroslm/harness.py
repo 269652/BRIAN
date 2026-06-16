@@ -2714,6 +2714,15 @@ class BRIANHarness(nn.Module):
                     self.language_model, device)
                 self._metrics["gif_ood_probe_ce"] = ce
 
+        # ── GIF adaptive ramp update ──
+        # Advance the shared progress variable based on gap ratio.
+        # Must run AFTER the OOD probe eval so it sees the latest EMA.
+        if self._gif is not None and self._gif.enabled:
+            self._gif.update(self._global_step, float(self._lm_loss_ema))
+            self._metrics["gif_progress"] = self._gif.progress
+            if self._gif.adaptive and self._gif.last_gap_ratio > 0:
+                self._metrics["gif_gap_ratio"] = self._gif.last_gap_ratio
+
         loss = self.compute_loss(ids, targets, nt_levels=nt_levels)
         accum = max(1, self.training_config.grad_accum)
 

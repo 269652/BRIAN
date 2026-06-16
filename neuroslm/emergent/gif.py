@@ -11,7 +11,13 @@ identified in the GPT-2 vs SmolLM2 10k forensic (2026-06-16):
 3. Isotropy schedule — ramped via the same schedule (reuses the
    existing ``IsotropyLoss`` in ``neuroslm/regularizers.py``).
 
-Contracts: tests/test_gif.py.
+All three ramps now share a single *progress* variable (0→1) that can
+be driven adaptively from the gap ratio instead of fixed step counts.
+When ``adaptive: true``, progress advances faster when the gap ratio
+exceeds ``target_gap_ratio`` and holds steady when it's below target.
+The static step-based schedule is kept as a minimum floor.
+
+Contracts: tests/dsl/test_gif_config.py.
 """
 from __future__ import annotations
 
@@ -31,19 +37,27 @@ class VBBAlphaSchedule:
     """Piecewise-linear ramp for the VBB information bottleneck weight.
 
     Matches ``gif_vbb_alpha_schedule`` in lib/gif.neuro exactly.
+    When used inside the adaptive GIFController, the ``step`` passed
+    to ``__call__`` is ignored in favour of the shared ``progress``.
     """
     alpha_start: float = 0.001
     alpha_end: float = 0.05
-    ramp_start: int = 2000
-    ramp_end: int = 5000
+    ramp_start: int = 500
+    ramp_end: int = 3000
 
-    def __call__(self, step: int) -> float:
-        if step < self.ramp_start:
-            return self.alpha_start
-        if step >= self.ramp_end:
-            return self.alpha_end
-        t = (step - self.ramp_start) / max(1, self.ramp_end - self.ramp_start)
-        return self.alpha_start + (self.alpha_end - self.alpha_start) * t
+    def __call__(self, step: int, *, progress: Optional[float] = None) -> float:
+        """Return α for the given step or explicit progress (0-1)."""
+        if progress is not None:
+            p = max(0.0, min(1.0, progress))
+        else:
+            # Static fallback
+            if step < self.ramp_start:
+                p = 0.0
+            elif step >= self.ramp_end:
+                p = 1.0
+            else:
+                p = (step - self.ramp_start) / max(1, self.ramp_end - self.ramp_start)
+        return self.alpha_start + (self.alpha_end - self.alpha_start) * p
 
     @classmethod
     def from_config(cls, cfg) -> "VBBAlphaSchedule":
@@ -60,9 +74,9 @@ class VBBAlphaSchedule:
                 alpha_end=float(gif.get("vbb_alpha_end",
                                  gif.get("vbb_alpha_max", 0.05))),
                 ramp_start=int(gif.get("vbb_alpha_ramp_start",
-                                gif.get("vbb_ramp_start", 2000))),
+                                gif.get("vbb_ramp_start", 500))),
                 ramp_end=int(gif.get("vbb_alpha_ramp_end",
-                              gif.get("vbb_ramp_end", 5000))),
+                              gif.get("vbb_ramp_end", 3000))),
             )
         return cls()
 
@@ -260,18 +274,24 @@ class IsotropySchedule:
     """Ramps isotropy weight from 0 to weight_max in lockstep with VBB.
 
     Matches ``gif_isotropy_schedule`` in lib/gif.neuro.
+    When used inside the adaptive GIFController, the ``step`` passed
+    to ``__call__`` is ignored in favour of the shared ``progress``.
     """
     weight_max: float = 0.01
-    ramp_start: int = 2000
-    ramp_end: int = 5000
+    ramp_start: int = 500
+    ramp_end: int = 3000
 
-    def __call__(self, step: int) -> float:
-        if step < self.ramp_start:
-            return 0.0
-        if step >= self.ramp_end:
-            return self.weight_max
-        t = (step - self.ramp_start) / max(1, self.ramp_end - self.ramp_start)
-        return self.weight_max * t
+    def __call__(self, step: int, *, progress: Optional[float] = None) -> float:
+        if progress is not None:
+            p = max(0.0, min(1.0, progress))
+        else:
+            if step < self.ramp_start:
+                p = 0.0
+            elif step >= self.ramp_end:
+                p = 1.0
+            else:
+                p = (step - self.ramp_start) / max(1, self.ramp_end - self.ramp_start)
+        return self.weight_max * p
 
     @classmethod
     def from_config(cls, cfg) -> "IsotropySchedule":
@@ -281,9 +301,9 @@ class IsotropySchedule:
                 weight_max=float(gif.get("isotropy_weight_max",
                                   gif.get("iso_weight_max", 0.01))),
                 ramp_start=int(gif.get("isotropy_ramp_start",
-                                gif.get("vbb_ramp_start", 2000))),
+                                gif.get("vbb_ramp_start", 500))),
                 ramp_end=int(gif.get("isotropy_ramp_end",
-                              gif.get("vbb_ramp_end", 5000))),
+                              gif.get("vbb_ramp_end", 3000))),
             )
         return cls()
 
@@ -298,17 +318,104 @@ class GIFController:
     - ``vbb_alpha(step)`` → scheduled α for the VBB loss
     - ``isotropy_weight(step)`` → scheduled weight for the isotropy reg
     - ``ood_probe`` → the OODProbe instance for EMA-based cortex gating
+
+    **Adaptive mode** (``adaptive=True``):
+
+    A single ``progress`` variable (0→1) drives both the VBB α and
+    isotropy weight.  Each step, ``update()`` is called with the
+    current ``lm_loss_ema`` from the harness.  When the OOD probe has
+    data, it computes the PPL-space gap ratio:
+
+        gap_ratio = exp(ood_ce_ema - lm_loss_ema)
+
+    A proportional controller advances progress:
+
+        error    = max(0, gap_ratio - target_gap_ratio)
+        Δp       = ramp_gain × error + min_ramp_speed
+        progress = clamp(progress + Δp, 0, 1)
+
+    The static step-based schedule is kept as a *floor*: progress
+    never falls below what the old linear ramp would give.  This
+    guarantees that even if the OOD probe hasn't loaded yet, the
+    ramp still advances at its baseline pace.
+
+    When ``adaptive=False``, behaviour is identical to the original
+    fixed step-based schedule.
     """
     vbb_schedule: VBBAlphaSchedule = field(default_factory=VBBAlphaSchedule)
     isotropy_schedule: IsotropySchedule = field(default_factory=IsotropySchedule)
     ood_probe: OODProbe = field(default_factory=OODProbe)
     enabled: bool = False
 
+    # ── Adaptive ramp state ──
+    adaptive: bool = False
+    target_gap_ratio: float = 1.5     # desired PPL gap ceiling
+    ramp_gain: float = 0.0002         # progress per unit gap error per step
+    min_ramp_speed: float = 0.00005   # minimum Δp per step (prevents stall)
+    _progress: float = 0.0            # shared ramp progress 0→1
+    _last_gap_ratio: float = 0.0      # for telemetry
+
     def vbb_alpha(self, step: int) -> float:
+        if self.adaptive:
+            return self.vbb_schedule(step, progress=self._progress)
         return self.vbb_schedule(step)
 
     def isotropy_weight(self, step: int) -> float:
+        if self.adaptive:
+            return self.isotropy_schedule(step, progress=self._progress)
         return self.isotropy_schedule(step)
+
+    @property
+    def progress(self) -> float:
+        """Current ramp progress (0→1)."""
+        return self._progress
+
+    @property
+    def last_gap_ratio(self) -> float:
+        """Most recent gap ratio used by the adaptive controller."""
+        return self._last_gap_ratio
+
+    def update(self, step: int, lm_loss_ema: float) -> None:
+        """Advance the adaptive ramp based on current gap ratio.
+
+        Called once per step from the harness.  When ``adaptive=False``
+        this is a no-op.
+
+        Args:
+            step:  current global step (for the static floor)
+            lm_loss_ema:  harness train-loss EMA (CE, nats)
+        """
+        if not self.adaptive:
+            return
+
+        # Static floor: what the old linear ramp would give
+        rs = self.vbb_schedule.ramp_start
+        re = self.vbb_schedule.ramp_end
+        if step < rs:
+            static_p = 0.0
+        elif step >= re:
+            static_p = 1.0
+        else:
+            static_p = (step - rs) / max(1, re - rs)
+
+        # Adaptive component: driven by gap ratio when OOD data ready
+        if self.ood_probe.is_ready and lm_loss_ema > 0.5:
+            ood_ce = self.ood_probe.ema
+            # Gap ratio in PPL space: exp(ood_ce) / exp(lm_ce)
+            gap_ratio = math.exp(
+                max(-20.0, min(20.0, ood_ce - lm_loss_ema))
+            )
+            self._last_gap_ratio = gap_ratio
+
+            error = max(0.0, gap_ratio - self.target_gap_ratio)
+            delta = self.ramp_gain * error + self.min_ramp_speed
+            self._progress = min(1.0, self._progress + delta)
+        else:
+            # No OOD data yet: use only min_ramp_speed
+            self._progress = min(1.0, self._progress + self.min_ramp_speed)
+
+        # Never fall below the static floor
+        self._progress = max(self._progress, static_p)
 
     @classmethod
     def from_config(cls, cfg) -> "GIFController":
@@ -317,9 +424,19 @@ class GIFController:
         enabled = bool(gif.get("enabled", False)) if isinstance(gif, dict) else False
         if not enabled:
             return cls(enabled=False)
+
+        adaptive = bool(gif.get("adaptive", False))
+        target_gap = float(gif.get("target_gap_ratio", 1.5))
+        gain = float(gif.get("ramp_gain", 0.0002))
+        min_speed = float(gif.get("min_ramp_speed", 0.00005))
+
         return cls(
             vbb_schedule=VBBAlphaSchedule.from_config(cfg),
             isotropy_schedule=IsotropySchedule.from_config(cfg),
             ood_probe=OODProbe.from_config(cfg),
             enabled=True,
+            adaptive=adaptive,
+            target_gap_ratio=target_gap,
+            ramp_gain=gain,
+            min_ramp_speed=min_speed,
         )
