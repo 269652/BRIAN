@@ -714,6 +714,19 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
             f"NE×{m.get('allostasis_ne_mult', 1.0):.2f} "
             f"T×{m.get('allostasis_trophic_mult', 1.0):.2f} "
             f"LR×{m.get('allostasis_lr_mult', 1.0):.2f}]")
+    # GIF (Geometric Information Funnel) telemetry — shows only when
+    # GIF is active. Surfaces the three mechanism read-outs so we can
+    # confirm the funnel is actually operating: vbb_α (IB tightness),
+    # ood_ema (true-generalisation probe EMA), iso_w (isotropy weight).
+    gif_str = ""
+    gif_keys = ("gif_ood_probe_ema", "gif_ood_probe_ce",
+                "gif_isotropy_weight", "gif_vbb_alpha")
+    if any(k in m for k in gif_keys):
+        gif_str = (" | gif["
+                   f"α={m.get('gif_vbb_alpha', 0.0):.4f} "
+                   f"ood_ema={m.get('gif_ood_probe_ema', 0.0):.2f} "
+                   f"ood_ce={m.get('gif_ood_probe_ce', 0.0):.2f} "
+                   f"iso_w={m.get('gif_isotropy_weight', 0.0):.4f}]")
     # Emergent C1–C6 telemetry tail (printed only when those keys are
     # present, so legacy runs without enable_emergent see no change).
     em_str = ""
@@ -751,7 +764,7 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
             f"| mesoLG {lg:.2f} "
             f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
             f"| NT[{nt_str}]{osc_str}{em_str}{reg_str}"
-            f"{cortex_str}{allostasis_str}")
+            f"{cortex_str}{gif_str}{allostasis_str}")
 
 
 def _eval_pass_marks(rules, step: int,

@@ -440,8 +440,10 @@ training {
     # gap divergence observed in every 10k run so far:
     #
     #  GIF-1  VBB α schedule: ramp α from 0.001 → 0.05 over steps
-    #         2000-5000.  Fixes the decorative IB (α=0.001 × KL~5000
+    #         500-3000.  Fixes the decorative IB (α=0.001 × KL~5000
     #         ≈ 5 nats, swamped by LM loss ~3-4).
+    #         Pulled to step 500 (from 2000) because gap_ratio
+    #         already reaches 2.63 by step 1000.
     #
     #  GIF-2  OOD probe EMA: cache 50 WikiText-103 seqs, evaluate
     #         trunk CE every 100 steps, maintain EMA(β=0.9).
@@ -459,8 +461,8 @@ training {
       enabled:       true
       vbb_alpha_min: 0.001
       vbb_alpha_max: 0.05
-      vbb_ramp_start: 2000
-      vbb_ramp_end:   5000
+      vbb_ramp_start: 500
+      vbb_ramp_end:   3000
       probe_n_seqs:   50
       probe_every:    100
       probe_ema_beta: 0.9

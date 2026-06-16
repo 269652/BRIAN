@@ -1946,6 +1946,7 @@ class BRIANHarness(nn.Module):
         # (loose, 0.001) to α_end (tight, 0.05) over training.
         if self._gif is not None and self._gif.enabled:
             alpha = self._gif.vbb_alpha(self._global_step)
+            self._metrics["gif_vbb_alpha"] = alpha
         else:
             alpha = float(getattr(self.training_config, "vbb_alpha", 0.0))
         use_vbb = (alpha > 0.0
@@ -2122,6 +2123,7 @@ class BRIANHarness(nn.Module):
         # GIF-1: use scheduled α when GIF is enabled.
         if self._gif is not None and self._gif.enabled:
             alpha = self._gif.vbb_alpha(self._global_step)
+            self._metrics["gif_vbb_alpha"] = alpha
         else:
             alpha = float(getattr(self.training_config, "vbb_alpha", 0.001))
         free_bits = float(getattr(self.training_config, "vbb_free_bits", 0.0))

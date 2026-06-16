@@ -439,7 +439,9 @@ training {
     # gap divergence identified in the GPT-2 vs SmolLM2 10k forensic:
     #
     #  GIF-1: VBB α schedule — ramp from 0.001 (loose, infancy) to
-    #         0.05 (tight, maturity) between steps 2000–5000.
+    #         0.05 (tight, maturity) between steps 500–3000.
+    #         Pulled to step 500 (from 2000) — gap_ratio already 2.63
+    #         by step 1000 on instance 41211499.
     #  GIF-2: OOD probe EMA — cache 50 WikiText-103 seqs at startup,
     #         eval trunk CE every 100 steps. Replaces pre-fusion EMA.
     #  GIF-3: Isotropy schedule — ramp from 0 to 0.01 in lockstep.
@@ -449,15 +451,15 @@ training {
         enabled:                true,
         vbb_alpha_start:        0.001,
         vbb_alpha_end:          0.05,
-        vbb_alpha_ramp_start:   2000,
-        vbb_alpha_ramp_end:     5000,
+        vbb_alpha_ramp_start:   500,
+        vbb_alpha_ramp_end:     3000,
         ood_probe_seqs:         50,
         ood_probe_max_len:      512,
         ood_probe_every:        100,
         ood_probe_ema_alpha:    0.1,
         isotropy_weight_max:    0.01,
-        isotropy_ramp_start:    2000,
-        isotropy_ramp_end:      5000
+        isotropy_ramp_start:    500,
+        isotropy_ramp_end:      3000
     }
     # â”€â”€ MDRV-VBB anti-collapse stabilisers (VBB-v2, Jun 2026) â”€â”€â”€â”€â”€â”€
     # Three interlocking mechanisms that prevent the Î²â†‘/Ïƒâ†“ co-collapse
