@@ -119,22 +119,43 @@ def test_template_has_no_hardcoded_numbers():
 
 def test_all_template_metrics_exist():
     """
-    Every ${METRIC} placeholder in template must exist in readme_metrics.toml
+    Every ${METRIC} placeholder in template must be resolvable from either:
+    - Live collectors (collectors/*.py)
+    - Static TOML overrides (docs/readme_metrics.toml)
     """
     template_text = TEMPLATE_PATH.read_text(encoding="utf-8")
-    metrics_toml = tomllib.loads(METRICS_PATH.read_text(encoding="utf-8"))
     
-    # Extract all ${METRIC} placeholders
-    placeholders = set(re.findall(r'\$\{([A-Z_]+)\}', template_text))
+    # Collect all available metrics (live + TOML)
+    import sys
+    sys.path.insert(0, str(REPO_ROOT))
+    try:
+        from neuroslm.metrics_collector import collect_all
+        live = collect_all(REPO_ROOT, skip=["model_params"])
+    except Exception:
+        live = {}
+
+    static = {}
+    if METRICS_PATH.exists():
+        static = tomllib.loads(METRICS_PATH.read_text(encoding="utf-8"))
+        # Flatten sections
+        flat_static: dict[str, str] = {}
+        for key, value in static.items():
+            if isinstance(value, dict):
+                flat_static.update(value)
+            else:
+                flat_static[key] = str(value)
+        static = flat_static
+
+    all_available = {**live, **static}
+
+    # Extract all ${METRIC} placeholders from template
+    placeholders = set(re.findall(r'\$\{([A-Z_][A-Z0-9_]*)\}', template_text))
     
-    # Check each exists in TOML
-    missing = []
-    for ph in placeholders:
-        if ph not in metrics_toml:
-            missing.append(ph)
+    # Check each exists
+    missing = [ph for ph in placeholders if ph not in all_available]
     
     if missing:
-        pytest.fail(f"Template references {len(missing)} missing metrics: {sorted(missing)}")
+        pytest.fail(f"Template references {len(missing)} unresolvable metrics: {sorted(missing)}")
 
 
 def test_readme_has_no_unrendered_placeholders():

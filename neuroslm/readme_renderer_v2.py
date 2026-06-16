@@ -393,6 +393,7 @@ def render_readme(
     check: bool = False,
     repo_root: Optional[Path] = None,
     neuro_exports_path: Optional[Path] = None,
+    skip_live_collection: bool = False,
 ) -> tuple[str, bool]:
     """Render README template with full v2 templating (compatible with v1 API).
 
@@ -416,6 +417,9 @@ def render_readme(
         Optional path to .neuro/exports.toml generated from arch.neuro
         # @export directives.  When present its values are merged into
         the metrics dict *before* the static TOML, so static values win.
+    skip_live_collection:
+        Skip live metrics collection (pytest, arch parsing).
+        Useful for tests that only care about template syntax.
 
     Returns
     -------
@@ -432,15 +436,27 @@ def render_readme(
     if repo_root is None:
         repo_root = template_path.parent
 
-    # Load static metrics
-    metrics = load_metrics(metrics_path)
+    # Layer 1: Live-collected metrics (source of truth)
+    if not skip_live_collection:
+        try:
+            from neuroslm.metrics_collector import collect_all
+            live_metrics = collect_all(repo_root, skip=["model_params"])
+        except Exception:
+            live_metrics = {}
+    else:
+        live_metrics = {}
 
-    # Merge arch exports (arch values are overridden by static metrics)
+    # Layer 2: Arch exports (.neuro/exports.toml)
     if neuro_exports_path is not None:
         arch_exports = load_arch_exports(neuro_exports_path)
-        merged = {**arch_exports, **metrics}  # static wins on conflict
     else:
-        merged = metrics
+        arch_exports = {}
+
+    # Layer 3: Static TOML overrides (always wins)
+    static_metrics = load_metrics(metrics_path)
+
+    # Merge: live < arch_exports < static TOML
+    merged = {**live_metrics, **arch_exports, **static_metrics}
 
     # Load and render
     template = template_path.read_text(encoding='utf-8')

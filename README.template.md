@@ -42,7 +42,7 @@ Instead of scaling parameters, BRIAN spends them on **topology, Φ-coupled plast
 
 ## System Architecture
 
-BRIAN is an **11-stage bowtie** with two re-entry loops and five functional subsystems:
+BRIAN is an **${BOWTIE_STAGES}-stage bowtie** with two re-entry loops and five functional subsystems:
 
 ```
 ┌─────────────────────────────────────────┐
@@ -163,7 +163,7 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: ${LAYER_B_BEST_ROW} (a
 
 ### Implementation Status
 
-- **${TOTAL_TESTS}/1515 tests passing** in `tests/` (4 deselected; ${TEST_RUNTIME_SECONDS}s on CPU); breakdown: **${DSL_TESTS} in `tests/dsl/`** (DSL parsing + codegen + byte-equivalence), **65 in `tests/training/`** (harness, multi-cortex, distillation, gating), plus verification, THSD, evolution, narrative, qualia, neurochem subsuites.
+- **${TOTAL_TESTS} tests passing** in `tests/` (${TEST_RUNTIME_SECONDS}s on CPU); breakdown: **${DSL_TESTS} in `tests/dsl/`** (DSL parsing + codegen + byte-equivalence), **${TRAINING_TESTS} in `tests/training/`** (harness, multi-cortex, distillation, gating), plus verification, THSD, evolution, narrative, qualia, neurochem subsuites.
 - Training with optimizer-partitioned checkpoint streaming
 - DSL-based architecture specs compile to byte-equivalent PyTorch models with **source maps** (`neuroslm/compiler/module_bundler.py`) and **byte-identity round-trip** verification
 - Real-time architecture evolution via RAID-5 protected DNA mutations, gated by **`ImprovementGate`** (Welch's t-test) — no mutation lands without statistically significant fitness gain
@@ -340,11 +340,11 @@ pip install -r requirements.txt
 # torch is intentionally not in requirements.txt — install matching your accelerator:
 #   pip install torch --index-url https://download.pytorch.org/whl/cu121
 
-# CPU sanity run
-python -m neuroslm.train --preset small --steps 2000 --batch_size 4 --optimizer adamw
+# CPU sanity run (tiny preset, ${PRESET_TINY_PARAMS} params)
+brian train --preset=tiny --steps=2000
 
-# A100 (xl preset, ~230M params, bf16, grad-checkpointing)
-python -m neuroslm.train --preset xl --steps 100000 --batch_size 4 --device cuda
+# A100 full training (xl preset, ${PRESET_XL_PARAMS} params, bf16, grad-checkpointing)
+brian train --preset=xl --steps=100000 --device=cuda
 
 # Resume the latest stream-matched checkpoint
 python -m neuroslm.train --resume latest
@@ -360,9 +360,23 @@ The full Colab workflow (clone → ablation → full training → benchmarks) is
 
 ---
 
-## Checkpoints (Git LFS)
+## Checkpoints (HuggingFace Hub)
 
-Training checkpoints live in `lfs_checkpoints/` and are tracked via Git LFS. A single `.pt` file is multi-GB, so a full `git pull` on a laptop can be very slow — and you usually don't need the binaries locally.
+Training checkpoints are pushed to HuggingFace Hub (`${HF_REPO_ID}`) every ${B4_STEPS} steps during training. The push backend is configurable per-architecture in `config.neuro`:
+
+```neuro
+# architectures/master/config.neuro
+checkpoint {
+    push_backend: "hf"              # "hf" | "lfs" | "none"
+    hf_repo_id: "${HF_REPO_ID}"
+    hf_token_env: "HF_TOKEN"       # env var holding the write token
+    save_every: 500                 # local .pt cadence
+    push_every: 2500                # remote push cadence
+    push_optimizer: false           # strip Adam state (~2/3 size savings)
+}
+```
+
+Legacy local checkpoints in `lfs_checkpoints/` are tracked via Git LFS. A single `.pt` file is multi-GB, so a full `git pull` on a laptop can be very slow.
 
 ### Skip LFS downloads for this repo (recommended on laptops)
 
@@ -480,7 +494,7 @@ Each test is a claim from [Layer A](#layer-a--mechanism-verification-unit-tests-
 | Document | Audience | Contents |
 |----------|----------|----------|
 | **[`findings.md`](docs/findings.md)** | Everyone | Hypothesis ledger: H1–H20 with links to test files, result JSONs, and raw logs. The source of truth for what's proven vs. open. |
-| **[`architecture.md`](docs/architecture.md)** | Researchers, implementers | Full spec: 11-stage forward pass, tensor shapes, equations, module diagrams, IIT 4.0 theory. Reproducible to the line number. |
+| **[`architecture.md`](docs/architecture.md)** | Researchers, implementers | Full spec: ${BOWTIE_STAGES}-stage forward pass, tensor shapes, equations, module diagrams, IIT 4.0 theory. Reproducible to the line number. |
 | **[`formal_framework.md`](docs/formal_framework.md)** | Theorists, evolutionary loop | **v0.2** (§§7–11): normative mathematical contract for the THSD discovery substrate: simpliziale ontology, $H^1$ guard, symbolic-simplex discovery operator, Φ guard, Tonnetz filter, Fisher-Rao retrieval, RAID-5 DNA, **ImprovementGate** admission spec, **TheoryOfMindIR** stalk geometry, **Lean roadmap** for mechanised proofs. Source of Truth for evolutionary mutations. |
 | **[`technical_report.md`](docs/technical_report.md)** | External AI, new contributors | Executive summary: proven claims, current model state, evidence, open questions. Synced with findings.md. Now covers all 7 Pillars including Multi-Cortex Fusion. |
 | **[`dsl.md`](docs/dsl.md)** | DSL users | NeuroML-like syntax, macro system, symbol resolution, compile pipeline, **module bundling**, source maps. |

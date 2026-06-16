@@ -1,157 +1,61 @@
-# docs/readme_metrics.toml — single source of truth for all empirical
-# numbers that appear in README.md.
+# docs/readme_metrics.toml - OVERRIDES (non-collectable values only)
 #
-# Update this file whenever a new training run produces new results.
-# Then run `brian update-readme` to regenerate README.md.
-# The pre-commit hook enforces that README.md is always in sync.
-#
-# All values MUST be strings (quoted).  Numeric-looking values are stored
-# as strings so the renderer substitutes them verbatim without float
-# formatting surprises (e.g. 66.0 stays "66.0", not "66").
+# Live metrics come from collectors/*.py scripts.
+# This file: values with no local computable source.
+# Precedence: live < TOML (this file wins on conflict).
 
-# ── Top-level metrics (used throughout README) ────────────────────────
-
-# Model param counts
+# Model params (requires full model instantiation; fallback override)
 TRUNK_TRAINABLE_PARAMS = "146.9M"
 TOTAL_FROZEN_PARAMS = "~980M"
 
-# Test suite metrics
-TOTAL_TESTS = "1511"
-DSL_TESTS = "620"
-LAYER_A_TEST_COUNT = "1511"
-TEST_RUNTIME_SECONDS = "~110"
-
-# Core mechanism counts
 CORE_PROPERTIES_COUNT = "20+"
 CORE_MECHANISMS_COUNT = "15"
 
-# Multi-cortex expert roster
-EXPERT_GENERAL_MODEL = "HuggingFaceTB/SmolLM2-360M"
-EXPERT_GENERAL_PARAMS = "360M"
-EXPERT_GENERAL_ROLE = "general"
-EXPERT_CODE_MODEL = "microsoft/phi-1_5"
-EXPERT_CODE_PARAMS = "1.3B"
-EXPERT_CODE_ROLE = "code"
-EXPERT_REASONING_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
-EXPERT_REASONING_PARAMS = "0.5B"
-EXPERT_REASONING_ROLE = "reasoning"
-
-# Layer B summary (best results from B4)
 LAYER_B_BEST_ROW = "B4"
 LAYER_B_BEST_GAP_RATIO = "2.87"
 LAYER_B_BEST_TRAIN_PPL = "102.9"
 LAYER_B_BEST_OOD_PPL = "295.9"
-LAYER_B_BASELINE_GAP_RATIO = "6.12"
 LAYER_B_IMPROVEMENT_PCT = "53"
 
-# Current GFD v2 commit (update when GFD gets a new eval run)
-GFD_V2_COMMIT     = "83db76b"
-GFD_V2_TEST_COUNT = "37"
-
-# ── Per-variant details (TOML tables below) ───────────────────────────# ── B0 flat baseline (80k steps, results/ood_baseline-80k_107M_step80000.json) ──
-[b0]
 B0_VARIANT_NAME = "Flat Transformer (Baseline)"
-B0_STEPS      = "80,000"
-B0_TRAINABLE  = "106.9M"
-B0_TRAIN_PPL  = "66.0"
-B0_OOD_PPL    = "404.0"
-B0_GAP_RATIO  = "6.12"
-B0_ARTIFACT   = "results/ood_baseline-80k_107M_step80000.json"
-
-# ── B1 trunk-iso + recursive (results/ood_recursive_108M_step5000.json) ──
-[b1]
 B1_VARIANT_NAME = "BRIAN (Trunk + Recursive)"
-B1_STEPS      = "5,000"
-B1_TRAINABLE  = "108.2M"
-B1_TRAIN_PPL  = "216.5"
-B1_OOD_PPL    = "1372.8"
-B1_GAP_RATIO  = "6.34"
-B1_ARTIFACT   = "results/ood_recursive_108M_step5000.json"
-
-# ── B2.fix trunk-iso + ReZero (results/ood_rezero-fixed_107M_step7000.json) ──
-[b2fix]
 B2FIX_VARIANT_NAME = "BRIAN (Trunk + ReZero)"
-B2FIX_STEPS      = "7,000"
-B2FIX_TRAINABLE  = "107.8M"
-B2FIX_TRAIN_PPL  = "258.8"
-B2FIX_OOD_PPL    = "1351.5"
-B2FIX_GAP_RATIO  = "5.22"
-B2FIX_ARTIFACT   = "results/ood_rezero-fixed_107M_step7000.json"
-
-# ── B3 PCT trunk (results/ood_pct-30m_68M_step4000.json) ──
-[b3]
 B3_VARIANT_NAME = "BRIAN (PCT trunk)"
-B3_STEPS      = "4,000"
-B3_TRAINABLE  = "69.2M"
-B3_TRAIN_PPL  = "400.9"
-B3_OOD_PPL    = "1806.6"
-B3_GAP_RATIO  = "4.51"
-B3_ARTIFACT   = "results/ood_pct-30m_68M_step4000.json"
-
-# ── B4 abstain-fix + multi-cortex (vast 40925851 @ a22eecc, step 2000) ──
-# Log: logs/vast/20260614*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log
-[b4]
 B4_VARIANT_NAME = "BRIAN (abstain-fix + multi-cortex, B4)"
-B4_STEPS      = "2,000"
-B4_TRAINABLE  = "889.6M"
-B4_FROZEN     = "~743M"
-B4_TRAIN_PPL  = "102.9"
-B4_OOD_PPL    = "295.9"
-B4_GAP_RATIO  = "2.87"
-B4_VAST_ID    = "40925851"
-B4_GIT_SHA    = "a22eecc"
-B4_LOG        = "*af758c381388*_step2kof2k.log"
+
+[b4]
+B4_STEPS = "2,000"
+B4_TRAINABLE = "889.6M"
+B4_FROZEN = "~743M"
+B4_TRAIN_PPL = "102.9"
+B4_OOD_PPL = "295.9"
+B4_GAP_RATIO = "2.87"
+B4_VAST_ID = "40925851"
+B4_GIT_SHA = "a22eecc"
 B4_GAP_THRESHOLD = "3.0"
-B4_IMPROVEMENT_VS_B3 = "53"
 B4_GAP_STEP500 = "2.05"
-B4_COMPUTE_RATIO_VS_B0 = "40×"
+B4_COMPUTE_RATIO_VS_B0 = "40x"
 B4_GPU_TYPE = "A100 SXM4"
-B4_GPU_COST = "$0.74/hr"
+B4_GPU_COST = "0.74"
 
-# ── B5 GPT-2 roster 10k rerun — mid-run snapshot at step 3000 ──
-# Log: logs/vast/20260615T092922Z_cd3a9493b050_arch_889M_h24-cfd-10k-dna-arch_step3540of10k.log
-[b5]
-B5_STEPS      = "3,000"
-B5_STEPS_NOTE = "mid-run, 10k planned"
-B5_TRAINABLE  = "~147M"
-B5_FROZEN     = "~743M"
-B5_TRAIN_PPL  = "45.0"
-B5_OOD_PPL    = "130.1"
-B5_GAP_RATIO  = "2.89"
-B5_LOG        = "logs/vast/20260615T092922Z_cd3a9493b050_arch_889M_h24-cfd-10k-dna-arch_step3540of10k.log"
-
-# ── B6 SmolLM2 general upgrade (vast 41084160 @ c19bf62, step 10000) ──
-# Checkpoint: hf://moritzroessler/BRIAN/checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt
-# Log: logs/20260615/neuroslm-full-dna-arch/175931_0_10000.log
 [b6]
-B6_STEPS      = "10,000"
-B6_TRAINABLE  = "146.9M"
-B6_FROZEN     = "~980M"
-B6_TRAIN_PPL  = "23.6"
-B6_OOD_PPL    = "155.0"
-B6_GAP_RATIO  = "6.55"
-B6_VAST_ID    = "41084160"
-B6_GIT_SHA    = "c19bf62"
-B6_LOG        = "logs/20260615/neuroslm-full-dna-arch/175931_0_10000.log"
-B6_HF_CKPT   = "moritzroessler/BRIAN/checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt"
+B6_STEPS = "10,000"
+B6_TRAINABLE = "146.9M"
+B6_FROZEN = "~980M"
+B6_TRAIN_PPL = "23.6"
+B6_OOD_PPL = "155.0"
+B6_GAP_RATIO = "6.55"
+B6_VAST_ID = "41084160"
+B6_GIT_SHA = "c19bf62"
+B6_LOG = "logs/20260615/neuroslm-full-dna-arch/175931_0_10000.log"
+B6_HF_CKPT = "moritzroessler/BRIAN/checkpoints/20260615-175931_c19bf629_neuroslm-full-dna-arch/step10000.pt"
 
-# H22 specific targets (for narrative text)
-B6_H22_TRAIN_TARGET    = "70"
-B6_H22_OOD_TARGET      = "250"
-B6_H22_GAP_TARGET      = "2.5"
-
-# H22 post-mortem run id (GFD regression analysis; not the same as B6_VAST_ID)
-[h22]
-H22_POSTMORTEM_VAST_ID = "40968510"
-
-# ── H21 abstain-fix narrative numbers ──
 [h21]
-H21_BROKEN_VAST_ID        = "40923107"
-H21_BROKEN_CX_EMA         = "491"
-H21_BROKEN_TRAIN_PPL      = "1444"
-H21_BROKEN_OOD_PPL        = "4655"
-H21_IMPROVEMENT_TRAIN_X   = "14×"
-H21_IMPROVEMENT_OOD_X     = "17×"
-H21_ABSTAIN_CE_BEFORE     = "17.37"
-H21_ABSTAIN_CE_AFTER      = "4.03"
-H21_FIX_COMMIT            = "a22eecc"
+H21_BROKEN_VAST_ID = "40923107"
+H21_BROKEN_TRAIN_PPL = "1444"
+H21_BROKEN_OOD_PPL = "4655"
+H21_IMPROVEMENT_TRAIN_X = "14x"
+H21_IMPROVEMENT_OOD_X = "17x"
+H21_ABSTAIN_CE_BEFORE = "17.37"
+H21_ABSTAIN_CE_AFTER = "4.03"
+H21_FIX_COMMIT = "a22eecc"

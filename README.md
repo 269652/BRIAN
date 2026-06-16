@@ -2,7 +2,7 @@
 
 > *A 146.9M trainable-parameter trunk language model (~980M additional frozen expert parameters) optimized for integrated information (Φ) and mechanistic consciousness-like properties. Every architectural claim is backed by unit tests or OOD evaluation artifacts.*
 
-[![tests](https://img.shields.io/badge/tests-1511%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-2942%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
@@ -11,10 +11,10 @@
 [![cortex-fusion](https://img.shields.io/badge/cortex--fusion-KL%20+%20NT--gated-blueviolet)]()
 [![formal-gate](https://img.shields.io/badge/improvement--gate-Welch's%20t-9cf)]()
 
-BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained causal-LM cortex experts (`HuggingFaceTB/SmolLM2-360M` for general, `microsoft/phi-1_5` for code, `Qwen/Qwen2.5-0.5B-Instruct` for reasoning).
+BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained causal-LM cortex experts (`smollm2_360m` for general, `microsoft/CodeGPT-small-py` for code, `Qwen/Qwen2.5-0.5B` for reasoning).
 
 **Current status:**
-- ✅ **Layer A (mechanisms):** 20+ core properties verified via 1511 unit tests across `tests/` (`tests/dsl/` alone runs 620). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
+- ✅ **Layer A (mechanisms):** 20+ core properties verified via 2942 unit tests across `tests/` (`tests/dsl/` alone runs 765). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
 - 🟡 **Layer B (generalization):** Best variant B4 achieves **2.87 gap_ratio** on WikiText-103-v1 OOD (53% better than flat-transformer baseline at 6.12). Best run: train_ppl 102.9, OOD_ppl 295.9. See [`docs/findings.md`](docs/findings.md) for full Layer B arc.
 
 Code, math, and tensor shapes: [`docs/architecture.md`](docs/architecture.md). Full evidence ledger: [`docs/findings.md`](docs/findings.md).
@@ -105,7 +105,7 @@ modulation dopamine -> pfc {
 }
 ```
 
-**Why?** Hand-written PyTorch is error-prone for biologically-plausible models; math specs are checkable. The DSL codegen produces torch modules with **byte-equivalent forward passes** (verified by 620 DSL tests in `tests/dsl/`) and enables symbolic analysis (fixed-point, stability, sensitivity). The DNA layer (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) supports **module bundling with source maps** and **byte-identity round-trip** verification (`tests/test_dna_roundtrip_byte_identity.py`).
+**Why?** Hand-written PyTorch is error-prone for biologically-plausible models; math specs are checkable. The DSL codegen produces torch modules with **byte-equivalent forward passes** (verified by 765 DSL tests in `tests/dsl/`) and enables symbolic analysis (fixed-point, stability, sensitivity). The DNA layer (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) supports **module bundling with source maps** and **byte-identity round-trip** verification (`tests/test_dna_roundtrip_byte_identity.py`).
 
 **Folder layout:** `arch.neuro` (package config + wiring), `modules/*.neuro` (per-region specs), `lib/` (shared mechanics). Import paths: `@/` = absolute, `./` = relative.
 
@@ -139,7 +139,7 @@ All 15 core mechanisms confirmed to implement as specified:
 | **H20** — `TheoryOfMindIR` represents nested agent beliefs as stalk vectors over a sheaf | `tests/thsd/test_theory_of_mind_ir.py` (9) | ✅ `d_belief`, `max_agents`, `belief_decay ∈ [0,1]`, `order ≥ 1`, `false_belief_threshold ∈ [0,1]` all validated; stalk dimension scales with recursion `order` (k-th order ToM has `stalk_dim = d_belief × max_agents^(k-1)`). |
 | **H21** — Per-position abstain logit unlocks multi-cortex fusion | `tests/training/test_lm_expert_abstain_safety.py` (5) | ✅ Replacing flat `_ABSTAIN_LOGIT = -1e4` with `abstain = max(mapped_logits) − ln(V_trunk)` keeps unmapped trunk-vocab slots at uniform baseline. Standalone-cortex CE on a random batch drops from 17.37 nats (pre-fix) to 4.03 nats (post-fix); on deploy 40925851 the fusion gate `α_eff` stays at 0.50 throughout instead of collapsing to 0 → **14× train-PPL / 17× OOD-PPL improvement** vs the broken precursor 40923107. |
 
-**Run all:** `py -3 -m pytest tests/ -v` (1511 tests, ~110 seconds on CPU)
+**Run all:** `py -3 -m pytest tests/ -v` (2942 tests, ~367 seconds on CPU)
 
 ### Layer B — OOD Generalization (The Open Question) 🟡
 
@@ -154,20 +154,20 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: B4 (abstain-fix + mult
 | **BRIAN (abstain-fix + multi-cortex, B4)** | **889.6M** | **2,000** | **102.9** | **295.9** | **2.87** | [vast 40925851 log](logs/vast/) — `*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log` |
 
 **What the table says:**
-1. **B4 wins absolute OOD PPL among BRIAN variants** (295.9 vs ≥1351.5 for B1–B3). The abstain fix unblocks the multi-cortex fusion pathway, and the full 889.6M DNA-compiled `BRIANHarness` (3 frozen causal-LM cortex experts + bowtie trunk + every wired module) now contributes signal that earlier variants couldn't access. *B4 used the legacy gpt2/CodeGPT/Qwen2.5 roster; the post-H22 roster (`HuggingFaceTB/SmolLM2-360M` + `microsoft/phi-1_5` + `Qwen/Qwen2.5-0.5B-Instruct`) is the 10k follow-up baseline.*
+1. **B4 wins absolute OOD PPL among BRIAN variants** (295.9 vs ≥1351.5 for B1–B3). The abstain fix unblocks the multi-cortex fusion pathway, and the full 889.6M DNA-compiled `BRIANHarness` (3 frozen causal-LM cortex experts + bowtie trunk + every wired module) now contributes signal that earlier variants couldn't access. *B4 used the legacy gpt2/CodeGPT/Qwen2.5 roster; the post-H22 roster (`smollm2_360m` + `microsoft/CodeGPT-small-py` + `Qwen/Qwen2.5-0.5B`) is the 10k follow-up baseline.*
 2. **B4 is also the first BRIAN variant with gap_ratio < 3.0** (2.87, vs 4.51 best prior). The drop from B3's 4.51 to B4's 2.87 is larger than any single prior step in the arc.
-3. **B4 still trails the flat baseline on absolute PPL** (295.9 OOD vs 404.0), but with 40× fewer training steps (2,000 vs 80,000). Matched-compute comparison is the next experiment.
+3. **B4 still trails the flat baseline on absolute PPL** (295.9 OOD vs 404.0), but with 40x fewer training steps (2,000 vs 80,000). Matched-compute comparison is the next experiment.
 4. **gap_ratio is drifting upward within B4** (2.05 → 2.87 between step 500 and step 2,000). The 10k rerun queued immediately after H21 will distinguish plateau vs accelerating overfit. [See H21 in findings.md for the full trajectory, telemetry, and adjacent issues.](docs/FINDINGS.md#h21--per-position-abstain-logit-fixes-catastrophic-cortex-ce-2026-06-14)
 
-**Latest stable full-scale run:** B4 — vast 40925851, A100 SXM4 @ $0.74/hr, branch `master` @ `a22eecc`, completed 2,000 steps with PPL 102.9 / OOD 295.9 / gap 2.87.
+**Latest stable full-scale run:** B4 — vast 40925851, A100 SXM4 @ 0.74, branch `master` @ `a22eecc`, completed 2,000 steps with PPL 102.9 / OOD 295.9 / gap 2.87.
 
 ### Implementation Status
 
-- **1511/1515 tests passing** in `tests/` (4 deselected; ~110s on CPU); breakdown: **620 in `tests/dsl/`** (DSL parsing + codegen + byte-equivalence), **65 in `tests/training/`** (harness, multi-cortex, distillation, gating), plus verification, THSD, evolution, narrative, qualia, neurochem subsuites.
+- **2942 tests passing** in `tests/` (~367s on CPU); breakdown: **765 in `tests/dsl/`** (DSL parsing + codegen + byte-equivalence), **294 in `tests/training/`** (harness, multi-cortex, distillation, gating), plus verification, THSD, evolution, narrative, qualia, neurochem subsuites.
 - Training with optimizer-partitioned checkpoint streaming
 - DSL-based architecture specs compile to byte-equivalent PyTorch models with **source maps** (`neuroslm/compiler/module_bundler.py`) and **byte-identity round-trip** verification
 - Real-time architecture evolution via RAID-5 protected DNA mutations, gated by **`ImprovementGate`** (Welch's t-test) — no mutation lands without statistically significant fitness gain
-- **Multi-cortex fusion** (3 pretrained causal-LM experts — `HuggingFaceTB/SmolLM2-360M` / `microsoft/phi-1_5` / `Qwen/Qwen2.5-0.5B-Instruct` — + bowtie trunk) with **LayerNorm pre-head anisotropy suppression**, **KL distillation** (trunk learns from cortex), and **NT-mediated α gating** (cortex retires when trunk surpasses it)
+- **Multi-cortex fusion** (3 pretrained causal-LM experts — `smollm2_360m` / `microsoft/CodeGPT-small-py` / `Qwen/Qwen2.5-0.5B` — + bowtie trunk) with **LayerNorm pre-head anisotropy suppression**, **KL distillation** (trunk learns from cortex), and **NT-mediated α gating** (cortex retires when trunk surpasses it)
 
 ---
 
@@ -177,9 +177,9 @@ BRIAN's 30M-P4 preset stacks three frozen causal-LM "cortex" experts above the b
 
 | Domain | Expert | Params | Tokenizer vs trunk | Path |
 |---|---|---|---|---|
-| `general` | `HuggingFaceTB/SmolLM2-360M` | 360M | different (~49 152 BPE) | bridge (per-sample retokenise + char-offset align) |
-| `code` | `microsoft/phi-1_5` | 1.3B | same (gpt2 BPE) | fast (`lm(ids).logits` direct) |
-| `reasoning` | `Qwen/Qwen2.5-0.5B-Instruct` | 0.5B | different | bridge |
+| `general` | `smollm2_360m` | ~360M | different (~49 152 BPE) | bridge (per-sample retokenise + char-offset align) |
+| `code` | `microsoft/CodeGPT-small-py` | ~125M | same (gpt2 BPE) | fast (`lm(ids).logits` direct) |
+| `reasoning` | `Qwen/Qwen2.5-0.5B` | ~500M | different | bridge |
 
 The legacy roster used plain `gpt2` for `general` (2019, ~125M, WebText). It was upgraded under [H22](docs/FINDINGS.md#h22--smollm2-360m-general-expert-upgrade-2026-06-14) on 2026-06-14 to capture ~3× the parameters and ~100× the training tokens at the same routing slot.
 
@@ -340,11 +340,11 @@ pip install -r requirements.txt
 # torch is intentionally not in requirements.txt — install matching your accelerator:
 #   pip install torch --index-url https://download.pytorch.org/whl/cu121
 
-# CPU sanity run
-python -m neuroslm.train --preset small --steps 2000 --batch_size 4 --optimizer adamw
+# CPU sanity run (tiny preset, ~27M params)
+brian train --preset=tiny --steps=2000
 
-# A100 (xl preset, ~230M params, bf16, grad-checkpointing)
-python -m neuroslm.train --preset xl --steps 100000 --batch_size 4 --device cuda
+# A100 full training (xl preset, ~240M params, bf16, grad-checkpointing)
+brian train --preset=xl --steps=100000 --device=cuda
 
 # Resume the latest stream-matched checkpoint
 python -m neuroslm.train --resume latest
@@ -360,9 +360,23 @@ The full Colab workflow (clone → ablation → full training → benchmarks) is
 
 ---
 
-## Checkpoints (Git LFS)
+## Checkpoints (HuggingFace Hub)
 
-Training checkpoints live in `lfs_checkpoints/` and are tracked via Git LFS. A single `.pt` file is multi-GB, so a full `git pull` on a laptop can be very slow — and you usually don't need the binaries locally.
+Training checkpoints are pushed to HuggingFace Hub (`moritzroessler/BRIAN`) every 2,000 steps during training. The push backend is configurable per-architecture in `config.neuro`:
+
+```neuro
+# architectures/master/config.neuro
+checkpoint {
+    push_backend: "hf"              # "hf" | "lfs" | "none"
+    hf_repo_id: "moritzroessler/BRIAN"
+    hf_token_env: "HF_TOKEN"       # env var holding the write token
+    save_every: 500                 # local .pt cadence
+    push_every: 2500                # remote push cadence
+    push_optimizer: false           # strip Adam state (~2/3 size savings)
+}
+```
+
+Legacy local checkpoints in `lfs_checkpoints/` are tracked via Git LFS. A single `.pt` file is multi-GB, so a full `git pull` on a laptop can be very slow.
 
 ### Skip LFS downloads for this repo (recommended on laptops)
 
