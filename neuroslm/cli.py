@@ -2908,7 +2908,13 @@ def cmd_update_readme(args: argparse.Namespace) -> int:
     ``brian update-readme``         — write README.md in place.
     ``brian update-readme --check`` — compare only; exit 1 if stale (pre-commit use).
     """
-    from neuroslm.readme_renderer import ReadmeRenderError, render_readme
+    from neuroslm.readme_renderer_v2 import (
+    ReadmeRenderError,
+    MissingMetricError,
+    MissingClaimError,
+    LogNotFoundError,
+    render_readme
+)
 
     template = REPO_ROOT / "docs" / "README.template.md"
     metrics  = REPO_ROOT / "docs" / "readme_metrics.toml"
