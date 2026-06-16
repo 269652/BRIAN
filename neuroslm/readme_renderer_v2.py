@@ -109,9 +109,9 @@ _CLAIM_REF_RE = re.compile(
 )
 
 # $claim{ ... } - multiline claim definition
-# $claim{ ... } - claim definition
+# $claim{ ... } - claim definition (captures trailing newlines)
 _CLAIM_DEF_RE = re.compile(
-    r"\$claim\s*\{([^}]+(?:\{[^}]*\}[^}]*)*)\}",
+    r"\$claim\s*\{([^}]+(?:\{[^}]*\}[^}]*)*)\}\n*",
     re.MULTILINE | re.DOTALL
 )
 
