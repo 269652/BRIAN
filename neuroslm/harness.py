@@ -1106,6 +1106,20 @@ class BRIANHarness(nn.Module):
         from neuroslm.emergent.gif import GIFController
         self._gif = GIFController.from_config(self.training_config)
 
+    def load_gif_probe(self, tokenizer, device: torch.device) -> bool:
+        """Load the GIF OOD probe's held-out sequences.
+
+        Must be called after construction, once a tokenizer and device
+        are available.  Without this call, the OOD probe never arms and
+        the adaptive GIF controller stays dormant.
+
+        Returns True if the probe loaded successfully (or was already
+        loaded / GIF disabled).
+        """
+        if self._gif is None or not self._gif.enabled:
+            return True
+        return self._gif.ood_probe.maybe_load(tokenizer, device)
+
     def _read_ne_gaba_levels(self) -> tuple[float, float]:
         """Sample current per-batch-mean NE and GABA levels.
 

@@ -410,6 +410,17 @@ def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
         f"checkpoint will only save the trainable subset "
         f"(frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)"
     )
+
+    # ── GIF OOD probe: arm the held-out evaluator ──
+    # The probe needs a tokenizer + device to download and cache WikiText
+    # sequences. Without this call, the adaptive GIF controller never
+    # sees OOD signal and stays at the static floor.
+    from neuroslm.tokenizer import Tokenizer as _TokCls
+    _probe_tok = _TokCls()
+    _probe_device = torch.device(device)
+    if harness.load_gif_probe(_probe_tok, _probe_device):
+        print("[train_dsl] GIF OOD probe armed")
+
     return harness
 
 
@@ -463,6 +474,13 @@ def build_harness(arch_root: Path, vocab_size: int, d_sem: int,
                     if s.gradient == "detached_from_main_loss"]
         print(f"[train_dsl] param_scopes: {len(scopes)} declared, "
               f"detached-from-main-loss: {detached}")
+
+    # ── GIF OOD probe: arm the held-out evaluator ──
+    from neuroslm.tokenizer import Tokenizer as _TokCls2
+    _probe_tok2 = _TokCls2()
+    _probe_device2 = torch.device(device)
+    if harness.load_gif_probe(_probe_tok2, _probe_device2):
+        print("[train_dsl] GIF OOD probe armed")
 
     return harness
 
