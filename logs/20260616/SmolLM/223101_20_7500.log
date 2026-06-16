@@ -1775,3 +1775,263 @@ step  7420 | loss 4.7027 | lm 3.8410 | ppl 46.6 | gnorm 28.579 | lr 1.66e-04 | 1
 step  7440 | loss 4.8209 | lm 3.9596 | ppl 52.4 | gnorm 27.039 | lr 1.43e-04 | 1616 tok/s | Φ 0.574 | λ₁ 0.075 | ign 0.57 | mesoLG 0.44 | troph 7/8 μ0.62 | NT[DA=0.10 NE=0.14 5HT=0.34 ACh=0.17 eCB=0.05 Glu=0.39 GABA=0.13] | osc[δ=0.377 θ=0.253 γ=0.370] | em[C2:ρ=0.27/τ=0.16/s=0.57 C4:Q=0.1 W=0 pl=511 C3:pc=0.199 VBB:β=1.07 σ=0.0211 kl=129.047 C5:lat=1.61 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0046 cmd=0.000 Σ=0.005 w=1.00 chat=0.60] | cortex[α_eff=0.525 inh=0.000 λ=0.727 kl=0.404 lm_ema=7.50 cx_ema=3.08] | gif[α=0.0500 p=1.000 gap=4.14 ood_ema=8.86 ood_ce=8.93 iso_w=0.0100 ls=0.050 div=0.000] | hpa[load=0.27 cort=0.26 NE×0.82 T×0.74 LR×0.87]
 step  7460 | loss 4.8828 | lm 4.0391 | ppl 56.8 | gnorm 29.870 | lr 1.63e-04 | 1412 tok/s | Φ 0.662 | λ₁ 0.075 | ign 0.57 | mesoLG 0.49 | troph 7/8 μ0.62 | NT[DA=0.10 NE=0.15 5HT=0.34 ACh=0.23 eCB=0.05 Glu=0.39 GABA=0.08] | osc[δ=0.347 θ=0.254 γ=0.399] | em[C2:ρ=0.00/τ=0.14/s=0.57 C4:Q=0.7 W=14 pl=34 C3:pc=0.196 VBB:β=1.07 σ=0.0210 kl=126.569 C5:lat=1.35 C6:pac=0.00] | reg[dar=0.000 pcc=0.000 iso=0.0043 cmd=0.000 Σ=0.004 w=1.00 chat=0.60] | cortex[α_eff=0.525 inh=0.000 λ=0.817 kl=0.398 lm_ema=7.68 cx_ema=3.00] | gif[α=0.0500 p=1.000 gap=3.14 ood_ema=8.86 ood_ce=8.93 iso_w=0.0100 ls=0.050 div=0.000] | hpa[load=0.26 cort=0.26 NE×0.82 T×0.74 LR×0.87]
 step  7480 | loss 4.8368 | lm 3.9690 | ppl 52.9 | gnorm 38.831 | lr 1.41e-04 | 1505 tok/s | Φ 0.451 | λ₁ 0.075 | ign 0.57 | mesoLG 0.48 | troph 7/8 μ0.62 | NT[DA=0.16 NE=0.17 5HT=0.34 ACh=0.24 eCB=0.05 Glu=0.40 GABA=0.08] | osc[δ=0.461 θ=0.226 γ=0.314] | em[C2:ρ=0.00/τ=0.10/s=0.57 C4:Q=-0.2 W=19 pl=25 C3:pc=0.196 VBB:β=1.07 σ=0.0216 kl=222.374 C5:lat=1.68 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0060 cmd=0.000 Σ=0.006 w=1.00 chat=0.60] | cortex[α_eff=0.526 inh=0.000 λ=0.745 kl=0.314 lm_ema=6.69 cx_ema=3.67] | gif[α=0.0500 p=1.000 gap=5.62 ood_ema=8.86 ood_ce=8.93 iso_w=0.0100 ls=0.050 div=0.000] | hpa[load=0.26 cort=0.26 NE×0.82 T×0.74 LR×0.87]
+step  7500 | loss 4.3088 | lm 3.4323 | ppl 30.9 | gnorm 37.278 | lr 1.60e-04 | 1622 tok/s | Φ 0.547 | λ₁ 0.075 | ign 0.58 | mesoLG 0.51 | troph 7/8 μ0.62 | NT[DA=0.12 NE=0.33 5HT=0.36 ACh=0.21 eCB=0.05 Glu=0.39 GABA=0.11] | osc[δ=0.498 θ=0.251 γ=0.252] | em[C2:ρ=0.11/τ=0.08/s=0.58 C4:Q=0.4 W=18 pl=26 C3:pc=0.200 VBB:β=1.07 σ=0.0209 kl=120.098 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0039 cmd=0.000 Σ=0.004 w=1.00 chat=0.60] | cortex[α_eff=0.526 inh=0.000 λ=0.804 kl=0.424 lm_ema=6.53 cx_ema=3.63] | gif[α=0.0500 p=1.000 gap=11.09 ood_ema=8.87 ood_ce=8.96 iso_w=0.0100 ls=0.050 div=0.000] | hpa[load=0.27 cort=0.26 NE×0.82 T×0.74 LR×0.87]
+[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260616-232134_49a57586_neuroslm-full/step7500.pt
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+  ...ull/step7500.pt.strip.tmp:   6%|▌         | 34.2MB /  597MB            [A[A
+
+  ...ull/step7500.pt.strip.tmp:   6%|▌         | 34.2MB /  597MB            [A[AProcessing Files (0 / 1)      :   6%|▌         | 34.2MB /  597MB, 3.30MB/s  
+
+  ...ull/step7500.pt.strip.tmp:  12%|█▏        | 72.1MB /  597MB            [A[AProcessing Files (0 / 1)      :  12%|█▏        | 72.1MB /  597MB, 6.84MB/s  
+New Data Upload               :   1%|          |  555kB / 67.1MB, 53.2kB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  19%|█▉        |  114MB /  597MB            [A[AProcessing Files (0 / 1)      :  19%|█▉        |  114MB /  597MB, 10.7MB/s  
+New Data Upload               :   4%|▍         | 2.78MB / 67.1MB,  263kB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  26%|██▌       |  154MB /  597MB            [A[AProcessing Files (0 / 1)      :  26%|██▌       |  154MB /  597MB, 14.2MB/s  
+New Data Upload               :   7%|▋         | 4.44MB / 67.1MB,  414kB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  26%|██▋       |  157MB /  597MB            [A[AProcessing Files (0 / 1)      :  26%|██▋       |  157MB /  597MB, 14.2MB/s  
+New Data Upload               :  12%|█▏        | 7.78MB / 67.1MB,  717kB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  27%|██▋       |  163MB /  597MB            [A[AProcessing Files (0 / 1)      :  27%|██▋       |  163MB /  597MB, 14.3MB/s  
+New Data Upload               :  20%|█▉        | 13.3MB / 67.1MB, 1.22MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  28%|██▊       |  169MB /  597MB            [A[AProcessing Files (0 / 1)      :  28%|██▊       |  169MB /  597MB, 14.6MB/s  
+New Data Upload               :  15%|█▍        | 20.0MB /  134MB, 1.81MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  30%|██▉       |  177MB /  597MB            [A[AProcessing Files (0 / 1)      :  30%|██▉       |  177MB /  597MB, 15.0MB/s  
+New Data Upload               :  21%|██        | 27.8MB /  134MB, 2.49MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  31%|███       |  182MB /  597MB            [A[AProcessing Files (0 / 1)      :  31%|███       |  182MB /  597MB, 15.1MB/s  
+New Data Upload               :  24%|██▍       | 32.8MB /  134MB, 2.89MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  32%|███▏      |  191MB /  597MB            [A[AProcessing Files (0 / 1)      :  32%|███▏      |  191MB /  597MB, 15.6MB/s  
+New Data Upload               :  21%|██        | 41.3MB /  201MB, 3.60MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  34%|███▎      |  201MB /  597MB            [A[AProcessing Files (0 / 1)      :  34%|███▎      |  201MB /  597MB, 16.1MB/s  
+New Data Upload               :  26%|██▌       | 51.4MB /  201MB, 4.43MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  35%|███▌      |  212MB /  597MB            [A[AProcessing Files (0 / 1)      :  35%|███▌      |  212MB /  597MB, 16.7MB/s  
+New Data Upload               :  31%|███       | 62.1MB /  201MB, 5.30MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  36%|███▋      |  217MB /  597MB            [A[AProcessing Files (0 / 1)      :  36%|███▋      |  217MB /  597MB, 16.9MB/s  
+New Data Upload               :  34%|███▎      | 67.7MB /  201MB, 5.68MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  39%|███▊      |  230MB /  597MB            [A[AProcessing Files (0 / 1)      :  39%|███▊      |  230MB /  597MB, 17.6MB/s  
+New Data Upload               :  40%|████      | 80.8MB /  201MB, 6.72MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  39%|███▉      |  234MB /  597MB            [A[AProcessing Files (0 / 1)      :  39%|███▉      |  234MB /  597MB, 17.6MB/s  
+New Data Upload               :  42%|████▏     | 84.4MB /  201MB, 6.88MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  40%|████      |  240MB /  597MB            [A[AProcessing Files (0 / 1)      :  40%|████      |  240MB /  597MB, 17.7MB/s  
+New Data Upload               :  45%|████▍     | 90.1MB /  201MB, 7.24MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  41%|████      |  245MB /  597MB            [A[AProcessing Files (0 / 1)      :  41%|████      |  245MB /  597MB, 17.8MB/s  
+New Data Upload               :  47%|████▋     | 95.4MB /  201MB, 7.54MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  42%|████▏     |  249MB /  597MB            [A[AProcessing Files (0 / 1)      :  42%|████▏     |  249MB /  597MB, 17.7MB/s  
+New Data Upload               :  49%|████▉     | 99.5MB /  201MB, 7.74MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  42%|████▏     |  252MB /  597MB            [A[AProcessing Files (0 / 1)      :  42%|████▏     |  252MB /  597MB, 17.7MB/s  
+New Data Upload               :  51%|█████     |  103MB /  201MB, 7.87MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  43%|████▎     |  256MB /  597MB            [A[AProcessing Files (0 / 1)      :  43%|████▎     |  256MB /  597MB, 17.6MB/s  
+New Data Upload               :  53%|█████▎    |  107MB /  201MB, 8.04MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  44%|████▍     |  263MB /  597MB            [A[AProcessing Files (0 / 1)      :  44%|████▍     |  263MB /  597MB, 17.8MB/s  
+New Data Upload               :  42%|████▏     |  113MB /  268MB, 8.42MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  46%|████▌     |  273MB /  597MB            [A[AProcessing Files (0 / 1)      :  46%|████▌     |  273MB /  597MB, 18.3MB/s  
+New Data Upload               :  46%|████▌     |  124MB /  268MB, 9.12MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  47%|████▋     |  281MB /  597MB            [A[AProcessing Files (0 / 1)      :  47%|████▋     |  281MB /  597MB, 18.5MB/s  
+New Data Upload               :  39%|███▉      |  131MB /  335MB, 9.56MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  48%|████▊     |  287MB /  597MB            [A[AProcessing Files (0 / 1)      :  48%|████▊     |  287MB /  597MB, 18.7MB/s  
+New Data Upload               :  41%|████      |  138MB /  335MB, 9.94MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  50%|█████     |  300MB /  597MB            [A[AProcessing Files (0 / 1)      :  50%|█████     |  300MB /  597MB, 19.4MB/s  
+New Data Upload               :  45%|████▍     |  151MB /  335MB, 10.8MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  52%|█████▏    |  311MB /  597MB            [A[AProcessing Files (0 / 1)      :  52%|█████▏    |  311MB /  597MB, 19.9MB/s  
+New Data Upload               :  40%|████      |  161MB /  402MB, 11.5MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  54%|█████▍    |  323MB /  597MB            [A[AProcessing Files (0 / 1)      :  54%|█████▍    |  323MB /  597MB, 20.5MB/s  
+New Data Upload               :  39%|███▊      |  173MB /  447MB, 12.2MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  55%|█████▌    |  329MB /  597MB            [A[AProcessing Files (0 / 1)      :  55%|█████▌    |  329MB /  597MB, 20.6MB/s  
+New Data Upload               :  40%|████      |  180MB /  447MB, 12.6MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  57%|█████▋    |  340MB /  597MB            [A[AProcessing Files (0 / 1)      :  57%|█████▋    |  340MB /  597MB, 21.1MB/s  
+New Data Upload               :  43%|████▎     |  190MB /  447MB, 13.2MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  59%|█████▉    |  351MB /  597MB            [A[AProcessing Files (0 / 1)      :  59%|█████▉    |  351MB /  597MB, 21.5MB/s  
+New Data Upload               :  45%|████▌     |  202MB /  447MB, 13.8MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  59%|█████▉    |  354MB /  597MB            [A[AProcessing Files (0 / 1)      :  59%|█████▉    |  354MB /  597MB, 21.4MB/s  
+New Data Upload               :  46%|████▌     |  205MB /  447MB, 13.8MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  60%|█████▉    |  357MB /  597MB            [A[AProcessing Files (0 / 1)      :  60%|█████▉    |  357MB /  597MB, 21.2MB/s  
+New Data Upload               :  46%|████▋     |  208MB /  447MB, 13.8MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  61%|██████▏   |  367MB /  597MB            [A[AProcessing Files (0 / 1)      :  61%|██████▏   |  367MB /  597MB, 21.5MB/s  
+New Data Upload               :  49%|████▊     |  217MB /  447MB, 14.3MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  62%|██████▏   |  371MB /  597MB            [A[AProcessing Files (0 / 1)      :  62%|██████▏   |  371MB /  597MB, 21.5MB/s  
+New Data Upload               :  50%|████▉     |  222MB /  447MB, 14.3MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  64%|██████▎   |  380MB /  597MB            [A[AProcessing Files (0 / 1)      :  64%|██████▎   |  380MB /  597MB, 21.7MB/s  
+New Data Upload               :  52%|█████▏    |  231MB /  447MB, 14.8MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  66%|██████▌   |  392MB /  597MB            [A[AProcessing Files (0 / 1)      :  66%|██████▌   |  392MB /  597MB, 22.2MB/s  
+New Data Upload               :  54%|█████▍    |  242MB /  447MB, 15.4MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  67%|██████▋   |  398MB /  597MB            [A[AProcessing Files (0 / 1)      :  67%|██████▋   |  398MB /  597MB, 22.3MB/s  
+New Data Upload               :  56%|█████▌    |  249MB /  447MB, 15.6MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  68%|██████▊   |  407MB /  597MB            [A[AProcessing Files (0 / 1)      :  68%|██████▊   |  407MB /  597MB, 22.6MB/s  
+New Data Upload               :  58%|█████▊    |  257MB /  447MB, 16.0MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  70%|██████▉   |  418MB /  597MB            [A[AProcessing Files (0 / 1)      :  70%|██████▉   |  418MB /  597MB, 23.0MB/s  
+New Data Upload               :  60%|█████▉    |  268MB /  447MB, 16.5MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  72%|███████▏  |  429MB /  597MB            [A[AProcessing Files (0 / 1)      :  72%|███████▏  |  429MB /  597MB, 23.4MB/s  
+New Data Upload               :  62%|██████▏   |  279MB /  447MB, 17.1MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  73%|███████▎  |  438MB /  597MB            [A[AProcessing Files (0 / 1)      :  73%|███████▎  |  438MB /  597MB, 23.6MB/s  
+New Data Upload               :  64%|██████▍   |  288MB /  447MB, 17.5MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  75%|███████▌  |  448MB /  597MB            [A[AProcessing Files (0 / 1)      :  75%|███████▌  |  448MB /  597MB, 24.0MB/s  
+New Data Upload               :  67%|██████▋   |  299MB /  447MB, 18.0MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  77%|███████▋  |  459MB /  597MB            [A[AProcessing Files (0 / 1)      :  77%|███████▋  |  459MB /  597MB, 24.4MB/s  
+New Data Upload               :  69%|██████▉   |  309MB /  447MB, 18.5MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  79%|███████▉  |  471MB /  597MB            [A[AProcessing Files (0 / 1)      :  79%|███████▉  |  471MB /  597MB, 24.9MB/s  
+New Data Upload               :  72%|███████▏  |  322MB /  447MB, 19.1MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  80%|████████  |  479MB /  597MB            [A[AProcessing Files (0 / 1)      :  80%|████████  |  479MB /  597MB, 25.0MB/s  
+New Data Upload               :  74%|███████▎  |  330MB /  447MB, 19.3MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  81%|████████  |  484MB /  597MB            [A[AProcessing Files (0 / 1)      :  81%|████████  |  484MB /  597MB, 24.9MB/s  
+New Data Upload               :  75%|███████▍  |  334MB /  447MB, 19.3MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  82%|████████▏ |  487MB /  597MB            [A[AProcessing Files (0 / 1)      :  82%|████████▏ |  487MB /  597MB, 24.7MB/s  
+New Data Upload               :  75%|███████▌  |  338MB /  447MB, 19.2MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  82%|████████▏ |  492MB /  597MB            [A[AProcessing Files (0 / 1)      :  82%|████████▏ |  492MB /  597MB, 24.6MB/s  
+New Data Upload               :  77%|███████▋  |  343MB /  447MB, 19.2MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  83%|████████▎ |  497MB /  597MB            [A[AProcessing Files (0 / 1)      :  83%|████████▎ |  497MB /  597MB, 24.5MB/s  
+New Data Upload               :  78%|███████▊  |  347MB /  447MB, 19.2MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  84%|████████▍ |  500MB /  597MB            [A[AProcessing Files (0 / 1)      :  84%|████████▍ |  500MB /  597MB, 24.2MB/s  
+New Data Upload               :  78%|███████▊  |  351MB /  447MB, 19.1MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  84%|████████▍ |  503MB /  597MB            [A[AProcessing Files (0 / 1)      :  84%|████████▍ |  503MB /  597MB, 24.0MB/s  
+New Data Upload               :  79%|███████▉  |  354MB /  447MB, 19.0MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  85%|████████▌ |  508MB /  597MB            [A[AProcessing Files (0 / 1)      :  85%|████████▌ |  508MB /  597MB, 23.9MB/s  
+New Data Upload               :  80%|████████  |  358MB /  447MB, 18.9MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  86%|████████▌ |  512MB /  597MB            [A[AProcessing Files (0 / 1)      :  86%|████████▌ |  512MB /  597MB, 23.8MB/s  
+New Data Upload               :  81%|████████  |  363MB /  447MB, 18.9MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  87%|████████▋ |  517MB /  597MB            [A[AProcessing Files (0 / 1)      :  87%|████████▋ |  517MB /  597MB, 23.7MB/s  
+New Data Upload               :  82%|████████▏ |  367MB /  447MB, 18.9MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  87%|████████▋ |  520MB /  597MB            [A[AProcessing Files (0 / 1)      :  87%|████████▋ |  520MB /  597MB, 23.5MB/s  
+New Data Upload               :  83%|████████▎ |  370MB /  447MB, 18.8MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  88%|████████▊ |  523MB /  597MB            [A[AProcessing Files (0 / 1)      :  88%|████████▊ |  523MB /  597MB, 23.3MB/s  
+New Data Upload               :  84%|████████▎ |  374MB /  447MB, 18.7MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  88%|████████▊ |  527MB /  597MB            [A[AProcessing Files (0 / 1)      :  88%|████████▊ |  527MB /  597MB, 23.1MB/s  
+New Data Upload               :  84%|████████▍ |  377MB /  447MB, 18.6MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  89%|████████▊ |  529MB /  597MB            [A[AProcessing Files (0 / 1)      :  89%|████████▊ |  529MB /  597MB, 22.8MB/s  
+New Data Upload               :  85%|████████▍ |  379MB /  447MB, 18.4MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  89%|████████▉ |  530MB /  597MB            [A[AProcessing Files (0 / 1)      :  89%|████████▉ |  530MB /  597MB, 22.5MB/s  
+New Data Upload               :  85%|████████▌ |  381MB /  447MB, 18.2MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  89%|████████▉ |  534MB /  597MB            [A[AProcessing Files (0 / 1)      :  89%|████████▉ |  534MB /  597MB, 22.3MB/s  
+New Data Upload               :  86%|████████▌ |  384MB /  447MB, 18.1MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  90%|████████▉ |  536MB /  597MB            [A[AProcessing Files (0 / 1)      :  90%|████████▉ |  536MB /  597MB, 22.0MB/s  
+New Data Upload               :  86%|████████▋ |  386MB /  447MB, 17.9MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  90%|█████████ |  539MB /  597MB            [A[AProcessing Files (0 / 1)      :  90%|█████████ |  539MB /  597MB, 21.9MB/s  
+New Data Upload               :  87%|████████▋ |  389MB /  447MB, 17.8MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  91%|█████████ |  542MB /  597MB            [A[AProcessing Files (0 / 1)      :  91%|█████████ |  542MB /  597MB, 21.7MB/s  
+New Data Upload               :  88%|████████▊ |  393MB /  447MB, 17.7MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  91%|█████████▏|  545MB /  597MB            [A[AProcessing Files (0 / 1)      :  91%|█████████▏|  545MB /  597MB, 21.5MB/s  
+New Data Upload               :  88%|████████▊ |  396MB /  447MB, 17.6MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  92%|█████████▏|  548MB /  597MB            [A[AProcessing Files (0 / 1)      :  92%|█████████▏|  548MB /  597MB, 21.3MB/s  
+New Data Upload               :  89%|████████▉ |  399MB /  447MB, 17.5MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  92%|█████████▏|  552MB /  597MB            [A[AProcessing Files (0 / 1)      :  92%|█████████▏|  552MB /  597MB, 21.2MB/s  
+New Data Upload               :  90%|████████▉ |  402MB /  447MB, 17.4MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  93%|█████████▎|  553MB /  597MB            [A[AProcessing Files (0 / 1)      :  93%|█████████▎|  553MB /  597MB, 20.9MB/s  
+New Data Upload               :  90%|█████████ |  403MB /  447MB, 17.2MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  93%|█████████▎|  556MB /  597MB            [A[AProcessing Files (0 / 1)      :  93%|█████████▎|  556MB /  597MB, 20.7MB/s  
+New Data Upload               :  91%|█████████ |  407MB /  447MB, 17.1MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  94%|█████████▎|  559MB /  597MB            [A[AProcessing Files (0 / 1)      :  94%|█████████▎|  559MB /  597MB, 20.5MB/s  
+New Data Upload               :  92%|█████████▏|  409MB /  447MB, 17.0MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  94%|█████████▍|  562MB /  597MB            [A[AProcessing Files (0 / 1)      :  94%|█████████▍|  562MB /  597MB, 20.4MB/s  
+New Data Upload               :  92%|█████████▏|  413MB /  447MB, 16.9MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  95%|█████████▍|  566MB /  597MB            [A[AProcessing Files (0 / 1)      :  95%|█████████▍|  566MB /  597MB, 20.3MB/s  
+New Data Upload               :  93%|█████████▎|  416MB /  447MB, 16.9MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  95%|█████████▌|  568MB /  597MB            [A[AProcessing Files (0 / 1)      :  95%|█████████▌|  568MB /  597MB, 20.1MB/s  
+New Data Upload               :  94%|█████████▎|  419MB /  447MB, 16.7MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  96%|█████████▌|  572MB /  597MB            [A[AProcessing Files (0 / 1)      :  96%|█████████▌|  572MB /  597MB, 20.0MB/s  
+New Data Upload               :  94%|█████████▍|  422MB /  447MB, 16.7MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  96%|█████████▋|  575MB /  597MB            [A[AProcessing Files (0 / 1)      :  96%|█████████▋|  575MB /  597MB, 19.8MB/s  
+New Data Upload               :  95%|█████████▌|  425MB /  447MB, 16.6MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  97%|█████████▋|  576MB /  597MB            [A[AProcessing Files (0 / 1)      :  97%|█████████▋|  576MB /  597MB, 19.6MB/s  
+New Data Upload               :  95%|█████████▌|  427MB /  447MB, 16.4MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  97%|█████████▋|  580MB /  597MB            [A[AProcessing Files (0 / 1)      :  97%|█████████▋|  580MB /  597MB, 19.5MB/s  
+New Data Upload               :  96%|█████████▌|  430MB /  447MB, 16.3MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  98%|█████████▊|  582MB /  597MB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊|  582MB /  597MB, 19.3MB/s  
+New Data Upload               :  97%|█████████▋|  433MB /  447MB, 16.2MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  98%|█████████▊|  585MB /  597MB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊|  585MB /  597MB, 19.1MB/s  
+New Data Upload               :  97%|█████████▋|  436MB /  447MB, 16.1MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  99%|█████████▊|  588MB /  597MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▊|  588MB /  597MB, 19.0MB/s  
+New Data Upload               :  98%|█████████▊|  439MB /  447MB, 16.1MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  99%|█████████▉|  591MB /  597MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉|  591MB /  597MB, 18.9MB/s  
+New Data Upload               :  99%|█████████▊|  442MB /  447MB, 16.0MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  99%|█████████▉|  592MB /  597MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉|  592MB /  597MB, 18.6MB/s  
+New Data Upload               :  99%|█████████▉|  443MB /  447MB, 15.8MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp: 100%|█████████▉|  594MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  594MB /  597MB, 18.1MB/s  
+New Data Upload               :  99%|█████████▉|  445MB /  447MB, 15.3MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp: 100%|█████████▉|  596MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  596MB /  597MB, 17.9MB/s  
+New Data Upload               : 100%|█████████▉|  446MB /  447MB, 15.2MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp: 100%|█████████▉|  596MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  596MB /  597MB, 17.6MB/s  
+New Data Upload               : 100%|█████████▉|  447MB /  447MB, 14.9MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp: 100%|██████████|  597MB /  597MB            [A[AProcessing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 16.1MB/s  
+New Data Upload               : 100%|██████████|  447MB /  447MB, 13.7MB/s  [A
