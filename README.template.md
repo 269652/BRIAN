@@ -1,6 +1,6 @@
 # BRIAN — Biologically Realistic Information Architecture Network
 
-> *A 230M-parameter language model optimized for integrated information (Φ) and mechanistic consciousness-like properties. Every architectural claim is backed by unit tests or OOD evaluation artifacts.*
+> *A ${TRUNK_TRAINABLE_PARAMS} trainable-parameter trunk language model (${TOTAL_FROZEN_PARAMS} additional frozen expert parameters) optimized for integrated information (Φ) and mechanistic consciousness-like properties. Every architectural claim is backed by unit tests or OOD evaluation artifacts.*
 
 [![tests](https://img.shields.io/badge/tests-${LAYER_A_TEST_COUNT}%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
@@ -11,7 +11,7 @@
 [![cortex-fusion](https://img.shields.io/badge/cortex--fusion-KL%20+%20NT--gated-blueviolet)]()
 [![formal-gate](https://img.shields.io/badge/improvement--gate-Welch's%20t-9cf)]()
 
-BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained causal-LM cortex experts (SmolLM2-360M for general English, CodeGPT-small-py for code, Qwen2.5-0.5B for reasoning).
+BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained causal-LM cortex experts (`${EXPERT_GENERAL_MODEL}` for ${EXPERT_GENERAL_ROLE}, `${EXPERT_CODE_MODEL}` for ${EXPERT_CODE_ROLE}, `${EXPERT_REASONING_MODEL}` for ${EXPERT_REASONING_ROLE}).
 
 **Current status:**
 - ✅ **Layer A (mechanisms):** 20+ core properties verified via ${LAYER_A_TEST_COUNT} unit tests across `tests/` (`tests/dsl/` alone runs 620). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
@@ -23,7 +23,7 @@ Code, math, and tensor shapes: [`docs/architecture.md`](docs/architecture.md). F
 
 ## Architecture Rationale
 
-Instead of scaling parameters, BRIAN spends them on **topology, Φ-coupled plasticity, and closed-loop embodiment**. The bet is that a strategically designed 230M brain outgeneralizes a flat 100M transformer on OOD tasks by implementing consciousness-like properties at the mechanistic level:
+Instead of scaling parameters, BRIAN spends them on **topology, Φ-coupled plasticity, and closed-loop embodiment**. The bet is that a strategically designed ${TRUNK_TRAINABLE_PARAMS} trainable-param trunk outgeneralizes a flat 100M transformer on OOD tasks by implementing consciousness-like properties at the mechanistic level:
 
 | Component | Role | Verified? |
 |---|---|---|
@@ -73,7 +73,7 @@ Every box is a learnable module. Every arrow is a documented tensor operation. F
 
 ![Neural Flow Graph — current architecture](.neuro/nfg.svg)
 
-*Every node, edge, and modulation shown in the NFG is declared in `arch.neuro` and compiled to PyTorch. The diagram is the source of truth for wiring.*
+*The NFG is generated from `arch.neuro` → Hypergraph IR → PyTorch. The Hypergraph IR is the source of truth for wiring; the diagram visualizes it.*
 
 Re-render after editing `arch.neuro` with:
 
@@ -154,7 +154,7 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: B4 (abstain-fix + mult
 | **BRIAN (abstain-fix + multi-cortex, B4)** | **889.6M** | **2,000** | **102.9** | **295.9** | **2.87** | [vast 40925851 log](logs/vast/) — `*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log` |
 
 **What the table says:**
-1. **B4 wins absolute OOD PPL among BRIAN variants** (295.9 vs ≥1351 for B1–B3). The abstain fix unblocks the multi-cortex fusion pathway, and the full 889M DNA-compiled `BRIANHarness` (3 frozen causal-LM cortex experts + bowtie trunk + every wired module) now contributes signal that earlier variants couldn't access. *B4 used the legacy gpt2/CodeGPT/Qwen2.5 roster; the post-H22 roster (`smollm2_360m` + CodeGPT + Qwen2.5) is the 10k follow-up baseline.*
+1. **B4 wins absolute OOD PPL among BRIAN variants** (295.9 vs ≥1351 for B1–B3). The abstain fix unblocks the multi-cortex fusion pathway, and the full 889M DNA-compiled `BRIANHarness` (3 frozen causal-LM cortex experts + bowtie trunk + every wired module) now contributes signal that earlier variants couldn't access. *B4 used the legacy gpt2/CodeGPT/Qwen2.5 roster; the post-H22 roster (`${EXPERT_GENERAL_MODEL}` + `${EXPERT_CODE_MODEL}` + `${EXPERT_REASONING_MODEL}`) is the 10k follow-up baseline.*
 2. **B4 is also the first BRIAN variant with gap_ratio < 3.0** (2.87, vs 4.51 best prior). The drop from B3's 4.51 to B4's 2.87 is larger than any single prior step in the arc.
 3. **B4 still trails the flat baseline on absolute PPL** (295.9 OOD vs 404.0), but with 40× fewer training steps (2k vs 80k). Matched-compute comparison is the next experiment.
 4. **gap_ratio is drifting upward within B4** (2.05 → 2.87 between step 500 and step 2000). The 10k rerun queued immediately after H21 will distinguish plateau vs accelerating overfit. [See H21 in findings.md for the full trajectory, telemetry, and adjacent issues.](docs/FINDINGS.md#h21--per-position-abstain-logit-fixes-catastrophic-cortex-ce-2026-06-14)
@@ -167,7 +167,7 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: B4 (abstain-fix + mult
 - Training with optimizer-partitioned checkpoint streaming
 - DSL-based architecture specs compile to byte-equivalent PyTorch models with **source maps** (`neuroslm/compiler/module_bundler.py`) and **byte-identity round-trip** verification
 - Real-time architecture evolution via RAID-5 protected DNA mutations, gated by **`ImprovementGate`** (Welch's t-test) — no mutation lands without statistically significant fitness gain
-- **Multi-cortex fusion** (3 pretrained causal-LM experts — `smollm2_360m` / `CodeGPT-small-py` / `Qwen2.5-0.5B` — + bowtie trunk) with **LayerNorm pre-head anisotropy suppression**, **KL distillation** (trunk learns from cortex), and **NT-mediated α gating** (cortex retires when trunk surpasses it)
+- **Multi-cortex fusion** (3 pretrained causal-LM experts — `${EXPERT_GENERAL_MODEL}` / `${EXPERT_CODE_MODEL}` / `${EXPERT_REASONING_MODEL}` — + bowtie trunk) with **LayerNorm pre-head anisotropy suppression**, **KL distillation** (trunk learns from cortex), and **NT-mediated α gating** (cortex retires when trunk surpasses it)
 
 ---
 
@@ -175,11 +175,11 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: B4 (abstain-fix + mult
 
 BRIAN's 30M-P4 preset stacks three frozen causal-LM "cortex" experts above the bowtie trunk and fuses their logits with the trunk's at the LM head. The post-H22 roster (configured in `architectures/rcc_bowtie/arch.neuro`):
 
-| Domain | Expert | Tokenizer vs trunk | Path |
-|---|---|---|---|
-| `general` | `smollm2_360m` (HuggingFaceTB/SmolLM2-360M, ~360M, 4T tokens, late 2024) | different (~49 152 BPE) | bridge (per-sample retokenise + char-offset align) |
-| `code` | `microsoft/CodeGPT-small-py` (~125M) | same (gpt2 BPE) | fast (`lm(ids).logits` direct) |
-| `reasoning` | `Qwen/Qwen2.5-0.5B` (~500M) | different | bridge |
+| Domain | Expert | Params | Tokenizer vs trunk | Path |
+|---|---|---|---|---|
+| `${EXPERT_GENERAL_ROLE}` | `${EXPERT_GENERAL_MODEL}` | ${EXPERT_GENERAL_PARAMS} | different (~49 152 BPE) | bridge (per-sample retokenise + char-offset align) |
+| `${EXPERT_CODE_ROLE}` | `${EXPERT_CODE_MODEL}` | ${EXPERT_CODE_PARAMS} | same (gpt2 BPE) | fast (`lm(ids).logits` direct) |
+| `${EXPERT_REASONING_ROLE}` | `${EXPERT_REASONING_MODEL}` | ${EXPERT_REASONING_PARAMS} | different | bridge |
 
 The legacy roster used plain `gpt2` for `general` (2019, ~125M, WebText). It was upgraded under [H22](docs/FINDINGS.md#h22--smollm2-360m-general-expert-upgrade-2026-06-14) on 2026-06-14 to capture ~3× the parameters and ~100× the training tokens at the same routing slot.
 
@@ -506,7 +506,7 @@ python -m neuroslm.train --preset xl --steps 100000 --device cuda
 Full Colab workflow in [`colab_run.ipynb`](colab_run.ipynb).
 
 ---
-
+p
 ## Cite / discuss
 
 If BRIAN is useful in your research or you want to discuss the design, open an issue or reach out. ⭐ stars and PRs welcome — this is open research.

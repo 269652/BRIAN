@@ -618,6 +618,40 @@ python scripts/maintain_technical_report.py --fix
 ```
 to auto-archive known stale files. Then commit the archive move.
 
+### 9.3 README/template proofreading — technical accuracy is mandatory
+
+**CRITICAL:** Every statement added to `README.template.md` must be
+technically accurate. The README is the first thing external visitors
+see. Incorrect claims damage credibility.
+
+**Common errors to avoid:**
+
+1. **Wrong compilation pipeline:**
+   - ❌ "arch.neuro compiles to PyTorch"
+   - ✅ "arch.neuro → Hypergraph IR → PyTorch"
+   - **The Hypergraph IR is the source of truth for wiring**, not arch.neuro
+     directly. arch.neuro is parsed into IR, then IR generates PyTorch.
+
+2. **Oversimplified mechanism claims:**
+   - ❌ "cortex experts teach the trunk"
+   - ✅ "KL distillation from detached cortex logits into trunk (gradient
+     flows trunk-only)"
+   - Precision matters. The mechanism must match the actual code.
+
+3. **Stale metrics or results:**
+   - Always use `${METRIC}` placeholders from `docs/readme_metrics.toml`
+   - Never hardcode numbers that will drift (test counts, PPL, params)
+
+**Proofreading checklist before editing README.template.md:**
+
+- [ ] Is this claim actually true? Check the code/tests/logs.
+- [ ] Does the compilation pipeline match reality? (arch.neuro → IR → PyTorch)
+- [ ] Are all metrics using `${...}` placeholders from readme_metrics.toml?
+- [ ] Would a first-time visitor misunderstand this sentence?
+- [ ] Does the code snippet actually run against current HEAD?
+
+**If you add claims to the README, proofread them.** No exceptions.
+
 ---
 
 ## 10. arch.neuro change → deploy → observe → record (the scientific loop)
