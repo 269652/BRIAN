@@ -130,3 +130,32 @@ export equation gif_head_diversity_weight {
     params: [w0, gap_ratio, target_gap],
     formula: "w = w0 * log(1 + gap_ratio / target_gap)"
 }
+
+# ─────────────────────────────────────────────────────────────────────
+# GIF-6: Cosine LM Head — norm-invariant output projection
+# ─────────────────────────────────────────────────────────────────────
+# Replaces the standard linear LM head  z_i = h · w_i  with a cosine-
+# similarity projection  z_i = τ · cos(h, w_i). Eliminates magnitude
+# as a degree of freedom: the model cannot encode domain-specific
+# confidence in ‖h‖ or ‖w_i‖. All predictions must come from angular
+# proximity — a geometric property that generalises across domains.
+#
+# τ (temperature) is a learnable scalar, init = √d_model. Logits are
+# bounded in [-τ, +τ], so the output distribution sharpness is
+# controlled by a single scalar instead of the full weight matrix
+# spectrum. Self-consistent with the QK-normalisation already applied
+# in attention (unit-sphere queries and keys).
+#
+# Root cause addressed: norm-mediated confidence asymmetry — the model
+# grows ‖γ_f ⊙ (h/rms(h))‖ and ‖W_head[i]‖ for domain-frequent tokens,
+# producing wrong-but-confident OOD predictions. The cosine head maps
+# from S^{d-1} (compact hypersphere) to the simplex, physically unable
+# to represent unbounded domain-specific confidence.
+#
+# Python backing: nn_ops.cosine_lm_head in neuroslm/dsl/nn_ops.py
+# Contracts: tests/dsl/test_cosine_head.py
+
+export equation gif_cosine_lm_head {
+    params: [h, W, tau],
+    formula: "z_i = tau * dot(h / ||h||, W_i / ||W_i||)"
+}

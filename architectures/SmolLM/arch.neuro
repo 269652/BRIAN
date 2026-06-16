@@ -88,6 +88,10 @@ training {
     stochastic_depth: 0.0      # was 0.1  â€” reduces effective depth
     z_loss: 0.0001             # keep â€” cheap PaLM-style logit stabiliser
     llrd: 1.0                  # was 0.85 â€” LLRD is for FINE-TUNING, not pretrain
+    # GIF-6: Cosine LM Head -- eliminates magnitude as a DoF in the
+    # final projection. Logits = t*cos(h, w_i), bounded in [-t, +t].
+    # Prevents norm-mediated overfitting that causes the train/OOD gap.
+    cosine_head: true
     pct_trunk:     0.0
     pct_strength:  0.0
     # â”€â”€ HPB Phases 1-5 â€” novel-topology mechanisms ACTIVATED â”€â”€
@@ -845,7 +849,7 @@ neurotransmitter gaba {
 import { standard_synapse, multiplicative_modulation, additive_modulation } from "@lib/equations"
 # Geometric Information Funnel (GIF) — scheduled IB + OOD probe + isotropy.
 # See lib/gif.neuro for canonical equations.
-import { gif_vbb_alpha_schedule, gif_ood_probe_ema, gif_isotropy_schedule, gif_label_smoothing, gif_head_diversity_loss, gif_head_diversity_weight } from "@lib/gif"
+import { gif_vbb_alpha_schedule, gif_ood_probe_ema, gif_isotropy_schedule, gif_label_smoothing, gif_head_diversity_loss, gif_head_diversity_weight, gif_cosine_lm_head } from "@lib/gif"
 # Regularizer & CDGA equation libraries â€” math-first declarative specs
 # for the OOD interventions (PR2 + PR-A + PR-B). The Python lowerings
 # live in neuroslm/regularizers.py and read their hyperparameters from

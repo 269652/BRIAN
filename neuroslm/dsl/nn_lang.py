@@ -462,7 +462,8 @@ class DSLLanguageModel(nn.Module):
     from common.py.
     """
     def __init__(self, vocab: int, d_model: int, depth: int,
-                 n_heads: int, max_ctx: int, n_kv_heads: Optional[int] = None):
+                 n_heads: int, max_ctx: int, n_kv_heads: Optional[int] = None,
+                 cosine_head: bool = False):
         super().__init__()
         n_kv_heads = n_kv_heads or n_heads
         H = nn_ops.swiglu_hidden_dim(d_model)
@@ -477,6 +478,14 @@ class DSLLanguageModel(nn.Module):
         ])
         self.gamma_f = nn.Parameter(torch.ones(d_model))
         self.lm_head = nn.Parameter(_alloc("xavier", (vocab, d_model)))
+        # GIF-6: cosine LM head — learnable temperature τ (init √d_model)
+        self._cosine_head = cosine_head
+        if cosine_head:
+            import math as _math
+            self.head_temperature = nn.Parameter(
+                torch.tensor(_math.sqrt(d_model)))
+        else:
+            self.head_temperature = None
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         h = nn_ops.embedding(ids, self.embed)
@@ -497,15 +506,20 @@ class DSLLanguageModel(nn.Module):
         # PCC, CMD) can consume it. Detaching here would silently neuter
         # those losses. Cleared at the next forward.
         self._last_hidden = h
+        if self._cosine_head:
+            return nn_ops.cosine_lm_head(h, self.lm_head,
+                                         self.head_temperature)
         return nn_ops.linear(h, self.lm_head)
 
 
 def build_language_model(vocab: int, d_model: int, depth: int,
                          n_heads: int, max_ctx: int,
-                         n_kv_heads: Optional[int] = None) -> DSLLanguageModel:
+                         n_kv_heads: Optional[int] = None,
+                         cosine_head: bool = False) -> DSLLanguageModel:
     """Construct a DSL-composed language model (embedding + stacked blocks
     + final norm + head)."""
-    return DSLLanguageModel(vocab, d_model, depth, n_heads, max_ctx, n_kv_heads)
+    return DSLLanguageModel(vocab, d_model, depth, n_heads, max_ctx,
+                            n_kv_heads, cosine_head=cosine_head)
 
 
 # ─── N8: full DSL LanguageCortex (interleaved pattern + adapters) ──────
@@ -654,7 +668,8 @@ class DSLLanguageCortex(nn.Module):
                  stochastic_depth: float = 0.0,
                  grid_positions=None,
                  episodic_memory=None,
-                 surprise_head=None):
+                 surprise_head=None,
+                 cosine_head: bool = False):
         super().__init__()
         n_kv_heads = n_kv_heads or n_heads
         head_dim = d_model // n_heads
@@ -713,6 +728,15 @@ class DSLLanguageCortex(nn.Module):
 
         self.gamma_f = nn.Parameter(torch.ones(d_model))
         self.lm_head = nn.Parameter(_alloc("xavier", (vocab, d_model)))
+
+        # GIF-6: cosine LM head — learnable temperature τ (init √d_model)
+        self._cosine_head = cosine_head
+        if cosine_head:
+            import math as _math
+            self.head_temperature = nn.Parameter(
+                torch.tensor(_math.sqrt(d_model)))
+        else:
+            self.head_temperature = None
 
         # Predictive-coding heads — Brain's per-layer-pair aux loss. Each
         # head: pred = Linear(d_model, hidden) → SiLU → Linear(hidden, d_model)
@@ -942,7 +966,11 @@ class DSLLanguageCortex(nn.Module):
         h_final = block_outs[-1] if block_outs else h
         h_final = nn_ops.rmsnorm(h_final, self.gamma_f)
         h_for_head = h_final
-        logits = nn_ops.linear(h_for_head, self.lm_head)
+        if self._cosine_head:
+            logits = nn_ops.cosine_lm_head(h_for_head, self.lm_head,
+                                           self.head_temperature)
+        else:
+            logits = nn_ops.linear(h_for_head, self.lm_head)
 
         # ── H19: Surprise head — local-context NLL vs global NLL ──
         # Uses ids as next-token labels (NLL of token t given <t under
@@ -965,7 +993,11 @@ class DSLLanguageCortex(nn.Module):
             if self._episodic_memory.alpha.detach().abs().item() > 0:
                 h_final_blended = h_final + delta
                 h_for_head = h_final_blended
-                logits = nn_ops.linear(h_for_head, self.lm_head)
+                if self._cosine_head:
+                    logits = nn_ops.cosine_lm_head(
+                        h_for_head, self.lm_head, self.head_temperature)
+                else:
+                    logits = nn_ops.linear(h_for_head, self.lm_head)
         # PR2: expose the exact hidden state used by the LM head projection
         # so the harness regularization controller can consume it.
         self._last_hidden = h_for_head
@@ -1001,7 +1033,8 @@ def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
                                stochastic_depth: float = 0.0,
                                grid_positions=None,
                                episodic_memory=None,
-                               surprise_head=None) -> DSLLanguageCortex:
+                               surprise_head=None,
+                               cosine_head: bool = False) -> DSLLanguageCortex:
     """Assemble Brain's full LanguageCortex from pure-DSL blocks.
 
     `pct_trunk > 0` enables forward-path predictive coding: each layer
@@ -1023,4 +1056,5 @@ def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
                               stochastic_depth=stochastic_depth,
                               grid_positions=grid_positions,
                               episodic_memory=episodic_memory,
-                              surprise_head=surprise_head)
+                              surprise_head=surprise_head,
+                              cosine_head=cosine_head)

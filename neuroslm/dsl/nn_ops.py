@@ -50,6 +50,30 @@ def embedding(ids: torch.Tensor, table: torch.Tensor) -> torch.Tensor:
     return F.embedding(ids, table)
 
 
+# ── GIF-6: Cosine LM Head ─────────────────────────────────────────────
+
+def cosine_lm_head(h: torch.Tensor, weight: torch.Tensor,
+                   temperature: torch.Tensor) -> torch.Tensor:
+    """Cosine-similarity LM head — eliminates magnitude as a DoF.
+
+    z_i = τ · (h̄ · w̄_i)    where h̄ = h/‖h‖, w̄_i = w_i/‖w_i‖
+
+    Args:
+        h:           (B, T, D) hidden states
+        weight:      (V, D) token embeddings (same layout as nn.Linear)
+        temperature: scalar learnable τ (init √d_model)
+
+    Returns:
+        (B, T, V) logits bounded in [-τ, +τ]
+
+    Gradients flow through h, weight, and temperature. Numerical
+    stability: F.normalize adds eps=1e-12 to avoid div-by-zero.
+    """
+    h_norm = F.normalize(h, dim=-1)       # (B, T, D)
+    w_norm = F.normalize(weight, dim=-1)  # (V, D)
+    return temperature * F.linear(h_norm, w_norm)
+
+
 # ── Normalization ──────────────────────────────────────────────────────
 
 def rmsnorm(x: torch.Tensor, weight: torch.Tensor,
