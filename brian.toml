@@ -94,7 +94,7 @@ branch = "master"
 # (the legacy train.py pushed after every save). We restore an
 # explicit value here so a box self-destruction (H24 mode of failure)
 # can never eat more than ~push_every steps of checkpoint progress.
-log_every = 500
+log_every = 20
 save_every = 500    
 push_every = 2500
 
