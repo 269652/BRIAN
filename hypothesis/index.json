@@ -48,6 +48,46 @@
       "status": "draft",
       "theorem_name": "Brian.CapacityFunneledDistillationImplode",
       "title": "Capacity-Funneled Distillation produces monotone-implode PPL in teacher capacity"
+    },
+    {
+      "file": "H007_gif_adaptive_ramp_convergence.md",
+      "id": "H007",
+      "proof_status": "missing",
+      "status": "stated",
+      "theorem_name": "Brian.GIFAdaptiveRampConvergence",
+      "title": "GIF-1/2/3: Adaptive VBB + OOD probe + isotropy ramp converges"
+    },
+    {
+      "file": "H008_gif_label_smoothing_gap_reduction.md",
+      "id": "H008",
+      "proof_status": "missing",
+      "status": "stated",
+      "theorem_name": "Brian.GIFLabelSmoothingGapReduction",
+      "title": "GIF-4: Gap-driven label smoothing reduces gap ratio"
+    },
+    {
+      "file": "H009_gif_head_diversity_redundancy.md",
+      "id": "H009",
+      "proof_status": "missing",
+      "status": "stated",
+      "theorem_name": "Brian.GIFHeadDiversityReducesRedundancy",
+      "title": "GIF-5: Attention head diversity loss reduces encoder-side redundancy"
+    },
+    {
+      "file": "H010_gif_cosine_head_norm_invariance.md",
+      "id": "H010",
+      "proof_status": "missing",
+      "status": "stated",
+      "theorem_name": "Brian.CosineHeadEliminatesMagnitudeBias",
+      "title": "GIF-6: Cosine LM head eliminates norm-mediated confidence asymmetry"
+    },
+    {
+      "file": "H011_ood_probe_arming_prerequisite.md",
+      "id": "H011",
+      "proof_status": "missing",
+      "status": "stated",
+      "theorem_name": "Brian.OODProbeArmingIsPrerequisite",
+      "title": "OOD probe arming is a prerequisite for all gap-reactive GIF mechanisms"
     }
   ],
   "version": 1
