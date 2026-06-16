@@ -1388,3 +1388,595 @@ step  7500 | loss 4.8627 | lm 4.2928 | ppl 73.2 | gnorm 24.170 | lr 1.60e-04 | 1
 
   ...ull/step7500.pt.strip.tmp:  97%|█████████▋|  581MB /  597MB            [A[AProcessing Files (0 / 1)      :  97%|█████████▋|  581MB /  597MB, 16.4MB/s  
 New Data Upload               :  97%|█████████▋|  430MB /  446MB, 14.2MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  98%|█████████▊|  583MB /  597MB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊|  583MB /  597MB, 15.9MB/s  
+New Data Upload               :  97%|█████████▋|  432MB /  446MB, 13.8MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  98%|█████████▊|  585MB /  597MB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊|  585MB /  597MB, 15.5MB/s  
+New Data Upload               :  97%|█████████▋|  434MB /  446MB, 13.4MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  98%|█████████▊|  586MB /  597MB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊|  586MB /  597MB, 15.0MB/s  
+New Data Upload               :  98%|█████████▊|  435MB /  446MB, 13.0MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  98%|█████████▊|  587MB /  597MB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊|  587MB /  597MB, 14.6MB/s  
+New Data Upload               :  98%|█████████▊|  436MB /  446MB, 12.7MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  99%|█████████▊|  589MB /  597MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▊|  589MB /  597MB, 14.2MB/s  
+New Data Upload               :  98%|█████████▊|  438MB /  446MB, 12.3MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  99%|█████████▉|  591MB /  597MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉|  591MB /  597MB, 14.1MB/s  
+New Data Upload               :  99%|█████████▊|  440MB /  446MB, 12.2MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  99%|█████████▉|  592MB /  597MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉|  592MB /  597MB, 13.6MB/s  
+New Data Upload               :  99%|█████████▉|  441MB /  446MB, 11.9MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp:  99%|█████████▉|  593MB /  597MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉|  593MB /  597MB, 13.3MB/s  
+New Data Upload               :  99%|█████████▉|  442MB /  446MB, 11.6MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp: 100%|█████████▉|  595MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  595MB /  597MB, 12.9MB/s  
+New Data Upload               : 100%|█████████▉|  444MB /  446MB, 11.3MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp: 100%|█████████▉|  597MB /  597MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  597MB /  597MB, 12.6MB/s  
+New Data Upload               : 100%|█████████▉|  446MB /  446MB, 11.0MB/s  [A
+
+  ...ull/step7500.pt.strip.tmp: 100%|██████████|  597MB /  597MB            [A[AProcessing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 11.1MB/s  
+New Data Upload               : 100%|██████████|  446MB /  446MB, 9.70MB/s  [AProcessing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 11.1MB/s  
+New Data Upload               : 100%|██████████|  446MB /  446MB, 9.70MB/s  
+  ...ull/step7500.pt.strip.tmp: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step7500.pt (optimizer stripped) → hf://moritzroessler/BRIAN/checkpoints/20260616-204729_136e25e6_neuroslm-full/step7500.pt
+[mid-ood] step 7500: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 7500: wikitext ppl=194.5 gap_ratio=2.66 (train_ppl=73.2) (50 seq, 6430 tok)
+[train_dsl] PASS-MARK EARLY EXIT @ step 7500: ood_not_falling: ood_ppl not falling (min[first_half]=174.5 vs min[second_half]=172.8, tol=0.02, n=8) over last 4000 steps
+[train_dsl] saved early-exit checkpoint /workspace/brian/lfs_checkpoints/20260616-204729_136e25e6_neuroslm-full/step7500.pt
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+  ...neuroslm-full/step7500.pt:   3%|▎         | 45.7MB / 1.47GB            [A[A
+
+  ...neuroslm-full/step7500.pt:   3%|▎         | 45.7MB / 1.47GB            [A[AProcessing Files (0 / 1)      :   3%|▎         | 45.7MB / 1.47GB,   ???B/s  
+
+  ...neuroslm-full/step7500.pt:   6%|▌         | 90.3MB / 1.47GB            [A[AProcessing Files (0 / 1)      :   6%|▌         | 90.3MB / 1.47GB,   ???B/s  
+
+  ...neuroslm-full/step7500.pt:   9%|▉         |  138MB / 1.47GB            [A[AProcessing Files (0 / 1)      :   9%|▉         |  138MB / 1.47GB, 13.2MB/s  
+
+  ...neuroslm-full/step7500.pt:  12%|█▏        |  170MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  12%|█▏        |  170MB / 1.47GB, 16.0MB/s  
+
+  ...neuroslm-full/step7500.pt:  14%|█▍        |  210MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  14%|█▍        |  210MB / 1.47GB, 19.5MB/s  
+
+  ...neuroslm-full/step7500.pt:  17%|█▋        |  257MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  17%|█▋        |  257MB / 1.47GB, 23.6MB/s  
+
+  ...neuroslm-full/step7500.pt:  23%|██▎       |  337MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  23%|██▎       |  337MB / 1.47GB, 30.6MB/s  
+
+  ...neuroslm-full/step7500.pt:  26%|██▌       |  385MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  26%|██▌       |  385MB / 1.47GB, 34.4MB/s  
+
+  ...neuroslm-full/step7500.pt:  26%|██▌       |  385MB / 1.47GB            [A[A
+
+  ...neuroslm-full/step7500.pt:  26%|██▋       |  389MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  26%|██▋       |  389MB / 1.47GB, 33.2MB/s  
+New Data Upload               :   3%|▎         | 4.11MB /  134MB,  383kB/s  [A
+
+  ...neuroslm-full/step7500.pt:  27%|██▋       |  393MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  27%|██▋       |  393MB / 1.47GB, 32.8MB/s  
+New Data Upload               :   6%|▋         | 8.61MB /  134MB,  792kB/s  [A
+
+  ...neuroslm-full/step7500.pt:  27%|██▋       |  393MB / 1.47GB            [A[A
+
+  ...neuroslm-full/step7500.pt:  27%|██▋       |  395MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  27%|██▋       |  395MB / 1.47GB, 30.8MB/s  
+New Data Upload               :   5%|▌         | 10.4MB /  201MB,  899kB/s  [A
+
+  ...neuroslm-full/step7500.pt:  27%|██▋       |  399MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  27%|██▋       |  399MB / 1.47GB, 30.4MB/s  
+New Data Upload               :   7%|▋         | 14.1MB /  201MB, 1.21MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  27%|██▋       |  401MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  27%|██▋       |  401MB / 1.47GB, 29.9MB/s  
+New Data Upload               :   8%|▊         | 16.0MB /  201MB, 1.36MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  27%|██▋       |  402MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  27%|██▋       |  402MB / 1.47GB, 29.4MB/s  
+New Data Upload               :   9%|▉         | 17.8MB /  201MB, 1.49MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  28%|██▊       |  406MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  28%|██▊       |  406MB / 1.47GB, 29.1MB/s  
+New Data Upload               :  11%|█         | 21.4MB /  201MB, 1.78MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  28%|██▊       |  408MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  28%|██▊       |  408MB / 1.47GB, 28.6MB/s  
+New Data Upload               :  12%|█▏        | 23.2MB /  201MB, 1.90MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  28%|██▊       |  410MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  28%|██▊       |  410MB / 1.47GB, 28.1MB/s  
+New Data Upload               :  13%|█▎        | 25.1MB /  201MB, 2.03MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  28%|██▊       |  411MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  28%|██▊       |  411MB / 1.47GB, 27.6MB/s  
+New Data Upload               :  13%|█▎        | 26.9MB /  201MB, 2.14MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  28%|██▊       |  414MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  28%|██▊       |  414MB / 1.47GB, 27.3MB/s  
+New Data Upload               :  15%|█▍        | 29.9MB /  201MB, 2.36MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  28%|██▊       |  417MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  28%|██▊       |  417MB / 1.47GB, 26.9MB/s  
+New Data Upload               :  16%|█▌        | 32.3MB /  201MB, 2.52MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  28%|██▊       |  420MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  28%|██▊       |  420MB / 1.47GB, 26.6MB/s  
+New Data Upload               :  18%|█▊        | 35.4MB /  201MB, 2.72MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  29%|██▊       |  422MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  29%|██▊       |  422MB / 1.47GB, 26.2MB/s  
+New Data Upload               :  19%|█▊        | 37.3MB /  201MB, 2.83MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  29%|██▉       |  425MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  29%|██▉       |  425MB / 1.47GB, 25.9MB/s  
+New Data Upload               :  20%|██        | 40.8MB /  201MB, 3.07MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  29%|██▉       |  429MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  29%|██▉       |  429MB / 1.47GB, 25.7MB/s  
+New Data Upload               :  22%|██▏       | 44.5MB /  201MB, 3.32MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  29%|██▉       |  430MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  29%|██▉       |  430MB / 1.47GB, 25.2MB/s  
+New Data Upload               :  23%|██▎       | 45.7MB /  201MB, 3.35MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  29%|██▉       |  434MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  29%|██▉       |  434MB / 1.47GB, 25.0MB/s  
+New Data Upload               :  25%|██▍       | 49.4MB /  201MB, 3.59MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  30%|██▉       |  436MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  30%|██▉       |  436MB / 1.47GB, 24.6MB/s  
+New Data Upload               :  25%|██▌       | 51.2MB /  201MB, 3.67MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  30%|██▉       |  439MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  30%|██▉       |  439MB / 1.47GB, 24.4MB/s  
+New Data Upload               :  27%|██▋       | 54.9MB /  201MB, 3.90MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  30%|███       |  443MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  30%|███       |  443MB / 1.47GB, 24.2MB/s  
+New Data Upload               :  29%|██▉       | 58.5MB /  201MB, 4.13MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  30%|███       |  445MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  30%|███       |  445MB / 1.47GB, 23.9MB/s  
+New Data Upload               :  30%|███       | 60.9MB /  201MB, 4.24MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  31%|███       |  450MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  31%|███       |  450MB / 1.47GB, 23.8MB/s  
+New Data Upload               :  33%|███▎      | 65.8MB /  201MB, 4.55MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  31%|███       |  454MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  31%|███       |  454MB / 1.47GB, 23.6MB/s  
+New Data Upload               :  34%|███▍      | 69.3MB /  201MB, 4.75MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  31%|███       |  457MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  31%|███       |  457MB / 1.47GB, 23.4MB/s  
+New Data Upload               :  36%|███▌      | 72.3MB /  201MB, 4.90MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  31%|███▏      |  462MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  31%|███▏      |  462MB / 1.47GB, 23.4MB/s  
+New Data Upload               :  39%|███▊      | 77.8MB /  201MB, 5.25MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  32%|███▏      |  465MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  32%|███▏      |  465MB / 1.47GB, 23.1MB/s  
+New Data Upload               :  40%|███▉      | 80.1MB /  201MB, 5.34MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  32%|███▏      |  470MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  32%|███▏      |  470MB / 1.47GB, 23.0MB/s  
+New Data Upload               :  43%|████▎     | 85.6MB /  201MB, 5.67MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  32%|███▏      |  474MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  32%|███▏      |  474MB / 1.47GB, 22.9MB/s  
+New Data Upload               :  44%|████▍     | 89.3MB /  201MB, 5.86MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  33%|███▎      |  479MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  33%|███▎      |  479MB / 1.47GB, 22.8MB/s  
+New Data Upload               :  47%|████▋     | 94.5MB /  201MB, 6.17MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  33%|███▎      |  485MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  33%|███▎      |  485MB / 1.47GB, 22.8MB/s  
+New Data Upload               :  50%|████▉     |  100MB /  201MB, 6.48MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  33%|███▎      |  489MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  33%|███▎      |  489MB / 1.47GB, 22.8MB/s  
+New Data Upload               :  52%|█████▏    |  105MB /  201MB, 6.75MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  33%|███▎      |  491MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  33%|███▎      |  491MB / 1.47GB, 22.0MB/s  
+New Data Upload               :  53%|█████▎    |  107MB /  201MB, 6.63MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  33%|███▎      |  493MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  33%|███▎      |  493MB / 1.47GB, 21.7MB/s  
+New Data Upload               :  54%|█████▍    |  109MB /  201MB, 6.66MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  34%|███▍      |  497MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  34%|███▍      |  497MB / 1.47GB, 21.6MB/s  
+New Data Upload               :  55%|█████▍    |  110MB /  201MB, 6.63MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  34%|███▍      |  504MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  34%|███▍      |  504MB / 1.47GB, 21.7MB/s  
+New Data Upload               :  58%|█████▊    |  117MB /  201MB, 7.02MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  35%|███▍      |  509MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  35%|███▍      |  509MB / 1.47GB, 21.7MB/s  
+New Data Upload               :  46%|████▌     |  122MB /  268MB, 7.30MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  35%|███▌      |  519MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  35%|███▌      |  519MB / 1.47GB, 22.0MB/s  
+New Data Upload               :  49%|████▉     |  132MB /  268MB, 7.94MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  36%|███▌      |  526MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  36%|███▌      |  526MB / 1.47GB, 22.1MB/s  
+New Data Upload               :  41%|████▏     |  138MB /  335MB, 8.30MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  37%|███▋      |  538MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  37%|███▋      |  538MB / 1.47GB, 22.7MB/s  
+New Data Upload               :  45%|████▍     |  151MB /  335MB, 9.10MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  37%|███▋      |  546MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  37%|███▋      |  546MB / 1.47GB, 22.9MB/s  
+New Data Upload               :  47%|████▋     |  159MB /  335MB, 9.57MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  38%|███▊      |  555MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  38%|███▊      |  555MB / 1.47GB, 23.1MB/s  
+New Data Upload               :  41%|████      |  165MB /  402MB, 9.85MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  38%|███▊      |  567MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  38%|███▊      |  567MB / 1.47GB, 23.6MB/s  
+New Data Upload               :  44%|████▍     |  177MB /  402MB, 10.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  39%|███▉      |  578MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  39%|███▉      |  578MB / 1.47GB, 24.0MB/s  
+New Data Upload               :  47%|████▋     |  188MB /  402MB, 11.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  40%|███▉      |  586MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  40%|███▉      |  586MB / 1.47GB, 24.1MB/s  
+New Data Upload               :  42%|████▏     |  196MB /  469MB, 11.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  41%|████      |  600MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  41%|████      |  600MB / 1.47GB, 24.7MB/s  
+New Data Upload               :  44%|████▍     |  206MB /  469MB, 12.2MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  42%|████▏     |  621MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  42%|████▏     |  621MB / 1.47GB, 25.9MB/s  
+New Data Upload               :  41%|████      |  218MB /  536MB, 12.9MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  45%|████▌     |  667MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  45%|████▌     |  667MB / 1.47GB, 29.0MB/s  
+New Data Upload               :  43%|████▎     |  230MB /  536MB, 13.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  49%|████▉     |  720MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  49%|████▉     |  720MB / 1.47GB, 32.5MB/s  
+New Data Upload               :  45%|████▌     |  242MB /  536MB, 14.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  52%|█████▏    |  761MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  52%|█████▏    |  761MB / 1.47GB, 35.0MB/s  
+New Data Upload               :  47%|████▋     |  253MB /  536MB, 14.8MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  52%|█████▏    |  773MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  52%|█████▏    |  773MB / 1.47GB, 35.2MB/s  
+New Data Upload               :  44%|████▎     |  263MB /  603MB, 15.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  53%|█████▎    |  788MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  53%|█████▎    |  788MB / 1.47GB, 35.7MB/s  
+New Data Upload               :  44%|████▍     |  268MB /  603MB, 15.4MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  54%|█████▍    |  797MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  54%|█████▍    |  797MB / 1.47GB, 35.7MB/s  
+New Data Upload               :  46%|████▌     |  276MB /  603MB, 15.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  55%|█████▍    |  804MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  55%|█████▍    |  804MB / 1.47GB, 35.6MB/s  
+New Data Upload               :  47%|████▋     |  283MB /  603MB, 16.0MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  55%|█████▌    |  816MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  55%|█████▌    |  816MB / 1.47GB, 35.8MB/s  
+New Data Upload               :  44%|████▍     |  294MB /  671MB, 16.5MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  56%|█████▋    |  831MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  56%|█████▋    |  831MB / 1.47GB, 36.3MB/s  
+New Data Upload               :  46%|████▌     |  307MB /  671MB, 17.1MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  57%|█████▋    |  843MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  57%|█████▋    |  843MB / 1.47GB, 36.5MB/s  
+New Data Upload               :  43%|████▎     |  314MB /  738MB, 17.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  58%|█████▊    |  859MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  58%|█████▊    |  859MB / 1.47GB, 37.0MB/s  
+New Data Upload               :  45%|████▍     |  328MB /  738MB, 18.1MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  60%|█████▉    |  883MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  60%|█████▉    |  883MB / 1.47GB, 38.2MB/s  
+New Data Upload               :  46%|████▌     |  339MB /  738MB, 18.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  61%|██████    |  898MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  61%|██████    |  898MB / 1.47GB, 38.6MB/s  
+New Data Upload               :  44%|████▍     |  353MB /  805MB, 19.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  62%|██████▏   |  908MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  62%|██████▏   |  908MB / 1.47GB, 38.6MB/s  
+New Data Upload               :  45%|████▌     |  363MB /  805MB, 19.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  62%|██████▏   |  917MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  62%|██████▏   |  917MB / 1.47GB, 38.6MB/s  
+New Data Upload               :  43%|████▎     |  373MB /  872MB, 20.0MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  65%|██████▌   |  964MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  65%|██████▌   |  964MB / 1.47GB, 41.4MB/s  
+New Data Upload               :  43%|████▎     |  378MB /  872MB, 20.0MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  66%|██████▋   |  977MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  66%|██████▋   |  977MB / 1.47GB, 41.5MB/s  
+New Data Upload               :  44%|████▍     |  389MB /  886MB, 20.5MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  67%|██████▋   |  985MB / 1.47GB            [A[AProcessing Files (0 / 1)      :  67%|██████▋   |  985MB / 1.47GB, 41.4MB/s  
+New Data Upload               :  45%|████▍     |  397MB /  886MB, 20.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  68%|██████▊   | 1.00GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  68%|██████▊   | 1.00GB / 1.47GB, 41.8MB/s  
+New Data Upload               :  47%|████▋     |  413MB /  886MB, 21.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  69%|██████▊   | 1.01GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  69%|██████▊   | 1.01GB / 1.47GB, 41.8MB/s  
+New Data Upload               :  48%|████▊     |  423MB /  886MB, 21.9MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  70%|██████▉   | 1.03GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  70%|██████▉   | 1.03GB / 1.47GB, 42.3MB/s  
+New Data Upload               :  50%|████▉     |  440MB /  886MB, 22.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  70%|███████   | 1.04GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  70%|███████   | 1.04GB / 1.47GB, 42.1MB/s  
+New Data Upload               :  51%|█████     |  448MB /  886MB, 22.9MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  72%|███████▏  | 1.06GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  72%|███████▏  | 1.06GB / 1.47GB, 43.1MB/s  
+New Data Upload               :  53%|█████▎    |  472MB /  886MB, 24.2MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  73%|███████▎  | 1.07GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  73%|███████▎  | 1.07GB / 1.47GB, 43.2MB/s  
+New Data Upload               :  55%|█████▍    |  484MB /  886MB, 24.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  73%|███████▎  | 1.08GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  73%|███████▎  | 1.08GB / 1.47GB, 43.2MB/s  
+New Data Upload               :  56%|█████▌    |  495MB /  886MB, 25.0MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  74%|███████▍  | 1.09GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  74%|███████▍  | 1.09GB / 1.47GB, 43.1MB/s  
+New Data Upload               :  57%|█████▋    |  504MB /  886MB, 25.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  75%|███████▍  | 1.10GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  75%|███████▍  | 1.10GB / 1.47GB, 43.2MB/s  
+New Data Upload               :  58%|█████▊    |  517MB /  886MB, 25.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  76%|███████▌  | 1.11GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  76%|███████▌  | 1.11GB / 1.47GB, 43.1MB/s  
+New Data Upload               :  59%|█████▉    |  526MB /  886MB, 25.9MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  76%|███████▋  | 1.13GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  76%|███████▋  | 1.13GB / 1.47GB, 43.1MB/s  
+New Data Upload               :  61%|██████    |  537MB /  886MB, 26.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  77%|███████▋  | 1.14GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  77%|███████▋  | 1.14GB / 1.47GB, 43.0MB/s  
+New Data Upload               :  62%|██████▏   |  547MB /  886MB, 26.5MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  78%|███████▊  | 1.14GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  78%|███████▊  | 1.14GB / 1.47GB, 42.8MB/s  
+New Data Upload               :  63%|██████▎   |  555MB /  886MB, 26.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  78%|███████▊  | 1.15GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  78%|███████▊  | 1.15GB / 1.47GB, 42.5MB/s  
+New Data Upload               :  63%|██████▎   |  561MB /  886MB, 26.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  78%|███████▊  | 1.15GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  78%|███████▊  | 1.15GB / 1.47GB, 42.0MB/s  
+New Data Upload               :  64%|██████▍   |  565MB /  886MB, 26.4MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  79%|███████▊  | 1.16GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  79%|███████▊  | 1.16GB / 1.47GB, 41.7MB/s  
+New Data Upload               :  64%|██████▍   |  571MB /  886MB, 26.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  79%|███████▊  | 1.16GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  79%|███████▊  | 1.16GB / 1.47GB, 41.0MB/s  
+New Data Upload               :  65%|██████▍   |  572MB /  886MB, 26.0MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  79%|███████▉  | 1.17GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  79%|███████▉  | 1.17GB / 1.47GB, 40.7MB/s  
+New Data Upload               :  65%|██████▌   |  579MB /  886MB, 26.0MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  80%|███████▉  | 1.17GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  80%|███████▉  | 1.17GB / 1.47GB, 40.4MB/s  
+New Data Upload               :  66%|██████▌   |  584MB /  886MB, 25.8MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  80%|███████▉  | 1.17GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  80%|███████▉  | 1.17GB / 1.47GB, 39.7MB/s  
+New Data Upload               :  66%|██████▌   |  585MB /  886MB, 25.5MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  80%|███████▉  | 1.18GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  80%|███████▉  | 1.18GB / 1.47GB, 39.2MB/s  
+New Data Upload               :  66%|██████▋   |  588MB /  886MB, 25.2MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  80%|████████  | 1.18GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  80%|████████  | 1.18GB / 1.47GB, 38.2MB/s  
+New Data Upload               :  67%|██████▋   |  594MB /  886MB, 24.8MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  80%|████████  | 1.18GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  80%|████████  | 1.18GB / 1.47GB, 37.6MB/s  
+New Data Upload               :  67%|██████▋   |  595MB /  886MB, 24.4MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  81%|████████  | 1.19GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  81%|████████  | 1.19GB / 1.47GB, 37.2MB/s  
+New Data Upload               :  68%|██████▊   |  599MB /  886MB, 24.2MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  81%|████████  | 1.19GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  81%|████████  | 1.19GB / 1.47GB, 36.1MB/s  
+New Data Upload               :  68%|██████▊   |  602MB /  886MB, 23.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  81%|████████  | 1.19GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  81%|████████  | 1.19GB / 1.47GB, 35.6MB/s  
+New Data Upload               :  68%|██████▊   |  605MB /  886MB, 23.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  81%|████████  | 1.20GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  81%|████████  | 1.20GB / 1.47GB, 35.3MB/s  
+New Data Upload               :  69%|██████▊   |  609MB /  886MB, 23.2MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  81%|████████▏ | 1.20GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  81%|████████▏ | 1.20GB / 1.47GB, 34.8MB/s  
+New Data Upload               :  69%|██████▉   |  610MB /  886MB, 22.9MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  81%|████████▏ | 1.20GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  81%|████████▏ | 1.20GB / 1.47GB, 34.2MB/s  
+New Data Upload               :  69%|██████▉   |  611MB /  886MB, 22.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  82%|████████▏ | 1.20GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  82%|████████▏ | 1.20GB / 1.47GB, 33.9MB/s  
+New Data Upload               :  69%|██████▉   |  615MB /  886MB, 22.4MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  82%|████████▏ | 1.21GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  82%|████████▏ | 1.21GB / 1.47GB, 33.4MB/s  
+New Data Upload               :  70%|██████▉   |  617MB /  886MB, 22.2MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  82%|████████▏ | 1.21GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  82%|████████▏ | 1.21GB / 1.47GB, 32.9MB/s  
+New Data Upload               :  70%|██████▉   |  618MB /  886MB, 21.8MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  82%|████████▏ | 1.21GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  82%|████████▏ | 1.21GB / 1.47GB, 32.6MB/s  
+New Data Upload               :  70%|███████   |  622MB /  886MB, 21.8MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  82%|████████▏ | 1.21GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  82%|████████▏ | 1.21GB / 1.47GB, 32.2MB/s  
+New Data Upload               :  71%|███████   |  626MB /  886MB, 21.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  82%|████████▏ | 1.22GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  82%|████████▏ | 1.22GB / 1.47GB, 31.7MB/s  
+New Data Upload               :  71%|███████   |  627MB /  886MB, 21.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  83%|████████▎ | 1.22GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  83%|████████▎ | 1.22GB / 1.47GB, 30.9MB/s  
+New Data Upload               :  71%|███████   |  630MB /  886MB, 20.8MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  83%|████████▎ | 1.22GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  83%|████████▎ | 1.22GB / 1.47GB, 30.6MB/s  
+New Data Upload               :  72%|███████▏  |  634MB /  886MB, 20.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  83%|████████▎ | 1.23GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  83%|████████▎ | 1.23GB / 1.47GB, 30.3MB/s  
+New Data Upload               :  72%|███████▏  |  637MB /  886MB, 20.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  83%|████████▎ | 1.23GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  83%|████████▎ | 1.23GB / 1.47GB, 30.0MB/s  
+New Data Upload               :  72%|███████▏  |  641MB /  886MB, 20.4MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  83%|████████▎ | 1.23GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  83%|████████▎ | 1.23GB / 1.47GB, 29.5MB/s  
+New Data Upload               :  73%|███████▎  |  642MB /  886MB, 20.2MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  84%|████████▍ | 1.23GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  84%|████████▍ | 1.23GB / 1.47GB, 29.3MB/s  
+New Data Upload               :  73%|███████▎  |  646MB /  886MB, 20.1MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  84%|████████▍ | 1.24GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  84%|████████▍ | 1.24GB / 1.47GB, 29.0MB/s  
+New Data Upload               :  73%|███████▎  |  649MB /  886MB, 19.9MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  84%|████████▍ | 1.24GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  84%|████████▍ | 1.24GB / 1.47GB, 28.6MB/s  
+New Data Upload               :  74%|███████▎  |  651MB /  886MB, 19.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  84%|████████▍ | 1.24GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  84%|████████▍ | 1.24GB / 1.47GB, 28.4MB/s  
+New Data Upload               :  74%|███████▍  |  656MB /  886MB, 19.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  85%|████████▍ | 1.25GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  85%|████████▍ | 1.25GB / 1.47GB, 28.1MB/s  
+New Data Upload               :  74%|███████▍  |  658MB /  886MB, 19.5MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  85%|████████▍ | 1.25GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  85%|████████▍ | 1.25GB / 1.47GB, 27.6MB/s  
+New Data Upload               :  74%|███████▍  |  659MB /  886MB, 19.2MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  85%|████████▌ | 1.25GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  85%|████████▌ | 1.25GB / 1.47GB, 27.6MB/s  
+New Data Upload               :  75%|███████▌  |  665MB /  886MB, 19.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  85%|████████▌ | 1.25GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  85%|████████▌ | 1.25GB / 1.47GB, 27.2MB/s  
+New Data Upload               :  75%|███████▌  |  667MB /  886MB, 19.1MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  85%|████████▌ | 1.26GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  85%|████████▌ | 1.26GB / 1.47GB, 26.8MB/s  
+New Data Upload               :  75%|███████▌  |  667MB /  886MB, 18.8MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  86%|████████▌ | 1.26GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  86%|████████▌ | 1.26GB / 1.47GB, 26.8MB/s  
+New Data Upload               :  76%|███████▌  |  674MB /  886MB, 19.0MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  86%|████████▌ | 1.26GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  86%|████████▌ | 1.26GB / 1.47GB, 26.5MB/s  
+New Data Upload               :  76%|███████▋  |  677MB /  886MB, 18.8MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  86%|████████▋ | 1.27GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  86%|████████▋ | 1.27GB / 1.47GB, 26.6MB/s  
+New Data Upload               :  77%|███████▋  |  684MB /  886MB, 19.0MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  86%|████████▋ | 1.27GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  86%|████████▋ | 1.27GB / 1.47GB, 26.3MB/s  
+New Data Upload               :  78%|███████▊  |  687MB /  886MB, 18.8MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  87%|████████▋ | 1.28GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  87%|████████▋ | 1.28GB / 1.47GB, 26.2MB/s  
+New Data Upload               :  78%|███████▊  |  693MB /  886MB, 18.9MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  87%|████████▋ | 1.28GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  87%|████████▋ | 1.28GB / 1.47GB, 26.0MB/s  
+New Data Upload               :  79%|███████▊  |  697MB /  886MB, 18.9MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  88%|████████▊ | 1.29GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  88%|████████▊ | 1.29GB / 1.47GB, 26.1MB/s  
+New Data Upload               :  79%|███████▉  |  704MB /  886MB, 19.0MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  88%|████████▊ | 1.30GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  88%|████████▊ | 1.30GB / 1.47GB, 26.1MB/s  
+New Data Upload               :  80%|████████  |  710MB /  886MB, 19.2MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  89%|████████▊ | 1.30GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  89%|████████▊ | 1.30GB / 1.47GB, 26.1MB/s  
+New Data Upload               :  81%|████████  |  716MB /  886MB, 19.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  89%|████████▉ | 1.31GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  89%|████████▉ | 1.31GB / 1.47GB, 26.1MB/s  
+New Data Upload               :  82%|████████▏ |  724MB /  886MB, 19.4MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  90%|████████▉ | 1.32GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  90%|████████▉ | 1.32GB / 1.47GB, 26.2MB/s  
+New Data Upload               :  83%|████████▎ |  732MB /  886MB, 19.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  90%|█████████ | 1.33GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  90%|█████████ | 1.33GB / 1.47GB, 26.3MB/s  
+New Data Upload               :  83%|████████▎ |  739MB /  886MB, 19.8MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  91%|█████████ | 1.34GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  91%|█████████ | 1.34GB / 1.47GB, 26.4MB/s  
+New Data Upload               :  84%|████████▍ |  748MB /  886MB, 20.1MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  91%|█████████▏| 1.35GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  91%|█████████▏| 1.35GB / 1.47GB, 26.6MB/s  
+New Data Upload               :  86%|████████▌ |  757MB /  886MB, 20.4MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  92%|█████████▏| 1.36GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  92%|█████████▏| 1.36GB / 1.47GB, 27.0MB/s  
+New Data Upload               :  87%|████████▋ |  769MB /  886MB, 20.9MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  93%|█████████▎| 1.37GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  93%|█████████▎| 1.37GB / 1.47GB, 27.1MB/s  
+New Data Upload               :  88%|████████▊ |  778MB /  886MB, 21.1MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  93%|█████████▎| 1.38GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  93%|█████████▎| 1.38GB / 1.47GB, 27.5MB/s  
+New Data Upload               :  89%|████████▉ |  789MB /  886MB, 21.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  94%|█████████▍| 1.39GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  94%|█████████▍| 1.39GB / 1.47GB, 27.6MB/s  
+New Data Upload               :  90%|█████████ |  799MB /  886MB, 21.9MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  95%|█████████▍| 1.40GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  95%|█████████▍| 1.40GB / 1.47GB, 27.7MB/s  
+New Data Upload               :  91%|█████████ |  807MB /  886MB, 22.1MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  95%|█████████▌| 1.40GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  95%|█████████▌| 1.40GB / 1.47GB, 27.9MB/s  
+New Data Upload               :  92%|█████████▏|  816MB /  886MB, 22.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  95%|█████████▌| 1.41GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  95%|█████████▌| 1.41GB / 1.47GB, 27.6MB/s  
+New Data Upload               :  92%|█████████▏|  819MB /  886MB, 22.1MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  96%|█████████▌| 1.42GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  96%|█████████▌| 1.42GB / 1.47GB, 27.8MB/s  
+New Data Upload               :  94%|█████████▎|  829MB /  886MB, 22.4MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  97%|█████████▋| 1.42GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  97%|█████████▋| 1.42GB / 1.47GB, 27.7MB/s  
+New Data Upload               :  94%|█████████▍|  835MB /  886MB, 22.4MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  97%|█████████▋| 1.43GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  97%|█████████▋| 1.43GB / 1.47GB, 27.9MB/s  
+New Data Upload               :  95%|█████████▌|  844MB /  886MB, 22.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  98%|█████████▊| 1.44GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊| 1.44GB / 1.47GB, 27.8MB/s  
+New Data Upload               :  96%|█████████▌|  849MB /  886MB, 22.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  98%|█████████▊| 1.44GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊| 1.44GB / 1.47GB, 27.7MB/s  
+New Data Upload               :  96%|█████████▋|  854MB /  886MB, 22.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  98%|█████████▊| 1.45GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊| 1.45GB / 1.47GB, 27.5MB/s  
+New Data Upload               :  97%|█████████▋|  859MB /  886MB, 22.5MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  98%|█████████▊| 1.45GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊| 1.45GB / 1.47GB, 27.3MB/s  
+New Data Upload               :  97%|█████████▋|  863MB /  886MB, 22.4MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  98%|█████████▊| 1.45GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊| 1.45GB / 1.47GB, 26.8MB/s  
+New Data Upload               :  97%|█████████▋|  863MB /  886MB, 22.1MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  99%|█████████▊| 1.45GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  99%|█████████▊| 1.45GB / 1.47GB, 26.5MB/s  
+New Data Upload               :  98%|█████████▊|  865MB /  886MB, 21.8MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  99%|█████████▊| 1.45GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  99%|█████████▊| 1.45GB / 1.47GB, 26.1MB/s  
+New Data Upload               :  98%|█████████▊|  867MB /  886MB, 21.5MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  99%|█████████▊| 1.45GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  99%|█████████▊| 1.45GB / 1.47GB, 25.2MB/s  
+New Data Upload               :  98%|█████████▊|  867MB /  886MB, 20.8MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  99%|█████████▉| 1.46GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉| 1.46GB / 1.47GB, 24.9MB/s  
+New Data Upload               :  98%|█████████▊|  868MB /  886MB, 20.5MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  99%|█████████▉| 1.46GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉| 1.46GB / 1.47GB, 24.5MB/s  
+New Data Upload               :  98%|█████████▊|  869MB /  886MB, 20.2MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  99%|█████████▉| 1.46GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉| 1.46GB / 1.47GB, 23.3MB/s  
+New Data Upload               :  98%|█████████▊|  870MB /  886MB, 19.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  99%|█████████▉| 1.46GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉| 1.46GB / 1.47GB, 22.2MB/s  
+New Data Upload               :  98%|█████████▊|  872MB /  886MB, 18.4MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  99%|█████████▉| 1.46GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉| 1.46GB / 1.47GB, 21.2MB/s  
+New Data Upload               :  99%|█████████▊|  874MB /  886MB, 17.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  99%|█████████▉| 1.46GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉| 1.46GB / 1.47GB, 20.2MB/s  
+New Data Upload               :  99%|█████████▉|  875MB /  886MB, 16.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  99%|█████████▉| 1.46GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉| 1.46GB / 1.47GB, 19.3MB/s  
+New Data Upload               :  99%|█████████▉|  876MB /  886MB, 16.0MB/s  [A
+
+  ...neuroslm-full/step7500.pt:  99%|█████████▉| 1.47GB / 1.47GB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉| 1.47GB / 1.47GB, 18.1MB/s  
+New Data Upload               :  99%|█████████▉|  878MB /  886MB, 15.0MB/s  [A
+
+  ...neuroslm-full/step7500.pt: 100%|█████████▉| 1.47GB / 1.47GB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉| 1.47GB / 1.47GB, 17.2MB/s  
+New Data Upload               :  99%|█████████▉|  879MB /  886MB, 14.3MB/s  [A
+
+  ...neuroslm-full/step7500.pt: 100%|█████████▉| 1.47GB / 1.47GB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉| 1.47GB / 1.47GB, 16.5MB/s  
+New Data Upload               :  99%|█████████▉|  881MB /  886MB, 13.7MB/s  [A
+
+  ...neuroslm-full/step7500.pt: 100%|█████████▉| 1.47GB / 1.47GB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉| 1.47GB / 1.47GB, 15.7MB/s  
+New Data Upload               : 100%|█████████▉|  882MB /  886MB, 13.1MB/s  [A
+
+  ...neuroslm-full/step7500.pt: 100%|█████████▉| 1.47GB / 1.47GB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉| 1.47GB / 1.47GB, 15.0MB/s  
+New Data Upload               : 100%|█████████▉|  884MB /  886MB, 12.6MB/s  [A
+
+  ...neuroslm-full/step7500.pt: 100%|█████████▉| 1.47GB / 1.47GB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉| 1.47GB / 1.47GB, 14.4MB/s  
+New Data Upload               : 100%|█████████▉|  885MB /  886MB, 12.0MB/s  [A
+
+  ...neuroslm-full/step7500.pt: 100%|██████████| 1.47GB / 1.47GB            [A[AProcessing Files (1 / 1)      : 100%|██████████| 1.47GB / 1.47GB, 11.9MB/s  
+New Data Upload               : 100%|██████████|  886MB /  886MB, 9.94MB/s  [AProcessing Files (1 / 1)      : 100%|██████████| 1.47GB / 1.47GB, 11.9MB/s  
+New Data Upload               : 100%|██████████|  886MB /  886MB, 9.94MB/s  
+  ...neuroslm-full/step7500.pt: 100%|██████████| 1.47GB / 1.47GB            
+[ckpt_push] ✓ pushed step7500.pt → hf://moritzroessler/BRIAN/checkpoints/20260616-204729_136e25e6_neuroslm-full/step7500.pt
+[train_dsl] done.
+Fatal Python error: PyGILState_Release: thread state 0x7f14e8003d80 must be current when releasing
+Python runtime state: finalizing (tstate=0x000000000243a020)
+
+Thread 0x00007f19af14c740 (most recent call first):
+  <no Python frame>
+scripts/vast_train_dsl_loop.sh: line 150:   889 Aborted                 python -u -m neuroslm.train_dsl --arch "$ARCH_PATH" --model dsl_lm --preset "$PRESET" --data "$DATA" --mode "$MODE" --chat_ratio "$CHAT_RATIO" --steps "$STEPS" --batch "$BATCH" --seq_len "$SEQ_LEN" --d_sem "$D_SEM" --device cuda --log_every "$LOG_EVERY" --save_every "$SAVE_EVERY" --push_every "$PUSH_EVERY" --push_backend "$PUSH_BACKEND" --ood_every "$OOD_EVERY" --ckpt_dir "$CKPT_DIR" --resume
+⚠ training exited with code 134 — restarting in 15s...
+
+▶ launch attempt 2 @ 21:39:56Z
+[train_dsl] boot @ 2026-06-16T21:39:57Z
+[train_dsl] git_commit 884d3dd938e90966382f47c48e4326ff6731aa59 (master)
+[train_dsl] arch_dsl_sha256 ec8067c19511c3233929df0ce18c2efd402db751dc367d795c681546155a8d7d (/workspace/brian/architectures/SmolLM)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[train_dsl] GIF OOD probe armed
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,903  (trainable 146,856,815 · frozen 980,097,088)
+  checkpoint = 149,187,774 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /workspace/brian/lfs_checkpoints
+[train_dsl] resumed from /workspace/brian/lfs_checkpoints/20260616-204729_136e25e6_neuroslm-full/step7500.pt @ step 7500
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=off pcc=off isotropy=off cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[data:chat] using OpenHermes-2.5 (teknium/OpenHermes-2.5)
+step  7520 | loss 6.0806 | lm 4.0877 | ppl 59.6 | gnorm 11.652 | lr 1.58e-04 | 172 tok/s | Φ 0.548 | λ₁ 0.075 | ign 0.00 | mesoLG 0.46 | troph 8/8 μ0.84 | NT[DA=0.02 NE=0.00 5HT=0.27 ACh=0.20 eCB=0.06 Glu=0.48 GABA=0.04] | osc[δ=0.650 θ=0.192 γ=0.158] | em[C2:ρ=0.00/τ=0.47/s=0.00 C4:Q=0.5 W=1 pl=255 C3:pc=0.202 VBB:β=1.03 σ=0.0358 kl=3787.211 C5:lat=1.00 C6:pac=0.00] | reg[dar=0.000 pcc=0.000 iso=0.0121 cmd=0.000 Σ=0.012 w=1.00 chat=0.60] | cortex[α_eff=0.509 inh=0.000 λ=0.801 kl=0.252 lm_ema=8.64 cx_ema=3.07] | gif[α=0.0500 p=1.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0100] | hpa[load=0.25 cort=0.26 NE×0.82 T×0.74 LR×0.87]
