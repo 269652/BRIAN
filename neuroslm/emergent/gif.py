@@ -410,9 +410,10 @@ class GIFController:
             error = max(0.0, gap_ratio - self.target_gap_ratio)
             delta = self.ramp_gain * error + self.min_ramp_speed
             self._progress = min(1.0, self._progress + delta)
-        else:
-            # No OOD data yet: use only min_ramp_speed
-            self._progress = min(1.0, self._progress + self.min_ramp_speed)
+        # else: No OOD data yet — do NOT advance progress.
+        # The static floor (below) provides the minimum baseline.
+        # Advancing min_ramp_speed blind inflates VBB loss when KL is
+        # enormous (25k+ nats early), drowning LM signal.
 
         # Never fall below the static floor
         self._progress = max(self._progress, static_p)

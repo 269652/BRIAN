@@ -520,11 +520,24 @@ class TestAdaptiveGIFRamp:
         expected_gap = math.exp(5.0 - 4.0)
         assert ctrl.last_gap_ratio == pytest.approx(expected_gap, rel=1e-3)
 
-    def test_no_ood_data_uses_min_speed(self):
-        """Before probe loads, only min_ramp_speed advances."""
+    def test_no_ood_data_does_not_advance(self):
+        """Before probe loads, progress stays at static floor only.
+
+        Fix for 41215474: blind min_ramp_speed advancement inflated
+        VBB loss (α × KL~25000) and drowned LM learning signal.
+        """
         ctrl = self._make_adaptive_ctrl(min_ramp_speed=0.01)
         ctrl.update(step=100, lm_loss_ema=4.0)
-        assert ctrl.progress == pytest.approx(0.01, abs=1e-6)
+        # Step 100 < ramp_start 500, so static floor = 0
+        # Without OOD data, progress must NOT advance
+        assert ctrl.progress == pytest.approx(0.0, abs=1e-6)
+
+    def test_no_ood_data_respects_static_floor(self):
+        """Static floor still applies pre-probe (step >= ramp_start)."""
+        ctrl = self._make_adaptive_ctrl(min_ramp_speed=0.01)
+        # Step 1750 → static floor = (1750-500)/(3000-500) = 0.5
+        ctrl.update(step=1750, lm_loss_ema=4.0)
+        assert ctrl.progress >= 0.5 - 1e-6
 
     def test_live_smollm_arch_is_adaptive(self):
         """Pin: SmolLM must deploy with adaptive GIF."""
