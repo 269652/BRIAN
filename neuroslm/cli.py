@@ -2900,6 +2900,46 @@ def cmd_lint(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── update-readme ──────────────────────────────────────────────────────
+
+def cmd_update_readme(args: argparse.Namespace) -> int:
+    """Render docs/README.template.md → README.md using docs/readme_metrics.toml.
+
+    ``brian update-readme``         — write README.md in place.
+    ``brian update-readme --check`` — compare only; exit 1 if stale (pre-commit use).
+    """
+    from neuroslm.readme_renderer import ReadmeRenderError, render_readme
+
+    template = REPO_ROOT / "docs" / "README.template.md"
+    metrics  = REPO_ROOT / "docs" / "readme_metrics.toml"
+    output   = REPO_ROOT / "README.md"
+
+    try:
+        rendered, is_clean = render_readme(
+            template, metrics, output, check=args.check
+        )
+    except FileNotFoundError as exc:
+        print(f"[update-readme] error: {exc}", file=sys.stderr)
+        return 1
+    except ReadmeRenderError as exc:
+        print(f"[update-readme] template error:\n{exc}", file=sys.stderr)
+        return 1
+
+    if args.check:
+        if is_clean:
+            print("[update-readme] README.md is up to date.")
+            return 0
+        print(
+            "[update-readme] README.md is stale — run `brian update-readme` "
+            "and stage the result.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"[update-readme] wrote {output.relative_to(REPO_ROOT)}")
+    return 0
+
+
 # ── arg parser ────────────────────────────────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -3421,6 +3461,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "-v", "--verbose", action="store_true",
         help="show reference-scan progress")
     sc_mig.set_defaults(func=cmd_migrate)
+
+    # update-readme
+    sur = sub.add_parser(
+        "update-readme",
+        help="Render docs/README.template.md → README.md (pre-commit: --check)")
+    sur.add_argument(
+        "--check", action="store_true",
+        help="compare rendered output to README.md without writing; exit 1 if stale")
+    sur.set_defaults(func=cmd_update_readme)
 
     return p
 
