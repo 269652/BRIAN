@@ -47,13 +47,13 @@
 # 2026-06-14: the bowtie arch folder was renamed rcc_bowtie → master
 # (canonical source-of-truth), and architectures/current/ was added as
 # the live working-copy that brian train/deploy consume by default.
-arch = "architectures/master"
+arch = "architectures/gpt2"
 # 2026-06-15: DNA path mirrors the active git branch so a fork on
 # `feature/X` never clobbers master's compiled DNA. The pre-deploy
 # hook (hooks/pre-deploy.yaml) recompiles architectures/master into
 # this exact path on every `brian deploy`, then unfolds back to
 # architectures/current/arch.neuro so the working copy stays in sync.
-dna = "./dna/master/arch.dna"
+# dna = "./dna/master/arch.dna"
 
 [defaults]
 # Workspace-wide default preset (used only when no [hardware.<DETECTED>]
