@@ -88,6 +88,30 @@
       "status": "stated",
       "theorem_name": "Brian.OODProbeArmingIsPrerequisite",
       "title": "OOD probe arming is a prerequisite for all gap-reactive GIF mechanisms"
+    },
+    {
+      "file": "H012_spectral_powerlaw_invariant.md",
+      "id": "H012",
+      "proof_status": "missing",
+      "status": "stated",
+      "theorem_name": "Brian.SpectralPowerLawInvariant",
+      "title": "TRUNK-OPT: SpectralPowerLawProbe is a scale- and rotation-invariant geometric measure of representation manifold"
+    },
+    {
+      "file": "H013_budget_loss_space_proxy.md",
+      "id": "H013",
+      "proof_status": "missing",
+      "status": "stated",
+      "theorem_name": "Brian.BudgetLossSpaceProxy",
+      "title": "TRUNK-OPT: Loss-space budget proxy is directionally consistent with the gradient-space budget"
+    },
+    {
+      "file": "H014_early_isotropy_activation.md",
+      "id": "H014",
+      "proof_status": "missing",
+      "status": "stated",
+      "theorem_name": "Brian.EarlyIsotropyActivation",
+      "title": "TRUNK-OPT: Early-isotropy activation prevents effective-rank collapse during LM-only warmup"
     }
   ],
   "version": 1

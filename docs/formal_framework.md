@@ -1227,3 +1227,240 @@ deferred to a CDGA sweep.
   intermediate teacher activations. Deferred to v3.0.
 
 
+
+## 15 TRUNK-OPT — Measurement & Provability Layer
+
+> **Status.** §15 introduces the *measurement* layer that sits
+> beneath every learning intervention in §11–§14. Where prior
+> sections defined *what to optimise*, §15 defines *what to
+> observe* — formally invariant geometric quantities of the
+> representation manifold, plus the activation-gate protocol
+> that mediates the trunk-vs-auxiliary trade-off during warmup.
+>
+> Codepath: `neuroslm/emergent/trunk_opt.py` (probes),
+> `neuroslm/regularizers.py` (gates), `neuroslm/train_dsl.py`
+> (telemetry format). Formal hypotheses: **H012**
+> (`Brian.SpectralPowerLawInvariant`), **H013**
+> (`Brian.BudgetLossSpaceProxy`), **H014**
+> (`Brian.EarlyIsotropyActivation`).
+
+### 15.1 Gradient budget tracker — B1
+
+The fundamental quantity is the **gradient budget** allocated
+to the language-modelling loss versus the sum of all auxiliaries:
+
+$$
+B_{\nabla}(t) \;=\;
+\frac{\lVert \nabla_\theta \mathcal{L}_{\mathrm{LM}}(\theta_t) \rVert}
+     {\lVert \nabla_\theta \mathcal{L}_{\mathrm{tot}}(\theta_t) \rVert}
+\;\in\; [0, 1].
+$$
+
+When the optimiser performs a single fused backward on
+$\mathcal{L}_{\mathrm{tot}}$ (to save FLOPs), $B_{\nabla}$ is unavailable.
+The fallback is the **loss-space proxy** (H013):
+
+$$
+B_{\mathcal{L}}(t) \;=\;
+\frac{\mathcal{L}_{\mathrm{LM}}(\theta_t)}
+     {\mathcal{L}_{\mathrm{tot}}(\theta_t)}
+\;\in\; (0, 1].
+$$
+
+**Theorem 15.1 (Brian.BudgetLossSpaceProxy).** $B_{\mathcal{L}}$ is
+*exact* when $\mathcal{L}_{\mathrm{aux}} = 0$, *directionally consistent*
+with $B_{\nabla}$ otherwise, and *never zero* when
+$\mathcal{L}_{\mathrm{LM}} > 0$. (Proof: hypothesis H013, §sub-theorems 1–3.)
+
+### 15.2 Effective-rank probe — B2 (legacy)
+
+The Shannon effective rank uses probability simplex
+$p_i = \sigma_i / \sum_j \sigma_j$:
+
+$$
+\text{erank}(H) \;=\; \exp\Bigl(-\sum_i p_i \log p_i\Bigr).
+$$
+
+The probe is **tail-weighted**: small singular values inflate
+the entropy. Cannot distinguish a healthy 1/f spectrum from
+white noise (both yield similar `erank ≈ K/2`).
+
+### 15.3 Spectral power-law probe — B3 (NEW, novel intrinsic invariant)
+
+Given $H \in \mathbb{R}^{N \times d}$ with top-$K$ significant
+singular values $\sigma_1 \ge \cdots \ge \sigma_K > 0$
+($K \le k_{\max} = 64$), the **Spectral Power-Law triple**
+$(\alpha, R^2, D_{\mathrm{PR}})$ is defined as:
+
+$$
+\log \sigma_i \;\approx\; \log C - \alpha \cdot \log i
+\quad\text{(OLS slope)}
+$$
+
+$$
+R^2 \;=\; 1 - \frac{\mathrm{SS}_{\mathrm{res}}}{\mathrm{SS}_{\mathrm{tot}}}
+\;\in\; [0,1]
+$$
+
+$$
+D_{\mathrm{PR}} \;=\; \frac{\bigl(\sum_i \sigma_i^2\bigr)^2}{\sum_i \sigma_i^4}
+\;\in\; [1, K]
+\quad\text{(Wegner 1980; Edwards–Thouless 1972)}
+$$
+
+**Theorem 15.3 (Brian.SpectralPowerLawInvariant).** For all
+$c > 0$ and $Q \in O(d)$, the map $H \mapsto cHQ$ leaves
+$(\alpha, R^2, D_{\mathrm{PR}})$ unchanged. Furthermore, the
+biological 1/f cortical signature ($\alpha \approx 1$, $R^2 > 0.9$)
+is separable from the bottleneck regime ($\alpha \gtrsim 3$,
+$R^2 \le 0.8$) in the $(\alpha, R^2)$ plane. (Proof: hypothesis
+H012, §sub-theorems 1–3.)
+
+**Interpretation legend.**
+
+| Regime | $(\alpha, R^2)$ signature | Geometric meaning |
+|--------|---------------------------|-------------------|
+| 1/f cortical (target) | $\alpha \approx 1.0$, $R^2 > 0.9$ | Scale-free, multi-scale features |
+| Brownian | $\alpha \approx 2.0$, $R^2 > 0.9$ | Random-walk-like decay |
+| Bottleneck | $\alpha \gtrsim 3.0$, $R^2 > 0.7$ | Compressive collapse |
+| White noise | $\alpha \lesssim 0.5$ | Uniform spectrum, no hierarchy |
+| Bumpy | any, $R^2 < 0.5$ | Not scale-free; structure unstable |
+
+**Complementarity with `erank`.** The pair (`erank`, `d_pr`)
+brackets the effective-dimensionality estimate from above and below:
+`erank` is tail-weighted (Shannon), `d_pr` is head-weighted
+($L^2 / L^4$). Their ratio detects spectrum *shape*; the absolute
+value of either alone detects spectrum *spread*.
+
+### 15.4 PAC-Bayes capacity bound — B4
+
+Carried over unchanged from prior TRUNK-OPT layer. Bounds expected
+generalisation gap as a function of posterior divergence to the
+prior over $\theta$. See `neuroslm/emergent/trunk_opt.py::PACBayesBound`.
+
+### 15.5 Bits-per-parameter capacity meter — B5
+
+Carried over unchanged. Estimates effective parameter count from
+loss curvature; complements PAC-Bayes by tracking capacity
+utilisation in real time.
+
+### 15.6 Capacity-first activation protocol — M1
+
+The **activation step** $A_{\mathrm{global}}$ is the global counter
+threshold below which all auxiliary losses are forcibly masked:
+
+$$
+\mathcal{L}_{\mathrm{tot}}(t) \;=\;
+\mathcal{L}_{\mathrm{LM}}(t) \;+\;
+\mathbb{1}[t \ge A_{\mathrm{global}}] \cdot \sum_k \lambda_k \mathcal{L}_{\mathrm{aux},k}(t).
+$$
+
+Before $A_{\mathrm{global}}$ the trunk is trained on pure cross-entropy.
+This protects early-phase capacity allocation from competing
+gradients (DAR, PCC, distillation, head-diversity, NIS+, symbolic).
+
+**Failure mode.** Bordelon et al. (2020) show that pure LM
+optimisation has a strong inductive bias toward *low-rank*
+representations. Empirical Colab run at commit `e2c1659` showed
+erank collapse 40 → 2.3 by step 1400, entirely within the
+LM-only warmup window. By the time auxiliaries activate, the
+representation manifold has already lost the dimensions whitening
+would have preserved.
+
+### 15.7 Isotropy activation step extension — M2
+
+The **isotropy activation step** $A_{\mathrm{iso}}$ is a per-intervention
+override on the whitening loss only:
+
+$$
+\mathcal{L}_{\mathrm{iso}}(t) \;=\;
+\mathbb{1}[t \ge \max(A_{\mathrm{iso}}, 0)] \cdot \lambda_{\mathrm{iso}} \cdot \mathcal{L}_{\mathrm{whitening}}(H_t)
+$$
+
+with the convention $A_{\mathrm{iso}} = -1 \Rightarrow A_{\mathrm{iso}} := A_{\mathrm{global}}$
+(back-compat). When $0 \le A_{\mathrm{iso}} < A_{\mathrm{global}}$ the
+whitening loss fires *before* the rest of the auxiliary stack,
+counteracting the LM inductive bias toward low rank during warmup.
+
+**Theorem 15.7 (Brian.EarlyIsotropyActivation).** Setting
+$A_{\mathrm{iso}} < A_{\mathrm{global}}$ is a strict refinement of the
+legacy protocol — no existing recipe is affected unless it sets
+the field to a non-default value. Under SmolLM training on
+FineWeb-Edu, the recipe $A_{\mathrm{iso}} = 1000$,
+$A_{\mathrm{global}} = 4000$ is predicted to maintain
+$\text{erank}(t) \ge K/2$ for all $t \in [0, A_{\mathrm{global}}]$.
+(Proof: hypothesis H014, §sub-theorems 1–3; falsification protocol
+in §H014.)
+
+### 15.8 Closed-loop architecture
+
+The three measurements and one intervention form a control loop:
+
+```
+H012 (measure)        H013 (telemetry)        H014 (intervention)
+─────────────────     ──────────────────      ────────────────────
+α, R², D_PR    ───►   budget proxy       ───► isotropy activation
+                                              at A_iso < A_global
+        ▲                                              │
+        │            erank, budget, α, R², D_PR        │
+        └──────────────────────────────────────────────┘
+                       closed loop
+```
+
+The triple was shipped together in commit `5cec369` because each
+component is load-bearing for the others:
+
+* **Without H013** the loop has no observability — every
+  `trunk[budget=0.00]` is a blackout.
+* **Without H014** the intervention has no actuator —
+  $A_{\mathrm{iso}}$ defaults to $A_{\mathrm{global}}$ and whitening
+  fires too late.
+* **Without H012** the controller has no shape-discriminating
+  signal — `erank` alone cannot distinguish 1/f from white noise.
+
+### 15.9 Implementation summary
+
+* `neuroslm.emergent.trunk_opt.GradientBudgetTracker` — B1 + loss-proxy
+  fallback (H013).
+* `neuroslm.emergent.trunk_opt.EffectiveRankProbe` — B2 (legacy).
+* `neuroslm.emergent.trunk_opt.SpectralPowerLawProbe` — **B3 NEW**
+  (H012). `compute(H, k_max=64) → {"alpha", "r2", "d_pr"}`.
+* `neuroslm.emergent.trunk_opt.PACBayesBound` — B4.
+* `neuroslm.emergent.trunk_opt.BitsPerParamMeter` — B5.
+* `neuroslm.emergent.trunk_opt.TrunkOptMonitor` — orchestrator;
+  surfaces metrics in `compute_loss` and `compute_loss_simple`.
+* `neuroslm.regularizers` — early-isotropy gate (H014).
+* DSL knobs on `RegularizationConfig`:
+  `isotropy_activation_step: int = -1`.
+* Telemetry keys (in `BRIANHarness._metrics`):
+  `trunk_opt_budget`, `trunk_opt_erank`, `trunk_opt_power_alpha`,
+  `trunk_opt_power_r2`, `trunk_opt_dpr`, `trunk_opt_pac_bound`,
+  `trunk_opt_bits_per_param`.
+* Log format in `neuroslm/train_dsl.py`:
+  `trunk[budget=0.98 erank=40.1 α=1.34 R²=0.97 PR=12.5 pac=0.42 bits=8.3]`.
+
+### 15.10 Open questions for v2.1+
+
+* **B6 (Lyapunov spectrum)** — Tracking exponents of the trunk's
+  Jacobian at fixed-points would directly measure dynamical
+  stability; defer until an efficient power-iteration estimator
+  is benchmarked.
+* **B7 (KL-divergence to teacher)** — A per-step KL between
+  student trunk and a frozen pretrained teacher; partially
+  subsumed by §14.6 CFD telemetry but not exposed via
+  `TrunkOptMonitor` yet.
+* **M3 (adaptive $A_{\mathrm{iso}}$)** — Schedule
+  $A_{\mathrm{iso}}$ as a function of the live $(\alpha, R^2)$
+  reading rather than a hard-coded step. Closes the loop
+  end-to-end; deferred pending more empirical data.
+* **M4 (two-pass exact budget)** — Optional flag
+  `training.trunk_opt.two_pass_budget: true` to compute
+  $B_{\nabla}$ exactly via a second backward. Useful for
+  ablations; not needed in default training.
+* **M5 (DSL surface for k_max)** — Expose
+  `training.trunk_opt.power_law_k_max: int = 64` so heavy/light
+  trunks can tune the SVD cost per probe.
+
+
+
+

@@ -276,6 +276,20 @@ brian train --steps 2000
 # Full-scale training on A100 (requires vast.ai deploy)
 brian deploy --steps 10000
 
+# Resume training from a previous checkpoint (local or HF Hub)
+brian deploy --resume lfs_checkpoints/<run-dir>/step<N>.pt
+brian deploy --latest                            # newest HF Hub ckpt
+
+# Browse / download HuggingFace Hub checkpoints
+brian hf list                                    # newest-first listing
+brian hf latest                                  # print newest URI
+brian hf pull --latest                           # download into lfs_checkpoints/
+
+# Boot a checkpoint into an always-on chat daemon (memory + idle thoughts)
+brian chat                                       # auto-pick local highest-step
+brian chat --latest                              # pull newest from HF first
+brian chat lfs_checkpoints/<run-dir>/step<N>.pt  # explicit path
+
 # OOD eval on a checkpoint
 brian ood eval lfs_checkpoints/<checkpoint>.pt
 ```

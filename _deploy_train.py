@@ -80,6 +80,15 @@ CHECKPOINT_PUSH_BACKEND = os.environ.get(
     "CHECKPOINT_PUSH_BACKEND", "hf")
 HF_REPO_ID = os.environ.get("HF_REPO_ID", "moritzroessler/BRIAN")
 
+# ── Resume target (set by `brian deploy --resume X` / `--latest`) ──
+# Empty string = fresh start; the on-box trainer's --resume globber
+# falls back to the highest-step file in lfs_checkpoints/ as before.
+# Non-empty = either a local path or an hf://owner/repo/path URI;
+# both are forwarded as RESUME_FROM via the ONSTART env block. The
+# trainer's --resume_from flag (in neuroslm.train_dsl) handles the
+# HF download + load itself, so the bootstrap script is a pass-thru.
+RESUME_FROM = os.environ.get("RESUME_FROM", "")
+
 # ── Pre-flight: warn loudly if the chosen backend lacks credentials ──
 # The on-box pusher fails open (prints + skips, never crashes the run),
 # so a missing token would otherwise only surface in the training log
@@ -242,7 +251,8 @@ if USE_DNA:
         f"LOG_EVERY={LOG_EVERY} SAVE_EVERY={SAVE_EVERY} "
         f"PUSH_EVERY={PUSH_EVERY} "
         f"CHECKPOINT_PUSH_BACKEND={CHECKPOINT_PUSH_BACKEND} "
-        f"HF_REPO_ID={HF_REPO_ID} FRESH=1 \\\n"
+        f"HF_REPO_ID={HF_REPO_ID} "
+        f"RESUME_FROM='{RESUME_FROM}' FRESH=1 \\\n"
         f"    bash scripts/vast_train_dna_loop.sh 2>&1 | tee /workspace/train.log"
     )
     arch_name_for_log = dna_arch_name or arch_display
@@ -252,7 +262,8 @@ else:
         f"LOG_EVERY={LOG_EVERY} SAVE_EVERY={SAVE_EVERY} "
         f"PUSH_EVERY={PUSH_EVERY} "
         f"CHECKPOINT_PUSH_BACKEND={CHECKPOINT_PUSH_BACKEND} "
-        f"HF_REPO_ID={HF_REPO_ID} FRESH=1 \\\n"
+        f"HF_REPO_ID={HF_REPO_ID} "
+        f"RESUME_FROM='{RESUME_FROM}' FRESH=1 \\\n"
         f"    bash scripts/vast_train_dsl_loop.sh 2>&1 | tee /workspace/train.log"
     )
     arch_name_for_log = ARCH
@@ -262,6 +273,7 @@ export DEBIAN_FRONTEND=noninteractive
 export GITHUB='{GITHUB}' HF_TOKEN='{HF_TOKEN}' VAST_API_KEY='{VAST_API_KEY}'
 export CHECKPOINT_PUSH_BACKEND='{CHECKPOINT_PUSH_BACKEND}'
 export HF_REPO_ID='{HF_REPO_ID}'
+export RESUME_FROM='{RESUME_FROM}'
 {scale_env}
 export DIST_STRATEGY={hw.dist_strategy}
 export NUM_GPUS={hw.num_gpus}

@@ -18,6 +18,15 @@ from pathlib import Path
 from typing import Optional
 
 
+# ── log macro regexes ─────────────────────────────────────────────────
+# ${LOG_TAIL:source:N} — last-N-lines fenced block + GitHub link
+# ${LOG_LINK:source}   — GitHub link only (suitable for table cells)
+# source: "best" | "latest" | <TOML-key> | <literal-path>
+
+_LOG_TAIL_RE = re.compile(r"\$\{LOG_TAIL:([^:}]+):(\d+)\}")
+_LOG_LINK_RE = re.compile(r"\$\{LOG_LINK:([^}]+)\}")
+
+
 # ── public exception ──────────────────────────────────────────────────
 
 class ReadmeRenderError(Exception):
@@ -101,12 +110,46 @@ def render(template: str, metrics: dict[str, str]) -> str:
     return _PLACEHOLDER_RE.sub(_sub, template)
 
 
+def resolve_log_macros(
+    template: str,
+    metrics: dict[str, str],
+    repo_root: Optional[Path] = None,
+) -> str:
+    """Expand ${LOG_TAIL:src:N} and ${LOG_LINK:src} macros in *template*.
+
+    Must be called AFTER the standard ${KEY} substitution so that log file
+    content (which may contain $-signs) is never treated as a placeholder.
+
+    Sources
+    -------
+    ``best``        — resolved from ``.brian/best_run.ln``
+    ``latest``      — mtime-newest ``.log`` file under ``<repo_root>/logs``
+    ``<TOML-KEY>``  — path read from *metrics* dict
+    ``<literal>``   — treated as a path relative to *repo_root*
+    """
+    root = repo_root or Path(".")
+
+    def _tail_sub(m: re.Match) -> str:
+        source, n = m.group(1), int(m.group(2))
+        return _render_log_tail(_resolve_log_source(source, metrics, root), n, root)
+
+    def _link_sub(m: re.Match) -> str:
+        return _render_log_link(
+            _resolve_log_source(m.group(1), metrics, root), root
+        )
+
+    result = _LOG_TAIL_RE.sub(_tail_sub, template)
+    result = _LOG_LINK_RE.sub(_link_sub, result)
+    return result
+
+
 def render_readme(
     template_path: Path,
     metrics_path: Path,
     output_path: Optional[Path] = None,
     *,
     check: bool = False,
+    repo_root: Optional[Path] = None,
 ) -> tuple[str, bool]:
     """Render the README template and optionally write / diff the result.
 
@@ -138,7 +181,10 @@ def render_readme(
     """
     template = template_path.read_text(encoding="utf-8")
     metrics = load_metrics(metrics_path)
+    # Step 1: standard ${KEY} substitution — leaves ${LOG_TAIL:…} untouched
     rendered = render(template, metrics)
+    # Step 2: log macro resolution — safe to run on rendered content
+    rendered = resolve_log_macros(rendered, metrics, repo_root=repo_root)
 
     if check:
         if output_path is None or not output_path.exists():
@@ -149,6 +195,76 @@ def render_readme(
     if output_path is not None:
         output_path.write_text(rendered, encoding="utf-8")
     return rendered, True
+
+
+# ── log macro helpers ─────────────────────────────────────────────────
+
+def _resolve_log_source(
+    source: str,
+    metrics: dict[str, str],
+    root: Path,
+) -> Optional[Path]:
+    """Translate a macro source token into a Path (or None if not resolvable)."""
+    if source == "best":
+        ln = root / ".brian" / "best_run.ln"
+        if not ln.is_file():
+            return None
+        try:
+            from neuroslm.log_refs import read_ref
+            ref = read_ref(ln)
+            p = ref.target if ref.target.is_absolute() else root / ref.target
+            return p if p.is_file() else None
+        except Exception:
+            return None
+
+    if source == "latest":
+        return _find_latest_log(root / "logs")
+
+    # TOML key lookup
+    if source in metrics:
+        p = Path(metrics[source])
+        resolved = p if p.is_absolute() else root / p
+        return resolved  # may not exist — callers handle that gracefully
+
+    # Literal path fallback
+    p = Path(source)
+    return p if p.is_absolute() else root / p
+
+
+def _find_latest_log(log_dir: Path) -> Optional[Path]:
+    """Return the most-recently-modified .log file under *log_dir*, or None."""
+    try:
+        logs = list(log_dir.rglob("*.log"))
+    except OSError:
+        return None
+    if not logs:
+        return None
+    return max(logs, key=lambda p: p.stat().st_mtime)
+
+
+def _render_log_tail(log_path: Optional[Path], n_lines: int, root: Path) -> str:
+    """Render a GitHub link + last-N-lines fenced code block, or a "not available" note."""
+    if log_path is None or not log_path.is_file():
+        return "*(log not available)*"
+    try:
+        rel_posix = log_path.relative_to(root).as_posix()
+    except ValueError:
+        rel_posix = log_path.as_posix()
+    lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    tail = lines[-n_lines:] if len(lines) > n_lines else lines
+    link = f"[`{rel_posix}`]({rel_posix})"
+    return f"{link}\n\n```\n" + "\n".join(tail) + "\n```"
+
+
+def _render_log_link(log_path: Optional[Path], root: Path) -> str:
+    """Render a GitHub-followable markdown link, or a "not available" note."""
+    if log_path is None or not log_path.is_file():
+        return "*(log not available)*"
+    try:
+        rel_posix = log_path.relative_to(root).as_posix()
+    except ValueError:
+        rel_posix = log_path.as_posix()
+    return f"[`{rel_posix}`]({rel_posix})"
 
 
 # ── internal helpers ──────────────────────────────────────────────────

@@ -1112,10 +1112,16 @@ shell scripts or Python entry points directly.
 | Operation                | ✅ Use this                                  | ❌ Do not call this directly                        |
 |--------------------------|---------------------------------------------|-----------------------------------------------------|
 | Launch training run      | `brian deploy [--steps N] [--branch X]`     | `python _deploy_train.py` · `bash scripts/vast_train.sh` |
+| Resume previous run      | `brian deploy --resume <path-or-hf-uri>`    | manually editing env vars                          |
+| Resume latest from HF    | `brian deploy --latest [--hf-prefix RUN]`   | manual `huggingface_hub` download                  |
 | Long-horizon run         | `brian deploy-100k`                         | same                                                |
 | Kill a vast.ai instance  | `brian destroy <ID>`                        | `bash scripts/vast.sh destroy instance <ID> -y`     |
 | List active instances    | `brian ps [--it]` · `brian status`          | `vastai show instances`                             |
 | Tail container logs      | `brian logs <ID>`                           | `vastai logs <ID>`                                  |
+| List HF checkpoints      | `brian hf list [--prefix RUN]`              | `huggingface_hub.HfApi().list_repo_files(...)`     |
+| Download HF checkpoint   | `brian hf pull <path>` · `brian hf pull --latest` | `hf_hub_download(...)` + manual copy         |
+| Newest HF checkpoint URI | `brian hf latest`                           | manual repo listing                                |
+| Always-on chat daemon    | `brian chat [<ckpt>] [--latest]`            | `python -m neuroslm.chat_daemon`                   |
 | Compile arch → DNA       | `brian dna compile [<arch>] [-o FILE]`      | `python -m neuroslm.compiler.ribosome ...`          |
 | Unfold DNA → DSL         | `brian dna unfold <dna> [-o FILE]`          | same                                                |
 | Render NFG diagram       | `brian compile nfg --current` · `brian nfg` | `python -m neuroslm.graphviz ...`                   |

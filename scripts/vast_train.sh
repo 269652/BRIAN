@@ -266,6 +266,7 @@ echo "    BOOT_TIMESTAMP=\$BOOT_TIMESTAMP (used in log filename prefix)"
 INSTANCE_ID="\$(hostname)" PUSH_INTERVAL='${LOG_PUSH_INTERVAL}' \\
     BRANCH='${BRANCH}' REPO_SLUG='${REPO_SLUG}' \\
     BOOT_TIMESTAMP="\$BOOT_TIMESTAMP" \\
+    OOD_EVERY='${OOD_EVERY}' \\
     nohup bash scripts/log_pusher.sh > /workspace/log_pusher.log 2>&1 &
 LOG_PUSHER_PID=\$!
 echo "    log_pusher pid=\$LOG_PUSHER_PID"

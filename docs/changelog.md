@@ -14,8 +14,84 @@ by `brian ai document` from `git log`.
 
 ## 2026-06
 
-- `(staged)` · 2026-06-14 · feat(MoE+NT) · Items 2/3/4/5/6 — neuro-modulated
-  mixture-of-experts surgery (B5 prep).
+- `XXXXXXX` · 2026-06-17 · feat(cli) · **HF Hub checkpoint listing/download,
+  always-on chat daemon, deploy --resume / --latest**.
+  Four user-facing capabilities wired end-to-end across CLI / deploy /
+  trainer / vast.ai bash loop:
+    * **`brian hf list / pull / latest`** (`neuroslm/hf_checkpoints.py` NEW) —
+      Read-side companion to `neuroslm.checkpoint_push`. Lists every
+      `.pt` on the HF Hub repo (newest-step first), pulls a specific
+      checkpoint by `path_in_repo` or `--latest` into
+      `lfs_checkpoints/<RUN_DIR>/step<N>.pt` (layout-preserving so the
+      existing resume globber finds it), prints the newest URI.
+      Accepts `hf://owner/repo/path` shorthand. Auth chain mirrors
+      `checkpoint_push`: explicit token → `HF_TOKEN` env → cached
+      `~/.huggingface/token`. Never raises — failures print + return
+      empty/None. **27 new TDD tests.**
+    * **`brian chat`** (`neuroslm/chat_daemon.py` NEW) — Boots a
+      checkpoint into an always-on inference daemon with three
+      concurrent surfaces: conversation (USER ↔ BRIAN), idle thoughts
+      (model self-prompts during user inactivity), CLI dashboard (one
+      ANSI screen with `memory` / `thoughts` / `chat` panes). Single
+      `threading.Lock()` serialises user-turn and thought-tick
+      generates (transformer KV-cache not thread-safe). `_stop.wait()`
+      interrupt instead of `time.sleep` so process shutdown is
+      instant. REPL slash commands: `/quit`, `/clear`, `/think`,
+      `/render`. Resolution chain for the checkpoint: positional arg
+      → `--latest` (HF pull) → local highest-step in
+      `lfs_checkpoints/`. **34 new TDD tests with deterministic stub
+      `GenerateFn` (zero torch dependency in suite).**
+    * **`brian deploy --resume PATH_OR_URI`** + **`--latest`**
+      (`neuroslm/cli.py`, `neuroslm/train_dsl.py`, `_deploy_train.py`,
+      `scripts/vast_train_{dsl,dna}_loop.sh`) — Resume training from
+      a specific checkpoint (local path or `hf://` URI), or auto-pick
+      the highest-step from HF Hub with `--latest`. Five-hop env-var
+      propagation: CLI → `extra['RESUME_FROM']` → `_deploy_train.py`
+      ONSTART export → bash `RESUME_ARGS` array → trainer's new
+      `--resume_from` flag. The trainer downloads `hf://` URIs into
+      `--ckpt_dir` and resumes at the saved step. Backwards-compat:
+      legacy `--resume` globber still works when `RESUME_FROM` is
+      empty. **23 new TDD tests covering parser flags, handler
+      dispatch, env propagation chain, bash array expansion.**
+  **Net: 5 new test files, 120 new tests, all green in 2.4s.**
+  Zero new top-level dependencies (lazy `huggingface_hub` import,
+  no `rich`, no `curses`). Daemon works on Windows + git-bash + Linux.
+
+- `5cec369` · 2026-06-17 · feat(trunk-opt) · **SpectralPowerLawProbe**
+  (NOVEL intrinsic geometric invariant) + loss-space budget proxy +
+  `isotropy_activation_step` (early erank guard).
+  Three coupled changes shipped together as a closed measurement →
+  telemetry → intervention loop:
+    * **SpectralPowerLawProbe** (`neuroslm/emergent/trunk_opt.py`) —
+      One SVD/step yields three intrinsic invariants of the
+      representation manifold: power-law exponent `α`, goodness-of-fit
+      `R²`, and Wegner participation ratio `D_PR`. Provably scale-
+      invariant ($H \to cH$) and orthogonally-invariant
+      ($H \to HQ$ for $Q \in O(d)$). Tracks the biological 1/f cortical
+      signature (He 2014, Voytek 2015). Log format extended to
+      `trunk[... α=1.34 R²=0.97 PR=12.5]`. Live numerical verification
+      recovers $\alpha \in \{1, 1.5, 2, 3\}$ to $10^{-3}$ precision.
+      10 new TDD tests in `TestSpectralPowerLawProbe`. **Formal hypothesis: H012**.
+    * **Budget loss-space proxy** (`neuroslm/emergent/trunk_opt.py`,
+      `neuroslm/harness.py`) — Fixes `trunk[budget=0.00]` blackout
+      observed in Colab telemetry for all 1400 steps. When no
+      LM-only backward is available, `B_L = L_LM / L_tot` is used
+      instead of `B_∇ = ||∇L_LM|| / ||∇L_tot||`. Exact when
+      `L_aux = 0`, directionally consistent otherwise. **Formal hypothesis: H013**.
+    * **`isotropy_activation_step`** (`neuroslm/regularizers.py`,
+      `neuroslm/dsl/regularization.py`, `architectures/SmolLM/arch.neuro`) —
+      Per-intervention override (default `-1` = use global gate).
+      Lets whitening loss fire *before* the global activation step,
+      preventing the erank collapse 40→2.3 observed during the
+      LM-only warmup. SmolLM recipe activates at step 1000 (3000
+      steps before DAR/PCC). **Formal hypothesis: H014**.
+  13 new TDD tests across `TestSpectralPowerLawProbe` (10) +
+  `TestActivationStep` (3). 1004 broader regression tests pass.
+  Pre-commit hook ran 911 tests green and regenerated README.
+  Three hypothesis files added (H012/H013/H014) + `docs/formal_framework.md`
+  §15 TRUNK-OPT — Measurement & Provability Layer.
+
+
   Five disciplined-TDD additions, all GREEN end-to-end:
     * **Item 5** — Expert alias registry (`_EXPERT_ALIAS_REGISTRY` +
       `resolve_expert_alias()` + `register_expert_alias()` in

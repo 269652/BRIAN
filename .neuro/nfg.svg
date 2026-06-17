@@ -9,7 +9,7 @@
 <g id="graph0" class="graph" transform="scale(2.08333 2.08333) rotate(0) translate(36 3035.8)">
 <title>nfg</title>
 <polygon fill="white" stroke="none" points="-36,36 -36,-3035.8 2058.98,-3035.8 2058.98,36 -36,36"/>
-<text xml:space="preserve" text-anchor="middle" x="1011.49" y="-2974.9" font-family="Helvetica,sans-Serif" font-size="22.00">NFG · master</text>
+<text xml:space="preserve" text-anchor="middle" x="1011.49" y="-2974.9" font-family="Helvetica,sans-Serif" font-size="22.00">NFG · SmolLM</text>
 <!-- master -->
 <g id="node1" class="node">
 <title>master</title>
@@ -822,9 +822,9 @@
 <title>cortex_reasoning&#45;&gt;lm_trunk</title>
 <path fill="none" stroke="#7a2b9c" stroke-width="2" d="M1125.94,-405.21C1142.57,-322.46 1170.57,-149.04 1180.01,-69.81"/>
 <polygon fill="#7a2b9c" stroke="#7a2b9c" stroke-width="2" points="1183.13,-70.24 1181.02,-60.94 1176.87,-69.52 1183.13,-70.24"/>
-<text xml:space="preserve" text-anchor="start" x="1156.33" y="-255.04" font-family="Times New Roman,serif" font-size="9.00" fill="#7a2b9c">KL distill</text>
-<text xml:space="preserve" text-anchor="start" x="1156.33" y="-244.54" font-family="Times New Roman,serif" font-size="9.00" fill="#7a2b9c">λ_max=1.0</text>
-<text xml:space="preserve" text-anchor="middle" x="1176.58" y="-234.04" font-family="Times New Roman,serif" font-size="9.00" fill="#7a2b9c">T=4.0</text>
+<text xml:space="preserve" text-anchor="start" x="1115.83" y="-255.04" font-family="Times New Roman,serif" font-size="9.00" fill="#7a2b9c">KL distill</text>
+<text xml:space="preserve" text-anchor="start" x="1115.83" y="-244.54" font-family="Times New Roman,serif" font-size="9.00" fill="#7a2b9c">λ_max=1.0</text>
+<text xml:space="preserve" text-anchor="middle" x="1136.08" y="-234.04" font-family="Times New Roman,serif" font-size="9.00" fill="#7a2b9c">T=4.0</text>
 </g>
 <!-- dopamine -->
 <g id="node37" class="node">

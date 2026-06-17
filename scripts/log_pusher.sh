@@ -56,6 +56,7 @@
 set -uo pipefail
 
 LOG_EVERY="${LOG_EVERY:-0}"
+OOD_EVERY="${OOD_EVERY:-0}"
 POLL_INTERVAL="${POLL_INTERVAL:-30}"
 PUSH_INTERVAL="${PUSH_INTERVAL:-300}"
 SOURCE_LOG="${SOURCE_LOG:-/workspace/train.log}"
@@ -300,7 +301,10 @@ fi
 # _compose_logfile every iteration.
 _BANNER_DEST="$(_compose_logfile)"
 
-if [ "$LOG_EVERY" -gt 0 ] 2>/dev/null; then
+if [ "$OOD_EVERY" -gt 0 ] 2>/dev/null; then
+    echo "[log_pusher] OOD-DRIVEN: push after each [mid-ood] validation (OOD_EVERY=${OOD_EVERY}, poll every ${POLL_INTERVAL}s)"
+    echo "[log_pusher] watching $SOURCE_LOG → $_BANNER_DEST"
+elif [ "$LOG_EVERY" -gt 0 ] 2>/dev/null; then
     echo "[log_pusher] STEP-DRIVEN: push every ${LOG_EVERY} train steps (poll every ${POLL_INTERVAL}s)"
     echo "[log_pusher] watching $SOURCE_LOG → $_BANNER_DEST"
 else
@@ -319,10 +323,22 @@ _current_step() {
     echo "${n:-0}"
 }
 
+# Returns the step of the most recently completed OOD validation in the log.
+# train_dsl.py prints: "[mid-ood] step N: wikitext ppl=..."
+# Returns empty string when no [mid-ood] line has appeared yet.
+_last_mid_ood_step() {
+    grep -oE "\[mid-ood\] step [0-9]+" "$SOURCE_LOG" 2>/dev/null \
+        | tail -1 | grep -oE '[0-9]+$'
+}
+
 # Tracks the highest LOG_EVERY-bucket we've already pushed (integer
 # division). Initialised to -1 so step 0 is always considered a fresh
 # bucket. Only consulted in step-driven mode.
 LAST_PUSHED_BUCKET=-1
+
+# Tracks the highest OOD step we have already pushed (OOD-driven mode).
+# Initialised to -1 so the very first [mid-ood] line always fires a push.
+LAST_OOD_STEP_PUSHED=-1
 
 while true; do
     # Poll cadence:
@@ -344,22 +360,45 @@ while true; do
         continue
     fi
 
-    # ── Step-bucket gate (only active when LOG_EVERY > 0) ─────────────
-    # Push iff the trainer has crossed into a new LOG_EVERY-sized bucket
-    # since our last push. e.g. LOG_EVERY=500 → push exactly at the
-    # step-500, step-1000, step-1500, … log rows. This keeps the on-
-    # disk log in lock-step with what the user sees in ``brian logs``.
-    if [ "$LOG_EVERY" -gt 0 ] 2>/dev/null; then
+    # ── Push-trigger gate: three modes ────────────────────────────────
+    #
+    # OOD-DRIVEN  (OOD_EVERY > 0):  push once per completed [mid-ood]
+    #   validation — the sentinel line "[mid-ood] step N" is written by
+    #   train_dsl.py AFTER the WikiText-103 eval finishes (~30s of GPU
+    #   work). This guarantees the gap_ratio is in the committed log.
+    #
+    # STEP-DRIVEN (LOG_EVERY > 0, no OOD):  push on LOG_EVERY-step
+    #   bucket boundaries — the original behaviour.
+    #
+    # TIME-DRIVEN (both 0):  push every PUSH_INTERVAL seconds.
+    #   Implicit — the outer sleep + no gate = always push.
+    #
+    SHOULD_PUSH=0
+    NEW_BUCKET=""
+    NEW_OOD_STEP=""
+
+    if [ "$OOD_EVERY" -gt 0 ] 2>/dev/null; then
+        # OOD-DRIVEN: fire when a new [mid-ood] step N line appears.
+        CUR_OOD_STEP="$(_last_mid_ood_step)"
+        if [ -n "$CUR_OOD_STEP" ] && [ "$CUR_OOD_STEP" -gt "$LAST_OOD_STEP_PUSHED" ] 2>/dev/null; then
+            SHOULD_PUSH=1
+            NEW_OOD_STEP="$CUR_OOD_STEP"
+        fi
+    elif [ "$LOG_EVERY" -gt 0 ] 2>/dev/null; then
+        # STEP-DRIVEN: fire when a new LOG_EVERY-sized bucket is crossed.
         CUR_STEP="$(_current_step)"
         CUR_BUCKET=$((CUR_STEP / LOG_EVERY))
-        if [ "$CUR_BUCKET" -le "$LAST_PUSHED_BUCKET" ]; then
-            # Still in the same bucket — no new log_every boundary crossed.
-            continue
+        if [ "$CUR_BUCKET" -gt "$LAST_PUSHED_BUCKET" ]; then
+            SHOULD_PUSH=1
+            NEW_BUCKET="$CUR_BUCKET"
         fi
-        # Cross detected. Fall through to commit+push; update tracker
-        # only AFTER a successful push so a transient git failure
-        # retries on the next poll.
-        NEW_BUCKET="$CUR_BUCKET"
+    else
+        # TIME-DRIVEN: always push (outer sleep provides the cadence).
+        SHOULD_PUSH=1
+    fi
+
+    if [ "$SHOULD_PUSH" = "0" ]; then
+        continue
     fi
 
     # Compute new log path with current step range
@@ -403,10 +442,14 @@ while true; do
         echo "[log_pusher] $(date -u +%H:%M:%SZ) push failed; will retry next cycle"
     fi
 
-    # Only advance the bucket tracker on a SUCCESSFUL push. A transient
-    # network blip stays in the current bucket so the next poll retries.
-    if [ "$LOG_EVERY" -gt 0 ] 2>/dev/null && [ "$PUSH_OK" -eq 1 ]; then
-        LAST_PUSHED_BUCKET="$NEW_BUCKET"
+    # Advance the push tracker only on SUCCESS. A transient network blip
+    # stays in the current bucket/step so the next poll automatically retries.
+    if [ "$PUSH_OK" -eq 1 ]; then
+        if [ "$OOD_EVERY" -gt 0 ] 2>/dev/null && [ -n "$NEW_OOD_STEP" ]; then
+            LAST_OOD_STEP_PUSHED="$NEW_OOD_STEP"
+        elif [ "$LOG_EVERY" -gt 0 ] 2>/dev/null && [ -n "$NEW_BUCKET" ]; then
+            LAST_PUSHED_BUCKET="$NEW_BUCKET"
+        fi
     fi
 done
 

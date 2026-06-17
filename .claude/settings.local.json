@@ -107,7 +107,12 @@
       "PowerShell(Remove-Item \".venv-2\" -Recurse -Force -Confirm:$false)",
       "PowerShell(git log --all --oneline --format=\"%h %ad %s\" | Where-Object { $_ -notmatch \"tail sync\" } | Select-Object -First 20)",
       "PowerShell(brian ps 2>&1)",
-      "PowerShell(Get-Job)"
+      "PowerShell(Get-Job)",
+      "Bash(grep -n \"checkpoint\\\\|hf://\\\\|HF_CKPT\\\\|push_to_hub\" c:/Users/morrossl/Documents/Private/SLM/neuroslm/train_dsl.py)",
+      "Bash(grep -n \"hf://\\\\|hub_checkpoint\\\\|HF\\\\|hf_path\\\\|checkpoint_push\\\\|push_checkpoint\" c:/Users/morrossl/Documents/Private/SLM/neuroslm/checkpoint_push.py)",
+      "Bash(grep -n \"checkpoint.*hf://\\\\|hf://.*checkpoint\\\\|printed.*checkpoint\\\\|print.*hub\\\\|hub.*url\" c:/Users/morrossl/Documents/Private/SLM/neuroslm/checkpoint_push.py)",
+      "Bash(grep -n \"print\\\\|logger\\\\|log.*checkpoint\\\\|checkpoint.*log\\\\|hf://\\\\|uploaded\\\\|pushed\" c:/Users/morrossl/Documents/Private/SLM/neuroslm/checkpoint_push.py)",
+      "Bash(xargs -I{} grep -l \"ckpt_push\" {})"
     ]
   }
 }

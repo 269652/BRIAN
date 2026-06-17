@@ -25,7 +25,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 from neuroslm.evolution.grad_heat import (
     parameter_grad_norms, update_heatmap,
@@ -79,6 +79,7 @@ class HeatmapHook:
     alias: Optional[Dict[str, str]] = None
     enabled: bool = True
     verbose: bool = False
+    grad_norm_fn: Optional[Callable[[], Dict[str, float]]] = None
 
     # ── factory ────────────────────────────────────────────────────
 
@@ -149,13 +150,26 @@ class HeatmapHook:
             return
 
         try:
-            grad_norms = parameter_grad_norms(self.model.named_parameters())
-            update_heatmap(
-                self.heatmap, grad_norms, self.ir,
-                step=step_idx,
-                publisher=self.publisher,
-                alias=self.alias or {},
-            )
+            if self.grad_norm_fn is not None:
+                # Signals are already keyed by IR element ID — bypass the
+                # param-name → node-name alias translation in update_heatmap
+                # and fold directly into the heatmap.
+                signals = self.grad_norm_fn()
+                kinds = {
+                    k: ("edge" if any(k.startswith(p) for p in ("synapse:", "modulation:", "distillation:", "inhibition:")) else "node")
+                    for k in signals
+                }
+                self.heatmap.update(signals, kinds=kinds, step=step_idx)
+                if self.publisher is not None:
+                    self.publisher.maybe_publish(self.heatmap, step_idx)
+            else:
+                grad_norms = parameter_grad_norms(self.model.named_parameters())
+                update_heatmap(
+                    self.heatmap, grad_norms, self.ir,
+                    step=step_idx,
+                    publisher=self.publisher,
+                    alias=self.alias or {},
+                )
             if self.verbose:
                 hottest = self.heatmap.rank(top=3)
                 print(

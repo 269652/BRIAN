@@ -403,3 +403,111 @@ class TestCliUsesGraphvizByDefault:
         assert rc == 0
         # legacy path always writes the .py too
         assert out_py.exists()
+
+
+# ───────────────────────────────────────────────────────────────────────
+# 5. brian.toml engine propagates through the positional-arch path
+# ───────────────────────────────────────────────────────────────────────
+
+class TestPositionalArchPicksUpConfigEngine:
+    """`brian compile nfg <arch>` (no --current) must honour [nfg] engine
+    from brian.toml, not silently fall back to 'dot'."""
+
+    def _fake_cfg(self, engine="neato"):
+        from unittest.mock import MagicMock
+        from neuroslm.project_config import ProjectConfig
+        cfg = MagicMock(spec=ProjectConfig)
+        cfg.nfg_engine = engine
+        cfg.nfg_dpi = 150
+        cfg.nfg_spring_gain = 0.9
+        cfg.nfg_panel_opacity = 1.0
+        cfg.nfg_show_panels = True
+        return cfg
+
+    def test_brian_toml_engine_applied_positional_path(self, tmp_path):
+        """Positional `brian compile nfg <arch>` renders with the engine
+        from brian.toml, not the argparse default 'dot'."""
+        import argparse
+        from unittest.mock import patch, MagicMock
+        from neuroslm.cli import cmd_compile_nfg
+
+        render_calls = []
+
+        def fake_render(ir, path, **kw):
+            render_calls.append(kw.get("engine", "dot"))
+            Path(path).write_bytes(b"\x89PNG")
+            return path
+
+        fake_ir = MagicMock()
+        fake_ir.nodes = []
+        fake_ir.hyperedges = []
+
+        out_png = tmp_path / "nfg.png"
+        args = argparse.Namespace(
+            arch=str(RCC_ARCH),
+            out=None,
+            png=str(out_png),
+            semantic=False,
+            legacy=False,
+            engine="dot",   # argparse default — must be overridden by cfg
+            format="png",
+            heat=None,
+            current=False,
+        )
+
+        with patch("neuroslm.project_config.load_project_config",
+                   return_value=self._fake_cfg("neato")), \
+             patch("neuroslm.compiler.hypergraph_ir.lift_arch_to_hypergraph",
+                   return_value=fake_ir), \
+             patch("neuroslm.compiler.nfg_graphviz.render_hypergraph",
+                   side_effect=fake_render):
+            rc = cmd_compile_nfg(args)
+
+        assert rc == 0
+        assert len(render_calls) == 1
+        assert render_calls[0] == "neato", (
+            f"Expected engine='neato' from brian.toml, got '{render_calls[0]}'"
+        )
+
+    def test_explicit_cli_engine_wins_over_config(self, tmp_path):
+        """--engine sfdp on the CLI must override a brian.toml neato setting."""
+        import argparse
+        from unittest.mock import patch, MagicMock
+        from neuroslm.cli import cmd_compile_nfg
+
+        render_calls = []
+
+        def fake_render(ir, path, **kw):
+            render_calls.append(kw.get("engine", "dot"))
+            Path(path).write_bytes(b"\x89PNG")
+            return path
+
+        fake_ir = MagicMock()
+        fake_ir.nodes = []
+        fake_ir.hyperedges = []
+
+        out_png = tmp_path / "nfg.png"
+        args = argparse.Namespace(
+            arch=str(RCC_ARCH),
+            out=None,
+            png=str(out_png),
+            semantic=False,
+            legacy=False,
+            engine="sfdp",  # explicit CLI choice — must NOT be overridden
+            format="png",
+            heat=None,
+            current=False,
+        )
+
+        with patch("neuroslm.project_config.load_project_config",
+                   return_value=self._fake_cfg("neato")), \
+             patch("neuroslm.compiler.hypergraph_ir.lift_arch_to_hypergraph",
+                   return_value=fake_ir), \
+             patch("neuroslm.compiler.nfg_graphviz.render_hypergraph",
+                   side_effect=fake_render):
+            rc = cmd_compile_nfg(args)
+
+        assert rc == 0
+        assert render_calls[0] == "sfdp", (
+            f"Explicit --engine sfdp should win over brian.toml, got '{render_calls[0]}'"
+        )

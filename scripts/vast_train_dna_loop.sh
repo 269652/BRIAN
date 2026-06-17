@@ -119,6 +119,16 @@ OOD_EVERY="${OOD_EVERY:-0}"
 CKPT_DIR="${CKPT_DIR:-$REPO_DIR/lfs_checkpoints}"
 MAX_RESTARTS="${MAX_RESTARTS:-1000}"
 
+# RESUME_FROM is set by `brian deploy --resume X` / `--latest`. See
+# vast_train_dsl_loop.sh for the full contract — same logic mirrored
+# here for DNA-driven training.
+RESUME_FROM="${RESUME_FROM:-}"
+RESUME_ARGS=("--resume")
+if [ -n "$RESUME_FROM" ]; then
+    echo "▶ resuming from RESUME_FROM=$RESUME_FROM"
+    RESUME_ARGS=("--resume_from" "$RESUME_FROM")
+fi
+
 mkdir -p "$CKPT_DIR"
 
 # Extract architecture name from the prepared workspace's arch.neuro
@@ -164,7 +174,7 @@ while [ "$restart" -lt "$MAX_RESTARTS" ]; do
         --push_backend "$PUSH_BACKEND" \
         --ood_every "$OOD_EVERY" \
         --ckpt_dir "$CKPT_DIR" \
-        --resume
+        "${RESUME_ARGS[@]}"
     rc=$?
 
     if [ "$rc" -eq 0 ]; then

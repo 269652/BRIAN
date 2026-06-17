@@ -151,7 +151,7 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: ${LAYER_B_BEST_ROW} (a
 | **${B1_VARIANT_NAME}** | ${B1_TRAINABLE} | ${B1_STEPS} | ${B1_TRAIN_PPL} | ${B1_OOD_PPL} | ${B1_GAP_RATIO} | [`ood_recursive_108M_step5000.json`](results/ood_recursive_108M_step5000.json) |
 | **${B2FIX_VARIANT_NAME}** | ${B2FIX_TRAINABLE} | ${B2FIX_STEPS} | ${B2FIX_TRAIN_PPL} | ${B2FIX_OOD_PPL} | ${B2FIX_GAP_RATIO} | [`ood_rezero-fixed_107M_step7000.json`](results/ood_rezero-fixed_107M_step7000.json) |
 | **${B3_VARIANT_NAME}** | ${B3_TRAINABLE} | ${B3_STEPS} | ${B3_TRAIN_PPL} | ${B3_OOD_PPL} | **${B3_GAP_RATIO}** | [`ood_pct-30m_68M_step4000.json`](results/ood_pct-30m_68M_step4000.json) |
-| **${B4_VARIANT_NAME}** | **${B4_TRAINABLE}** | **${B4_STEPS}** | **${B4_TRAIN_PPL}** | **${B4_OOD_PPL}** | **${B4_GAP_RATIO}** | [vast ${B4_VAST_ID} log](logs/vast/) — `*_af758c381388_arch_889M_abstain-fix-dna-arch-30m_p4_step2kof2k.log` |
+| **${B4_VARIANT_NAME}** | **${B4_TRAINABLE}** | **${B4_STEPS}** | **${B4_TRAIN_PPL}** | **${B4_OOD_PPL}** | **${B4_GAP_RATIO}** | ${LOG_LINK:B4_LOG} |
 
 **What the table says:**
 1. **B4 wins absolute OOD PPL among BRIAN variants** (${B4_OOD_PPL} vs ≥${B2FIX_OOD_PPL} for B1–B3). The abstain fix unblocks the multi-cortex fusion pathway, and the full ${B4_TRAINABLE} DNA-compiled `BRIANHarness` (3 frozen causal-LM cortex experts + bowtie trunk + every wired module) now contributes signal that earlier variants couldn't access. *B4 used the legacy gpt2/CodeGPT/Qwen2.5 roster; the post-H22 roster (`${EXPERT_GENERAL_MODEL}` + `${EXPERT_CODE_MODEL}` + `${EXPERT_REASONING_MODEL}`) is the 10k follow-up baseline.*
@@ -160,6 +160,16 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: ${LAYER_B_BEST_ROW} (a
 4. **gap_ratio is drifting upward within B4** (${B4_GAP_STEP500} → ${B4_GAP_RATIO} between step 500 and step ${B4_STEPS}). The 10k rerun queued immediately after H21 will distinguish plateau vs accelerating overfit. [See H21 in findings.md for the full trajectory, telemetry, and adjacent issues.](docs/FINDINGS.md#h21--per-position-abstain-logit-fixes-catastrophic-cortex-ce-2026-06-14)
 
 **Latest stable full-scale run:** B4 — vast ${B4_VAST_ID}, ${B4_GPU_TYPE} @ ${B4_GPU_COST}, branch `master` @ `${B4_GIT_SHA}`, completed ${B4_STEPS} steps with PPL ${B4_TRAIN_PPL} / OOD ${B4_OOD_PPL} / gap ${B4_GAP_RATIO}.
+
+### Recent Runs
+
+**Best run** (auto-detected from `.brian/best_run.ln`, ranked by `gap_ratio`):
+
+${LOG_TAIL:best:25}
+
+**Latest run** (most recently modified log under `logs/`):
+
+${LOG_TAIL:latest:25}
 
 ### Implementation Status
 

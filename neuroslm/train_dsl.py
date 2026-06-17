@@ -26,6 +26,7 @@ import hashlib
 import os
 import re
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -475,7 +476,11 @@ def _nt_baselines_from_arch(arch_root: Path) -> Optional[dict]:
 
 def build_harness(arch_root: Path, vocab_size: int, d_sem: int,
                   device: str = "cpu",
-                  sink_population: str = "motor") -> BRIANHarness:
+                  sink_population: str = "motor",
+                  use_hypergraph_executor: bool = True,
+                  heatmap_every: int = 500,
+                  heatmap_path: Optional[str] = None,
+                  heatmap_push: bool = False) -> BRIANHarness:
     print(f"[train_dsl] compiling architecture from {arch_root}")
     ir = compile_folder(arch_root)
     print(f"[train_dsl]   populations:  {len(ir.populations)}")
@@ -488,8 +493,18 @@ def build_harness(arch_root: Path, vocab_size: int, d_sem: int,
           f"opt={cfg.optimizer}, lr={cfg.learning_rate}, "
           f"grad_accum={cfg.grad_accum}, label_smooth={cfg.label_smoothing}")
 
-    Cls = CodeGenerator(ir, module_name="DSLCircuit").compile_to_module()
-    circuit = Cls(d_sem=d_sem).to(device)
+    hir = None
+    if use_hypergraph_executor:
+        from neuroslm.compiler.hypergraph_ir import lift_arch_to_hypergraph
+        from neuroslm.compiler.hypergraph_executor import HypergraphExecutor
+        hir = lift_arch_to_hypergraph(arch_root)
+        circuit = HypergraphExecutor(hir, d_model=d_sem).to(device)
+        print(f"[train_dsl] circuit: HypergraphExecutor "
+              f"({len(hir.nodes_of_kind('population'))} populations, "
+              f"{len([e for e in hir.hyperedges if e.kind == 'synapse'])} synapses)")
+    else:
+        Cls = CodeGenerator(ir, module_name="DSLCircuit").compile_to_module()
+        circuit = Cls(d_sem=d_sem).to(device)
 
     harness = BRIANHarness(
         circuit=circuit, vocab_size=vocab_size, d_sem=d_sem,
@@ -511,6 +526,40 @@ def build_harness(arch_root: Path, vocab_size: int, d_sem: int,
     _probe_device2 = torch.device(device)
     if harness.load_gif_probe(_probe_tok2, _probe_device2):
         print("[train_dsl] GIF OOD probe armed")
+
+    # ── Heatmap hook: incremental gradient heat over the hypergraph ──
+    # Only active when the executor is in use and heatmap_every > 0.
+    harness._heatmap_hook = None
+    if use_hypergraph_executor and hir is not None and heatmap_every > 0:
+        from neuroslm.compiler.hypergraph_executor import executor_activation_norms
+        from neuroslm.evolution.harness_hook import HeatmapHook
+        from neuroslm.evolution.publisher import HeatmapPublisher
+
+        _hm_path = heatmap_path or "results/heatmaps/hypergraph.heatmap.json"
+        _png_path = str(Path(_hm_path).with_suffix(".png"))
+
+        def _png_renderer(hm, path, _ir=hir):
+            from neuroslm.compiler.nfg_graphviz import render_hypergraph
+            render_hypergraph(_ir, path, engine="neato", heat=hm, format="png")
+
+        publisher = HeatmapPublisher(
+            heatmap_path=_hm_path,
+            commit_every=heatmap_every,
+            push=heatmap_push,
+            png_renderer=_png_renderer,
+            png_path=_png_path,
+        )
+
+        _circuit = circuit  # capture for lambda
+        harness._heatmap_hook = HeatmapHook(
+            model=harness,
+            ir=hir,
+            every_n=heatmap_every,
+            publisher=publisher,
+            grad_norm_fn=lambda: executor_activation_norms(_circuit),
+            verbose=True,
+        )
+        print(f"[train_dsl] heatmap hook armed: every {heatmap_every} steps → {_png_path}")
 
     return harness
 
@@ -1031,7 +1080,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
           ood_every: int = 0,
           push_every: int = 0,
           push_backend: str = "hf",
-          push_optimizer: bool = False) -> None:
+          push_optimizer: bool = False,
+          heatmap_every: int = 0) -> None:
     """Run train_steps from `start_step+1` to `steps`. Emits the native
     train.py metric format; saves checkpoints.
 
@@ -1100,6 +1150,12 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                 _live_nt = None
         loss = harness.train_step(ids, targets, nt_levels=_live_nt)
         log_buf.append(loss)
+
+        # Heatmap: fire the hook every heatmap_every steps (after backward).
+        _hm_hook = getattr(harness, "_heatmap_hook", None)
+        if _hm_hook is not None and heatmap_every > 0:
+            _hm_hook.step(step)
+
         # `harness._last_lm_loss_value` is the LM-only CE (set inside
         # compute_loss before aux terms are added). When aux losses are
         # active (VBB, PC reentry, MSPCC, distillation) this lags below
@@ -1453,6 +1509,14 @@ def main():
                         help="mixed-precision dtype (cuda only)")
     parser.add_argument("--resume", action="store_true",
                         help="resume from the latest dsl_arch_step*.pt in ckpt_dir")
+    parser.add_argument(
+        "--resume_from", default=None, metavar="PATH_OR_URI",
+        help="Resume from a SPECIFIC checkpoint. Accepts a local path "
+             "or an hf://owner/repo/path URI; HF URIs are downloaded "
+             "into --ckpt_dir before the load. Wins over --resume's "
+             "globber. Set by ``brian deploy --resume`` /"
+             " ``brian deploy --latest`` via the ``RESUME_FROM`` env "
+             "var.")
     parser.add_argument("--model", default="dsl_lm",
                         choices=["dsl_lm", "circuit"],
                         help="dsl_lm: exact-match transformer LM (N4/N5); "
@@ -1632,7 +1696,42 @@ def main():
 
     ckpt_dir = Path(args.ckpt_dir) if args.ckpt_dir else None
     start_step = 0
-    if args.resume and ckpt_dir is not None:
+    # ── --resume_from PATH_OR_URI : take precedence over --resume ──
+    # The trainer accepts a SPECIFIC checkpoint URI (local or hf://)
+    # passed via --resume_from or the RESUME_FROM env var. HF URIs are
+    # downloaded into ``ckpt_dir`` before the load so the resumed run
+    # naturally falls back to the same per-run subdir layout the
+    # training-loop save path uses.
+    resume_from = args.resume_from or os.environ.get("RESUME_FROM", "").strip()
+    if resume_from:
+        path_to_load: Optional[Path] = None
+        if resume_from.startswith("hf://"):
+            from neuroslm.hf_checkpoints import (
+                parse_hf_uri, download_checkpoint,
+            )
+            try:
+                repo_id, path_in_repo = parse_hf_uri(resume_from)
+            except ValueError as e:
+                print(f"[train_dsl] --resume_from: {e}", file=sys.stderr)
+                return  # fail-fast: don't continue with a broken URI
+            print(f"[train_dsl] --resume_from: pulling {resume_from}")
+            local = download_checkpoint(
+                path_in_repo, repo_id=repo_id,
+                dest_dir=str(ckpt_dir) if ckpt_dir else None,
+            )
+            path_to_load = local
+        else:
+            path_to_load = Path(resume_from)
+            if not path_to_load.is_file():
+                print(f"[train_dsl] --resume_from: not a file: "
+                      f"{path_to_load}", file=sys.stderr)
+                path_to_load = None
+        if path_to_load is not None:
+            start_step = harness.load_checkpoint(str(path_to_load))
+            harness._global_step = start_step
+            print(f"[train_dsl] resumed from {path_to_load} "
+                  f"@ step {start_step}")
+    elif args.resume and ckpt_dir is not None:
         start_step = _maybe_resume(harness, ckpt_dir)
         harness._global_step = start_step
 

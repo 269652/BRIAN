@@ -13,6 +13,7 @@ This unit only issues the commands.
 """
 from __future__ import annotations
 import subprocess
+from pathlib import Path
 from typing import Callable, List, Optional
 
 
@@ -35,7 +36,11 @@ class HeatmapPublisher:
                  push: bool = True, remote: str = "origin",
                  branch: Optional[str] = None,
                  runner: Optional[Callable[..., int]] = None,
-                 repo_root: Optional[str] = None) -> None:
+                 repo_root: Optional[str] = None,
+                 dot_renderer: Optional[Callable] = None,
+                 dot_path: Optional[str] = None,
+                 png_renderer: Optional[Callable] = None,
+                 png_path: Optional[str] = None) -> None:
         self.heatmap_path = heatmap_path
         self.commit_every = commit_every
         self.push = push
@@ -43,6 +48,10 @@ class HeatmapPublisher:
         self.branch = branch
         self._run = runner or _default_runner
         self.repo_root = repo_root
+        self.dot_renderer = dot_renderer  # callable(heatmap) -> dot str
+        self.dot_path = dot_path          # path to write the .dot file
+        self.png_renderer = png_renderer  # callable(heatmap, path) -> None; writes PNG
+        self.png_path = png_path          # path for the rendered PNG
 
     def maybe_publish(self, heatmap, step: int) -> bool:
         """Publish iff ``commit_every > 0`` and ``step`` is a multiple of it."""
@@ -53,9 +62,27 @@ class HeatmapPublisher:
         return self.publish(heatmap, step)
 
     def publish(self, heatmap, step: int) -> bool:
-        """Save the heatmap, then best-effort commit (+push). Never raises."""
+        """Save the heatmap (+ colored DOT when configured), then commit."""
         heatmap.save(self.heatmap_path)
-        self._git(["add", self.heatmap_path])
+        add_paths = [self.heatmap_path]
+
+        if self.dot_renderer is not None and self.dot_path is not None:
+            try:
+                dot_src = self.dot_renderer(heatmap)
+                Path(self.dot_path).write_text(dot_src, encoding="utf-8")
+                add_paths.append(self.dot_path)
+            except Exception:
+                pass  # never crash — rendering failure is non-fatal
+
+        if self.png_renderer is not None and self.png_path is not None:
+            try:
+                self.png_renderer(heatmap, self.png_path)
+                add_paths.append(self.png_path)
+            except Exception:
+                pass  # never crash — rendering failure is non-fatal
+
+        for path in add_paths:
+            self._git(["add", path])
         self._git([
             "commit", "-m",
             f"chore(heatmap): update at step {step} [skip ci]",

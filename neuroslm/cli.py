@@ -314,6 +314,21 @@ def cmd_compile_nfg(args: argparse.Namespace) -> int:
         else:
             default_dir = Path(arch)
 
+        # Apply brian.toml [nfg] settings that the --current branch already
+        # handles. Without this, the positional path silently uses "dot" even
+        # when brian.toml configures engine = "neato" (or any other engine).
+        from neuroslm.project_config import load_project_config
+        try:
+            cfg = load_project_config()
+            if not getattr(args, "engine", None) or args.engine == "dot":
+                args.engine = cfg.nfg_engine
+            args._cfg_dpi = cfg.nfg_dpi
+            args._cfg_spring_gain = cfg.nfg_spring_gain
+            args._cfg_panel_opacity = cfg.nfg_panel_opacity
+            args._cfg_show_panels = cfg.nfg_show_panels
+        except Exception:
+            pass  # no brian.toml or malformed — fall through to hard-coded defaults
+
     use_legacy = getattr(args, "legacy", False)
     if use_legacy:
         return _cmd_compile_nfg_legacy(args, arch, default_dir)
@@ -1146,6 +1161,62 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     if getattr(args, "label", None):
         extra["LABEL_SUFFIX"] = args.label
 
+    # ── Resume from a previous run ────────────────────────────────────
+    # Two flags work together:
+    #   --resume <path|hf-uri>  resume from a specific checkpoint
+    #   --latest               pull the highest-step ckpt from HF Hub
+    #                          and resume from it
+    # Their precedence: an explicit ``--resume <path>`` always wins.
+    # ``--latest`` resolves to an HF lookup; the result is forwarded
+    # as RESUME_FROM=hf://repo/path so the on-box bootstrap can pull
+    # it before training. Local paths are forwarded as-is and the
+    # bootstrap script will scp / git-pull them as part of the clone.
+    resume_target = getattr(args, "resume", None)
+    use_latest = getattr(args, "latest", False)
+    if use_latest and not resume_target:
+        try:
+            from neuroslm.hf_checkpoints import find_latest_checkpoint
+            latest = find_latest_checkpoint(
+                repo_id=getattr(args, "hf_repo", None),
+                prefix=getattr(args, "hf_prefix", "") or "",
+            )
+        except Exception as e:
+            print(f"[deploy] --latest lookup failed: "
+                  f"{type(e).__name__}: {e}", file=sys.stderr)
+            return 1
+        if latest is None:
+            print("[deploy] --latest: no checkpoints found on HF Hub.",
+                  file=sys.stderr)
+            return 1
+        repo = getattr(args, "hf_repo", None) \
+            or os.environ.get("HF_REPO_ID", "") \
+            or "moritzroessler/BRIAN"
+        resume_target = f"hf://{repo}/{latest.path_in_repo}"
+        print(f"[deploy] --latest resolved to step {latest.step}: "
+              f"{resume_target}")
+        # If the user did not pass --steps, inherit the prior run's
+        # step budget so resumes target the same total. The trainer's
+        # ``--resume`` path uses ``args.steps`` as the target; the
+        # checkpoint's saved ``step`` is the start. Without this
+        # guard, ``brian deploy --latest`` after a 4000-step run
+        # would default to brian.toml's [defaults].steps and silently
+        # extend the run budget.
+        if args.steps is None:
+            # Best-effort: the step number is encoded in the filename
+            # (``step5000.pt``). The trainer auto-extracts the start.
+            # We *don't* know the original target, so we use the
+            # ``--steps`` precedence chain (CLI > toml > 10000) as
+            # before — same as a fresh deploy. The trainer's
+            # range(start_step+1, steps+1) loop ensures only the
+            # remaining steps are run.
+            pass
+    if resume_target:
+        extra["RESUME_FROM"] = resume_target
+        # Also forward the HF repo if the resume URI didn't carry one
+        if getattr(args, "hf_repo", None):
+            extra["HF_REPO_ID"] = args.hf_repo
+        print(f"[deploy] resuming from: {resume_target}")
+
     # ── Cadence: brian.toml [defaults] > trainer default ──
     # The trainer treats 0 as "use my own default"; we mirror that.
     # If a user wants a CLI override later, the place to add it is a
@@ -1832,6 +1903,36 @@ def cmd_ood(args: argparse.Namespace) -> int:
     return _run([_bash(), "scripts/vast_ood_eval.sh"], env=env)
 
 
+# ── best ───────────────────────────────────────────────────────────────
+
+def cmd_best_update(args: argparse.Namespace) -> int:
+    """Scan logs, find best run, write .brian/best_run.ln."""
+    from neuroslm.log_refs import update_best_run_pointer, score_log
+    repo_root = Path(".")
+    log_dir = Path(getattr(args, "log_dir", "logs") or "logs")
+    metric = getattr(args, "metric", "gap_ratio") or "gap_ratio"
+    result = update_best_run_pointer(root=repo_root, log_dir=log_dir,
+                                     metric=metric)
+    if result is None:
+        print(f"✗ No qualifying logs found under {log_dir}", file=sys.stderr)
+        return 1
+    print(f"best  →  {result}  (metric: {metric})")
+    score = score_log(result)
+    if score:
+        _parts: list[str] = []
+        if score.gap_ratio is not None:
+            _parts.append(f"gap_ratio={score.gap_ratio:.2f}")
+        if score.ood_ppl is not None:
+            _parts.append(f"ood_ppl={score.ood_ppl:.1f}")
+        if score.train_ppl is not None:
+            _parts.append(f"train_ppl={score.train_ppl:.1f}")
+        if score.step:
+            _parts.append(f"step={score.step}")
+        if _parts:
+            print("  " + "  |  ".join(_parts))
+    return 0
+
+
 # ── analyze-log ────────────────────────────────────────────────────────
 
 def cmd_analyze_log(args: argparse.Namespace) -> int:
@@ -2376,6 +2477,189 @@ def cmd_train(args: argparse.Namespace) -> int:
 
     print(f"[train] {' '.join(cmd)}")
     return _run(cmd)
+
+
+# ── hf : list / pull / latest checkpoints from HuggingFace Hub ────────
+
+def cmd_hf(args: argparse.Namespace) -> int:
+    """Top-level dispatcher for ``brian hf <subcommand>``.
+
+    The HF subcommands wrap :mod:`neuroslm.hf_checkpoints` with
+    a one-line CLI surface:
+
+      brian hf list   [--repo R] [--prefix P] [--limit N]
+      brian hf pull   <path-in-repo|hf://uri>  [--repo R] [--out DIR]
+      brian hf latest [--repo R] [--prefix P]                # PRINT only
+      brian hf pull --latest [--repo R] [--prefix P] [--out DIR]
+
+    The default repo follows the same chain as the push side:
+    ``--repo`` arg → ``HF_REPO_ID`` env →
+    :data:`neuroslm.checkpoint_push._DEFAULT_HF_REPO_ID`.
+    """
+    sub = getattr(args, "hf_cmd", None)
+    if sub == "list":
+        return _hf_list(args)
+    if sub == "pull":
+        return _hf_pull(args)
+    if sub == "latest":
+        return _hf_latest(args)
+    print(f"[hf] unknown subcommand: {sub!r}", file=sys.stderr)
+    return 2
+
+
+def _hf_list(args: argparse.Namespace) -> int:
+    """``brian hf list`` — print every checkpoint on the repo."""
+    from neuroslm.hf_checkpoints import list_repo_checkpoints
+    entries = list_repo_checkpoints(
+        repo_id=args.repo, prefix=args.prefix or "")
+    if not entries:
+        print("(no checkpoints found)")
+        return 1
+    limit = args.limit or len(entries)
+    print(f"  {'step':>10}  {'sidecar':<8}  path_in_repo")
+    print(f"  {'-' * 10}  {'-' * 8}  {'-' * 60}")
+    for e in entries[:limit]:
+        sidecar = "yes" if e.has_mem_sidecar else "no"
+        print(f"  {e.step:>10}  {sidecar:<8}  {e.path_in_repo}")
+    print(f"\n  total: {len(entries)} (showing {min(limit, len(entries))})")
+    return 0
+
+
+def _hf_pull(args: argparse.Namespace) -> int:
+    """``brian hf pull <path>`` (or ``--latest``) — download into
+    ``lfs_checkpoints/`` (or ``--out``)."""
+    from neuroslm.hf_checkpoints import (
+        download_checkpoint, find_latest_checkpoint, parse_hf_uri,
+    )
+    target = args.target
+    repo = args.repo
+    if args.latest:
+        latest = find_latest_checkpoint(
+            repo_id=repo, prefix=args.prefix or "")
+        if latest is None:
+            print("[hf pull] no checkpoints found on the repo",
+                  file=sys.stderr)
+            return 1
+        target = latest.path_in_repo
+        print(f"[hf pull] --latest resolved to step {latest.step} "
+              f"({target})")
+    if not target:
+        print("[hf pull] either provide a path-in-repo positional or "
+              "use --latest", file=sys.stderr)
+        return 2
+    # Accept ``hf://owner/repo/path`` shorthand
+    if target.startswith("hf://"):
+        try:
+            uri_repo, uri_path = parse_hf_uri(target)
+        except ValueError as e:
+            print(f"[hf pull] {e}", file=sys.stderr)
+            return 2
+        repo = repo or uri_repo
+        target = uri_path
+    out = download_checkpoint(
+        target, repo_id=repo,
+        dest_dir=args.out, force_download=bool(args.force))
+    return 0 if out is not None else 1
+
+
+def _hf_latest(args: argparse.Namespace) -> int:
+    """``brian hf latest`` — print the highest-step checkpoint URI."""
+    from neuroslm.hf_checkpoints import find_latest_checkpoint
+    latest = find_latest_checkpoint(
+        repo_id=args.repo, prefix=args.prefix or "")
+    if latest is None:
+        print("(no checkpoints found)")
+        return 1
+    repo = args.repo or os.environ.get("HF_REPO_ID", "") \
+        or "moritzroessler/BRIAN"
+    print(f"step       : {latest.step}")
+    print(f"run_dir    : {latest.run_dir or '(flat)'}")
+    print(f"sidecar    : {'yes' if latest.has_mem_sidecar else 'no'}")
+    print(f"path       : {latest.path_in_repo}")
+    print(f"hf_uri     : hf://{repo}/{latest.path_in_repo}")
+    return 0
+
+
+# ── chat : always-on inference daemon with dashboard ──────────────────
+
+def cmd_chat(args: argparse.Namespace) -> int:
+    """``brian chat`` — boot a checkpoint and run the always-on dashboard.
+
+    Resolution order for the checkpoint:
+
+      1. positional ``ckpt`` arg.
+      2. ``--latest`` flag → pull from HF Hub first, then load.
+      3. fall back to the highest-step file under
+         ``lfs_checkpoints/`` (whatever the local resume globber would
+         pick).
+    """
+    ckpt = args.ckpt
+    if args.latest and not ckpt:
+        from neuroslm.hf_checkpoints import (
+            find_latest_checkpoint, download_checkpoint,
+        )
+        latest = find_latest_checkpoint(
+            repo_id=args.repo, prefix=args.prefix or "")
+        if latest is None:
+            print("[chat] no remote checkpoint found; falling back to "
+                  "local lfs_checkpoints/", file=sys.stderr)
+        else:
+            print(f"[chat] pulling latest step {latest.step} "
+                  f"({latest.path_in_repo})")
+            local = download_checkpoint(
+                latest.path_in_repo, repo_id=args.repo)
+            if local is not None:
+                ckpt = str(local)
+    if not ckpt:
+        # Local fallback: pick the highest-step .pt under lfs_checkpoints/
+        ckpt = _pick_local_latest_ckpt()
+    if not ckpt:
+        print("[chat] no checkpoint found. Provide a path, "
+              "use --latest, or train one first.", file=sys.stderr)
+        return 2
+    if not Path(ckpt).is_file():
+        print(f"[chat] checkpoint not found: {ckpt}", file=sys.stderr)
+        return 2
+
+    from neuroslm.chat_daemon import run_chat_daemon
+    return run_chat_daemon(
+        ckpt_path=ckpt,
+        arch_root=args.arch,
+        device=args.device,
+        temperature=args.temperature,
+        top_k=args.top_k,
+        max_new_tokens=args.max_new_tokens,
+        thought_n_tok=args.thought_tokens,
+        thought_period=args.thought_period,
+        idle_threshold=args.idle_threshold,
+        no_color=bool(args.no_color),
+        no_thoughts=bool(args.no_thoughts),
+    )
+
+
+def _pick_local_latest_ckpt() -> Optional[str]:
+    """Find the highest-step .pt under lfs_checkpoints/ — both legacy
+    flat layout and H24+ per-run subdir."""
+    ckpt_root = REPO_ROOT / "lfs_checkpoints"
+    if not ckpt_root.is_dir():
+        return None
+    flat = list(ckpt_root.glob("dsl_arch_*.pt")) \
+        + list(ckpt_root.glob("dsl_arch_step*.pt"))
+    nested = list(ckpt_root.glob("*/step*.pt"))
+    candidates: List[Tuple[int, Path]] = []
+    for p in flat + nested:
+        m = re.search(r"step(\d+)\.pt$", p.name)
+        if m:
+            candidates.append((int(m.group(1)), p))
+    if not candidates:
+        # Last resort: any .pt file at all
+        any_pt = sorted(
+            list(ckpt_root.glob("*.pt")) + list(ckpt_root.glob("*/*.pt")),
+            key=lambda p: p.stat().st_mtime, reverse=True,
+        )
+        return str(any_pt[0]) if any_pt else None
+    candidates.sort(key=lambda x: -x[0])
+    return str(candidates[0][1])
 
 
 def cmd_test(args: argparse.Namespace) -> int:
@@ -3222,6 +3506,36 @@ def _build_parser() -> argparse.ArgumentParser:
     sd.add_argument("--ood", type=int, nargs="?", const=3000,
                     help="Run mid-training OOD eval every N steps "
                          "(default 3000 if flag passed without value)")
+    # ── Resume training from a checkpoint ──
+    # Three flag shapes work together:
+    #   --resume PATH          local path or hf://repo/path URI
+    #   --latest               pull the highest-step ckpt from HF Hub
+    #   --hf-repo R            override the HF repo for --latest
+    #   --hf-prefix P          scope --latest to a run-dir prefix
+    # On-box: ``RESUME_FROM`` env propagates through _deploy_train.py
+    # → vast_train_dsl_loop.sh → ``--resume_from`` to neuroslm.train_dsl,
+    # which downloads ``hf://...`` URIs into ``lfs_checkpoints/`` and
+    # then resumes via the existing globber.
+    sd.add_argument(
+        "--resume", default=None, metavar="PATH_OR_URI",
+        help="Resume training from a specific checkpoint. Accepts a "
+             "local path (e.g. lfs_checkpoints/run-A/step5000.pt) or "
+             "an hf:// URI (e.g. hf://moritzroessler/BRIAN/checkpoints/"
+             "run-A/step5000.pt). Mutually exclusive with --latest.")
+    sd.add_argument(
+        "--latest", action="store_true",
+        help="Resume from the highest-step checkpoint on HF Hub. Use "
+             "with --hf-repo / --hf-prefix to scope the lookup. The "
+             "step counter continues from where the prior run left "
+             "off; use --steps to set a new target.")
+    sd.add_argument(
+        "--hf-repo", default=None, metavar="OWNER/REPO",
+        help="HF Hub repo for --latest (default: HF_REPO_ID env, "
+             "then moritzroessler/BRIAN).")
+    sd.add_argument(
+        "--hf-prefix", default=None, metavar="RUN_DIR",
+        help="Scope --latest to checkpoints under this run-dir "
+             "prefix (e.g. run-20260615_abc1234).")
     # Subparser-slot alias for the top-level --no-verify flag so
     # `brian deploy --no-verify` works as well as
     # `brian --no-verify deploy`. ``default=SUPPRESS`` is critical:
@@ -3369,6 +3683,19 @@ def _build_parser() -> argparse.ArgumentParser:
                           "them together")
     sal.set_defaults(func=cmd_analyze_log)
 
+    # best update — scan logs, write .brian/best_run.ln
+    sbest = sub.add_parser("best",
+                           help="Detect best run and write .brian/best_run.ln")
+    sbest_sub = sbest.add_subparsers(dest="best_cmd", required=True)
+    sbest_update = sbest_sub.add_parser("update",
+                                        help="Scan logs, pick best, write .brian/best_run.ln")
+    sbest_update.add_argument("--metric", default="gap_ratio",
+                              choices=["gap_ratio", "ppl", "ood_ppl"],
+                              help="ranking metric (default: gap_ratio)")
+    sbest_update.add_argument("--log-dir", default="logs",
+                              help="directory to scan (default: logs)")
+    sbest_update.set_defaults(func=cmd_best_update)
+
     # train (run training from command line)
     str_train = sub.add_parser("train",
                                help="Train from evol.dna or run minimal CPU training")
@@ -3451,6 +3778,131 @@ def _build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("push",
                         help="Push current branch via PAT (no credential helper)")
     sp.set_defaults(func=cmd_push)
+
+    # ── hf : HuggingFace Hub checkpoint operations ────────────────────
+    shf = sub.add_parser(
+        "hf",
+        help="List / download checkpoints from HuggingFace Hub.")
+    shf_sub = shf.add_subparsers(
+        dest="hf_cmd", required=True,
+        title="hf subcommands",
+        description=(
+            "  brian hf list   [--repo R] [--prefix P] [--limit N]\n"
+            "  brian hf pull   PATH_OR_URI  [--repo R] [--out DIR]\n"
+            "  brian hf pull   --latest    [--repo R] [--prefix P]\n"
+            "  brian hf latest [--repo R] [--prefix P]"
+        ),
+    )
+    # hf list
+    shf_l = shf_sub.add_parser(
+        "list", help="List every checkpoint on the repo (newest first).")
+    shf_l.add_argument(
+        "--repo", default=None, metavar="OWNER/REPO",
+        help="Target HF repo (default: HF_REPO_ID env, then "
+             "moritzroessler/BRIAN).")
+    shf_l.add_argument(
+        "--prefix", default=None, metavar="RUN_DIR",
+        help="Filter to checkpoints under this run-dir prefix.")
+    shf_l.add_argument(
+        "--limit", type=int, default=20,
+        help="Cap rows printed (default 20). Pass 0 for no cap.")
+    shf_l.set_defaults(func=cmd_hf, hf_cmd="list")
+    # hf pull
+    shf_p = shf_sub.add_parser(
+        "pull",
+        help="Download a checkpoint into ./lfs_checkpoints (or --out).")
+    shf_p.add_argument(
+        "target", nargs="?", default=None, metavar="PATH_IN_REPO",
+        help="Path on the repo (e.g. checkpoints/run-A/step5000.pt) "
+             "or hf://owner/repo/path URI. Omit when using --latest.")
+    shf_p.add_argument(
+        "--latest", action="store_true",
+        help="Pull the highest-step checkpoint instead of a named path.")
+    shf_p.add_argument(
+        "--repo", default=None, metavar="OWNER/REPO",
+        help="Target HF repo (default: HF_REPO_ID env, then "
+             "moritzroessler/BRIAN).")
+    shf_p.add_argument(
+        "--prefix", default=None, metavar="RUN_DIR",
+        help="(With --latest) scope to checkpoints under this prefix.")
+    shf_p.add_argument(
+        "--out", default=None, metavar="DIR",
+        help="Override the destination root (default: ./lfs_checkpoints).")
+    shf_p.add_argument(
+        "--force", action="store_true",
+        help="Bypass the huggingface_hub local cache and re-fetch.")
+    shf_p.set_defaults(func=cmd_hf, hf_cmd="pull")
+    # hf latest
+    shf_t = shf_sub.add_parser(
+        "latest",
+        help="Print the highest-step checkpoint URI (no download).")
+    shf_t.add_argument(
+        "--repo", default=None, metavar="OWNER/REPO",
+        help="Target HF repo (default: HF_REPO_ID env, then "
+             "moritzroessler/BRIAN).")
+    shf_t.add_argument(
+        "--prefix", default=None, metavar="RUN_DIR",
+        help="Scope to checkpoints under this run-dir prefix.")
+    shf_t.set_defaults(func=cmd_hf, hf_cmd="latest")
+
+    # ── chat : always-on inference daemon with dashboard ──────────────
+    sc_chat = sub.add_parser(
+        "chat",
+        help="Boot a checkpoint into an always-on inference daemon "
+             "with memory + idle thoughts on a CLI dashboard.")
+    sc_chat.add_argument(
+        "ckpt", nargs="?", default=None,
+        help="Local checkpoint path. Omit + use --latest to pull from "
+             "HF Hub. Omit both to auto-pick the highest-step file "
+             "under ./lfs_checkpoints/.")
+    sc_chat.add_argument(
+        "--latest", action="store_true",
+        help="Download the highest-step checkpoint from HF Hub before "
+             "booting (uses --repo / --prefix to scope).")
+    sc_chat.add_argument(
+        "--repo", default=None, metavar="OWNER/REPO",
+        help="HF repo for --latest (default: HF_REPO_ID env, then "
+             "moritzroessler/BRIAN).")
+    sc_chat.add_argument(
+        "--prefix", default=None, metavar="RUN_DIR",
+        help="(With --latest) scope to checkpoints under this prefix.")
+    sc_chat.add_argument(
+        "--arch", default=None, metavar="PATH",
+        help="Path to the architecture folder (containing arch.neuro). "
+             "Default: auto-detect from checkpoint dir, then "
+             "architectures/SmolLM.")
+    sc_chat.add_argument(
+        "--device", default="cpu", choices=["cpu", "cuda"],
+        help="Inference device (default cpu — the daemon is built for "
+             "laptop-resident always-on use).")
+    sc_chat.add_argument(
+        "--temperature", type=float, default=0.8,
+        help="Sampling temperature (default 0.8).")
+    sc_chat.add_argument(
+        "--top-k", dest="top_k", type=int, default=40,
+        help="Top-k filter for sampling (default 40, 0 = disabled).")
+    sc_chat.add_argument(
+        "--max-new-tokens", dest="max_new_tokens", type=int, default=96,
+        help="User-turn token budget (default 96).")
+    sc_chat.add_argument(
+        "--thought-tokens", dest="thought_tokens", type=int, default=32,
+        help="Idle-thought token budget (default 32).")
+    sc_chat.add_argument(
+        "--thought-period", dest="thought_period", type=float,
+        default=12.0,
+        help="Seconds between idle-thought ticks (default 12).")
+    sc_chat.add_argument(
+        "--idle-threshold", dest="idle_threshold", type=float,
+        default=6.0,
+        help="Seconds of user inactivity before thoughts start firing "
+             "(default 6).")
+    sc_chat.add_argument(
+        "--no-color", dest="no_color", action="store_true",
+        help="Disable ANSI colour in the dashboard.")
+    sc_chat.add_argument(
+        "--no-thoughts", dest="no_thoughts", action="store_true",
+        help="Disable the idle-thought thread (chat-only mode).")
+    sc_chat.set_defaults(func=cmd_chat)
 
     # clean — reference-aware repo janitor
     sc_clean = sub.add_parser(

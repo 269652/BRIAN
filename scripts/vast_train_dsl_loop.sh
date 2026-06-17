@@ -98,6 +98,21 @@ OOD_EVERY="${OOD_EVERY:-0}"
 CKPT_DIR="${CKPT_DIR:-$REPO_DIR/lfs_checkpoints}"
 MAX_RESTARTS="${MAX_RESTARTS:-1000}"
 
+# RESUME_FROM is set by `brian deploy --resume X` / `--latest` and
+# propagated through the ONSTART env block. Two shapes:
+#   * local path  (e.g. lfs_checkpoints/run-A/step5000.pt)
+#   * hf:// URI   (e.g. hf://moritzroessler/BRIAN/checkpoints/.../step5000.pt)
+# When set, we forward it as ``--resume_from`` to the trainer; the
+# trainer downloads HF URIs into ``$CKPT_DIR`` and then loads. When
+# unset, the existing ``--resume`` globber in the trainer falls back
+# to the highest-step file under ``$CKPT_DIR``.
+RESUME_FROM="${RESUME_FROM:-}"
+RESUME_ARGS=("--resume")
+if [ -n "$RESUME_FROM" ]; then
+    echo "▶ resuming from RESUME_FROM=$RESUME_FROM"
+    RESUME_ARGS=("--resume_from" "$RESUME_FROM")
+fi
+
 mkdir -p "$CKPT_DIR"
 
 ARCH_PATH="architectures/$ARCH"
@@ -136,7 +151,7 @@ while [ "$restart" -lt "$MAX_RESTARTS" ]; do
         --push_backend "$PUSH_BACKEND" \
         --ood_every "$OOD_EVERY" \
         --ckpt_dir "$CKPT_DIR" \
-        --resume
+        "${RESUME_ARGS[@]}"
     rc=$?
 
     if [ "$rc" -eq 0 ]; then
