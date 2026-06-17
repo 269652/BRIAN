@@ -725,7 +725,9 @@ training {
     # `wikitext gap_ratio` looks like with no interventions at chat_ratioâ‰ˆ0.3.
     # =========================================================================
     regularization: {
-        # â”€â”€ WARMUP RAMP â€” REMOVED 2026-06-03 â”€â”€
+        # â”€â”€ WARMUP RAMP â€” RESTORED 2026-06-17 â”€â”€
+        warmup_steps: 2000
+
         # warmup_steps controlled a linear 0â†’1 ramp on all aux loss
         # contributions. With every intervention disabled in this
         # baseline config there is nothing to ramp, so the field has
@@ -733,16 +735,16 @@ training {
         # any of (dar, pcc, isotropy, cmd, adaptive_mixture, cdga)
         # restore `warmup_steps: 2000` here.
 
-        # A. Distributional Adversarial Reweighting â€” DISABLED for baseline.
-        dar: { enabled: false, lambda: 1.0, hidden: 64, grl_alpha: 0.1,
+        # A. Distributional Adversarial Reweighting â€” RE-ENABLED 2026-06-17.
+        dar: { enabled: true, lambda: 1.0, hidden: 64, grl_alpha: 0.1,
                weight: 0.1 }
 
-        # B. Predictive Contrastive Coding â€” DISABLED for baseline.
-        pcc: { enabled: false, k: 4, n_negatives: 64, tau: 0.1, layers: [],
+        # B. Predictive Contrastive Coding â€” RE-ENABLED 2026-06-17.
+        pcc: { enabled: true, k: 4, n_negatives: 64, tau: 0.1, layers: [],
                weight: 0.1 }
 
-        # C. Isotropy whitening â€” DISABLED for baseline.
-        isotropy: { enabled: false, weight: 0.01, buffer: 4096, distance: "frobenius" }
+        # C. Isotropy whitening â€” RE-ENABLED 2026-06-17.
+        isotropy: { enabled: true, weight: 0.01, buffer: 4096, distance: "frobenius" }
 
         # D. Cross-Module Disagreement â€” DISABLED (OOM at this batch+seq).
         cmd: { enabled: false, weight: 0.05, divergence: "jsd",
