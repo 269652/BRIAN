@@ -1,0 +1,7 @@
+[train_dsl] boot @ 2026-06-17T15:33:34Z
+[train_dsl] git_commit c0762cad76cb89030fab5919427b7e378b9a46f4 (master)
+[train_dsl] arch_dsl_sha256 c98ac54a2c07c82d21978c02b7efa0bba288462eb6fd58ee696cb15c9e59b62c (/content/brian/architectures/SmolLM)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
