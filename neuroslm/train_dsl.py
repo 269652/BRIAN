@@ -429,6 +429,18 @@ def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
         f"(frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)"
     )
 
+    # ── TRUNK-OPT monitor: auto-attach (Phase 1 measurement) ────────
+    # Wires all six probes into the harness so trunk[budget bpp erank pac]
+    # appear in every log line and in harness._metrics — zero overhead
+    # on runs that don't care, full measurement on every SmolLM run.
+    from neuroslm.emergent.trunk_opt import TrunkOptMonitor as _TOM
+    _monitor = _TOM(n_train=max(1, n_trainable), pac_delta=0.05,
+                    prior_sigma=0.02)
+    harness.attach_trunk_opt_monitor(_monitor)
+    print(f"[train_dsl] TrunkOptMonitor attached "
+          f"(n_trainable={n_trainable/1e6:.1f}M, "
+          f"pac_sigma=0.02, pac_delta=0.05)")
+
     # ── GIF OOD probe: arm the held-out evaluator ──
     # The probe needs a tokenizer + device to download and cache WikiText
     # sequences. Without this call, the adaptive GIF controller never
