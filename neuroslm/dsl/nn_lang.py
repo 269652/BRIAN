@@ -431,7 +431,7 @@ def compile_layer(source: str) -> type:
 # model whose forward is exact-match to a reference built from the same
 # common.py primitives.
 TRANSFORMER_BLOCK_DSL = '''
-layer TransformerBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv) {
+layer TransformerBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv, rope_base) {
     param gamma1: (D,) init=ones
     param Wq: (D, D) init=xavier
     param Wkv: (Dkv, D) init=xavier
@@ -442,7 +442,7 @@ layer TransformerBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv) {
     param w3: (D, H) init=xavier
 
     forward(x) {
-        a = causal_self_attention(rmsnorm(x, gamma1), Wq, Wkv, Wo, n_heads, n_kv_heads, max_ctx)
+        a = causal_self_attention(rmsnorm(x, gamma1), Wq, Wkv, Wo, n_heads, n_kv_heads, max_ctx, rope_base)
         x = x + a
         m = swiglu(rmsnorm(x, gamma2), w1, w2, w3)
         return x + m
@@ -463,7 +463,7 @@ class DSLLanguageModel(nn.Module):
     """
     def __init__(self, vocab: int, d_model: int, depth: int,
                  n_heads: int, max_ctx: int, n_kv_heads: Optional[int] = None,
-                 cosine_head: bool = False):
+                 cosine_head: bool = False, rope_base: float = 10000.0):
         super().__init__()
         n_kv_heads = n_kv_heads or n_heads
         H = nn_ops.swiglu_hidden_dim(d_model)
@@ -473,7 +473,7 @@ class DSLLanguageModel(nn.Module):
         self.embed = nn.Parameter(_alloc("normal", (vocab, d_model)))
         self.blocks = nn.ModuleList([
             BlockCls(D=d_model, n_heads=n_heads, n_kv_heads=n_kv_heads,
-                     max_ctx=max_ctx, H=H, Dkv=Dkv)
+                     max_ctx=max_ctx, H=H, Dkv=Dkv, rope_base=rope_base)
             for _ in range(depth)
         ])
         self.gamma_f = nn.Parameter(torch.ones(d_model))
@@ -515,11 +515,13 @@ class DSLLanguageModel(nn.Module):
 def build_language_model(vocab: int, d_model: int, depth: int,
                          n_heads: int, max_ctx: int,
                          n_kv_heads: Optional[int] = None,
-                         cosine_head: bool = False) -> DSLLanguageModel:
+                         cosine_head: bool = False,
+                         rope_base: float = 10000.0) -> DSLLanguageModel:
     """Construct a DSL-composed language model (embedding + stacked blocks
     + final norm + head)."""
     return DSLLanguageModel(vocab, d_model, depth, n_heads, max_ctx,
-                            n_kv_heads, cosine_head=cosine_head)
+                            n_kv_heads, cosine_head=cosine_head,
+                            rope_base=rope_base)
 
 
 # ─── N8: full DSL LanguageCortex (interleaved pattern + adapters) ──────
@@ -532,7 +534,7 @@ def build_language_model(vocab: int, d_model: int, depth: int,
 # DSL form proven bit-identical in test_dsl_blocks_equivalence.py.
 
 _STD_BLOCK_DSL = '''
-layer StandardBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv) {
+layer StandardBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv, rope_base) {
     param gamma1: (D,) init=ones
     param Wq:     (D, D) init=xavier
     param Wkv:    (Dkv, D) init=xavier
@@ -542,7 +544,7 @@ layer StandardBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv) {
     param w2:     (H, D) init=xavier
     param w3:     (D, H) init=xavier
     forward(x) {
-        a = causal_self_attention(rmsnorm(x, gamma1), Wq, Wkv, Wo, n_heads, n_kv_heads, max_ctx)
+        a = causal_self_attention(rmsnorm(x, gamma1), Wq, Wkv, Wo, n_heads, n_kv_heads, max_ctx, rope_base)
         x = x + a
         m = swiglu(rmsnorm(x, gamma2), w1, w2, w3)
         return x + m
@@ -669,7 +671,8 @@ class DSLLanguageCortex(nn.Module):
                  grid_positions=None,
                  episodic_memory=None,
                  surprise_head=None,
-                 cosine_head: bool = False):
+                 cosine_head: bool = False,
+                 rope_base: float = 10000.0):
         super().__init__()
         n_kv_heads = n_kv_heads or n_heads
         head_dim = d_model // n_heads
@@ -711,7 +714,7 @@ class DSLLanguageCortex(nn.Module):
             if pattern == 0:
                 std_kwargs = dict(D=d_model, n_heads=n_heads,
                                   n_kv_heads=n_kv_heads, max_ctx=max_ctx,
-                                  H=H, Dkv=Dkv)
+                                  H=H, Dkv=Dkv, rope_base=rope_base)
                 if tonnetz_period > 0:
                     std_kwargs["tonnetz_period"] = tonnetz_period
                 self.blocks.append(Std(**std_kwargs))
@@ -1034,7 +1037,8 @@ def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
                                grid_positions=None,
                                episodic_memory=None,
                                surprise_head=None,
-                               cosine_head: bool = False) -> DSLLanguageCortex:
+                               cosine_head: bool = False,
+                               rope_base: float = 10000.0) -> DSLLanguageCortex:
     """Assemble Brain's full LanguageCortex from pure-DSL blocks.
 
     `pct_trunk > 0` enables forward-path predictive coding: each layer
@@ -1057,4 +1061,5 @@ def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
                               grid_positions=grid_positions,
                               episodic_memory=episodic_memory,
                               surprise_head=surprise_head,
-                              cosine_head=cosine_head)
+                              cosine_head=cosine_head,
+                              rope_base=rope_base)

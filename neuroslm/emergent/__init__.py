@@ -9,6 +9,11 @@ worth promoting into a real architectural change in a later PR.
 
 See `docs/EMERGENT_TOPOLOGY.md` for the master design and falsifiable
 predictions per mechanism.
+
+TRUNK-OPT layer (Phase 1–4):
+  GradientBudgetTracker, LayerGradientProbe, BitsPerParamMeter,
+  PACBayesBound, SharpnessProbe, EffectiveRankProbe, TrunkOptMonitor —
+  all in `neuroslm.emergent.trunk_opt`.
 """
 from neuroslm.emergent.driven_nt import DrivenNTSystem
 from neuroslm.emergent.metastable_ignition import MetastableIgnition
@@ -16,6 +21,15 @@ from neuroslm.emergent.pc_reentry import PCReentryProbe
 from neuroslm.emergent.topological_charge import TopologicalChargeProbe
 from neuroslm.emergent.bowtie_lattice import BowtieLatticeProbe
 from neuroslm.emergent.pac_binding import PACBindingProbe
+from neuroslm.emergent.trunk_opt import (
+    GradientBudgetTracker,
+    LayerGradientProbe,
+    BitsPerParamMeter,
+    PACBayesBound,
+    SharpnessProbe,
+    EffectiveRankProbe,
+    TrunkOptMonitor,
+)
 
 __all__ = [
     "DrivenNTSystem",
@@ -24,4 +38,12 @@ __all__ = [
     "TopologicalChargeProbe",
     "BowtieLatticeProbe",
     "PACBindingProbe",
+    # TRUNK-OPT
+    "GradientBudgetTracker",
+    "LayerGradientProbe",
+    "BitsPerParamMeter",
+    "PACBayesBound",
+    "SharpnessProbe",
+    "EffectiveRankProbe",
+    "TrunkOptMonitor",
 ]

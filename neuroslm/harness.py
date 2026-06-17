@@ -629,6 +629,11 @@ class BRIANHarness(nn.Module):
         # the harness doesn't pull in the evolution subsystem until a run
         # actually wants incremental heat collection.
         self._heatmap_hook = None
+        # TRUNK-OPT monitor — optional observability layer (Phase 1).
+        self._trunk_opt_monitor = None
+        # LM-only gradient norm snapshot (Phase 1A: grad_budget).
+        # Set by train_step before aux-loss backward contributions arrive.
+        self._lm_grad_norm_snapshot: float = 0.0
 
         # ── Cortex fusion: distillation + NT-gated α state ──
         # Slot A (KL-distillation) and slot C (NT-mediated gating) are
@@ -755,8 +760,9 @@ class BRIANHarness(nn.Module):
         # Mirror __init__ so the L6 NFG overlay path is safe to query
         # from this alternate constructor (DSL LM training).
         h._heatmap_hook = None
-        # Cortex fusion state (slot A + slot C) — mirror __init__
-        # so this alternate constructor doesn't crash the fusion path.
+        # TRUNK-OPT monitor (Phase 1)
+        h._trunk_opt_monitor = None
+        h._lm_grad_norm_snapshot = 0.0
         h._last_pre_fusion_lm_logits = None
         h._last_pre_fusion_cortex_logits = None
         h._lm_loss_ema = 0.0
@@ -779,6 +785,8 @@ class BRIANHarness(nn.Module):
         # GIF controller — see __init__.
         h._gif = None
         h._build_gif()
+        # TRUNK-OPT monitor — optional observability layer (Phase 1).
+        h._trunk_opt_monitor = None
         return h
 
     # ── Distributed training wrapping (DDP / FSDP) ────────────────────
@@ -2467,6 +2475,7 @@ class BRIANHarness(nn.Module):
                     h=h_last, lm_logits=logits,
                     per_sample_ce=per_sample_ce,
                     domain_labels=domain_labels,
+                    global_step=self._global_step,
                 )
                 total = total + reg_out["total"]
                 # Publish per-intervention metrics for logging / brian ps.
@@ -2538,6 +2547,15 @@ class BRIANHarness(nn.Module):
                 total = total + mspcc_loss
         # Record the LM-portion so train_step can update MAT after the
         # backward pass without a second forward.
+        self._last_lm_loss_value = float(loss_lm.detach().item())
+
+        # ── TRUNK-OPT monitor: compute_loss hook ──────────────────────
+        # Called after LM loss is known but before backward.
+        # Fires effective_rank + bits_per_param probes.
+        _tom = getattr(self, "_trunk_opt_monitor", None)
+        if _tom is not None and self.language_model is not None:
+            _h_last_for_tom = getattr(self.language_model, "_last_hidden", None)
+            _tom.on_compute_loss(self, logits, _h_last_for_tom)
         self._last_lm_loss_value = float(loss_lm.detach().item())
 
         # ── Cortex fusion: distillation (slot A) + NT gating (slot C) ──
@@ -3014,6 +3032,14 @@ class BRIANHarness(nn.Module):
                 else:
                     optimizer.step()
             self._last_gnorm = float(gnorm)
+            # ── TRUNK-OPT monitor: post-backward hook ──────────────
+            # Fires with the lm_grad_norm snapshot (set earlier in
+            # this method) and the current total gnorm so budget can
+            # be computed.  Zero overhead when no monitor is attached.
+            _tom_post = getattr(self, "_trunk_opt_monitor", None)
+            if _tom_post is not None:
+                _lm_norm = getattr(self, "_lm_grad_norm_snapshot", 0.0)
+                _tom_post.on_train_step_post_backward(self, _lm_norm)
             optimizer.zero_grad(set_to_none=True)
             self._accum_step = 0
 
@@ -3043,6 +3069,27 @@ class BRIANHarness(nn.Module):
         Pass ``None`` to detach.
         """
         self._heatmap_hook = hook
+
+    def attach_trunk_opt_monitor(self, monitor) -> None:
+        """Attach a :class:`~neuroslm.emergent.trunk_opt.TrunkOptMonitor`.
+
+        The monitor receives two callbacks per training step:
+
+        * ``monitor.on_compute_loss(harness, logits, h_last)`` — called
+          inside ``compute_loss`` after the forward pass.
+        * ``monitor.on_train_step_post_backward(harness, lm_grad_norm)``
+          — called in ``train_step`` after ``loss.backward()`` and before
+          ``optimizer.step()``.
+
+        Pass ``None`` to detach.  Zero overhead when no monitor is attached.
+        """
+        self._trunk_opt_monitor = monitor
+        if monitor is not None and self.language_model is not None:
+            n_trainable = sum(
+                p.numel() for p in self.language_model.parameters()
+                if p.requires_grad
+            )
+            monitor.init_bpp_meter(self.vocab_size, n_trainable)
 
     def eval_step(self, ids: torch.Tensor, targets: torch.Tensor,
                   nt_levels: Optional[Dict[str, float]] = None) -> float:

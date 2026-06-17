@@ -779,6 +779,12 @@ class TrainingConfig:
     # a learnable temperature (init √d_model). Bounds logits in [-τ, +τ],
     # preventing norm-mediated overfitting. False = standard linear head.
     cosine_head: bool = False
+    # TRUNK-OPT Phase 2: RoPE base frequency.
+    # Default 10000 is the original LLaMA-1 value.  At ctx=2048 this gives
+    # adequate coverage but limits OOD length generalisation.  500000 is
+    # the Llama-3 recipe (Su et al. 2023 "Scaling RoPE to Longer Contexts").
+    # Changing this requires a fresh training run (init state is affected).
+    rope_base: float = 10000.0
     # ── GIF-7: Homeostatic Gradient Equilibrium (Jun 2026) ───────────
     # Part A: Divisive gradient normalization (cortical gain control).
     # Replaces hard clip_grad_norm_ with smooth g' = g * c/√(c²+||g||²).
@@ -1095,6 +1101,8 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.z_loss = float(props["z_loss"])
     if "cosine_head" in props:
         cfg.cosine_head = _parse_bool(props["cosine_head"])
+    if "rope_base" in props:
+        cfg.rope_base = float(props["rope_base"])
     # ── GIF-7: Homeostatic Gradient Equilibrium ──
     if "divisive_grad_c" in props:
         cfg.divisive_grad_c = float(props["divisive_grad_c"])

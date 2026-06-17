@@ -277,6 +277,21 @@ class RegularizationConfig:
         default_factory=FreqBalanceConfig)
     cdga: CDGAConfig = field(default_factory=CDGAConfig)
     warmup_steps: int = 2000
+    activation_step: int = 0
+    """First global step at which any aux loss may be non-zero.
+
+    Capacity-First protocol (Hypothesis H-A2):
+    Aux losses must NOT fire until the LM trunk has reached its
+    pretrain capacity floor (train PPL ≈ stable).  Setting
+    activation_step > 0 hard-gates all aux losses to zero for the
+    first N steps — the warmup ramp then starts at activation_step
+    rather than at step 0.
+
+    Recommended: activation_step = 4 × warmup_steps (i.e. the full
+    warmup epoch fires well after pretrain PPL plateaus).
+    Set to 0 (default) for legacy behaviour: interventions fire from
+    step 0 with only the warmup ramp for protection.
+    """
 
     def any_enabled(self) -> bool:
         return any([
@@ -316,6 +331,8 @@ def parse_regularization_block(body: str) -> RegularizationConfig:
 
     if "warmup_steps" in props:
         cfg.warmup_steps = int(props["warmup_steps"])
+    if "activation_step" in props:
+        cfg.activation_step = int(props["activation_step"])
     if "dar" in props:
         cfg.dar = _parse_dar(props["dar"])
     if "pcc" in props:

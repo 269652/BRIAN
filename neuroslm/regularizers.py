@@ -758,11 +758,25 @@ class RegularizationController(nn.Module):
         s = int(self._reg_step.item())
         return min(1.0, s / float(w))
 
+    def _effective_step_for_warmup(self, global_step: Optional[int]) -> int:
+        """Step within the post-activation window.
+
+        Returns how many steps have elapsed since activation_step.
+        This is what the warmup multiplier should use when activation_step
+        > 0: the ramp starts at activation_step, not at absolute step 0.
+        """
+        act = int(getattr(self.cfg, "activation_step", 0))
+        if global_step is None:
+            # Legacy path: fall back to internal counter.
+            return int(self._reg_step.item())
+        return max(0, global_step - act)
+
     def collect_aux(self,
                     h: torch.Tensor,
                     lm_logits: torch.Tensor,
                     per_sample_ce: torch.Tensor,
-                    domain_labels: Optional[torch.Tensor]
+                    domain_labels: Optional[torch.Tensor],
+                    global_step: Optional[int] = None,
                     ) -> Dict[str, torch.Tensor]:
         """Compute every enabled aux loss; return per-key dict + sum.
 
@@ -774,6 +788,29 @@ class RegularizationController(nn.Module):
         what actually entered the gradient).
         """
         zero = lm_logits.new_zeros(())
+
+        # ── Capacity-First: hard gate before activation_step ──────────
+        # Hypothesis H-A2: aux losses must not fire until the LM trunk
+        # has reached its pretrain capacity floor.  Before activation_step
+        # all aux losses are exactly zero; the warmup ramp only begins
+        # AFTER this step, measured from (global_step - activation_step).
+        act = int(getattr(self.cfg, "activation_step", 0))
+        gs  = global_step if global_step is not None else int(self._reg_step.item())
+        if act > 0 and gs < act:
+            # State-accumulating sub-systems (PCC buffer, mixture probe)
+            # should still observe but contribute zero to the loss.
+            self.adaptive_mixture.observe_logits(lm_logits)
+            self._reg_step += 1
+            return {
+                "dar":         zero,
+                "weighted_ce": per_sample_ce.mean(),
+                "pcc":         zero,
+                "isotropy":    zero,
+                "cmd":         zero,
+                "total":       zero,
+                "warmup_mult": lm_logits.new_tensor(0.0),
+            }
+
         # DAR runs on h and CE; returns the *replacement* CE for the caller.
         dar_out = self.dar(h, per_sample_ce, domain_labels)
         pcc_loss = self.pcc(h) if self.cfg.pcc.enabled else zero
@@ -791,7 +828,17 @@ class RegularizationController(nn.Module):
         # for "PCC InfoNCE saturates at log(N) and drowns the LM signal"
         # — defaults are 0.1 (CPC literature standard, Oord et al. 2018).
         # Isotropy and CMD already apply their `weight` internally.
-        mult = self.warmup_multiplier()
+        #
+        # When activation_step > 0, the warmup counter resets to the
+        # post-activation elapsed time so the ramp starts fresh at
+        # activation_step (not absolute step 0).
+        w = int(self.cfg.warmup_steps)
+        if w <= 0:
+            mult = 1.0
+        else:
+            post_act_steps = self._effective_step_for_warmup(global_step)
+            mult = min(1.0, post_act_steps / float(w))
+
         scaled_dar = dar_out["total_aux"] * (mult * self.cfg.dar.weight)
         scaled_pcc = pcc_loss * (mult * self.cfg.pcc.weight)
         scaled_iso = iso_loss * mult
@@ -811,3 +858,4 @@ class RegularizationController(nn.Module):
             "total": total,
             "warmup_mult": lm_logits.new_tensor(mult),
         }
+

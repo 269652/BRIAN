@@ -92,6 +92,8 @@ training {
     # final projection. Logits = t*cos(h, w_i), bounded in [-t, +t].
     # Prevents norm-mediated overfitting that causes the train/OOD gap.
     cosine_head: true
+    # TRUNK-OPT Phase 2: RoPE base 500k (Llama-3 recipe for OOD length generalisation)
+    rope_base:             500000
     # GIF-7: Homeostatic Gradient Equilibrium — stabilize optimization dynamics.
     # A) Divisive grad norm (cortical gain control): smooth replacement for hard clip.
     divisive_grad_c: 5.0
@@ -727,6 +729,7 @@ training {
     regularization: {
         # â”€â”€ WARMUP RAMP â€” RESTORED 2026-06-17 â”€â”€
         warmup_steps: 2000
+        activation_step: 4000
 
         # warmup_steps controlled a linear 0â†’1 ramp on all aux loss
         # contributions. With every intervention disabled in this
@@ -737,14 +740,14 @@ training {
 
         # A. Distributional Adversarial Reweighting â€” RE-ENABLED 2026-06-17.
         dar: { enabled: true, lambda: 1.0, hidden: 64, grl_alpha: 0.1,
-               weight: 0.1 }
+               weight: 0.05 }
 
         # B. Predictive Contrastive Coding â€” RE-ENABLED 2026-06-17.
         pcc: { enabled: true, k: 4, n_negatives: 64, tau: 0.1, layers: [],
-               weight: 0.1 }
+               weight: 0.05 }
 
         # C. Isotropy whitening â€” RE-ENABLED 2026-06-17.
-        isotropy: { enabled: true, weight: 0.01, buffer: 4096, distance: "frobenius" }
+        isotropy: { enabled: true, weight: 0.005, buffer: 4096, distance: "frobenius" }
 
         # D. Cross-Module Disagreement â€” DISABLED (OOM at this batch+seq).
         cmd: { enabled: false, weight: 0.05, divergence: "jsd",

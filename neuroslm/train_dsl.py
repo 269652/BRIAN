@@ -333,6 +333,21 @@ def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
           f"wd={cfg.weight_decay}, dropout={cfg.dropout}, "
           f"pct_strength={cfg.pct_strength}")
 
+    # Resolve n_kv_heads from config (0 → full MHA = n_heads).
+    _n_kv_heads = int(getattr(cfg, "n_kv_heads", 0) or 0)
+    if _n_kv_heads <= 0:
+        # Try to read from the active scale variant.
+        try:
+            _sv = cfg.scales.variants.get(cfg.scales.default)
+            if _sv is not None and _sv.n_kv_heads > 0:
+                _n_kv_heads = _sv.n_kv_heads
+        except Exception:
+            pass
+    _n_kv_heads = _n_kv_heads or n_heads
+    _rope_base = float(getattr(cfg, "rope_base", 10000.0))
+    print(f"[train_dsl] GQA: n_kv_heads={_n_kv_heads}/{n_heads}  "
+          f"RoPE base={_rope_base:.0f}")
+
     # Full DSL LanguageCortex: interleaved Standard/Diff/MoD blocks +
     # NeuralGeometryAdapter after each, bit-identical to Brain's
     # LanguageCortex(baseline=False) on the LM-logits path (N8 passes).
@@ -341,13 +356,15 @@ def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
     lm = build_dsl_language_cortex(
         vocab=vocab_size, d_model=d_model, depth=depth,
         n_heads=n_heads, max_ctx=max_ctx,
+        n_kv_heads=_n_kv_heads,
         dropout=cfg.dropout, pct_trunk=cfg.pct_trunk,
         tonnetz_period=cfg.tonnetz_period,
         stochastic_depth=cfg.stochastic_depth,
         grid_positions=cfg.grid_positions,
         episodic_memory=cfg.episodic_memory,
         surprise_head=cfg.surprise_head,
-        cosine_head=cfg.cosine_head).to(device)
+        cosine_head=cfg.cosine_head,
+        rope_base=_rope_base).to(device)
     harness = BRIANHarness.from_language_model(
         lm, vocab_size=vocab_size, d_sem=d_model, training_config=cfg,
     ).to(device)
@@ -800,6 +817,26 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
         if "pac" in m:
             em_parts.append(f"C6:pac={m.get('pac', 0.0):.2f}")
         em_str = " | em[" + " ".join(em_parts) + "]"
+
+    # ── TRUNK-OPT metrics (Phase 1) ──
+    trunk_str = ""
+    to_keys = ("trunk_opt_grad_budget", "trunk_opt_bits_per_param",
+               "trunk_opt_effective_rank", "trunk_opt_pac_bayes_bound",
+               "trunk_opt_layer_uniformity")
+    to_parts = []
+    if m.get("trunk_opt_grad_budget") is not None:
+        to_parts.append(f"budget={m['trunk_opt_grad_budget']:.2f}")
+    if m.get("trunk_opt_bits_per_param") is not None:
+        to_parts.append(f"bpp={m['trunk_opt_bits_per_param']:.2e}")
+    if m.get("trunk_opt_effective_rank") is not None:
+        to_parts.append(f"erank={m['trunk_opt_effective_rank']:.1f}")
+    if m.get("trunk_opt_pac_bayes_bound") is not None:
+        to_parts.append(f"pac≤{m['trunk_opt_pac_bayes_bound']:.3f}")
+    if m.get("trunk_opt_layer_uniformity") is not None:
+        to_parts.append(f"uni={m['trunk_opt_layer_uniformity']:.2f}")
+    if to_parts:
+        trunk_str = " | trunk[" + " ".join(to_parts) + "]"
+
     return (f"step {step:5d} | loss {avg_loss:.4f} | lm {avg_lm:.4f} "
             f"| ppl {ppl:.1f} | gnorm {gnorm:.3f} | lr {lr:.2e} "
             f"| {tok_per_s:.0f} tok/s "
@@ -807,7 +844,7 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
             f"| mesoLG {lg:.2f} "
             f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
             f"| NT[{nt_str}]{osc_str}{em_str}{reg_str}"
-            f"{cortex_str}{gif_str}{gif7_str}{allostasis_str}")
+            f"{cortex_str}{gif_str}{gif7_str}{allostasis_str}{trunk_str}")
 
 
 def _eval_pass_marks(rules, step: int,
