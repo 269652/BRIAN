@@ -2585,16 +2585,41 @@ def _hf_latest(args: argparse.Namespace) -> int:
 def cmd_chat(args: argparse.Namespace) -> int:
     """``brian chat`` — boot a checkpoint and run the always-on dashboard.
 
-    Resolution order for the checkpoint:
+    Resolution order for the checkpoint (top wins):
 
-      1. positional ``ckpt`` arg.
-      2. ``--latest`` flag → pull from HF Hub first, then load.
-      3. fall back to the highest-step file under
-         ``lfs_checkpoints/`` (whatever the local resume globber would
-         pick).
+      1. ``--pt PATH_OR_URI``           — explicit named flag (alias for positional).
+      2. positional ``ckpt`` arg.
+      3. ``--latest`` flag               — pull HF Hub highest-step (by raw step).
+      4. ``.brian/checkpoint.ln``        — auto-pulled best-run checkpoint
+                                            (DEFAULT; written by ``brian best update``).
+      5. local ``lfs_checkpoints/`` highest-step (fallback for offline use).
+
+    ``--no-best`` disables hop 4 — use it when you want to chat with whatever
+    is on disk regardless of remote state (laptop offline, slow network).
+
+    The default behaviour (no flags, no positional) downloads the *best*
+    HF checkpoint per ``.brian/checkpoint.ln`` so ``brian chat`` "just
+    works" right after a fresh training run lands its first push.
     """
-    ckpt = args.ckpt
-    if args.latest and not ckpt:
+    # Hop 1 + 2: explicit overrides — ``--pt`` wins over positional, both
+    # wins over every implicit lookup below. Accept hf:// URIs too so the
+    # user can paste anything ``brian hf latest`` printed.
+    ckpt: Optional[str] = getattr(args, "pt", None) or args.ckpt
+    if ckpt and ckpt.startswith("hf://"):
+        from neuroslm.hf_checkpoints import (
+            parse_hf_uri, download_checkpoint,
+        )
+        try:
+            repo_id, path_in_repo = parse_hf_uri(ckpt)
+        except ValueError as e:
+            print(f"[chat] invalid hf URI: {e}", file=sys.stderr)
+            return 2
+        print(f"[chat] pulling {ckpt}")
+        local = download_checkpoint(path_in_repo, repo_id=repo_id)
+        ckpt = str(local) if local is not None else None
+
+    # Hop 3: --latest (explicit HF lookup by raw step, NOT by best-run score)
+    if not ckpt and args.latest:
         from neuroslm.hf_checkpoints import (
             find_latest_checkpoint, download_checkpoint,
         )
@@ -2610,12 +2635,35 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 latest.path_in_repo, repo_id=args.repo)
             if local is not None:
                 ckpt = str(local)
+
+    # Hop 4: best-run pointer (DEFAULT when no explicit flag was given).
+    # Skipped if --no-best is set or if --latest already resolved a ckpt.
+    if not ckpt and not getattr(args, "no_best", False):
+        from neuroslm.log_refs import read_checkpoint_url
+        hf_url = read_checkpoint_url(REPO_ROOT)
+        if hf_url:
+            from neuroslm.hf_checkpoints import (
+                parse_hf_uri, download_checkpoint,
+            )
+            try:
+                repo_id, path_in_repo = parse_hf_uri(hf_url)
+                print(f"[chat] using best-run checkpoint: {hf_url}")
+                local = download_checkpoint(
+                    path_in_repo, repo_id=repo_id)
+                if local is not None:
+                    ckpt = str(local)
+            except ValueError as e:
+                print(f"[chat] .brian/checkpoint.ln has invalid URI: {e}; "
+                      f"falling back to local", file=sys.stderr)
+
+    # Hop 5: local fallback — highest-step .pt under lfs_checkpoints/
     if not ckpt:
-        # Local fallback: pick the highest-step .pt under lfs_checkpoints/
         ckpt = _pick_local_latest_ckpt()
+
     if not ckpt:
-        print("[chat] no checkpoint found. Provide a path, "
-              "use --latest, or train one first.", file=sys.stderr)
+        print("[chat] no checkpoint found. Provide a path with --pt, "
+              "use --latest, run `brian best update` to refresh the "
+              "best-run pointer, or train one first.", file=sys.stderr)
         return 2
     if not Path(ckpt).is_file():
         print(f"[chat] checkpoint not found: {ckpt}", file=sys.stderr)
@@ -3201,9 +3249,38 @@ def cmd_update_readme(args: argparse.Namespace) -> int:
     """Render README.template.md → README.md using docs/readme_metrics.toml
     merged with arch.neuro # @export values from .neuro/exports.toml.
 
-    ``brian update-readme``         — write README.md in place.
-    ``brian update-readme --check`` — compare only; exit 1 if stale (pre-commit).
+    Workflow (in order):
+
+      1. ``log_refs.update_best_run_pointer`` — refresh ``.brian/best_run.ln``
+         + ``.brian/checkpoint.ln`` so the ``${LOG_TAIL:best:N}`` macro
+         always points at the freshest qualifying training run. Skipped
+         with ``--no-best-update``; failures are non-fatal.
+      2. Collect arch exports from ``architectures/master/arch.neuro``
+         and write ``.neuro/exports.toml``.
+      3. Render the template and write ``README.md`` (or check freshness
+         with ``--check``).
+
+    ``brian update-readme``                  — full pipeline, in-place write.
+    ``brian update-readme --check``          — compare only; exit 1 if stale (pre-commit).
+    ``brian update-readme --no-best-update`` — skip step 1 (CI / tests).
     """
+    # ── Step 1: refresh .brian/best_run.ln + .brian/checkpoint.ln ──
+    # Auto-update keeps the ${LOG_TAIL:best:N} macro fresh so a render
+    # right after a new training log lands picks up the new best run
+    # without a manual ``brian best update`` invocation. Failures are
+    # non-fatal: the renderer's macro falls back to "(log not available)"
+    # gracefully when the .ln file is absent.
+    if not getattr(args, "no_best_update", False):
+        try:
+            from neuroslm.log_refs import update_best_run_pointer
+            best = update_best_run_pointer(root=REPO_ROOT)
+            if best is not None:
+                print(f"[update-readme] refreshed best-run pointer: "
+                      f"{best.relative_to(REPO_ROOT) if best.is_absolute() else best}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[update-readme] warning: best-run pointer refresh "
+                  f"failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+
     from neuroslm.readme_renderer_v2 import (
         ReadmeRenderError,
         render_readme,
@@ -3852,13 +3929,24 @@ def _build_parser() -> argparse.ArgumentParser:
              "with memory + idle thoughts on a CLI dashboard.")
     sc_chat.add_argument(
         "ckpt", nargs="?", default=None,
-        help="Local checkpoint path. Omit + use --latest to pull from "
-             "HF Hub. Omit both to auto-pick the highest-step file "
-             "under ./lfs_checkpoints/.")
+        help="Local checkpoint path (positional). Omit all args to "
+             "auto-pull the best-run checkpoint from "
+             ".brian/checkpoint.ln (default). Use --pt/--latest/"
+             "--no-best to control resolution.")
+    sc_chat.add_argument(
+        "--pt", default=None, metavar="PATH_OR_URI",
+        help="Explicit checkpoint override (named-flag alias for "
+             "the positional). Accepts a local path or hf:// URI. "
+             "Wins over every other resolution mode.")
     sc_chat.add_argument(
         "--latest", action="store_true",
         help="Download the highest-step checkpoint from HF Hub before "
-             "booting (uses --repo / --prefix to scope).")
+             "booting (by step number, NOT by best-run score; for "
+             "best-by-score use the default behaviour).")
+    sc_chat.add_argument(
+        "--no-best", dest="no_best", action="store_true",
+        help="Disable the default best-run auto-pull (skip "
+             ".brian/checkpoint.ln). Useful for offline laptops.")
     sc_chat.add_argument(
         "--repo", default=None, metavar="OWNER/REPO",
         help="HF repo for --latest (default: HF_REPO_ID env, then "
@@ -3960,6 +4048,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sur.add_argument(
         "--check", action="store_true",
         help="compare rendered output to README.md without writing; exit 1 if stale")
+    sur.add_argument(
+        "--no-best-update", dest="no_best_update", action="store_true",
+        help="skip the auto-refresh of .brian/best_run.ln before "
+             "rendering (CI / tests where logs/ may be unstable).")
     sur.set_defaults(func=cmd_update_readme)
 
     return p

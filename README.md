@@ -2,7 +2,7 @@
 
 > *A 146.9M trainable-parameter trunk language model (~980M additional frozen expert parameters) optimized for integrated information (Φ) and mechanistic consciousness-like properties. Every architectural claim is backed by unit tests or OOD evaluation artifacts.*
 
-[![tests](https://img.shields.io/badge/tests-3407%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-3450%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
@@ -14,7 +14,7 @@
 BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained causal-LM cortex experts (`smollm2_360m` for general, `microsoft/CodeGPT-small-py` for code, `Qwen/Qwen2.5-0.5B` for reasoning).
 
 **Current status:**
-- ✅ **Layer A (mechanisms):** 20+ core properties verified via 3407 unit tests across `tests/` (`tests/dsl/` alone runs 936). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
+- ✅ **Layer A (mechanisms):** 20+ core properties verified via 3450 unit tests across `tests/` (`tests/dsl/` alone runs 956). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
 - 🟡 **Layer B (generalization):** Best variant B4 achieves **2.87 gap_ratio** on WikiText-103-v1 OOD (53% better than flat-transformer baseline at 6.12). Best run: train_ppl 102.9, OOD_ppl 295.9. See [`docs/findings.md`](docs/findings.md) for full Layer B arc.
 
 Code, math, and tensor shapes: [`docs/architecture.md`](docs/architecture.md). Full evidence ledger: [`docs/findings.md`](docs/findings.md).
@@ -105,7 +105,7 @@ modulation dopamine -> pfc {
 }
 ```
 
-**Why?** Hand-written PyTorch is error-prone for biologically-plausible models; math specs are checkable. The DSL codegen produces torch modules with **byte-equivalent forward passes** (verified by 936 DSL tests in `tests/dsl/`) and enables symbolic analysis (fixed-point, stability, sensitivity). The DNA layer (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) supports **module bundling with source maps** and **byte-identity round-trip** verification (`tests/test_dna_roundtrip_byte_identity.py`).
+**Why?** Hand-written PyTorch is error-prone for biologically-plausible models; math specs are checkable. The DSL codegen produces torch modules with **byte-equivalent forward passes** (verified by 956 DSL tests in `tests/dsl/`) and enables symbolic analysis (fixed-point, stability, sensitivity). The DNA layer (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) supports **module bundling with source maps** and **byte-identity round-trip** verification (`tests/test_dna_roundtrip_byte_identity.py`).
 
 **Folder layout:** `arch.neuro` (package config + wiring), `modules/*.neuro` (per-region specs), `lib/` (shared mechanics). Import paths: `@/` = absolute, `./` = relative.
 
@@ -139,7 +139,7 @@ All 15 core mechanisms confirmed to implement as specified:
 | **H20** — `TheoryOfMindIR` represents nested agent beliefs as stalk vectors over a sheaf | `tests/thsd/test_theory_of_mind_ir.py` (9) | ✅ `d_belief`, `max_agents`, `belief_decay ∈ [0,1]`, `order ≥ 1`, `false_belief_threshold ∈ [0,1]` all validated; stalk dimension scales with recursion `order` (k-th order ToM has `stalk_dim = d_belief × max_agents^(k-1)`). |
 | **H21** — Per-position abstain logit unlocks multi-cortex fusion | `tests/training/test_lm_expert_abstain_safety.py` (5) | ✅ Replacing flat `_ABSTAIN_LOGIT = -1e4` with `abstain = max(mapped_logits) − ln(V_trunk)` keeps unmapped trunk-vocab slots at uniform baseline. Standalone-cortex CE on a random batch drops from 17.37 nats (pre-fix) to 4.03 nats (post-fix); on deploy 40925851 the fusion gate `α_eff` stays at 0.50 throughout instead of collapsing to 0 → **14× train-PPL / 17× OOD-PPL improvement** vs the broken precursor 40923107. |
 
-**Run all:** `py -3 -m pytest tests/ -v` (3407 tests, ~425 seconds on CPU)
+**Run all:** `py -3 -m pytest tests/ -v` (3450 tests, ~431 seconds on CPU)
 
 ### Layer B — OOD Generalization (The Open Question) 🟡
 
@@ -151,7 +151,7 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: B4 (abstain-fix + mult
 | **BRIAN (Trunk + Recursive)** | 108.2M | 5,000 | 216.5 | 1372.8 | 6.34 | [`ood_recursive_108M_step5000.json`](results/ood_recursive_108M_step5000.json) |
 | **BRIAN (Trunk + ReZero)** | 107.8M | 7,000 | 258.8 | 1351.5 | 5.22 | [`ood_rezero-fixed_107M_step7000.json`](results/ood_rezero-fixed_107M_step7000.json) |
 | **BRIAN (PCT trunk)** | 69.2M | 4,000 | 400.9 | 1806.6 | **4.51** | [`ood_pct-30m_68M_step4000.json`](results/ood_pct-30m_68M_step4000.json) |
-| **BRIAN (abstain-fix + multi-cortex, B4)** | **889.6M** | **2,000** | **102.9** | **295.9** | **2.87** | ${LOG_LINK:B4_LOG} |
+| **BRIAN (abstain-fix + multi-cortex, B4)** | **889.6M** | **2,000** | **102.9** | **295.9** | **2.87** | *(log not available)* |
 
 **What the table says:**
 1. **B4 wins absolute OOD PPL among BRIAN variants** (295.9 vs ≥1351.5 for B1–B3). The abstain fix unblocks the multi-cortex fusion pathway, and the full 889.6M DNA-compiled `BRIANHarness` (3 frozen causal-LM cortex experts + bowtie trunk + every wired module) now contributes signal that earlier variants couldn't access. *B4 used the legacy gpt2/CodeGPT/Qwen2.5 roster; the post-H22 roster (`smollm2_360m` + `microsoft/CodeGPT-small-py` + `Qwen/Qwen2.5-0.5B`) is the 10k follow-up baseline.*
@@ -165,15 +165,25 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: B4 (abstain-fix + mult
 
 **Best run** (auto-detected from `.brian/best_run.ln`, ranked by `gap_ratio`):
 
-${LOG_TAIL:best:25}
+[`logs/20260616/SmolLM/170628_20_4560.log`](logs/20260616/SmolLM/170628_20_4560.log)
+
+```
+step  4560 | loss 6.6617 | lm 4.1006 | ppl 60.4 | gnorm 94.346 | lr 3.69e-04 | 1478 tok/s | Φ 0.767 | λ₁ 0.075 | ign 0.63 | mesoLG 0.49 | troph 8/8 μ1.40 | NT[DA=0.16 NE=0.13 5HT=0.38 ACh=0.32 eCB=0.03 Glu=0.24 GABA=0.04] | osc[δ=0.430 θ=0.201 γ=0.369] | em[C2:ρ=0.00/τ=0.10/s=0.63 C4:Q=-0.3 W=1 pl=255 C3:pc=0.462 VBB:β=1.02 σ=0.0232 kl=454.354 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0086 cmd=0.000 Σ=0.009 w=1.00 chat=0.60] | cortex[α_eff=0.510 inh=0.000 λ=0.734 kl=0.082 lm_ema=8.20 cx_ema=3.21] | gif[α=0.0500 p=1.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0100] | hpa[load=0.23 cort=0.23 NE×0.84 T×0.77 LR×0.89]
+```
 
 **Latest run** (most recently modified log under `logs/`):
 
-${LOG_TAIL:latest:25}
+[`logs/20260617/SmolLM/170512_20_2000.log`](logs/20260617/SmolLM/170512_20_2000.log)
+
+```
+step  1960 | loss 9.4320 | lm 4.0266 | ppl 56.1 | gnorm 2.071 | lr 4.02e-04 | 581 tok/s | Φ 0.484 | λ₁ 0.075 | ign 0.73 | mesoLG 0.50 | troph 8/8 μ1.88 | NT[DA=0.18 NE=0.08 5HT=0.31 ACh=0.16 eCB=0.05 Glu=0.45 GABA=0.12] | osc[δ=0.356 θ=0.277 γ=0.367] | em[C2:ρ=0.34/τ=1.00/s=0.73 C4:Q=0.1 W=78 pl=6 C3:pc=0.545 VBB:β=1.03 σ=0.5215 kl=38303.809 C5:lat=1.51 C6:pac=0.04] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.511 inh=0.000 λ=0.756 kl=0.334 lm_ema=7.89 cx_ema=3.36] | gif[α=0.0500 p=1.000 gap=9.25 ood_ema=10.32 ood_ce=9.41 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.924 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.03 NE×0.98 T×0.97 LR×0.98] | trunk[budget=0.00 bpp=5.57e-08 erank=6.1 uni=1.90]
+step  1980 | loss 9.5732 | lm 4.1688 | ppl 64.6 | gnorm 1.985 | lr 4.12e-04 | 568 tok/s | Φ 0.638 | λ₁ 0.075 | ign 0.73 | mesoLG 0.48 | troph 8/8 μ1.79 | NT[DA=0.08 NE=0.07 5HT=0.31 ACh=0.27 eCB=0.04 Glu=0.30 GABA=0.04] | osc[δ=0.351 θ=0.286 γ=0.363] | em[C2:ρ=0.06/τ=0.99/s=0.73 C4:Q=2.7 W=29 pl=17 C3:pc=0.651 VBB:β=1.03 σ=0.2335 kl=38296.953 C5:lat=1.51 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.512 inh=0.000 λ=0.823 kl=0.206 lm_ema=8.25 cx_ema=3.43] | gif[α=0.0500 p=1.000 gap=7.85 ood_ema=10.32 ood_ce=9.41 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.929 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.03 NE×0.98 T×0.97 LR×0.98] | trunk[budget=0.00 bpp=5.24e-08 erank=7.4 uni=1.51]
+step  2000 | loss 9.4657 | lm 4.0874 | ppl 59.6 | gnorm 1.673 | lr 4.10e-04 | 568 tok/s | Φ 0.675 | λ₁ 0.075 | ign 0.73 | mesoLG 0.53 | troph 8/8 μ1.84 | NT[DA=0.07 NE=0.08 5HT=0.31 ACh=0.31 eCB=0.05 Glu=0.35 GABA=0.03] | osc[δ=0.263 θ=0.359 γ=0.379] | em[C2:ρ=0.02/τ=0.95/s=0.73 C4:Q=0.6 W=6 pl=73 C3:pc=0.585 VBB:β=1.03 σ=0.2030 kl=38225.770 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.512 inh=0.000 λ=0.762 kl=0.183 lm_ema=7.67 cx_ema=3.81] | gif[α=0.0500 p=1.000 gap=14.03 ood_ema=10.24 ood_ce=9.51 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.948 lr×1.000 klf=0.0] | hpa[load=0.04 cort=0.03 NE×0.98 T×0.97 LR×0.98] | trunk[budget=0.00 bpp=5.18e-08 erank=7.4 uni=1.98]
+```
 
 ### Implementation Status
 
-- **3407 tests passing** in `tests/` (~425s on CPU); breakdown: **936 in `tests/dsl/`** (DSL parsing + codegen + byte-equivalence), **294 in `tests/training/`** (harness, multi-cortex, distillation, gating), plus verification, THSD, evolution, narrative, qualia, neurochem subsuites.
+- **3450 tests passing** in `tests/` (~431s on CPU); breakdown: **956 in `tests/dsl/`** (DSL parsing + codegen + byte-equivalence), **294 in `tests/training/`** (harness, multi-cortex, distillation, gating), plus verification, THSD, evolution, narrative, qualia, neurochem subsuites.
 - Training with optimizer-partitioned checkpoint streaming
 - DSL-based architecture specs compile to byte-equivalent PyTorch models with **source maps** (`neuroslm/compiler/module_bundler.py`) and **byte-identity round-trip** verification
 - Real-time architecture evolution via RAID-5 protected DNA mutations, gated by **`ImprovementGate`** (Welch's t-test) — no mutation lands without statistically significant fitness gain
