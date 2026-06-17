@@ -693,6 +693,14 @@ class BRIANHarness(nn.Module):
         self.allostasis = None
         self._build_allostasis()
 
+        # ── GIF-7: Homeostatic Gradient Equilibrium ──
+        # Three synergistic mechanisms: (A) divisive grad normalization,
+        # (B) loss-variance metaplastic damping, (C) VBB KL floor.
+        # Disabled-config ⇒ all three are no-ops, bit-identical to
+        # legacy behaviour. See lib/gif.neuro + neuroslm/emergent/gif7.py.
+        self._loss_var_damper = None
+        self._build_gif7_damper()
+
         # ── Geometric Information Funnel (GIF) ──
         # Three interlocking mechanisms that fix the train-PPL / OOD-PPL
         # gap divergence: (1) VBB α schedule, (2) OOD probe EMA,
@@ -765,6 +773,9 @@ class BRIANHarness(nn.Module):
         # Synthetic HPA axis (allostasis) — see __init__.
         h.allostasis = None
         h._build_allostasis()
+        # GIF-7: loss-variance damper — see __init__.
+        h._loss_var_damper = None
+        h._build_gif7_damper()
         # GIF controller — see __init__.
         h._gif = None
         h._build_gif()
@@ -1087,6 +1098,50 @@ class BRIANHarness(nn.Module):
         # the neurochem.allostasis import cost.
         from neuroslm.neurochem.allostasis import AllostaticController
         self.allostasis = AllostaticController(cfg)
+
+    # ── GIF-7: Homeostatic Gradient Equilibrium ──────────────────────
+
+    def _build_gif7_damper(self) -> None:
+        """Build the :class:`LossVarianceDamper` for GIF-7B if configured.
+
+        When ``loss_var_window == 0`` (default), ``self._loss_var_damper``
+        stays ``None`` and the LR-damping hook is a no-op — bit-identical
+        to legacy behaviour.
+        """
+        cfg = self.training_config
+        window = int(getattr(cfg, "loss_var_window", 0))
+        if window <= 0:
+            self._loss_var_damper = None
+            return
+        from neuroslm.emergent.gif7 import LossVarianceDamper
+        min_mult = float(getattr(cfg, "loss_var_min_mult", 0.1))
+        warmup = int(getattr(cfg, "warmup", 0) or 0)
+        self._loss_var_damper = LossVarianceDamper(
+            window=window,
+            min_mult=min_mult,
+            calibrate_at=warmup if warmup > 0 else None,
+        )
+
+    def _apply_gif7_lr_damping(
+        self, optimizer: torch.optim.Optimizer
+    ) -> None:
+        """Multiply every param-group's LR by the BCM damper multiplier.
+
+        Called from ``train_step`` immediately after
+        ``_apply_lr_damping`` (allostasis).  The scheduler re-bases LR
+        from the schedule on every step, so this damping is per-step
+        (never compounds).
+
+        No-op when ``self._loss_var_damper is None`` or multiplier ≈ 1.
+        """
+        if self._loss_var_damper is None:
+            return
+        mult = self._loss_var_damper.lr_multiplier()
+        self._metrics["gif7_lr_mult"] = mult
+        if mult >= 1.0 - 1e-9:
+            return  # stable variance ⇒ skip the param-group walk
+        for group in optimizer.param_groups:
+            group["lr"] = float(group["lr"]) * mult
 
     def _build_gif(self) -> None:
         """Construct the GIFController if enabled in the config.
@@ -2089,6 +2144,23 @@ class BRIANHarness(nn.Module):
             kl_norm = kl
         free_energy = beta * residual - torch.log(beta) + alpha * kl_norm + pec_term
 
+        # ── GIF-7C: VBB KL floor anti-collapse guard ──────────────
+        # When KL drops below kl_min (posterior collapse), add a
+        # quadratic penalty: γ·max(0, kl_min − KL)².  This makes
+        # the KL=0 attractor repulsive without any annealing schedule.
+        kl_floor_min = float(getattr(
+            self.training_config, "vbb_kl_floor", 0.0))
+        kl_floor_gamma = float(getattr(
+            self.training_config, "vbb_kl_floor_gamma", 0.01))
+        if kl_floor_min > 0 and kl_floor_gamma > 0:
+            from neuroslm.emergent.gif7 import vbb_kl_floor_loss
+            kl_floor = vbb_kl_floor_loss(kl, kl_floor_min, kl_floor_gamma)
+            free_energy = free_energy + kl_floor
+            try:
+                self._metrics["gif7_kl_floor"] = float(kl_floor.detach())
+            except Exception:
+                pass
+
         eff_w = base_weight * gate_scalar
         try:
             self._metrics["pc_reentry_loss"] = float(residual.detach())
@@ -2810,6 +2882,11 @@ class BRIANHarness(nn.Module):
         # while loss is still near the random-init ln(V) (early-init
         # bug fix from run 38608948).
         loss_f = float(loss.detach().item())
+
+        # ── GIF-7B: feed loss into the variance damper ──
+        if self._loss_var_damper is not None:
+            self._loss_var_damper.update(loss_f)
+
         mat = self.maturity.value()
         eff_nemori_floor = self.training_config.mechanisms.effective_nemori(
             mat, fallback=self.training_config.nemori_floor)
@@ -2883,18 +2960,29 @@ class BRIANHarness(nn.Module):
                         self._metrics["cdga_alpha"] = float(cdga_out["alpha"])
 
             clip = self.training_config.grad_clip
-            # clip_grad_norm_ returns the total norm *before* clipping —
-            # capture it for native-format logging (gnorm).
+            # ── GIF-7A: divisive normalization or hard clip ──
+            # When divisive_grad_c > 0, use smooth C∞ divisive norm
+            # (cortical gain control) instead of hard clip_grad_norm_.
+            div_c = float(getattr(self.training_config,
+                                  "divisive_grad_c", 0.0))
             if self._grad_scaler is not None:
                 self._grad_scaler.unscale_(optimizer)
-                gnorm = torch.nn.utils.clip_grad_norm_(
-                    self.parameters(), clip if (clip and clip > 0) else 1e9)
+                if div_c > 0:
+                    from neuroslm.emergent.gif7 import divisive_grad_normalize
+                    gnorm, dgn_scale = divisive_grad_normalize(
+                        self.parameters(), div_c)
+                    self._metrics["gif7_dgn_scale"] = dgn_scale
+                else:
+                    gnorm = torch.nn.utils.clip_grad_norm_(
+                        self.parameters(),
+                        clip if (clip and clip > 0) else 1e9)
                 # ── Allostasis: advance HPA controller + damp LR ──
                 # Read this step's loss + grad-norm into the load/cort
                 # EMAs; multiply optimizer LR by lr_multiplier() to brake
                 # under chronic stress. No-op when allostasis disabled.
                 self._allostasis_step(loss=loss_f, grad_norm=float(gnorm))
                 self._apply_lr_damping(optimizer)
+                self._apply_gif7_lr_damping(optimizer)
                 # BEMA wraps optimizer.step() with rollback detection.
                 if self._bema is not None and self._bema.cfg.enabled:
                     self._grad_scaler.unscale_(optimizer)  # already done
@@ -2905,13 +2993,21 @@ class BRIANHarness(nn.Module):
                     self._grad_scaler.step(optimizer)
                     self._grad_scaler.update()
             else:
-                gnorm = torch.nn.utils.clip_grad_norm_(
-                    self.parameters(), clip if (clip and clip > 0) else 1e9)
+                if div_c > 0:
+                    from neuroslm.emergent.gif7 import divisive_grad_normalize
+                    gnorm, dgn_scale = divisive_grad_normalize(
+                        self.parameters(), div_c)
+                    self._metrics["gif7_dgn_scale"] = dgn_scale
+                else:
+                    gnorm = torch.nn.utils.clip_grad_norm_(
+                        self.parameters(),
+                        clip if (clip and clip > 0) else 1e9)
                 # ── Allostasis: advance HPA controller + damp LR ──
                 # Same hook as the fp16 branch above — see _allostasis_step
                 # and _apply_lr_damping for the math.
                 self._allostasis_step(loss=loss_f, grad_norm=float(gnorm))
                 self._apply_lr_damping(optimizer)
+                self._apply_gif7_lr_damping(optimizer)
                 if self._bema is not None and self._bema.cfg.enabled:
                     info = self._bema.maybe_step(loss_f)
                     self._last_bema_info = info
