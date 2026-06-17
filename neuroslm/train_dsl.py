@@ -733,6 +733,20 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
             f"NE×{m.get('allostasis_ne_mult', 1.0):.2f} "
             f"T×{m.get('allostasis_trophic_mult', 1.0):.2f} "
             f"LR×{m.get('allostasis_lr_mult', 1.0):.2f}]")
+    # ── GIF-7 (Homeostatic Gradient Equilibrium) telemetry ──
+    # Surfaces the three mechanism read-outs so we can confirm
+    # divisive norm, loss-variance damping, and KL floor are active.
+    gif7_str = ""
+    gif7_keys = ("gif7_dgn_scale", "gif7_lr_mult", "gif7_kl_floor")
+    if any(k in m for k in gif7_keys):
+        g7_parts = []
+        if "gif7_dgn_scale" in m:
+            g7_parts.append(f"dgn={m['gif7_dgn_scale']:.3f}")
+        if "gif7_lr_mult" in m:
+            g7_parts.append(f"lr×{m['gif7_lr_mult']:.3f}")
+        if "gif7_kl_floor" in m:
+            g7_parts.append(f"klf={m['gif7_kl_floor']:.1f}")
+        gif7_str = " | gif7[" + " ".join(g7_parts) + "]"
     # GIF (Geometric Information Funnel) telemetry — shows only when
     # GIF is active. Surfaces the three mechanism read-outs so we can
     # confirm the funnel is actually operating: vbb_α (IB tightness),
@@ -793,7 +807,7 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
             f"| mesoLG {lg:.2f} "
             f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
             f"| NT[{nt_str}]{osc_str}{em_str}{reg_str}"
-            f"{cortex_str}{gif_str}{allostasis_str}")
+            f"{cortex_str}{gif_str}{gif7_str}{allostasis_str}")
 
 
 def _eval_pass_marks(rules, step: int,
