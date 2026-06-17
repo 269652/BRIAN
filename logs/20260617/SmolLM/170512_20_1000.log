@@ -1,0 +1,405 @@
+[train_dsl] boot @ 2026-06-17T17:05:16Z
+[train_dsl] git_commit e2c1659f3b7a1b10245cd406e593cde2b458c9ec (master)
+[train_dsl] arch_dsl_sha256 ba38bff63d2075414b1cea8179e4e6fb83c737bb0aaa9d748fd5af64081c9c6e (/content/brian/architectures/SmolLM)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] GQA: n_kv_heads=8/8  RoPE base=500000
+
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 290/290 [00:00<00:00, 18017.04it/s]
+
+Loading weights:   0%|          | 0/148 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 148/148 [00:00<00:00, 5563.93it/s]
+[transformers] [1mGPT2LMHeadModel LOAD REPORT[0m from: microsoft/CodeGPT-small-py
+Key                                     | Status     |  | 
+----------------------------------------+------------+--+-
+transformer.h.{0...11}.attn.masked_bias | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 290/290 [00:00<00:00, 5818.57it/s]
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] TrunkOptMonitor attached (n_trainable=146.9M, pac_sigma=0.02, pac_delta=0.05)
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+
+Generating test split:   0%|          | 0/4358 [00:00<?, ? examples/s]
+Generating test split: 100%|██████████| 4358/4358 [00:00<00:00, 101892.36 examples/s]
+
+Generating train split:   0%|          | 0/1801350 [00:00<?, ? examples/s]
+Generating train split:   3%|▎         | 57000/1801350 [00:00<00:03, 543099.98 examples/s]
+Generating train split:   8%|▊         | 137000/1801350 [00:00<00:02, 688892.05 examples/s]
+Generating train split:  12%|█▏        | 218000/1801350 [00:00<00:02, 569699.38 examples/s]
+Generating train split:  16%|█▌        | 282000/1801350 [00:00<00:02, 590917.22 examples/s]
+Generating train split:  19%|█▉        | 345000/1801350 [00:00<00:02, 598180.62 examples/s]
+Generating train split:  23%|██▎       | 420000/1801350 [00:00<00:02, 533971.95 examples/s]
+Generating train split:  27%|██▋       | 488000/1801350 [00:00<00:02, 570558.79 examples/s]
+Generating train split:  31%|███       | 559000/1801350 [00:00<00:02, 604180.79 examples/s]
+Generating train split:  40%|████      | 725000/1801350 [00:03<00:09, 117451.92 examples/s]
+Generating train split:  50%|█████     | 904675/1801350 [00:03<00:04, 201056.68 examples/s]
+Generating train split:  56%|█████▌    | 1009675/1801350 [00:03<00:03, 240516.31 examples/s]
+Generating train split:  61%|██████▏   | 1104675/1801350 [00:03<00:02, 286081.33 examples/s]
+Generating train split:  66%|██████▋   | 1197675/1801350 [00:04<00:01, 332959.65 examples/s]
+Generating train split:  72%|███████▏  | 1288675/1801350 [00:04<00:01, 376112.68 examples/s]
+Generating train split:  75%|███████▌  | 1354675/1801350 [00:04<00:01, 414669.64 examples/s]
+Generating train split:  81%|████████  | 1450675/1801350 [00:04<00:00, 461657.90 examples/s]
+Generating train split:  84%|████████▍ | 1515675/1801350 [00:04<00:00, 477572.53 examples/s]
+Generating train split:  88%|████████▊ | 1591675/1801350 [00:04<00:00, 530338.04 examples/s]
+Generating train split:  92%|█████████▏| 1660675/1801350 [00:04<00:00, 502666.11 examples/s]
+Generating train split:  97%|█████████▋| 1753675/1801350 [00:04<00:00, 535734.57 examples/s]
+Generating train split: 100%|██████████| 1801350/1801350 [00:05<00:00, 356635.29 examples/s]
+
+Generating validation split:   0%|          | 0/3760 [00:00<?, ? examples/s]
+Generating validation split: 100%|██████████| 3760/3760 [00:00<00:00, 386268.81 examples/s]
+[train_dsl] GIF OOD probe armed
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,126,953,904  (trainable 146,856,816 · frozen 980,097,088)
+  checkpoint = 149,187,775 params ≈ 569.1 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] skipping 1 LFS pointer file(s) in /content/brian/lfs_checkpoints
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=ON pcc=ON isotropy=ON cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] DAR domain labels ON — emitting (window, source_id) tuples
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[data:chat] using OpenHermes-2.5 (teknium/OpenHermes-2.5)
+step    20 | loss 6.7418 | lm 6.0274 | ppl 414.6 | gnorm 7.471 | lr 4.17e-06 | 175 tok/s | Φ 0.882 | λ₁ 0.075 | ign 0.00 | mesoLG 0.52 | troph 8/8 μ0.83 | NT[DA=0.41 NE=0.15 5HT=0.34 ACh=0.20 eCB=0.05 Glu=0.39 GABA=0.10] | osc[δ=0.347 θ=0.319 γ=0.334] | em[C2:ρ=0.00/τ=0.47/s=0.00 C4:Q=0.4 W=1 pl=255 C3:pc=3.816 VBB:β=1.00 σ=0.0183 kl=26011.678 C5:lat=1.00 C6:pac=0.00] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.596 kl=0.453 lm_ema=11.33 cx_ema=3.59] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | gif7[dgn=0.556 lr×1.000 klf=0.0] | hpa[load=0.02 cort=0.00 NE×1.00 T×1.00 LR×1.00] | trunk[budget=0.00 bpp=4.83e-08 erank=40.0 uni=2.64]
+step    40 | loss 6.7988 | lm 6.3060 | ppl 547.8 | gnorm 8.713 | lr 8.32e-06 | 606 tok/s | Φ 0.907 | λ₁ 0.075 | ign 0.53 | mesoLG 0.50 | troph 8/8 μ1.12 | NT[DA=0.21 NE=0.47 5HT=0.37 ACh=0.20 eCB=0.05 Glu=0.39 GABA=0.15] | osc[δ=0.284 θ=0.315 γ=0.402] | em[C2:ρ=0.03/τ=0.43/s=0.53 C4:Q=0.5 W=1 pl=255 C3:pc=1.595 VBB:β=1.00 σ=0.0183 kl=25955.027 C5:lat=1.00 C6:pac=0.04] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.677 kl=0.475 lm_ema=11.28 cx_ema=3.91] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | gif7[dgn=0.498 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.00 NE×1.00 T×1.00 LR×1.00] | trunk[budget=0.00 bpp=4.21e-08 erank=34.2 uni=2.54]
+step    60 | loss 7.2114 | lm 6.7170 | ppl 826.3 | gnorm 32.936 | lr 1.25e-05 | 648 tok/s | Φ 0.872 | λ₁ 0.075 | ign 0.79 | mesoLG 0.54 | troph 8/8 μ1.26 | NT[DA=0.19 NE=0.98 5HT=0.37 ACh=0.18 eCB=0.05 Glu=0.39 GABA=0.42] | osc[δ=0.371 θ=0.351 γ=0.278] | em[C2:ρ=0.25/τ=0.42/s=0.79 C4:Q=-0.4 W=1 pl=255 C3:pc=0.745 VBB:β=1.00 σ=0.0183 kl=24738.605 C5:lat=1.77 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.779 kl=0.439 lm_ema=11.13 cx_ema=4.42] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | gif7[dgn=0.150 lr×1.000 klf=0.0] | hpa[load=0.09 cort=0.01 NE×1.00 T×0.99 LR×1.00] | trunk[budget=0.00 bpp=4.16e-08 erank=24.6 uni=2.27]
+step    80 | loss 6.6735 | lm 6.1992 | ppl 492.3 | gnorm 6.597 | lr 1.66e-05 | 557 tok/s | Φ 0.890 | λ₁ 0.075 | ign 0.74 | mesoLG 0.51 | troph 8/8 μ1.28 | NT[DA=0.25 NE=0.15 5HT=0.40 ACh=0.17 eCB=0.05 Glu=0.38 GABA=0.15] | osc[δ=0.337 θ=0.395 γ=0.268] | em[C2:ρ=0.39/τ=0.45/s=0.74 C4:Q=-0.5 W=1 pl=255 C3:pc=0.379 VBB:β=1.00 σ=0.0184 kl=25848.258 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.676 kl=0.424 lm_ema=11.10 cx_ema=3.96] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | gif7[dgn=0.604 lr×1.000 klf=0.0] | hpa[load=0.11 cort=0.01 NE×0.99 T×0.99 LR×0.99] | trunk[budget=0.00 bpp=4.18e-08 erank=34.1 uni=2.44]
+step   100 | loss 6.4032 | lm 5.9560 | ppl 386.0 | gnorm 7.368 | lr 2.08e-05 | 538 tok/s | Φ 0.880 | λ₁ 0.075 | ign 0.74 | mesoLG 0.52 | troph 8/8 μ1.31 | NT[DA=0.29 NE=0.13 5HT=0.43 ACh=0.17 eCB=0.05 Glu=0.41 GABA=0.13] | osc[δ=0.409 θ=0.312 γ=0.279] | em[C2:ρ=0.45/τ=0.50/s=0.74 C4:Q=-0.5 W=1 pl=255 C3:pc=0.242 VBB:β=1.00 σ=0.0185 kl=28120.211 C5:lat=1.68 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.781 kl=0.369 lm_ema=10.81 cx_ema=3.78] | gif[α=0.0010 p=0.000 gap=1.46 ood_ema=11.28 ood_ce=11.28 iso_w=0.0000 div=0.003] | gif7[dgn=0.562 lr×1.000 klf=0.0] | hpa[load=0.12 cort=0.02 NE×0.99 T×0.98 LR×0.99] | trunk[budget=0.00 bpp=4.56e-08 erank=13.3 uni=2.51]
+step   120 | loss 6.3688 | lm 5.9198 | ppl 372.3 | gnorm 7.194 | lr 2.47e-05 | 585 tok/s | Φ 0.887 | λ₁ 0.075 | ign 0.73 | mesoLG 0.50 | troph 8/8 μ1.32 | NT[DA=0.26 NE=0.11 5HT=0.45 ACh=0.17 eCB=0.05 Glu=0.41 GABA=0.12] | osc[δ=0.362 θ=0.299 γ=0.339] | em[C2:ρ=0.30/τ=0.54/s=0.73 C4:Q=-0.5 W=1 pl=255 C3:pc=0.178 VBB:β=1.00 σ=0.0186 kl=26658.486 C5:lat=1.00 C6:pac=0.00] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.683 kl=0.400 lm_ema=10.82 cx_ema=3.65] | gif[α=0.0011 p=0.001 gap=1.58 ood_ema=11.28 ood_ce=11.28 iso_w=0.0000 ls=0.003 div=0.003] | gif7[dgn=0.571 lr×1.000 klf=0.0] | hpa[load=0.11 cort=0.02 NE×0.98 T×0.98 LR×0.99] | trunk[budget=0.00 bpp=4.21e-08 erank=34.2 uni=2.57]
+step   140 | loss 6.4385 | lm 5.9663 | ppl 390.1 | gnorm 8.897 | lr 2.92e-05 | 597 tok/s | Φ 0.867 | λ₁ 0.075 | ign 0.73 | mesoLG 0.51 | troph 8/8 μ1.34 | NT[DA=0.25 NE=0.16 5HT=0.45 ACh=0.20 eCB=0.05 Glu=0.42 GABA=0.10] | osc[δ=0.365 θ=0.273 γ=0.362] | em[C2:ρ=0.09/τ=0.53/s=0.73 C4:Q=-0.5 W=1 pl=255 C3:pc=0.173 VBB:β=1.00 σ=0.0188 kl=27253.250 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.798 kl=0.375 lm_ema=10.38 cx_ema=3.90] | gif[α=0.0012 p=0.004 gap=2.22 ood_ema=11.28 ood_ce=11.28 iso_w=0.0000 ls=0.024 div=0.002] | gif7[dgn=0.490 lr×1.000 klf=0.0] | hpa[load=0.13 cort=0.03 NE×0.98 T×0.97 LR×0.99] | trunk[budget=0.00 bpp=4.90e-08 erank=17.5 uni=2.57]
+step   160 | loss 6.4060 | lm 5.9440 | ppl 381.5 | gnorm 9.511 | lr 3.28e-05 | 578 tok/s | Φ 0.848 | λ₁ 0.075 | ign 0.73 | mesoLG 0.48 | troph 8/8 μ1.39 | NT[DA=0.23 NE=0.17 5HT=0.46 ACh=0.20 eCB=0.06 Glu=0.48 GABA=0.10] | osc[δ=0.378 θ=0.280 γ=0.342] | em[C2:ρ=0.09/τ=0.50/s=0.73 C4:Q=-0.5 W=1 pl=255 C3:pc=0.176 VBB:β=1.00 σ=0.0194 kl=31373.129 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.745 kl=0.316 lm_ema=9.74 cx_ema=4.05] | gif[α=0.0016 p=0.012 gap=4.99 ood_ema=11.28 ood_ce=11.28 iso_w=0.0001 ls=0.050 div=0.003] | gif7[dgn=0.465 lr×1.000 klf=0.0] | hpa[load=0.14 cort=0.03 NE×0.98 T×0.97 LR×0.98] | trunk[budget=0.00 bpp=4.83e-08 erank=20.2 uni=2.35]
+step   180 | loss 6.1490 | lm 5.6398 | ppl 281.4 | gnorm 8.234 | lr 3.75e-05 | 583 tok/s | Φ 0.904 | λ₁ 0.075 | ign 0.74 | mesoLG 0.46 | troph 8/8 μ1.43 | NT[DA=0.21 NE=0.16 5HT=0.47 ACh=0.20 eCB=0.07 Glu=0.47 GABA=0.10] | osc[δ=0.428 θ=0.246 γ=0.326] | em[C2:ρ=0.08/τ=0.48/s=0.74 C4:Q=-0.5 W=1 pl=255 C3:pc=0.183 VBB:β=1.00 σ=0.0195 kl=28043.926 C5:lat=1.67 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.680 kl=0.377 lm_ema=9.64 cx_ema=3.72] | gif[α=0.0025 p=0.030 gap=5.75 ood_ema=11.28 ood_ce=11.28 iso_w=0.0003 ls=0.050 div=0.001] | gif7[dgn=0.519 lr×1.000 klf=0.0] | hpa[load=0.15 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.00 bpp=5.36e-08 erank=33.1 uni=2.48]
+step   200 | loss 5.9845 | lm 5.4348 | ppl 229.3 | gnorm 9.365 | lr 4.07e-05 | 554 tok/s | Φ 0.774 | λ₁ 0.075 | ign 0.75 | mesoLG 0.49 | troph 8/8 μ1.52 | NT[DA=0.31 NE=0.14 5HT=0.49 ACh=0.20 eCB=0.09 Glu=0.58 GABA=0.10] | osc[δ=0.434 θ=0.216 γ=0.351] | em[C2:ρ=0.09/τ=0.46/s=0.75 C4:Q=-0.5 W=1 pl=255 C3:pc=0.199 VBB:β=1.00 σ=0.0208 kl=34630.621 C5:lat=1.46 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.773 kl=0.240 lm_ema=8.82 cx_ema=3.98] | gif[α=0.0035 p=0.051 gap=10.59 ood_ema=11.22 ood_ce=10.69 iso_w=0.0005 ls=0.050 div=0.003] | gif7[dgn=0.471 lr×1.000 klf=0.0] | hpa[load=0.16 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.00 bpp=4.90e-08 erank=9.0 uni=2.09]
+step   220 | loss 6.1677 | lm 5.5037 | ppl 245.6 | gnorm 6.942 | lr 4.58e-05 | 578 tok/s | Φ 0.816 | λ₁ 0.075 | ign 0.75 | mesoLG 0.49 | troph 8/8 μ1.57 | NT[DA=0.16 NE=0.09 5HT=0.48 ACh=0.20 eCB=0.10 Glu=0.59 GABA=0.08] | osc[δ=0.413 θ=0.254 γ=0.333] | em[C2:ρ=0.08/τ=0.44/s=0.75 C4:Q=-0.5 W=1 pl=255 C3:pc=0.186 VBB:β=1.00 σ=0.0232 kl=35878.887 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.812 kl=0.140 lm_ema=9.36 cx_ema=3.78] | gif[α=0.0050 p=0.082 gap=6.43 ood_ema=11.22 ood_ce=10.69 iso_w=0.0008 ls=0.050 div=0.002] | gif7[dgn=0.584 lr×1.000 klf=0.0] | hpa[load=0.14 cort=0.05 NE×0.97 T×0.95 LR×0.98] | trunk[budget=0.00 bpp=4.32e-08 erank=16.8 uni=2.18]
+step   240 | loss 6.5371 | lm 5.7759 | ppl 322.4 | gnorm 5.978 | lr 4.87e-05 | 592 tok/s | Φ 0.811 | λ₁ 0.075 | ign 0.75 | mesoLG 0.51 | troph 8/8 μ1.66 | NT[DA=0.13 NE=0.06 5HT=0.46 ACh=0.19 eCB=0.13 Glu=0.67 GABA=0.08] | osc[δ=0.582 θ=0.154 γ=0.264] | em[C2:ρ=0.19/τ=0.42/s=0.75 C4:Q=-0.5 W=1 pl=255 C3:pc=0.184 VBB:β=1.00 σ=0.0253 kl=37071.668 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.825 kl=0.100 lm_ema=9.40 cx_ema=4.15] | gif[α=0.0061 p=0.104 gap=5.66 ood_ema=11.22 ood_ce=10.69 iso_w=0.0010 ls=0.050 div=0.001] | gif7[dgn=0.642 lr×1.000 klf=0.0] | hpa[load=0.13 cort=0.05 NE×0.96 T×0.95 LR×0.97] | trunk[budget=0.00 bpp=4.34e-08 erank=13.1 uni=2.20]
+step   260 | loss 6.4024 | lm 5.5781 | ppl 264.6 | gnorm 3.924 | lr 5.42e-05 | 577 tok/s | Φ 0.785 | λ₁ 0.075 | ign 0.75 | mesoLG 0.49 | troph 8/8 μ1.81 | NT[DA=0.13 NE=0.04 5HT=0.45 ACh=0.19 eCB=0.18 Glu=0.75 GABA=0.08] | osc[δ=0.570 θ=0.172 γ=0.258] | em[C2:ρ=0.23/τ=0.43/s=0.75 C4:Q=-0.5 W=1 pl=255 C3:pc=0.171 VBB:β=1.00 σ=0.0300 kl=38286.648 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.859 kl=0.081 lm_ema=9.16 cx_ema=4.09] | gif[α=0.0073 p=0.129 gap=8.01 ood_ema=11.22 ood_ce=10.69 iso_w=0.0013 ls=0.050 div=0.001] | gif7[dgn=0.787 lr×1.000 klf=0.0] | hpa[load=0.11 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=5.07e-08 erank=14.3 uni=1.95]
+step   280 | loss 6.2515 | lm 5.2945 | ppl 199.2 | gnorm 3.340 | lr 5.67e-05 | 550 tok/s | Φ 0.764 | λ₁ 0.075 | ign 0.75 | mesoLG 0.50 | troph 8/8 μ1.96 | NT[DA=0.21 NE=0.04 5HT=0.45 ACh=0.18 eCB=0.21 Glu=0.78 GABA=0.08] | osc[δ=0.622 θ=0.205 γ=0.174] | em[C2:ρ=0.27/τ=0.44/s=0.75 C4:Q=-0.5 W=1 pl=255 C3:pc=0.163 VBB:β=1.00 σ=0.0333 kl=38202.965 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.846 kl=0.094 lm_ema=8.91 cx_ema=3.70] | gif[α=0.0088 p=0.160 gap=9.82 ood_ema=11.22 ood_ce=10.69 iso_w=0.0016 ls=0.050 div=0.001] | gif7[dgn=0.832 lr×1.000 klf=0.0] | hpa[load=0.08 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=5.41e-08 erank=14.0 uni=1.84]
+step   300 | loss 6.3661 | lm 5.2277 | ppl 186.4 | gnorm 2.919 | lr 6.25e-05 | 529 tok/s | Φ 0.770 | λ₁ 0.075 | ign 0.74 | mesoLG 0.48 | troph 8/8 μ2.10 | NT[DA=0.09 NE=0.04 5HT=0.43 ACh=0.19 eCB=0.23 Glu=0.79 GABA=0.07] | osc[δ=0.606 θ=0.196 γ=0.198] | em[C2:ρ=0.17/τ=0.45/s=0.74 C4:Q=0.5 W=1 pl=255 C3:pc=0.165 VBB:β=1.00 σ=0.0459 kl=38300.719 C5:lat=1.94 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.815 kl=0.068 lm_ema=9.14 cx_ema=4.02] | gif[α=0.0106 p=0.196 gap=7.41 ood_ema=11.10 ood_ce=10.00 iso_w=0.0020 ls=0.050 div=0.000] | gif7[dgn=0.864 lr×1.000 klf=0.0] | hpa[load=0.07 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=5.82e-08 erank=9.4 uni=1.86]
+step   320 | loss 6.2869 | lm 4.9907 | ppl 147.0 | gnorm 3.161 | lr 6.47e-05 | 594 tok/s | Φ 0.660 | λ₁ 0.075 | ign 0.74 | mesoLG 0.50 | troph 8/8 μ2.23 | NT[DA=0.14 NE=0.05 5HT=0.43 ACh=0.20 eCB=0.22 Glu=0.79 GABA=0.07] | osc[δ=0.629 θ=0.206 γ=0.166] | em[C2:ρ=0.11/τ=0.43/s=0.74 C4:Q=-0.5 W=1 pl=255 C3:pc=0.189 VBB:β=1.00 σ=0.0542 kl=38300.973 C5:lat=1.60 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.871 kl=0.075 lm_ema=9.43 cx_ema=3.75] | gif[α=0.0116 p=0.217 gap=5.32 ood_ema=11.10 ood_ce=10.00 iso_w=0.0022 ls=0.050 div=0.000] | gif7[dgn=0.845 lr×1.000 klf=0.0] | hpa[load=0.06 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=4.90e-08 erank=8.6 uni=1.74]
+step   340 | loss 6.2818 | lm 4.8956 | ppl 133.7 | gnorm 2.552 | lr 7.08e-05 | 566 tok/s | Φ 0.681 | λ₁ 0.075 | ign 0.74 | mesoLG 0.50 | troph 8/8 μ2.39 | NT[DA=0.29 NE=0.05 5HT=0.42 ACh=0.22 eCB=0.23 Glu=0.79 GABA=0.06] | osc[δ=0.662 θ=0.139 γ=0.199] | em[C2:ρ=0.03/τ=0.41/s=0.74 C4:Q=-0.5 W=1 pl=255 C3:pc=0.186 VBB:β=1.00 σ=0.0792 kl=38302.566 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.919 kl=0.109 lm_ema=10.07 cx_ema=3.48] | gif[α=0.0121 p=0.227 gap=2.90 ood_ema=11.10 ood_ce=10.00 iso_w=0.0023 ls=0.047 div=0.000] | gif7[dgn=0.891 lr×1.000 klf=0.0] | hpa[load=0.06 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=5.78e-08 erank=7.7 uni=1.76]
+step   360 | loss 6.1307 | lm 4.6793 | ppl 107.7 | gnorm 4.432 | lr 7.28e-05 | 570 tok/s | Φ 0.662 | λ₁ 0.075 | ign 0.74 | mesoLG 0.46 | troph 8/8 μ2.50 | NT[DA=0.13 NE=0.06 5HT=0.42 ACh=0.22 eCB=0.21 Glu=0.77 GABA=0.06] | osc[δ=0.570 θ=0.220 γ=0.209] | em[C2:ρ=0.02/τ=0.37/s=0.74 C4:Q=0.5 W=1 pl=255 C3:pc=0.208 VBB:β=1.00 σ=0.1109 kl=38304.371 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.892 kl=0.115 lm_ema=10.59 cx_ema=3.85] | gif[α=0.0123 p=0.231 gap=1.74 ood_ema=11.10 ood_ce=10.00 iso_w=0.0023 ls=0.008 div=0.000] | gif7[dgn=0.748 lr×1.000 klf=0.0] | hpa[load=0.06 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=5.10e-08 erank=7.8 uni=1.70]
+step   380 | loss 5.8861 | lm 4.3990 | ppl 81.4 | gnorm 2.824 | lr 7.92e-05 | 592 tok/s | Φ 0.614 | λ₁ 0.075 | ign 0.73 | mesoLG 0.44 | troph 8/8 μ2.61 | NT[DA=0.17 NE=0.06 5HT=0.43 ACh=0.21 eCB=0.19 Glu=0.74 GABA=0.07] | osc[δ=0.476 θ=0.271 γ=0.253] | em[C2:ρ=0.06/τ=0.34/s=0.73 C4:Q=-0.5 W=1 pl=255 C3:pc=0.225 VBB:β=1.00 σ=0.1712 kl=38305.309 C5:lat=1.10 C6:pac=0.03] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.836 kl=0.146 lm_ema=10.08 cx_ema=3.99] | gif[α=0.0125 p=0.234 gap=3.07 ood_ema=11.10 ood_ce=10.00 iso_w=0.0023 ls=0.050 div=0.000] | gif7[dgn=0.871 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=5.94e-08 erank=6.8 uni=1.73]
+step   400 | loss 6.3468 | lm 4.8286 | ppl 125.0 | gnorm 4.328 | lr 8.09e-05 | 534 tok/s | Φ 0.688 | λ₁ 0.075 | ign 0.73 | mesoLG 0.44 | troph 8/8 μ2.70 | NT[DA=0.11 NE=0.07 5HT=0.42 ACh=0.20 eCB=0.18 Glu=0.73 GABA=0.08] | osc[δ=0.468 θ=0.306 γ=0.226] | em[C2:ρ=0.16/τ=0.32/s=0.73 C4:Q=-0.5 W=1 pl=255 C3:pc=0.210 VBB:β=1.00 σ=0.2212 kl=38305.664 C5:lat=1.68 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.872 kl=0.172 lm_ema=10.89 cx_ema=4.01] | gif[α=0.0126 p=0.236 gap=1.40 ood_ema=11.19 ood_ce=11.96 iso_w=0.0024 ls=0.001 div=0.000] | gif7[dgn=0.756 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=5.89e-08 erank=6.4 uni=1.47]
+step   420 | loss 5.9098 | lm 4.3858 | ppl 80.3 | gnorm 2.947 | lr 8.75e-05 | 550 tok/s | Φ 0.675 | λ₁ 0.075 | ign 0.73 | mesoLG 0.48 | troph 8/8 μ2.78 | NT[DA=0.20 NE=0.07 5HT=0.42 ACh=0.19 eCB=0.16 Glu=0.70 GABA=0.09] | osc[δ=0.424 θ=0.280 γ=0.296] | em[C2:ρ=0.17/τ=0.32/s=0.73 C4:Q=-0.5 W=1 pl=255 C3:pc=0.186 VBB:β=1.00 σ=0.3142 kl=38306.305 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.847 kl=0.216 lm_ema=10.57 cx_ema=3.59] | gif[α=0.0126 p=0.238 gap=1.85 ood_ema=11.19 ood_ce=11.96 iso_w=0.0024 ls=0.012 div=0.000] | gif7[dgn=0.861 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=6.06e-08 erank=6.7 uni=1.28]
+step   440 | loss 6.0611 | lm 4.5153 | ppl 91.4 | gnorm 2.254 | lr 8.91e-05 | 565 tok/s | Φ 0.660 | λ₁ 0.075 | ign 0.71 | mesoLG 0.47 | troph 8/8 μ2.80 | NT[DA=0.14 NE=0.06 5HT=0.42 ACh=0.18 eCB=0.15 Glu=0.68 GABA=0.09] | osc[δ=0.406 θ=0.261 γ=0.332] | em[C2:ρ=0.22/τ=0.31/s=0.71 C4:Q=-0.5 W=1 pl=255 C3:pc=0.185 VBB:β=1.00 σ=0.3351 kl=38305.727 C5:lat=1.12 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.837 kl=0.189 lm_ema=10.63 cx_ema=3.64] | gif[α=0.0128 p=0.240 gap=1.77 ood_ema=11.19 ood_ce=11.96 iso_w=0.0024 ls=0.009 div=0.000] | gif7[dgn=0.912 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=6.32e-08 erank=7.3 uni=1.46]
+step   460 | loss 6.1696 | lm 4.6167 | ppl 101.2 | gnorm 3.293 | lr 9.58e-05 | 581 tok/s | Φ 0.622 | λ₁ 0.075 | ign 0.72 | mesoLG 0.50 | troph 8/8 μ2.81 | NT[DA=0.13 NE=0.08 5HT=0.41 ACh=0.16 eCB=0.13 Glu=0.65 GABA=0.12] | osc[δ=0.310 θ=0.241 γ=0.449] | em[C2:ρ=0.39/τ=0.33/s=0.72 C4:Q=-0.5 W=1 pl=255 C3:pc=0.181 VBB:β=1.00 σ=0.3819 kl=38305.910 C5:lat=1.76 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.900 kl=0.198 lm_ema=10.63 cx_ema=3.61] | gif[α=0.0129 p=0.242 gap=1.65 ood_ema=11.19 ood_ce=11.96 iso_w=0.0024 ls=0.005 div=0.000] | gif7[dgn=0.835 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=5.43e-08 erank=5.8 uni=1.54]
+step   480 | loss 6.2969 | lm 4.7294 | ppl 113.2 | gnorm 16.838 | lr 9.72e-05 | 619 tok/s | Φ 0.845 | λ₁ 0.075 | ign 0.75 | mesoLG 0.48 | troph 8/8 μ2.77 | NT[DA=0.12 NE=0.19 5HT=0.39 ACh=0.12 eCB=0.11 Glu=0.59 GABA=0.23] | osc[δ=0.441 θ=0.209 γ=0.350] | em[C2:ρ=0.66/τ=0.40/s=0.75 C4:Q=-0.5 W=1 pl=255 C3:pc=0.278 VBB:β=1.00 σ=0.2939 kl=38303.746 C5:lat=1.50 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.869 kl=0.262 lm_ema=9.44 cx_ema=4.41] | gif[α=0.0131 p=0.247 gap=3.93 ood_ema=11.19 ood_ce=11.96 iso_w=0.0025 ls=0.050 div=0.001] | gif7[dgn=0.285 lr×1.000 klf=0.0] | hpa[load=0.07 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=4.39e-08 erank=3.4 uni=2.10]
+step   500 | loss 6.2449 | lm 4.5301 | ppl 92.8 | gnorm 4.461 | lr 1.04e-04 | 605 tok/s | Φ 0.680 | λ₁ 0.075 | ign 0.83 | mesoLG 0.49 | troph 8/8 μ2.75 | NT[DA=0.07 NE=0.29 5HT=0.38 ACh=0.10 eCB=0.10 Glu=0.57 GABA=0.37] | osc[δ=0.453 θ=0.290 γ=0.257] | em[C2:ρ=0.83/τ=0.51/s=0.83 C4:Q=-0.5 W=1 pl=255 C3:pc=0.349 VBB:β=1.00 σ=0.3943 kl=38306.340 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.878 kl=0.169 lm_ema=8.94 cx_ema=4.33] | gif[α=0.0154 p=0.294 gap=9.73 ood_ema=11.17 ood_ce=11.03 iso_w=0.0029 ls=0.050 div=0.000] | gif7[dgn=0.746 lr×1.000 klf=0.0] | hpa[load=0.08 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=5.22e-08 erank=5.9 uni=2.09]
+[train_dsl] saved checkpoint /content/brian/lfs_checkpoints/20260617-170512_db73aa80_run/step500.pt
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  ..._run/step500.pt.strip.tmp:   0%|          |  554kB /  597MB            [A[A
+
+
+  ..._run/step500.pt.strip.tmp:   0%|          |  554kB /  597MB            [A[A
+Processing Files (0 / 1)      :   0%|          |  554kB /  597MB, 53.8kB/s  
+
+New Data Upload               :   0%|          |  554kB /  134MB, 53.8kB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:   1%|          | 5.54MB /  597MB            [A[A
+Processing Files (0 / 1)      :   1%|          | 5.54MB /  597MB,  533kB/s  
+
+New Data Upload               :   3%|▎         | 5.54MB /  201MB,  533kB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:   3%|▎         | 20.5MB /  597MB            [A[A
+Processing Files (0 / 1)      :   3%|▎         | 20.5MB /  597MB, 1.95MB/s  
+
+New Data Upload               :  10%|█         | 20.5MB /  201MB, 1.95MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:   7%|▋         | 42.1MB /  597MB            [A[A
+Processing Files (0 / 1)      :   7%|▋         | 42.1MB /  597MB, 3.96MB/s  
+
+New Data Upload               :  21%|██        | 42.1MB /  201MB, 3.96MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  11%|█         | 67.1MB /  597MB            [A[A
+Processing Files (0 / 1)      :  11%|█         | 67.1MB /  597MB, 6.23MB/s  
+
+New Data Upload               :  33%|███▎      | 67.1MB /  201MB, 6.23MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  15%|█▌        | 92.1MB /  597MB            [A[A
+Processing Files (0 / 1)      :  15%|█▌        | 92.1MB /  597MB, 8.42MB/s  
+
+New Data Upload               :  46%|████▌     | 92.1MB /  201MB, 8.42MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  20%|█▉        |  118MB /  597MB            [A[A
+Processing Files (0 / 1)      :  20%|█▉        |  118MB /  597MB, 10.6MB/s  
+
+New Data Upload               :  58%|█████▊    |  118MB /  201MB, 10.6MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  22%|██▏       |  130MB /  597MB            [A[A
+Processing Files (0 / 1)      :  22%|██▏       |  130MB /  597MB, 11.5MB/s  
+
+New Data Upload               :  65%|██████▍   |  130MB /  201MB, 11.5MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  22%|██▏       |  134MB /  597MB            [A[A
+Processing Files (0 / 1)      :  22%|██▏       |  134MB /  597MB, 11.6MB/s  
+
+New Data Upload               :  66%|██████▋   |  134MB /  201MB, 11.6MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  22%|██▏       |  134MB /  597MB            [A[A
+Processing Files (0 / 1)      :  22%|██▏       |  134MB /  597MB, 11.3MB/s  
+
+New Data Upload               :  66%|██████▋   |  134MB /  201MB, 11.3MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  24%|██▍       |  143MB /  597MB            [A[A
+Processing Files (0 / 1)      :  24%|██▍       |  143MB /  597MB, 11.9MB/s  
+
+New Data Upload               :  53%|█████▎    |  143MB /  268MB, 11.9MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  27%|██▋       |  161MB /  597MB            [A[A
+Processing Files (0 / 1)      :  27%|██▋       |  161MB /  597MB, 13.3MB/s  
+
+New Data Upload               :  48%|████▊     |  161MB /  335MB, 13.3MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  31%|███       |  186MB /  597MB            [A[A
+Processing Files (0 / 1)      :  31%|███       |  186MB /  597MB, 15.2MB/s  
+
+New Data Upload               :  55%|█████▌    |  186MB /  335MB, 15.2MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  36%|███▌      |  212MB /  597MB            [A[A
+Processing Files (0 / 1)      :  36%|███▌      |  212MB /  597MB, 17.2MB/s  
+
+New Data Upload               :  53%|█████▎    |  212MB /  402MB, 17.2MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  40%|████      |  239MB /  597MB            [A[A
+Processing Files (0 / 1)      :  40%|████      |  239MB /  597MB, 19.3MB/s  
+
+New Data Upload               :  60%|█████▉    |  239MB /  402MB, 19.3MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  44%|████▍     |  263MB /  597MB            [A[A
+Processing Files (0 / 1)      :  44%|████▍     |  263MB /  597MB, 20.9MB/s  
+
+New Data Upload               :  56%|█████▌    |  263MB /  469MB, 20.9MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  47%|████▋     |  282MB /  597MB            [A[A
+Processing Files (0 / 1)      :  47%|████▋     |  282MB /  597MB, 22.2MB/s  
+
+New Data Upload               :  60%|█████▉    |  282MB /  469MB, 22.1MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  49%|████▉     |  295MB /  597MB            [A[A
+Processing Files (0 / 1)      :  49%|████▉     |  295MB /  597MB, 22.8MB/s  
+
+New Data Upload               :  55%|█████▍    |  294MB /  536MB, 22.7MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  53%|█████▎    |  316MB /  597MB            [A[A
+Processing Files (0 / 1)      :  53%|█████▎    |  316MB /  597MB, 24.1MB/s  
+
+New Data Upload               :  54%|█████▎    |  314MB /  586MB, 24.0MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  58%|█████▊    |  344MB /  597MB            [A[A
+Processing Files (0 / 1)      :  58%|█████▊    |  344MB /  597MB, 26.0MB/s  
+
+New Data Upload               :  58%|█████▊    |  341MB /  586MB, 25.8MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  63%|██████▎   |  376MB /  597MB            [A[A
+Processing Files (0 / 1)      :  63%|██████▎   |  376MB /  597MB, 28.2MB/s  
+
+New Data Upload               :  64%|██████▎   |  373MB /  586MB, 28.0MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  68%|██████▊   |  409MB /  597MB            [A[A
+Processing Files (0 / 1)      :  68%|██████▊   |  409MB /  597MB, 30.5MB/s  
+
+New Data Upload               :  69%|██████▉   |  405MB /  586MB, 30.1MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  74%|███████▍  |  442MB /  597MB            [A[A
+Processing Files (0 / 1)      :  74%|███████▍  |  442MB /  597MB, 32.7MB/s  
+
+New Data Upload               :  75%|███████▍  |  437MB /  586MB, 32.3MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  79%|███████▉  |  474MB /  597MB            [A[A
+Processing Files (0 / 1)      :  79%|███████▉  |  474MB /  597MB, 34.7MB/s  
+
+New Data Upload               :  80%|███████▉  |  468MB /  586MB, 34.2MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  84%|████████▍ |  504MB /  597MB            [A[A
+Processing Files (0 / 1)      :  84%|████████▍ |  504MB /  597MB, 36.5MB/s  
+
+New Data Upload               :  85%|████████▌ |  498MB /  586MB, 36.0MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  90%|████████▉ |  535MB /  597MB            [A[A
+Processing Files (0 / 1)      :  90%|████████▉ |  535MB /  597MB, 38.4MB/s  
+
+New Data Upload               :  90%|█████████ |  527MB /  586MB, 37.8MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  91%|█████████▏|  546MB /  597MB            [A[A
+Processing Files (0 / 1)      :  91%|█████████▏|  546MB /  597MB, 38.5MB/s  
+
+New Data Upload               :  92%|█████████▏|  537MB /  586MB, 37.8MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  92%|█████████▏|  547MB /  597MB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏|  547MB /  597MB, 37.8MB/s  
+
+New Data Upload               :  92%|█████████▏|  538MB /  586MB, 37.1MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  92%|█████████▏|  547MB /  597MB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏|  547MB /  597MB, 37.0MB/s  
+
+New Data Upload               :  92%|█████████▏|  539MB /  586MB, 36.4MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  92%|█████████▏|  549MB /  597MB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏|  549MB /  597MB, 36.4MB/s  
+
+New Data Upload               :  92%|█████████▏|  541MB /  586MB, 35.8MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  92%|█████████▏|  550MB /  597MB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏|  550MB /  597MB, 35.7MB/s  
+
+New Data Upload               :  92%|█████████▏|  542MB /  586MB, 35.1MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  92%|█████████▏|  552MB /  597MB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏|  552MB /  597MB, 35.1MB/s  
+
+New Data Upload               :  93%|█████████▎|  543MB /  586MB, 34.5MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  93%|█████████▎|  554MB /  597MB            [A[A
+Processing Files (0 / 1)      :  93%|█████████▎|  554MB /  597MB, 34.6MB/s  
+
+New Data Upload               :  93%|█████████▎|  545MB /  586MB, 34.0MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  93%|█████████▎|  556MB /  597MB            [A[A
+Processing Files (0 / 1)      :  93%|█████████▎|  556MB /  597MB, 34.0MB/s  
+
+New Data Upload               :  93%|█████████▎|  547MB /  586MB, 33.4MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  94%|█████████▎|  558MB /  597MB            [A[A
+Processing Files (0 / 1)      :  94%|█████████▎|  558MB /  597MB, 33.5MB/s  
+
+New Data Upload               :  94%|█████████▍|  550MB /  586MB, 32.9MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  94%|█████████▍|  562MB /  597MB            [A[A
+Processing Files (0 / 1)      :  94%|█████████▍|  562MB /  597MB, 33.1MB/s  
+
+New Data Upload               :  94%|█████████▍|  553MB /  586MB, 32.5MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  95%|█████████▍|  565MB /  597MB            [A[A
+Processing Files (0 / 1)      :  95%|█████████▍|  565MB /  597MB, 32.7MB/s  
+
+New Data Upload               :  95%|█████████▌|  556MB /  586MB, 32.2MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  96%|█████████▌|  570MB /  597MB            [A[A
+Processing Files (0 / 1)      :  96%|█████████▌|  570MB /  597MB, 32.4MB/s  
+
+New Data Upload               :  96%|█████████▌|  561MB /  586MB, 31.9MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  96%|█████████▌|  573MB /  597MB            [A[A
+Processing Files (0 / 1)      :  96%|█████████▌|  573MB /  597MB, 32.0MB/s  
+
+New Data Upload               :  96%|█████████▋|  564MB /  586MB, 31.5MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  97%|█████████▋|  579MB /  597MB            [A[A
+Processing Files (0 / 1)      :  97%|█████████▋|  579MB /  597MB, 31.9MB/s  
+
+New Data Upload               :  97%|█████████▋|  571MB /  586MB, 31.4MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp:  98%|█████████▊|  586MB /  597MB            [A[A
+Processing Files (0 / 1)      :  98%|█████████▊|  586MB /  597MB, 31.8MB/s  
+
+New Data Upload               :  99%|█████████▊|  577MB /  586MB, 31.3MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp: 100%|█████████▉|  594MB /  597MB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉|  594MB /  597MB, 31.8MB/s  
+
+New Data Upload               : 100%|█████████▉|  585MB /  586MB, 31.3MB/s  [A
+
+
+  ..._run/step500.pt.strip.tmp: 100%|█████████▉|  594MB /  597MB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉|  594MB /  597MB, 29.4MB/s  
+
+New Data Upload               : 100%|██████████|  586MB /  586MB, 28.9MB/s  [A
+Processing Files (0 / 1)      : 100%|█████████▉|  594MB /  597MB, 29.4MB/s  
+
+New Data Upload               : 100%|██████████|  586MB /  586MB, 28.9MB/s  
+
+  ..._run/step500.pt.strip.tmp: 100%|█████████▉|  594MB /  597MB            
+[ckpt_push] ✓ pushed step500.pt (optimizer stripped) → hf://moritzroessler/BRIAN/checkpoints/20260617-170512_db73aa80_run/step500.pt
+[mid-ood] step 500: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 500: wikitext ppl=312.0 gap_ratio=3.36 (train_ppl=92.8) (50 seq, 6430 tok)
+step   520 | loss 6.9898 | lm 5.1280 | ppl 168.7 | gnorm 2.739 | lr 1.05e-04 | 68 tok/s | Φ 0.744 | λ₁ 0.075 | ign 0.83 | mesoLG 0.51 | troph 8/8 μ2.72 | NT[DA=0.04 NE=0.07 5HT=0.33 ACh=0.11 eCB=0.09 Glu=0.53 GABA=0.20] | osc[δ=0.455 θ=0.294 γ=0.251] | em[C2:ρ=0.73/τ=0.63/s=0.83 C4:Q=0.5 W=1 pl=255 C3:pc=0.257 VBB:β=1.00 σ=0.3216 kl=38304.762 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.928 kl=0.204 lm_ema=9.89 cx_ema=4.11] | gif[α=0.0164 p=0.315 gap=3.66 ood_ema=11.17 ood_ce=11.03 iso_w=0.0032 ls=0.050 div=0.000] | gif7[dgn=0.877 lr×1.000 klf=0.0] | hpa[load=0.07 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=5.30e-08 erank=5.5 uni=1.38]
+step   540 | loss 6.9383 | lm 5.0291 | ppl 152.8 | gnorm 5.251 | lr 1.13e-04 | 578 tok/s | Φ 0.673 | λ₁ 0.075 | ign 0.82 | mesoLG 0.49 | troph 8/8 μ2.69 | NT[DA=0.04 NE=0.12 5HT=0.30 ACh=0.16 eCB=0.08 Glu=0.50 GABA=0.14] | osc[δ=0.364 θ=0.368 γ=0.268] | em[C2:ρ=0.47/τ=0.71/s=0.82 C4:Q=-0.5 W=1 pl=255 C3:pc=0.211 VBB:β=1.00 σ=0.2616 kl=38304.973 C5:lat=1.50 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.815 kl=0.134 lm_ema=10.07 cx_ema=3.79] | gif[α=0.0169 p=0.324 gap=2.93 ood_ema=11.17 ood_ce=11.03 iso_w=0.0032 ls=0.048 div=0.000] | gif7[dgn=0.690 lr×1.000 klf=0.0] | hpa[load=0.06 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=5.14e-08 erank=7.2 uni=2.14]
+step   560 | loss 6.6717 | lm 4.7366 | ppl 114.0 | gnorm 2.250 | lr 1.13e-04 | 572 tok/s | Φ 0.656 | λ₁ 0.075 | ign 0.82 | mesoLG 0.50 | troph 8/8 μ2.67 | NT[DA=0.10 NE=0.11 5HT=0.29 ACh=0.21 eCB=0.07 Glu=0.48 GABA=0.08] | osc[δ=0.412 θ=0.275 γ=0.313] | em[C2:ρ=0.19/τ=0.73/s=0.82 C4:Q=-0.5 W=1 pl=255 C3:pc=0.227 VBB:β=1.00 σ=0.2634 kl=38305.148 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.847 kl=0.142 lm_ema=9.94 cx_ema=3.44] | gif[α=0.0173 p=0.332 gap=3.63 ood_ema=11.17 ood_ce=11.03 iso_w=0.0033 ls=0.050 div=0.000] | gif7[dgn=0.912 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=6.27e-08 erank=5.5 uni=1.43]
+step   580 | loss 6.8438 | lm 4.8651 | ppl 129.7 | gnorm 3.014 | lr 1.21e-04 | 563 tok/s | Φ 0.705 | λ₁ 0.075 | ign 0.82 | mesoLG 0.48 | troph 8/8 μ2.66 | NT[DA=0.09 NE=0.09 5HT=0.28 ACh=0.26 eCB=0.07 Glu=0.47 GABA=0.05] | osc[δ=0.432 θ=0.246 γ=0.322] | em[C2:ρ=0.05/τ=0.72/s=0.82 C4:Q=-0.5 W=1 pl=255 C3:pc=0.273 VBB:β=1.00 σ=0.2498 kl=38305.633 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.833 kl=0.147 lm_ema=9.69 cx_ema=3.88] | gif[α=0.0178 p=0.342 gap=4.38 ood_ema=11.17 ood_ce=11.03 iso_w=0.0034 ls=0.050 div=0.000] | gif7[dgn=0.856 lr×1.000 klf=0.0] | hpa[load=0.04 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=6.01e-08 erank=5.4 uni=2.22]
+step   600 | loss 6.8378 | lm 4.7816 | ppl 119.3 | gnorm 5.033 | lr 1.22e-04 | 546 tok/s | Φ 0.637 | λ₁ 0.075 | ign 0.82 | mesoLG 0.46 | troph 8/8 μ2.65 | NT[DA=0.12 NE=0.13 5HT=0.27 ACh=0.26 eCB=0.06 Glu=0.47 GABA=0.06] | osc[δ=0.393 θ=0.294 γ=0.313] | em[C2:ρ=0.05/τ=0.69/s=0.82 C4:Q=-0.5 W=1 pl=255 C3:pc=0.347 VBB:β=1.00 σ=0.2597 kl=38305.336 C5:lat=1.50 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.790 kl=0.177 lm_ema=9.21 cx_ema=4.20] | gif[α=0.0183 p=0.353 gap=8.45 ood_ema=11.22 ood_ce=11.65 iso_w=0.0035 ls=0.050 div=0.000] | gif7[dgn=0.705 lr×1.000 klf=0.0] | hpa[load=0.04 cort=0.06 NE×0.96 T×0.94 LR×0.97] | trunk[budget=0.00 bpp=7.30e-08 erank=5.9 uni=1.68]
+step   620 | loss 6.8165 | lm 4.6797 | ppl 107.7 | gnorm 2.293 | lr 1.29e-04 | 553 tok/s | Φ 0.666 | λ₁ 0.075 | ign 0.83 | mesoLG 0.48 | troph 8/8 μ2.66 | NT[DA=0.06 NE=0.08 5HT=0.27 ACh=0.26 eCB=0.06 Glu=0.46 GABA=0.05] | osc[δ=0.351 θ=0.311 γ=0.338] | em[C2:ρ=0.05/τ=0.66/s=0.83 C4:Q=-0.5 W=1 pl=255 C3:pc=0.272 VBB:β=1.00 σ=0.2862 kl=38305.781 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.803 kl=0.153 lm_ema=10.23 cx_ema=3.63] | gif[α=0.0189 p=0.366 gap=2.82 ood_ema=11.22 ood_ce=11.65 iso_w=0.0037 ls=0.044 div=0.000] | gif7[dgn=0.909 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.05 NE×0.96 T×0.95 LR×0.97] | trunk[budget=0.00 bpp=6.36e-08 erank=6.0 uni=1.48]
+step   640 | loss 6.8131 | lm 4.6534 | ppl 104.9 | gnorm 2.097 | lr 1.30e-04 | 561 tok/s | Φ 0.697 | λ₁ 0.075 | ign 0.82 | mesoLG 0.46 | troph 8/8 μ2.65 | NT[DA=0.08 NE=0.08 5HT=0.26 ACh=0.25 eCB=0.06 Glu=0.45 GABA=0.05] | osc[δ=0.392 θ=0.254 γ=0.355] | em[C2:ρ=0.05/τ=0.62/s=0.82 C4:Q=0.5 W=1 pl=255 C3:pc=0.193 VBB:β=1.00 σ=0.2798 kl=38305.793 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.800 kl=0.159 lm_ema=10.40 cx_ema=3.52] | gif[α=0.0192 p=0.371 gap=2.23 ood_ema=11.22 ood_ce=11.65 iso_w=0.0037 ls=0.024 div=0.000] | gif7[dgn=0.922 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.05 NE×0.96 T×0.95 LR×0.97] | trunk[budget=0.00 bpp=6.31e-08 erank=5.5 uni=1.59]
+step   660 | loss 6.8219 | lm 4.6467 | ppl 104.2 | gnorm 3.014 | lr 1.38e-04 | 569 tok/s | Φ 0.658 | λ₁ 0.075 | ign 0.83 | mesoLG 0.45 | troph 8/8 μ2.64 | NT[DA=0.07 NE=0.10 5HT=0.26 ACh=0.25 eCB=0.06 Glu=0.44 GABA=0.06] | osc[δ=0.308 θ=0.291 γ=0.401] | em[C2:ρ=0.05/τ=0.59/s=0.83 C4:Q=0.5 W=1 pl=255 C3:pc=0.189 VBB:β=1.00 σ=0.2645 kl=38305.445 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.765 kl=0.142 lm_ema=10.05 cx_ema=3.78] | gif[α=0.0194 p=0.375 gap=3.02 ood_ema=11.22 ood_ce=11.65 iso_w=0.0038 ls=0.050 div=0.000] | gif7[dgn=0.856 lr×1.000 klf=0.0] | hpa[load=0.02 cort=0.05 NE×0.96 T×0.95 LR×0.97] | trunk[budget=0.00 bpp=5.61e-08 erank=5.2 uni=1.54]
+step   680 | loss 7.1584 | lm 4.9511 | ppl 141.3 | gnorm 2.234 | lr 1.38e-04 | 577 tok/s | Φ 0.730 | λ₁ 0.075 | ign 0.82 | mesoLG 0.51 | troph 8/8 μ2.62 | NT[DA=0.08 NE=0.09 5HT=0.24 ACh=0.24 eCB=0.06 Glu=0.43 GABA=0.06] | osc[δ=0.340 θ=0.265 γ=0.395] | em[C2:ρ=0.08/τ=0.57/s=0.82 C4:Q=-0.5 W=1 pl=255 C3:pc=0.169 VBB:β=1.00 σ=0.3613 kl=38306.324 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.880 kl=0.225 lm_ema=10.16 cx_ema=3.75] | gif[α=0.0198 p=0.383 gap=2.78 ood_ema=11.22 ood_ce=11.65 iso_w=0.0038 ls=0.043 div=0.000] | gif7[dgn=0.913 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.05 NE×0.96 T×0.95 LR×0.97] | trunk[budget=0.00 bpp=5.03e-08 erank=4.6 uni=1.75]
+step   700 | loss 7.0981 | lm 4.8368 | ppl 126.1 | gnorm 2.109 | lr 1.46e-04 | 534 tok/s | Φ 0.656 | λ₁ 0.075 | ign 0.82 | mesoLG 0.49 | troph 8/8 μ2.59 | NT[DA=0.04 NE=0.10 5HT=0.23 ACh=0.23 eCB=0.05 Glu=0.40 GABA=0.07] | osc[δ=0.339 θ=0.316 γ=0.345] | em[C2:ρ=0.09/τ=0.54/s=0.82 C4:Q=0.5 W=1 pl=255 C3:pc=0.165 VBB:β=1.00 σ=0.3294 kl=38305.488 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.815 kl=0.187 lm_ema=10.13 cx_ema=3.83] | gif[α=0.0202 p=0.391 gap=2.80 ood_ema=11.16 ood_ce=10.68 iso_w=0.0039 ls=0.043 div=0.000] | gif7[dgn=0.921 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.05 NE×0.97 T×0.95 LR×0.98] | trunk[budget=0.00 bpp=5.37e-08 erank=4.9 uni=1.38]
+step   720 | loss 7.3289 | lm 5.0422 | ppl 154.8 | gnorm 2.240 | lr 1.46e-04 | 573 tok/s | Φ 0.689 | λ₁ 0.075 | ign 0.81 | mesoLG 0.52 | troph 8/8 μ2.53 | NT[DA=0.04 NE=0.09 5HT=0.22 ACh=0.23 eCB=0.04 Glu=0.35 GABA=0.07] | osc[δ=0.351 θ=0.264 γ=0.386] | em[C2:ρ=0.11/τ=0.52/s=0.81 C4:Q=-0.5 W=1 pl=255 C3:pc=0.162 VBB:β=1.00 σ=0.2958 kl=38304.477 C5:lat=1.50 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.501 inh=0.000 λ=0.836 kl=0.170 lm_ema=10.01 cx_ema=3.88] | gif[α=0.0206 p=0.400 gap=3.26 ood_ema=11.16 ood_ce=10.68 iso_w=0.0040 ls=0.050 div=0.000] | gif7[dgn=0.913 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.05 NE×0.97 T×0.95 LR×0.98] | trunk[budget=0.00 bpp=4.96e-08 erank=6.0 uni=2.07]
+step   740 | loss 7.2481 | lm 4.8939 | ppl 133.5 | gnorm 2.391 | lr 1.54e-04 | 564 tok/s | Φ 0.662 | λ₁ 0.075 | ign 0.80 | mesoLG 0.53 | troph 8/8 μ2.47 | NT[DA=0.05 NE=0.10 5HT=0.21 ACh=0.22 eCB=0.03 Glu=0.30 GABA=0.07] | osc[δ=0.404 θ=0.269 γ=0.327] | em[C2:ρ=0.11/τ=0.50/s=0.80 C4:Q=-0.5 W=1 pl=255 C3:pc=0.175 VBB:β=1.00 σ=0.2763 kl=38303.590 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.502 inh=0.000 λ=0.827 kl=0.171 lm_ema=9.99 cx_ema=3.88] | gif[α=0.0213 p=0.415 gap=3.28 ood_ema=11.16 ood_ce=10.68 iso_w=0.0041 ls=0.050 div=0.000] | gif7[dgn=0.902 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.05 NE×0.97 T×0.95 LR×0.98] | trunk[budget=0.00 bpp=5.95e-08 erank=5.3 uni=2.11]
+step   760 | loss 7.1727 | lm 4.7413 | ppl 114.6 | gnorm 2.280 | lr 1.55e-04 | 602 tok/s | Φ 0.747 | λ₁ 0.075 | ign 0.79 | mesoLG 0.51 | troph 8/8 μ2.46 | NT[DA=0.04 NE=0.10 5HT=0.21 ACh=0.20 eCB=0.04 Glu=0.31 GABA=0.09] | osc[δ=0.456 θ=0.243 γ=0.301] | em[C2:ρ=0.20/τ=0.49/s=0.79 C4:Q=0.5 W=1 pl=255 C3:pc=0.243 VBB:β=1.00 σ=0.1913 kl=38301.586 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.502 inh=0.000 λ=0.740 kl=0.150 lm_ema=9.60 cx_ema=4.11] | gif[α=0.0219 p=0.427 gap=4.86 ood_ema=11.16 ood_ce=10.68 iso_w=0.0043 ls=0.050 div=0.000] | gif7[dgn=0.910 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.05 NE×0.97 T×0.95 LR×0.98] | trunk[budget=0.00 bpp=5.88e-08 erank=7.4 uni=1.74]
+step   780 | loss 6.9821 | lm 4.4574 | ppl 86.3 | gnorm 2.345 | lr 1.63e-04 | 608 tok/s | Φ 0.512 | λ₁ 0.075 | ign 0.77 | mesoLG 0.48 | troph 8/8 μ2.48 | NT[DA=0.08 NE=0.11 5HT=0.22 ACh=0.16 eCB=0.04 Glu=0.37 GABA=0.13] | osc[δ=0.435 θ=0.286 γ=0.279] | em[C2:ρ=0.34/τ=0.50/s=0.77 C4:Q=-0.5 W=1 pl=255 C3:pc=0.287 VBB:β=1.00 σ=0.3353 kl=38305.566 C5:lat=1.50 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.502 inh=0.000 λ=0.863 kl=0.227 lm_ema=9.03 cx_ema=4.11] | gif[α=0.0232 p=0.453 gap=8.28 ood_ema=11.16 ood_ce=10.68 iso_w=0.0045 ls=0.050 div=0.000] | gif7[dgn=0.905 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.05 NE×0.97 T×0.95 LR×0.98] | trunk[budget=0.00 bpp=4.74e-08 erank=4.3 uni=2.52]
+step   800 | loss 7.3676 | lm 4.7324 | ppl 113.6 | gnorm 2.527 | lr 1.63e-04 | 540 tok/s | Φ 0.723 | λ₁ 0.075 | ign 0.75 | mesoLG 0.46 | troph 8/8 μ2.49 | NT[DA=0.03 NE=0.20 5HT=0.22 ACh=0.14 eCB=0.04 Glu=0.34 GABA=0.20] | osc[δ=0.429 θ=0.312 γ=0.258] | em[C2:ρ=0.44/τ=0.54/s=0.75 C4:Q=0.5 W=1 pl=255 C3:pc=0.270 VBB:β=1.01 σ=0.1732 kl=38301.105 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.502 inh=0.000 λ=0.711 kl=0.163 lm_ema=9.29 cx_ema=4.15] | gif[α=0.0239 p=0.467 gap=5.16 ood_ema=11.05 ood_ce=9.98 iso_w=0.0047 ls=0.050 div=0.000] | gif7[dgn=0.892 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.05 NE×0.97 T×0.95 LR×0.98] | trunk[budget=0.00 bpp=4.96e-08 erank=7.0 uni=2.04]
+step   820 | loss 7.3742 | lm 4.6562 | ppl 105.2 | gnorm 2.708 | lr 1.71e-04 | 593 tok/s | Φ 0.591 | λ₁ 0.075 | ign 0.74 | mesoLG 0.44 | troph 8/8 μ2.48 | NT[DA=0.04 NE=0.12 5HT=0.21 ACh=0.13 eCB=0.04 Glu=0.37 GABA=0.18] | osc[δ=0.341 θ=0.298 γ=0.360] | em[C2:ρ=0.44/τ=0.59/s=0.74 C4:Q=-0.5 W=1 pl=255 C3:pc=0.269 VBB:β=1.01 σ=0.2807 kl=38301.508 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.502 inh=0.000 λ=0.774 kl=0.188 lm_ema=9.72 cx_ema=4.13] | gif[α=0.0246 p=0.482 gap=4.02 ood_ema=11.05 ood_ce=9.98 iso_w=0.0048 ls=0.050 div=0.000] | gif7[dgn=0.879 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.00 bpp=5.83e-08 erank=5.0 uni=1.65]
+step   840 | loss 7.8040 | lm 5.0561 | ppl 157.0 | gnorm 2.257 | lr 1.71e-04 | 569 tok/s | Φ 0.707 | λ₁ 0.075 | ign 0.72 | mesoLG 0.48 | troph 8/8 μ2.40 | NT[DA=0.04 NE=0.12 5HT=0.20 ACh=0.15 eCB=0.03 Glu=0.27 GABA=0.15] | osc[δ=0.377 θ=0.293 γ=0.330] | em[C2:ρ=0.38/τ=0.63/s=0.72 C4:Q=-0.5 W=1 pl=255 C3:pc=0.195 VBB:β=1.01 σ=0.3199 kl=38301.984 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.502 inh=0.000 λ=0.787 kl=0.201 lm_ema=9.71 cx_ema=3.73] | gif[α=0.0251 p=0.491 gap=3.94 ood_ema=11.05 ood_ce=9.98 iso_w=0.0049 ls=0.050 div=0.000] | gif7[dgn=0.911 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.00 bpp=6.26e-08 erank=5.5 uni=1.70]
+step   860 | loss 7.4096 | lm 4.5646 | ppl 96.0 | gnorm 6.754 | lr 1.79e-04 | 606 tok/s | Φ 0.680 | λ₁ 0.075 | ign 0.72 | mesoLG 0.52 | troph 8/8 μ2.47 | NT[DA=0.03 NE=0.36 5HT=0.20 ACh=0.19 eCB=0.04 Glu=0.35 GABA=0.15] | osc[δ=0.340 θ=0.285 γ=0.375] | em[C2:ρ=0.25/τ=0.65/s=0.72 C4:Q=-0.5 W=1 pl=255 C3:pc=0.252 VBB:β=1.01 σ=0.3180 kl=38301.762 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.502 inh=0.000 λ=0.723 kl=0.188 lm_ema=8.68 cx_ema=4.18] | gif[α=0.0264 p=0.519 gap=11.06 ood_ema=11.05 ood_ce=9.98 iso_w=0.0052 ls=0.050 div=0.000] | gif7[dgn=0.595 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.00 bpp=4.87e-08 erank=5.8 uni=1.45]
+step   880 | loss 7.5968 | lm 4.5741 | ppl 96.9 | gnorm 3.569 | lr 1.79e-04 | 580 tok/s | Φ 0.702 | λ₁ 0.075 | ign 0.72 | mesoLG 0.50 | troph 8/8 μ2.44 | NT[DA=0.05 NE=0.11 5HT=0.20 ACh=0.21 eCB=0.03 Glu=0.28 GABA=0.08] | osc[δ=0.339 θ=0.293 γ=0.368] | em[C2:ρ=0.19/τ=0.66/s=0.72 C4:Q=0.5 W=1 pl=255 C3:pc=0.214 VBB:β=1.01 σ=0.3374 kl=38301.660 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.502 inh=0.000 λ=0.805 kl=0.199 lm_ema=9.69 cx_ema=3.65] | gif[α=0.0277 p=0.545 gap=3.66 ood_ema=11.05 ood_ce=9.98 iso_w=0.0055 ls=0.050 div=0.000] | gif7[dgn=0.814 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.00 bpp=5.04e-08 erank=5.7 uni=2.18]
+step   900 | loss 7.7394 | lm 4.6720 | ppl 106.9 | gnorm 3.833 | lr 1.88e-04 | 531 tok/s | Φ 0.701 | λ₁ 0.075 | ign 0.72 | mesoLG 0.45 | troph 8/8 μ2.43 | NT[DA=0.04 NE=0.16 5HT=0.20 ACh=0.23 eCB=0.03 Glu=0.31 GABA=0.08] | osc[δ=0.307 θ=0.335 γ=0.358] | em[C2:ρ=0.17/τ=0.65/s=0.72 C4:Q=0.5 W=1 pl=255 C3:pc=0.172 VBB:β=1.01 σ=0.3334 kl=38303.043 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.502 inh=0.000 λ=0.727 kl=0.169 lm_ema=9.49 cx_ema=3.49] | gif[α=0.0283 p=0.556 gap=4.20 ood_ema=10.96 ood_ce=10.21 iso_w=0.0056 ls=0.050 div=0.000] | gif7[dgn=0.794 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.00 bpp=5.66e-08 erank=5.7 uni=2.07]
+step   920 | loss 8.1251 | lm 5.0052 | ppl 149.2 | gnorm 2.788 | lr 1.87e-04 | 563 tok/s | Φ 0.713 | λ₁ 0.075 | ign 0.72 | mesoLG 0.46 | troph 8/8 μ2.48 | NT[DA=0.03 NE=0.11 5HT=0.18 ACh=0.19 eCB=0.04 Glu=0.36 GABA=0.10] | osc[δ=0.249 θ=0.388 γ=0.363] | em[C2:ρ=0.30/τ=0.66/s=0.72 C4:Q=0.5 W=1 pl=255 C3:pc=0.149 VBB:β=1.01 σ=0.3672 kl=38303.418 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.502 inh=0.000 λ=0.736 kl=0.189 lm_ema=9.70 cx_ema=3.89] | gif[α=0.0289 p=0.569 gap=3.55 ood_ema=10.96 ood_ce=10.21 iso_w=0.0057 ls=0.050 div=0.000] | gif7[dgn=0.873 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.00 bpp=5.93e-08 erank=5.3 uni=2.09]
+step   940 | loss 7.7072 | lm 4.5077 | ppl 90.7 | gnorm 3.186 | lr 1.96e-04 | 580 tok/s | Φ 0.648 | λ₁ 0.075 | ign 0.79 | mesoLG 0.45 | troph 8/8 μ2.52 | NT[DA=0.08 NE=0.13 5HT=0.19 ACh=0.13 eCB=0.05 Glu=0.43 GABA=0.18] | osc[δ=0.401 θ=0.259 γ=0.341] | em[C2:ρ=0.50/τ=0.70/s=0.79 C4:Q=-0.5 W=1 pl=255 C3:pc=0.167 VBB:β=1.01 σ=0.4403 kl=38304.012 C5:lat=1.00 C6:pac=0.03] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.503 inh=0.000 λ=0.812 kl=0.209 lm_ema=11.08 cx_ema=3.79] | gif[α=0.0290 p=0.572 gap=1.00 ood_ema=10.96 ood_ce=10.21 iso_w=0.0057 ls=0.001 div=0.000] | gif7[dgn=0.843 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.05 NE×0.97 T×0.95 LR×0.98] | trunk[budget=0.00 bpp=6.45e-08 erank=5.5 uni=2.25]
+step   960 | loss 7.4028 | lm 4.1709 | ppl 64.8 | gnorm 3.051 | lr 1.95e-04 | 602 tok/s | Φ 0.546 | λ₁ 0.075 | ign 0.83 | mesoLG 0.50 | troph 8/8 μ2.54 | NT[DA=0.11 NE=0.11 5HT=0.20 ACh=0.10 eCB=0.06 Glu=0.43 GABA=0.29] | osc[δ=0.419 θ=0.258 γ=0.324] | em[C2:ρ=0.67/τ=0.77/s=0.83 C4:Q=-0.5 W=1 pl=255 C3:pc=0.213 VBB:β=1.01 σ=0.3717 kl=38305.176 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.503 inh=0.000 λ=0.790 kl=0.293 lm_ema=10.26 cx_ema=4.00] | gif[α=0.0292 p=0.576 gap=1.41 ood_ema=10.96 ood_ce=10.21 iso_w=0.0058 ls=0.002 div=0.001] | gif7[dgn=0.854 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.05 NE×0.97 T×0.95 LR×0.98] | trunk[budget=0.00 bpp=5.24e-08 erank=4.4 uni=2.37]
+step   980 | loss 7.8703 | lm 4.6487 | ppl 104.4 | gnorm 2.417 | lr 2.04e-04 | 589 tok/s | Φ 0.686 | λ₁ 0.075 | ign 0.85 | mesoLG 0.47 | troph 8/8 μ2.50 | NT[DA=0.04 NE=0.11 5HT=0.20 ACh=0.09 eCB=0.04 Glu=0.36 GABA=0.30] | osc[δ=0.327 θ=0.258 γ=0.414] | em[C2:ρ=0.73/τ=0.88/s=0.85 C4:Q=0.5 W=1 pl=255 C3:pc=0.229 VBB:β=1.01 σ=0.2698 kl=38303.441 C5:lat=1.58 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.503 inh=0.000 λ=0.673 kl=0.146 lm_ema=8.29 cx_ema=4.32] | gif[α=0.0300 p=0.591 gap=14.11 ood_ema=10.96 ood_ce=10.21 iso_w=0.0059 ls=0.050 div=0.000] | gif7[dgn=0.900 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.05 NE×0.97 T×0.95 LR×0.98] | trunk[budget=0.00 bpp=6.59e-08 erank=5.1 uni=2.20]
+step  1000 | loss 8.1138 | lm 4.6351 | ppl 103.0 | gnorm 3.100 | lr 2.04e-04 | 540 tok/s | Φ 0.628 | λ₁ 0.075 | ign 0.85 | mesoLG 0.51 | troph 8/8 μ2.44 | NT[DA=0.03 NE=0.11 5HT=0.19 ACh=0.13 eCB=0.03 Glu=0.29 GABA=0.17] | osc[δ=0.329 θ=0.260 γ=0.411] | em[C2:ρ=0.50/τ=0.96/s=0.85 C4:Q=-0.5 W=1 pl=255 C3:pc=0.204 VBB:β=1.01 σ=0.3368 kl=38302.996 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.503 inh=0.000 λ=0.833 kl=0.215 lm_ema=8.54 cx_ema=3.75] | gif[α=0.0337 p=0.667 gap=11.45 ood_ema=10.81 ood_ce=9.40 iso_w=0.0067 ls=0.050 div=0.000] | gif7[dgn=0.850 lr×1.000 klf=0.0] | hpa[load=0.05 cort=0.05 NE×0.97 T×0.95 LR×0.98] | trunk[budget=0.00 bpp=5.07e-08 erank=5.5 uni=1.68]
