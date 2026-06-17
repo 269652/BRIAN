@@ -88,6 +88,15 @@ training {
     stochastic_depth: 0.0      # was 0.1  â€” reduces effective depth
     z_loss: 0.0001             # keep â€” cheap PaLM-style logit stabiliser
     llrd: 1.0                  # was 0.85 â€” LLRD is for FINE-TUNING, not pretrain
+    # GIF-7: Homeostatic Gradient Equilibrium -- stabilize optimization dynamics.
+    # A) Divisive grad norm (cortical gain control): smooth replacement for hard clip.
+    divisive_grad_c: 5.0
+    # B) Loss-variance metaplastic damping (BCM rule): damp LR when loss oscillates.
+    loss_var_window: 64
+    loss_var_min_mult: 0.1
+    # C) VBB KL floor (anti-collapse guard): prevent posterior collapse.
+    vbb_kl_floor: 1000.0
+    vbb_kl_floor_gamma: 0.01
     pct_trunk:     0.0
     pct_strength:  0.0
     # â”€â”€ HPB Phases 1-5 â€” novel-topology mechanisms ACTIVATED â”€â”€
