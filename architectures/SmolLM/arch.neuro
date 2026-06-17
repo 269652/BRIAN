@@ -730,6 +730,7 @@ training {
         # â”€â”€ WARMUP RAMP â€” RESTORED 2026-06-17 â”€â”€
         warmup_steps: 2000
         activation_step: 4000
+    isotropy_activation_step: 1000   # erank guard: whitening fires ~3000 steps before DAR/PCC
 
         # warmup_steps controlled a linear 0â†’1 ramp on all aux loss
         # contributions. With every intervention disabled in this

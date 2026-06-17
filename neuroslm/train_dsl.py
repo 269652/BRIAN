@@ -834,7 +834,9 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
     trunk_str = ""
     to_keys = ("trunk_opt_grad_budget", "trunk_opt_bits_per_param",
                "trunk_opt_effective_rank", "trunk_opt_pac_bayes_bound",
-               "trunk_opt_layer_uniformity")
+               "trunk_opt_layer_uniformity",
+               "trunk_opt_power_alpha", "trunk_opt_power_r2",
+               "trunk_opt_dpr")
     to_parts = []
     if m.get("trunk_opt_grad_budget") is not None:
         to_parts.append(f"budget={m['trunk_opt_grad_budget']:.2f}")
@@ -846,6 +848,15 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
         to_parts.append(f"pac≤{m['trunk_opt_pac_bayes_bound']:.3f}")
     if m.get("trunk_opt_layer_uniformity") is not None:
         to_parts.append(f"uni={m['trunk_opt_layer_uniformity']:.2f}")
+    # Spectral power-law geometry (novel invariant — biological 1/f signature).
+    # α ≈ 1.0 + R² > 0.9 means the trunk has crystallised onto the
+    # cortical scale-free regime; α >> 2 signals bottleneck collapse.
+    if m.get("trunk_opt_power_alpha") is not None:
+        to_parts.append(f"α={m['trunk_opt_power_alpha']:.2f}")
+    if m.get("trunk_opt_power_r2") is not None:
+        to_parts.append(f"R²={m['trunk_opt_power_r2']:.2f}")
+    if m.get("trunk_opt_dpr") is not None:
+        to_parts.append(f"PR={m['trunk_opt_dpr']:.1f}")
     if to_parts:
         trunk_str = " | trunk[" + " ".join(to_parts) + "]"
 

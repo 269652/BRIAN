@@ -634,6 +634,10 @@ class BRIANHarness(nn.Module):
         # LM-only gradient norm snapshot (Phase 1A: grad_budget).
         # Set by train_step before aux-loss backward contributions arrive.
         self._lm_grad_norm_snapshot: float = 0.0
+        # Total (joint) loss value for the most recent train_step.
+        # Used by TrunkOptMonitor to compute the loss-space budget proxy
+        # when a true LM-only backward is not available.
+        self._last_total_loss_value: float = 0.0
 
         # ── Cortex fusion: distillation + NT-gated α state ──
         # Slot A (KL-distillation) and slot C (NT-mediated gating) are
@@ -763,6 +767,7 @@ class BRIANHarness(nn.Module):
         # TRUNK-OPT monitor (Phase 1)
         h._trunk_opt_monitor = None
         h._lm_grad_norm_snapshot = 0.0
+        h._last_total_loss_value = 0.0
         h._last_pre_fusion_lm_logits = None
         h._last_pre_fusion_cortex_logits = None
         h._lm_loss_ema = 0.0
@@ -2900,6 +2905,8 @@ class BRIANHarness(nn.Module):
         # while loss is still near the random-init ln(V) (early-init
         # bug fix from run 38608948).
         loss_f = float(loss.detach().item())
+        # Store for TrunkOptMonitor loss-space budget proxy.
+        self._last_total_loss_value = loss_f
 
         # ── GIF-7B: feed loss into the variance damper ──
         if self._loss_var_damper is not None:

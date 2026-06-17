@@ -796,18 +796,36 @@ class RegularizationController(nn.Module):
         # AFTER this step, measured from (global_step - activation_step).
         act = int(getattr(self.cfg, "activation_step", 0))
         gs  = global_step if global_step is not None else int(self._reg_step.item())
+        # Per-intervention override for isotropy (rank-collapse guard).
+        # isotropy_activation_step: -1 → use global act; ≥ 0 → fires early.
+        iso_act_raw = int(getattr(self.cfg, "isotropy_activation_step", -1))
+        iso_act = iso_act_raw if iso_act_raw >= 0 else act
         if act > 0 and gs < act:
             # State-accumulating sub-systems (PCC buffer, mixture probe)
             # should still observe but contribute zero to the loss.
             self.adaptive_mixture.observe_logits(lm_logits)
             self._reg_step += 1
+
+            # Early-isotropy: whitening can fire before global gate opens
+            # (protects against erank collapse during the LM-only window).
+            if self.cfg.isotropy.enabled and iso_act >= 0 and gs >= iso_act:
+                w = int(self.cfg.warmup_steps)
+                if w <= 0:
+                    iso_mult = 1.0
+                else:
+                    post_iso = gs - iso_act
+                    iso_mult = min(1.0, post_iso / float(w))
+                iso_loss = self.isotropy(h) * iso_mult
+            else:
+                iso_loss = zero
+
             return {
                 "dar":         zero,
                 "weighted_ce": per_sample_ce.mean(),
                 "pcc":         zero,
-                "isotropy":    zero,
+                "isotropy":    iso_loss,
                 "cmd":         zero,
-                "total":       zero,
+                "total":       iso_loss,
                 "warmup_mult": lm_logits.new_tensor(0.0),
             }
 

@@ -292,6 +292,21 @@ class RegularizationConfig:
     Set to 0 (default) for legacy behaviour: interventions fire from
     step 0 with only the warmup ramp for protection.
     """
+    isotropy_activation_step: int = -1
+    """Per-intervention override for isotropy (whitening/rank collapse guard).
+
+    -1 (default): use the global activation_step value.
+    >= 0: isotropy fires independently at this step, even before the
+    global activation_step gate opens for DAR/PCC/CMD.
+
+    Rationale: representation rank collapse (erank → 1) can happen
+    during the Capacity-First window when all aux losses are gated off.
+    The whitening loss is low-weight and safe to fire early; other
+    interventions (DAR, PCC) require more LM capacity before they help.
+
+    Recommended for SmolLM: isotropy_activation_step: 1000
+    (fires after initial stabilisation, ~1500 steps before DAR/PCC).
+    """
 
     def any_enabled(self) -> bool:
         return any([
@@ -333,6 +348,8 @@ def parse_regularization_block(body: str) -> RegularizationConfig:
         cfg.warmup_steps = int(props["warmup_steps"])
     if "activation_step" in props:
         cfg.activation_step = int(props["activation_step"])
+    if "isotropy_activation_step" in props:
+        cfg.isotropy_activation_step = int(props["isotropy_activation_step"])
     if "dar" in props:
         cfg.dar = _parse_dar(props["dar"])
     if "pcc" in props:

@@ -11,6 +11,8 @@ each assertion pass.  Covers:
     P1D  PACBayesBound: upper-bounds empirical OOD CE (statistical)
     P1E  SharpnessProbe: sharpness measurable + decreases under SAM
     P1F  EffectiveRankProbe: rank ≥ 1 for non-degenerate hidden states
+    P1G  SpectralPowerLawProbe: (α, R², D_PR) intrinsic invariants
+         (rotation- and scale-invariant — biological 1/f signature)
 
   Phase 2 — activation_step (Capacity-First protocol)
     P2A  RegularizationController honours activation_step = 0 (zero loss)
@@ -374,6 +376,171 @@ class TestEffectiveRankProbe:
 
 
 # ═════════════════════════════════════════════════════════════════════
+# Phase 1G  –  SpectralPowerLawProbe  (novel intrinsic geometric inv.)
+# ═════════════════════════════════════════════════════════════════════
+
+class TestSpectralPowerLawProbe:
+    """Power-law spectrum geometry (α, R², D_PR) of hidden activations.
+
+    Properties under test:
+      P1G-1  exact power-law σ_i = i^{-α} → recovers α and R² = 1
+      P1G-2  white-noise random matrix → high R² requires bumpy spectrum
+      P1G-3  rank-1 matrix → graceful (no NaN), D_PR ≈ 1
+      P1G-4  scale invariance: H → c·H leaves (α, R², D_PR) unchanged
+      P1G-5  orthogonal invariance: H → H·Q leaves (α, R², D_PR) unchanged
+      P1G-6  participation ratio bounds: 1 ≤ D_PR ≤ min(N, d)
+      P1G-7  monitor wiring: trunk_opt_power_alpha appears in _metrics
+    """
+
+    def _import(self):
+        from neuroslm.emergent.trunk_opt import SpectralPowerLawProbe
+        return SpectralPowerLawProbe
+
+    def test_import(self):
+        assert callable(self._import())
+
+    def test_perfect_powerlaw_recovers_alpha(self):
+        """σ_i = i^{-α} → fit recovers α to within 1e-3 and R² ≈ 1."""
+        SPL = self._import()
+        # Build H with a chosen σ vector.  Take random U, V from O(d)
+        # and form H = U · diag(σ) · V^T → svdvals(H) = σ (up to sign).
+        alpha_true = 1.4
+        K = 40
+        rank = torch.arange(1, K + 1, dtype=torch.float32)
+        sigma = rank.pow(-alpha_true)
+        # H is K × K; svd returns σ
+        Q1, _ = torch.linalg.qr(torch.randn(K, K))
+        Q2, _ = torch.linalg.qr(torch.randn(K, K))
+        H = Q1 @ torch.diag(sigma) @ Q2.t()
+        out = SPL.compute(H, k_max=K)
+        assert out["alpha"] == pytest.approx(alpha_true, abs=1e-2), \
+            f"recovered α = {out['alpha']}, expected {alpha_true}"
+        assert out["r2"] > 0.999, \
+            f"R² = {out['r2']} for perfect power-law (expected ≈ 1)"
+
+    def test_rank1_graceful(self):
+        """Rank-1 matrix → finite output, D_PR ≈ 1."""
+        SPL = self._import()
+        v = torch.randn(16, 1)
+        H = v @ torch.randn(1, 16)  # rank-1, well-defined SV
+        out = SPL.compute(H)
+        # All fields finite (no NaN/Inf)
+        for k, val in out.items():
+            assert math.isfinite(val), f"{k} = {val} not finite"
+        # D_PR ≈ 1 because only one nonzero σ
+        assert out["d_pr"] == pytest.approx(1.0, abs=0.1), \
+            f"D_PR = {out['d_pr']} for rank-1 (expected ≈ 1)"
+
+    def test_zero_matrix_graceful(self):
+        """All-zero matrix → defaults, no NaN, no crash."""
+        SPL = self._import()
+        H = torch.zeros(16, 16)
+        out = SPL.compute(H)
+        assert out["alpha"] == 0.0
+        assert out["r2"] == 0.0
+        assert out["d_pr"] >= 1.0
+        for k, val in out.items():
+            assert math.isfinite(val)
+
+    def test_scale_invariance(self):
+        """α, R², D_PR are invariant under H → c·H for any c > 0.
+
+        Provable: σ_i(cH) = c·σ_i(H), so log σ shifts vertically.
+        OLS slope is unchanged → α invariant.
+        Sum-of-squares ratios scale as c⁴/c⁴ → D_PR invariant.
+        """
+        SPL = self._import()
+        torch.manual_seed(42)
+        H = torch.randn(64, 32)
+        out1 = SPL.compute(H)
+        out2 = SPL.compute(H * 17.3)        # arbitrary positive scaling
+        out3 = SPL.compute(H * 1e-6)        # near-degenerate scaling
+        for key in ("alpha", "r2", "d_pr"):
+            assert out1[key] == pytest.approx(out2[key], abs=1e-4), \
+                f"{key} not scale-invariant: {out1[key]} vs {out2[key]}"
+            # Very small scaling can hit the relative-threshold filter;
+            # allow a larger tolerance there but enforce qualitative match.
+            assert out1[key] == pytest.approx(out3[key], abs=1e-2), \
+                f"{key} broke under tiny scaling: {out1[key]} vs {out3[key]}"
+
+    def test_orthogonal_invariance(self):
+        """α, R², D_PR are invariant under H → H·Q for Q ∈ O(d).
+
+        Provable: σ(HQ) = σ(H) for orthogonal Q → all three are functions
+        of the singular spectrum, hence orthogonal-invariant.
+        """
+        SPL = self._import()
+        torch.manual_seed(7)
+        H = torch.randn(64, 32)
+        Q, _ = torch.linalg.qr(torch.randn(32, 32))
+        out_H  = SPL.compute(H)
+        out_HQ = SPL.compute(H @ Q)
+        for key in ("alpha", "r2", "d_pr"):
+            assert out_H[key] == pytest.approx(out_HQ[key], abs=1e-4), \
+                f"{key} broke orthogonal invariance: " \
+                f"{out_H[key]} vs {out_HQ[key]}"
+
+    def test_participation_ratio_bounds(self):
+        """1 ≤ D_PR ≤ K for any non-zero matrix."""
+        SPL = self._import()
+        torch.manual_seed(1)
+        for shape in [(64, 32), (32, 64), (16, 16), (8, 128)]:
+            H = torch.randn(*shape)
+            out = SPL.compute(H)
+            K_eff = min(shape)
+            assert 1.0 - 1e-6 <= out["d_pr"], \
+                f"D_PR={out['d_pr']} below 1 for shape {shape}"
+            assert out["d_pr"] <= K_eff + 1e-3, \
+                f"D_PR={out['d_pr']} exceeds K={K_eff} for shape {shape}"
+
+    def test_uniform_spectrum_high_dpr(self):
+        """Identity → uniform σ → D_PR ≈ K (maximum)."""
+        SPL = self._import()
+        K = 24
+        H = torch.eye(K)  # σ = (1, 1, ..., 1)
+        out = SPL.compute(H, k_max=K)
+        # Uniform spectrum → all σ_i equal → D_PR = K and OLS slope = 0
+        assert out["d_pr"] == pytest.approx(float(K), rel=0.05)
+        assert out["alpha"] == pytest.approx(0.0, abs=0.05), \
+            f"α={out['alpha']} for uniform spectrum (expected ≈ 0)"
+
+    def test_bottleneck_signature(self):
+        """Heavy-tailed σ_i = i^{-3} → α ≈ 3 with high R².
+
+        This is the 'bottleneck collapse' signature in the legend.
+        """
+        SPL = self._import()
+        K = 30
+        rank = torch.arange(1, K + 1, dtype=torch.float32)
+        sigma = rank.pow(-3.0)
+        Q1, _ = torch.linalg.qr(torch.randn(K, K))
+        Q2, _ = torch.linalg.qr(torch.randn(K, K))
+        H = Q1 @ torch.diag(sigma) @ Q2.t()
+        out = SPL.compute(H, k_max=K)
+        assert out["alpha"] == pytest.approx(3.0, abs=0.05)
+        assert out["r2"] > 0.99
+
+    def test_monitor_wiring_metrics_present(self):
+        """Attach monitor + run train_step → α, R², D_PR in _metrics."""
+        from neuroslm.harness import BRIANHarness
+        from neuroslm.emergent.trunk_opt import TrunkOptMonitor
+        lm = _tiny_lm()
+        h = BRIANHarness.from_language_model(lm, vocab_size=128, d_sem=32)
+        h.attach_trunk_opt_monitor(TrunkOptMonitor())
+        h.set_schedule(warmup=10, total=100)
+        ids, tgt = _fake_batch()
+        h.train_step(ids, tgt)
+        for key in ("trunk_opt_power_alpha", "trunk_opt_power_r2",
+                    "trunk_opt_dpr"):
+            assert key in h._metrics, f"missing metric: {key}"
+            val = h._metrics[key]
+            assert math.isfinite(val), f"{key}={val} not finite"
+        # Sanity bounds
+        assert 0.0 <= h._metrics["trunk_opt_power_r2"] <= 1.0
+        assert h._metrics["trunk_opt_dpr"] >= 1.0
+
+
+# ═════════════════════════════════════════════════════════════════════
 # Phase 2A-D  –  activation_step  (Capacity-First protocol)
 # ═════════════════════════════════════════════════════════════════════
 
@@ -454,6 +621,81 @@ class TestActivationStep:
         # At activation_step + warmup_steps, warmup_mult = 1.0
         assert w_end >= 1.0 - 1e-6, \
             f"warmup_mult at activation_step+warmup_steps = {w_end}, expected ≈ 1"
+
+    def test_isotropy_activation_step_fires_before_global_gate(self):
+        """isotropy_activation_step fires even when gs < global activation_step."""
+        from neuroslm.regularizers import RegularizationController
+        from neuroslm.dsl.regularization import (
+            RegularizationConfig, IsotropyConfig,
+        )
+        cfg = RegularizationConfig()
+        cfg.isotropy = IsotropyConfig(enabled=True, weight=0.005)
+        cfg.activation_step = 4000          # DAR/PCC gate
+        cfg.isotropy_activation_step = 1000  # isotropy fires much earlier
+        cfg.warmup_steps = 0                 # no ramp — full weight immediately
+        ctrl = RegularizationController(cfg, d_model=32, vocab_size=128)
+
+        h = torch.randn(2, 8, 32, requires_grad=True)
+        logits = torch.randn(2, 8, 128)
+        ce = torch.rand(2)
+
+        # Before iso_act: both should be zero
+        out_pre = ctrl.collect_aux(h=h, lm_logits=logits,
+                                   per_sample_ce=ce, domain_labels=None,
+                                   global_step=500)
+        assert float(out_pre["isotropy"].item()) == pytest.approx(0.0, abs=1e-9)
+        assert float(out_pre["dar"].item())      == pytest.approx(0.0, abs=1e-9)
+
+        # At iso_act: isotropy fires, DAR/PCC still zero
+        out_iso = ctrl.collect_aux(h=h, lm_logits=logits,
+                                   per_sample_ce=ce, domain_labels=None,
+                                   global_step=1000)
+        assert float(out_iso["isotropy"].item()) > 0.0, \
+            "isotropy should be non-zero at isotropy_activation_step"
+        assert float(out_iso["dar"].item()) == pytest.approx(0.0, abs=1e-9), \
+            "DAR should still be gated before global activation_step"
+        assert float(out_iso["warmup_mult"].item()) == pytest.approx(0.0, abs=1e-9), \
+            "Global warmup_mult still shows 0 (DAR/PCC gate not open)"
+
+    def test_isotropy_default_neg1_uses_global_gate(self):
+        """isotropy_activation_step=-1 (default) falls back to global gate."""
+        from neuroslm.regularizers import RegularizationController
+        from neuroslm.dsl.regularization import (
+            RegularizationConfig, IsotropyConfig,
+        )
+        cfg = RegularizationConfig()
+        cfg.isotropy = IsotropyConfig(enabled=True, weight=0.005)
+        cfg.activation_step = 4000
+        cfg.isotropy_activation_step = -1   # default: use global
+        cfg.warmup_steps = 0
+        ctrl = RegularizationController(cfg, d_model=32, vocab_size=128)
+
+        h = torch.randn(2, 8, 32, requires_grad=True)
+        logits = torch.randn(2, 8, 128)
+        ce = torch.rand(2)
+
+        # At step 1000 (< 4000): isotropy must be zero because iso_act = -1 → uses 4000
+        out = ctrl.collect_aux(h=h, lm_logits=logits,
+                               per_sample_ce=ce, domain_labels=None,
+                               global_step=1000)
+        assert float(out["isotropy"].item()) == pytest.approx(0.0, abs=1e-9), \
+            "isotropy_activation_step=-1 should use global gate (4000); step 1000 must be zero"
+
+    def test_budget_loss_proxy_nonzero(self):
+        """P2E: budget metric is >0 after a train_step (loss-space proxy)."""
+        from neuroslm.harness import BRIANHarness
+        from neuroslm.emergent.trunk_opt import TrunkOptMonitor
+        lm = _tiny_lm()
+        h = BRIANHarness.from_language_model(lm, vocab_size=128, d_sem=32)
+        h.attach_trunk_opt_monitor(TrunkOptMonitor())
+        h.set_schedule(warmup=10, total=100)
+        ids, tgt = _fake_batch()
+        h.train_step(ids, tgt)
+        budget = h._metrics.get("trunk_opt_grad_budget", 0.0)
+        assert budget > 0.0, \
+            f"budget should be >0 via loss-space proxy; got {budget}"
+        assert budget <= 1.0 + 1e-6, \
+            f"budget must be <=1; got {budget}"
 
 
 # ═════════════════════════════════════════════════════════════════════
