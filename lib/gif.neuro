@@ -159,3 +159,76 @@ export equation gif_cosine_lm_head {
     params: [h, W, tau],
     formula: "z_i = tau * dot(h / ||h||, W_i / ||W_i||)"
 }
+
+# ─────────────────────────────────────────────────────────────────────
+# GIF-7A: Divisive Gradient Normalization (Cortical Gain Control)
+# ─────────────────────────────────────────────────────────────────────
+# Replaces hard gradient clipping with smooth divisive normalization,
+# the same functional form as V1 contrast gain control (Heeger, 1992):
+#
+#   g'(t) = g(t) · c / √(c² + ||g(t)||²)
+#
+# c = semi-saturation constant (gnorm at which signal is halved).
+# Properties: C∞ smooth (no discontinuity), monotonically compressive,
+# scale ≈ 1 for ||g|| << c, scale ≈ c/||g|| for ||g|| >> c.
+#
+# Root cause addressed: Hard clip at gnorm >> threshold discards 97% of
+# gradient information and creates a discontinuity that miscalibrates
+# Adam's momentum/variance estimates across the clip boundary.
+#
+# Python backing: neuroslm/emergent/gif7.py::divisive_grad_normalize
+# Contracts: tests/dsl/test_gif7_gradient_equilibrium.py
+
+export equation gif_divisive_grad_norm {
+    params: [g, c],
+    formula: "g_prime = g * c / sqrt(c^2 + ||g||^2)"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# GIF-7B: Loss-Variance Metaplastic Damping (BCM Rule)
+# ─────────────────────────────────────────────────────────────────────
+# Modulates effective learning rate by inverse loss variance, implementing
+# a sliding plasticity threshold (Bienenstock-Cooper-Munro, 1982):
+#
+#   lr_eff(t) = lr_sched(t) · min(1, σ_ref / σ_L(t))
+#
+# σ_ref = loss std during late warmup (the "healthy" reference).
+# σ_L(t) = running loss std over window of k steps.
+#
+# When loss oscillates wildly (high σ), LR automatically drops.
+# When stable (σ ≈ σ_ref), LR runs at full schedule.
+#
+# Root cause addressed: Train PPL oscillating 3.7× (26→95) due to batch
+# difficulty variance after VBB collapse. Gap ratio = ood/train becomes
+# noise-dominated when train oscillates this much.
+#
+# Python backing: neuroslm/emergent/gif7.py::LossVarianceDamper
+# Contracts: tests/dsl/test_gif7_gradient_equilibrium.py
+
+export equation gif_loss_variance_damping {
+    params: [lr_sched, sigma_ref, sigma_L, min_mult],
+    formula: "lr_eff = lr_sched * max(min_mult, min(1, sigma_ref / sigma_L))"
+}
+
+# ─────────────────────────────────────────────────────────────────────
+# GIF-7C: VBB KL Floor (Anti-Collapse Guard)
+# ─────────────────────────────────────────────────────────────────────
+# Prevents VBB posterior collapse by penalizing low KL:
+#
+#   L_floor = γ · max(0, KL_min − KL(q||p))²
+#
+# Symmetric quadratic pushes KL back up when it drops below floor.
+# When KL is healthy (above floor), penalty is zero.
+#
+# Root cause addressed: VBB KL catastrophically collapsed from 38000
+# to ~100 at step ~2040. Once collapsed, the bottleneck passes
+# everything unconstrained, providing zero regularization.
+# The model then overfits freely (train PPL races ahead).
+#
+# Python backing: neuroslm/emergent/gif7.py::vbb_kl_floor_loss
+# Contracts: tests/dsl/test_gif7_gradient_equilibrium.py
+
+export equation gif_vbb_kl_floor {
+    params: [kl, kl_min, gamma],
+    formula: "L_floor = gamma * max(0, kl_min - kl)^2"
+}

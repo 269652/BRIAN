@@ -2,7 +2,7 @@
 
 > *A 146.9M trainable-parameter trunk language model (~980M additional frozen expert parameters) optimized for integrated information (Φ) and mechanistic consciousness-like properties. Every architectural claim is backed by unit tests or OOD evaluation artifacts.*
 
-[![tests](https://img.shields.io/badge/tests-3059%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-3093%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
@@ -14,7 +14,7 @@
 BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained causal-LM cortex experts (`smollm2_360m` for general, `microsoft/CodeGPT-small-py` for code, `Qwen/Qwen2.5-0.5B` for reasoning).
 
 **Current status:**
-- ✅ **Layer A (mechanisms):** 20+ core properties verified via 3059 unit tests across `tests/` (`tests/dsl/` alone runs 882). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
+- ✅ **Layer A (mechanisms):** 20+ core properties verified via 3093 unit tests across `tests/` (`tests/dsl/` alone runs 916). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
 - 🟡 **Layer B (generalization):** Best variant B4 achieves **2.87 gap_ratio** on WikiText-103-v1 OOD (53% better than flat-transformer baseline at 6.12). Best run: train_ppl 102.9, OOD_ppl 295.9. See [`docs/findings.md`](docs/findings.md) for full Layer B arc.
 
 Code, math, and tensor shapes: [`docs/architecture.md`](docs/architecture.md). Full evidence ledger: [`docs/findings.md`](docs/findings.md).
@@ -105,7 +105,7 @@ modulation dopamine -> pfc {
 }
 ```
 
-**Why?** Hand-written PyTorch is error-prone for biologically-plausible models; math specs are checkable. The DSL codegen produces torch modules with **byte-equivalent forward passes** (verified by 882 DSL tests in `tests/dsl/`) and enables symbolic analysis (fixed-point, stability, sensitivity). The DNA layer (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) supports **module bundling with source maps** and **byte-identity round-trip** verification (`tests/test_dna_roundtrip_byte_identity.py`).
+**Why?** Hand-written PyTorch is error-prone for biologically-plausible models; math specs are checkable. The DSL codegen produces torch modules with **byte-equivalent forward passes** (verified by 916 DSL tests in `tests/dsl/`) and enables symbolic analysis (fixed-point, stability, sensitivity). The DNA layer (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) supports **module bundling with source maps** and **byte-identity round-trip** verification (`tests/test_dna_roundtrip_byte_identity.py`).
 
 **Folder layout:** `arch.neuro` (package config + wiring), `modules/*.neuro` (per-region specs), `lib/` (shared mechanics). Import paths: `@/` = absolute, `./` = relative.
 
@@ -139,7 +139,7 @@ All 15 core mechanisms confirmed to implement as specified:
 | **H20** — `TheoryOfMindIR` represents nested agent beliefs as stalk vectors over a sheaf | `tests/thsd/test_theory_of_mind_ir.py` (9) | ✅ `d_belief`, `max_agents`, `belief_decay ∈ [0,1]`, `order ≥ 1`, `false_belief_threshold ∈ [0,1]` all validated; stalk dimension scales with recursion `order` (k-th order ToM has `stalk_dim = d_belief × max_agents^(k-1)`). |
 | **H21** — Per-position abstain logit unlocks multi-cortex fusion | `tests/training/test_lm_expert_abstain_safety.py` (5) | ✅ Replacing flat `_ABSTAIN_LOGIT = -1e4` with `abstain = max(mapped_logits) − ln(V_trunk)` keeps unmapped trunk-vocab slots at uniform baseline. Standalone-cortex CE on a random batch drops from 17.37 nats (pre-fix) to 4.03 nats (post-fix); on deploy 40925851 the fusion gate `α_eff` stays at 0.50 throughout instead of collapsing to 0 → **14× train-PPL / 17× OOD-PPL improvement** vs the broken precursor 40923107. |
 
-**Run all:** `py -3 -m pytest tests/ -v` (3059 tests, ~382 seconds on CPU)
+**Run all:** `py -3 -m pytest tests/ -v` (3093 tests, ~386 seconds on CPU)
 
 ### Layer B — OOD Generalization (The Open Question) 🟡
 
@@ -163,7 +163,7 @@ Evaluated on WikiText-103-v1 held-out set. **Best result: B4 (abstain-fix + mult
 
 ### Implementation Status
 
-- **3059 tests passing** in `tests/` (~382s on CPU); breakdown: **882 in `tests/dsl/`** (DSL parsing + codegen + byte-equivalence), **294 in `tests/training/`** (harness, multi-cortex, distillation, gating), plus verification, THSD, evolution, narrative, qualia, neurochem subsuites.
+- **3093 tests passing** in `tests/` (~386s on CPU); breakdown: **916 in `tests/dsl/`** (DSL parsing + codegen + byte-equivalence), **294 in `tests/training/`** (harness, multi-cortex, distillation, gating), plus verification, THSD, evolution, narrative, qualia, neurochem subsuites.
 - Training with optimizer-partitioned checkpoint streaming
 - DSL-based architecture specs compile to byte-equivalent PyTorch models with **source maps** (`neuroslm/compiler/module_bundler.py`) and **byte-identity round-trip** verification
 - Real-time architecture evolution via RAID-5 protected DNA mutations, gated by **`ImprovementGate`** (Welch's t-test) — no mutation lands without statistically significant fitness gain

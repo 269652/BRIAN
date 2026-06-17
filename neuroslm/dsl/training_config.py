@@ -779,6 +779,21 @@ class TrainingConfig:
     # a learnable temperature (init √d_model). Bounds logits in [-τ, +τ],
     # preventing norm-mediated overfitting. False = standard linear head.
     cosine_head: bool = False
+    # ── GIF-7: Homeostatic Gradient Equilibrium (Jun 2026) ───────────
+    # Part A: Divisive gradient normalization (cortical gain control).
+    # Replaces hard clip_grad_norm_ with smooth g' = g * c/√(c²+||g||²).
+    # 0 = disabled (use standard grad_clip). Recommended: 5.0.
+    divisive_grad_c: float = 0.0
+    # Part B: Loss-variance metaplastic damping (BCM rule).
+    # Modulates LR by min(1, σ_ref/σ_L). 0 = disabled.
+    # Recommended: 64 (window size in steps).
+    loss_var_window: int = 0
+    loss_var_min_mult: float = 0.1
+    # Part C: VBB KL floor (anti-collapse guard).
+    # Quadratic penalty when VBB KL < floor. 0 = disabled.
+    # Recommended: 1000.0 for 30M scale (ensures bottleneck stays active).
+    vbb_kl_floor: float = 0.0
+    vbb_kl_floor_gamma: float = 0.01
     # Stage 11 OOD push: layer-wise LR decay (ULMFiT / DeBERTa). Top
     # transformer blocks get a smaller LR than bottom ones:
     #     lr_i = base_lr * llrd_factor^(depth - 1 - i)
@@ -1080,6 +1095,17 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.z_loss = float(props["z_loss"])
     if "cosine_head" in props:
         cfg.cosine_head = _parse_bool(props["cosine_head"])
+    # ── GIF-7: Homeostatic Gradient Equilibrium ──
+    if "divisive_grad_c" in props:
+        cfg.divisive_grad_c = float(props["divisive_grad_c"])
+    if "loss_var_window" in props:
+        cfg.loss_var_window = int(props["loss_var_window"])
+    if "loss_var_min_mult" in props:
+        cfg.loss_var_min_mult = float(props["loss_var_min_mult"])
+    if "vbb_kl_floor" in props:
+        cfg.vbb_kl_floor = float(props["vbb_kl_floor"])
+    if "vbb_kl_floor_gamma" in props:
+        cfg.vbb_kl_floor_gamma = float(props["vbb_kl_floor_gamma"])
     if "llrd" in props:
         cfg.llrd = float(props["llrd"])
     if "pc_reentry_weight" in props:
