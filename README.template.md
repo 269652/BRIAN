@@ -124,17 +124,29 @@ Run all: `py -3 -m pytest tests/ -v` (~${TEST_RUNTIME_SECONDS}s on CPU).
 
 Evaluated on WikiText-103-v1 held-out set. **gap\_ratio = OOD\_ppl / train\_ppl** (lower is better):
 
-| Variant | Params | Steps | train\_ppl | OOD\_ppl | gap\_ratio |
-|---------|--------|-------|-----------|---------|-----------|
-| ${B0_VARIANT_NAME} | ${B0_TRAINABLE} | ${B0_STEPS} | ${B0_TRAIN_PPL} | ${B0_OOD_PPL} | **${B0_GAP_RATIO}** |
-| BRIAN B1 (trunk + recursive) | ${B1_TRAINABLE} | ${B1_STEPS} | ${B1_TRAIN_PPL} | ${B1_OOD_PPL} | ${B1_GAP_RATIO} |
-| BRIAN B2 (trunk + ReZero) | ${B2FIX_TRAINABLE} | ${B2FIX_STEPS} | ${B2FIX_TRAIN_PPL} | ${B2FIX_OOD_PPL} | ${B2FIX_GAP_RATIO} |
-| BRIAN B3 (PCT trunk) | ${B3_TRAINABLE} | ${B3_STEPS} | ${B3_TRAIN_PPL} | ${B3_OOD_PPL} | ${B3_GAP_RATIO} |
-| **${B4_VARIANT_NAME}** | **${B4_TRAINABLE}** | **${B4_STEPS}** | **${B4_TRAIN_PPL}** | **${B4_OOD_PPL}** | **${B4_GAP_RATIO}** |
+| Variant | Params | Steps | train\_ppl | OOD\_ppl | gap\_ratio | Log |
+|---------|--------|-------|-----------|---------|-----------|-----|
+| ${B0_VARIANT_NAME} | ${B0_TRAINABLE} | ${B0_STEPS} | ${B0_TRAIN_PPL} | ${B0_OOD_PPL} | **${B0_GAP_RATIO}** | - |
+| BRIAN B1 (trunk + recursive) | ${B1_TRAINABLE} | ${B1_STEPS} | ${B1_TRAIN_PPL} | ${B1_OOD_PPL} | ${B1_GAP_RATIO} | - |
+| BRIAN B2 (trunk + ReZero) | ${B2FIX_TRAINABLE} | ${B2FIX_STEPS} | ${B2FIX_TRAIN_PPL} | ${B2FIX_OOD_PPL} | ${B2FIX_GAP_RATIO} | - |
+| BRIAN B3 (PCT trunk) | ${B3_TRAINABLE} | ${B3_STEPS} | ${B3_TRAIN_PPL} | ${B3_OOD_PPL} | ${B3_GAP_RATIO} | - |
+| **${B4_VARIANT_NAME}** | **${B4_TRAINABLE}** | **${B4_STEPS}** | **${B4_TRAIN_PPL}** | **${B4_OOD_PPL}** | **${B4_GAP_RATIO}** | ${LOG_LINK:B4_LOG} |
 
 ${LAYER_B_BEST_ROW} is the first variant under ${B4_GAP_THRESHOLD} gap\_ratio — a ${LAYER_B_IMPROVEMENT_PCT}% improvement over the flat baseline — achieved at ${B4_COMPUTE_RATIO_VS_B0} fewer steps. Absolute OOD PPL (${B4_OOD_PPL}) still trails the baseline (${B0_OOD_PPL}), but the baseline ran ${B0_STEPS} steps. Matched-compute comparison is the immediate next experiment.
 
-> ⚠️ gap\_ratio drifts upward within B4 (${B4_GAP_STEP500} → ${B4_GAP_RATIO} from step 500 → ${B4_STEPS}). The 10k follow-up run will distinguish plateau from accelerating overfit. See [`docs/findings.md#H21`](docs/FINDINGS.md#h21--per-position-abstain-logit-fixes-catastrophic-cortex-ce-2026-06-14).
+> ⚠️ gap\_ratio drifts upward within B4 (${B4_GAP_STEP500} → ${B4_GAP_RATIO} from step 500 → ${B4_STEPS}). The 10k follow-up run will distinguish plateau from accelerating overfit. See [`docs/findings.md#H21`](docs/findings.md#h21--per-position-abstain-logit-fixes-catastrophic-cortex-ce-2026-06-14).
+
+### Latest Logs
+
+**Best Run Overall (OOD / Combined Score):**
+```
+${LOG_TAIL:best:best:15}
+```
+
+**Most Recent Run (Last Checkpoint):**
+```
+${LOG_TAIL:latest:ood:15}
+```
 
 ---
 
