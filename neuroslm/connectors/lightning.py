@@ -9,7 +9,22 @@ stopped after the run completes.
 Prerequisites
 ─────────────
   pip install lightning-sdk        # Lightning AI SDK
-  lightning login                  # authenticate once (stores token)
+  # then either:
+  lightning login                  # CLI flow (writes ~/.lightning/credentials)
+  # OR set in .env / shell:
+  LIGHTNING_USER_ID=<your-username>
+  LIGHTNING_API_KEY=<your-api-key>
+
+Authentication
+──────────────
+On every ``launch()`` we call :func:`neuroslm.utils.secrets.bootstrap_secrets`
+which walks the chain ``os.environ → Colab → Kaggle → .env (CWD upward)``
+to populate ``LIGHTNING_USER_ID`` and ``LIGHTNING_API_KEY`` before the
+SDK reads them.  Friendly aliases are accepted so older ``.env`` files
+keep working:
+
+  LIGHTNING_API_KEY  ← LIGHTNING_AI, LIGHTNING_TOKEN, LIGHTNING_AUTH_TOKEN
+  LIGHTNING_USER_ID  ← LIGHTNING_USERNAME, LIGHTNING_USER
 
 Machine selection (highest precedence wins)
 ───────────────────────────────────────────
@@ -25,6 +40,13 @@ Substring match — case-insensitive. Examples that resolve to T4::
     --machine t4
     --scale t4_2k
     LIGHTNING_MACHINE=T4
+
+Teamspace selection
+───────────────────
+Optional. When the user has multiple teamspaces, pin one via
+``LIGHTNING_TEAMSPACE`` (env or ``brian.toml [deploy].teamspace``,
+threaded through ``config.extra_env``). Otherwise the SDK uses the
+user's default teamspace.
 
 Studio naming
 ─────────────
@@ -72,25 +94,79 @@ class LightningConnector(BaseConnector):
         return "lightning"
 
     def launch(self, config: DeployConfig) -> int:
+        # ── Step 1: resolve auth from .env / Colab / Kaggle / env ──
+        # Lightning SDK only inspects ``os.environ`` directly, so a
+        # token sitting in ``.env`` is invisible unless we bootstrap
+        # it into the process environment first. ``bootstrap_secrets``
+        # walks env → Colab → Kaggle → .env (CWD upward).
+        #
+        # We accept friendly aliases for the BRIAN-side ergonomics
+        # (older .env files used ``LIGHTNING_AI`` for the API key).
+        try:
+            from neuroslm.utils.secrets import bootstrap_secrets
+            bootstrap_secrets(
+                ["LIGHTNING_USER_ID", "LIGHTNING_API_KEY"],
+                aliases={
+                    # Tolerate legacy / shorthand names some users
+                    # already have in their .env from the early days.
+                    "LIGHTNING_API_KEY": (
+                        "LIGHTNING_AI",
+                        "LIGHTNING_TOKEN",
+                        "LIGHTNING_AUTH_TOKEN",
+                    ),
+                    "LIGHTNING_USER_ID": (
+                        "LIGHTNING_USERNAME",
+                        "LIGHTNING_USER",
+                    ),
+                },
+                verbose=False,
+            )
+        except Exception as exc:
+            # Secrets resolution must never crash the deploy chain — if
+            # the user has the env vars set the SDK will see them and
+            # everything works regardless.
+            print(f"[lightning] (note) secrets bootstrap skipped: "
+                  f"{type(exc).__name__}: {exc}", file=sys.stderr)
+
+        import os as _os
+        have_user = bool(_os.environ.get("LIGHTNING_USER_ID"))
+        have_key = bool(_os.environ.get("LIGHTNING_API_KEY"))
+        if not (have_user and have_key):
+            print(
+                "[lightning] missing credentials.\n"
+                "  Set both LIGHTNING_USER_ID and LIGHTNING_API_KEY\n"
+                "  (in .env, your shell, or via `lightning login`).\n"
+                "  Get them from https://lightning.ai → Profile → "
+                "API Keys.",
+                file=sys.stderr,
+            )
+            return 1
+
+        # ── Step 2: import the SDK (resilient to wheel rename) ──
         Studio, Machine, sdk_name = _import_lightning_sdk()
         if Studio is None:
             print(
                 "[lightning] lightning-sdk is not installed.\n"
                 "  pip install lightning-sdk\n"
-                "  lightning login\n"
                 "  Docs: https://lightning.ai/docs/overview/studios",
                 file=sys.stderr,
             )
             return 1
 
+        # ── Step 3: assemble launch parameters ──
         studio_name = f"brian-{config.label}" if config.label else "brian-train"
         machine = self._resolve_machine(config, Machine)
         train_cmd = self._build_command(config)
+        teamspace = config.extra_env.get("LIGHTNING_TEAMSPACE") \
+            or _os.environ.get("LIGHTNING_TEAMSPACE") \
+            or None
 
         # Loud, pre-flight summary so any failure beyond this point is
         # post-launch (cloud-side), not configuration-side.
         print(f"[lightning] SDK         : {sdk_name}")
+        print(f"[lightning] user        : {_os.environ['LIGHTNING_USER_ID']}")
         print(f"[lightning] studio      : {studio_name}")
+        print(f"[lightning] teamspace   : {teamspace or '(SDK default)'}")
         print(f"[lightning] machine     : {machine}")
         print(f"[lightning] arch        : {config.arch or '(brian.toml default)'}")
         print(f"[lightning] steps       : {config.steps}")
@@ -98,7 +174,15 @@ class LightningConnector(BaseConnector):
             print(f"[lightning] resume_from : {config.resume_from}")
         print(f"[lightning] command     : {train_cmd}")
 
-        studio = Studio(name=studio_name)
+        # ── Step 4: provision the Studio and run ──
+        # ``teamspace`` is optional — the SDK will fall back to the
+        # user's default teamspace if not given. Pass it explicitly
+        # when the user has multiple teamspaces and brian.toml /
+        # LIGHTNING_TEAMSPACE picks one.
+        studio_kwargs: dict = {"name": studio_name}
+        if teamspace:
+            studio_kwargs["teamspace"] = teamspace
+        studio = Studio(**studio_kwargs)
         studio.start(machine=machine)
         try:
             studio.run(train_cmd)

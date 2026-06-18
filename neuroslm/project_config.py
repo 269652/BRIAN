@@ -141,6 +141,14 @@ _DEFAULT_PLATFORM = "vast"
 # ``brian deploy --machine T4``.
 _DEFAULT_MACHINE = ""
 
+# ── deploy teamspace (2026-06-18) ────────────────────────────────────
+# Lightning AI teamspace to launch the Studio under. Empty = use the
+# SDK default (the user's personal teamspace). Set this when an
+# account has multiple teamspaces and a specific one should always
+# host BRIAN runs. Threaded through DeployConfig.extra_env so the
+# Lightning connector picks it up while Vast ignores it transparently.
+_DEFAULT_TEAMSPACE = ""
+
 
 # ─── data class ──────────────────────────────────────────────────────
 
@@ -223,6 +231,11 @@ class ProjectConfig:
     # "L4". Empty string means "let the connector pick". Overridden by
     # the ``--machine`` CLI flag and ``BRIAN_DEFAULT_MACHINE`` env.
     default_machine: str = _DEFAULT_MACHINE
+    # ── Deploy teamspace (2026-06-18) ──
+    # Lightning AI teamspace name (empty = SDK default = user's
+    # personal teamspace). Threaded through ``extra_env`` so only the
+    # Lightning connector consumes it; Vast ignores it.
+    default_teamspace: str = _DEFAULT_TEAMSPACE
 
     # ── Per-hardware preset map ──
     # ``[hardware.<NAME>] preset = "..."`` sections feed this dict.
@@ -495,6 +508,9 @@ def load_project_config(
     default_machine = str(
         deploy_section.get("machine", _DEFAULT_MACHINE)
     )
+    default_teamspace = str(
+        deploy_section.get("teamspace", _DEFAULT_TEAMSPACE)
+    )
 
     # ── env-var overrides (BRIAN_ prefix to avoid collisions) ──
     env_arch = os.environ.get("BRIAN_ARCH")
@@ -525,6 +541,7 @@ def load_project_config(
     )
     env_default_platform = os.environ.get("BRIAN_DEFAULT_PLATFORM")
     env_default_machine = os.environ.get("BRIAN_DEFAULT_MACHINE")
+    env_default_teamspace = os.environ.get("BRIAN_DEFAULT_TEAMSPACE")
 
     if env_arch:
         arch = env_arch
@@ -624,6 +641,8 @@ def load_project_config(
     if env_default_machine is not None:
         # Allow empty string to clear a brian.toml setting.
         default_machine = env_default_machine
+    if env_default_teamspace is not None:
+        default_teamspace = env_default_teamspace
 
     return ProjectConfig(
         repo_root=repo_root,
@@ -649,6 +668,7 @@ def load_project_config(
         default_push_optimizer=default_push_optimizer,
         default_platform=default_platform,
         default_machine=default_machine,
+        default_teamspace=default_teamspace,
         hardware_presets=hardware_presets,
     )
 

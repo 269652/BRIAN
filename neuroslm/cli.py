@@ -1038,6 +1038,13 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         config.extra_env["LIGHTNING_MACHINE"] = machine
         print(f"[deploy] machine: {machine}")
 
+    # ── Teamspace: CLI --teamspace > brian.toml [deploy].teamspace > "" ──
+    # Lightning-only; Vast ignores extra_env keys it doesn't recognise.
+    teamspace = getattr(args, "teamspace", None) or cfg.default_teamspace
+    if teamspace:
+        config.extra_env["LIGHTNING_TEAMSPACE"] = teamspace
+        print(f"[deploy] teamspace: {teamspace}")
+
     # ── Arch: CLI positional > brian.toml [current].arch ──
     _arch_arg = getattr(args, "arch", None)
     if _arch_arg:
@@ -3694,6 +3701,11 @@ def _build_parser() -> argparse.ArgumentParser:
                          "the connector's enum, e.g. T4, A10G, A100, L4. "
                          "Default: brian.toml [deploy].machine, then "
                          "connector's own default.")
+    sd.add_argument("--teamspace", default=None,
+                    help="Lightning AI teamspace to host the Studio under. "
+                         "Default: brian.toml [deploy].teamspace, then the "
+                         "SDK's default (user's personal teamspace). "
+                         "Ignored by non-Lightning connectors.")
     sd.add_argument("--dna", help="path to evolved DNA file for training "
                     "(e.g., dna/evol/arch.dna). If set, trains from DNA instead of DSL arch")
     sd.add_argument("--label", help="Label suffix for the vast.ai instance")

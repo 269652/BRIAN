@@ -134,6 +134,11 @@ platform = "lightning"
 # "L4". Empty string = let the connector pick (currently T4 for Lightning).
 # Override with `brian deploy --machine A10G` or BRIAN_DEFAULT_MACHINE env.
 machine = "T4"
+# Lightning AI teamspace to launch the Studio under. Empty = use the
+# SDK default (your personal teamspace). Set this if your account has
+# multiple teamspaces and you want a specific one. Override with
+# `LIGHTNING_TEAMSPACE` env (also picked up directly by the SDK).
+teamspace = ""
 
 [hardware.A100]
 preset = "large"
