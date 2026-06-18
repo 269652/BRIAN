@@ -1,10 +1,22 @@
 #!/usr/bin/env bash
-# .githooks/pre-commit — tests + auto-render README.md
+# .githooks/pre-commit — gated DSL tests + auto-render README.md
 #
 # Activated by running once (from repo root):
 #   git config core.hooksPath .githooks
 #
 # Works on both Windows (Git Bash) and Linux/macOS.
+#
+# Gating policy (skip work when nothing relevant changed):
+#   • DSL tests run only when staged files touch DSL surface
+#     (*.neuro, neuroslm/{dsl,compiler,modules,emergent,intelligence}/**,
+#      neuroslm/{cortex,genome,genomes,arch_exports,brain}.py, tests/dsl/**).
+#   • README render runs only when staged files touch the template,
+#     metric sources, renderer, or count catalogs (hypothesis/, discoveries/,
+#     lean/, neuroslm/readme_*.py, docs/readme_*).
+#   • Pure auto-generated commits (e.g. dna/**/arch.dna recompiled by the
+#     pre-deploy hook) skip both gates so `brian deploy` stays snappy.
+#
+# Escape hatch: BRIAN_PRECOMMIT_FORCE=1 runs the full pipeline regardless.
 
 set -e
 
@@ -20,32 +32,65 @@ else
   exit 0
 fi
 
-# ── 1. Run DSL tests ──────────────────────────────────────────────────
-echo "[pre-commit] Running DSL tests..."
-"$PYTHON" -m pytest tests/dsl/ -q -m "not slow"
+# ── Collect staged paths (all changes: A/C/M/R/D/T) ───────────────────
+STAGED="$(git diff --cached --name-only)"
 
-if [ $? -ne 0 ]; then
-  echo ""
-  echo "[pre-commit] Tests failed. Commit rejected." >&2
-  exit 1
+if [ -z "$STAGED" ]; then
+  echo "[pre-commit] no staged changes — skipping checks"
+  exit 0
 fi
 
-echo "[pre-commit] Tests passed."
+FORCE="${BRIAN_PRECOMMIT_FORCE:-0}"
+
+# DSL surface: anything that can change roundtrip / parser / codegen / module behaviour
+DSL_PATTERN='(\.neuro$|^neuroslm/(dsl|compiler|modules|emergent|intelligence|neurochem|thsd|verification|evolution|memory)/|^neuroslm/(cortex|genome|genomes|arch_exports|brain|experts|hypergraph_ir|train|train_dsl|harness|fitness)\.py$|^tests/dsl/|^lib/.*\.neuro$|^architectures/.*\.neuro$|^neuroslm/dsl/lib/)'
+
+# README inputs: template, metric sources, renderer, count catalogs
+README_PATTERN='(^README\.template\.md$|^docs/readme_metrics\.toml$|^docs/readme_template_language\.md$|^neuroslm/readme_metrics\.py$|^neuroslm/readme_renderer(_v2)?\.py$|^hypothesis/|^discoveries/|^lean/.*\.lean$)'
+
+run_dsl=0
+run_readme=0
+
+if [ "$FORCE" = "1" ]; then
+  run_dsl=1
+  run_readme=1
+  echo "[pre-commit] BRIAN_PRECOMMIT_FORCE=1 → running full pipeline"
+else
+  if printf '%s\n' "$STAGED" | grep -qE "$DSL_PATTERN"; then
+    run_dsl=1
+  fi
+  if printf '%s\n' "$STAGED" | grep -qE "$README_PATTERN"; then
+    run_readme=1
+  fi
+fi
+
+# ── 1. DSL tests ──────────────────────────────────────────────────────
+if [ "$run_dsl" = "1" ]; then
+  echo "[pre-commit] DSL-relevant files staged → running DSL tests..."
+  if ! "$PYTHON" -m pytest tests/dsl/ -q -m "not slow"; then
+    echo ""
+    echo "[pre-commit] DSL tests failed. Commit rejected." >&2
+    exit 1
+  fi
+  echo "[pre-commit] DSL tests passed."
+else
+  echo "[pre-commit] no DSL-relevant changes → skipping DSL tests"
+fi
 
 # ── 2. Auto-render README.md ──────────────────────────────────────────
-echo "[pre-commit] Rendering README.md..."
-"$PYTHON" -m neuroslm.cli update-readme
-
-if [ $? -ne 0 ]; then
-  echo ""
-  echo "[pre-commit] README render failed. Commit rejected." >&2
-  exit 1
-fi
-
-# Stage README.md if it changed
-if ! git diff --quiet README.md 2>/dev/null; then
-  git add README.md
-  echo "[pre-commit] README.md staged"
+if [ "$run_readme" = "1" ]; then
+  echo "[pre-commit] README-relevant files staged → rendering README.md..."
+  if ! "$PYTHON" -m neuroslm.cli update-readme; then
+    echo ""
+    echo "[pre-commit] README render failed. Commit rejected." >&2
+    exit 1
+  fi
+  if ! git diff --quiet README.md 2>/dev/null; then
+    git add README.md
+    echo "[pre-commit] README.md re-staged"
+  fi
+else
+  echo "[pre-commit] no README-relevant changes → skipping README render"
 fi
 
 echo "[pre-commit] All checks passed."

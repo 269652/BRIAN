@@ -121,7 +121,11 @@
       "Bash(.venv/Scripts/python.exe -m pytest tests/dsl/test_novel_topology.py::TestH015_H018_NeuralFieldOscillator -v)",
       "Bash(.venv/Scripts/python.exe -m pytest tests/test_cli_hf_chat.py::TestCmdChat::test_no_ckpt_no_latest_no_local_fallback_returns_2 -x -q)",
       "Bash(git show *)",
-      "Bash(cat .brian/checkpoint.ln)"
+      "Bash(cat .brian/checkpoint.ln)",
+      "PowerShell($env:LIGHTNING_USER_ID = \"357a2e75-3c24-4086-adda-06c8b16fa3d4\"; $env:LIGHTNING_API_KEY = \"1443d4f0-abc2-4912-a342-fff7569613e6\"; lightning login)",
+      "Bash(python -c \"import lightning_sdk; import inspect; print\\(inspect.getsource\\(lightning_sdk.studio.Studio.__init__\\)\\)\")",
+      "PowerShell(& \"C:\\\\Users\\\\morrossl\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\" -c \"import lightning_sdk; import inspect; src = inspect.getsource\\(lightning_sdk.Studio.__init__\\); print\\(src[:3000]\\)\")",
+      "PowerShell(head -60)"
     ]
   }
 }

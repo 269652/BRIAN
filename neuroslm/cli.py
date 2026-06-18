@@ -1327,19 +1327,26 @@ def _parse_status(log: str) -> dict:
 
 
 def cmd_ps(args: argparse.Namespace) -> int:
-    """List active vast.ai neuroslm instances + parsed last metric line.
+    """List active training runs across every cloud platform.
 
-    Output columns:
+    Output columns (vast section):
       ID | LABEL | GPU | $/hr | UPTIME | PHASE | STEP | PPL | OOD-PPL | TOK/S
 
-    With --it (interactive/watch), redraws every `--interval` seconds
-    until Ctrl-C. Uses double-buffering + cursor-home + clear-to-end-of-
-    screen so the redraw is seamless (no flicker, no black flash).
-    
-    With --colab <url>, connects to a Colab log server and displays
-    training status from the remote notebook.
+    Output columns (lightning section):
+      JOB ID | LABEL | STATUS | MACHINE | UPTIME | LAST LOG LINE
+
+    Modes:
+      --it                interactive watch, redraws every --interval seconds
+      --colab <url>       connect to a Colab log server
+      --logs <job_id>     stream the last --tail N lines of one remote job's log
+      --platform <name>   restrict the listing to one platform
     """
-    # Colab mode — connect to remote log server
+    # ── Single-job log streaming (no live list) ──
+    job_id = getattr(args, "logs", None)
+    if job_id:
+        return _ps_show_logs(args, job_id)
+
+    # ── Colab mode — connect to remote log server ──
     if getattr(args, "colab", None):
         if args.it:
             return _ps_colab_watch(args)
@@ -1347,6 +1354,79 @@ def cmd_ps(args: argparse.Namespace) -> int:
     if args.it:
         return _ps_watch(args)
     return _render_ps_once(args)
+
+
+def _ps_show_logs(args: argparse.Namespace, job_id: str) -> int:
+    """Stream the last N lines of one remote job's log.
+
+    Looks up the job in ``.brian/jobs/<job_id>.json``, dispatches to
+    the owning connector's :meth:`tail_logs`. With ``--it`` keeps
+    refreshing.
+    """
+    from neuroslm.connectors import get_connector, load_job
+    info = load_job(job_id)
+    if info is None:
+        print(f"brian ps --logs: no job {job_id!r} in .brian/jobs/",
+              file=sys.stderr)
+        return 1
+    try:
+        connector = get_connector(info.platform)
+    except ValueError as e:
+        print(f"brian ps --logs: {e}", file=sys.stderr)
+        return 1
+    tail_n = int(getattr(args, "tail", 200) or 200)
+
+    def _fetch_and_print(initial: bool = False) -> bool:
+        try:
+            out = connector.tail_logs(job_id, n=tail_n)
+        except NotImplementedError:
+            print(f"brian ps --logs: {info.platform!r} connector does not "
+                  f"support log tailing", file=sys.stderr)
+            return False
+        except Exception as e:
+            print(f"brian ps --logs: tail failed: {type(e).__name__}: {e}",
+                  file=sys.stderr)
+            return False
+        if initial:
+            print(f"=== {info.platform}/{job_id}  ({info.studio_name or info.host}, "
+                  f"last {tail_n} lines) ===")
+        sys.stdout.write(out)
+        if not out.endswith("\n"):
+            sys.stdout.write("\n")
+        sys.stdout.flush()
+        return True
+
+    if not getattr(args, "it", False):
+        ok = _fetch_and_print(initial=True)
+        return 0 if ok else 1
+    # Watch mode — redraw the tail every --interval seconds.
+    import time
+    interval = float(getattr(args, "interval", 1.0) or 1.0)
+    is_tty = sys.stdout.isatty()
+    if is_tty:
+        sys.stdout.write("\x1b[?25l\x1b[2J\x1b[H")
+        sys.stdout.flush()
+    try:
+        while True:
+            if is_tty:
+                sys.stdout.write("\x1b[H")
+            ok = _fetch_and_print(initial=True)
+            if is_tty:
+                sys.stdout.write("\x1b[J")
+            sys.stdout.flush()
+            if not ok:
+                return 1
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        if is_tty:
+            sys.stdout.write("\x1b[?25h\n")
+            sys.stdout.flush()
+        print("(stopped)")
+        return 0
+    finally:
+        if is_tty:
+            sys.stdout.write("\x1b[?25h")
+            sys.stdout.flush()
 
 
 def _ps_colab_once(args: argparse.Namespace, out=None) -> int:
@@ -1623,18 +1703,59 @@ def _render_ps_once(args: argparse.Namespace, out=None) -> int:
     set, all output goes there instead of stdout; status/error messages
     that would normally hit stderr also route to `out` so the watch
     redraw stays atomic.
+
+    Renders one section per cloud platform (vast, lightning) — gated by
+    ``--platform`` so ``brian ps --platform lightning`` shows only
+    Lightning jobs without spending a vastai roundtrip.
     """
     import json
     sink = out if out is not None else sys.stdout
     def _say(msg: str = "") -> None:
         sink.write(msg + "\n")
+    platform_filter = (getattr(args, "platform", None) or "all").lower()
+    show_vast = platform_filter in ("all", "vast")
+    show_lightning = platform_filter in ("all", "lightning")
+
     # Polished header (one-time; not re-emitted in watch mode because the
     # caller already prints the per-tick timestamp line).
     if out is None:
-        _say("Brian Task Manager — vast.ai instance + training monitor")
+        _say("Brian Task Manager — training monitor (vast.ai + Lightning AI)")
         _say("  Interactive: brian ps --it --interval 1")
-        _say("  All GPUs:    brian ps --all")
+        _say("  Platform:    brian ps --platform lightning")
+        _say("  Logs:        brian ps --logs <job_id> [--tail 200] [--it]")
         _say("")
+
+    if show_vast:
+        _render_vast_section(args, _say)
+
+    if show_lightning:
+        if show_vast:
+            _say()
+        _render_lightning_section(args, _say)
+
+    # ── Recently destroyed instances (vast-only history) ──
+    if show_vast:
+        destroyed = _scan_recent_destroyed(top_n=5)
+        if destroyed:
+            _say()
+            _say("Recent destroyed (vast):")
+            dhdr = (f"  {'ID':>10}  {'WHEN':<19}  {'REASON':<15}  "
+                    f"{'STEPS':>6}  {'OOD-PPL':>9}  DETAIL")
+            _say(dhdr)
+            _say("  " + "-" * (len(dhdr) - 2))
+            for r in destroyed:
+                steps = str(r["steps"]) if r["steps"] is not None else "-"
+                ood = f"{r['ood_ppl']:.0f}" if r["ood_ppl"] is not None else "-"
+                when = r["mtime"].strftime("%Y-%m-%d %H:%M:%S")
+                _say(f"  {r['id']:>10}  {when:<19}  {r['exit_reason']:<15}  "
+                     f"{steps:>6}  {ood:>9}  {r['detail'][:80]}")
+    return 0
+
+
+def _render_vast_section(args: argparse.Namespace, _say) -> None:
+    """Render the vast.ai instance table (extracted from old _render_ps_once)."""
+    import json
+    _say("── vast.ai ──")
     vastai = _vastai_exe()
     raw, rc = _run_capture([vastai, "show", "instances", "--raw"])
     # Failure modes: offline (rc!=0, raw contains 'connection'/'resolve'/empty),
@@ -1718,22 +1839,91 @@ def _render_ps_once(args: argparse.Namespace, out=None) -> int:
             live_hint = " (pass --all to list non-neuroslm instances too)"
         _say(f"(no live instances{live_hint})")
 
-    # ── Recently destroyed instances ──
-    destroyed = _scan_recent_destroyed(top_n=5)
-    if destroyed:
-        _say()
-        _say("Recent destroyed:")
-        dhdr = (f"  {'ID':>10}  {'WHEN':<19}  {'REASON':<15}  "
-                f"{'STEPS':>6}  {'OOD-PPL':>9}  DETAIL")
-        _say(dhdr)
-        _say("  " + "-" * (len(dhdr) - 2))
-        for r in destroyed:
-            steps = str(r["steps"]) if r["steps"] is not None else "-"
-            ood = f"{r['ood_ppl']:.0f}" if r["ood_ppl"] is not None else "-"
-            when = r["mtime"].strftime("%Y-%m-%d %H:%M:%S")
-            _say(f"  {r['id']:>10}  {when:<19}  {r['exit_reason']:<15}  "
-                 f"{steps:>6}  {ood:>9}  {r['detail'][:80]}")
-    return 0
+
+def _render_lightning_section(args: argparse.Namespace, _say) -> None:
+    """Render the Lightning AI jobs table.
+
+    Reads ``.brian/jobs/*.json``, attaches to each Studio, queries live
+    status, and tails the last 2 lines of the remote training log so
+    the table column shows current step/PPL even though Lightning has
+    no native ``vastai show``-style poll.
+
+    Errors short-circuit to a friendly message — never blow up
+    ``brian ps`` because the Lightning SDK can't reach the cloud.
+    """
+    _say("── Lightning AI ──")
+    try:
+        from neuroslm.connectors import LightningConnector, JobStatus
+    except Exception as e:
+        _say(f"(lightning import failed: {type(e).__name__}: {e})")
+        return
+    try:
+        connector = LightningConnector()
+        jobs = connector.list_jobs()
+    except Exception as e:
+        _say(f"(lightning list_jobs failed: {type(e).__name__}: {e})")
+        return
+
+    if not jobs:
+        _say("(no Lightning jobs registered — `brian deploy --platform "
+             "lightning` writes them to .brian/jobs/)")
+        return
+
+    import time as _time
+    hdr = (f"{'JOB ID':<22}  {'LABEL':<16}  {'STATUS':<10}  "
+           f"{'MACHINE':<8}  {'UP(m)':>5}  {'STEP':>6}  {'PPL':>8}  "
+           f"LAST")
+    _say(hdr)
+    _say("-" * min(len(hdr), 110))
+    now = int(_time.time())
+    for j in jobs:
+        up_m = max(0, (now - (j.started_at or now)) // 60)
+        label = (j.label or "(none)")[:16]
+        status = (j.status or "?")[:10]
+        machine = (j.machine or "?")[:8]
+        # Try a quick log tail for the most recent training line — but
+        # skip it for stopped/completed/failed since the cost of an
+        # SSH roundtrip per row is high. We cap tail length so a slow
+        # Studio doesn't stall the render.
+        step_s, ppl_s, last_s = "-", "-", ""
+        if status in (JobStatus.RUNNING.value, JobStatus.STARTING.value):
+            try:
+                tail = connector.tail_logs(j.job_id, n=20)
+                step_s, ppl_s, last_s = _summarise_lightning_tail(tail)
+            except Exception as e:
+                last_s = f"(tail err: {type(e).__name__})"
+        _say(f"{j.job_id:<22}  {label:<16}  {status:<10}  "
+             f"{machine:<8}  {up_m:>5}  {step_s:>6}  {ppl_s:>8}  "
+             f"{last_s[:48]}")
+
+
+def _summarise_lightning_tail(tail: str) -> tuple:
+    """Extract (step, ppl, last_line) from a tail of train.log.
+
+    Reuses the same regexes as the vast parser so the same training
+    output format ``[train] step=N ppl=X tps=Y`` is parsed identically.
+    """
+    if not tail:
+        return ("-", "-", "")
+    # Reuse the module-level _STEP_RE if available; otherwise fall back.
+    step, ppl = None, None
+    try:
+        for m in _STEP_RE.finditer(tail):
+            step = int(m.group("step"))
+            ppl = float(m.group("ppl"))
+    except NameError:
+        pass
+    last_line = ""
+    for line in reversed(tail.strip().splitlines()):
+        line = line.strip()
+        if line:
+            last_line = line
+            break
+    return (
+        str(step) if step is not None else "-",
+        f"{ppl:.1f}" if ppl is not None else "-",
+        last_line,
+    )
 
 
 def _vastai_exe() -> str:
@@ -1770,6 +1960,36 @@ def cmd_destroy(args: argparse.Namespace) -> int:
         return 2
     return _run([_bash(), "scripts/vast.sh",
                  "destroy", "instance", str(args.instance_id), "-y"], env=env)
+
+
+def cmd_stop(args: argparse.Namespace) -> int:
+    """Stop a remote training job by job_id (Lightning AI).
+
+    Reads ``.brian/jobs/<job_id>.json`` to discover the platform and
+    dispatches to that connector's :meth:`stop`. The job record is
+    removed on success.
+    """
+    from neuroslm.connectors import get_connector, load_job
+    info = load_job(args.job_id)
+    if info is None:
+        print(f"brian stop: no job {args.job_id!r} in .brian/jobs/",
+              file=sys.stderr)
+        return 1
+    try:
+        connector = get_connector(info.platform)
+    except ValueError as e:
+        print(f"brian stop: {e}", file=sys.stderr)
+        return 1
+    try:
+        return connector.stop(args.job_id)
+    except NotImplementedError:
+        print(f"brian stop: {info.platform!r} connector does not support "
+              f"stop(). Use `brian destroy {args.job_id}` for vast.",
+              file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"brian stop: {type(e).__name__}: {e}", file=sys.stderr)
+        return 1
 
 
 # ── ood ────────────────────────────────────────────────────────────────
@@ -3810,12 +4030,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ss = sub.add_parser("status", help="List active vast instances (raw vastai view)")
     ss.set_defaults(func=cmd_status)
 
-    # ps (parsed-status table — like `docker ps` for neuroslm runs)
+    # ps (parsed-status table — like `docker ps` for neuroslm runs across platforms)
     sps = sub.add_parser(
         "ps",
-        help="List neuroslm instances + parsed last metric line + phase")
+        help="List training jobs across all platforms (vast + Lightning) + "
+             "parsed last metric line + phase")
     sps.add_argument("--all", action="store_true",
-                     help="include non-neuroslm instances too")
+                     help="include non-neuroslm instances too (vast only)")
     sps.add_argument("-it", "--it", action="store_true",
                      help="interactive watch mode — redraw every --interval "
                           "seconds until Ctrl-C")
@@ -3824,6 +4045,18 @@ def _build_parser() -> argparse.ArgumentParser:
     sps.add_argument("--colab", metavar="URL",
                      help="connect to Colab log server URL (from cell 5b). "
                           "Shows training status from Colab notebook")
+    sps.add_argument("--platform", choices=["all", "vast", "lightning"],
+                     default="all",
+                     help="Restrict the listing to one cloud platform "
+                          "(default: all). Use `lightning` to skip the "
+                          "vastai roundtrip when you only care about Studios.")
+    sps.add_argument("--logs", metavar="JOB_ID", default=None,
+                     help="Stream the remote training log for one job "
+                          "(reads .brian/jobs/<JOB_ID>.json). Combine with "
+                          "--it for live tail, --tail N for the line count "
+                          "(default 200).")
+    sps.add_argument("--tail", type=int, default=200,
+                     help="Lines of log to pull when --logs is set (default 200)")
     sps.set_defaults(func=cmd_ps)
 
     # destroy
@@ -3832,6 +4065,16 @@ def _build_parser() -> argparse.ArgumentParser:
     sde.add_argument("--all", action="store_true",
                      help="destroy every neuroslm-* labelled instance")
     sde.set_defaults(func=cmd_destroy)
+
+    # stop (per-job halt — currently Lightning-only; vast uses `destroy`)
+    sstop = sub.add_parser(
+        "stop",
+        help="Stop a remote training job by job_id (Lightning AI). "
+             "Reads .brian/jobs/<JOB_ID>.json and stops the underlying Studio.")
+    sstop.add_argument("job_id",
+                       help="Job id printed by `brian deploy` and listed "
+                            "in `brian ps --platform lightning`.")
+    sstop.set_defaults(func=cmd_stop)
 
     # ood (legacy — explicit ckpt path)
     so = sub.add_parser("ood", help="Run OOD eval on a checkpoint")

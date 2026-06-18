@@ -3,6 +3,10 @@
 # Local inference checkpoints (downloaded by `brian checkpoints download`)
 checkpoints/
 
+# .brian/ runtime artefacts (job registry, ckpt pointer, best_run pointer)
+# The directory itself is project-local state, not source of truth.
+.brian/jobs/
+
 # Python caches
 __pycache__/
 *.py[cod]

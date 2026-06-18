@@ -30,8 +30,14 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import List
 
-from neuroslm.connectors.base import BaseConnector, DeployConfig
+from neuroslm.connectors.base import (
+    BaseConnector,
+    DeployConfig,
+    JobInfo,
+    load_jobs,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -49,6 +55,19 @@ class VastConnector(BaseConnector):
         script = str(REPO_ROOT / "scripts" / "vast_train.sh")
         print(f"$ {bash} {script}")
         return subprocess.call([bash, script], cwd=str(REPO_ROOT), env=env)
+
+    # ── ps integration (unified job registry) ───────────────────────
+    #
+    # Vast.ai already has rich live polling via ``vastai show instances``
+    # in ``cmd_ps``; the unified registry surface is wired here for
+    # completeness so ``brian ps --platform vast`` works symmetrically
+    # with Lightning. We currently just expose any jobs persisted to
+    # ``.brian/jobs/`` — the deploy path doesn't write them yet for
+    # vast (the existing ``vast_train.sh`` flow is self-contained),
+    # but future SSH-style refactors of vast will populate them.
+
+    def list_jobs(self) -> List[JobInfo]:
+        return load_jobs(platform=self.platform_name())
 
     # ── internal helpers ────────────────────────────────────────────
 

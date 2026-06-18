@@ -18,7 +18,16 @@ Adding a new platform
 """
 from __future__ import annotations
 
-from neuroslm.connectors.base import BaseConnector, DeployConfig
+from neuroslm.connectors.base import (
+    BaseConnector,
+    DeployConfig,
+    JobInfo,
+    JobStatus,
+    load_job,
+    load_jobs,
+    register_job,
+    remove_job,
+)
 from neuroslm.connectors.lightning import LightningConnector
 from neuroslm.connectors.vast import VastConnector
 
@@ -43,10 +52,26 @@ def get_connector(platform: str) -> BaseConnector:
     return _REGISTRY[platform]()
 
 
+def all_connectors() -> list[BaseConnector]:
+    """Return one instantiated connector per registered platform.
+
+    Used by ``brian ps`` to iterate every platform's ``list_jobs()``
+    without hardcoding the platform list.
+    """
+    return [cls() for cls in _REGISTRY.values()]
+
+
 __all__ = [
     "BaseConnector",
     "DeployConfig",
+    "JobInfo",
+    "JobStatus",
     "LightningConnector",
     "VastConnector",
+    "all_connectors",
     "get_connector",
+    "load_job",
+    "load_jobs",
+    "register_job",
+    "remove_job",
 ]

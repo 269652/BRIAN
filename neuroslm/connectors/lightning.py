@@ -1,10 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Lightning AI training connector.
+"""Lightning AI training connector — SSH-style remote provisioning.
 
-Launches a training run on Lightning AI Studios via the ``lightning-sdk``
-Python package.  A Studio is created (or reused by name), started with the
-requested GPU machine, the training command is submitted, and the Studio is
-stopped after the run completes.
+Launches a training run on a Lightning AI Studio over the SDK's remote-exec
+channel (which is internally SSH/RPC — the public surface is ``Studio.run``
+and ``Studio.run_and_detach``). The flow is::
+
+    1.   Bootstrap secrets from .env → os.environ.
+    2.   Resolve the authed user + teamspace (auto if exactly one).
+    3.   Start (or reuse) a Studio on the requested machine tier.
+    4.   ``Studio.set_env`` to push HF_TOKEN / GITHUB_PAT / branch / arch.
+    5.   ``Studio.run_with_exit_code`` — synchronously CLONE the repo,
+         checkout the branch, ``pip install -e .`` so training imports work.
+    6.   ``Studio.run_and_detach`` — fire-and-forget the training command,
+         redirected to ``~/brian/logs/run-<job_id>.log`` so it survives
+         the SDK session disconnect.
+    7.   Persist ``.brian/jobs/<job_id>.json`` so ``brian ps`` can re-attach.
+    8.   Return immediately (the Studio keeps running until ``brian stop``).
 
 Prerequisites
 ─────────────
@@ -12,7 +23,7 @@ Prerequisites
   # then either:
   lightning login                  # CLI flow (writes ~/.lightning/credentials)
   # OR set in .env / shell:
-  LIGHTNING_USER_ID=<your-username>
+  LIGHTNING_USER_ID=<api-key-uuid>
   LIGHTNING_API_KEY=<your-api-key>
 
 Authentication
@@ -21,10 +32,22 @@ On every ``launch()`` we call :func:`neuroslm.utils.secrets.bootstrap_secrets`
 which walks the chain ``os.environ → Colab → Kaggle → .env (CWD upward)``
 to populate ``LIGHTNING_USER_ID`` and ``LIGHTNING_API_KEY`` before the
 SDK reads them.  Friendly aliases are accepted so older ``.env`` files
-keep working:
+keep working::
 
   LIGHTNING_API_KEY  ← LIGHTNING_AI, LIGHTNING_TOKEN, LIGHTNING_AUTH_TOKEN
   LIGHTNING_USER_ID  ← LIGHTNING_USERNAME, LIGHTNING_USER
+
+Repo cloning on the Studio
+──────────────────────────
+The Studio needs read access to the repo.  We use HTTPS with a token to
+avoid needing to forward SSH keys:
+
+  https://x-access-token:${GITHUB_PAT}@github.com/<owner>/<repo>.git
+
+``GITHUB_PAT`` is sourced from the same secrets chain as the Lightning
+credentials.  Set it as a fine-grained PAT scoped to the repo
+(``contents:read`` is enough for training; ``contents:write`` only if
+the in-Studio checkpoint pusher should also push back to the repo).
 
 Machine selection (highest precedence wins)
 ───────────────────────────────────────────
@@ -34,31 +57,45 @@ Machine selection (highest precedence wins)
      re-purposed as a GPU hint when no ``--machine`` is given)
   3. ``Machine.T4``                              (sensible default)
 
-Substring match — case-insensitive. Examples that resolve to T4::
+Substring match — case-insensitive.
 
-    --machine T4
-    --machine t4
-    --scale t4_2k
-    LIGHTNING_MACHINE=T4
-
-Teamspace selection
-───────────────────
-Optional. When the user has multiple teamspaces, pin one via
-``LIGHTNING_TEAMSPACE`` (env or ``brian.toml [deploy].teamspace``,
-threaded through ``config.extra_env``). Otherwise the SDK uses the
-user's default teamspace.
+Teamspace resolution
+────────────────────
+  1. ``config.extra_env["LIGHTNING_TEAMSPACE"]`` / ``LIGHTNING_TEAMSPACE`` env
+  2. The user's only teamspace (auto-resolved via the SDK)
+  3. Hard error with a chooser hint when the user has multiple
 
 Studio naming
 ─────────────
   brian-{config.label}   when label is set
   brian-train            fallback
+
+Job tracking
+────────────
+Every successful launch writes ``.brian/jobs/<job_id>.json`` so
+``brian ps --platform lightning`` can re-attach and stream logs without
+the user having to remember Studio names.
 """
 from __future__ import annotations
 
+import os
+import re
+import shlex
 import sys
-from typing import TYPE_CHECKING
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from neuroslm.connectors.base import BaseConnector, DeployConfig
+from neuroslm.connectors.base import (
+    BaseConnector,
+    DeployConfig,
+    JobInfo,
+    JobStatus,
+    load_job,
+    load_jobs,
+    register_job,
+    remove_job,
+)
 
 if TYPE_CHECKING:
     try:  # ``lightning_sdk`` is the modern wheel name (no dot).
@@ -67,8 +104,29 @@ if TYPE_CHECKING:
         from lightning.sdk import Machine  # type: ignore[import]
 
 
+# ── Remote layout on the Studio ──────────────────────────────────────
+# Everything BRIAN-related lives under ``~/brian`` so the Studio's
+# default ``/teamspace/studios`` layout stays uncluttered. The repo
+# itself sits at ``~/brian/repo`` and live logs at ``~/brian/logs``.
+REMOTE_BASE = "~/brian"
+REMOTE_REPO = REMOTE_BASE + "/repo"
+REMOTE_LOGS = REMOTE_BASE + "/logs"
+
+
+# ── Status mapping: Lightning SDK Status → JobStatus ─────────────────
+_STATUS_MAP = {
+    "NotCreated": JobStatus.STOPPED,
+    "Pending": JobStatus.STARTING,
+    "Running": JobStatus.RUNNING,
+    "Stopping": JobStatus.STOPPING,
+    "Stopped": JobStatus.STOPPED,
+    "Completed": JobStatus.COMPLETED,
+    "Failed": JobStatus.FAILED,
+}
+
+
 def _import_lightning_sdk():
-    """Import (Studio, Machine) from whichever Lightning SDK is installed.
+    """Import (Studio, Machine, sdk_name) from whichever SDK is installed.
 
     The wheel was renamed from ``lightning.sdk`` to ``lightning_sdk``
     (no dot) in mid-2024. We try the modern name first, then the legacy
@@ -86,52 +144,168 @@ def _import_lightning_sdk():
         return None, None, None
 
 
+def _bootstrap_lightning_secrets() -> None:
+    """Walk .env/Colab/Kaggle/env into os.environ for the SDK's sake.
+
+    Lightning SDK only inspects ``os.environ`` directly, so a token
+    sitting in ``.env`` is invisible unless we bootstrap it into the
+    process environment first.
+
+    Friendly aliases are accepted for the BRIAN-side ergonomics —
+    older ``.env`` files used ``LIGHTNING_AI`` for the API key.
+    """
+    try:
+        from neuroslm.utils.secrets import bootstrap_secrets
+        bootstrap_secrets(
+            ["LIGHTNING_USER_ID", "LIGHTNING_API_KEY", "GITHUB_PAT",
+             "HF_TOKEN"],
+            aliases={
+                "LIGHTNING_API_KEY": (
+                    "LIGHTNING_AI",
+                    "LIGHTNING_TOKEN",
+                    "LIGHTNING_AUTH_TOKEN",
+                ),
+                "LIGHTNING_USER_ID": (
+                    "LIGHTNING_USERNAME",
+                    "LIGHTNING_USER",
+                ),
+                "GITHUB_PAT": (
+                    "GH_TOKEN",
+                    "GITHUB_TOKEN",
+                ),
+            },
+            verbose=False,
+        )
+    except Exception as exc:
+        # Secrets resolution must never crash the deploy chain — if
+        # the user has the env vars set the SDK will see them and
+        # everything works regardless.
+        print(f"[lightning] (note) secrets bootstrap skipped: "
+              f"{type(exc).__name__}: {exc}", file=sys.stderr)
+
+
+def _git_repo_url() -> Optional[str]:
+    """Detect the origin remote URL of the local repo, or ``None``.
+
+    Returns the HTTPS form when the local checkout uses git@ SSH,
+    so the in-Studio clone (which has no SSH keys) can be tokenised
+    with ``x-access-token:${GITHUB_PAT}``.
+    """
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+    url = r.stdout.strip()
+    if not url:
+        return None
+    # Normalise git@github.com:owner/repo.git → https://github.com/owner/repo.git
+    m = re.match(r"git@([^:]+):(.+?)(?:\.git)?$", url)
+    if m:
+        return f"https://{m.group(1)}/{m.group(2)}.git"
+    return url
+
+
+def _git_current_branch() -> str:
+    """Return the current local branch name, or ``"master"`` as fallback."""
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, check=True,
+        )
+        return r.stdout.strip() or "master"
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return "master"
+
+
+def _short_id() -> str:
+    """Generate a short, human-readable job id (lightning-YYYYMMDD-HHMMSS-XX).
+
+    Includes a 2-char random suffix so two launches in the same
+    second don't collide.
+    """
+    import secrets
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    suffix = secrets.token_hex(2)
+    return f"ln-{ts}-{suffix}"
+
+
+def _resolve_teamspace_handle(user_handle, requested_name: str):
+    """Return a Teamspace object for *requested_name*, or the user's
+    only one when *requested_name* is empty.
+
+    Raises :class:`RuntimeError` with a helpful chooser message when
+    multiple teamspaces exist and none was named.
+    """
+    teamspaces = list(user_handle.teamspaces)
+    if requested_name:
+        for ts in teamspaces:
+            if ts.name == requested_name:
+                return ts
+        names = ", ".join(t.name for t in teamspaces)
+        raise RuntimeError(
+            f"Teamspace {requested_name!r} not found for user "
+            f"{user_handle.name!r}. Available: [{names}]"
+        )
+    if len(teamspaces) == 1:
+        return teamspaces[0]
+    if not teamspaces:
+        raise RuntimeError(
+            f"User {user_handle.name!r} has no teamspaces. "
+            "Create one at https://lightning.ai first."
+        )
+    names = ", ".join(t.name for t in teamspaces)
+    raise RuntimeError(
+        f"User {user_handle.name!r} has multiple teamspaces ({names}). "
+        "Pick one via `brian deploy --teamspace <name>` or "
+        "[deploy].teamspace in brian.toml."
+    )
+
+
+def _get_authed_user_safe():
+    """Return the authenticated User via the SDK's internal resolver.
+
+    Wraps the private :func:`_get_authed_user` so we can handle the
+    case where the API-key UUID is in ``LIGHTNING_USER_ID`` (which
+    the public ``User(name=…)`` constructor rejects).
+    """
+    try:
+        from lightning_sdk.utils.resolve import _get_authed_user
+        return _get_authed_user()
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not resolve the authenticated Lightning user. "
+            "Make sure LIGHTNING_USER_ID and LIGHTNING_API_KEY are set "
+            "in your .env (or run `lightning login`). "
+            f"Underlying error: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
 class LightningConnector(BaseConnector):
-    """Launch training on Lightning AI Studios."""
+    """Launch + monitor training on Lightning AI Studios."""
 
     @classmethod
     def platform_name(cls) -> str:
         return "lightning"
 
-    def launch(self, config: DeployConfig) -> int:
-        # ── Step 1: resolve auth from .env / Colab / Kaggle / env ──
-        # Lightning SDK only inspects ``os.environ`` directly, so a
-        # token sitting in ``.env`` is invisible unless we bootstrap
-        # it into the process environment first. ``bootstrap_secrets``
-        # walks env → Colab → Kaggle → .env (CWD upward).
-        #
-        # We accept friendly aliases for the BRIAN-side ergonomics
-        # (older .env files used ``LIGHTNING_AI`` for the API key).
-        try:
-            from neuroslm.utils.secrets import bootstrap_secrets
-            bootstrap_secrets(
-                ["LIGHTNING_USER_ID", "LIGHTNING_API_KEY"],
-                aliases={
-                    # Tolerate legacy / shorthand names some users
-                    # already have in their .env from the early days.
-                    "LIGHTNING_API_KEY": (
-                        "LIGHTNING_AI",
-                        "LIGHTNING_TOKEN",
-                        "LIGHTNING_AUTH_TOKEN",
-                    ),
-                    "LIGHTNING_USER_ID": (
-                        "LIGHTNING_USERNAME",
-                        "LIGHTNING_USER",
-                    ),
-                },
-                verbose=False,
-            )
-        except Exception as exc:
-            # Secrets resolution must never crash the deploy chain — if
-            # the user has the env vars set the SDK will see them and
-            # everything works regardless.
-            print(f"[lightning] (note) secrets bootstrap skipped: "
-                  f"{type(exc).__name__}: {exc}", file=sys.stderr)
+    # ── launch ──────────────────────────────────────────────────────
 
-        import os as _os
-        have_user = bool(_os.environ.get("LIGHTNING_USER_ID"))
-        have_key = bool(_os.environ.get("LIGHTNING_API_KEY"))
-        if not (have_user and have_key):
+    def launch(self, config: DeployConfig) -> int:
+        """SSH-style deploy: clone repo on Studio, set up env, run training.
+
+        The training process is *detached* — the SDK call returns as
+        soon as the background ``nohup`` is in flight, so ``brian
+        deploy`` exits while training continues on the Studio.
+        Re-attach via ``brian ps --platform lightning``.
+        """
+        # ── 1. Resolve auth from .env / env ──
+        _bootstrap_lightning_secrets()
+        if not (os.environ.get("LIGHTNING_USER_ID") and
+                os.environ.get("LIGHTNING_API_KEY")):
             print(
                 "[lightning] missing credentials.\n"
                 "  Set both LIGHTNING_USER_ID and LIGHTNING_API_KEY\n"
@@ -142,7 +316,7 @@ class LightningConnector(BaseConnector):
             )
             return 1
 
-        # ── Step 2: import the SDK (resilient to wheel rename) ──
+        # ── 2. Import SDK ──
         Studio, Machine, sdk_name = _import_lightning_sdk()
         if Studio is None:
             print(
@@ -153,41 +327,270 @@ class LightningConnector(BaseConnector):
             )
             return 1
 
-        # ── Step 3: assemble launch parameters ──
-        studio_name = f"brian-{config.label}" if config.label else "brian-train"
-        machine = self._resolve_machine(config, Machine)
-        train_cmd = self._build_command(config)
-        teamspace = config.extra_env.get("LIGHTNING_TEAMSPACE") \
-            or _os.environ.get("LIGHTNING_TEAMSPACE") \
-            or None
+        # ── 3. Resolve user + teamspace ──
+        try:
+            user = _get_authed_user_safe()
+        except RuntimeError as exc:
+            print(f"[lightning] {exc}", file=sys.stderr)
+            return 1
 
-        # Loud, pre-flight summary so any failure beyond this point is
+        requested_ts = (
+            config.extra_env.get("LIGHTNING_TEAMSPACE")
+            or os.environ.get("LIGHTNING_TEAMSPACE")
+            or ""
+        )
+        try:
+            teamspace = _resolve_teamspace_handle(user, requested_ts)
+        except RuntimeError as exc:
+            print(f"[lightning] {exc}", file=sys.stderr)
+            return 1
+
+        # ── 4. Assemble launch parameters ──
+        job_id = _short_id()
+        studio_name = (f"brian-{config.label}" if config.label
+                       else "brian-train")
+        machine = self._resolve_machine(config, Machine)
+        branch = (config.branch
+                  or config.extra_env.get("BRANCH")
+                  or _git_current_branch())
+        repo_url = (config.extra_env.get("REPO_URL")
+                    or _git_repo_url()
+                    or "https://github.com/269652/BRIAN.git")
+        log_path = f"{REMOTE_LOGS}/{job_id}.log"
+
+        # Pre-flight summary — any failure beyond this point is
         # post-launch (cloud-side), not configuration-side.
         print(f"[lightning] SDK         : {sdk_name}")
-        print(f"[lightning] user        : {_os.environ['LIGHTNING_USER_ID']}")
+        print(f"[lightning] user        : {user.name}")
+        print(f"[lightning] teamspace   : {teamspace.name}")
         print(f"[lightning] studio      : {studio_name}")
-        print(f"[lightning] teamspace   : {teamspace or '(SDK default)'}")
         print(f"[lightning] machine     : {machine}")
-        print(f"[lightning] arch        : {config.arch or '(brian.toml default)'}")
+        print(f"[lightning] repo        : {repo_url}")
+        print(f"[lightning] branch      : {branch}")
+        print(f"[lightning] arch        : {config.arch or '(default)'}")
         print(f"[lightning] steps       : {config.steps}")
         if config.resume_from:
             print(f"[lightning] resume_from : {config.resume_from}")
-        print(f"[lightning] command     : {train_cmd}")
+        print(f"[lightning] job_id      : {job_id}")
+        print(f"[lightning] remote log  : {log_path}")
 
-        # ── Step 4: provision the Studio and run ──
-        # ``teamspace`` is optional — the SDK will fall back to the
-        # user's default teamspace if not given. Pass it explicitly
-        # when the user has multiple teamspaces and brian.toml /
-        # LIGHTNING_TEAMSPACE picks one.
-        studio_kwargs: dict = {"name": studio_name}
-        if teamspace:
-            studio_kwargs["teamspace"] = teamspace
-        studio = Studio(**studio_kwargs)
-        studio.start(machine=machine)
+        # ── 5. Provision the Studio ──
         try:
-            studio.run(train_cmd)
-        finally:
-            studio.stop()
+            studio = Studio(
+                name=studio_name,
+                teamspace=teamspace,
+                user=user,
+                create_ok=True,
+            )
+        except Exception as exc:
+            print(f"[lightning] Studio() failed: {type(exc).__name__}: "
+                  f"{exc}", file=sys.stderr)
+            return 1
+
+        # Start the machine. Idempotent — already-running Studios
+        # surface a benign error we can swallow.
+        print(f"[lightning] starting Studio on {machine} ...")
+        try:
+            studio.start(machine=machine)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "already" in msg or "running" in msg:
+                print(f"[lightning] (note) Studio already running: {exc}")
+            else:
+                print(f"[lightning] start() failed: "
+                      f"{type(exc).__name__}: {exc}", file=sys.stderr)
+                return 1
+
+        # ── 6. Push env vars onto the Studio so the training process
+        #       sees HF_TOKEN / GITHUB_PAT / repo coordinates.
+        remote_env = self._build_remote_env(config, repo_url, branch,
+                                            job_id)
+        try:
+            studio.set_env(remote_env, partial=True)
+        except Exception as exc:
+            # set_env can race with the boot; we proceed and re-export
+            # the vars inline in the setup script as a belt-and-braces.
+            print(f"[lightning] (note) set_env: {type(exc).__name__}: "
+                  f"{exc}", file=sys.stderr)
+
+        # ── 7. Run setup (clone + install) synchronously ──
+        setup_cmd = self._build_setup_command(repo_url, branch, log_path)
+        print(f"[lightning] running setup (clone + install) ...")
+        try:
+            out, exit_code = studio.run_with_exit_code(setup_cmd)
+        except Exception as exc:
+            print(f"[lightning] setup failed: "
+                  f"{type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+        if exit_code != 0:
+            print(f"[lightning] setup exited {exit_code}:\n{out[-2000:]}",
+                  file=sys.stderr)
+            return exit_code or 1
+        print(f"[lightning] setup OK ({len(out.splitlines())} lines)")
+
+        # ── 8. Launch training as a detached background process ──
+        train_cmd = self._build_train_command(config, log_path)
+        print(f"[lightning] launching detached training:")
+        print(f"            {train_cmd}")
+        try:
+            studio.run_and_detach(train_cmd, timeout=30)
+        except Exception as exc:
+            print(f"[lightning] detach failed: "
+                  f"{type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+
+        # ── 9. Persist job record so `brian ps` can re-attach ──
+        info = JobInfo(
+            job_id=job_id,
+            platform=self.platform_name(),
+            label=config.label or "(none)",
+            status=JobStatus.RUNNING.value,
+            machine=str(machine),
+            branch=branch,
+            arch=config.arch or "",
+            steps=config.steps,
+            studio_name=studio_name,
+            teamspace=teamspace.name,
+            host=user.name,
+            log_path=log_path,
+            source_dna=config.source_dna or "",
+            extra={
+                "sdk": sdk_name,
+                "repo_url": repo_url,
+                "resume_from": config.resume_from or "",
+            },
+        )
+        path = register_job(info)
+        print(f"[lightning] job registered: {path}")
+        print(f"")
+        print(f"  monitor : brian ps --platform lightning")
+        print(f"  logs    : brian ps --logs {job_id} [--tail 200] [--it]")
+        print(f"  stop    : brian stop {job_id}")
+        print(f"")
+        return 0
+
+    # ── list_jobs / status / tail_logs / stop ───────────────────────
+
+    def list_jobs(self) -> List[JobInfo]:
+        """Refresh every persisted Lightning job's live status.
+
+        Each on-disk record is re-attached via the SDK (cheap — no
+        machine restart) so the status column reflects the current
+        Studio state, not the moment-of-launch value.
+        """
+        records = load_jobs(platform=self.platform_name())
+        if not records:
+            return []
+        # Bootstrap secrets once for the whole batch so SDK auth works.
+        _bootstrap_lightning_secrets()
+        Studio, _Machine, _ = _import_lightning_sdk()
+        if Studio is None:
+            return records  # SDK missing — return stale records as-is
+
+        try:
+            user = _get_authed_user_safe()
+        except RuntimeError:
+            return records
+
+        for r in records:
+            try:
+                teamspace = _resolve_teamspace_handle(user, r.teamspace)
+                s = Studio(
+                    name=r.studio_name,
+                    teamspace=teamspace,
+                    user=user,
+                    create_ok=False,
+                )
+                native = getattr(s.status, "value", str(s.status))
+                native_name = (native.name if hasattr(native, "name")
+                               else str(native))
+                r.status = _STATUS_MAP.get(
+                    native_name, JobStatus.UNKNOWN
+                ).value
+            except Exception:
+                # Studio deleted / unreachable — fall through with
+                # whatever was on disk (likely "running" → stale).
+                pass
+        return records
+
+    def status(self, job_id: str) -> JobStatus:
+        info = load_job(job_id)
+        if info is None or info.platform != self.platform_name():
+            return JobStatus.UNKNOWN
+        _bootstrap_lightning_secrets()
+        Studio, _Machine, _ = _import_lightning_sdk()
+        if Studio is None:
+            return JobStatus.UNKNOWN
+        try:
+            user = _get_authed_user_safe()
+            teamspace = _resolve_teamspace_handle(user, info.teamspace)
+            s = Studio(name=info.studio_name, teamspace=teamspace,
+                       user=user, create_ok=False)
+            native = s.status
+            native_name = (native.name if hasattr(native, "name")
+                           else str(native))
+            return _STATUS_MAP.get(native_name, JobStatus.UNKNOWN)
+        except Exception:
+            return JobStatus.UNKNOWN
+
+    def tail_logs(self, job_id: str, n: int = 200) -> str:
+        """Stream the last *n* lines of the remote training log."""
+        info = load_job(job_id)
+        if info is None or info.platform != self.platform_name():
+            raise ValueError(
+                f"No Lightning job with id {job_id!r} in registry"
+            )
+        _bootstrap_lightning_secrets()
+        Studio, _Machine, _ = _import_lightning_sdk()
+        if Studio is None:
+            raise RuntimeError("lightning-sdk is not installed")
+        user = _get_authed_user_safe()
+        teamspace = _resolve_teamspace_handle(user, info.teamspace)
+        try:
+            s = Studio(name=info.studio_name, teamspace=teamspace,
+                       user=user, create_ok=False)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not attach to Studio {info.studio_name!r}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        # tail -n N <log_path>
+        log_path = info.log_path or f"{REMOTE_LOGS}/{job_id}.log"
+        cmd = f"tail -n {int(n)} {shlex.quote(log_path)} 2>/dev/null || echo '(log not yet created)'"
+        try:
+            out = s.run(cmd)
+        except Exception as exc:
+            raise RuntimeError(
+                f"tail_logs failed for {job_id}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        return out or ""
+
+    def stop(self, job_id: str) -> int:
+        """Stop the Studio backing *job_id* and clean up the registry."""
+        info = load_job(job_id)
+        if info is None or info.platform != self.platform_name():
+            print(f"[lightning] no job {job_id!r} in registry",
+                  file=sys.stderr)
+            return 1
+        _bootstrap_lightning_secrets()
+        Studio, _Machine, _ = _import_lightning_sdk()
+        if Studio is None:
+            return 1
+        try:
+            user = _get_authed_user_safe()
+            teamspace = _resolve_teamspace_handle(user, info.teamspace)
+            s = Studio(name=info.studio_name, teamspace=teamspace,
+                       user=user, create_ok=False)
+            s.stop()
+        except Exception as exc:
+            print(f"[lightning] stop() failed: "
+                  f"{type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+        # Mark as stopped + remove from active registry
+        info.status = JobStatus.STOPPED.value
+        remove_job(job_id)
+        print(f"[lightning] stopped {job_id} (Studio {info.studio_name})")
         return 0
 
     # ── internal helpers ────────────────────────────────────────────
@@ -216,23 +619,118 @@ class LightningConnector(BaseConnector):
         return Machine.T4
 
     @staticmethod
-    def _build_command(config: DeployConfig) -> str:
+    def _build_remote_env(config: DeployConfig, repo_url: str,
+                          branch: str, job_id: str) -> dict:
+        """Env vars to push onto the Studio before training starts."""
+        env: dict = {
+            "BRIAN_JOB_ID": job_id,
+            "BRIAN_REPO_URL": repo_url,
+            "BRIAN_BRANCH": branch,
+            "PYTHONIOENCODING": "utf-8",
+        }
+        # Forward secrets that the training loop needs for pushes.
+        for k in ("HF_TOKEN", "GITHUB_PAT", "HF_REPO_ID"):
+            v = os.environ.get(k)
+            if v:
+                env[k] = v
+        # Forward caller-supplied extras (minus Lightning-internal keys
+        # that don't belong on the remote side).
+        skip = {"LIGHTNING_MACHINE", "LIGHTNING_TEAMSPACE",
+                "LIGHTNING_API_KEY", "LIGHTNING_USER_ID"}
+        for k, v in config.extra_env.items():
+            if k in skip or not v:
+                continue
+            env[str(k)] = str(v)
+        return env
+
+    @staticmethod
+    def _build_setup_command(repo_url: str, branch: str,
+                             log_path: str) -> str:
+        """Bash one-liner that clones/updates the repo and installs deps.
+
+        Idempotent — re-running on a warm Studio just does a ``git
+        fetch`` + ``checkout`` instead of a full clone.
+
+        ``GITHUB_PAT`` is injected as ``x-access-token`` so private
+        repos work without ssh keys on the Studio. Public repos work
+        without the PAT too.
+        """
+        # Tokenise the URL if GITHUB_PAT is in the (remote) env.
+        # Done inline in the shell so the token never round-trips
+        # through this Python string (and ends up in logs).
+        clone_url_expr = (
+            'if [ -n "$GITHUB_PAT" ]; then '
+            f'CLONE_URL="$(echo {shlex.quote(repo_url)} | '
+            'sed \'s|https://|https://x-access-token:\'"$GITHUB_PAT"\'@|\')"; '
+            'else '
+            f'CLONE_URL={shlex.quote(repo_url)}; '
+            'fi'
+        )
+        return (
+            f"set -e; "
+            f"mkdir -p {REMOTE_BASE} {REMOTE_LOGS}; "
+            f"cd {REMOTE_BASE}; "
+            f"{clone_url_expr}; "
+            # First-time clone OR fast-forward update.
+            f"if [ -d {REMOTE_REPO}/.git ]; then "
+            f"  echo '[setup] repo exists - fetching latest'; "
+            f"  cd {REMOTE_REPO}; "
+            f"  git remote set-url origin \"$CLONE_URL\"; "
+            f"  git fetch --all --prune; "
+            f"  git checkout {shlex.quote(branch)}; "
+            f"  git reset --hard origin/{shlex.quote(branch)}; "
+            f"else "
+            f"  echo '[setup] cloning repo'; "
+            f"  git clone --depth 50 --branch {shlex.quote(branch)} "
+            f"      \"$CLONE_URL\" {REMOTE_REPO}; "
+            f"  cd {REMOTE_REPO}; "
+            f"fi; "
+            f"echo '[setup] installing python deps'; "
+            # Install with -e so the import path resolves and any
+            # patch we ship works without a fresh clone.
+            f"python -m pip install --upgrade pip --quiet; "
+            f"python -m pip install -e . --quiet || "
+            f"  python -m pip install -r requirements.txt --quiet; "
+            f"echo '[setup] done at '$(date)"
+        )
+
+    @staticmethod
+    def _build_train_command(config: DeployConfig, log_path: str) -> str:
+        """Bash one-liner that launches training in the background.
+
+        ``nohup`` + ``&`` + ``disown`` ensures the process survives the
+        SDK session disconnect. Output is redirected to *log_path* so
+        ``brian ps --logs`` can ``tail -n`` it back.
+        """
         arch = config.arch or "architectures/current"
-        parts = [
+        parts: list[str] = [
             "python -m neuroslm.train_dsl",
-            f"--arch {arch}",
-            f"--steps {config.steps}",
+            f"--arch {shlex.quote(arch)}",
+            f"--steps {int(config.steps)}",
         ]
         if config.log_every > 0:
-            parts.append(f"--log_every {config.log_every}")
+            parts.append(f"--log_every {int(config.log_every)}")
         if config.save_every > 0:
-            parts.append(f"--save_every {config.save_every}")
+            parts.append(f"--save_every {int(config.save_every)}")
         if config.push_every > 0:
-            parts.append(f"--push_every {config.push_every}")
+            parts.append(f"--push_every {int(config.push_every)}")
         if config.push_backend:
-            parts.append(f"--push_backend {config.push_backend}")
+            parts.append(f"--push_backend {shlex.quote(config.push_backend)}")
         if config.resume_from:
-            parts.append(f"--resume_from {config.resume_from}")
+            parts.append(f"--resume_from {shlex.quote(config.resume_from)}")
         if config.ood_every > 0:
-            parts.append(f"--ood_every {config.ood_every}")
-        return " ".join(parts)
+            parts.append(f"--ood_every {int(config.ood_every)}")
+
+        train_inner = " ".join(parts)
+        # Wrap in cd + nohup + disown so the process survives the SDK
+        # detach. Append a "[train] done" marker so the log tail can
+        # detect completion.
+        return (
+            f"cd {REMOTE_REPO} && "
+            f"mkdir -p {REMOTE_LOGS} && "
+            f"nohup bash -c '{train_inner}; "
+            f"  echo \"[train] done at \"$(date)' "
+            f"  > {log_path} 2>&1 &"
+            f" disown; "
+            f"echo \"[launch] pid=$! log={log_path}\""
+        )
