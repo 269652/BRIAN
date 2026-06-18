@@ -377,12 +377,27 @@ ONSTART
 
 # ─── Create the instance ─────────────────────────────────────────────────
 echo "── creating instance ──"
-CREATE_OUT="$(vastai create instance "$OFFER_ID" \
+echo "  (this is a network call to vast.ai API; typically 5-30s, max 120s)"
+# Stream output live to terminal AND capture for parsing. Without `tee` the
+# raw `CREATE_OUT="$(...)"` capture buffers everything until the subshell
+# exits, so a slow/hung create call shows zero feedback. Wrap with a 120s
+# timeout so a true hang exits visibly instead of waiting forever.
+_CREATE_TMP="$(mktemp -t vast_create.XXXXXX)"
+timeout 120 vastai create instance "$OFFER_ID" \
     --image "$VAST_IMAGE" \
     --disk "$VAST_DISK" \
     --label "neuroslm-full" \
     --env "-e GITHUB=$GITHUB -e HF_TOKEN=${HF_TOKEN:-} -e VAST_API_KEY=$VAST_API_KEY" \
-    --onstart-cmd "$ONSTART" 2>&1)"
+    --onstart-cmd "$ONSTART" 2>&1 \
+    | sed -E "s#${GITHUB}#***#g" \
+    | tee "$_CREATE_TMP"
+_CREATE_RC=${PIPESTATUS[0]}
+CREATE_OUT="$(cat "$_CREATE_TMP")"
+rm -f "$_CREATE_TMP"
+if [ "$_CREATE_RC" = "124" ]; then
+    echo "✗ vastai create instance TIMED OUT after 120s" >&2
+    exit 1
+fi
     # Note: no --ssh. vast.ai /.launch spawns an ssh keepalive whenever
     # --ssh is set; the pytorch/pytorch image has no openssh-client so
     # /.launch spins on "ssh: command not found" forever and onstart-cmd
