@@ -99,6 +99,12 @@ _DEFAULT_BRANCH = ""  # "" = "no opinion — caller picks" (deploy will
 _DEFAULT_LOG_EVERY = 20
 _DEFAULT_SAVE_EVERY = 500
 _DEFAULT_PUSH_EVERY = 500
+# Mid-training WikiText-103 PPL probe cadence (held-out OOD eval).
+# 0 = disabled (matches the legacy train_dsl.py default). Set to 500
+# in brian.toml so deploys get a real OOD readout every 500 steps —
+# the fast per-step ``gif[ood_ema=…]`` is a training-batch EMA, not
+# a held-out eval.
+_DEFAULT_OOD_EVERY = 0
 
 # ── checkpoint push backend (2026-06-15) ────────────────────────────
 # Default flipped from Git-LFS to HuggingFace Hub after run 41063959
@@ -203,6 +209,11 @@ class ProjectConfig:
     default_log_every: int = _DEFAULT_LOG_EVERY
     default_save_every: int = _DEFAULT_SAVE_EVERY
     default_push_every: int = _DEFAULT_PUSH_EVERY
+    # Held-out OOD perplexity probe cadence. 0 = disabled.
+    # Propagated through cli.cmd_deploy → DeployConfig.ood_every →
+    # connectors.lightning._build_train_command as
+    # ``--ood_every N`` to ``python -m neuroslm.train_dsl``.
+    default_ood_every: int = _DEFAULT_OOD_EVERY
     # ── Checkpoint push backend (2026-06-15) ──
     # ``default_push_backend`` chooses between the HF Hub uploader
     # (default) and the legacy Git LFS uploader. ``default_hf_repo_id``
@@ -493,6 +504,9 @@ def load_project_config(
     default_push_every = int(
         defaults_section.get("push_every", _DEFAULT_PUSH_EVERY)
     )
+    default_ood_every = int(
+        defaults_section.get("ood_every", _DEFAULT_OOD_EVERY)
+    )
     default_push_backend = str(
         defaults_section.get("push_backend", _DEFAULT_PUSH_BACKEND)
     )
@@ -532,6 +546,7 @@ def load_project_config(
     env_default_log_every = os.environ.get("BRIAN_DEFAULT_LOG_EVERY")
     env_default_save_every = os.environ.get("BRIAN_DEFAULT_SAVE_EVERY")
     env_default_push_every = os.environ.get("BRIAN_DEFAULT_PUSH_EVERY")
+    env_default_ood_every = os.environ.get("BRIAN_DEFAULT_OOD_EVERY")
     env_default_push_backend = os.environ.get(
         "BRIAN_DEFAULT_PUSH_BACKEND"
     )
@@ -622,6 +637,14 @@ def load_project_config(
                 default_push_every = int(env_default_push_every)
             except ValueError:
                 pass
+    if env_default_ood_every is not None:
+        # Same semantics as PUSH_EVERY: explicit "0" disables the
+        # probe, empty string falls through to the file value.
+        if env_default_ood_every != "":
+            try:
+                default_ood_every = int(env_default_ood_every)
+            except ValueError:
+                pass
     if env_default_push_backend:
         # Empty string keeps the file value; any non-empty value
         # wins. Caller-side ``push_checkpoint`` dispatcher tolerates
@@ -663,6 +686,7 @@ def load_project_config(
         default_log_every=default_log_every,
         default_save_every=default_save_every,
         default_push_every=default_push_every,
+        default_ood_every=default_ood_every,
         default_push_backend=default_push_backend,
         default_hf_repo_id=default_hf_repo_id,
         default_push_optimizer=default_push_optimizer,

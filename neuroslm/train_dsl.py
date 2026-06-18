@@ -30,7 +30,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 
 
 # Per-run id stamped into checkpoint filenames so concurrent / successive
@@ -149,6 +149,78 @@ def _arch_dsl_sha256(arch_root: Optional[Path]) -> str:
             # Unreadable file is treated as empty — don't crash the boot
             continue
     return h.hexdigest()
+
+
+def _collect_nfo_metrics(harness) -> Dict[str, float]:
+    """Pull NFO telemetry from any ``NeuralFieldOscillator`` block in
+    *harness*.
+
+    Walks the module tree once per call (cheap — typically <50 modules)
+    and returns a flat ``{nfo_R_mean, nfo_R_max, nfo_A_mean, nfo_A_std,
+    nfo_phi_circular_var, nfo_kappa, nfo_dt, nfo_alpha, nfo_phi_kappa}``
+    dict mirroring :class:`neuroslm.emergent.nfo_coherence.NFOCoherenceProbe`.
+
+    Returns an empty dict when no NFO block is present (legacy archs
+    without the H015..H018 block) or when ``last_state`` is empty
+    (block hasn't been forward-passed yet, e.g. step 0 in a freshly
+    constructed harness).
+
+    Multiple NFO blocks (unusual but legal) are aggregated as a simple
+    mean — they currently share `last_state` keys so the aggregation
+    is well-defined.
+    """
+    try:
+        from neuroslm.modules.neural_field_oscillator import (
+            NeuralFieldOscillator,
+        )
+    except ImportError:
+        # NFO module missing → arch can't have NFO either. Cheap exit.
+        return {}
+
+    SCALAR_KEYS = (
+        ("R_mean", "nfo_R_mean"),
+        ("R_max", "nfo_R_max"),
+        ("A_mean", "nfo_A_mean"),
+        ("A_std", "nfo_A_std"),
+        ("phi_circular_var", "nfo_phi_circular_var"),
+        ("kappa", "nfo_kappa"),
+        ("dt", "nfo_dt"),
+        ("alpha", "nfo_alpha"),
+        ("phi_kappa", "nfo_phi_kappa"),
+    )
+
+    blocks: list = []
+    if hasattr(harness, "modules"):
+        for m in harness.modules():
+            if isinstance(m, NeuralFieldOscillator):
+                state = getattr(m, "last_state", None)
+                if state:
+                    blocks.append(state)
+
+    if not blocks:
+        return {}
+
+    out: Dict[str, float] = {}
+    for src_key, dst_key in SCALAR_KEYS:
+        vals = []
+        for state in blocks:
+            v = state.get(src_key)
+            if v is None:
+                continue
+            if hasattr(v, "detach"):
+                # Avoid sync-on-print: copy + flatten to CPU scalar once.
+                try:
+                    vals.append(float(v.detach().mean().cpu().item()))
+                except Exception:
+                    continue
+            else:
+                try:
+                    vals.append(float(v))
+                except (TypeError, ValueError):
+                    continue
+        if vals:
+            out[dst_key] = sum(vals) / len(vals)
+    return out
 
 
 def _print_boot_stamp(arch_root: Optional[Path] = None) -> None:
@@ -849,6 +921,42 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
         if "gif_head_div_loss" in m:
             parts.append(f"div={m['gif_head_div_loss']:.3f}")
         gif_str = " | gif[" + " ".join(parts) + "]"
+    # ── NFO (Neural Field Oscillator) telemetry ──
+    # Surfaces only when the arch has an NFO block (cf. SmolLM
+    # arch.neuro `nfo: { enabled: true, ... }`). Keys flow from the
+    # block's ``last_state`` dict through ``_collect_nfo_metrics``.
+    #
+    #  R   — Kuramoto order parameter (0=incoherent, 1=phase-locked)
+    #  R★  — peak across oscillators (max coherence in any cluster)
+    #  A   — Swift–Hohenberg amplitude mean (sigmoid-bounded by μ)
+    #  σA  — amplitude std (high σA + low cVar = traveling waves)
+    #  cV  — phase circular variance (1=uniform, 0=delta peak)
+    #  κ   — coupling strength (Kuramoto K parameter)
+    #  α   — ReZero gate (0=identity, 1=full NFO contribution)
+    #  Φκ  — bipartition coherence lower bound (provable Φ surrogate)
+    nfo_str = ""
+    nfo_keys = ("nfo_R_mean", "nfo_R_max", "nfo_A_mean", "nfo_A_std",
+                "nfo_phi_circular_var", "nfo_kappa", "nfo_alpha",
+                "nfo_phi_kappa")
+    if any(k in m for k in nfo_keys):
+        nparts = []
+        if "nfo_R_mean" in m:
+            nparts.append(f"R={m['nfo_R_mean']:.2f}")
+        if "nfo_R_max" in m:
+            nparts.append(f"R★={m['nfo_R_max']:.2f}")
+        if "nfo_A_mean" in m:
+            nparts.append(f"A={m['nfo_A_mean']:.2f}")
+        if "nfo_A_std" in m:
+            nparts.append(f"σA={m['nfo_A_std']:.2f}")
+        if "nfo_phi_circular_var" in m:
+            nparts.append(f"cV={m['nfo_phi_circular_var']:.2f}")
+        if "nfo_kappa" in m:
+            nparts.append(f"κ={m['nfo_kappa']:.2f}")
+        if "nfo_alpha" in m:
+            nparts.append(f"α={m['nfo_alpha']:.3f}")
+        if "nfo_phi_kappa" in m:
+            nparts.append(f"Φκ={m['nfo_phi_kappa']:.2f}")
+        nfo_str = " | nfo[" + " ".join(nparts) + "]"
     # Emergent C1–C6 telemetry tail (printed only when those keys are
     # present, so legacy runs without enable_emergent see no change).
     em_str = ""
@@ -917,7 +1025,8 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
             f"| mesoLG {lg:.2f} "
             f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
             f"| NT[{nt_str}]{osc_str}{em_str}{reg_str}"
-            f"{cortex_str}{gif_str}{gif7_str}{allostasis_str}{trunk_str}")
+            f"{cortex_str}{gif_str}{gif7_str}{nfo_str}"
+            f"{allostasis_str}{trunk_str}")
 
 
 def _eval_pass_marks(rules, step: int,
@@ -1234,6 +1343,16 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                     # these to render.
                     merged[k] = v
                 metrics = merged
+            # NFO telemetry — pulled from any NeuralFieldOscillator
+            # block in the harness's module tree. Returns an empty
+            # dict when the arch has no NFO (so legacy archs see no
+            # change to the log format). Surfaces R, κ, α, Φκ so we
+            # can verify the H015..H018 block is actually firing.
+            nfo_metrics = _collect_nfo_metrics(harness)
+            if nfo_metrics:
+                if metrics is None:
+                    metrics = {}
+                metrics.update(nfo_metrics)
             # `avg` = total loss (LM + aux); `avg_lm` = LM-only CE.
             # When aux losses are off they're equal; when on, the
             # `loss` column shows the optimization target and the `lm`

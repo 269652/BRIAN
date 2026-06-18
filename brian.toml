@@ -95,8 +95,23 @@ branch = "master"
 # explicit value here so a box self-destruction (H24 mode of failure)
 # can never eat more than ~push_every steps of checkpoint progress.
 log_every = 20
-save_every = 500    
+save_every = 2500
 push_every = 2500
+
+# ── OOD evaluation cadence (2026-06-18) ──
+# Mid-training WikiText-103 perplexity probe — runs the *real*
+# eval loop (`_mid_ood_eval` in train_dsl.py) every N steps and
+# emits `[mid-ood] step N: wikitext ppl=...` lines, which the
+# `brian ps` task-manager parses to populate the PPL column.
+#
+# The fast per-step `gif[ood_ema=… ood_ce=…]` readout in the
+# normal training log is a running EMA over the harness's *training*
+# batches — it is NOT a held-out OOD evaluation. The held-out PPL
+# only appears when `ood_every > 0`.
+#
+# Set to 0 to disable the mid-training probe entirely (e.g. for
+# very long warmups where the eval pause is not worth the signal).
+ood_every = 500
 
 # ── Checkpoint push backend (2026-06-15) ──
 # Default flipped from Git LFS to HuggingFace Hub after run 41063959

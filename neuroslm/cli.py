@@ -1008,7 +1008,12 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         dna_path = cfg.dna
         print(f"[deploy] brian.toml DNA mode: {dna_path}")
 
-    ood = args.ood if args.ood else 0
+    # ── OOD probe cadence: CLI --ood > brian.toml [defaults].ood_every > 0 ──
+    # When > 0 the on-box trainer fires `_mid_ood_eval` every N steps and
+    # prints `[mid-ood] step N: wikitext ppl=...` — the line `brian ps`
+    # parses to populate the PPL column. The per-step `gif[ood_ema=…]`
+    # in normal log rows is a *training-batch* EMA, not held-out OOD.
+    ood = args.ood if args.ood else cfg.default_ood_every
     log_every = cfg.default_log_every
     save_every = cfg.default_save_every
     push_every = cfg.default_push_every
@@ -1046,12 +1051,23 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         print(f"[deploy] teamspace: {teamspace}")
 
     # ── Arch: CLI positional > brian.toml [current].arch ──
+    # Previously: ``config.arch`` was left unset when no CLI ``--arch``
+    # was passed, so the connector fell back to ``architectures/current``
+    # (a stale working-copy folder). That meant deploys *silently
+    # ignored* the configured ``[current].arch = "architectures/SmolLM"``
+    # and trained on a different file with different (and out-of-date)
+    # NFO / regularization settings. Now we always propagate ``cfg.arch``
+    # when neither ``--arch`` nor DNA-mode is set.
     _arch_arg = getattr(args, "arch", None)
     if _arch_arg:
         arch_path = Path(_arch_arg)
         if arch_path.is_file():
             arch_path = arch_path.parent
         config.arch = str(arch_path)
+    elif not dna_path and cfg.arch:
+        # No CLI override and no DNA workspace: honour brian.toml.
+        config.arch = cfg.arch
+        print(f"[deploy] arch: {cfg.arch} (from brian.toml [current].arch)")
 
     # ── Resume ──
     resume_target = getattr(args, "resume", None)
