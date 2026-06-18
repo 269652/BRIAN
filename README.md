@@ -1,6 +1,6 @@
 # BRIAN — Biologically Realistic Information Architecture Network
 
-> *146.9M trainable-param bowtie trunk · ~980M frozen cortex experts · optimized for integrated information (Φ) · every claim backed by unit tests or OOD artifacts.*
+> *146.9M trainable-param bowtie trunk · ~980M frozen cortex experts · exploring integrated information (Φ).*
 
 [![tests](https://img.shields.io/badge/tests-3518%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
@@ -17,7 +17,7 @@ BRIAN is a research prototype that bets on **topology, Φ-coupled plasticity, an
 
 ## What it does
 
-BRIAN combines five pillars into a single differentiable training loop:
+BRIAN combines five mechanisms into a single differentiable training loop:
 
 | Pillar | What it is | Verified |
 |--------|-----------|---------|
@@ -31,32 +31,6 @@ Full architecture spec and tensor shapes: [`docs/architecture.md`](docs/architec
 
 ---
 
-## Architecture
-
-```
-┌──────────────────────────────────────────┐
-│  Sensory → Thalamus → State Models       │
-│       ↓                                  │
-│  Qualia + Hopfield + Cortical Ignition   │  ← within-pass re-entry
-│       ↓                                  │
-│  Memory + Cognition + Executive          │
-│       ↓                                  │
-│  Motor Output                            │
-│       ↓                                  │
-│  [PFC + GWS] ──→ Thalamic crosspass      │  ← cross-pass re-entry
-└──────────────────────────────────────────┘
-        ↕ (bidirectional)
-  ┌─ Narrative Stack (Sheaf H¹)
-  ├─ Causal Rule Store
-  └─ Personality Vector (.mem checkpoint)
-
-        ↕
-  ┌─ GridWorld 10×10
-  ├─ Survival Loop (homeostasis)
-  └─ Policy Memory (Basal Ganglia VQH)
-```
-
-The full wiring — 32 populations, 22 synapses, 6 neurotransmitter systems — is captured in the Neural Flow Graph (NFG):
 
 ![Neural Flow Graph — current architecture](.neuro/nfg.svg)
 
@@ -97,6 +71,11 @@ Full reference: [`docs/dsl.md`](docs/dsl.md).
 Three frozen causal-LM experts sit above the bowtie trunk and fuse logits at the LM head:
 
 | Domain | Expert | Params | Tokenizer bridge |
+|--------|--------|--------|-----------------|
+| General | `smollm2_360m` | ~360M | cross-vocab retokenise |
+| Code | `microsoft/CodeGPT-small-py` | ~125M | direct (shared BPE) |
+| Reasoning | `Qwen/Qwen2.5-0.5B` | ~500M | cross-vocab retokenise |
+
 |--------|--------|--------|-----------------|
 | General | `smollm2_360m` | ~360M | cross-vocab retokenise |
 | Code | `microsoft/CodeGPT-small-py` | ~125M | direct (shared BPE) |
