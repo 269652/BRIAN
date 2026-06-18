@@ -500,11 +500,17 @@ class LightningConnector(BaseConnector):
         for r in records:
             try:
                 teamspace = _resolve_teamspace_handle(user, r.teamspace)
+                # SDK quirk: ``create_ok=False`` fails with "does not
+                # exist" on Stopped/Completed Studios — only currently
+                # Running ones are found. ``create_ok=True`` re-attaches
+                # to ANY existing Studio (and only creates a new one if
+                # the name truly isn't on the account). Safe here
+                # because we already know the studio existed at launch.
                 s = Studio(
                     name=r.studio_name,
                     teamspace=teamspace,
                     user=user,
-                    create_ok=False,
+                    create_ok=True,
                 )
                 native = getattr(s.status, "value", str(s.status))
                 native_name = (native.name if hasattr(native, "name")
@@ -529,8 +535,10 @@ class LightningConnector(BaseConnector):
         try:
             user = _get_authed_user_safe()
             teamspace = _resolve_teamspace_handle(user, info.teamspace)
+            # create_ok=True so we re-attach to Stopped / Completed
+            # Studios too (the SDK's create_ok=False only finds Running).
             s = Studio(name=info.studio_name, teamspace=teamspace,
-                       user=user, create_ok=False)
+                       user=user, create_ok=True)
             native = s.status
             native_name = (native.name if hasattr(native, "name")
                            else str(native))
@@ -552,16 +560,33 @@ class LightningConnector(BaseConnector):
         user = _get_authed_user_safe()
         teamspace = _resolve_teamspace_handle(user, info.teamspace)
         try:
+            # create_ok=True for re-attach across all studio states.
             s = Studio(name=info.studio_name, teamspace=teamspace,
-                       user=user, create_ok=False)
+                       user=user, create_ok=True)
         except Exception as exc:
             raise RuntimeError(
                 f"Could not attach to Studio {info.studio_name!r}: "
                 f"{type(exc).__name__}: {exc}"
             ) from exc
-        # tail -n N <log_path>
+        # Refuse to tail when the Studio is stopped — ``Studio.run`` on
+        # a stopped Studio hangs trying to provision a shell session.
+        native = getattr(s, "status", None)
+        native_name = (native.name if hasattr(native, "name") else str(native))
+        if native_name in ("Stopped", "NotCreated", "Failed"):
+            return (f"(studio {info.studio_name!r} is {native_name}; "
+                    f"start it via the Lightning UI to inspect "
+                    f"{info.log_path or 'the log'})")
+        # ``shlex.quote`` wraps in single quotes, which SUPPRESS tilde
+        # expansion (``'~/brian/logs/x.log'`` is interpreted literally).
+        # Rewrite leading ``~/`` → ``$HOME/`` so the shell interpolates
+        # the user's home dir even inside the quoted path.
         log_path = info.log_path or f"{REMOTE_LOGS}/{job_id}.log"
-        cmd = f"tail -n {int(n)} {shlex.quote(log_path)} 2>/dev/null || echo '(log not yet created)'"
+        if log_path.startswith("~/"):
+            quoted = '"$HOME/' + log_path[2:] + '"'
+        else:
+            quoted = shlex.quote(log_path)
+        cmd = (f"tail -n {int(n)} {quoted} 2>/dev/null || "
+               f"echo '(log not yet created at {log_path})'")
         try:
             out = s.run(cmd)
         except Exception as exc:
@@ -585,17 +610,31 @@ class LightningConnector(BaseConnector):
         try:
             user = _get_authed_user_safe()
             teamspace = _resolve_teamspace_handle(user, info.teamspace)
+            # create_ok=True for re-attach across all studio states.
             s = Studio(name=info.studio_name, teamspace=teamspace,
-                       user=user, create_ok=False)
-            s.stop()
+                       user=user, create_ok=True)
+            # If the Studio is already stopped, treat as a no-op
+            # success — the user's intent ("don't run any more") is
+            # already satisfied. Lightning auto-stops crashed runs.
+            native = getattr(s, "status", None)
+            native_name = (native.name if hasattr(native, "name")
+                           else str(native))
+            if native_name in ("Stopped", "NotCreated", "Failed",
+                               "Completed"):
+                print(f"[lightning] studio {info.studio_name!r} already "
+                      f"{native_name} (no-op)")
+            else:
+                s.stop()
+                print(f"[lightning] stopped studio {info.studio_name!r}")
         except Exception as exc:
             print(f"[lightning] stop() failed: "
                   f"{type(exc).__name__}: {exc}", file=sys.stderr)
             return 1
-        # Mark as stopped + remove from active registry
+        # Mark as stopped + remove from active registry so brian ps
+        # forgets about it. The actual SDK stop already happened above.
         info.status = JobStatus.STOPPED.value
         remove_job(job_id)
-        print(f"[lightning] stopped {job_id} (Studio {info.studio_name})")
+        print(f"[lightning] job {job_id} unregistered from .brian/jobs/")
         return 0
 
     # ── internal helpers ────────────────────────────────────────────

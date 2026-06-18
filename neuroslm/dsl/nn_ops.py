@@ -200,7 +200,15 @@ def causal_self_attention(x: torch.Tensor,
     q = F.normalize(q, dim=-1)
     k = F.normalize(k, dim=-1)
 
-    cos, sin = rope_cache(max_ctx, head_dim, base=rope_base,
+    # RoPE cache: size to the ACTUAL sequence length (not just max_ctx).
+    # Without this, when T > max_ctx (e.g. the GIF OOD probe evaluating
+    # length-extrapolation at T=358 against a model trained at T=128),
+    # ``rope()`` silently slices the cache to max_ctx entries and the
+    # next ``x1 * cos`` blows up with a shape mismatch. Using
+    # ``max(T, max_ctx)`` keeps the in-training T==max_ctx path identical
+    # (same cache size) while the OOD-probe T>max_ctx path also works.
+    cache_len = max(int(T), int(max_ctx))
+    cos, sin = rope_cache(cache_len, head_dim, base=rope_base,
                           device=x.device, dtype=x.dtype)
     q = rope(q, cos.to(q.dtype), sin.to(q.dtype))
     k = rope(k, cos.to(k.dtype), sin.to(k.dtype))

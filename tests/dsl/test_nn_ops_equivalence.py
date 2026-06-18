@@ -120,5 +120,83 @@ class TestSoftmax:
         assert torch.allclose(nn_ops.softmax(x, dim=-1), F.softmax(x, dim=-1), atol=1e-6)
 
 
+# ── causal_self_attention (T vs max_ctx length extrapolation) ──────────
+
+class TestCausalSelfAttentionLengthHandling:
+    """Regression: GIF OOD probe passes T>max_ctx to the DSL attention path.
+
+    The original implementation built ``rope_cache(max_ctx, ...)`` and then
+    ``rope()`` did ``cos[..., :T, :]``. When T > max_ctx, the slice
+    returned only ``max_ctx`` entries and the next ``x1 * cos`` blew up
+    with::
+
+        RuntimeError: The size of tensor a (358) must match the size
+        of tensor b (128) at non-singleton dimension 2
+
+    Hit during real Lightning AI deploy at step 80 — the GIF.OOD_probe
+    evaluates length-extrapolation on cached sequences (~T=358) against
+    a model trained with max_ctx=128. RoPE itself supports arbitrary
+    length (it's parameter-free), so the model must be ABLE to run
+    these batches without crashing.
+
+    Fix: build cache at ``max(T, max_ctx)``.
+    """
+
+    def _weights(self, dim, n_heads, n_kv_heads):
+        head_dim = dim // n_heads
+        return (
+            torch.randn(n_heads * head_dim, dim) * 0.02,
+            torch.randn(2 * n_kv_heads * head_dim, dim) * 0.02,
+            torch.randn(dim, dim) * 0.02,
+        )
+
+    def test_T_equal_max_ctx_works(self):
+        """Sanity: T == max_ctx (the training path) still works."""
+        B, dim, n_heads, n_kv = 2, 64, 4, 2
+        T = max_ctx = 16
+        x = torch.randn(B, T, dim)
+        qw, kvw, ow = self._weights(dim, n_heads, n_kv)
+        y = nn_ops.causal_self_attention(x, qw, kvw, ow, n_heads, n_kv, max_ctx)
+        assert y.shape == (B, T, dim)
+
+    def test_T_less_than_max_ctx_works(self):
+        """T < max_ctx (e.g. mid-batch trim) — same shape contract."""
+        B, dim, n_heads, n_kv = 2, 64, 4, 2
+        T, max_ctx = 12, 16
+        x = torch.randn(B, T, dim)
+        qw, kvw, ow = self._weights(dim, n_heads, n_kv)
+        y = nn_ops.causal_self_attention(x, qw, kvw, ow, n_heads, n_kv, max_ctx)
+        assert y.shape == (B, T, dim)
+
+    def test_T_greater_than_max_ctx_no_shape_mismatch(self):
+        """REGRESSION: T > max_ctx must not crash (length extrapolation)."""
+        B, dim, n_heads, n_kv = 2, 64, 4, 2
+        # Mirror the production failure: T=358, max_ctx=128 (≈3× larger)
+        max_ctx, T = 16, 48
+        x = torch.randn(B, T, dim)
+        qw, kvw, ow = self._weights(dim, n_heads, n_kv)
+        y = nn_ops.causal_self_attention(x, qw, kvw, ow, n_heads, n_kv, max_ctx)
+        # Output must preserve the input sequence length, not get
+        # silently truncated to max_ctx.
+        assert y.shape == (B, T, dim), (
+            f"expected (B={B}, T={T}, dim={dim}), got {tuple(y.shape)} — "
+            "RoPE cache was sliced to max_ctx and lost positions"
+        )
+
+    def test_T_three_times_max_ctx_matches_gif_probe_scenario(self):
+        """The actual production failure ratio (T=358 / max_ctx=128 ≈ 2.8)."""
+        B, dim, n_heads, n_kv = 1, 64, 4, 2
+        max_ctx = 16
+        T = 48  # 3× max_ctx
+        x = torch.randn(B, T, dim)
+        qw, kvw, ow = self._weights(dim, n_heads, n_kv)
+        # Should not raise.
+        y = nn_ops.causal_self_attention(x, qw, kvw, ow, n_heads, n_kv, max_ctx)
+        assert y.shape == (B, T, dim)
+        # Sanity: output is finite (RoPE didn't explode at the long
+        # positions; the inv_freq values are well-behaved).
+        assert torch.isfinite(y).all()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
