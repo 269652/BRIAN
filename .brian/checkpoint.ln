@@ -1,2 +1,2 @@
-# auto: best gap_ratio checkpoint — 170628_20_4560.log
-hf://moritzroessler/BRIAN/checkpoints/20260616-170630_9bf5434c_neuroslm-full/step2500.pt
+# auto: best combined checkpoint — train.log
+hf://moritzroessler/BRIAN/checkpoints/20260615-194900_a54e607e_neuroslm-full-dna-arch/step7500.pt

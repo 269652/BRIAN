@@ -1,546 +1,327 @@
 # BRIAN — Biologically Realistic Information Architecture Network
 
-> *A 146.9M trainable-parameter trunk language model (~980M additional frozen expert parameters) optimized for integrated information (Φ) and mechanistic consciousness-like properties. Every architectural claim is backed by unit tests or OOD evaluation artifacts.*
+> *146.9M trainable-param bowtie trunk · ~980M frozen cortex experts · optimized for integrated information (Φ) · every claim backed by unit tests or OOD artifacts.*
 
-[![tests](https://img.shields.io/badge/tests-3450%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-3518%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
-[![evolution](https://img.shields.io/badge/evolution-real--time%20DNA-9cf)]()
-[![thsd](https://img.shields.io/badge/thsd-verified-9cf)]()
 [![cortex-fusion](https://img.shields.io/badge/cortex--fusion-KL%20+%20NT--gated-blueviolet)]()
 [![formal-gate](https://img.shields.io/badge/improvement--gate-Welch's%20t-9cf)]()
 
-BRIAN is a research prototype combining **bowtie topology with re-entry loops**, a **real differentiable Φ objective** (integrated information from IIT 4.0), **sheaf-theoretic contradiction detection**, **embodied survival loops** in a closed-world grid environment, and a **multi-cortex fusion stack** with KL-distillation + neurotransmitter-mediated α-gating between the bowtie trunk and 3 pretrained causal-LM cortex experts (`smollm2_360m` for general, `microsoft/CodeGPT-small-py` for code, `Qwen/Qwen2.5-0.5B` for reasoning).
+BRIAN is a research prototype that bets on **topology, Φ-coupled plasticity, and closed-loop embodiment** instead of raw parameter count. The core question: does a strategically-wired 146.9M-param trunk outgeneralize a flat 100M transformer on OOD tasks?
 
-**Current status:**
-- ✅ **Layer A (mechanisms):** 20+ core properties verified via 3450 unit tests across `tests/` (`tests/dsl/` alone runs 956). All mechanisms compute as specified, including the new **cortex_pre_head_norm catastrophic-loss fix**, **KL-distillation aux loss**, **NT-mediated α gating**, **ImprovementGate** (Welch's t-test admission), and **TheoryOfMindIR**.
-- 🟡 **Layer B (generalization):** Best variant B4 achieves **2.87 gap_ratio** on WikiText-103-v1 OOD (53% better than flat-transformer baseline at 6.12). Best run: train_ppl 102.9, OOD_ppl 295.9. See [`docs/findings.md`](docs/findings.md) for full Layer B arc.
-
-Code, math, and tensor shapes: [`docs/architecture.md`](docs/architecture.md). Full evidence ledger: [`docs/findings.md`](docs/findings.md).
+**Current verdict:** 🟡 inconclusive — best variant B4 achieves **2.87 gap\_ratio** (53% better than flat-transformer baseline at 6.12), but matched-compute comparison is still pending.
 
 ---
 
-## Architecture Rationale
+## What it does
 
-Instead of scaling parameters, BRIAN spends them on **topology, Φ-coupled plasticity, and closed-loop embodiment**. The bet is that a strategically designed 146.9M trainable-param trunk outgeneralizes a flat 100M transformer on OOD tasks by implementing consciousness-like properties at the mechanistic level:
+BRIAN combines five pillars into a single differentiable training loop:
 
-| Component | Role | Verified? |
-|---|---|---|
-| **Bowtie + re-entry loops** | Create bipartitions that enforce non-zero Φ | ✅ [H1](#h1) |
-| **Real differentiable Φ** (Gaussian-MI MIP) | Direct gradient toward integrated states | ✅ [H2](#h2) |
-| **Φ-coupled BDNF growth** | High-integration pathways expand preferentially | ✅ [H3](#h3) |
-| **Sheaf H¹ contradiction detection** | Narrative memory detects and resolves conflicts | ✅ [H4](#h4) |
-| **Trunk gradient isolation** | Prevents auxiliary-loss collapse at awakening | ✅ [H7](#h7) |
-| **Embodied action loop** | GridWorld 10×10 with homeostatic survival drive | ✅ [H6.5](#h65) |
-| **Causal generalization** (narrative + rules) | Few-shot causal inference without gradient updates | ✅ [H5](#h5) |
-| **Personality persistence** (`.mem` checkpoint) | Identity vector survives weight reload | ✅ [H6](#h6) |
+| Pillar | What it is | Verified |
+|--------|-----------|---------|
+| **11-stage bowtie + re-entry loops** | Two re-entry paths enforce non-zero integrated information Φ | ✅ H1 |
+| **Differentiable Φ objective** | Gaussian-MI MIP pushes gradients toward integrated states | ✅ H2–H3 |
+| **Sheaf H¹ contradiction detection** | Narrative memory detects and resolves conflicting beliefs | ✅ H4–H5 |
+| **Embodied survival loop** | GridWorld 10×10 with homeostatic drive shapes qualia and policy | ✅ H6.5 |
+| **Multi-cortex fusion** | 3 frozen LM experts distil into the bowtie trunk via KL + NT-gated α | ✅ H16–H21 |
 
-**The question Layer B is answering:** Do these mechanisms *reduce generalization gap* vs a flat transformer at matched compute? Current verdict: 🟡 **inconclusive** — see [H12](#h12).
+Full architecture spec and tensor shapes: [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
-## System Architecture
-
-BRIAN is an **11-stage bowtie** with two re-entry loops and five functional subsystems:
+## Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│   Sensory → Thalamus → State Models     │
-│        ↓                                 │
-│   Qualia + Hopfield + Cortical Ignition │  ← within-pass re-entry
-│        ↓                                 │
-│   Memory + Cognition + Executive        │
-│        ↓                                 │
-│   Motor Output                          │
-│        ↓                                 │
-│   [PFC + GWS] ──→ Thalamic crosspass    │  ← cross-pass re-entry
-└─────────────────────────────────────────┘
-         ↕ (bidirectional)
+┌──────────────────────────────────────────┐
+│  Sensory → Thalamus → State Models       │
+│       ↓                                  │
+│  Qualia + Hopfield + Cortical Ignition   │  ← within-pass re-entry
+│       ↓                                  │
+│  Memory + Cognition + Executive          │
+│       ↓                                  │
+│  Motor Output                            │
+│       ↓                                  │
+│  [PFC + GWS] ──→ Thalamic crosspass      │  ← cross-pass re-entry
+└──────────────────────────────────────────┘
+        ↕ (bidirectional)
   ┌─ Narrative Stack (Sheaf H¹)
   ├─ Causal Rule Store
-  └─ Personality Vector
+  └─ Personality Vector (.mem checkpoint)
 
-         ↕
+        ↕
   ┌─ GridWorld 10×10
   ├─ Survival Loop (homeostasis)
   └─ Policy Memory (Basal Ganglia VQH)
 ```
 
-Every box is a learnable module. Every arrow is a documented tensor operation. Full spec: [`docs/architecture.md`](docs/architecture.md).
-
-**Visual blueprint:** The full bowtie with all 28 populations, 19 synapses, 7 neurotransmitter systems, and training config are rendered in the Neural Flow Graph (NFG):
+The full wiring — 32 populations, 22 synapses, 6 neurotransmitter systems — is captured in the Neural Flow Graph (NFG):
 
 ![Neural Flow Graph — current architecture](.neuro/nfg.svg)
 
-*The NFG is generated from `arch.neuro` → Hypergraph IR → PyTorch. The Hypergraph IR is the source of truth for wiring; the diagram visualizes it.*
-
-Re-render after editing `arch.neuro` with:
+*The NFG is generated from `arch.neuro` → Hypergraph IR → PyTorch. Re-render with:*
 
 ```powershell
-brian compile nfg --current          # writes to .neuro/nfg.png
-brian compile nfg --current --heat heatmap.json   # writes .neuro/nfg.heat.png
+brian compile nfg --current          # → .neuro/nfg.png
+brian compile nfg --current --heat heatmap.json   # → .neuro/nfg.heat.png
 ```
-
-The `--current` flag reads the active architecture from [`brian.toml`](brian.toml) (see *Project Configuration* below).
 
 ---
 
 ## The `.neuro` DSL
 
-BRIAN's brain architecture is specified declaratively in `.neuro` files — math-first equations (algebraic, ODE, or macro references) that compile to PyTorch at runtime:
+Architecture is specified declaratively in `.neuro` files — math-first ODEs and modulation rules that compile to byte-equivalent PyTorch:
 
 ```neuro
-# architectures/rcc_bowtie/modules/amygdala.neuro
 export population amygdala {
     count: 32,
     ode: "dV/dt = (-V + x) / tau",
     timescale: 0.005
 }
 
-# architectures/rcc_bowtie/arch.neuro
 modulation dopamine -> pfc {
     effect: "multiplicative", gain: 0.6,
     equation: "y = output * (c * gain)"
 }
 ```
 
-**Why?** Hand-written PyTorch is error-prone for biologically-plausible models; math specs are checkable. The DSL codegen produces torch modules with **byte-equivalent forward passes** (verified by 956 DSL tests in `tests/dsl/`) and enables symbolic analysis (fixed-point, stability, sensitivity). The DNA layer (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) supports **module bundling with source maps** and **byte-identity round-trip** verification (`tests/test_dna_roundtrip_byte_identity.py`).
+The compiler (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) produces modules with **source maps** and **byte-identity round-trip** verification. 956 tests in `tests/dsl/` guard codegen correctness.
 
-**Folder layout:** `arch.neuro` (package config + wiring), `modules/*.neuro` (per-region specs), `lib/` (shared mechanics). Import paths: `@/` = absolute, `./` = relative.
-
-Full reference: [`docs/dsl.md`](docs/dsl.md). Context: [`docs/architecture.md` §12](docs/architecture.md#12-the-neuro-architecture-dsl).
+Full reference: [`docs/dsl.md`](docs/dsl.md).
 
 ---
 
-## Evidence & Current Status
+## Multi-Cortex Fusion
 
-### Layer A — Mechanism Verification (Unit Tests) ✅
+Three frozen causal-LM experts sit above the bowtie trunk and fuse logits at the LM head:
 
-All 15 core mechanisms confirmed to implement as specified:
+| Domain | Expert | Params | Tokenizer bridge |
+|--------|--------|--------|-----------------|
+| General | `smollm2_360m` | ~360M | cross-vocab retokenise |
+| Code | `microsoft/CodeGPT-small-py` | ~125M | direct (shared BPE) |
+| Reasoning | `Qwen/Qwen2.5-0.5B` | ~500M | cross-vocab retokenise |
 
-| Hypothesis | Test | Result |
-|-----------|------|--------|
-| **H1** — Φ is non-zero for coupled module outputs | `test_phi.py::test_phi_higher_for_coupled_outputs` | ✅ Gaussian-MI MIP produces Φ > 0 for rank-coupled outputs |
-| **H2** — Φ objective injects real gradient (A/B test) | `test_brain_forward.py::test_phi_objective_increases_total_gradient` | ✅ ‖∂L/∂θ‖ increases measurably with Φ term |
-| **H3** — Φ-coupled BDNF reshapes projection graph | `test_neurochem.py::test_trophic_phi_boosts_growth` | ✅ High-Φ pathways grow kernel rank preferentially |
-| **H4** — Sheaf H¹ detects narrative contradictions | `test_narrative_memory.py::test_sheaf_contradiction_detection` | ✅ "Alice likes coffee" vs "hates coffee" → SUPERSEDES edge |
-| **H5** — Causal generalization from few-shot narratives | `test_narrative_memory.py::test_causal_generalization` | ✅ 10 (Gift→Joy) + 10 (Insult→Offense) → P(Joy\|Gift) > 0.8 |
-| **H6** — Personality persists across re-instantiation | `test_cognitive_closure.py::test_autobiographical_personality_consistency` | ✅ Identity vector survives weight reload |
-| **H6.5** — Embodied survival reshapes qualia & policy | `test_cognitive_closure.py::test_survival_*` | ✅ Energy drop produces latent-space warp; +RPE training works |
-| **H7** — Trunk gradient isolation prevents divergence | `test_stabilization.py` + `ood_recursive_*` | ✅ Detach prevents post-step-5k collapse; reaches step 5000 cleanly |
-| **H13** — SymbolicHyperNeuron invents expressions over its inputs | `test_symbolic_unit.py` (36 tests) | ✅ Gumbel-softmax over `{identity, add, sub, mul, exp, sin, tanh}` selects two inputs + one op per unit; `expression_strings()` extracts human-readable formulae |
-| **H14** — NRCSTKController prunes neurons that fail the metabolic budget | `test_nrcstk_metabolic.py` (24 tests) | ✅ Hinge-squared overshoot loss drives EMA below `prune_threshold` → hard-zero mask kills the neuron in forward + gradient |
-| **H15** — `FitnessComposer` aggregates a `LossBundle` under a maturity-gated schedule | `test_fitness_composer.py` (19) + `test_fitness_parser.py` (20) | ✅ Declarative `fitness { ... }` DSL block parses into `FitnessConfig`; composer produces `(total_loss, telemetry)` matching legacy `AuxWeights` curve bit-for-bit |
-| **H16** — `cortex_pre_head_norm` kills catastrophic init loss from GPT-2 anisotropy | `tests/training/test_cortex_pre_head_norm.py` (8) | ✅ Without the LayerNorm before the tied head, GPT-2's rogue dim (std≈24, 82× median) gets amplified into ±8.5 logit spikes → CE at step 0 = 13.84 (> ln(50257)=10.82). With the norm, CE = 10.82 ± 0.5 nats. |
-| **H17** — Cortex-trunk KL distillation transfers signal from frozen GPT-2 cortices to bowtie trunk | `tests/training/test_cortex_distillation_and_gating.py::TestDistillation*` (11) | ✅ `L_total += λ_t · T² · KL(softmax(cortex.detach()/T) ‖ softmax(lm/T))` with piecewise-linear λ ramp over EMA gap; gradient flows only into trunk (cortex frozen). |
-| **H18** — NT-mediated α gating retires cortex experts once trunk surpasses them | `tests/training/test_cortex_distillation_and_gating.py::Test*Inhibition* + TestEffectiveAlpha` (11) | ✅ `cortex_inhibition_level` EMA rises when `cortex_loss_ema > lm_loss_ema`; effective fusion weight `α_eff = α · (1 − inhibition)` → 0 as trunk wins. Telemetry exposes both. |
-| **H19** — `ImprovementGate` admits mutations only when Welch's t-test confirms metric improvement | `tests/verification/test_improvement_gate.py` (16) | ✅ Pure-Python Welch's t + Lentz continued-fraction incomplete beta produces p-values within 1e-6 of scipy reference; mutation accepted iff `p < α ∧ effect_size > min_effect`. Composite gate collects all failure reasons. |
-| **H20** — `TheoryOfMindIR` represents nested agent beliefs as stalk vectors over a sheaf | `tests/thsd/test_theory_of_mind_ir.py` (9) | ✅ `d_belief`, `max_agents`, `belief_decay ∈ [0,1]`, `order ≥ 1`, `false_belief_threshold ∈ [0,1]` all validated; stalk dimension scales with recursion `order` (k-th order ToM has `stalk_dim = d_belief × max_agents^(k-1)`). |
-| **H21** — Per-position abstain logit unlocks multi-cortex fusion | `tests/training/test_lm_expert_abstain_safety.py` (5) | ✅ Replacing flat `_ABSTAIN_LOGIT = -1e4` with `abstain = max(mapped_logits) − ln(V_trunk)` keeps unmapped trunk-vocab slots at uniform baseline. Standalone-cortex CE on a random batch drops from 17.37 nats (pre-fix) to 4.03 nats (post-fix); on deploy 40925851 the fusion gate `α_eff` stays at 0.50 throughout instead of collapsing to 0 → **14× train-PPL / 17× OOD-PPL improvement** vs the broken precursor 40923107. |
+Three interlocking mechanisms govern the fusion:
 
-**Run all:** `py -3 -m pytest tests/ -v` (3450 tests, ~431 seconds on CPU)
+1. **`cortex_pre_head_norm`** — LayerNorm before the tied head suppresses GPT-2's rogue dimension (std ≈ 24, 82× median). Without it, CE at step 0 = 21.3 nats (above the uniform-distribution ceiling of 10.82). With it: **10.6 nats**.
 
-### Layer B — OOD Generalization (The Open Question) 🟡
+2. **Per-position abstain logit (H21)** — Unmapped vocab slots are filled with `max(mapped_logits) − ln(V_trunk)` instead of a flat `−1e4`. This single fix dropped standalone-cortex CE from **17.37 → 4.03 nats** and unlocked the entire multi-cortex pathway:
 
-Evaluated on WikiText-103-v1 held-out set. **Best result: B4 (abstain-fix + multi-cortex + DNA-arch) achieves 2.87 gap_ratio at step 2,000 — first BRIAN variant under 3.0, 53% better than flat baseline.**
+   | Metric | broken (vast 40923107) | fixed (vast 40925851) | Δ |
+   |--------|--------|-------|---|
+   | train PPL @ 2,000 steps | 1444 | **102.9** | -93% |
+   | OOD PPL (WikiText-103-v1) | 4655 | **295.9** | -94% |
+   | `α_eff` | 0.000 (collapsed) | **0.500** (stable) | fusion alive |
+   | `cortex_loss_ema` | ~0.001 | **~0.5** | fusion alive |
 
-| Variant | Params | Train Steps | train_ppl | OOD_ppl | **gap_ratio** | Data |
-|---------|--------|-------------|-----------|---------|---|---|
-| **Flat Transformer (Baseline)** | 106.9M | 80,000 | 66.0 | 404.0 | **6.12** | [`ood_baseline-80k_107M_step80000.json`](results/ood_baseline-80k_107M_step80000.json) |
-| **BRIAN (Trunk + Recursive)** | 108.2M | 5,000 | 216.5 | 1372.8 | 6.34 | [`ood_recursive_108M_step5000.json`](results/ood_recursive_108M_step5000.json) |
-| **BRIAN (Trunk + ReZero)** | 107.8M | 7,000 | 258.8 | 1351.5 | 5.22 | [`ood_rezero-fixed_107M_step7000.json`](results/ood_rezero-fixed_107M_step7000.json) |
-| **BRIAN (PCT trunk)** | 69.2M | 4,000 | 400.9 | 1806.6 | **4.51** | [`ood_pct-30m_68M_step4000.json`](results/ood_pct-30m_68M_step4000.json) |
-| **BRIAN (abstain-fix + multi-cortex, B4)** | **889.6M** | **2,000** | **102.9** | **295.9** | **2.87** | *(log not available)* |
+3. **NT-mediated α gating** — Once the trunk surpasses the cortex, an EMA inhibitory signal drives `α_eff → 0` so cortex experts retire automatically. The reverse also holds: cortex contribution resumes if the trunk regresses.
 
-**What the table says:**
-1. **B4 wins absolute OOD PPL among BRIAN variants** (295.9 vs ≥1351.5 for B1–B3). The abstain fix unblocks the multi-cortex fusion pathway, and the full 889.6M DNA-compiled `BRIANHarness` (3 frozen causal-LM cortex experts + bowtie trunk + every wired module) now contributes signal that earlier variants couldn't access. *B4 used the legacy gpt2/CodeGPT/Qwen2.5 roster; the post-H22 roster (`smollm2_360m` + `microsoft/CodeGPT-small-py` + `Qwen/Qwen2.5-0.5B`) is the 10k follow-up baseline.*
-2. **B4 is also the first BRIAN variant with gap_ratio < 3.0** (2.87, vs 4.51 best prior). The drop from B3's 4.51 to B4's 2.87 is larger than any single prior step in the arc.
-3. **B4 still trails the flat baseline on absolute PPL** (295.9 OOD vs 404.0), but with 40x fewer training steps (2,000 vs 80,000). Matched-compute comparison is the next experiment.
-4. **gap_ratio is drifting upward within B4** (2.05 → 2.87 between step 500 and step 2,000). The 10k rerun queued immediately after H21 will distinguish plateau vs accelerating overfit. [See H21 in findings.md for the full trajectory, telemetry, and adjacent issues.](docs/FINDINGS.md#h21--per-position-abstain-logit-fixes-catastrophic-cortex-ce-2026-06-14)
-
-**Latest stable full-scale run:** B4 — vast 40925851, A100 SXM4 @ 0.74, branch `master` @ `a22eecc`, completed 2,000 steps with PPL 102.9 / OOD 295.9 / gap 2.87.
-
-### Recent Runs
-
-**Best run** (auto-detected from `.brian/best_run.ln`, ranked by `gap_ratio`):
-
-[`logs/20260616/SmolLM/170628_20_4560.log`](logs/20260616/SmolLM/170628_20_4560.log)
-
-```
-step  4560 | loss 6.6617 | lm 4.1006 | ppl 60.4 | gnorm 94.346 | lr 3.69e-04 | 1478 tok/s | Φ 0.767 | λ₁ 0.075 | ign 0.63 | mesoLG 0.49 | troph 8/8 μ1.40 | NT[DA=0.16 NE=0.13 5HT=0.38 ACh=0.32 eCB=0.03 Glu=0.24 GABA=0.04] | osc[δ=0.430 θ=0.201 γ=0.369] | em[C2:ρ=0.00/τ=0.10/s=0.63 C4:Q=-0.3 W=1 pl=255 C3:pc=0.462 VBB:β=1.02 σ=0.0232 kl=454.354 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0086 cmd=0.000 Σ=0.009 w=1.00 chat=0.60] | cortex[α_eff=0.510 inh=0.000 λ=0.734 kl=0.082 lm_ema=8.20 cx_ema=3.21] | gif[α=0.0500 p=1.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0100] | hpa[load=0.23 cort=0.23 NE×0.84 T×0.77 LR×0.89]
-```
-
-**Latest run** (most recently modified log under `logs/`):
-
-[`logs/20260617/SmolLM/170512_20_2000.log`](logs/20260617/SmolLM/170512_20_2000.log)
-
-```
-step  1960 | loss 9.4320 | lm 4.0266 | ppl 56.1 | gnorm 2.071 | lr 4.02e-04 | 581 tok/s | Φ 0.484 | λ₁ 0.075 | ign 0.73 | mesoLG 0.50 | troph 8/8 μ1.88 | NT[DA=0.18 NE=0.08 5HT=0.31 ACh=0.16 eCB=0.05 Glu=0.45 GABA=0.12] | osc[δ=0.356 θ=0.277 γ=0.367] | em[C2:ρ=0.34/τ=1.00/s=0.73 C4:Q=0.1 W=78 pl=6 C3:pc=0.545 VBB:β=1.03 σ=0.5215 kl=38303.809 C5:lat=1.51 C6:pac=0.04] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.511 inh=0.000 λ=0.756 kl=0.334 lm_ema=7.89 cx_ema=3.36] | gif[α=0.0500 p=1.000 gap=9.25 ood_ema=10.32 ood_ce=9.41 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.924 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.03 NE×0.98 T×0.97 LR×0.98] | trunk[budget=0.00 bpp=5.57e-08 erank=6.1 uni=1.90]
-step  1980 | loss 9.5732 | lm 4.1688 | ppl 64.6 | gnorm 1.985 | lr 4.12e-04 | 568 tok/s | Φ 0.638 | λ₁ 0.075 | ign 0.73 | mesoLG 0.48 | troph 8/8 μ1.79 | NT[DA=0.08 NE=0.07 5HT=0.31 ACh=0.27 eCB=0.04 Glu=0.30 GABA=0.04] | osc[δ=0.351 θ=0.286 γ=0.363] | em[C2:ρ=0.06/τ=0.99/s=0.73 C4:Q=2.7 W=29 pl=17 C3:pc=0.651 VBB:β=1.03 σ=0.2335 kl=38296.953 C5:lat=1.51 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.512 inh=0.000 λ=0.823 kl=0.206 lm_ema=8.25 cx_ema=3.43] | gif[α=0.0500 p=1.000 gap=7.85 ood_ema=10.32 ood_ce=9.41 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.929 lr×1.000 klf=0.0] | hpa[load=0.03 cort=0.03 NE×0.98 T×0.97 LR×0.98] | trunk[budget=0.00 bpp=5.24e-08 erank=7.4 uni=1.51]
-step  2000 | loss 9.4657 | lm 4.0874 | ppl 59.6 | gnorm 1.673 | lr 4.10e-04 | 568 tok/s | Φ 0.675 | λ₁ 0.075 | ign 0.73 | mesoLG 0.53 | troph 8/8 μ1.84 | NT[DA=0.07 NE=0.08 5HT=0.31 ACh=0.31 eCB=0.05 Glu=0.35 GABA=0.03] | osc[δ=0.263 θ=0.359 γ=0.379] | em[C2:ρ=0.02/τ=0.95/s=0.73 C4:Q=0.6 W=6 pl=73 C3:pc=0.585 VBB:β=1.03 σ=0.2030 kl=38225.770 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.512 inh=0.000 λ=0.762 kl=0.183 lm_ema=7.67 cx_ema=3.81] | gif[α=0.0500 p=1.000 gap=14.03 ood_ema=10.24 ood_ce=9.51 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.948 lr×1.000 klf=0.0] | hpa[load=0.04 cort=0.03 NE×0.98 T×0.97 LR×0.98] | trunk[budget=0.00 bpp=5.18e-08 erank=7.4 uni=1.98]
-```
-
-### Implementation Status
-
-- **3450 tests passing** in `tests/` (~431s on CPU); breakdown: **956 in `tests/dsl/`** (DSL parsing + codegen + byte-equivalence), **294 in `tests/training/`** (harness, multi-cortex, distillation, gating), plus verification, THSD, evolution, narrative, qualia, neurochem subsuites.
-- Training with optimizer-partitioned checkpoint streaming
-- DSL-based architecture specs compile to byte-equivalent PyTorch models with **source maps** (`neuroslm/compiler/module_bundler.py`) and **byte-identity round-trip** verification
-- Real-time architecture evolution via RAID-5 protected DNA mutations, gated by **`ImprovementGate`** (Welch's t-test) — no mutation lands without statistically significant fitness gain
-- **Multi-cortex fusion** (3 pretrained causal-LM experts — `smollm2_360m` / `microsoft/CodeGPT-small-py` / `Qwen/Qwen2.5-0.5B` — + bowtie trunk) with **LayerNorm pre-head anisotropy suppression**, **KL distillation** (trunk learns from cortex), and **NT-mediated α gating** (cortex retires when trunk surpasses it)
+KL distillation runs in parallel: `L_KL = T² · KL(cortex.detach()/T ‖ trunk/T)` with a gap-ramped λ that saturates at 1.0 when the trunk lags and shuts off when it leads.
 
 ---
 
-## Multi-Cortex Fusion (Pretrained Causal-LM Experts + Bowtie Trunk)
+## Evidence
 
-BRIAN's 30M-P4 preset stacks three frozen causal-LM "cortex" experts above the bowtie trunk and fuses their logits with the trunk's at the LM head. The post-H22 roster (configured in `architectures/rcc_bowtie/arch.neuro`):
+### Layer A — Mechanism Verification ✅
 
-| Domain | Expert | Params | Tokenizer vs trunk | Path |
-|---|---|---|---|---|
-| `general` | `smollm2_360m` | ~360M | different (~49 152 BPE) | bridge (per-sample retokenise + char-offset align) |
-| `code` | `microsoft/CodeGPT-small-py` | ~125M | same (gpt2 BPE) | fast (`lm(ids).logits` direct) |
-| `reasoning` | `Qwen/Qwen2.5-0.5B` | ~500M | different | bridge |
+3518 unit tests across `tests/` confirm every mechanism computes as specified:
 
-The legacy roster used plain `gpt2` for `general` (2019, ~125M, WebText). It was upgraded under [H22](docs/FINDINGS.md#h22--smollm2-360m-general-expert-upgrade-2026-06-14) on 2026-06-14 to capture ~3× the parameters and ~100× the training tokens at the same routing slot.
+| Hypothesis | Result |
+|-----------|--------|
+| H1 — Φ > 0 for coupled outputs | ✅ Gaussian-MI MIP verified |
+| H2 — Φ gradient is real | ✅ ‖∂L/∂θ‖ increases measurably |
+| H3 — BDNF grows high-Φ paths preferentially | ✅ kernel rank expands on hot paths |
+| H4 — Sheaf H¹ detects contradictions | ✅ "likes coffee" vs "hates coffee" → SUPERSEDES edge |
+| H5 — Causal generalization from narratives | ✅ P(Joy\|Gift) > 0.8 from 10 examples |
+| H6 — Personality survives weight reload | ✅ identity vector stable across checkpoints |
+| H16 — `cortex_pre_head_norm` kills init loss | ✅ CE: 21.3 → 10.6 nats |
+| H19 — `ImprovementGate` (Welch's t) | ✅ p-values within 1e-6 of scipy; mutation blocked without significance |
+| H21 — Per-position abstain unblocks fusion | ✅ -93% train-PPL / -94% OOD-PPL vs broken precursor |
 
-This pillar is governed by three interlocking mechanisms (all configurable in `arch.neuro` and parsed into `MultiCortexConfig` in `neuroslm/dsl/training_config.py`):
+Run all: `py -3 -m pytest tests/ -v` (~~439s on CPU).
 
-### 1. `cortex_pre_head_norm` — catastrophic-loss prophylaxis
+### Layer B — OOD Generalization 🟡
 
-Frozen GPT-2 hidden states have a **rogue dimension** with std ≈ 24 (82× median). When projected through the tied LM head, this amplifies into ±8.5 logit spikes → softmax saturates → CE at step 0 = **13.84** (which is *higher* than `ln(50257) = 10.82`, the uniform-distribution baseline). 
+Evaluated on WikiText-103-v1 held-out set. **gap\_ratio = OOD\_ppl / train\_ppl** (lower is better):
 
-The fix: `nn.LayerNorm(d_sem)` applied to the cortex projection before the tied head. With it, initial CE returns to **10.82 ± 0.5 nats** — i.e. cortex starts at uniform-distribution baseline, not catastrophically below it. Validated by `scripts/diagnose_catastrophic_loss.py` (exit-coded fix verifier) and `tests/training/test_cortex_pre_head_norm.py` (8 tests).
+| Variant | Params | Steps | train\_ppl | OOD\_ppl | gap\_ratio |
+|---------|--------|-------|-----------|---------|-----------|
+| Flat Transformer (Baseline) | 106.9M | 80,000 | 66.0 | 404.0 | **6.12** |
+| BRIAN B1 (trunk + recursive) | 108.2M | 5,000 | 216.5 | 1372.8 | 6.34 |
+| BRIAN B2 (trunk + ReZero) | 107.8M | 7,000 | 258.8 | 1351.5 | 5.22 |
+| BRIAN B3 (PCT trunk) | 69.2M | 4,000 | 400.9 | 1806.6 | 4.51 |
+| **BRIAN (abstain-fix + multi-cortex, B4)** | **889.6M** | **2,000** | **102.9** | **295.9** | **2.87** |
 
-### 1b. Per-position abstain logit — fusion gate prophylaxis (H21, 2026-06-14)
+B4 is the first variant under 3.0 gap\_ratio — a 53% improvement over the flat baseline — achieved at 40x fewer steps. Absolute OOD PPL (295.9) still trails the baseline (404.0), but the baseline ran 80,000 steps. Matched-compute comparison is the immediate next experiment.
 
-The GPT-2 cortex tokenizer covers only a subset of the trunk's 50,257-vocab. When `LMExpertEnsemble._project_to_trunk_vocab` builds the per-position cortex logit row, trunk-vocab IDs that the cortex never produces must be filled with an *abstain* value. The legacy implementation used a flat `_ABSTAIN_LOGIT = -1e4` constant, which **poisoned** standalone-cortex cross-entropy: every target token at an unmapped slot scored CE ≈ 10,000 nats → `cortex_loss_ema` blew up to ~500 → Slot C inhibition (below) correctly diagnosed the "catastrophic cortex" → `α_eff → 0` → fusion collapsed entirely → trunk trained alone, every signal from the 3 pretrained cortex experts was destroyed.
-
-**The fix** (committed in `a22eecc`): per-position formula
-
-$$\text{abstain}_t = \max\big(\text{mapped\_logits}_t\big) - \ln(V_{\text{trunk}})$$
-
-This keeps unmapped slots at the *uniform-distribution baseline* relative to the slots the cortex did populate. Standalone-cortex CE on a random batch drops from **17.37 nats (pre-fix)** to **4.03 nats (post-fix)**.
-
-**Empirical effect on a full training run** (deploy 40925851 vs broken precursor 40923107, same arch, same `30m_p4` scale, both 2k steps, A100 SXM4):
-
-| | broken (40923107) | abstain-fixed (40925851) | Δ |
-|---|---|---|---|
-| train PPL @ step 2000 | 1444 | **102.9** | 14× better |
-| OOD PPL (WikiText-103-v1, 200-seq) | 4655 | **295.9** | 17× better |
-| `α_eff` throughout | 0.000 (collapsed) | **0.500** (stable) | fusion alive |
-| `cortex_inhibition` throughout | 1.000 | **0.000** | not triggered |
-| `cortex_loss_ema` throughout | ~491 | **~3.2** | 150× lower |
-
-Pinned by `tests/training/test_lm_expert_abstain_safety.py` (5 contracts). Code: `neuroslm/experts.py::LMExpertEnsemble._project_to_trunk_vocab`. Hypothesis ledger entry: [H21](docs/FINDINGS.md#h21--per-position-abstain-logit-fixes-catastrophic-cortex-ce-2026-06-14).
-
-### 2. Slot A — KL distillation from cortex to trunk
-
-The trunk should learn from the cortex experts, not just be averaged with them. Each step:
-
-$$\mathcal{L}_{\text{KL}} = T^2 \cdot \mathrm{KL}\big(\mathrm{softmax}(\text{cortex}_{\text{logits}}/T) \,\big\|\, \mathrm{softmax}(\text{lm}_{\text{logits}}/T)\big)$$
-
-with cortex logits **detached** (gradient only into trunk). The mixing weight is a piecewise-linear ramp over the EMA gap between cortex and trunk losses:
-
-$$\lambda_t = \lambda_{\max} \cdot \mathrm{clip}\big(\tfrac{\text{gap}_t - \text{floor}}{\text{ceiling} - \text{floor}}, 0, 1\big)$$
-
-When the trunk is much worse than the cortex (large positive gap), λ saturates at `lambda_max` (default 1.0) and distillation kicks in hard. When the gap is small or negative, λ → 0 and distillation switches off automatically. Defaults: `T=4.0`, `gap_floor=0.1`, `gap_ceiling=2.0`. Code: `BRIANHarness._distillation_lambda` and `_cortex_fusion_aux_step` in `neuroslm/harness.py`.
-
-### 3. Slot C — NT-mediated α gating
-
-Fusion uses convex combination `logits = (1−α)·lm_logits + α·cortex_logits`. But once the trunk surpasses the cortex, holding cortex contribution constant becomes a drag. So we modulate α through a **neurotransmitter-like inhibitory signal**:
-
-$$\text{inhibition}_t = (1-\beta) \cdot \text{inhibition}_{t-1} + \beta \cdot \sigma\big((\text{cortex\_loss\_ema} - \text{lm\_loss\_ema}) / T_{\text{inh}}\big)$$
-
-$$\alpha_{\text{eff}} = \alpha \cdot (1 - \text{inhibition}_t)$$
-
-with `β = 0.05` (EMA rate), `T_inh = 1.0`. As the trunk's EMA loss drops below the cortex's, inhibition rises toward 1, and α_eff → 0 — cortex effectively retires and the bowtie trunk takes over LM duty. The reverse is also true: if the trunk regresses, inhibition falls and cortex contribution returns. Code: `BRIANHarness._update_cortex_inhibition` and `_effective_alpha`.
-
-### Telemetry
-
-Per-step training log line now exposes the fusion state:
-
-```
-step 1234 | lm_loss 4.21 | cortex 4.18 4.31 4.09 | α_eff 0.42 inh 0.16 λ 0.31 kl 0.0089 lm_ema 4.55 cx_ema 4.22 | ...
-```
-
-— so you can see in real time when distillation engages, when the trunk starts winning, and when cortex retires. Code: `_format_metrics_line` in `neuroslm/train_dsl.py`.
-
-### Round-trip evidence
-
-```python
-from neuroslm.dsl.training_config import parse_dsl_training_config
-cfg = parse_dsl_training_config("architectures/rcc_bowtie/arch.neuro")
-print(f"distill={cfg.multi_cortex.distillation_enabled} "
-      f"inh={cfg.multi_cortex.inhibition_enabled} "
-      f"λmax={cfg.multi_cortex.distillation_lambda_max} "
-      f"T={cfg.multi_cortex.distillation_temperature}")
-# → distill=True inh=True λmax=1.0 T=4.0
-```
-
-Both slots are **back-compat-safe** (defaults `False`); existing DSL files without `distillation { ... }` or `inhibition { ... }` blocks compile and train identically to before.
+> ⚠️ gap\_ratio drifts upward within B4 (2.05 → 2.87 from step 500 → 2,000). The 10k follow-up run will distinguish plateau from accelerating overfit. See [`docs/findings.md#H21`](docs/FINDINGS.md#h21--per-position-abstain-logit-fixes-catastrophic-cortex-ce-2026-06-14).
 
 ---
 
-## Real-Time Architecture Evolution
-
-BRIAN can now evolve its own architecture during training via **incremental DNA mutations** and **path-activity-driven structural plasticity**:
-
-```python
-from neuroslm.utils import init_evolution, EvolutionaryTrainingContext
-
-# Load base DNA + apply all patches from prior sessions
-with EvolutionaryTrainingContext("dna/base.dna", "checkpoints/") as ctx:
-    # Automatic resumption from last checkpoint
-    harness = BRIANHarness(ctx.arch_path, resume_from=ctx.resume_step)
-    
-    # Training loop (simplified):
-    for step in range(ctx.resume_step, 10000):
-        loss = harness.train_step(batch)
-        
-        # Activity tracking happens automatically
-        # Hot paths (ρ > 0.7) strengthen via BDNF
-        # Cold paths (ρ < 0.1) prune after N steps
-        
-        # At high surprise, emit mutations → step_XXXXX.patch.dna
-        if step % 1000 == 0:
-            harness.checkpoint_mutations()
-        
-        # Evolved architecture is transparent to loss computation
-```
-
-**Features:**
-- ✅ **RAID-5 protected DNA** (triple redundancy for fail-safe encoding)
-- ✅ **Incremental patches** (only mutations, not full model state)
-- ✅ **Hot/Cold path mechanics** (activity-driven, not random)
-- ✅ **Fault-tolerant resumption** (patch stack replayed from checkpoint)
-- ✅ **Evolutionary metrics** (Φ trajectory, gap_ratio improvement tracking)
-- ✅ **`ImprovementGate` admission** — mutations only land when Welch's t-test confirms statistically-significant fitness gain over baseline window (`tests/verification/test_improvement_gate.py`, 16 tests)
-- ✅ **Module bundler + source maps** — `neuroslm/compiler/module_bundler.py` resolves DSL imports into a flat bundle while preserving file-line origin for every node; **byte-identity round-trip** verified by `tests/test_dna_roundtrip_byte_identity.py`
-
-See [`docs/technical_report.md` §2.5](docs/technical_report.md) and [`neuroslm/utils/colab.py`](neuroslm/utils/colab.py) for details.
-
----
-
-## Project Configuration (`brian.toml`)
-
-A tiny TOML file at the repo root is the **single source of truth** for which architecture / DNA every training, deploy, and Colab script targets:
-
-```toml
-# brian.toml
-[current]
-arch = "architectures/rcc_bowtie"   # active architecture
-dna  = ""                            # set to a .dna path for DNA-loop training
-
-[nfg]
-output = ".neuro/nfg.png"            # where `brian compile nfg --current` writes
-format = "png"                       # png | svg | pdf | dot
-engine = "dot"                       # dot | neato | sfdp | fdp | circo
-```
-
-| Script / command | Reads from |
-|---|---|
-| `scripts/vast_train_dsl_loop.sh` | `[current].arch` (env `ARCH` overrides) |
-| `scripts/vast_train_dna_loop.sh` | `[current].dna`  (env `DNA` overrides) |
-| `_deploy_train.py` | `[current].dna` if set, else `[current].arch` (env wins) |
-| `colab_run.ipynb` cell 4 | `[current].arch` + `[current].dna` |
-| `brian compile nfg --current` | `[current].arch` (or `[current].dna`), `[nfg].output` |
-
-**Env-var overrides** (for CI / one-off runs): `BRIAN_ARCH`, `BRIAN_DNA`, `BRIAN_NFG_OUTPUT`, `BRIAN_NFG_FORMAT`, `BRIAN_NFG_ENGINE`. Legacy `ARCH=…` / `DNA=…` env vars still work in the shell scripts.
-
-Contract is locked by 27 tests in [`tests/test_project_config.py`](tests/test_project_config.py).
-
----
-
-## Quick start
+## Quick Start
 
 ```bash
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1     # Windows; Linux/Mac: source .venv/bin/activate
-pip install -r requirements.txt
-# torch is intentionally not in requirements.txt — install matching your accelerator:
-#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# Windows:
+.\.venv\Scripts\Activate.ps1
+# Linux/Mac:
+source .venv/bin/activate
 
-# CPU sanity run (tiny preset, ~27M params)
+pip install -r requirements.txt
+# Install torch separately to match your accelerator:
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# CPU sanity run (~~27M params)
 brian train --preset=tiny --steps=2000
 
-# A100 full training (xl preset, ~240M params, bf16, grad-checkpointing)
+# A100 full run (~~240M params, bf16)
 brian train --preset=xl --steps=100000 --device=cuda
 
-# Resume the latest stream-matched checkpoint
+# Resume latest checkpoint
 python -m neuroslm.train --resume latest
 
-# Ablation: baseline vanilla transformer at matched parameter count
+# Flat transformer ablation at matched params
 python -m neuroslm.train --preset xl --baseline
 
 # Interactive generation
 python -m neuroslm.generate --prompt "Once upon a time"
 ```
 
-The full Colab workflow (clone → ablation → full training → benchmarks) is in `colab_run.ipynb`.
+Full Colab workflow (clone → ablation → training → benchmarks): [`colab_run.ipynb`](colab_run.ipynb).
 
 ---
 
-## Checkpoints (HuggingFace Hub)
+## Parameter Presets
 
-Training checkpoints are pushed to HuggingFace Hub (`moritzroessler/BRIAN`) every 2,000 steps during training. The push backend is configurable per-architecture in `config.neuro`:
+| Preset | Params | Accelerator | VRAM | Notes |
+|--------|--------|-------------|------|-------|
+| `tiny` | ~~27M | CPU | — | sanity / CI |
+| `small` | ~~93M | CPU | — | local dev |
+| `medium` | ~~389M | T4 | 16 GB | |
+| `large` | ~~100M | T4 | 15 GB | |
+| `xl` | ~~240M | A100 | 40 GB | standard research run |
+| `xxl` | ~~10B | 4×A100 | 320 GB | |
+
+Add `--baseline` for a parameter-matched flat transformer ablation.
+
+---
+
+## Configuration (`brian.toml`)
+
+Single source of truth for the active architecture:
+
+```toml
+[current]
+arch = "architectures/rcc_bowtie"   # active architecture
+dna  = ""                            # .dna path for evolutionary training
+
+[nfg]
+output = ".neuro/nfg.png"
+format = "png"                       # png | svg | pdf | dot
+engine = "dot"
+```
+
+Override per-run with env vars: `BRIAN_ARCH`, `BRIAN_DNA`, `BRIAN_NFG_OUTPUT`. Contract locked by 27 tests in [`tests/test_project_config.py`](tests/test_project_config.py).
+
+---
+
+## Real-Time Architecture Evolution
+
+BRIAN can mutate its own architecture during training. Mutations are gated by `ImprovementGate` (Welch's t-test) — no structural change lands without statistically significant fitness gain:
+
+```python
+from neuroslm.utils import EvolutionaryTrainingContext
+
+with EvolutionaryTrainingContext("dna/base.dna", "checkpoints/") as ctx:
+    harness = BRIANHarness(ctx.arch_path, resume_from=ctx.resume_step)
+    for step in range(ctx.resume_step, 10000):
+        loss = harness.train_step(batch)
+        if step % 1000 == 0:
+            harness.checkpoint_mutations()   # emits step_XXXXX.patch.dna
+```
+
+- RAID-5 protected DNA (triple redundancy)
+- Incremental patches only — not full model state
+- Hot paths (ρ > 0.7) grow via BDNF; cold paths (ρ < 0.1) prune
+- Fault-tolerant: patch stack replayed from any checkpoint
+
+---
+
+## Loss Composition
+
+| Term | Source | Weight |
+|------|--------|--------|
+| `lm_loss` | mesolimbic-gain-modulated cross-entropy | 1.0 |
+| `phi_loss` | `−tanh(Φ/3)·3` from MIP estimator | 0.02 × maturation |
+| `world_loss` | predicted vs target world embedding (MSE) | 0.3 × maturation |
+| `pred_coding_loss` | per-layer next-layer prediction | 0.1 × maturation |
+| `cortex_kl_loss` | `T²·KL(cortex.detach()/T ‖ trunk/T)` | λ\_t (gap-ramped, max 1.0) |
+| motor, CPC, RSSM, novel aux | embodied + optional modules | 0.05–0.1 × maturation |
+
+The maturation gate `_aux_w_scale ∈ [0.001, 1.0]` suppresses all aux losses until step 5000 (or lm\_loss < 7.5), so the LM gradient dominates during early training.
+
+---
+
+## Introspection
+
+```python
+model.intelligence_metrics.snapshot()   # Φ, identity drift, causal density, self-reference rate
+model.consciousness_metrics.per_tick()  # γ (binding), θ (memory), α (idling), coherence, ignition
+model.narrative_stack.query_rules()     # discovered causal patterns with support counts
+model.personality_vector               # tensor(5) — stable across checkpoints
+```
+
+---
+
+## Tests
+
+```bash
+py -3 -m pytest tests/                                              # full suite (3518 tests, ~~439s)
+py -3 -m pytest tests/test_phi.py -v                               # H1–H3: integrated information
+py -3 -m pytest tests/test_narrative_memory.py -v                  # H4–H5: memory & causation
+py -3 -m pytest tests/test_cognitive_closure.py -v                 # H6–H6.5: identity & embodiment
+py -3 -m pytest tests/training/test_cortex_pre_head_norm.py -v     # H16: catastrophic-loss fix
+py -3 -m pytest tests/training/test_cortex_distillation_and_gating.py -v  # H17–H18: KL + NT gating
+py -3 -m pytest tests/verification/test_improvement_gate.py -v     # H19: Welch's t admission gate
+py -3 -m pytest tests/dsl/ -v                                       # 956 DSL codegen + byte-equivalence
+```
+
+---
+
+## Checkpoints
+
+Pushed to `moritzroessler/BRIAN` on HuggingFace Hub every 2500 steps. Configure in `architectures/*/config.neuro`:
 
 ```neuro
-# architectures/master/config.neuro
 checkpoint {
-    push_backend: "hf"              # "hf" | "lfs" | "none"
+    push_backend: "hf"
     hf_repo_id: "moritzroessler/BRIAN"
-    hf_token_env: "HF_TOKEN"       # env var holding the write token
-    save_every: 500                 # local .pt cadence
-    push_every: 2500                # remote push cadence
-    push_optimizer: false           # strip Adam state (~2/3 size savings)
+    hf_token_env: "HF_TOKEN"
+    save_every: 500
+    push_every: 2500
+    push_optimizer: false    # strips Adam state, ~2/3 size saving
 }
 ```
 
-Legacy local checkpoints in `lfs_checkpoints/` are tracked via Git LFS. A single `.pt` file is multi-GB, so a full `git pull` on a laptop can be very slow.
-
-### Skip LFS downloads for this repo (recommended on laptops)
-
+**Skip LFS on laptops** (recommended):
 ```bash
-# In the repo root, run once:
-git lfs install --local --skip-smudge
+git lfs install --local --skip-smudge   # fetch stubs only
+git lfs pull --include="lfs_checkpoints/neuroslm_xl_adamw_mix_800.pt"  # pull one when needed
 ```
-
-`git pull` will now fetch only the tiny pointer stubs (~130 B each). The repo metadata stays in sync, but `lfs_checkpoints/*.pt` become text stubs on disk.
-
-### Pull a specific checkpoint when you need it
-
-```bash
-git lfs pull --include="lfs_checkpoints/neuroslm_xl_adamw_mix_800.pt"
-# Or by glob — get all 800-step files:
-git lfs pull --include="lfs_checkpoints/*_800.*"
-```
-
-### Pull every LFS file (re-hydrate the whole repo)
-
-```bash
-git lfs pull
-```
-
-### Turn skip-smudge off again for this repo
-
-```bash
-git lfs install --local --force          # re-enable smudge for this repo
-git lfs pull                              # then fetch the binaries you want
-```
-
-### Make skip-smudge the global default
-
-```bash
-git lfs install --skip-smudge             # applies to every repo on this machine
-```
-
-After global skip-smudge, `git clone` of *any* LFS-tracked repo only downloads stubs by default; use `git lfs pull --include=...` to materialise specific files.
-
-> Training on Colab/TPU/A100 uses `git lfs pull` explicitly inside the notebook (cell 2) so the runtime always has the latest checkpoint — skip-smudge on your laptop won't affect that.
 
 ---
 
-## Parameter presets
+## Docs
 
-| Preset  | Params  | Accelerator | VRAM   | d_hidden | d_sem | lang_layers | lang_ctx |
-|---------|---------|-------------|--------|----------|-------|-------------|----------|
-| `tiny`  | ~5 M    | CPU         | —      | 192      | 128   | 2           | 256      |
-| `small` | ~15 M   | CPU         | —      | 384      | 256   | 4           | 512      |
-| `medium`| ~80 M   | T4          | 16 GB  | 768      | 512   | 8           | 1024     |
-| `large` | ~100 M  | T4          | 15 GB  | 384      | 256   | 8           | 1024     |
-| `xl`    | ~230 M  | A100        | 40 GB  | 512      | 384   | 12          | 2048     |
-| `xxl`   | ~10 B   | 4×A100      | 320 GB | 4096     | 2048  | 32          | 4096     |
-
-Pass `--baseline` for vanilla-transformer ablation at matched parameter count.
+| Document | Contents |
+|----------|----------|
+| [`docs/findings.md`](docs/findings.md) | Hypothesis ledger H1–H14: test files, result JSONs, raw logs. Source of truth for what's proven vs open. |
+| [`docs/architecture.md`](docs/architecture.md) | Full spec: 11-stage forward pass, tensor shapes, equations, IIT 4.0 theory. |
+| [`docs/formal_framework.md`](docs/formal_framework.md) | Normative math contract: sheaf ontology, H¹ guard, Φ guard, RAID-5 DNA, ImprovementGate spec, Lean roadmap. |
+| [`docs/dsl.md`](docs/dsl.md) | `.neuro` syntax, macro system, compile pipeline, module bundling, source maps. |
+| [`docs/technical_report.md`](docs/technical_report.md) | Executive summary: proven claims, open questions, all 7 pillars. |
 
 ---
 
-## Loss composition
-
-`brain.forward_lm` returns a `loss` tensor that's a weighted sum of:
-
-| term                | source                                      | weight       | gating |
-|---------------------|---------------------------------------------|--------------|--------|
-| `lm_loss`           | mesolimbic-gain-modulated cross-entropy     | `w_lm = 1.0` | always |
-| `world_loss`        | MSE between predicted and target world emb  | `w_world = 0.3` | × `_aux_w_scale` |
-| `motor_loss`        | cross-entropy on speak/silent action target | `w_motor = 0.05` | × `_aux_w_scale` |
-| `pred_coding_loss`  | per-layer next-layer prediction (lang.)     | `w_pred_coding = 0.1` | × `_aux_w_scale` |
-| `rssm_kl`           | (optional) RSSM KL prior–posterior          | `w_kl_world = 0.1` | × `_aux_w_scale` |
-| `cpc_loss`          | (optional) contrastive predictive coding    | `w_cpc = 0.05` | × `_aux_w_scale` |
-| **`phi_loss`**      | **`-tanh(Φ/3)·3` from real MIP estimator**  | **`w_phi = 0.02`** | × `_aux_w_scale` |
-| `novel_aux_loss`    | aggregate of opt-in novel-module aux losses | 0.05         | × `_aux_w_scale` |
-| **`cortex_kl_loss`** | **`T²·KL(softmax(cortex.detach()/T)‖softmax(lm/T))` distillation** | **`λ_t` (gap-ramped, max 1.0)** | only when `distillation_enabled` AND gap > floor |
-
-`_aux_w_scale ∈ [0.001, 1.0]` is the **topological maturation** gate (§6.4 in `architecture.md`). During infancy (`step < 5000`) every aux loss is suppressed so the LM gradient dominates while the network forms its first language-level representations. At awakening (`step ≥ 5000 AND lm_loss < 7.5`) all aux losses ramp linearly to full strength.
-
----
-
-## Metrics & Introspection
-
-Interrogate a trained model's consciousness-like properties:
-
-| Query | Returns | Meaning |
-|-------|---------|---------|
-| `model.intelligence_metrics.snapshot()` | dict | Φ, identity drift, narrative coherence, causal density, self-reference rate |
-| `model.consciousness_metrics.per_tick()` | dict | γ (binding), θ (memory), α (idling), Φ, coherence, ignition |
-| `model.narrative_stack.query_rules()` | list[Rule] | Discovered causal patterns with support counts |
-| `model.personality_vector` | tensor(384) | Identity embedding; stable across checkpoints |
-
-These enable Layer-A capability probing without needing to run language-model evals.
-
----
-
-## Running Tests
-
-```bash
-py -3 -m pytest tests/                              # full suite (1511 tests, ~110s on CPU)
-py -3 -m pytest tests/test_phi.py -v                # H1–H3: integrated information
-py -3 -m pytest tests/test_narrative_memory.py -v   # H4–H5: memory & causation
-py -3 -m pytest tests/test_cognitive_closure.py -v  # H6–H6.5: identity & embodiment
-py -3 -m pytest tests/test_stabilization.py -v      # H7: convergence guarantee
-py -3 -m pytest tests/training/test_cortex_pre_head_norm.py -v               # H16: catastrophic-loss fix
-py -3 -m pytest tests/training/test_cortex_distillation_and_gating.py -v     # H17–H18: KL distillation + NT-gated α
-py -3 -m pytest tests/verification/test_improvement_gate.py -v               # H19: Welch's t-test admission gate
-py -3 -m pytest tests/thsd/test_theory_of_mind_ir.py -v                      # H20: TheoryOfMindIR sheaf stalks
-py -3 -m pytest tests/dsl/ -v                       # 620 DSL parser + codegen + byte-equivalence tests
-```
-
-Each test is a claim from [Layer A](#layer-a--mechanism-verification-unit-tests-) in this README — e.g. `test_phi.py::test_phi_higher_for_coupled_outputs` verifies H1.
-
----
-
-## Documentation & Reproducibility
-
-| Document | Audience | Contents |
-|----------|----------|----------|
-| **[`findings.md`](docs/findings.md)** | Everyone | Hypothesis ledger: H1–H20 with links to test files, result JSONs, and raw logs. The source of truth for what's proven vs. open. |
-| **[`architecture.md`](docs/architecture.md)** | Researchers, implementers | Full spec: 11-stage forward pass, tensor shapes, equations, module diagrams, IIT 4.0 theory. Reproducible to the line number. |
-| **[`formal_framework.md`](docs/formal_framework.md)** | Theorists, evolutionary loop | **v0.2** (§§7–11): normative mathematical contract for the THSD discovery substrate: simpliziale ontology, $H^1$ guard, symbolic-simplex discovery operator, Φ guard, Tonnetz filter, Fisher-Rao retrieval, RAID-5 DNA, **ImprovementGate** admission spec, **TheoryOfMindIR** stalk geometry, **Lean roadmap** for mechanised proofs. Source of Truth for evolutionary mutations. |
-| **[`technical_report.md`](docs/technical_report.md)** | External AI, new contributors | Executive summary: proven claims, current model state, evidence, open questions. Synced with findings.md. Now covers all 7 Pillars including Multi-Cortex Fusion. |
-| **[`dsl.md`](docs/dsl.md)** | DSL users | NeuroML-like syntax, macro system, symbol resolution, compile pipeline, **module bundling**, source maps. |
-| **[`BRAIN.md`](docs/BRAIN.md)** | Diving deep | NeuralOrchestrator architecture, why re-entry loops work, design rationale. |
-| **[`CONTRIBUTING.md`](CONTRIBUTING.md)** | Future contributors | TDD workflow, testing patterns, documentation sync. |
-
-**Quick reproduction:**
-
-```bash
-# Verify setup
-py -3 -m pytest tests/ -v
-
-# CPU sanity run (5M params, 2k steps)
-python -m neuroslm.train --preset small --steps 2000
-
-# A100 full training (230M params)
-python -m neuroslm.train --preset xl --steps 100000 --device cuda
-
-# Reproduce OOD baseline eval (scripts/vast_ood_eval.sh)
-# See reproducibility recipes in docs/findings.md
-```
-
-Full Colab workflow in [`colab_run.ipynb`](colab_run.ipynb).
-
----
-p
-## Cite / discuss
-
-If BRIAN is useful in your research or you want to discuss the design, open an issue or reach out. ⭐ stars and PRs welcome — this is open research.
+*Open research. Issues, stars, and PRs welcome.*

@@ -308,6 +308,9 @@ class ModuleAST:
     exports: Dict[str, str] = field(default_factory=dict)   # name → decl text
     private: Dict[str, str] = field(default_factory=dict)   # name → decl text
     architecture: Optional[Dict] = None     # {name, properties} or None
+    # env_tags: declaration name → env mode string ("training"/"dev"/"prod")
+    # or None (no tag → included in all modes)
+    env_tags: Dict[str, Optional[str]] = field(default_factory=dict)
 
 
 # Top-level keywords whose blocks are extracted as declarations. Each block
@@ -347,10 +350,19 @@ def parse_module(source: str, path: Path) -> ModuleAST:
         import { <names> } from "..."
         import "..."
         export <decl>
+        @env=MODE <decl>              (env-gated; MODE ∈ training/dev/prod)
+        [env=MODE]                    (section header — all decls until
+                                       next section or EOF inherit MODE)
         <decl>                        (private)
 
     where `<decl>` is one of: population, synapse, neurotransmitter,
-    modulation, dynamics, function, formal_spec, sheaf.
+    modulation, dynamics, function, formal_spec, sheaf, expert, ...
+
+    Env-mode resolution precedence (highest wins):
+        1. inline ``@env=MODE`` decorator on the next declaration
+        2. enclosing ``[env=MODE]`` section
+        3. implicit ``@env=training`` for expert/distillation/funnel/warmup
+        4. no tag → declaration available in every env mode
 
     Raises:
         ValueError: malformed import, dangling `export`, or duplicate
@@ -359,7 +371,9 @@ def parse_module(source: str, path: Path) -> ModuleAST:
     ast = ModuleAST(path=Path(path))
 
     # First strip out import statements (line-oriented), then handle the
-    # rest of the source as block declarations.
+    # rest of the source as block declarations. Both ``@env=MODE``
+    # decorators and ``[env=MODE]`` section headers are preserved in the
+    # body so the brace walker can see them in their original positions.
     remaining_lines = []
     for line in source.splitlines():
         stripped = line.strip()
@@ -368,6 +382,13 @@ def parse_module(source: str, path: Path) -> ModuleAST:
         else:
             remaining_lines.append(line)
     body = "\n".join(remaining_lines)
+
+    # Env-mode state machine:
+    #   * ``section_env`` — currently-active ``[env=MODE]`` (or None)
+    #   * ``pending_env`` — decorator on the *next* declaration (or None);
+    #                       consumed by the next _record() call, then reset
+    section_env: Optional[str] = None
+    pending_env: Optional[str] = None
 
     # Now walk the body looking for top-level blocks. We rely on the same
     # brace-matching technique used in compiler.py's `_split_top_level`,
@@ -382,6 +403,37 @@ def parse_module(source: str, path: Path) -> ModuleAST:
                 pos = len(body) if nl == -1 else nl + 1
             else:
                 pos += 1
+            continue
+
+        # ── [env=MODE] section header ─────────────────────────────
+        # Section headers occupy their own line and reset on the next
+        # ``[env=...]``. They do NOT consume the pending decorator.
+        if ch == "[":
+            nl = body.find("\n", pos)
+            line_end = len(body) if nl == -1 else nl
+            line_text = body[pos:line_end].rstrip()
+            m_sec = _ENV_SECTION_RE.match(line_text)
+            if m_sec:
+                section_env = m_sec.group(1)
+                pos = line_end if nl == -1 else nl + 1
+                continue
+            # Not an env section → fall through; skip the line so a
+            # stray ``[`` can't deadlock the walker.
+            pos = line_end if nl == -1 else nl + 1
+            continue
+
+        # ── @env=MODE decorator (attaches to next decl) ───────────
+        if ch == "@":
+            nl = body.find("\n", pos)
+            line_end = len(body) if nl == -1 else nl
+            line_text = body[pos:line_end].rstrip()
+            m_dec = _ENV_DECORATOR_RE.match(line_text)
+            if m_dec:
+                pending_env = m_dec.group(1)
+                pos = line_end if nl == -1 else nl + 1
+                continue
+            # Unknown ``@something`` annotation → skip line and continue
+            pos = line_end if nl == -1 else nl + 1
             continue
 
         # Match `export` prefix
@@ -406,6 +458,9 @@ def parse_module(source: str, path: Path) -> ModuleAST:
                 "properties": _parse_simple_props(arch_props),
             }
             pos = end
+            # Architecture blocks aren't env-gated; consume + clear
+            # any pending decorator so it doesn't bleed forward.
+            pending_env = None
             continue
 
         # Named block: keyword <name> { ... }
@@ -416,8 +471,10 @@ def parse_module(source: str, path: Path) -> ModuleAST:
             ):
                 name, _, end = _slice_named_block(body, pos, kw)
                 decl_text = body[pos:end]
-                _record(ast, name, decl_text, is_export, path)
+                env_tag = _resolve_env_tag(kw, pending_env, section_env)
+                _record(ast, name, decl_text, is_export, path, env_tag=env_tag)
                 pos = end
+                pending_env = None  # consumed
                 matched_named = True
                 break
         if matched_named:
@@ -432,8 +489,10 @@ def parse_module(source: str, path: Path) -> ModuleAST:
                 src, tgt, end = _slice_arrow_block(body, pos, kw)
                 key = f"{src}__{tgt}"
                 decl_text = body[pos:end]
-                _record(ast, key, decl_text, is_export, path)
+                env_tag = _resolve_env_tag(kw, pending_env, section_env)
+                _record(ast, key, decl_text, is_export, path, env_tag=env_tag)
                 pos = end
+                pending_env = None  # consumed
                 matched_arrow = True
                 break
         if matched_arrow:
@@ -447,6 +506,27 @@ def parse_module(source: str, path: Path) -> ModuleAST:
     return ast
 
 
+def _resolve_env_tag(
+    keyword: str,
+    pending_env: Optional[str],
+    section_env: Optional[str],
+) -> Optional[str]:
+    """Apply the env-tag precedence rules (see :func:`parse_module`).
+
+    1. ``pending_env`` — inline ``@env=MODE`` decorator wins outright
+    2. ``section_env`` — enclosing ``[env=MODE]`` block
+    3. implicit ``training`` for expert/distillation/funnel/warmup
+    4. otherwise ``None`` (declaration available in every mode)
+    """
+    if pending_env is not None:
+        return pending_env
+    if section_env is not None:
+        return section_env
+    if keyword in _IMPLICIT_TRAINING_KEYWORDS:
+        return "training"
+    return None
+
+
 # ── Helpers ────────────────────────────────────────────────────────────
 
 # `import { foo, bar as baz } from "spec"`  or  `import "spec"`
@@ -454,6 +534,14 @@ _IMPORT_NAMED_RE = re.compile(
     r'^import\s*\{([^}]*)\}\s*from\s*"([^"]+)"\s*$'
 )
 _IMPORT_BARE_RE = re.compile(r'^import\s*"([^"]+)"\s*$')
+
+# @env=MODE decorator: @env=training / @env=dev / @env=prod
+_ENV_DECORATOR_RE = re.compile(r"@env=([\w]+)")
+# [env=MODE] section header
+_ENV_SECTION_RE = re.compile(r"^\[env=([\w]+)\]\s*$")
+
+# Declaration keywords whose blocks are implicitly @env=training when untagged
+_IMPLICIT_TRAINING_KEYWORDS = frozenset({"expert", "distillation", "funnel", "warmup"})
 
 
 def _parse_import(line: str) -> ImportDecl:
@@ -592,14 +680,21 @@ def _parse_simple_props(body: str) -> Dict[str, str]:
     return out
 
 
-def _record(ast: ModuleAST, name: str, decl_text: str,
-            is_export: bool, path: Path) -> None:
+def _record(
+    ast: ModuleAST,
+    name: str,
+    decl_text: str,
+    is_export: bool,
+    path: Path,
+    env_tag: Optional[str] = None,
+) -> None:
     """Store the decl under exports or private, rejecting duplicates.
 
+    *env_tag* is the ``@env=MODE`` annotation for the declaration, or
+    None when no annotation was present (means "all modes").
     Skip empty names (typically THSD blocks like 'complex' that don't
     parse as v2.0 declarations and are handled separately).
     """
-    # Skip empty names (THSD blocks, etc.)
     if not name or not name.strip():
         return
 
@@ -608,6 +703,8 @@ def _record(ast: ModuleAST, name: str, decl_text: str,
     if name in bucket or name in other:
         raise ValueError(f"{path}: duplicate declaration {name!r}")
     bucket[name] = decl_text
+    if env_tag is not None:
+        ast.env_tags[name] = env_tag
 
 
 # ════════════════════════════════════════════════════════════════════════

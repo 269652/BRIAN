@@ -112,7 +112,8 @@
       "Bash(grep -n \"hf://\\\\|hub_checkpoint\\\\|HF\\\\|hf_path\\\\|checkpoint_push\\\\|push_checkpoint\" c:/Users/morrossl/Documents/Private/SLM/neuroslm/checkpoint_push.py)",
       "Bash(grep -n \"checkpoint.*hf://\\\\|hf://.*checkpoint\\\\|printed.*checkpoint\\\\|print.*hub\\\\|hub.*url\" c:/Users/morrossl/Documents/Private/SLM/neuroslm/checkpoint_push.py)",
       "Bash(grep -n \"print\\\\|logger\\\\|log.*checkpoint\\\\|checkpoint.*log\\\\|hf://\\\\|uploaded\\\\|pushed\" c:/Users/morrossl/Documents/Private/SLM/neuroslm/checkpoint_push.py)",
-      "Bash(xargs -I{} grep -l \"ckpt_push\" {})"
+      "Bash(xargs -I{} grep -l \"ckpt_push\" {})",
+      "Bash(.venv/Scripts/brian.exe update-readme *)"
     ]
   }
 }

@@ -23,15 +23,134 @@ round-trips bit-identically; a mutated genome differs exactly where it
 was mutated.
 """
 from __future__ import annotations
+import os
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from neuroslm.dsl.compiler import _parse_properties
 from neuroslm.dsl.training_config import _strip_comments
 
+if TYPE_CHECKING:  # pragma: no cover — import-cycle avoidance
+    from neuroslm.dsl.multifile import ModuleAST
+
 
 Span = Tuple[int, int]
+
+
+# ════════════════════════════════════════════════════════════════════════
+# BRIAN_ENV — env-gated DSL compilation
+# ════════════════════════════════════════════════════════════════════════
+#
+# Three deployment modes select which declarations are compiled into the
+# hypergraph. The ``@env=MODE`` decorator and ``[env=MODE]`` section
+# header live in the .neuro source; the gate is consulted here.
+#
+#   training  — full model: trunk + frozen cortex experts + KL distillation
+#   dev       — superset of training, includes debug-only wiring
+#   prod      — trunk only; no expert forward passes, no KL loss
+#
+# Default mode (when ``BRIAN_ENV`` is unset) is ``training``. Anything
+# else raises a hard ``ValueError`` so a typo can never silently route
+# the wrong subset of declarations into the model.
+
+VALID_ENV_MODES: Tuple[str, ...] = ("training", "dev", "prod")
+
+# Compatibility matrix: ``env_tag -> set of modes that include it``.
+# Untagged declarations (``None``) are always included.
+# ``dev`` is a superset of ``training`` so test/development runs can see
+# everything the training topology sees, plus extra debug-only blocks.
+_TAG_INCLUDED_IN: Dict[Optional[str], frozenset] = {
+    None:        frozenset({"training", "dev", "prod"}),
+    "training":  frozenset({"training", "dev"}),
+    "dev":       frozenset({"dev"}),
+    "prod":      frozenset({"prod"}),
+}
+
+
+def current_env_mode() -> str:
+    """Return the active env mode, defaulting to ``"training"``.
+
+    Reads ``BRIAN_ENV`` from the process environment. Empty / unset →
+    ``"training"`` so plain ``brian train`` / ``brian deploy`` runs
+    without ceremony behave like before.
+
+    Raises:
+        ValueError: ``BRIAN_ENV`` is set to anything other than
+            ``training`` / ``dev`` / ``prod``.
+    """
+    raw = os.environ.get("BRIAN_ENV", "").strip()
+    if not raw:
+        return "training"
+    if raw not in VALID_ENV_MODES:
+        raise ValueError(
+            f"BRIAN_ENV={raw!r} is not a valid env mode; "
+            f"expected one of {VALID_ENV_MODES}"
+        )
+    return raw
+
+
+def filter_module_for_env(ast: "ModuleAST", mode: str) -> "ModuleAST":
+    """Return a copy of ``ast`` containing only env-compatible decls.
+
+    A declaration with no ``@env=MODE`` tag (``env_tag is None``) is
+    included in every mode. Tagged declarations are kept only if their
+    tag's compatibility set includes ``mode`` (see ``_TAG_INCLUDED_IN``).
+
+    Export status is preserved — a declaration that was ``export``ed in
+    the source remains in ``filtered.exports`` (or moves to
+    ``filtered.private`` if it wasn't). Imports / architecture metadata
+    are passed through unchanged.
+
+    Args:
+        ast:  the source ``ModuleAST`` (typically the output of
+              :func:`neuroslm.dsl.multifile.parse_module`).
+        mode: one of ``"training"`` / ``"dev"`` / ``"prod"``.
+
+    Returns:
+        A new ``ModuleAST`` with only the surviving declarations and
+        their env-tag annotations.
+
+    Raises:
+        ValueError: ``mode`` is not a valid env mode.
+    """
+    if mode not in VALID_ENV_MODES:
+        raise ValueError(
+            f"mode={mode!r} is not a valid env mode; "
+            f"expected one of {VALID_ENV_MODES}"
+        )
+
+    # Local import to avoid the compiler ↔ dsl import cycle at module
+    # load time (multifile.py imports from .equations which itself can
+    # pull in compiler internals during tests).
+    from neuroslm.dsl.multifile import ModuleAST
+
+    filtered = ModuleAST(path=ast.path)
+    filtered.imports = list(ast.imports)
+    filtered.architecture = ast.architecture
+
+    def _keep(name: str) -> bool:
+        tag = ast.env_tags.get(name)
+        return mode in _TAG_INCLUDED_IN.get(tag, frozenset())
+
+    for name, text in ast.exports.items():
+        if _keep(name):
+            filtered.exports[name] = text
+            if name in ast.env_tags:
+                filtered.env_tags[name] = ast.env_tags[name]
+
+    for name, text in ast.private.items():
+        if _keep(name):
+            filtered.private[name] = text
+            if name in ast.env_tags:
+                filtered.env_tags[name] = ast.env_tags[name]
+
+    return filtered
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Hypergraph IR — nodes, edges, source map
+# ════════════════════════════════════════════════════════════════════════
 
 
 @dataclass

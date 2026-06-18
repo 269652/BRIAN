@@ -265,6 +265,109 @@ brian analyze-log logs/vast/b49e69448613_rcc_bowtie_134M_lm-first-v11-100m_step7
 
 ---
 
+### `brian best update` — Refresh the Best-Run Pointer
+
+Scans every `.log` file under `logs/`, computes a combined score
+**`combined = train_ppl + 4 × gap_ratio`** for each (lower = better),
+and writes the winner's path to `.brian/best_run.ln`.  Also extracts the
+last `[ckpt_push] … → hf://…` line from the best log and writes it to
+`.brian/checkpoint.ln` so `brian chat` and `brian deploy --best` can
+pick the matching pretrained checkpoint.
+
+**Scoring tiers** (a run with measured OOD generalisation always beats
+a run without):
+
+1. **Tier 1** — any run with a `gap_ratio` value → ranked by combined score.
+2. **Tier 2** — runs with only `train_ppl` (no OOD eval) → ranked by `train_ppl`.
+
+Tier 1 wins over Tier 2 regardless of numeric values.
+
+**Usage:**
+```bash
+brian best update              # default: combined metric, root=<repo>, logs=<repo>/logs
+brian best update --metric=gap_ratio       # legacy: rank by raw gap_ratio
+brian best update --metric=ppl             # rank by raw final train_ppl
+```
+
+**Why combined score?** Pure `gap_ratio` rewards small generalisation
+deltas even when both `train_ppl` and `ood_ppl` are catastrophically
+high.  Pure `train_ppl` rewards overfit runs that memorised the training
+distribution.  The combined score `train_ppl + 4 × gap_ratio` weights
+OOD generalisation ~4× as heavily as raw training-set fit, which closely
+matches the trade-off humans make when eyeballing the metrics table.
+
+---
+
+### `brian update-readme` — Regenerate `README.md` from Template
+
+Runs `brian best update` first to refresh the best-run pointer, then
+substitutes every `${KEY}` placeholder in `README.template.md` with the
+corresponding value from `docs/readme_metrics.toml`, then expands the
+**log macros** (described below).
+
+**Usage:**
+```bash
+brian update-readme                  # write README.md
+brian update-readme --check          # exit 1 if README.md is stale (pre-commit hook)
+brian update-readme --no-best-update # skip the best-pointer refresh
+```
+
+**Log macros** (resolved AFTER ${KEY} substitution):
+
+| Macro | Resolves to |
+|---|---|
+| `${LOG_LINK:src}` | Markdown link to the source log file |
+| `${LOG_TAIL:src:N}` | Link + fenced block with the **last N lines** |
+| `${LOG_TAIL:src:ood:N}` | Link + fenced block with **N lines ending at the last `[mid-ood]` line** |
+| `${LOG_TAIL:src:best:N}` | Link + fenced block with **N lines ending at the line with the best metrics** (lowest combined score) |
+
+**Source token** (the `src` segment):
+
+| Token | Resolves to |
+|---|---|
+| `best` | The log referenced by `.brian/best_run.ln` |
+| `latest` | The mtime-newest `.log` file under `<repo>/logs` |
+| `<TOML-KEY>` | Path read from `docs/readme_metrics.toml` |
+| literal path | Treated as a path relative to repo root |
+
+**Example template snippet:**
+```markdown
+### Best run so far
+${LOG_TAIL:best:best:5}
+
+### Latest run's last OOD eval
+${LOG_TAIL:latest:ood:3}
+```
+
+When a selector finds no matching line (e.g. `ood` against a log with
+no `[mid-ood]` entries), the macro falls back to the legacy
+last-N-lines behaviour so the README always renders something useful.
+
+---
+
+### `brian chat` — Interactive Inference Daemon
+
+Loads a checkpoint and starts an always-on chat loop with optional
+background "thoughts".  Checkpoint resolution follows a **5-hop
+precedence chain** (first match wins):
+
+1. `--pt PATH_OR_URI` — explicit named flag (accepts local `.pt` or `hf://…`)
+2. Positional `ckpt` argument — explicit local file path
+3. `--latest` — download the highest-step checkpoint from HF Hub
+4. `.brian/checkpoint.ln` — **default**: the HF URL written by `brian best update`
+5. Local fallback: highest-numbered `lfs_checkpoints/*.pt`
+
+**Usage:**
+```bash
+brian chat                                 # default: best-run from .brian/checkpoint.ln
+brian chat --pt lfs_checkpoints/step.pt    # explicit local checkpoint
+brian chat --pt hf://owner/repo/path.pt    # explicit HF URI
+brian chat --latest                        # highest-step HF checkpoint
+brian chat --no-best                       # opt out of the default best-pull
+```
+
+---
+
 ## Utility Commands
 
 ### `python -m neuroslm.tools.prune_ckpts` — Checkpoint Rotation

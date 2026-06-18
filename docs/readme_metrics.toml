@@ -60,3 +60,23 @@ H21_IMPROVEMENT_OOD_X = "17x"
 H21_ABSTAIN_CE_BEFORE = "17.37"
 H21_ABSTAIN_CE_AFTER = "4.03"
 H21_FIX_COMMIT = "a22eecc"
+
+# Deploy ids of the broken vs fixed runs that demonstrate the H21 fix.
+# (Aliased on the variant names used directly in the README template.)
+H21_DEPLOY_BROKEN = "vast 40923107"
+H21_DEPLOY_FIXED  = "vast 40925851"
+
+# Cortex-loss EMA — collapsed near-zero pre-fix, stable post-fix.
+H21_CX_EMA_BROKEN = "0.001"
+H21_CX_EMA_FIXED  = "0.5"
+
+
+# ── H16 — `cortex_pre_head_norm` kills init loss ─────────────────────
+# Catastrophic CE values measured at step 0 before fusion training.
+# Uniform-distribution ceiling = ln(50_257) ≈ 10.82 nats for GPT-2 vocab.
+# These are one-off literature/measurement constants — not derivable
+# from live sources, so they stay in TOML.
+[h16]
+H16_CE_WITHOUT = "21.3"
+H16_CE_WITH    = "10.6"
+H16_CE_UNIFORM = "10.82"

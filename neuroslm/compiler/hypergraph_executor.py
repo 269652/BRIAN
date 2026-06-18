@@ -7,43 +7,67 @@ The compiler's traditional path is:
 This module provides the alternative:
   DSL → HypergraphIR → HypergraphExecutor (live nn.Module)
 
-The IR persists at runtime. Each population node owns an nn.Linear; each
-synapse edge owns a projection nn.Linear. The forward pass does a
-topological traversal so every tensor step is differentiable and gradients
-flow naturally through the full graph topology — no exec(), no string gen.
+The IR persists at runtime. Every operation that runs is dispatched from
+:mod:`neuroslm.compiler.op_registry` based on each element's ``attrs``
+dict — nothing is hardcoded in the executor.  The hypergraph IS the
+program; PyTorch IS the interpreter.
 
-This is the foundation for trainable graph structure: because the routing
-is differentiable, gradient information about which edges matter is already
-present in the computation graph. Growing or pruning edges becomes a matter
-of adding/removing nn.Module parameters and re-running the traversal.
+Edge dispatch chain (in priority order):
+  1. ``edge.attrs["feature"]`` → ``_FEATURE_REGISTRY`` (overrides equation)
+  2. ``edge.attrs["equation"]`` → ``_EDGE_REGISTRY`` (strip leading ``@``)
+  3. Fallback to ``StandardSynapseOp`` (linear projection, weight=1.0)
+
+Node dispatch:
+  ``node.attrs["act"]`` → ``relu`` | ``silu`` | ``tanh`` (default ``relu``)
+
+Modulation edges (``edge.kind == "modulation"``) are NEVER added to
+``edge_projections`` (they are non-parametric).  They run AFTER the
+node activation has been applied, transforming the node output in
+place when the corresponding NT level is present in the forward call's
+``nt_levels`` dict.
+
+This is the foundation for trainable graph structure: because the
+routing is differentiable, gradient information about which edges
+matter is already present in the computation graph. Growing or
+pruning edges becomes a matter of adding/removing nn.Module parameters
+and re-running the traversal.
 """
 from __future__ import annotations
 
 import math
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from neuroslm.compiler.hypergraph_ir import HypergraphIR, HyperEdge, HyperNode
+from neuroslm.compiler.op_registry import (
+    EdgeOp,
+    NodeOp,
+    resolve_edge_op,
+    resolve_node_op,
+)
 
 
 class HypergraphExecutor(nn.Module):
     """Execute a HypergraphIR as a live, differentiable nn.Module.
 
-    Each population node gets an nn.Linear(d_model, d_model) + ReLU.
-    Each synapse edge gets an nn.Linear(d_model, d_model) projection.
+    Each population node gets an ``nn.Linear(d_model, d_model)`` plus a
+    NodeOp-selected activation. Each synapse edge gets an
+    :class:`EdgeOp`-defined nn.Module projection. Each modulation edge
+    gets a non-parametric EdgeOp that runs after the node activation.
 
     Forward pass:
-      1. All source nodes (no incoming synapses) transform the input x.
-      2. Each subsequent node in topological order sums: its own
-         transformation of x plus the projected output of every upstream
-         neighbour that has a synapse edge pointing to it.
-      3. Returns a dict {population_name: tensor (B, d_model)}.
+      1. Topological traversal over synapse edges.
+      2. Each node sums: ``node_layer(x)`` plus every upstream synapse's
+         ``EdgeOp.forward(src_state, projection, attrs)`` contribution.
+      3. Apply node activation (``NodeOp(__call__)``).
+      4. Apply every modulation edge whose NT is present in
+         ``nt_levels`` via ``EdgeOp.apply_modulation(node_out, attrs, nt)``.
+      5. Store the result in ``states[name]``.
 
-    This matches the output contract of the exec()-compiled circuits in
-    BRIANHarness (_pick_sink_output reads from a dict of pop outputs).
+    Returns a dict ``{population_name: tensor (B, d_model)}``.
     """
 
     def __init__(self, ir: HypergraphIR, d_model: int) -> None:
@@ -52,23 +76,51 @@ class HypergraphExecutor(nn.Module):
         self.d_model = d_model
 
         pop_nodes = [n for n in ir.nodes if n.kind == "population"]
-        syn_edges = [e for e in ir.hyperedges if e.kind == "synapse"]
+        all_edges = list(ir.hyperedges)
+        syn_edges = [e for e in all_edges if e.kind == "synapse"]
+        mod_edges = [e for e in all_edges if e.kind == "modulation"]
 
-        # One learnable transformation per population node
+        # ── Per-node activation ops (NodeOp instances) ─────────────────
+        self._node_ops: Dict[str, NodeOp] = {
+            n.name: resolve_node_op(n.attrs) for n in pop_nodes
+        }
+
+        # ── Per-node Linear transformations ────────────────────────────
         self.node_layers: nn.ModuleDict = nn.ModuleDict({
             self._safe_key(n.name): nn.Linear(d_model, d_model)
             for n in pop_nodes
         })
 
-        # One learnable projection per synapse edge
-        self.edge_projections: nn.ModuleDict = nn.ModuleDict({
-            self._safe_key(e.id): nn.Linear(d_model, d_model)
-            for e in syn_edges
-        })
+        # ── Per-edge ops + parametric modules ──────────────────────────
+        # _edge_ops: edge.id → EdgeOp instance (one per IR edge)
+        # edge_projections: nn.ModuleDict of EdgeOp.build_module() results,
+        #                   keyed by safe edge id.  Modulation ops return
+        #                   None from build_module → NOT added here.
+        self._edge_ops: Dict[str, EdgeOp] = {}
+        edge_modules: Dict[str, nn.Module] = {}
+        for e in syn_edges:
+            op = resolve_edge_op(e.attrs, kind=e.kind)
+            self._edge_ops[e.id] = op
+            module = op.build_module(d_model)
+            if module is not None:
+                edge_modules[self._safe_key(e.id)] = module
+        for e in mod_edges:
+            op = resolve_edge_op(e.attrs, kind=e.kind)
+            self._edge_ops[e.id] = op
+            # Modulation ops MUST return None from build_module — if they
+            # don't (custom user op), we still add them to be safe, but
+            # the canonical AdditiveModulationOp / MultiplicativeModulationOp
+            # return None as documented.
+            module = op.build_module(d_model)
+            if module is not None:
+                edge_modules[self._safe_key(e.id)] = module
+
+        self.edge_projections: nn.ModuleDict = nn.ModuleDict(edge_modules)
 
         # Cache for the forward pass — avoid re-computing each call
         self._pop_names: List[str] = [n.name for n in pop_nodes]
         self._syn_edges: List[HyperEdge] = syn_edges
+        self._mod_edges: List[HyperEdge] = mod_edges
         self._topo_order: List[str] = self._topological_sort()
 
         # Per-element activation RMS from the most recent forward pass.
@@ -81,22 +133,33 @@ class HypergraphExecutor(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        **kwargs,  # absorbs nt_levels and other harness kwargs
+        nt_levels: Dict[str, float] | None = None,
+        **kwargs,  # absorbs harness kwargs we don't use
     ) -> Dict[str, torch.Tensor]:
         """Route x through the hypergraph and return per-population outputs.
 
         Args:
-            x: Input tensor of shape (B, d_model).
+            x: Input tensor of shape ``(B, d_model)``.
+            nt_levels: Optional dict mapping neurotransmitter name → scalar
+                level; consulted by modulation edges.  ``None`` or
+                missing key → modulation edge is skipped (identity).
 
         Returns:
-            Dict mapping population name → output tensor (B, d_model).
+            Dict mapping population name → output tensor ``(B, d_model)``.
         """
         states: Dict[str, torch.Tensor] = {}
         act_norms: Dict[str, float] = {}
+        nt_levels = nt_levels or {}
 
         for name in self._topo_order:
             key = self._safe_key(name)
             node_layer = self.node_layers[key]
+            node_op = self._node_ops.get(name)
+            if node_op is None:
+                # Population added after construction (shouldn't happen)
+                # — fall back to ReLU to keep the graph differentiable.
+                from neuroslm.compiler.op_registry import ReLUNodeOp
+                node_op = ReLUNodeOp()
 
             # Always include the node's own transformation of the raw input.
             # This ensures source nodes (no in-edges) are not identity ops.
@@ -105,22 +168,40 @@ class HypergraphExecutor(nn.Module):
             # Add a projected contribution from each upstream neighbour,
             # recording the RMS activation of each edge's projection.
             for edge in self._syn_edges:
-                if edge.members[1] == name:
-                    src_name = edge.members[0]
-                    proj_key = self._safe_key(edge.id)
-                    proj = self.edge_projections[proj_key]
-                    src_state = states.get(src_name, x)
-                    edge_out = proj(src_state)
-                    # RMS of the edge projection (detached — must not break grad graph)
-                    act_norms[edge.id] = float(
-                        edge_out.detach().norm().item()
-                        / math.sqrt(max(edge_out.numel(), 1))
-                    )
-                    incoming.append(edge_out)
+                if edge.members[1] != name:
+                    continue
+                src_name = edge.members[0]
+                src_state = states.get(src_name, x)
+                op = self._edge_ops[edge.id]
+                proj_key = self._safe_key(edge.id)
+                # nn.ModuleDict has no .get() — use __contains__ + index
+                module = self.edge_projections[proj_key] if proj_key in self.edge_projections else None
+                edge_out = op.forward(src_state, module, edge.attrs)
+                # RMS of the edge contribution (detached — must not break grad graph)
+                act_norms[edge.id] = float(
+                    edge_out.detach().norm().item()
+                    / math.sqrt(max(edge_out.numel(), 1))
+                )
+                incoming.append(edge_out)
 
-            # Sum all incoming signals, then apply non-linearity
+            # Sum all incoming signals, then apply node activation
             agg = torch.stack(incoming, dim=0).sum(dim=0)
-            node_out = F.relu(agg)
+            node_out = node_op(agg)
+
+            # Apply modulation edges that target this node
+            for mod_edge in self._mod_edges:
+                if mod_edge.members[1] != name:
+                    continue
+                nt_name = mod_edge.members[0]
+                if nt_name not in nt_levels:
+                    # NT not present this forward → modulation is identity
+                    continue
+                nt_level = float(nt_levels[nt_name])
+                mod_op = self._edge_ops[mod_edge.id]
+                node_out = mod_op.apply_modulation(
+                    node_out, mod_edge.attrs, nt_level
+                )
+
             states[name] = node_out
             # RMS of the node's output (detached)
             act_norms[f"population:{name}"] = float(

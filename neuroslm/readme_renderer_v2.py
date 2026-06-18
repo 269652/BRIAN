@@ -463,6 +463,10 @@ def render_readme(
     renderer = TemplateRenderer(repo_root, merged)
     rendered = renderer.render(template)
 
+    # Resolve ${LOG_TAIL:src:N} and ${LOG_LINK:src} macros (defined in v1 renderer)
+    from neuroslm.readme_renderer import resolve_log_macros
+    rendered = resolve_log_macros(rendered, merged, repo_root)
+
     # Check mode: compare without writing
     if check:
         if output_path is None or not output_path.exists():

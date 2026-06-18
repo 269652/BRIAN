@@ -37,10 +37,26 @@ Example::
 
 Scoring / ranking
 -----------------
-Primary metric: lowest ``gap_ratio`` (min across all mid-OOD evaluations).
-A run *with* any gap_ratio always beats a run with only train PPL.
-Fallback metric (no OOD data): lowest final train PPL.
-Secondary metric (explicit ``metric="ppl"``): lowest final train PPL regardless.
+Default (and recommended) metric: **combined score**::
+
+    score = train_ppl + GAP_RATIO_WEIGHT × gap_ratio        (lower = better)
+
+with :data:`GAP_RATIO_WEIGHT` = 4.0.  The factor weighs OOD generalisation
+~4× as heavily as raw training-set fit; a run that overfits (low train PPL,
+huge gap_ratio) is properly penalised against one that generalises.
+
+Tier rules — preserved across all metrics:
+
+* a run that has ``gap_ratio`` ALWAYS beats a run with only ``train_ppl``
+  (a measured OOD eval is more informative than no OOD measurement);
+* if no run has ``gap_ratio``, the fallback ranking is pure ``train_ppl``.
+
+Explicit metric aliases:
+
+* ``metric="combined"`` (default): combined score as above.
+* ``metric="gap_ratio"``         : raw lowest gap_ratio (legacy).
+* ``metric="ppl"``               : raw lowest final train_ppl (legacy).
+* ``metric="ood_ppl"``           : raw lowest OOD ppl at last eval.
 """
 from __future__ import annotations
 
@@ -54,6 +70,12 @@ from typing import List, Optional
 BEST_RUN_LN: str = ".brian/best_run.ln"
 CHECKPOINT_LN: str = ".brian/checkpoint.ln"
 REFS_DIR: str = ".brian/refs"
+
+# Weight applied to gap_ratio in the combined ranking score.  4× makes
+# OOD generalisation dominate when both runs are roughly comparable on PPL,
+# while still letting a much-lower train_ppl run outscore a marginally
+# better generalising one.  See docs/metrics.md §combined-score.
+GAP_RATIO_WEIGHT: float = 4.0
 
 # ── Regexes ────────────────────────────────────────────────────────────────
 
@@ -110,6 +132,21 @@ class RunScore:
         else:  # "ppl"
             v = self.train_ppl
         return v if v is not None else float("inf")
+
+    @property
+    def combined_score(self) -> float:
+        """``train_ppl + GAP_RATIO_WEIGHT × gap_ratio`` — lower is better.
+
+        * Both metrics present → full formula (e.g. train_ppl=20, gap=5 → 40).
+        * ``gap_ratio is None`` → returns ``train_ppl`` (no OOD penalty).
+        * ``train_ppl is None`` → returns ``+inf`` (a run we can't rank by
+          this metric should not win over one we can).
+        """
+        if self.train_ppl is None:
+            return float("inf")
+        if self.gap_ratio is None:
+            return float(self.train_ppl)
+        return float(self.train_ppl) + GAP_RATIO_WEIGHT * float(self.gap_ratio)
 
 
 # ── .ln file IO ────────────────────────────────────────────────────────────
@@ -262,15 +299,18 @@ def extract_checkpoint_url(text: str) -> Optional[str]:
 
 def find_best_log(
     log_dir: Path,
-    metric: str = "gap_ratio",
+    metric: str = "combined",
 ) -> Optional[Path]:
     """Scan all *.log files under *log_dir* and return the path of the best run.
 
     "Best" is determined by *metric*:
-      ``"gap_ratio"`` — lowest gap_ratio (primary); a run with any gap_ratio
-                        beats any run that only has train PPL.
-      ``"ppl"``        — lowest final train PPL.
-      ``"ood_ppl"``    — lowest OOD PPL at the last mid-OOD evaluation.
+      ``"combined"`` (default) — lowest ``train_ppl + 4 × gap_ratio``.
+                                  Tier rule: a run with gap_ratio always beats
+                                  one with only train_ppl; if NO run has
+                                  gap_ratio, falls back to lowest train_ppl.
+      ``"gap_ratio"`` — lowest gap_ratio (legacy); same tier rule.
+      ``"ppl"``       — lowest final train PPL (no tier preference).
+      ``"ood_ppl"``   — lowest OOD PPL at the last mid-OOD evaluation.
 
     Returns None if no scoreable log files are found.
     """
@@ -283,11 +323,14 @@ def find_best_log(
     if not scored:
         return None
 
-    if metric == "gap_ratio":
+    if metric in ("combined", "gap_ratio"):
         # Tier 1: runs with gap_ratio; Tier 2: runs with only train_ppl
         with_gap = [s for s in scored if s.gap_ratio is not None]
         if with_gap:
-            best = min(with_gap, key=lambda s: s.gap_ratio)  # type: ignore[arg-type]
+            if metric == "combined":
+                best = min(with_gap, key=lambda s: s.combined_score)
+            else:  # "gap_ratio"
+                best = min(with_gap, key=lambda s: s.gap_ratio)  # type: ignore[arg-type]
         else:
             best = min(scored, key=lambda s: s.sort_key("ppl"))
     else:
@@ -301,7 +344,7 @@ def find_best_log(
 def update_best_run_pointer(
     root: Path,
     log_dir: Optional[Path] = None,
-    metric: str = "gap_ratio",
+    metric: str = "combined",
 ) -> Optional[Path]:
     """Scan *log_dir* (default: *root*/logs), find best run, write .ln.
 

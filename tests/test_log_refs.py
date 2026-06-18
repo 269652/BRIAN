@@ -468,12 +468,17 @@ class TestCheckpointLn:
         from neuroslm.log_refs import update_best_run_pointer, read_checkpoint_url
         logs_dir = tmp_path / "logs"
         # First call: log with step1000 checkpoint
+        # _LOG_WITH_CKPT: final train_ppl 16.4, best gap_ratio 3.40
+        # → combined score = 16.4 + 4×3.40 = 30.0
         self._write_log_file(logs_dir / "run1.log", _LOG_WITH_CKPT)
         update_best_run_pointer(root=tmp_path, log_dir=logs_dir)
-        # Second run with lower gap_ratio and a different checkpoint URL
+        # Second run with a STRICTLY BETTER combined score than run1
+        # (lower train_ppl + lower gap_ratio → much lower combined).
+        # combined = 5.0 + 4×2.10 = 13.4  <  30.0
         better_log = (
+            "step 2000 | loss 1.609 | lm 1.609 | ppl 5.0 | gnorm 0.4 | lr 1.00e-04 | 700 tok/s\n"
             "[ckpt_push] ✓ pushed step2000.pt → hf://owner/repo/checkpoints/run2/step2000.pt\n"
-            "[mid-ood] step 2000: wikitext ppl=180.0 gap_ratio=2.10 (train_ppl=85.7)\n"
+            "[mid-ood] step 2000: wikitext ppl=10.5 gap_ratio=2.10 (train_ppl=5.0) (50 seq, 6430 tok)\n"
         )
         self._write_log_file(logs_dir / "run2.log", better_log)
         update_best_run_pointer(root=tmp_path, log_dir=logs_dir)

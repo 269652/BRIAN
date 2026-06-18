@@ -19,12 +19,31 @@ from typing import Optional
 
 
 # ── log macro regexes ─────────────────────────────────────────────────
-# ${LOG_TAIL:source:N} — last-N-lines fenced block + GitHub link
-# ${LOG_LINK:source}   — GitHub link only (suitable for table cells)
-# source: "best" | "latest" | <TOML-key> | <literal-path>
+# ${LOG_TAIL:source:N}            — last-N-lines fenced block + GitHub link
+# ${LOG_TAIL:source:selector:N}   — N lines ending at a selector-matched line
+# ${LOG_LINK:source}              — GitHub link only (suitable for table cells)
+# source:   "best" | "latest" | <TOML-key> | <literal-path>
+# selector: "ood"  → last [mid-ood] line in the log
+#           "best" → [mid-ood] line with the lowest combined score
+#                    (train_ppl + GAP_RATIO_WEIGHT × gap_ratio)
 
-_LOG_TAIL_RE = re.compile(r"\$\{LOG_TAIL:([^:}]+):(\d+)\}")
+_LOG_TAIL_RE = re.compile(
+    r"\$\{LOG_TAIL:"
+    r"(?P<source>[^:}]+)"               # source token (no ':' or '}')
+    r"(?::(?P<selector>[a-z][a-z_]*))?" # optional selector (lowercase ident)
+    r":(?P<n>\d+)"                       # line count
+    r"\}"
+)
 _LOG_LINK_RE = re.compile(r"\$\{LOG_LINK:([^}]+)\}")
+
+# Match a "[mid-ood] step N: … ppl=X gap_ratio=Y (train_ppl=Z) …" line
+# and pull out enough numbers to compute the combined score.  Tolerant
+# of optional metric annotations — same parser used by log_refs.score_log.
+_TAIL_OOD_LINE_RE = re.compile(
+    r"\[mid-ood\]\s+step\s+\d+:\s+\w+\s+ppl=(?P<ood_ppl>[\d.]+)"
+    r"(?:\s+gap_ratio=(?P<gap_ratio>[\d.]+))?"
+    r"(?:\s+\(train_ppl=(?P<train_ppl>[\d.]+)\))?"
+)
 
 
 # ── public exception ──────────────────────────────────────────────────
@@ -115,7 +134,7 @@ def resolve_log_macros(
     metrics: dict[str, str],
     repo_root: Optional[Path] = None,
 ) -> str:
-    """Expand ${LOG_TAIL:src:N} and ${LOG_LINK:src} macros in *template*.
+    """Expand ${LOG_TAIL:src:N}, ${LOG_TAIL:src:selector:N} and ${LOG_LINK:src}.
 
     Must be called AFTER the standard ${KEY} substitution so that log file
     content (which may contain $-signs) is never treated as a placeholder.
@@ -126,12 +145,29 @@ def resolve_log_macros(
     ``latest``      — mtime-newest ``.log`` file under ``<repo_root>/logs``
     ``<TOML-KEY>``  — path read from *metrics* dict
     ``<literal>``   — treated as a path relative to *repo_root*
+
+    Selectors (optional middle segment)
+    -----------------------------------
+    ``ood``   — N lines ending at the LAST ``[mid-ood]`` line in the log.
+    ``best``  — N lines ending at the ``[mid-ood]`` line with the lowest
+                combined score (``train_ppl + 4 × gap_ratio``).
+
+    Without a selector the macro returns the last N lines (legacy form).
+    When a selector is given but no matching line exists in the log the
+    macro falls back to last-N-lines so the README still renders.
     """
     root = repo_root or Path(".")
 
     def _tail_sub(m: re.Match) -> str:
-        source, n = m.group(1), int(m.group(2))
-        return _render_log_tail(_resolve_log_source(source, metrics, root), n, root)
+        source = m.group("source")
+        selector = m.group("selector")
+        n = int(m.group("n"))
+        return _render_log_tail(
+            _resolve_log_source(source, metrics, root),
+            n,
+            root,
+            selector=selector,
+        )
 
     def _link_sub(m: re.Match) -> str:
         return _render_log_link(
@@ -242,8 +278,18 @@ def _find_latest_log(log_dir: Path) -> Optional[Path]:
     return max(logs, key=lambda p: p.stat().st_mtime)
 
 
-def _render_log_tail(log_path: Optional[Path], n_lines: int, root: Path) -> str:
-    """Render a GitHub link + last-N-lines fenced code block, or a "not available" note."""
+def _render_log_tail(
+    log_path: Optional[Path],
+    n_lines: int,
+    root: Path,
+    selector: Optional[str] = None,
+) -> str:
+    """Render a GitHub link + fenced code block of N lines, with optional selector.
+
+    Without *selector* → last N lines (legacy behaviour).
+    With *selector*   → N lines ENDING at the selector-matched line.
+                        Falls back to last-N if no match is found.
+    """
     if log_path is None or not log_path.is_file():
         return "*(log not available)*"
     try:
@@ -251,9 +297,82 @@ def _render_log_tail(log_path: Optional[Path], n_lines: int, root: Path) -> str:
     except ValueError:
         rel_posix = log_path.as_posix()
     lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    tail = lines[-n_lines:] if len(lines) > n_lines else lines
+
+    excerpt = _select_lines(lines, n_lines, selector)
     link = f"[`{rel_posix}`]({rel_posix})"
-    return f"{link}\n\n```\n" + "\n".join(tail) + "\n```"
+    return f"{link}\n\n```\n" + "\n".join(excerpt) + "\n```"
+
+
+def _select_lines(
+    lines: list[str],
+    n: int,
+    selector: Optional[str],
+) -> list[str]:
+    """Pick N lines from *lines* per *selector* (selector logic).
+
+    No selector / unknown selector / no match  → last N lines.
+    selector="ood"   → N lines ending at the LAST ``[mid-ood]`` line.
+    selector="best"  → N lines ending at the ``[mid-ood]`` line with the
+                       lowest combined score (train_ppl + 4 × gap_ratio).
+
+    "Ending at" is inclusive: the matched line is the LAST element of the
+    returned list, with up to ``n - 1`` preceding lines, in original order.
+    """
+    if not selector or n <= 0:
+        return lines[-n:] if len(lines) > n else lines
+
+    target_idx = _find_selector_index(lines, selector)
+    if target_idx is None:
+        # Graceful fallback: no match → last N lines
+        return lines[-n:] if len(lines) > n else lines
+
+    start = max(0, target_idx - n + 1)
+    return lines[start:target_idx + 1]
+
+
+def _find_selector_index(lines: list[str], selector: str) -> Optional[int]:
+    """Return the 0-based index of the line picked by *selector*, or None.
+
+    selector="ood"  → index of the LAST line matching ``[mid-ood]``.
+    selector="best" → index of the ``[mid-ood]`` line with the lowest
+                      combined score (train_ppl + 4 × gap_ratio).
+                      Lines missing one or both numbers are skipped; ties
+                      are broken by file order (earliest wins).
+    """
+    if selector == "ood":
+        last = None
+        for i, line in enumerate(lines):
+            if "[mid-ood]" in line:
+                last = i
+        return last
+
+    if selector == "best":
+        # Lazy import to keep readme_renderer free of cycles when used
+        # standalone (e.g. by docs tooling without the rest of neuroslm).
+        try:
+            from neuroslm.log_refs import GAP_RATIO_WEIGHT
+        except ImportError:
+            GAP_RATIO_WEIGHT = 4.0  # safe default; tests pin the value
+
+        best_idx: Optional[int] = None
+        best_score: float = float("inf")
+        for i, line in enumerate(lines):
+            m = _TAIL_OOD_LINE_RE.search(line)
+            if m is None:
+                continue
+            train_ppl_s = m.group("train_ppl")
+            gap_s = m.group("gap_ratio")
+            if train_ppl_s is None:
+                continue
+            train_ppl = float(train_ppl_s)
+            gap_ratio = float(gap_s) if gap_s is not None else 0.0
+            score = train_ppl + GAP_RATIO_WEIGHT * gap_ratio
+            if score < best_score:
+                best_score = score
+                best_idx = i
+        return best_idx
+
+    return None  # unknown selector → caller falls back to last N
 
 
 def _render_log_link(log_path: Optional[Path], root: Path) -> str:

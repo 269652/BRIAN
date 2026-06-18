@@ -4,6 +4,29 @@ One row per training or OOD-eval run. Auto-updated by
 `brian analyze-log <logfile>`. Rows are upserted by run id —
 rerunning a log replaces the prior row.
 
+## Best-run ranking — Combined Score
+
+Authoritative formula used by `find_best_log` and `brian best update`:
+
+$$
+\textbf{combined\_score} \;=\; \mathrm{train\_ppl} \;+\; W \cdot \mathrm{gap\_ratio}
+\quad\text{with}\quad W = 4.0
+$$
+
+Lower is better.  `W = 4` is exposed as
+`neuroslm.log_refs.GAP_RATIO_WEIGHT`; bumping it makes the ranker
+penalise OOD overfit more aggressively.
+
+**Tier rules** (always applied before raw score comparison):
+
+| Tier | Set | Ranked by |
+|---|---|---|
+| 1 | runs with **measured `gap_ratio`** (at least one mid-OOD eval) | `combined_score` (or `gap_ratio` raw if `--metric=gap_ratio`) |
+| 2 | runs with **only `train_ppl`** (no OOD eval) | raw `train_ppl` |
+
+Tier 1 always beats Tier 2 regardless of numeric values — a measured
+OOD generalisation signal is strictly more informative than no signal.
+
 | Run | Date | Branch | Arch | Steps | Loss | LM | PPL | Phi | OOD-PPL | OOD-ratio | tok/s | Notes |
 |-----|------|--------|------|-------|------|----|-----|-----|---------|-----------|-------|-------|
 | dsl-step10000-v2 | 2026-06-01 |  | ood | ? | ? | ? | ? | ? | 837.6 | 7.04 | ? | OOD eval, ckpt=? |
