@@ -932,6 +932,14 @@ class TrainingConfig:
     # H19 — local-context surprise head. Composes with H15 via
     # `episodic_memory.write_gate = "surprise"`.
     surprise_head: Optional[Dict[str, Any]] = None
+    # H015..H018 — Neural Field Oscillator (Kuramoto + Swift–Hohenberg
+    # + coherence-gated readout). Drop-in residual block that lifts the
+    # token hidden states onto a complex oscillator field and writes the
+    # in-phase / mean-field component back into the residual stream with
+    # a zero-init readout (bit-identical baseline at step 0 — H018).
+    # See lib/blocks/neural_field_oscillator.neuro and
+    # neuroslm.modules.neural_field_oscillator for the canonical lowering.
+    nfo: Optional[Dict[str, Any]] = None
     # Stage 7 OOD push: curriculum + trunk isolation. Curriculum string
     # selects a data ordering strategy ("easy_to_hard", "random",
     # "uniform"). Trunk isolation is enforced by an existing param_scope
@@ -1146,6 +1154,8 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.episodic_memory = _parse_novel_topology_dict(props["episodic_memory"])
     if "surprise_head" in props:
         cfg.surprise_head = _parse_novel_topology_dict(props["surprise_head"])
+    if "nfo" in props:
+        cfg.nfo = _parse_novel_topology_dict(props["nfo"])
     if "curriculum" in props:
         cfg.curriculum = _strip_quotes(props["curriculum"])
     if "crystallization_step" in props:

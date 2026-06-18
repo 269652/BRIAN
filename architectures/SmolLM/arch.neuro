@@ -131,6 +131,23 @@ training {
     # under LM gradient pressure.
     episodic_memory: { enabled: true, slots: 4096, k: 32, alpha_init: 0.0,
                        write_gate: "all", write_quantile: 0.8 }
+    # HPB Phase 7 — H015..H018 Neural Field Oscillator (NFO).  A
+    # Kuramoto graph (binding-by-synchrony) coupled to a
+    # Swift–Hohenberg amplitude flow (Lyapunov-stable cubic-quintic),
+    # gated by the topological coherence functional
+    #     Φ_κ(t) = Σ_{(i,j)∈E_cut} κ_ij · A_i(t) · A_j(t).
+    # n_osc=32 ≪ d_model so the lift L is full-rank; the read-out is
+    # ReZero (zero-init projection), so the first forward is
+    # bit-identical to the baseline (H018) and the block only earns
+    # capacity as the LM gradient lifts α off zero. Per-step Euler
+    # discretisation with dt=0.1, kept well below the Swift–Hohenberg
+    # contractive bound dt ≤ 0.51 verified empirically (H017).
+    # Composes with surprise_head (Mismatch Negativity feeds κ as a
+    # routing prior in future revisions) and with grid_positions
+    # (Φ_κ readout shares the topological substrate).
+    nfo: { enabled: true, n_osc: 32, n_steps: 2, kappa_init: 0.1,
+           alpha_init: 0.0, mu_init: 0.5, a_star_init: 1.0,
+           expose_phi_lower_bound: true }
     # HPB Phase 3 â€” Multi-Scale Predictive Coding Cascade.  Applies the
     # MDRV-VBB free-energy at every adjacent layer pair (â„“, â„“+1) of the
     # trunk, with geometric weight decay Î»_â„“ = base_weight Â· 0.5^((L-1)-â„“)

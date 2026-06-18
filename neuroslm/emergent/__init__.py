@@ -21,6 +21,7 @@ from neuroslm.emergent.pc_reentry import PCReentryProbe
 from neuroslm.emergent.topological_charge import TopologicalChargeProbe
 from neuroslm.emergent.bowtie_lattice import BowtieLatticeProbe
 from neuroslm.emergent.pac_binding import PACBindingProbe
+from neuroslm.emergent.nfo_coherence import NFOCoherenceProbe
 from neuroslm.emergent.trunk_opt import (
     GradientBudgetTracker,
     LayerGradientProbe,
@@ -38,6 +39,7 @@ __all__ = [
     "TopologicalChargeProbe",
     "BowtieLatticeProbe",
     "PACBindingProbe",
+    "NFOCoherenceProbe",
     # TRUNK-OPT
     "GradientBudgetTracker",
     "LayerGradientProbe",

@@ -112,6 +112,38 @@
       "status": "stated",
       "theorem_name": "Brian.EarlyIsotropyActivation",
       "title": "TRUNK-OPT: Early-isotropy activation prevents effective-rank collapse during LM-only warmup"
+    },
+    {
+      "file": "H015_kuramoto_coherence_phi_lower_bound.md",
+      "id": "H015",
+      "proof_status": "verified",
+      "status": "stated",
+      "theorem_name": "Brian.NfoBipartitionCoherenceLowerBound",
+      "title": "NFO: Bipartition coherence is a closed-form Φ lower bound"
+    },
+    {
+      "file": "H016_coherence_gate_information_preserving.md",
+      "id": "H016",
+      "proof_status": "verified",
+      "status": "stated",
+      "theorem_name": "Brian.NfoCoherenceGateInformationPreserving",
+      "title": "NFO: Coherence gate is information-preserving"
+    },
+    {
+      "file": "H017_swift_hohenberg_contractive.md",
+      "id": "H017",
+      "proof_status": "stub",
+      "status": "stated",
+      "theorem_name": "Brian.NfoSwiftHohenbergContractive",
+      "title": "NFO: Swift–Hohenberg amplitude flow is contractive under dt cap"
+    },
+    {
+      "file": "H018_nfo_readout_zero_init_identity.md",
+      "id": "H018",
+      "proof_status": "verified",
+      "status": "stated",
+      "theorem_name": "Brian.NfoZeroInitReadoutIdentity",
+      "title": "NFO: Zero-init readout ⇒ baseline-identity forward"
     }
   ],
   "version": 1

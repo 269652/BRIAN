@@ -2,7 +2,7 @@
 
 > *146.9M trainable-param bowtie trunk · ~980M frozen cortex experts · exploring integrated information (Φ).*
 
-[![tests](https://img.shields.io/badge/tests-3550%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-3750%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
@@ -28,6 +28,250 @@ BRIAN combines five mechanisms into a single differentiable training loop:
 | **Multi-cortex fusion** | 3 frozen LM experts distil into the bowtie trunk via KL + NT-gated α | ✅ H16–H21 |
 
 Full architecture spec and tensor shapes: [`docs/architecture.md`](docs/architecture.md).
+
+---
+
+## Implemented Mechanics
+
+BRIAN currently composes **18** named mechanisms drawn from neuroscience, dynamical systems, and information geometry. Every entry below is:
+
+- a **first-class DSL primitive** — wires into any `.neuro` arch through a single block (`nfo: { … }`, `grid_positions: { … }`, …);
+- **ReZero-disciplined** — a zero-init read-out / `alpha_init=0` makes the first forward bit-identical to a vanilla transformer, so additions never regress the baseline at step 0;
+- **hypothesis-backed** — every mechanism cites an entry in [`hypothesis/`](hypothesis/) with a formal claim, code refs, test refs, and (where available) a Lean theorem.
+
+### 🌀 Topology & Geometric Substrate
+
+#### Neural Field Oscillator — H15 · H16 · H17 · H18
+
+$$
+\dot\varphi_i = \omega_i + \sum_j \kappa_{ij}\, A_j\,\sin(\varphi_j - \varphi_i), \qquad
+\dot A_i = \mu\, A_i - \tfrac14\,(A_i^2 - A_\star^2)\, A_i
+$$
+$$
+\Phi_\kappa(t) = \sum_{(i,j)\,\in\, E_{\mathrm{cut}}} \kappa_{ij}\, A_i(t)\, A_j(t), \qquad
+y = h + \alpha\,\mathrm{ReadOut}\!\bigl(g\odot A\odot \cos(\varphi-\psi)\bigr)
+$$
+
+A Kuramoto graph (binding-by-synchrony) coupled to a Swift–Hohenberg cubic-quintic amplitude flow with Lyapunov $V(A)=\tfrac18(A^2-A_+^2)^2$. The topological coherence functional $\Phi_\kappa$ is a closed-form **lower bound on integrated information** (H15) and a unit-interval information-preserving gate (H16). Read-out is ReZero so the block earns capacity only under LM gradient pressure (H18).
+*Source:* [`neuroslm/modules/neural_field_oscillator.py`](neuroslm/modules/neural_field_oscillator.py) · [`lib/blocks/neural_field_oscillator.neuro`](lib/blocks/neural_field_oscillator.neuro) · [`docs/NEURAL_FIELD_OSCILLATOR.md`](docs/NEURAL_FIELD_OSCILLATOR.md)
+
+#### Hyperbolic (Poincaré-Disc) Attention
+
+$$
+g^c_x = \lambda_c(x)^2\, g^E,\quad
+\lambda_c(x) = \frac{2}{1 - c\,\|x\|^2}, \qquad
+d_c(x,y) = \tfrac{2}{\sqrt{c}}\,\operatorname{artanh}\!\bigl(\sqrt{c}\,\|{-x \oplus_c y}\|\bigr)
+$$
+$$
+\text{logit}_{ij} = -\frac{d_c(Q_i, K_j)}{\sqrt{d_{\mathrm{head}}}}
+$$
+
+Query/key vectors are mapped into the Poincaré ball $\mathbb{D}^n_c$ via the exponential map at the origin; attention logits are **negative geodesic distances** instead of inner products. The exponential volume growth of the ball is the canonical embedding for tree-structured data (ASTs, dependency parses, scope chains).
+*Source:* [`neuroslm/modules/hyperbolic_attention.py`](neuroslm/modules/hyperbolic_attention.py) · [`docs/features/hyperbolic_attention.md`](docs/features/hyperbolic_attention.md)
+
+#### Multi-Scale Grid-Cell Positions — HPB Phase 2
+
+$$
+\mathbf{g}_k(t) = \bigl[\cos(2\pi t / T_k),\; \sin(2\pi t / T_k)\bigr], \qquad
+T_k = T_0\cdot \varphi^{\,k},\quad \varphi = 1.618\ldots,\quad k = 0,\dots,K-1
+$$
+
+$K$ position scales at the golden ratio — the Sargolini/Stensola entorhinal-cortex grid module spacing. The $2K$ raw features project to `d_model` via a **zero-init head**, so the first forward is bit-identical to RoPE-only baseline; the dormant code path activates as the projection lifts off zero. Provable length-OOD extrapolation.
+*Source:* `neuroslm/modules/grid_positions.py` · DSL: `grid_positions: { n_scales, scale_ratio, base_period }`
+
+#### RoPE on the Tonnetz Torus
+
+$$
+\mathbf{p}_t = R\!\left(\tfrac{2\pi t}{P}\right)\!\mathbf{p}_{t-1}, \qquad
+\mathbf{q}_t,\, \mathbf{k}_t \;\leftarrow\; \mathbf{q}_t\odot e^{i\theta_t},\; \mathbf{k}_t\odot e^{i\theta_t}
+$$
+
+Period-$P$ rotational embedding over the music-theoretic Tonnetz lattice — gives a *closed* cyclic prior under `tonnetz_period` chord-progression structure. Stacked with standard RoPE.
+*Source:* `neuroslm/modules/positional.py` · DSL: `rope_base`, `tonnetz_period`
+
+### 🧠 Memory & Predictive Coding
+
+#### Episodic kNN Memory — HPB Phase 5
+
+$$
+\hat v_t = \sum_{j\,\in\, \mathrm{kNN}(q_t, M)} \mathrm{softmax}\!\bigl(\langle q_t, k_j\rangle/\tau\bigr)\, v_j, \qquad
+y_t = h_t + \alpha\cdot \hat v_t
+$$
+
+A 4096-slot key/value store written either uniformly or **surprise-gated** (top-quantile of $\mathrm{nll}_{\mathrm{local}} - \mathrm{nll}_{\mathrm{global}}$). Read at every layer via kNN; $\alpha_{\mathrm{init}} = 0$ (ReZero). Memorizing-Transformers / RETRO style.
+*Source:* `neuroslm/modules/episodic_memory.py` · DSL: `episodic_memory: { slots, k, alpha_init, write_gate }`
+
+#### Multi-Scale Predictive Coding Cascade (MSPCC) — HPB Phase 3
+
+$$
+\mathcal{L}_{\mathrm{MSPCC}} = \sum_{\ell=1}^{L-1} \lambda_\ell\cdot \mathrm{KL}\!\bigl(q_\phi(z_{\ell+1}\mid h_\ell)\,\|\, p_\theta(z_{\ell+1})\bigr), \qquad
+\lambda_\ell = w_0\cdot \gamma^{(L-1)-\ell}
+$$
+
+Applies an MDRV–VBB free-energy at **every adjacent layer pair**; the deepest (bowtie waist) pair dominates via geometric weight decay $\gamma$. Composes additively with the single-waist VBB.
+*Source:* `neuroslm/modules/predictive_coding_residual.py` · [`docs/features/predictive_coding_residual.md`](docs/features/predictive_coding_residual.md) · DSL: `mspcc: { base_weight, layer_weight_decay }`
+
+#### Local-Context Surprise Head — HPB Phase 5 (Mismatch Negativity)
+
+$$
+s_t = \mathrm{nll}_{\mathrm{local}}(x_t \mid x_{t-W:t}) - \mathrm{nll}_{\mathrm{global}}(x_t \mid x_{<t})
+$$
+
+A second tied LM head over a $W$-token local window; the per-token surplus surprise $s_t$ is exposed on every train forward and feeds the episodic write-gate. Sliding-window MMN analogue from EEG literature.
+*Source:* `neuroslm/modules/surprise_head.py` · DSL: `surprise_head: { dim, local_window }`
+
+#### Predictive-Coding Residual
+
+$$
+\hat h_{\ell+1} = f_\ell(h_\ell),\qquad
+\varepsilon_\ell = h_{\ell+1} - \hat h_{\ell+1},\qquad
+\mathcal{L}_{\mathrm{PC}} = \sum_\ell \|\varepsilon_\ell\|^2
+$$
+
+Each layer predicts the next layer's activations from its own; only the *prediction error* propagates as a residual. Implements Rao–Ballard hierarchical predictive coding.
+*Source:* [`neuroslm/modules/predictive_coding_residual.py`](neuroslm/modules/predictive_coding_residual.py) · [`docs/features/predictive_coding_residual.md`](docs/features/predictive_coding_residual.md)
+
+### 🔁 Distillation & Multi-Cortex Fusion
+
+#### `cortex_pre_head_norm` — H16
+
+$$
+z_{\mathrm{trunk}} = W_{\mathrm{tied}}\cdot \mathrm{LayerNorm}(h_{\mathrm{trunk}})
+$$
+
+A LayerNorm **before** the tied LM head suppresses GPT-2's rogue dimension (std $\approx 24$, $82\times$ the median). Without it the init CE is 21.3 nats — *above* the uniform-distribution ceiling of 10.82; with it: **10.6 nats**.
+*Source:* `neuroslm/cortex/multi_cortex_lm_head.py`
+
+#### Per-Position Abstain Logit — H21
+
+$$
+\tilde z_{t,v} = \begin{cases}
+z_{t,v} & v \in \mathrm{vocab}_{\mathrm{cortex}} \\[2pt]
+\max_{v'\in\mathrm{vocab}_{\mathrm{cortex}}} z_{t,v'} - \ln V_{\mathrm{trunk}} & \text{otherwise}
+\end{cases}
+$$
+
+Unmapped vocab slots get an abstain logit instead of a flat $-10^4$. Dropped standalone-cortex CE from **17.37 → 4.03 nats**, unblocking the entire fusion pathway.
+*Source:* `neuroslm/cortex/cortex_lm_head.py`
+
+#### NT-Gated $\alpha$ Fusion
+
+$$
+\alpha_{\mathrm{eff}} = \sigma\!\bigl(W_{\mathrm{NT}}\cdot \mathrm{EMA}(\ell_{\mathrm{cortex}} - \ell_{\mathrm{trunk}})\bigr), \qquad
+z = z_{\mathrm{trunk}} + \alpha_{\mathrm{eff}}\cdot (z_{\mathrm{cortex}} - z_{\mathrm{trunk}})
+$$
+
+An EMA-smoothed *neurotransmitter* signal collapses $\alpha_{\mathrm{eff}} \to 0$ once the trunk surpasses the cortex, and resumes contribution if the trunk regresses. Auto-retiring teacher.
+*Source:* `neuroslm/cortex/nt_alpha_gate.py`
+
+#### KL Distillation (Temperature-Scaled)
+
+$$
+\mathcal{L}_{\mathrm{KL}} = T^2 \cdot \mathrm{KL}\!\bigl(\mathrm{softmax}(z_{\mathrm{cortex}}/T).\mathrm{detach}\;\big\|\;\mathrm{softmax}(z_{\mathrm{trunk}}/T)\bigr), \quad
+\lambda_t = \lambda_{\max}\cdot \mathrm{clip}\!\bigl((\ell_{\mathrm{cortex}} - \ell_{\mathrm{trunk}}) / \tau,\, 0, 1\bigr)
+$$
+
+Gap-ramped: $\lambda_t$ saturates at $\lambda_{\max} = 1.0$ when the trunk lags and shuts off when it leads. Pairs with the NT gate above.
+*Source:* `neuroslm/cortex/distillation.py`
+
+### 📐 Generalisation & Training Geometry (GIF stack)
+
+#### GIF-1/2/3 — Adaptive Gap-Ratio Ramp — H7
+
+$$
+r_t = \frac{\mathrm{ppl}_{\mathrm{OOD}}(t)}{\mathrm{ppl}_{\mathrm{train}}(t)},\qquad
+\beta_t = \beta_{\min} + (\beta_{\max} - \beta_{\min})\cdot \sigma(\kappa\,(r_t - r_\star))
+$$
+
+The VBB $\beta$, isotropy strength, and OOD-probe weight all ramp from a single gap-ratio signal $r_t$ → closed loop on generalisation gap rather than wall-clock schedule.
+*Source:* `neuroslm/gif/adaptive_ramp.py` · DSL: `vbb_kl_floor_gamma`, `loss_var_window`
+
+#### GIF-4 — Gap-Driven Label Smoothing — H8
+
+$$
+\varepsilon_t = \varepsilon_0 + (\varepsilon_{\max} - \varepsilon_0) \cdot \mathrm{clip}\!\bigl((r_t - 1) / (r^\star - 1),\, 0, 1\bigr)
+$$
+
+Label smoothing magnitude is itself gap-driven — increases as OOD/train diverges, shrinks as they re-align.
+*Source:* `neuroslm/gif/label_smoothing.py` · DSL: `label_smoothing`
+
+#### GIF-5 — Attention-Head Diversity — H9
+
+$$
+\mathcal{L}_{\mathrm{div}} = \frac{1}{H(H-1)}\sum_{i\ne j} \bigl\|\,P_i^\top P_j - \tfrac{1}{T}\mathbf{1}\mathbf{1}^\top\bigr\|_F^2
+$$
+
+Penalises pairwise alignment of attention probabilities $P_i$ across heads → forces encoder-side diversity, measurably cuts redundancy.
+*Source:* `neuroslm/gif/head_diversity.py`
+
+#### GIF-6 — Cosine LM Head — H10
+
+$$
+z_{t,v} = \tau\cdot \frac{\langle h_t,\, W_v\rangle}{\|h_t\|\cdot \|W_v\|}
+$$
+
+Cosine similarity (with learnable temperature $\tau$) instead of raw dot-product → eliminates the norm-mediated confidence asymmetry that biases LM heads toward high-norm trunk states.
+*Source:* `neuroslm/modules/cosine_head.py` · DSL: `cosine_head: true`
+
+#### GIF-7 — Homeostatic Gradient Equilibrium
+
+$$
+g_\ell \mathrel{:=} g_\ell \big/ \bigl(c + \mathrm{var}_{\mathrm{batch}}(\mathcal{L})\bigr), \qquad
+\mathrm{var}_{\mathrm{batch}}(\mathcal{L}) \ge \mathrm{var}_{\min}
+$$
+
+Divisive normalisation of layer-wise gradients by the rolling batch-loss variance — keeps SNR constant across the trunk and prevents bowtie-waist collapse.
+*Source:* `neuroslm/gif/gradient_equilibrium.py` · DSL: `divisive_grad_c`, `loss_var_min_mult`
+
+#### Hyperbolic Bowtie Waist (HPB Phase 4)
+
+$$
+\mathrm{KL}_{\mathbb{D}^n_c}(q\|p) = \mathrm{KL}_{\mathbb{R}^n}(q\|p) + \log\det J_{\exp_0^c}(\mu_q)
+$$
+
+Wraps the VBB posterior on the Poincaré ball of curvature $c$. The Jacobian log-det correction **strictly upper-bounds** the Euclidean KL for any $\|\mu_q\| > 0$ — $\sigma$-collapse becomes geometrically harder.
+*Source:* `neuroslm/gif/hyperbolic_bowtie.py` · DSL: `vbb_curvature`
+
+#### ImprovementGate (Welch's $t$) — H5
+
+$$
+t = \frac{\bar x_A - \bar x_B}{\sqrt{s_A^2/n_A + s_B^2/n_B}},\quad
+\mathrm{df} = \frac{(s_A^2/n_A + s_B^2/n_B)^2}{(s_A^2/n_A)^2/(n_A-1) + (s_B^2/n_B)^2/(n_B-1)}
+$$
+
+Every architecture mutation and DNA patch is gated by a two-sided Welch's $t$-test ($p < \alpha$) computed on the OOD-PPL pre/post window — no structural change lands without significance. Numerically pinned to scipy within $1\!\times\!10^{-6}$.
+*Source:* [`neuroslm/verification/improvement_gate.py`](neuroslm/verification/improvement_gate.py) · `tests/verification/test_improvement_gate.py`
+
+### ✨ Φ / Integrated Information
+
+#### Φ-MIP Gaussian Objective — H1 · H2
+
+$$
+\Phi^{\mathrm{MIP}}(X) = \min_{(A,B)\,\in\,\mathrm{cuts}(X)} I(A;B), \qquad
+\mathcal{L}_\Phi = -\tanh(\Phi^{\mathrm{MIP}} / 3)\cdot 3
+$$
+
+Differentiable lower bound on integrated information via the Gaussian-MI estimator over the **minimum information partition**; the bounded $-\tanh$ scalarisation gives a non-vanishing gradient that pushes the trunk toward integrated states.
+*Source:* `neuroslm/iit/phi_mip.py`
+
+#### Sheaf $H^1$ Contradiction Detection — H4
+
+$$
+H^1(\mathcal{F}) = \ker\delta^1 / \mathrm{im}\,\delta^0, \qquad
+\text{contradiction} \;\iff\; H^1 \ne 0
+$$
+
+Narrative memory is encoded as a cellular sheaf $\mathcal{F}$ over the proposition graph; **non-zero first cohomology** means two stalks contradict ("likes coffee" vs "hates coffee") and triggers a `SUPERSEDES` edge. Belief revision = killing $H^1$.
+*Source:* `neuroslm/sheaf/contradiction.py` · `tests/test_narrative_memory.py`
+
+#### Personality Vector
+
+$$
+\pi = \mathrm{EMA}\!\bigl(\mathrm{Embed}(\text{identity-tokens})\bigr) \in \mathbb{R}^{5}
+$$
+
+A frozen embedding learned during embodied training that **survives weight reload** — verified across checkpoints (H6). Used as a stable identity vector for self-reference rate and cognitive-closure metrics.
+*Source:* [`collectors/personality.py`](collectors/personality.py)
 
 ---
 
@@ -60,7 +304,7 @@ modulation dopamine -> pfc {
 }
 ```
 
-The compiler (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) produces modules with **source maps** and **byte-identity round-trip** verification. 956 tests in `tests/dsl/` guard codegen correctness.
+The compiler (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) produces modules with **source maps** and **byte-identity round-trip** verification. 962 tests in `tests/dsl/` guard codegen correctness.
 
 Full reference: [`docs/dsl.md`](docs/dsl.md).
 
@@ -104,7 +348,7 @@ KL distillation runs in parallel: `L_KL = T² · KL(cortex.detach()/T ‖ trunk/
 
 ### Layer A — Mechanism Verification ✅
 
-3550 unit tests across `tests/` confirm every mechanism computes as specified:
+3750 unit tests across `tests/` confirm every mechanism computes as specified:
 
 | Hypothesis | Result |
 |-----------|--------|
@@ -118,7 +362,7 @@ KL distillation runs in parallel: `L_KL = T² · KL(cortex.detach()/T ‖ trunk/
 | H19 — `ImprovementGate` (Welch's t) | ✅ p-values within 1e-6 of scipy; mutation blocked without significance |
 | H21 — Per-position abstain unblocks fusion | ✅ -93% train-PPL / -94% OOD-PPL vs broken precursor |
 
-Run all: `py -3 -m pytest tests/ -v` (~~443s on CPU).
+Run all: `py -3 -m pytest tests/ -v` (~~468s on CPU).
 
 ### Layer B — OOD Generalization 🟡
 
@@ -278,14 +522,14 @@ model.personality_vector               # tensor(5) — stable across checkpoints
 ## Tests
 
 ```bash
-py -3 -m pytest tests/                                              # full suite (3550 tests, ~~443s)
+py -3 -m pytest tests/                                              # full suite (3750 tests, ~~468s)
 py -3 -m pytest tests/test_phi.py -v                               # H1–H3: integrated information
 py -3 -m pytest tests/test_narrative_memory.py -v                  # H4–H5: memory & causation
 py -3 -m pytest tests/test_cognitive_closure.py -v                 # H6–H6.5: identity & embodiment
 py -3 -m pytest tests/training/test_cortex_pre_head_norm.py -v     # H16: catastrophic-loss fix
 py -3 -m pytest tests/training/test_cortex_distillation_and_gating.py -v  # H17–H18: KL + NT gating
 py -3 -m pytest tests/verification/test_improvement_gate.py -v     # H19: Welch's t admission gate
-py -3 -m pytest tests/dsl/ -v                                       # 956 DSL codegen + byte-equivalence
+py -3 -m pytest tests/dsl/ -v                                       # 962 DSL codegen + byte-equivalence
 ```
 
 ---
@@ -317,7 +561,7 @@ git lfs pull --include="lfs_checkpoints/neuroslm_xl_adamw_mix_800.pt"  # pull on
 
 | Document | Contents |
 |----------|----------|
-| [`docs/findings.md`](docs/findings.md) | Hypothesis ledger H1–H14: test files, result JSONs, raw logs. Source of truth for what's proven vs open. |
+| [`docs/findings.md`](docs/findings.md) | Hypothesis ledger H1–H18: test files, result JSONs, raw logs. Source of truth for what's proven vs open. |
 | [`docs/architecture.md`](docs/architecture.md) | Full spec: 11-stage forward pass, tensor shapes, equations, IIT 4.0 theory. |
 | [`docs/formal_framework.md`](docs/formal_framework.md) | Normative math contract: sheaf ontology, H¹ guard, Φ guard, RAID-5 DNA, ImprovementGate spec, Lean roadmap. |
 | [`docs/dsl.md`](docs/dsl.md) | `.neuro` syntax, macro system, compile pipeline, module bundling, source maps. |

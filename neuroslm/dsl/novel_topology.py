@@ -369,3 +369,19 @@ def make_surprise_head(spec, d_model: int, vocab: int) -> Optional[SurpriseHead]
         dim=int(d.get("dim", 128)),
         local_window=int(d.get("local_window", 64)),
     )
+
+
+def make_nfo(spec, d_model: int):
+    """Build a Neural Field Oscillator (H015..H018) from a DSL spec.
+
+    Imported lazily so the existing ``novel_topology`` import surface
+    does not gain a hard dependency on the NFO module. Returns ``None``
+    when disabled, exactly like the H15/H16/H19 factories above.
+    """
+    if not _enabled(spec):
+        return None
+    # Lazy import — keeps the legacy `novel_topology` test cost flat
+    # when NFO is not configured.
+    from neuroslm.modules.neural_field_oscillator import make_nfo as _make
+    return _make(spec, d_model)
+

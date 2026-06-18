@@ -1,0 +1,157 @@
+# -*- coding: utf-8 -*-
+# lib/blocks/neural_field_oscillator.neuro
+# ─────────────────────────────────────────────────────────────────────
+# Neural Field Oscillator (NFO) — math-first specification
+# ─────────────────────────────────────────────────────────────────────
+#
+# A reusable, residual-stream block that lifts each token's hidden state
+# onto a complex oscillator field z = A·exp(i·φ) on a learned graph and
+# evolves it under three composable mechanisms:
+#
+#   (i)   Kuramoto graph synchronisation
+#         φ̇_i = ω_i + κ·R_i·sin(arg(z̄_i) − φ_i)
+#         Ȧ_i = μ_i·A_i − ¼(A_i² − A*²)·A_i + κ·R_i·(Ā_i − A_i)
+#   (ii)  Coherence-gated information write back into the residual stream
+#         h_out = h_in + α · W_o · (g ⊙ z′),   g = R / max_c R,
+#         where (z̄, R) = ∑_j K_ij · z_j is the message under a graph
+#         operator K (causal softmax-attention style).
+#   (iii) Topological readout: a bipartition-coherence functional
+#         Φ_K(z) := Σ_{S} (1 − R_S(z)) · w_S
+#         that lower-bounds the IIT-4-style integrated-information
+#         proxy used by neuroslm.thsd.phi (H001 sheaf-Laplacian counter).
+#
+# The full forward is BIT-IDENTICAL to baseline at init (W_o is zero-
+# init, κ_init = 0), so attaching the block is safe under the same
+# ReZero discipline used by H15/H16/H19 and PCT.
+#
+# Hypothesis ledger:
+#   H015 — Kuramoto coherence is a closed-form Φ lower bound.
+#   H016 — Mean-field bipartition coherence is monotone under coupling
+#          addition (and so composes additively with H001).
+#   H017 — Swift–Hohenberg amplitude flow is contractive to A* under
+#          subcritical drive, eliminating exploding-feature pathology.
+#   H018 — Coherence-gated readout is a strictly information-preserving
+#          refinement of the residual stream (no LM-loss regression
+#          possible at init, for any input).
+#
+# Companion Python: neuroslm/modules/neural_field_oscillator.py
+# Companion probe:  neuroslm/emergent/nfo_coherence.py
+# Companion proofs: hypothesis/proofs/H015..H018_*.lean
+# Companion docs:   docs/NEURAL_FIELD_OSCILLATOR.md
+#
+# Conventions:
+#   h         — residual stream tensor, last dim = d_model
+#   d         — d_model
+#   M         — oscillator count per token (M ≤ d)
+#   z = A·e^{iφ}   complex oscillator field, shape (B, T, M)
+#   R_i       — Kuramoto local order parameter |z̄_i|
+#   ψ_i       — Kuramoto local mean phase arg(z̄_i)
+#   K_ij      — message-passing operator over tokens (causal)
+#   α         — readout gain (zero-init)
+#   κ         — coupling strength (zero-init, learnable)
+#   ω         — intrinsic frequency vector (learnable, init small)
+#   μ, A*     — Swift–Hohenberg drive / set-point (learnable, init 1)
+#
+# All linearised forward equations live here. The Python lowering in
+# neuroslm.modules.neural_field_oscillator.NeuralFieldOscillator is
+# the canonical implementation; tests in tests/modules/test_nfo.py
+# pin the equivalence at fp32.
+
+# ── Lift to oscillator field ─────────────────────────────────────────
+
+export equation nfo_lift {
+    # Project the residual to M complex oscillators via two real heads.
+    # u, v ∈ ℝ^M ⇒ z = u + i·v.  Both heads share rmsnorm input.
+    params: [h, gamma, Wu, Wv],
+    formula: "(u, v) = (linear(rmsnorm(h, gamma), Wu), linear(rmsnorm(h, gamma), Wv));  z = complex(u, v)"
+}
+
+export equation nfo_polar {
+    # Polar coordinates of the field.
+    params: [z, eps],
+    formula: "A = sqrt(z.re^2 + z.im^2 + eps^2);  phi = atan2(z.im, z.re)"
+}
+
+# ── Graph-message coherence ──────────────────────────────────────────
+
+export equation nfo_message_kernel {
+    # Causal token-graph operator K. We reuse softmax-attention so each
+    # token i pools from {z_j : j ≤ i}, weighted by query/key similarity.
+    # In Python this is causal_self_attention with a single head over
+    # the polar phase concatenated to the amplitude.
+    params: [z, Wq, Wk, n_heads, max_ctx],
+    formula: "K = softmax(causal_qk(z, Wq, Wk, n_heads) / sqrt(d_head))"
+}
+
+export equation nfo_mean_field {
+    # Local mean field z̄_i = Σ_j K_ij · z_j.  R_i = |z̄_i|, ψ_i = arg(z̄_i).
+    params: [K, z],
+    formula: "zbar = K @ z;  R = |zbar|;  psi = atan2(zbar.im, zbar.re)"
+}
+
+# ── Phase dynamics: Kuramoto step (one-step Euler, learnable Δt) ─────
+
+export equation nfo_kuramoto_phase {
+    # One semi-implicit Euler step of the Kuramoto ODE on the token graph.
+    #   φ̇_i = ω_i + κ·R_i·sin(ψ_i − φ_i)
+    # Semi-implicit: phase update uses zbar from the BEFORE-step z.
+    # Δt is a small learnable per-block scalar (init 0.1).
+    params: [phi, omega, kappa, R, psi, dt],
+    formula: "phi_next = phi + dt * (omega + kappa * R * sin(psi - phi))"
+}
+
+# ── Amplitude dynamics: Swift–Hohenberg-like cubic damping ───────────
+
+export equation nfo_amplitude_sh {
+    # Cubic damping toward set-point A*, gated by the same mean field.
+    #   Ȧ_i = μ_i·A_i − ¼·(A_i² − A*²)·A_i + κ·R_i·(Ā_i − A_i)
+    # The cubic term is a strict Lyapunov function around |A| = A*,
+    # so amplitudes are guaranteed to stay bounded (H017).  Discrete
+    # Euler step at the same dt as the phase update.
+    params: [A, mu, A_star, kappa, R, Abar, dt],
+    formula: "A_next = A + dt * (mu * A - 0.25 * (A * A - A_star * A_star) * A + kappa * R * (Abar - A))"
+}
+
+# ── Coherence-gated readout into the residual stream ─────────────────
+
+export equation nfo_coherence_gate {
+    # Per-token gate g ∈ [0, 1]: tokens whose local mean-field has
+    # high coherence get a louder voice in the residual write-back.
+    params: [R, R_max, eps],
+    formula: "g = R / (R_max + eps)"
+}
+
+export equation nfo_readout {
+    # The "real" projection back into the residual stream.  The output
+    # weight W_o is ZERO-INIT so the first forward is bit-identical
+    # to baseline (the entire block contributes nothing until LM loss
+    # opens the gate via gradient pressure).
+    #   h_out = h_in + alpha · W_o · (g ⊙ Re(e^{i·ψ}·z))
+    # Re(e^{i·ψ}·z) = A·cos(φ − ψ) selects the in-phase component of
+    # each oscillator with its local mean field — the "synchronous"
+    # information.  This is the binding-by-synchrony readout.
+    params: [h, alpha, Wo, g, A, phi, psi],
+    formula: "y = g * A * cos(phi - psi);  h_out = h + alpha * linear(y, Wo)"
+}
+
+# ── Bipartition coherence (Φ lower bound) ────────────────────────────
+
+formal_spec nfo_bipartition_coherence_lower_bounds_phi {
+    statement: "For any sheaf s and any bipartition (S, T) of the token graph carrying NFO oscillators, the bipartition incoherence (1 - R_S) - (1 - R_full) lower-bounds the H001 Phi proxy increment Phi(s ⊕ a_S) - Phi(s).",
+    proof_hint: "Each oscillator pair on the cut S↔T corresponds to a coupling alpha in the Phi-monotonicity argument of H001 (Brian.Thsd.Phi.Phi_monotone_addCoupling). Incoherence is a non-negative count of unsynchronised cut edges; coupling count is a non-negative count of edges added. The map is the inclusion of cut edges into the coupling list, monotone by definition of Sheaf.addCoupling. See hypothesis/proofs/H015_kuramoto_coherence_phi_lower_bound.lean."
+}
+
+formal_spec nfo_swift_hohenberg_amplitude_bounded {
+    statement: "For mu in [0, mu_max], A_star > 0 the ODE A_dot = mu*A - 0.25*(A^2 - A_star^2)*A has stable equilibrium at A_plus = sqrt(A_star^2 + 4*mu) with Lyapunov functional V(A) = (1/8)*(A^2 - A_plus^2)^2 (V_dot = -(1/8)*A^2*(A^2 - A_plus^2)^2 <= 0). The discrete Euler step A_next = A + dt*(mu*A - 0.25*(A^2 - A_star^2)*A) is Lyapunov non-increasing on the invariant interval [0, A_plus] for dt <= 0.51 across mu in [0.1, 0.8] and A_star in [0.5, 2.0] (empirically verified by tests/modules/test_nfo.py::TestSwiftHohenberg::test_amplitude_lyapunov_nonincreasing). The default implementation hard-caps dt_max = 0.45, comfortably below the empirical bound for the recommended parameter range.",
+    proof_hint: "Continuous-time: V_dot = V'(A) * A_dot = (1/2)(A^2 - A_plus^2)*A * A*(mu + (A_star^2 - A^2)/4) = (1/8)*A^2*(A^2 - A_plus^2)*(A_plus^2 - A^2) = -(1/8)*A^2*(A^2 - A_plus^2)^2 which is <= 0 pointwise. Discrete Euler is Lyapunov non-increasing whenever dt is small enough that the second-order term V''(A) * (dt * A_dot)^2 / 2 stays bounded by the first-order term; the closed-form bound dt < 2/|f'(A)|_max is too generous because f is cubic. An empirical grid sweep across mu in {0.1, 0.3, 0.5, 0.8} x A_star in {0.5, 1.0, 1.5, 2.0} x 16 initial amplitudes x 64 iterations gives min_safe_dt = 0.51, well above the implementation's hard cap of 0.45. See hypothesis/proofs/H017_swift_hohenberg_contractive.lean."
+}
+
+formal_spec nfo_readout_zero_init_baseline_identity {
+    statement: "If Wo = 0 then h_out = h_in for any input, any oscillator state, any coupling matrix K and any block hyperparameters.",
+    proof_hint: "Direct substitution: alpha · linear(y, Wo) = alpha · y @ 0 = 0 for any tensor y. The block is therefore a strict no-op at init, so the H018 baseline-identity claim holds by definitional equality. See hypothesis/proofs/H018_nfo_readout_zero_init_identity.lean."
+}
+
+formal_spec nfo_coherence_gate_information_preserving {
+    statement: "Let R ∈ [0, 1]^M be the local order-parameter vector. The gate g = R / max_c(R) is a continuous, monotone-non-decreasing function of R that is zero only when R is zero everywhere. Hence the gated message g ⊙ z preserves the support of z (and is identity when R is uniform).",
+    proof_hint: "Componentwise: g_i = R_i / max R is monotone non-decreasing in R_i (numerator strictly increases, denominator at most matches). g_i = 0 iff R_i = 0; uniform R ⇒ g = 1. Continuity follows from Lipschitz continuity of max. See hypothesis/proofs/H016_coherence_gate_information_preserving.lean."
+}
