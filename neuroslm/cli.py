@@ -1888,9 +1888,9 @@ def _render_lightning_section(args: argparse.Namespace, _say) -> None:
     import time as _time
     hdr = (f"{'JOB ID':<22}  {'LABEL':<16}  {'STATUS':<10}  "
            f"{'MACHINE':<8}  {'UP(m)':>5}  {'STEP':>6}  {'PPL':>8}  "
-           f"LAST")
+           f"{'OOD-PPL':>11}  LAST")
     _say(hdr)
-    _say("-" * min(len(hdr), 110))
+    _say("-" * min(len(hdr), 130))
     now = int(_time.time())
     for j in jobs:
         up_m = max(0, (now - (j.started_at or now)) // 60)
@@ -1899,34 +1899,52 @@ def _render_lightning_section(args: argparse.Namespace, _say) -> None:
         machine = (j.machine or "?")[:8]
         # Try a quick log tail for the most recent training line — but
         # skip it for stopped/completed/failed since the cost of an
-        # SSH roundtrip per row is high. We cap tail length so a slow
-        # Studio doesn't stall the render.
-        step_s, ppl_s, last_s = "-", "-", ""
+        # SSH roundtrip per row is high. We use n=500 so the parser
+        # catches the latest `[mid-ood] step N: wikitext ppl=...` block
+        # which only fires every `ood_every` (default 500) steps —
+        # with `log_every=20` that means the OOD line sits ≥25 step
+        # lines back in the log, so n=20 would always miss it.
+        step_s, ppl_s, ood_s, last_s = "-", "-", "-", ""
         if status in (JobStatus.RUNNING.value, JobStatus.STARTING.value):
             try:
-                tail = connector.tail_logs(j.job_id, n=20)
-                step_s, ppl_s, last_s = _summarise_lightning_tail(tail)
+                tail = connector.tail_logs(j.job_id, n=500)
+                step_s, ppl_s, ood_s, last_s = _summarise_lightning_tail(tail)
             except Exception as e:
                 last_s = f"(tail err: {type(e).__name__})"
         _say(f"{j.job_id:<22}  {label:<16}  {status:<10}  "
              f"{machine:<8}  {up_m:>5}  {step_s:>6}  {ppl_s:>8}  "
-             f"{last_s[:48]}")
+             f"{ood_s:>11}  {last_s[:48]}")
 
 
 def _summarise_lightning_tail(tail: str) -> tuple:
-    """Extract (step, ppl, last_line) from a tail of train.log.
+    """Extract ``(step, ppl, ood, last_line)`` from a tail of train.log.
 
-    Reuses the same regexes as the vast parser so the same training
-    output format ``[train] step=N ppl=X tps=Y`` is parsed identically.
+    Uses the same regexes as the vast parser so the per-step
+    ``step N | loss … | ppl …`` line and the periodic
+    ``[mid-ood] step N: wikitext ppl=…`` line both surface in the
+    Lightning ps table identically to the vast section.
+
+    The OOD column is formatted as ``"<ppl>@<step>"`` (e.g.
+    ``"1550@500"``) when a mid-OOD line is present in the tail,
+    or ``"-"`` otherwise. This requires the caller to pass a tail
+    large enough to catch the most recent OOD eval line — see the
+    n=500 hint in `_render_lightning_section`.
     """
     if not tail:
-        return ("-", "-", "")
-    # Reuse the module-level _STEP_RE if available; otherwise fall back.
+        return ("-", "-", "-", "")
+    # Reuse the module-level regexes if available; otherwise fall back.
     step, ppl = None, None
+    ood_step, ood_ppl = None, None
     try:
         for m in _STEP_RE.finditer(tail):
             step = int(m.group("step"))
             ppl = float(m.group("ppl"))
+    except NameError:
+        pass
+    try:
+        for m in _MID_OOD_RE.finditer(tail):
+            ood_step = int(m.group("step"))
+            ood_ppl = float(m.group("ppl"))
     except NameError:
         pass
     last_line = ""
@@ -1935,9 +1953,12 @@ def _summarise_lightning_tail(tail: str) -> tuple:
         if line:
             last_line = line
             break
+    ood_s = (f"{ood_ppl:.0f}@{ood_step}"
+             if ood_ppl is not None and ood_step is not None else "-")
     return (
         str(step) if step is not None else "-",
         f"{ppl:.1f}" if ppl is not None else "-",
+        ood_s,
         last_line,
     )
 

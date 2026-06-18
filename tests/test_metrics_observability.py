@@ -409,5 +409,98 @@ class TestBrianTomlCheckpointCadence:
             f"(got {cfg.default_ood_every}). Update brian.toml.")
 
 
+# ──────────────────────────────────────────────────────────────────
+# Group F — `brian ps` Lightning table surfaces OOD-PPL
+# ──────────────────────────────────────────────────────────────────
+#
+# Follow-up to the user's question on 2026-06-18 16:39:
+#   "why is brian ps not showing ood ppl?"
+#
+# Root cause: `_render_lightning_section` only parsed `_STEP_RE`
+# (training ppl), never `_MID_OOD_RE`. The vast.ai render had the
+# OOD-PPL column, but Lightning didn't. Now `_summarise_lightning_tail`
+# returns `(step, ppl, ood, last_line)` and the table includes the
+# column between PPL and LAST.
+
+class TestLightningPsOodPplColumn:
+    """`brian ps` Lightning table must surface `[mid-ood]` ppl."""
+
+    def test_F1_empty_tail_returns_dashes_for_ood(self):
+        """No log content → OOD column shows '-' (not a crash)."""
+        from neuroslm.cli import _summarise_lightning_tail
+        step, ppl, ood, last = _summarise_lightning_tail("")
+        assert (step, ppl, ood, last) == ("-", "-", "-", "")
+
+    def test_F2_tail_with_only_step_lines_has_dash_ood(self):
+        """Training has started but OOD eval hasn't fired yet —
+        STEP/PPL populated, OOD still '-'."""
+        from neuroslm.cli import _summarise_lightning_tail
+        tail = (
+            "step    20 | loss 6.98 | lm 6.32 | ppl 559.0 | gnorm 6.1 "
+            "| lr 1.00e-05 | 594 tok/s | other stuff\n"
+            "step    40 | loss 6.89 | lm 6.41 | ppl 612.4 | gnorm 5.7 "
+            "| lr 2.00e-05 | 643 tok/s | other stuff\n"
+        )
+        step, ppl, ood, last = _summarise_lightning_tail(tail)
+        assert step == "40", f"latest step should be 40, got {step!r}"
+        assert ppl == "612.4", f"latest ppl should be 612.4, got {ppl!r}"
+        assert ood == "-", (
+            f"no [mid-ood] line in tail → OOD column must be '-', "
+            f"got {ood!r}")
+
+    def test_F3_tail_with_mid_ood_populates_column(self):
+        """When `[mid-ood] step N: wikitext ppl=X` is in the tail,
+        OOD column shows '<ppl>@<step>'."""
+        from neuroslm.cli import _summarise_lightning_tail
+        tail = (
+            "step   480 | loss 6.5 | lm 6.0 | ppl 403.4 | gnorm 4.1 "
+            "| lr 1.00e-04 | 700 tok/s | other\n"
+            "[mid-ood] step 500: wikitext ppl=1550.1 gap_ratio=3.84 "
+            "(train_ppl=403.4) heldout=64 batches\n"
+            "step   500 | loss 6.4 | lm 6.0 | ppl 398.2 | gnorm 4.0 "
+            "| lr 1.00e-04 | 695 tok/s | other\n"
+        )
+        step, ppl, ood, last = _summarise_lightning_tail(tail)
+        assert step == "500"
+        assert ppl == "398.2"
+        assert ood == "1550@500", (
+            f"OOD column must show '1550@500', got {ood!r}")
+
+    def test_F4_latest_mid_ood_wins_over_earlier(self):
+        """Multiple [mid-ood] blocks → table shows the most recent."""
+        from neuroslm.cli import _summarise_lightning_tail
+        tail = (
+            "[mid-ood] step 500: wikitext ppl=1550.1 heldout=64 batches\n"
+            "step   600 | loss 6.3 | lm 5.9 | ppl 365.0 | gnorm 3.8 "
+            "| lr 1.00e-04 | 700 tok/s | other\n"
+            "[mid-ood] step 1000: wikitext ppl=1280.5 heldout=64 batches\n"
+            "step  1020 | loss 6.2 | lm 5.8 | ppl 330.0 | gnorm 3.6 "
+            "| lr 1.00e-04 | 700 tok/s | other\n"
+        )
+        _, _, ood, _ = _summarise_lightning_tail(tail)
+        assert ood == "1280@1000", (
+            f"latest [mid-ood] (step 1000) must win — got {ood!r}")
+
+    def test_F5_render_uses_n_500_tail(self):
+        """The render loop must request n=500 lines (not the old n=20)
+        so the parser actually catches [mid-ood] lines that sit ~25
+        step-lines back when log_every=20."""
+        import inspect
+        from neuroslm import cli as cli_module
+        src = inspect.getsource(cli_module._render_lightning_section)
+        assert "tail_logs(j.job_id, n=500)" in src, (
+            "Lightning render must tail 500 lines so [mid-ood] blocks "
+            "(which fire every ood_every=500 steps with log_every=20, "
+            "i.e. ~25 step lines apart) actually appear in the tail.")
+
+    def test_F6_header_contains_ood_ppl_column(self):
+        """The Lightning ps header must include an OOD-PPL column."""
+        import inspect
+        from neuroslm import cli as cli_module
+        src = inspect.getsource(cli_module._render_lightning_section)
+        assert "'OOD-PPL'" in src, (
+            "Lightning ps header must include the OOD-PPL column.")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
