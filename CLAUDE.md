@@ -1,4 +1,4 @@
-# Repo-wide instructions for Claude / agents working in this repo
+﻿# Repo-wide instructions for Claude / agents working in this repo
 
 These rules apply to **every** Claude/agent session on this codebase.
 They are non-optional.
@@ -341,7 +341,7 @@ Allowed `docs/` `.md`:
 - `changelog.md` — git-derived (auto-maintained)
 - `metrics.md` — auto-updated by `brian analyze-log`
 - `dsl.md`, `dsl_nn_language.md`, `dsl_subsystem_roadmap.md` — DSL docs
-- `BRIAN.md`, `CLI.md`, `harness.md` — reference documentation
+- `brian.md`, `cli.md`, `harness.md` — reference documentation
 - Anything else needs **explicit user approval**.
 
 `docs/archive/` is the graveyard for dead session notes and investigation
