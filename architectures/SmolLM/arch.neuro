@@ -97,6 +97,14 @@ training {
     # GIF-7: Homeostatic Gradient Equilibrium — stabilize optimization dynamics.
     # A) Divisive grad norm (cortical gain control): smooth replacement for hard clip.
     divisive_grad_c: 5.0
+    # A.1) Hard-clip safety ceiling AFTER divisive (added 2026-06-18).
+    # Without this, divisive at c=5 leaves an asymptotic 5.0-norm ceiling
+    # which the live SmolLM run (ln-20260618-163415-563b) showed STILL
+    # damaged training under outlier batches — 9 catastrophic spikes
+    # (gnorm ≥ 1000) each cost 20–50 PPL points. Composing divisive
+    # (smooth) → grad_clip (hard) bounds post-norm at grad_clip=1.0
+    # while keeping smoothness in the bulk of the distribution.
+    grad_clip_after_divisive: true
     # B) Loss-variance metaplastic damping (BCM rule): damp LR when loss oscillates.
     loss_var_window: 64
     loss_var_min_mult: 0.1
@@ -146,7 +154,7 @@ training {
     # routing prior in future revisions) and with grid_positions
     # (Φ_κ readout shares the topological substrate).
     nfo: { enabled: true, n_osc: 32, n_steps: 2, kappa_init: 0.1,
-           alpha_init: 0.0, mu_init: 0.5, a_star_init: 1.0,
+           alpha_init: 0.01, mu_init: 0.5, a_star_init: 1.0,
            expose_phi_lower_bound: true }
     # HPB Phase 3 â€” Multi-Scale Predictive Coding Cascade.  Applies the
     # MDRV-VBB free-energy at every adjacent layer pair (â„“, â„“+1) of the
@@ -746,7 +754,7 @@ training {
     regularization: {
         # â”€â”€ WARMUP RAMP â€” RESTORED 2026-06-17 â”€â”€
         warmup_steps: 2000
-        activation_step: 4000
+        activation_step: 2000
     isotropy_activation_step: 1000   # erank guard: whitening fires ~3000 steps before DAR/PCC
 
         # warmup_steps controlled a linear 0â†’1 ramp on all aux loss

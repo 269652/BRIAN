@@ -76,6 +76,87 @@ def divisive_grad_normalize(
     return gnorm, scale
 
 
+def divisive_then_hard_clip(
+    parameters: Iterator[nn.Parameter],
+    div_c: float,
+    hard_clip: float,
+) -> Tuple[float, float, float]:
+    """Compose divisive normalization with a hard-clip safety ceiling.
+
+    Background: ``divisive_grad_normalize`` smoothly scales gradients
+    via the V1 contrast-normalization formula
+    ``scale = c / sqrt(c² + ||g||²)``. As ``||g|| → ∞`` the resulting
+    norm asymptotes to ``c`` — meaning a true outlier gradient of
+    norm 2500 with ``c=5`` ends up at norm ≈5. That's only a 5× drop
+    in the dynamic range, which is **still too permissive** for runs
+    that experience genuine pathological batches (the 2026-06-18
+    SmolLM log showed 9 catastrophic spikes ≥ 1000 → PPL regressions
+    of 20–50 points each, even with ``divisive_grad_c=5``).
+
+    This helper composes divisive (smooth, soft-saturation) with
+    ``torch.nn.utils.clip_grad_norm_`` (hard ceiling) so the chain
+    looks like::
+
+        raw grad ──▶ divisive(c) ──▶ hard_clip(t) ──▶ optimizer
+
+    The divisive step keeps the C∞ smoothness in the bulk of the
+    distribution (typical gradients near the working point pay
+    almost no penalty), while the hard clip guarantees that
+    POST-normalization gradient norm never exceeds ``hard_clip``
+    regardless of how pathological the raw input was.
+
+    Args:
+        parameters: Iterator over parameters with ``.grad`` set.
+        div_c: Semi-saturation constant for divisive norm. Set to
+            0 or negative to disable divisive entirely (helper
+            degrades to pure hard clip — useful for legacy callers).
+        hard_clip: Maximum allowed gradient norm AFTER divisive.
+            Set to 0 or negative to disable hard clip (helper
+            degrades to pure divisive — current GIF-7A behaviour).
+
+    Returns:
+        ``(gnorm_pre, scale_div, gnorm_post)``:
+
+            * ``gnorm_pre`` — raw gradient norm before any clipping
+              (the value historically reported in the per-step log).
+            * ``scale_div`` — divisive scale factor (1.0 if disabled).
+            * ``gnorm_post`` — gradient norm AFTER both steps. Always
+              ≤ ``hard_clip`` when ``hard_clip > 0``.
+
+    Both clipping operations mutate ``p.grad`` in place, so the
+    caller can step the optimizer directly after this returns.
+    """
+    params = [p for p in parameters if p.grad is not None]
+    if not params:
+        return 0.0, 1.0, 0.0
+
+    # ── Step 1: divisive normalization (smooth) ────────────────────
+    if div_c > 0:
+        gnorm_pre, scale_div = divisive_grad_normalize(iter(params), div_c)
+    else:
+        # Disabled — compute raw norm without modifying grads.
+        total_sq = sum(
+            p.grad.data.float().pow(2).sum().item() for p in params
+        )
+        gnorm_pre = math.sqrt(total_sq)
+        scale_div = 1.0
+
+    # ── Step 2: hard clip safety ceiling ───────────────────────────
+    if hard_clip > 0:
+        # torch's clip_grad_norm_ returns the PRE-clip total norm of
+        # the (already-divisively-normed) grads. We then compute the
+        # actual post-clip norm by reading back from the params.
+        torch.nn.utils.clip_grad_norm_(params, max_norm=hard_clip)
+
+    # ── Final norm (after both steps) for telemetry ────────────────
+    total_post_sq = sum(
+        p.grad.data.float().pow(2).sum().item() for p in params
+    )
+    gnorm_post = math.sqrt(total_post_sq)
+
+    return gnorm_pre, scale_div, gnorm_post
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Part B: Loss-Variance Metaplastic Damping (BCM Rule)
 # ═══════════════════════════════════════════════════════════════════

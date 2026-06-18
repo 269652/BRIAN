@@ -2990,9 +2990,26 @@ class BRIANHarness(nn.Module):
             # (cortical gain control) instead of hard clip_grad_norm_.
             div_c = float(getattr(self.training_config,
                                   "divisive_grad_c", 0.0))
+            # GIF-7A.1 (added 2026-06-18): when grad_clip_after_divisive=True
+            # AND BOTH div_c > 0 AND clip > 0, compose them — divisive
+            # first (smooth), then clip_grad_norm_(clip) as a hard
+            # ceiling. Fixes the SmolLM trajectory where divisive at
+            # c=5 left a 5.0-norm asymptotic ceiling that still
+            # damaged training under true outlier batches.
+            compose_safety = bool(getattr(
+                self.training_config,
+                "grad_clip_after_divisive", False))
+            use_compose = (
+                compose_safety and div_c > 0 and clip and clip > 0)
             if self._grad_scaler is not None:
                 self._grad_scaler.unscale_(optimizer)
-                if div_c > 0:
+                if use_compose:
+                    from neuroslm.emergent.gif7 import divisive_then_hard_clip
+                    gnorm_pre, dgn_scale, _gnorm_post = divisive_then_hard_clip(
+                        self.parameters(), div_c=div_c, hard_clip=clip)
+                    gnorm = gnorm_pre
+                    self._metrics["gif7_dgn_scale"] = dgn_scale
+                elif div_c > 0:
                     from neuroslm.emergent.gif7 import divisive_grad_normalize
                     gnorm, dgn_scale = divisive_grad_normalize(
                         self.parameters(), div_c)
@@ -3018,7 +3035,13 @@ class BRIANHarness(nn.Module):
                     self._grad_scaler.step(optimizer)
                     self._grad_scaler.update()
             else:
-                if div_c > 0:
+                if use_compose:
+                    from neuroslm.emergent.gif7 import divisive_then_hard_clip
+                    gnorm_pre, dgn_scale, _gnorm_post = divisive_then_hard_clip(
+                        self.parameters(), div_c=div_c, hard_clip=clip)
+                    gnorm = gnorm_pre
+                    self._metrics["gif7_dgn_scale"] = dgn_scale
+                elif div_c > 0:
                     from neuroslm.emergent.gif7 import divisive_grad_normalize
                     gnorm, dgn_scale = divisive_grad_normalize(
                         self.parameters(), div_c)

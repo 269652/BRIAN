@@ -790,6 +790,17 @@ class TrainingConfig:
     # Replaces hard clip_grad_norm_ with smooth g' = g * c/√(c²+||g||²).
     # 0 = disabled (use standard grad_clip). Recommended: 5.0.
     divisive_grad_c: float = 0.0
+    # Part A.1 (added 2026-06-18 after the SmolLM live-training audit
+    # at job ln-20260618-163415-563b found 9 catastrophic spikes
+    # ≥1000 even with divisive_grad_c=5). When True AND BOTH
+    # ``grad_clip > 0`` AND ``divisive_grad_c > 0``, the harness
+    # applies divisive normalization FIRST (smooth) and then
+    # ``clip_grad_norm_(grad_clip)`` as a hard ceiling. False
+    # (default) preserves the original GIF-7A behaviour where
+    # divisive supersedes hard clip. See
+    # ``neuroslm.emergent.gif7.divisive_then_hard_clip`` for the
+    # canonical implementation.
+    grad_clip_after_divisive: bool = False
     # Part B: Loss-variance metaplastic damping (BCM rule).
     # Modulates LR by min(1, σ_ref/σ_L). 0 = disabled.
     # Recommended: 64 (window size in steps).
@@ -1114,6 +1125,9 @@ def parse_training_config(body: str) -> TrainingConfig:
     # ── GIF-7: Homeostatic Gradient Equilibrium ──
     if "divisive_grad_c" in props:
         cfg.divisive_grad_c = float(props["divisive_grad_c"])
+    if "grad_clip_after_divisive" in props:
+        cfg.grad_clip_after_divisive = _parse_bool(
+            props["grad_clip_after_divisive"])
     if "loss_var_window" in props:
         cfg.loss_var_window = int(props["loss_var_window"])
     if "loss_var_min_mult" in props:
