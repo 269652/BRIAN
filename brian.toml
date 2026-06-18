@@ -142,14 +142,12 @@ push_optimizer = false
 [deploy]
 # Cloud training provider. Connector implementations live in
 # neuroslm/connectors/. Override per-run with `brian deploy --platform X`.
-# Values: "vast" (default) | "lightning"
-platform = "vast"
+# Values: "vast" | "lightning"
+platform = "lightning"
 # GPU/machine tier for connectors that support it (currently Lightning AI).
 # Substring match against the connector's enum, e.g. "T4", "A10G", "A100",
 # "L4". Empty string = let the connector pick (currently T4 for Lightning).
 # Override with `brian deploy --machine A10G` or BRIAN_DEFAULT_MACHINE env.
-# (Vast.ai picks the GPU from arch.neuro `hardware.gpu_name` — A100_SXM4
-#  for SmolLM, so this field is informational on vast.)
 machine = "A100"
 # Lightning AI teamspace to launch the Studio under. Empty = use the
 # SDK default (your personal teamspace). Set this if your account has
