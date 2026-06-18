@@ -217,6 +217,14 @@ RELI="$(echo "$OFFER_INFO" | cut -f5)"
 echo "  offer  $OFFER_ID  ($GPU_NAME, machine $MACHINE_ID)"
 echo "  cost   \$$DPH/hr  reliability $RELI"
 
+# ─── Stage trace: visible progress markers (avoids "where did it hang?") ─
+# Use stderr + explicit fflush so Git-Bash + PowerShell + Python pipelines
+# all show output immediately. Without this, stdout is block-buffered when
+# bash is invoked via `subprocess.call`, and a slow `vastai create` looks
+# like a total hang because no markers appear until exit.
+trace() { printf '[stage] %s\n' "$*" >&2; }
+trace "offer selected — building onstart heredoc"
+
 # ─── Build the onstart script (runs INSIDE the vast container) ───────────
 # Heredoc with normal expansion: $BRANCH etc. expand HERE (locally) so the
 # values land in the onstart script as literals. Escape any in-container
@@ -374,16 +382,28 @@ fi
 echo "── training exited; FAILED to self-destroy. Run: vastai destroy instance <contract_id> ──"
 ONSTART
 )"
+trace "onstart heredoc built (${#ONSTART} chars)"
 
 # ─── Create the instance ─────────────────────────────────────────────────
+trace "calling: vastai create instance $OFFER_ID --image $VAST_IMAGE --disk $VAST_DISK"
 echo "── creating instance ──"
 echo "  (this is a network call to vast.ai API; typically 5-30s, max 120s)"
 # Stream output live to terminal AND capture for parsing. Without `tee` the
 # raw `CREATE_OUT="$(...)"` capture buffers everything until the subshell
 # exits, so a slow/hung create call shows zero feedback. Wrap with a 120s
 # timeout so a true hang exits visibly instead of waiting forever.
+#
+# IMPORTANT: `timeout` cannot invoke bash functions, so we must pass
+# `"$PYTHON"` (the project's .venv interpreter) directly rather than the
+# `vastai` bash function or any external `vastai` binary (which may be a
+# different Python / version and can block on confirmation prompts or hang).
+# PYTHONUNBUFFERED=1 + python -u ensures output streams to terminal in real
+# time instead of accumulating in a 4 KB block buffer.
 _CREATE_TMP="$(mktemp -t vast_create.XXXXXX)"
-timeout 120 vastai create instance "$OFFER_ID" \
+trace "create call starting (live output below) ──"
+PYTHONUNBUFFERED=1 timeout 120 "$PYTHON" -u -c \
+    'import sys; from vastai.cli.main import main; sys.exit(main())' \
+    create instance "$OFFER_ID" \
     --image "$VAST_IMAGE" \
     --disk "$VAST_DISK" \
     --label "neuroslm-full" \
@@ -394,6 +414,7 @@ timeout 120 vastai create instance "$OFFER_ID" \
 _CREATE_RC=${PIPESTATUS[0]}
 CREATE_OUT="$(cat "$_CREATE_TMP")"
 rm -f "$_CREATE_TMP"
+trace "create call exited rc=$_CREATE_RC"
 if [ "$_CREATE_RC" = "124" ]; then
     echo "✗ vastai create instance TIMED OUT after 120s" >&2
     exit 1
