@@ -53,6 +53,7 @@ logs/live/
 logs/tmp/
 logs/runs/
 logs/cache/
+logs/downloads/
 # Whitelist raw vast.ai stdout captures and their LLM-produced analyses.
 # These are committed evidence and override the *.log catch-all above.
 #
