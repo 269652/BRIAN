@@ -305,7 +305,11 @@ def causal_self_attention_tonnetz(x: torch.Tensor,
     k, v = kv[0], kv[1]
     q = F.normalize(q, dim=-1)
     k = F.normalize(k, dim=-1)
-    cos, sin = rope_cache(max_ctx, head_dim, base=rope_base,
+    # RoPE cache: size to actual T so length-extrapolation paths
+    # (e.g. GIF OOD probe with T > max_ctx) don't crash. See
+    # ``causal_self_attention`` for the full rationale.
+    cache_len = max(int(T), int(max_ctx))
+    cos, sin = rope_cache(cache_len, head_dim, base=rope_base,
                           device=x.device, dtype=x.dtype)
     q = rope(q, cos.to(q.dtype), sin.to(q.dtype))
     k = rope(k, cos.to(k.dtype), sin.to(k.dtype))
@@ -473,7 +477,11 @@ def differential_attention(x: torch.Tensor,
     q1, q2 = F.normalize(q1, dim=-1), F.normalize(q2, dim=-1)
     k1, k2 = F.normalize(k1, dim=-1), F.normalize(k2, dim=-1)
 
-    cos, sin = rope_cache(max_ctx, half_dim, base=rope_base,
+    # RoPE cache: size to actual T so length-extrapolation paths
+    # (e.g. GIF OOD probe with T > max_ctx) don't crash. See
+    # ``causal_self_attention`` for the full rationale.
+    cache_len = max(int(T), int(max_ctx))
+    cos, sin = rope_cache(cache_len, half_dim, base=rope_base,
                           device=x.device, dtype=x.dtype)
     q1 = rope(q1, cos.to(q1.dtype), sin.to(q1.dtype))
     q2 = rope(q2, cos.to(q2.dtype), sin.to(q2.dtype))

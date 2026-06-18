@@ -198,5 +198,105 @@ class TestCausalSelfAttentionLengthHandling:
         assert torch.isfinite(y).all()
 
 
+class TestDifferentialAttentionLengthHandling:
+    """Regression: differential_attention has the SAME RoPE bug pattern.
+
+    The first deploy (commit b6bb7ed) only fixed ``causal_self_attention``
+    but the SmolLM arch uses ``DiffBlock`` for half its layers, so the
+    GIF OOD probe crashed at the same step 80 with the same shape error
+    in ``differential_attention`` instead. Fix MUST mirror the
+    causal-self-attention pattern across every RoPE call site.
+    """
+
+    def _weights(self, dim, n_heads, n_kv):
+        head_dim = dim // n_heads
+        return (
+            torch.randn(n_heads * head_dim, dim) * 0.02,
+            torch.randn(2 * n_kv * head_dim, dim) * 0.02,
+            torch.randn(dim, dim) * 0.02,
+            torch.zeros(n_heads),                 # lambda_init
+            torch.ones(head_dim),                 # sub_norm_weight (per-head_dim RMSNorm γ)
+        )
+
+    def test_T_equal_max_ctx_works(self):
+        B, dim, n_heads, n_kv = 2, 64, 4, 2
+        T = max_ctx = 16
+        x = torch.randn(B, T, dim)
+        qw, kvw, ow, lam, sn = self._weights(dim, n_heads, n_kv)
+        y = nn_ops.differential_attention(
+            x, qw, kvw, ow, lam, sn, n_heads, n_kv, max_ctx)
+        assert y.shape == (B, T, dim)
+
+    def test_T_greater_than_max_ctx_no_shape_mismatch(self):
+        """REGRESSION: T > max_ctx in the differential path."""
+        B, dim, n_heads, n_kv = 2, 64, 4, 2
+        max_ctx, T = 16, 48
+        x = torch.randn(B, T, dim)
+        qw, kvw, ow, lam, sn = self._weights(dim, n_heads, n_kv)
+        y = nn_ops.differential_attention(
+            x, qw, kvw, ow, lam, sn, n_heads, n_kv, max_ctx)
+        assert y.shape == (B, T, dim), (
+            f"differential_attention sliced RoPE cache to max_ctx — "
+            f"expected (B={B}, T={T}, dim={dim}), got {tuple(y.shape)}"
+        )
+        assert torch.isfinite(y).all()
+
+
+class TestTonnetzAttentionLengthHandling:
+    """Same regression for the Tonnetz-masked variant
+    (``causal_self_attention_tonnetz``).
+    """
+
+    def _weights(self, dim, n_heads, n_kv):
+        head_dim = dim // n_heads
+        return (
+            torch.randn(n_heads * head_dim, dim) * 0.02,
+            torch.randn(2 * n_kv * head_dim, dim) * 0.02,
+            torch.randn(dim, dim) * 0.02,
+        )
+
+    def test_T_greater_than_max_ctx_no_shape_mismatch(self):
+        B, dim, n_heads, n_kv = 1, 64, 4, 2
+        max_ctx, T = 16, 48
+        x = torch.randn(B, T, dim)
+        qw, kvw, ow = self._weights(dim, n_heads, n_kv)
+        y = nn_ops.causal_self_attention_tonnetz(
+            x, qw, kvw, ow, n_heads, n_kv, max_ctx,
+            tonnetz_period=12)
+        assert y.shape == (B, T, dim)
+        assert torch.isfinite(y).all()
+
+
+class TestLegacyNNModulesLengthHandling:
+    """The legacy ``modules.common.CausalSelfAttention`` and
+    ``modules.differential_attention.DifferentialAttention`` register
+    RoPE buffers at ``__init__`` — must rebuild on-the-fly when T
+    exceeds the cached size, OR training crashes the same way.
+    """
+
+    def test_causal_self_attention_T_greater_than_max_ctx(self):
+        from neuroslm.modules.common import CausalSelfAttention
+        attn = CausalSelfAttention(dim=64, n_heads=4, max_ctx=16,
+                                   n_kv_heads=2)
+        attn.eval()
+        x = torch.randn(2, 48, 64)  # T=48 > max_ctx=16
+        with torch.no_grad():
+            y = attn(x)
+        assert y.shape == (2, 48, 64)
+        assert torch.isfinite(y).all()
+
+    def test_differential_attention_T_greater_than_max_ctx(self):
+        from neuroslm.modules.differential_attention import \
+            DifferentialAttention
+        attn = DifferentialAttention(
+            dim=64, n_heads=4, max_ctx=16, n_kv_heads=2)
+        attn.eval()
+        x = torch.randn(2, 48, 64)
+        with torch.no_grad():
+            y = attn(x)
+        assert y.shape == (2, 48, 64)
+        assert torch.isfinite(y).all()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

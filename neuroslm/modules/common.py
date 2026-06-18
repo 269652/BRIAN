@@ -100,8 +100,17 @@ class CausalSelfAttention(nn.Module):
         q = F.normalize(q, dim=-1)
         k = F.normalize(k, dim=-1)
 
-        q = apply_rope(q, self.cos.to(q.dtype), self.sin.to(q.dtype))
-        k = apply_rope(k, self.cos.to(k.dtype), self.sin.to(k.dtype))
+        # RoPE cache: if T exceeds the buffered cache (e.g. GIF OOD
+        # probe evaluates at T=358 against a model with max_ctx=128),
+        # rebuild on-the-fly. RoPE is parameter-free so this is a pure
+        # recomputation of trig tables — no learned state lost.
+        if self.cos.size(0) < T:
+            cos, sin = build_rope_cache(T, self.head_dim,
+                                        device=x.device, dtype=x.dtype)
+        else:
+            cos, sin = self.cos, self.sin
+        q = apply_rope(q, cos.to(q.dtype), sin.to(q.dtype))
+        k = apply_rope(k, cos.to(k.dtype), sin.to(k.dtype))
 
         # Expand KV heads to match Q heads for GQA
         if self.n_groups > 1:

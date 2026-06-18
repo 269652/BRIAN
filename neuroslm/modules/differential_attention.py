@@ -92,11 +92,20 @@ class DifferentialAttention(nn.Module):
         k1 = F.normalize(k1, dim=-1)
         k2 = F.normalize(k2, dim=-1)
 
-        # Apply RoPE to each half separately
-        q1 = apply_rope(q1, self.cos.to(q1.dtype), self.sin.to(q1.dtype))
-        q2 = apply_rope(q2, self.cos.to(q2.dtype), self.sin.to(q2.dtype))
-        k1 = apply_rope(k1, self.cos.to(k1.dtype), self.sin.to(k1.dtype))
-        k2 = apply_rope(k2, self.cos.to(k2.dtype), self.sin.to(k2.dtype))
+        # Apply RoPE to each half separately. If T exceeds the cached
+        # ``cos/sin`` (e.g. the GIF OOD probe evaluates at T=358 against
+        # a model with max_ctx=128), rebuild the cache on the fly —
+        # RoPE itself is parameter-free so this is a pure recomputation
+        # of trig tables.
+        if self.cos.size(0) < T:
+            cos, sin = build_rope_cache(T, self.half_dim,
+                                        device=x.device, dtype=x.dtype)
+        else:
+            cos, sin = self.cos, self.sin
+        q1 = apply_rope(q1, cos.to(q1.dtype), sin.to(q1.dtype))
+        q2 = apply_rope(q2, cos.to(q2.dtype), sin.to(q2.dtype))
+        k1 = apply_rope(k1, cos.to(k1.dtype), sin.to(k1.dtype))
+        k2 = apply_rope(k2, cos.to(k2.dtype), sin.to(k2.dtype))
 
         # GQA expansion
         if self.n_groups > 1:
