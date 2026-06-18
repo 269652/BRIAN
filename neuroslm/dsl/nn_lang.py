@@ -37,7 +37,7 @@ import torch.nn as nn
 
 from neuroslm.dsl import nn_ops
 from neuroslm.dsl.novel_topology import (
-    make_grid_positions, make_episodic_memory, make_surprise_head,
+    make_grid_positions, make_episodic_memory, make_surprise_head, make_nfo,
 )
 
 
@@ -671,6 +671,7 @@ class DSLLanguageCortex(nn.Module):
                  grid_positions=None,
                  episodic_memory=None,
                  surprise_head=None,
+                 nfo=None,
                  cosine_head: bool = False,
                  rope_base: float = 10000.0):
         super().__init__()
@@ -803,6 +804,10 @@ class DSLLanguageCortex(nn.Module):
         self._grid_positions = make_grid_positions(grid_positions, d_model)
         self._episodic_memory = make_episodic_memory(episodic_memory, d_model)
         self._surprise_head = make_surprise_head(surprise_head, d_model, vocab)
+        # H015..H018 — Neural Field Oscillator (Kuramoto + Swift–Hohenberg
+        # + coherence-gated ReZero readout). Zero-init ⇒ bit-identical to
+        # baseline at step 0. None when disabled (default).
+        self._nfo = make_nfo(nfo, d_model)
         # Diagnostic: per-token surprise (B, T) from the last forward.
         # Read by the harness for loss reweighting; None when off.
         self.last_token_surprise: Optional[torch.Tensor] = None
@@ -967,6 +972,12 @@ class DSLLanguageCortex(nn.Module):
         # without changing the forward signature (still returns logits).
         self._last_pred_coding_loss = pred_coding_loss
         h_final = block_outs[-1] if block_outs else h
+        # ── H015..H018: Neural Field Oscillator ──
+        # Applied to the raw residual before the final layer-norm so the
+        # coherence-gated write-back composes cleanly with the rmsnorm
+        # scale.  Zero-init readout ⇒ no-op at step 0 (H018).
+        if self._nfo is not None:
+            h_final = self._nfo(h_final)
         h_final = nn_ops.rmsnorm(h_final, self.gamma_f)
         h_for_head = h_final
         if self._cosine_head:
@@ -1037,6 +1048,7 @@ def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
                                grid_positions=None,
                                episodic_memory=None,
                                surprise_head=None,
+                               nfo=None,
                                cosine_head: bool = False,
                                rope_base: float = 10000.0) -> DSLLanguageCortex:
     """Assemble Brain's full LanguageCortex from pure-DSL blocks.
@@ -1050,6 +1062,7 @@ def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
         grid_positions     — H16, multi-scale grid-cell positional bias.
         episodic_memory    — H15, kNN memory blended via ReZero gate.
         surprise_head      — H19, local-NLL surprise (gates H15 writes).
+        nfo                — H015..H018, Neural Field Oscillator.
     Each accepts True / False / None / dict; bit-identical to baseline
     when all are False/None.
     """
@@ -1061,5 +1074,6 @@ def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
                               grid_positions=grid_positions,
                               episodic_memory=episodic_memory,
                               surprise_head=surprise_head,
+                              nfo=nfo,
                               cosine_head=cosine_head,
                               rope_base=rope_base)

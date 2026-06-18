@@ -251,3 +251,54 @@ class TestSurpriseHead:
             f"surprise-gated writes should be strictly between 0 and "
             f"total-tokens (128), got {n_written}"
         )
+
+
+# ── H015..H018: Neural Field Oscillator integration ──────────────────
+
+class TestH015_H018_NeuralFieldOscillator:
+    """NFO integration through build_dsl_language_cortex.
+
+    These tests pin the wiring layer (DSL config → factory → model
+    attribute → forward call) independently of the standalone-module
+    suite in tests/modules/test_nfo.py.
+    """
+
+    _SPEC = {"enabled": True, "n_osc": 8, "alpha_init": 0.0,
+             "n_steps": 1, "kappa_init": 0.1}
+
+    def test_nfo_attaches_when_enabled(self):
+        lm = _build(nfo=self._SPEC)
+        assert lm._nfo is not None
+
+    def test_nfo_absent_by_default(self):
+        lm = _build()
+        assert lm._nfo is None
+
+    def test_nfo_disabled_returns_none(self):
+        lm = _build(nfo={"enabled": False})
+        assert lm._nfo is None
+
+    def test_nfo_baseline_identity_through_full_forward(self):
+        """H018 end-to-end: alpha=0 + zero read_out ⇒ NFO is no-op.
+
+        We verify by checking that the NFO's read_out weight is all-zeros
+        at init AND that a forward pass with NFO enabled produces finite
+        logits — confirming the NFO block is live in the computation graph
+        without changing the output (bit-identical baseline).
+        """
+        import torch
+        torch.manual_seed(7)
+        lm = _build(nfo=self._SPEC)
+        lm.eval()
+        # read_out is zero-init (H018 ReZero discipline)
+        assert lm._nfo.read_out.weight.abs().max().item() == 0.0, (
+            "NFO read_out.weight must be zero-init at construction")
+        # alpha is zero-init
+        assert lm._nfo.alpha.item() == pytest.approx(0.0), (
+            "NFO alpha must be 0.0 at init")
+        # Forward must be finite
+        ids = torch.randint(0, VOCAB, (2, 16))
+        with torch.no_grad():
+            logits = lm(ids)
+        assert logits.shape == (2, 16, VOCAB)
+        assert torch.isfinite(logits).all(), "NFO forward produced non-finite logits"

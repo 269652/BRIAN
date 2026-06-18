@@ -364,6 +364,7 @@ def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
         grid_positions=cfg.grid_positions,
         episodic_memory=cfg.episodic_memory,
         surprise_head=cfg.surprise_head,
+        nfo=cfg.nfo,
         cosine_head=cfg.cosine_head,
         rope_base=_rope_base).to(device)
     harness = BRIANHarness.from_language_model(

@@ -264,6 +264,11 @@ class TestCmdChat:
             self, monkeypatch, capsys):
         from neuroslm import cli
         monkeypatch.setattr(cli, "_pick_local_latest_ckpt", lambda: None)
+        # Hop 3.5 + 4: silence the best-run pointer so the test is not
+        # sensitive to whatever URL is live in .brian/checkpoint.ln
+        monkeypatch.setattr(cli, "_read_neuro_checkpoint_ln", lambda: None)
+        from neuroslm import log_refs
+        monkeypatch.setattr(log_refs, "read_checkpoint_url", lambda root: None)
         args = argparse.Namespace(
             ckpt=None, latest=False, repo=None, prefix=None,
             arch=None, device="cpu", temperature=0.8, top_k=40,
@@ -331,8 +336,8 @@ class TestCmdChat:
 
 
 class TestCmdDeployResume:
-    """``cmd_deploy --resume / --latest`` should set RESUME_FROM in
-    the env that gets forwarded to vast.ai."""
+    """``cmd_deploy --resume / --latest`` should populate DeployConfig.resume_from
+    which the connector then forwards to the cloud platform."""
 
     def _make_args(self, **overrides):
         defaults = dict(
@@ -343,19 +348,26 @@ class TestCmdDeployResume:
         defaults.update(overrides)
         return argparse.Namespace(**defaults)
 
+    def _fake_connector(self, monkeypatch):
+        """Replace get_connector with a mock that captures DeployConfig."""
+        captured = {}
+
+        class _Connector:
+            def launch(self, config):
+                captured["config"] = config
+                return 0
+
+        monkeypatch.setattr("neuroslm.connectors.get_connector",
+                            lambda platform: _Connector())
+        return captured
+
     def test_explicit_resume_sets_env(self, monkeypatch):
         from neuroslm import cli
-        captured = {}
-        def fake_deploy_dsl(*, steps, branch, extra_env, **kw):
-            captured["extra"] = dict(extra_env)
-            return 0
-        monkeypatch.setattr(cli, "_deploy_dsl", fake_deploy_dsl)
-        # Make load_brian_config return defaults
-        args = self._make_args(
-            resume="lfs_checkpoints/run-A/step5000.pt")
+        captured = self._fake_connector(monkeypatch)
+        args = self._make_args(resume="lfs_checkpoints/run-A/step5000.pt")
         rc = cli.cmd_deploy(args)
         assert rc == 0
-        assert captured["extra"].get("RESUME_FROM") == \
+        assert captured["config"].resume_from == \
             "lfs_checkpoints/run-A/step5000.pt"
 
     def test_latest_resolves_to_hf_uri(self, monkeypatch):
@@ -366,15 +378,11 @@ class TestCmdDeployResume:
             lambda **kw: CheckpointEntry(
                 path_in_repo="checkpoints/run-A/step5000.pt", step=5000),
         )
-        captured = {}
-        def fake_deploy_dsl(*, steps, branch, extra_env, **kw):
-            captured["extra"] = dict(extra_env)
-            return 0
-        monkeypatch.setattr(cli, "_deploy_dsl", fake_deploy_dsl)
+        captured = self._fake_connector(monkeypatch)
         args = self._make_args(latest=True, hf_repo="alice/bob")
         rc = cli.cmd_deploy(args)
         assert rc == 0
-        resume = captured["extra"].get("RESUME_FROM", "")
+        resume = captured["config"].resume_from or ""
         assert resume.startswith("hf://alice/bob/")
         assert "step5000.pt" in resume
 
@@ -393,16 +401,11 @@ class TestCmdDeployResume:
 
     def test_no_resume_no_latest_no_env_var(self, monkeypatch):
         from neuroslm import cli
-        captured = {}
-        def fake_deploy_dsl(*, steps, branch, extra_env, **kw):
-            captured["extra"] = dict(extra_env)
-            return 0
-        monkeypatch.setattr(cli, "_deploy_dsl", fake_deploy_dsl)
+        captured = self._fake_connector(monkeypatch)
         args = self._make_args()
         rc = cli.cmd_deploy(args)
         assert rc == 0
-        # Without --resume or --latest, RESUME_FROM should NOT be set
-        assert "RESUME_FROM" not in captured["extra"]
+        assert captured["config"].resume_from is None
 
 
 # ─────────────────────────────────────────────────────────────────────

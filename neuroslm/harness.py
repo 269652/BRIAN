@@ -3223,6 +3223,15 @@ class BRIANHarness(nn.Module):
         "multi_cortex.experts.",
     )
 
+    # Keys that are new zero-init mechanisms and may legitimately be absent
+    # from checkpoints produced before these mechanisms were added. When
+    # missing, PyTorch keeps the __init__ values (which are identical to
+    # "not wired" behaviour) so loading is safe without any weight fixup.
+    _CKPT_ZERO_INIT_OPTIONAL_PREFIXES: tuple = (
+        "language_model._nfo.",            # H015-H018 Neural Field Oscillator
+        "language_model.head_temperature", # GIF-6 cosine LM head temperature
+    )
+
     @classmethod
     def _is_external_key(cls, key: str) -> bool:
         """True iff ``key`` points into a subtree whose weights are
@@ -3343,6 +3352,8 @@ class BRIANHarness(nn.Module):
             real_missing = [
                 k for k in getattr(result, "missing_keys", [])
                 if not self._is_external_key(k)
+                and not any(k.startswith(p)
+                            for p in self._CKPT_ZERO_INIT_OPTIONAL_PREFIXES)
             ]
             if real_missing:
                 raise RuntimeError(
