@@ -143,20 +143,6 @@ B4 is the first variant under 3.0 gap\_ratio — a 53% improvement over the flat
 [`logs/20260616/gpt2/140627_500_10000.log`](logs/20260616/gpt2/140627_500_10000.log)
 
 ```
-[mid-ood] step 8500: wikitext ppl=88.6 gap_ratio=4.39 (train_ppl=20.2) (50 seq, 6430 tok)
-step  9000 | loss 3.0705 | lm 2.9430 | ppl 19.0 | gnorm 2.741 | lr 6.50e-05 | 1800 tok/s | Φ 0.336 | λ₁ 0.075 | ign 0.69 | mesoLG 0.51 | troph 8/8 μ0.96 | NT[DA=0.13 NE=0.09 5HT=0.29 ACh=0.30 eCB=0.04 Glu=0.36 GABA=0.04] | osc[δ=0.359 θ=0.274 γ=0.368] | em[C2:ρ=0.05/τ=0.06/s=0.69 C4:Q=-1.9 W=33 pl=15 C3:pc=0.062 VBB:β=1.26 σ=0.0304 kl=458.185 C5:lat=1.54 C6:pac=0.03] | cortex[α_eff=0.576 inh=0.001 λ=0.801 kl=0.096 lm_ema=7.03 cx_ema=2.93] | hpa[load=0.14 cort=0.12 NE×0.92 T×0.88 LR×0.94]
-[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260616-140629_96cbeff8_neuroslm-full/step9000.pt
-[mid-ood] step 9000: WikiText-103 snapshot...
-`trust_remote_code` is not supported anymore.
-Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
-If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
-[mid-ood] step 9000: wikitext ppl=88.8 gap_ratio=4.68 (train_ppl=19.0) (50 seq, 6430 tok)
-step  9500 | loss 3.1174 | lm 2.9906 | ppl 19.9 | gnorm 2.542 | lr 5.48e-05 | 1852 tok/s | Φ 0.520 | λ₁ 0.075 | ign 0.69 | mesoLG 0.50 | troph 8/8 μ0.95 | NT[DA=0.11 NE=0.06 5HT=0.33 ACh=0.27 eCB=0.03 Glu=0.30 GABA=0.04] | osc[δ=0.313 θ=0.321 γ=0.367] | em[C2:ρ=0.06/τ=0.11/s=0.69 C4:Q=0.2 W=105 pl=4 C3:pc=0.062 VBB:β=1.26 σ=0.0278 kl=359.801 C5:lat=1.00 C6:pac=0.02] | cortex[α_eff=0.578 inh=0.000 λ=0.832 kl=0.141 lm_ema=6.73 cx_ema=2.74] | hpa[load=0.13 cort=0.12 NE×0.91 T×0.88 LR×0.94]
-[train_dsl] saved checkpoint /workspace/brian/lfs_checkpoints/20260616-140629_96cbeff8_neuroslm-full/step9500.pt
-[mid-ood] step 9500: WikiText-103 snapshot...
-`trust_remote_code` is not supported anymore.
-Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
-If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
 [mid-ood] step 9500: wikitext ppl=87.0 gap_ratio=4.37 (train_ppl=19.9) (50 seq, 6430 tok)
 ```
 ```
@@ -166,18 +152,6 @@ If the dataset is based on a loading script, please ask the dataset author to re
 [`logs/20260617/SmolLM/170512_20_2000.log`](logs/20260617/SmolLM/170512_20_2000.log)
 
 ```
-  ...run/step1500.pt.strip.tmp: 100%|██████████|  597MB /  597MB            [A[A
-Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 34.6MB/s  
-
-New Data Upload               : 100%|██████████|  438MB /  438MB, 25.5MB/s  [A
-Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 34.6MB/s  
-
-New Data Upload               : 100%|██████████|  438MB /  438MB, 25.5MB/s  
-
-  ...run/step1500.pt.strip.tmp: 100%|██████████|  597MB /  597MB            
-[ckpt_push] ✓ pushed step1500.pt (optimizer stripped) → hf://moritzroessler/BRIAN/checkpoints/20260617-170512_db73aa80_run/step1500.pt
-[mid-ood] step 1500: WikiText-103 snapshot...
-`trust_remote_code` is not supported anymore.
 Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
 If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
 [mid-ood] step 1500: wikitext ppl=248.5 gap_ratio=3.58 (train_ppl=69.5) (50 seq, 6430 tok)

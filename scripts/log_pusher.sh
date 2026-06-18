@@ -380,7 +380,7 @@ while true; do
     if [ "$OOD_EVERY" -gt 0 ] 2>/dev/null; then
         # OOD-DRIVEN: fire when a new [mid-ood] step N line appears.
         CUR_OOD_STEP="$(_last_mid_ood_step)"
-        if [ -n "$CUR_OOD_STEP" ] && [ "$CUR_OOD_STEP" -gt "$LAST_OOD_STEP_PUSHED" ] 2>/dev/null; then
+        if [ -n "$CUR_OOD_STEP" ] && [ "$CUR_OOD_STEP" -gt "$LAST_OOD_STEP_PUSHED" ]; then
             SHOULD_PUSH=1
             NEW_OOD_STEP="$CUR_OOD_STEP"
         fi
