@@ -378,7 +378,16 @@ def test_lightning_build_setup_command_includes_branch_and_pip():
     )
     assert "git clone" in cmd
     assert "feature/x" in cmd
-    assert "pip install" in cmd
+    # Critical: training needs the [ml] extras (torch / transformers /
+    # tiktoken / einops). Base ``pip install -e .`` skips them by
+    # design (CLI-only install), so the connector MUST install the
+    # heavy extras or training crashes with ModuleNotFoundError.
+    assert "pip install -e '.[ml]'" in cmd
+    assert "requirements.txt" in cmd
+    # Verify-imports step aborts with exit 2 when deps are missing
+    assert "import torch" in cmd
+    assert "transformers" in cmd
+    assert "tiktoken" in cmd
     # Token injection branch present
     assert "GITHUB_PAT" in cmd
     assert "x-access-token" in cmd

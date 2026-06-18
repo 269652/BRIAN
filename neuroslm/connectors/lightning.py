@@ -10,7 +10,12 @@ and ``Studio.run_and_detach``). The flow is::
     3.   Start (or reuse) a Studio on the requested machine tier.
     4.   ``Studio.set_env`` to push HF_TOKEN / GITHUB_PAT / branch / arch.
     5.   ``Studio.run_with_exit_code`` — synchronously CLONE the repo,
-         checkout the branch, ``pip install -e .`` so training imports work.
+         checkout the branch, ``pip install -e .[ml]`` (plus
+         ``requirements.txt`` as belt-and-braces) so training imports
+         resolve. The setup VERIFIES the critical ML imports (torch,
+         transformers, tiktoken, einops) and aborts with exit 2 if
+         any are missing — better to fail loud here than crash inside
+         the detached training run.
     6.   ``Studio.run_and_detach`` — fire-and-forget the training command,
          redirected to ``~/brian/logs/run-<job_id>.log`` so it survives
          the SDK session disconnect.
@@ -686,11 +691,29 @@ class LightningConnector(BaseConnector):
             f"  cd {REMOTE_REPO}; "
             f"fi; "
             f"echo '[setup] installing python deps'; "
-            # Install with -e so the import path resolves and any
-            # patch we ship works without a fresh clone.
+            # Two-step install:
+            #  1. ``pip install -e .[ml]`` gets the CLI + heavy training
+            #     stack (torch, transformers, datasets, tiktoken, einops).
+            #     Critical — base ``.`` deps are CLI-only by design so a
+            #     fresh CLI install doesn't pull a 3 GB torch wheel.
+            #  2. ``pip install -r requirements.txt`` is the belt-and-
+            #     braces — picks up anything pyproject.toml might miss
+            #     (e.g. transitive pins, optional accelerators).
+            # Run both so a partial failure of one still produces a
+            # working training environment.
             f"python -m pip install --upgrade pip --quiet; "
-            f"python -m pip install -e . --quiet || "
-            f"  python -m pip install -r requirements.txt --quiet; "
+            f"python -m pip install -e '.[ml]' --quiet || "
+            f"  echo '[setup] WARN: pip install -e .[ml] failed; falling back to requirements.txt'; "
+            f"python -m pip install -r requirements.txt --quiet || "
+            f"  echo '[setup] WARN: pip install -r requirements.txt failed'; "
+            # Verify the critical training imports resolve before we
+            # hand off to the (detached) train command — a missing
+            # ``transformers`` here means training will crash inside
+            # ``nohup`` and leave no usable trace except the log file.
+            f"python -c 'import torch, transformers, tiktoken, einops; "
+            f"  print(f\"[setup] verified torch={{torch.__version__}} "
+            f"transformers={{transformers.__version__}}\")' || "
+            f"  {{ echo '[setup] FATAL: required training deps missing'; exit 2; }}; "
             f"echo '[setup] done at '$(date)"
         )
 
