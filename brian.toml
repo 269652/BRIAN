@@ -124,6 +124,17 @@ hf_repo_id = "moritzroessler/BRIAN"
 # perfect resume target with no Adam warmup penalty.
 push_optimizer = false
 
+[deploy]
+# Cloud training provider. Connector implementations live in
+# neuroslm/connectors/. Override per-run with `brian deploy --platform X`.
+# Values: "vast" (default) | "lightning"
+platform = "lightning"
+# GPU/machine tier for connectors that support it (currently Lightning AI).
+# Substring match against the connector's enum, e.g. "T4", "A10G", "A100",
+# "L4". Empty string = let the connector pick (currently T4 for Lightning).
+# Override with `brian deploy --machine A10G` or BRIAN_DEFAULT_MACHINE env.
+machine = "T4"
+
 [hardware.A100]
 preset = "large"
 

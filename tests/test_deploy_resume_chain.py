@@ -39,32 +39,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Hop 2 + 3: _deploy_train.py reads RESUME_FROM and emits it in two
-# places: the training_cmd template and the ONSTART export block.
+# Hop 2: VastConnector._build_env() sets RESUME_FROM in the subprocess env.
+# The old _deploy_train.py hop was removed in the connector refactor
+# (2026-06-18). Equivalent contracts now live in test_connectors.py::
+#   test_G_build_env_propagates_all_fields (RESUME_FROM present)
+#   test_I_vast_launch_calls_vast_train_sh  (subprocess call shape)
 # ─────────────────────────────────────────────────────────────────────
-
-
-class TestDeployTrainTemplateForwardsResumeFrom:
-
-    @pytest.fixture
-    def src(self) -> str:
-        return (REPO_ROOT / "_deploy_train.py").read_text(encoding="utf-8")
-
-    def test_module_reads_env_var(self, src):
-        assert 'RESUME_FROM = os.environ.get("RESUME_FROM"' in src
-
-    def test_dsl_training_cmd_forwards_resume_from(self, src):
-        """``training_cmd`` for DSL must inject RESUME_FROM into the
-        env that the bash wrapper consumes."""
-        # The DSL training_cmd builds an ``env … script`` string;
-        # RESUME_FROM must appear in the env preamble.
-        assert "RESUME_FROM='{RESUME_FROM}'" in src
-
-    def test_onstart_exports_resume_from(self, src):
-        """The ONSTART script (the one vast.ai actually runs) must
-        ``export RESUME_FROM=...`` so subprocesses (the bash loop)
-        inherit it."""
-        assert "export RESUME_FROM='{RESUME_FROM}'" in src
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -137,9 +117,11 @@ class TestEnvVarNameConsistency:
     break the chain."""
 
     def test_env_var_is_RESUME_FROM_everywhere(self):
+        # _deploy_train.py was removed in the connector refactor (2026-06-18).
+        # Its role is now played by VastConnector._build_env() in vast.py.
         files = [
             REPO_ROOT / "neuroslm" / "cli.py",
-            REPO_ROOT / "_deploy_train.py",
+            REPO_ROOT / "neuroslm" / "connectors" / "vast.py",
             REPO_ROOT / "scripts" / "vast_train_dsl_loop.sh",
             REPO_ROOT / "scripts" / "vast_train_dna_loop.sh",
             REPO_ROOT / "neuroslm" / "train_dsl.py",

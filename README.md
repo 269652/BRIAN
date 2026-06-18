@@ -2,7 +2,7 @@
 
 > *146.9M trainable-param bowtie trunk · ~980M frozen cortex experts · exploring integrated information (Φ).*
 
-[![tests](https://img.shields.io/badge/tests-3750%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-3754%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
@@ -304,7 +304,7 @@ modulation dopamine -> pfc {
 }
 ```
 
-The compiler (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) produces modules with **source maps** and **byte-identity round-trip** verification. 962 tests in `tests/dsl/` guard codegen correctness.
+The compiler (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) produces modules with **source maps** and **byte-identity round-trip** verification. 966 tests in `tests/dsl/` guard codegen correctness.
 
 Full reference: [`docs/dsl.md`](docs/dsl.md).
 
@@ -348,7 +348,7 @@ KL distillation runs in parallel: `L_KL = T² · KL(cortex.detach()/T ‖ trunk/
 
 ### Layer A — Mechanism Verification ✅
 
-3750 unit tests across `tests/` confirm every mechanism computes as specified:
+3754 unit tests across `tests/` confirm every mechanism computes as specified:
 
 | Hypothesis | Result |
 |-----------|--------|
@@ -362,7 +362,7 @@ KL distillation runs in parallel: `L_KL = T² · KL(cortex.detach()/T ‖ trunk/
 | H19 — `ImprovementGate` (Welch's t) | ✅ p-values within 1e-6 of scipy; mutation blocked without significance |
 | H21 — Per-position abstain unblocks fusion | ✅ -93% train-PPL / -94% OOD-PPL vs broken precursor |
 
-Run all: `py -3 -m pytest tests/ -v` (~~468s on CPU).
+Run all: `py -3 -m pytest tests/ -v` (~~469s on CPU).
 
 ### Layer B — OOD Generalization 🟡
 
@@ -522,14 +522,14 @@ model.personality_vector               # tensor(5) — stable across checkpoints
 ## Tests
 
 ```bash
-py -3 -m pytest tests/                                              # full suite (3750 tests, ~~468s)
+py -3 -m pytest tests/                                              # full suite (3754 tests, ~~469s)
 py -3 -m pytest tests/test_phi.py -v                               # H1–H3: integrated information
 py -3 -m pytest tests/test_narrative_memory.py -v                  # H4–H5: memory & causation
 py -3 -m pytest tests/test_cognitive_closure.py -v                 # H6–H6.5: identity & embodiment
 py -3 -m pytest tests/training/test_cortex_pre_head_norm.py -v     # H16: catastrophic-loss fix
 py -3 -m pytest tests/training/test_cortex_distillation_and_gating.py -v  # H17–H18: KL + NT gating
 py -3 -m pytest tests/verification/test_improvement_gate.py -v     # H19: Welch's t admission gate
-py -3 -m pytest tests/dsl/ -v                                       # 962 DSL codegen + byte-equivalence
+py -3 -m pytest tests/dsl/ -v                                       # 966 DSL codegen + byte-equivalence
 ```
 
 ---

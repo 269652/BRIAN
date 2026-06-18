@@ -444,10 +444,59 @@ def parse_hf_uri(uri: str) -> Tuple[str, str]:
     return repo_id, path_in_repo
 
 
+def inspect_checkpoint_metadata(path: "Path") -> dict:
+    """Load a local .pt file and extract training metadata without GPU memory.
+
+    Returns a dict with keys: step, params, model_hash, ppl, ood_ppl,
+    vocab_size, d_sem. Fields that are absent in the checkpoint are None.
+    """
+    import hashlib
+    try:
+        import torch
+    except ImportError:
+        return {k: None for k in
+                ("step", "params", "model_hash", "ppl", "ood_ppl",
+                 "vocab_size", "d_sem")}
+
+    payload = torch.load(str(path), map_location="cpu", weights_only=False)
+    model: dict = payload.get("model") or {}
+
+    total_params = sum(
+        t.numel() for t in model.values() if hasattr(t, "numel")
+    )
+
+    h = hashlib.sha256()
+    for k in sorted(model.keys()):
+        t = model[k]
+        if hasattr(t, "numpy"):
+            try:
+                h.update(t.numpy().tobytes())
+            except Exception:
+                pass
+    model_hash = h.hexdigest()[:12] if total_params else None
+
+    extra: dict = payload.get("extra") or {}
+    ppl = (extra.get("ppl") or extra.get("train_ppl")
+           or extra.get("eval_ppl"))
+    ood_ppl = (extra.get("ood_ppl") or extra.get("wt103_ppl")
+               or extra.get("ood_eval_ppl"))
+
+    return {
+        "step": payload.get("step", 0),
+        "params": total_params or None,
+        "model_hash": model_hash,
+        "ppl": ppl,
+        "ood_ppl": ood_ppl,
+        "vocab_size": payload.get("vocab_size"),
+        "d_sem": payload.get("d_sem"),
+    }
+
+
 __all__ = [
     "CheckpointEntry",
     "list_repo_checkpoints",
     "find_latest_checkpoint",
     "download_checkpoint",
     "parse_hf_uri",
+    "inspect_checkpoint_metadata",
 ]

@@ -113,7 +113,15 @@
       "Bash(grep -n \"checkpoint.*hf://\\\\|hf://.*checkpoint\\\\|printed.*checkpoint\\\\|print.*hub\\\\|hub.*url\" c:/Users/morrossl/Documents/Private/SLM/neuroslm/checkpoint_push.py)",
       "Bash(grep -n \"print\\\\|logger\\\\|log.*checkpoint\\\\|checkpoint.*log\\\\|hf://\\\\|uploaded\\\\|pushed\" c:/Users/morrossl/Documents/Private/SLM/neuroslm/checkpoint_push.py)",
       "Bash(xargs -I{} grep -l \"ckpt_push\" {})",
-      "Bash(.venv/Scripts/brian.exe update-readme *)"
+      "Bash(.venv/Scripts/brian.exe update-readme *)",
+      "Bash(ls neuroslm/harness.py)",
+      "Bash(wc -l neuroslm/harness.py)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/verification/test_nfo_lean_lint.py -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/dsl/test_novel_topology.py::TestH015_H018_NeuralFieldOscillator -x -q)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/dsl/test_novel_topology.py::TestH015_H018_NeuralFieldOscillator -v)",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_cli_hf_chat.py::TestCmdChat::test_no_ckpt_no_latest_no_local_fallback_returns_2 -x -q)",
+      "Bash(git show *)",
+      "Bash(cat .brian/checkpoint.ln)"
     ]
   }
 }

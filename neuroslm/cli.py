@@ -945,114 +945,6 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
 # ── deploy / deploy-100k / deploy-brain ───────────────────────────────
 
-def _deploy_dsl(steps: int, branch: Optional[str], extra_env: dict,
-                 ood_every: int = 0,
-                 log_every: int = 0, save_every: int = 0,
-                 push_every: int = 0) -> int:
-    """Run _deploy_train.py with the appropriate env vars for DSL training.
-
-    The cadence triple ``(log_every, save_every, push_every)`` propagates
-    via env vars ``LOG_EVERY`` / ``SAVE_EVERY`` / ``PUSH_EVERY`` →
-    ``_deploy_train.py`` bakes them into the ONSTART script →
-    ``vast_train_dsl_loop.sh`` reads them and forwards as ``--log_every``
-    / ``--save_every`` / ``--push_every`` to ``python -m neuroslm.train_dsl``.
-    Zero means "use the trainer's own default".
-    """
-    env = os.environ.copy()
-    env["STEPS"] = str(steps)
-    if ood_every > 0:
-        env["OOD_EVERY"] = str(ood_every)
-    if log_every > 0:
-        env["LOG_EVERY"] = str(log_every)
-    if save_every > 0:
-        env["SAVE_EVERY"] = str(save_every)
-    if push_every > 0:
-        env["PUSH_EVERY"] = str(push_every)
-    if branch:
-        env["BRANCH"] = branch
-    env["PYTHONIOENCODING"] = "utf-8"
-    env.update(extra_env)
-    # Use _deploy_train.py (fast, direct vast.ai API call) instead of
-    # vast_train.sh which hangs on Windows due to heredoc pipe issues.
-    deploy_script = REPO_ROOT / "_deploy_train.py"
-    python = _find_deploy_python()
-    return subprocess.call([python, str(deploy_script)], cwd=str(REPO_ROOT), env=env)
-
-
-def _deploy_dna(dna_path: str, steps: int, branch: Optional[str], extra_env: dict,
-                ood_every: int = 0,
-                log_every: int = 0, save_every: int = 0,
-                push_every: int = 0) -> int:
-    """Deploy a DNA-driven training run on vast.ai through the canonical
-    workspace pipeline.
-
-    The DNA is compiled to DSL → HypergraphIR LOCALLY (via
-    ``prepare_run_workspace``) before any vast.ai network call. Two
-    consequences:
-
-      1. Bad DNA fails fast — the user never pays for vast.ai
-         provisioning when their snapshot is broken.
-      2. ``_deploy_train.py`` (and the on-box bash wrapper) consume the
-         pre-compiled ``.neuro/arch/temp/`` workspace, not a raw .dna
-         file. There is exactly ONE DNA→DSL unfold in the entire deploy
-         path, in this function, just like ``cmd_train``.
-
-    The vast.ai box sees ``ARCH=.neuro/arch/temp`` and runs the DSL
-    training path. The DNA snapshot still ships in the git clone so
-    on-box evolution callbacks (mutation persistence) can rewrite it.
-    """
-    # ── 1. compile DNA locally (fail-fast before any vast.ai call) ──
-    try:
-        from neuroslm.compiler.run_workspace import prepare_run_workspace
-        workspace = prepare_run_workspace(dna=dna_path)
-    except Exception as e:
-        print(f"[deploy] workspace preparation failed: {e}", file=sys.stderr)
-        print(f"[deploy] aborting — no vast.ai resources were provisioned.",
-              file=sys.stderr)
-        return 1
-    print(f"[deploy] workspace ready: {workspace.arch_root}")
-    print(f"        source: {workspace.source_kind}={workspace.source_path}")
-    print(f"        hypergraph IR: {len(workspace.hypergraph_ir.nodes)} nodes, "
-          f"{len(workspace.hypergraph_ir.hyperedges)} edges")
-
-    # ── 2. hand off the prepared workspace path to the deploy script ──
-    # We pass ARCH=<workspace> (NOT DNA=...) so _deploy_train.py reads
-    # the pre-compiled tree via the existing DSL code path. The original
-    # DNA path is exposed as BRIAN_SOURCE_DNA for telemetry / labels
-    # only — no code on the vast.ai box should compile it again.
-    env = os.environ.copy()
-    env["ARCH"] = str(workspace.arch_root)
-    env["BRIAN_SOURCE_DNA"] = dna_path
-    env["STEPS"] = str(steps)
-    if ood_every > 0:
-        env["OOD_EVERY"] = str(ood_every)
-    if log_every > 0:
-        env["LOG_EVERY"] = str(log_every)
-    if save_every > 0:
-        env["SAVE_EVERY"] = str(save_every)
-    if push_every > 0:
-        env["PUSH_EVERY"] = str(push_every)
-    if branch:
-        env["BRANCH"] = branch
-    env["PYTHONIOENCODING"] = "utf-8"
-    env.update(extra_env)
-    deploy_script = REPO_ROOT / "_deploy_train.py"
-    python = _find_deploy_python()
-    return subprocess.call([python, str(deploy_script)], cwd=str(REPO_ROOT), env=env)
-
-
-def _find_deploy_python() -> str:
-    """Return the Python interpreter to run ``_deploy_train.py`` with.
-
-    Per CLAUDE.md §13 we have exactly one venv (``./.venv``). The
-    canonical interpreter is whatever's currently running — it already
-    has every dep the deploy script needs (torch is no longer required
-    after the canonical-pipeline refactor; vastai is the only hard
-    requirement, and it lives in ``./.venv``).
-    """
-    return sys.executable
-
-
 def _run_hook(name: str, repo_root: Optional[Path] = None,
               env: Optional[dict] = None) -> int:
     """Thin shim around :func:`neuroslm.hooks.run_hook` so cmd_deploy
@@ -1068,45 +960,22 @@ def _run_hook(name: str, repo_root: Optional[Path] = None,
 
 
 def cmd_deploy(args: argparse.Namespace) -> int:
-    """Launch a DSL or DNA training run on vast.ai.
+    """Launch a DSL or DNA training run on a cloud platform.
 
-    Source-of-truth precedence (highest wins) for ``steps``, ``branch``,
-    and ``dna``::
+    Source-of-truth precedence (highest wins)::
 
-        1. CLI flag (``--steps`` / ``--branch`` / ``--dna``)
-        2. ``brian.toml`` (``[defaults].steps`` / ``[defaults].branch``
-           / ``[current].dna``)
-        3. Hardcoded fallback (``10_000`` steps, no BRANCH env →
-           ``_deploy_train.py``'s own default kicks in)
-
-    This matches the same precedence rule the rest of the CLI uses
-    (CLI > workspace config > sensible default). It also makes the
-    one-line invocation ``brian deploy`` produce a DEFINED training
-    run: brian.toml is the single source of truth, the CLI is for
-    one-off overrides.
+        1. CLI flag (``--steps`` / ``--branch`` / ``--dna`` / ``--platform``)
+        2. ``brian.toml`` ([defaults].steps / [defaults].branch /
+           [current].dna / [deploy].platform)
+        3. Hardcoded fallback (10_000 steps, platform "vast")
 
     Examples::
 
-        # Use brian.toml [defaults].steps + [defaults].branch + [current].dna
-        brian deploy
-
-        # Override just the step count, keep brian.toml's branch + dna
-        brian deploy --steps 50000
-
-        # Override branch, DSL mode (no DNA in brian.toml)
-        brian deploy --branch feature/new-arch
+        brian deploy                              # all from brian.toml
+        brian deploy --steps 50000               # override steps
+        brian deploy --platform lightning        # use Lightning AI
     """
-    # ── Pre-deploy hook (cross-platform, YAML-declared) ──
-    # See ``hooks/pre-deploy.yaml`` + ``hooks/scripts/pre-deploy.{sh,ps1}``.
-    # Default contract: recompile master arch → DNA → unfold into
-    # ``architectures/current``. A non-zero return aborts the deploy
-    # BEFORE any vast.ai call so the user never pays for a bad arch.
-    #
-    # Escape hatch: ``brian --no-verify deploy ...`` (or
-    # ``brian deploy --no-verify ...``) short-circuits the hook for
-    # quick-iteration cycles where the working tree is intentionally
-    # dirty or the hook is known-redundant. We ALWAYS print a notice
-    # so silent omission can't masquerade as a successful hook run.
+    # ── Pre-deploy hook ──
     if getattr(args, "no_verify", False):
         print("[deploy] pre-deploy hook SKIPPED (--no-verify)")
     else:
@@ -1116,12 +985,12 @@ def cmd_deploy(args: argparse.Namespace) -> int:
                   file=sys.stderr)
             return hook_rc
 
-    # ── Single config load: amortise the brian.toml read ──
-    # All three CLI flags consult the same config; loading it once
-    # avoids re-parsing the TOML file three times AND keeps the
-    # precedence rule (CLI > brian.toml > hardcoded) consistent.
+    # ── Config load ──
     from neuroslm.project_config import load_project_config
     cfg = load_project_config()
+
+    # ── Platform: CLI --platform > brian.toml [deploy].platform > "vast" ──
+    platform = getattr(args, "platform", None) or cfg.default_platform or "vast"
 
     # ── Steps: CLI > brian.toml [defaults].steps > 10_000 ──
     steps = args.steps
@@ -1129,48 +998,55 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         steps = cfg.default_steps if cfg.default_steps > 0 else 10_000
 
     # ── Branch: CLI > brian.toml [defaults].branch > leave unset ──
-    # When neither layer specifies a branch, we deliberately DON'T set
-    # the BRANCH env var so the downstream ``_deploy_train.py`` falls
-    # through to its own hardcoded fallback (a git HEAD lookup). This
-    # avoids hardcoding "master" here — different workspaces / forks
-    # use different default branches.
     branch = args.branch
     if branch is None and cfg.default_branch:
         branch = cfg.default_branch
 
     # ── DNA: CLI > brian.toml [current].dna (when file exists) > None ──
-    # The ``is_dna_mode`` check tests file existence too, so a stale
-    # ``[current].dna`` pointing at a deleted file won't silently switch
-    # us into DNA mode with garbage.
     dna_path = getattr(args, "dna", None)
     if not dna_path and cfg.is_dna_mode:
         dna_path = cfg.dna
         print(f"[deploy] brian.toml DNA mode: {dna_path}")
 
     ood = args.ood if args.ood else 0
-    extra = {}
+    log_every = cfg.default_log_every
+    save_every = cfg.default_save_every
+    push_every = cfg.default_push_every
+
+    # ── Build DeployConfig ──
+    from neuroslm.connectors import DeployConfig, get_connector
+    config = DeployConfig(
+        steps=steps,
+        branch=branch,
+        scale=args.scale if args.scale else None,
+        label=getattr(args, "label", None),
+        ood_every=ood,
+        log_every=log_every,
+        save_every=save_every,
+        push_every=push_every,
+        push_backend=cfg.default_push_backend,
+        hf_repo_id=cfg.default_hf_repo_id,
+        push_optimizer=cfg.default_push_optimizer,
+    )
+
+    # ── Machine: CLI --machine > brian.toml [deploy].machine > "" ──
+    # Threaded through extra_env so any connector that understands
+    # ``LIGHTNING_MACHINE`` (or future ``VAST_MACHINE``) picks it up
+    # without needing a dedicated DeployConfig field per connector.
+    machine = getattr(args, "machine", None) or cfg.default_machine
+    if machine:
+        config.extra_env["LIGHTNING_MACHINE"] = machine
+        print(f"[deploy] machine: {machine}")
+
     # ── Arch: CLI positional > brian.toml [current].arch ──
-    # Resolve folder from file path if user passed arch.neuro directly.
-    if args.arch:
-        arch_path = Path(args.arch)
+    _arch_arg = getattr(args, "arch", None)
+    if _arch_arg:
+        arch_path = Path(_arch_arg)
         if arch_path.is_file():
             arch_path = arch_path.parent
-        extra["ARCH"] = str(arch_path)
-    if args.scale:
-        extra["SCALE"] = args.scale
-    if getattr(args, "label", None):
-        extra["LABEL_SUFFIX"] = args.label
+        config.arch = str(arch_path)
 
-    # ── Resume from a previous run ────────────────────────────────────
-    # Two flags work together:
-    #   --resume <path|hf-uri>  resume from a specific checkpoint
-    #   --latest               pull the highest-step ckpt from HF Hub
-    #                          and resume from it
-    # Their precedence: an explicit ``--resume <path>`` always wins.
-    # ``--latest`` resolves to an HF lookup; the result is forwarded
-    # as RESUME_FROM=hf://repo/path so the on-box bootstrap can pull
-    # it before training. Local paths are forwarded as-is and the
-    # bootstrap script will scp / git-pull them as part of the clone.
+    # ── Resume ──
     resume_target = getattr(args, "resume", None)
     use_latest = getattr(args, "latest", False)
     if use_latest and not resume_target:
@@ -1181,66 +1057,67 @@ def cmd_deploy(args: argparse.Namespace) -> int:
                 prefix=getattr(args, "hf_prefix", "") or "",
             )
         except Exception as e:
-            print(f"[deploy] --latest lookup failed: "
-                  f"{type(e).__name__}: {e}", file=sys.stderr)
+            print(f"[deploy] --latest lookup failed: {type(e).__name__}: {e}",
+                  file=sys.stderr)
             return 1
         if latest is None:
             print("[deploy] --latest: no checkpoints found on HF Hub.",
                   file=sys.stderr)
             return 1
-        repo = getattr(args, "hf_repo", None) \
-            or os.environ.get("HF_REPO_ID", "") \
-            or "moritzroessler/BRIAN"
+        repo = (getattr(args, "hf_repo", None)
+                or os.environ.get("HF_REPO_ID", "")
+                or "moritzroessler/BRIAN")
         resume_target = f"hf://{repo}/{latest.path_in_repo}"
-        print(f"[deploy] --latest resolved to step {latest.step}: "
-              f"{resume_target}")
-        # If the user did not pass --steps, inherit the prior run's
-        # step budget so resumes target the same total. The trainer's
-        # ``--resume`` path uses ``args.steps`` as the target; the
-        # checkpoint's saved ``step`` is the start. Without this
-        # guard, ``brian deploy --latest`` after a 4000-step run
-        # would default to brian.toml's [defaults].steps and silently
-        # extend the run budget.
-        if args.steps is None:
-            # Best-effort: the step number is encoded in the filename
-            # (``step5000.pt``). The trainer auto-extracts the start.
-            # We *don't* know the original target, so we use the
-            # ``--steps`` precedence chain (CLI > toml > 10000) as
-            # before — same as a fresh deploy. The trainer's
-            # range(start_step+1, steps+1) loop ensures only the
-            # remaining steps are run.
-            pass
+        print(f"[deploy] --latest resolved to step {latest.step}: {resume_target}")
     if resume_target:
-        extra["RESUME_FROM"] = resume_target
-        # Also forward the HF repo if the resume URI didn't carry one
+        config.resume_from = resume_target
         if getattr(args, "hf_repo", None):
-            extra["HF_REPO_ID"] = args.hf_repo
+            config.extra_env["HF_REPO_ID"] = args.hf_repo
         print(f"[deploy] resuming from: {resume_target}")
 
-    # ── Cadence: brian.toml [defaults] > trainer default ──
-    # The trainer treats 0 as "use my own default"; we mirror that.
-    # If a user wants a CLI override later, the place to add it is a
-    # new ``--push-every`` arg on the deploy subcommand; for now the
-    # source of truth is ``brian.toml [defaults]``.
-    log_every = cfg.default_log_every
-    save_every = cfg.default_save_every
-    push_every = cfg.default_push_every
-
+    # ── DNA workspace compilation (fail-fast before any provider call) ──
     if dna_path:
-        return _deploy_dna(dna_path=dna_path, steps=steps,
-                           branch=branch, extra_env=extra, ood_every=ood,
-                           log_every=log_every, save_every=save_every,
-                           push_every=push_every)
-    else:
-        return _deploy_dsl(steps=steps, branch=branch,
-                           extra_env=extra, ood_every=ood,
-                           log_every=log_every, save_every=save_every,
-                           push_every=push_every)
+        try:
+            from neuroslm.compiler.run_workspace import prepare_run_workspace
+            workspace = prepare_run_workspace(dna=dna_path)
+        except Exception as e:
+            print(f"[deploy] workspace preparation failed: {e}", file=sys.stderr)
+            print("[deploy] aborting — no cloud resources were provisioned.",
+                  file=sys.stderr)
+            return 1
+        print(f"[deploy] workspace ready: {workspace.arch_root}")
+        print(f"        source: {workspace.source_kind}={workspace.source_path}")
+        print(f"        hypergraph IR: {len(workspace.hypergraph_ir.nodes)} nodes, "
+              f"{len(workspace.hypergraph_ir.hyperedges)} edges")
+        config.arch = str(workspace.arch_root)
+        config.source_dna = dna_path
+
+    # ── Dispatch to connector ──
+    try:
+        connector = get_connector(platform)
+    except ValueError as e:
+        print(f"[deploy] {e}", file=sys.stderr)
+        return 1
+    print(f"[deploy] platform: {platform} ({type(connector).__name__})")
+    return connector.launch(config)
 
 
 def cmd_deploy_100k(args: argparse.Namespace) -> int:
     """Shortcut for a long-horizon (100k steps) DSL run."""
-    return _deploy_dsl(steps=100_000, branch=args.branch, extra_env={})
+    from neuroslm.project_config import load_project_config
+    from neuroslm.connectors import DeployConfig, get_connector
+    cfg = load_project_config()
+    platform = cfg.default_platform or "vast"
+    config = DeployConfig(
+        steps=100_000,
+        branch=args.branch or cfg.default_branch or None,
+        log_every=cfg.default_log_every,
+        save_every=cfg.default_save_every,
+        push_every=cfg.default_push_every,
+        push_backend=cfg.default_push_backend,
+        hf_repo_id=cfg.default_hf_repo_id,
+    )
+    return get_connector(platform).launch(config)
 
 
 def cmd_deploy_brain(args: argparse.Namespace) -> int:
@@ -2580,6 +2457,225 @@ def _hf_latest(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── checkpoints : local checkpoint manager ─────────────────────────
+
+
+def _read_neuro_checkpoint_ln() -> Optional[str]:
+    """Return the contents of .neuro/checkpoint.ln, or None if absent/empty."""
+    ln_file = REPO_ROOT / ".neuro" / "checkpoint.ln"
+    if not ln_file.is_file():
+        return None
+    text = ln_file.read_text(encoding="utf-8").strip()
+    return text or None
+
+
+def _write_neuro_checkpoint_ln(path: Path) -> None:
+    """Write a repo-relative path to .neuro/checkpoint.ln."""
+    ln_file = REPO_ROOT / ".neuro" / "checkpoint.ln"
+    ln_file.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        rel = path.relative_to(REPO_ROOT)
+        ln_file.write_text(str(rel).replace("\\", "/"), encoding="utf-8")
+    except ValueError:
+        ln_file.write_text(str(path), encoding="utf-8")
+
+
+def _format_ckpt_size(size_bytes: int) -> str:
+    if size_bytes == 0:
+        return "—"
+    mb = size_bytes / (1024 * 1024)
+    if mb >= 1024:
+        return f"{mb / 1024:.1f} GB"
+    return f"{mb:.0f} MB"
+
+
+def _ckpts_list(args: argparse.Namespace) -> int:
+    try:
+        from neuroslm.utils.secrets import bootstrap_secrets
+        bootstrap_secrets(["HF_TOKEN"])
+    except Exception:
+        pass
+    from neuroslm.hf_checkpoints import list_repo_checkpoints
+    entries = list_repo_checkpoints(
+        repo_id=args.repo, prefix=args.prefix or "")
+    if not entries:
+        print("(no checkpoints found)")
+        return 1
+    limit = args.limit or len(entries)
+
+    active_path = _read_neuro_checkpoint_ln() or ""
+
+    def _find_local(entry) -> Optional[Path]:
+        for root in ("checkpoints", "lfs_checkpoints"):
+            if entry.run_dir:
+                p = REPO_ROOT / root / entry.run_dir / f"step{entry.step}.pt"
+                if p.is_file():
+                    return p
+        return None
+
+    repo = (args.repo or os.environ.get("HF_REPO_ID", "")
+            or "moritzroessler/BRIAN")
+    print(f"\n  brian checkpoints  ({repo})  — {len(entries)} total\n")
+
+    col_w = {"step": 8, "params": 8, "ppl": 7, "ood": 8, "hash": 12,
+              "size": 7, "sidecar": 7}
+    header = (f"  {'#':>3}  {'Step':>{col_w['step']}}  "
+              f"{'Params':>{col_w['params']}}  {'PPL':>{col_w['ppl']}}  "
+              f"{'OOD PPL':>{col_w['ood']}}  {'Hash':>{col_w['hash']}}  "
+              f"{'Size':>{col_w['size']}}  {'Sidecar':>{col_w['sidecar']}}  "
+              f"Run Dir")
+    sep = "  " + "─" * (len(header) - 2)
+    print(sep)
+    print(header)
+    print(sep)
+
+    for i, entry in enumerate(entries[:limit], 1):
+        local = _find_local(entry)
+        params_s = ppl_s = ood_s = hash_s = "—"
+        if local:
+            try:
+                from neuroslm.hf_checkpoints import inspect_checkpoint_metadata
+                meta = inspect_checkpoint_metadata(local)
+                p = meta.get("params") or 0
+                if p:
+                    params_s = f"{p / 1e6:.1f}M"
+                if meta.get("ppl"):
+                    ppl_s = f"{meta['ppl']:.1f}"
+                if meta.get("ood_ppl"):
+                    ood_s = f"{meta['ood_ppl']:.1f}"
+                if meta.get("model_hash"):
+                    hash_s = meta["model_hash"]
+            except Exception:
+                pass
+
+        size_s = _format_ckpt_size(entry.size)
+        sidecar_s = "yes" if entry.has_mem_sidecar else "no"
+        run_dir = entry.run_dir or "(flat)"
+
+        # Determine active marker
+        norm = active_path.replace("\\", "/")
+        rel_variants = {
+            f"checkpoints/{entry.run_dir}/step{entry.step}.pt",
+            f"lfs_checkpoints/{entry.run_dir}/step{entry.step}.pt",
+        }
+        marker = " ●" if norm in rel_variants else "  "
+
+        print(f"  {i:>3}  {entry.step:>{col_w['step']}}  "
+              f"{params_s:>{col_w['params']}}  {ppl_s:>{col_w['ppl']}}  "
+              f"{ood_s:>{col_w['ood']}}  {hash_s:>{col_w['hash']}}  "
+              f"{size_s:>{col_w['size']}}  {sidecar_s:>{col_w['sidecar']}}  "
+              f"{run_dir}{marker}")
+
+    print(sep)
+    if active_path:
+        print(f"\n  ● = active checkpoint  ({active_path})")
+    print()
+    return 0
+
+
+def _ckpts_download(args: argparse.Namespace) -> int:
+    try:
+        from neuroslm.utils.secrets import bootstrap_secrets
+        bootstrap_secrets(["HF_TOKEN"])
+    except Exception:
+        pass
+    from neuroslm.hf_checkpoints import (
+        download_checkpoint, find_latest_checkpoint,
+        list_repo_checkpoints, parse_hf_uri,
+    )
+
+    repo = args.repo
+    dest_dir = REPO_ROOT / "checkpoints"
+
+    if args.latest:
+        latest = find_latest_checkpoint(
+            repo_id=repo, prefix=args.prefix or "")
+        if latest is None:
+            print("[checkpoints] no checkpoints found on the repo",
+                  file=sys.stderr)
+            return 1
+        path_in_repo = latest.path_in_repo
+        print(f"[checkpoints] --latest → step {latest.step} "
+              f"({path_in_repo})")
+    elif args.target:
+        target = args.target
+        if target.startswith("hf://"):
+            try:
+                uri_repo, uri_path = parse_hf_uri(target)
+                repo = repo or uri_repo
+                path_in_repo = uri_path
+            except ValueError as e:
+                print(f"[checkpoints] {e}", file=sys.stderr)
+                return 2
+        elif target.isdigit():
+            step = int(target)
+            entries = list_repo_checkpoints(
+                repo_id=repo, prefix=args.prefix or "")
+            match = next((e for e in entries if e.step == step), None)
+            if match is None:
+                print(f"[checkpoints] no checkpoint at step {step}",
+                      file=sys.stderr)
+                return 1
+            path_in_repo = match.path_in_repo
+        else:
+            path_in_repo = target
+    else:
+        print("[checkpoints] provide a target (step, path, hf:// URI) "
+              "or use --latest", file=sys.stderr)
+        return 2
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    local = download_checkpoint(
+        path_in_repo, repo_id=repo, dest_dir=str(dest_dir))
+    if local is None:
+        return 1
+
+    print(f"[checkpoints] downloaded → {local}")
+
+    if getattr(args, "activate", True):
+        _write_neuro_checkpoint_ln(local)
+        print(f"[checkpoints] active checkpoint set to: {local}")
+
+    return 0
+
+
+def _ckpts_use(args: argparse.Namespace) -> int:
+    path = Path(args.path)
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    if not path.is_file():
+        print(f"[checkpoints] file not found: {path}", file=sys.stderr)
+        return 2
+    _write_neuro_checkpoint_ln(path)
+    print(f"[checkpoints] active checkpoint set to: {path}")
+    return 0
+
+
+def _ckpts_active(args: argparse.Namespace) -> int:
+    active = _read_neuro_checkpoint_ln()
+    if not active:
+        print("(no active checkpoint — run `brian checkpoints download "
+              "--latest` to set one)")
+        return 1
+    print(f"active: {active}")
+    return 0
+
+
+def cmd_checkpoints(args: argparse.Namespace) -> int:
+    """Top-level dispatcher for ``brian checkpoints <subcommand>``."""
+    sub = getattr(args, "ckpts_cmd", None)
+    if sub == "list":
+        return _ckpts_list(args)
+    if sub == "download":
+        return _ckpts_download(args)
+    if sub == "use":
+        return _ckpts_use(args)
+    if sub == "active":
+        return _ckpts_active(args)
+    print(f"[checkpoints] unknown subcommand: {sub!r}", file=sys.stderr)
+    return 2
+
+
 # ── chat : always-on inference daemon with dashboard ──────────────────
 
 def cmd_chat(args: argparse.Namespace) -> int:
@@ -2590,6 +2686,8 @@ def cmd_chat(args: argparse.Namespace) -> int:
       1. ``--pt PATH_OR_URI``           — explicit named flag (alias for positional).
       2. positional ``ckpt`` arg.
       3. ``--latest`` flag               — pull HF Hub highest-step (by raw step).
+      3.5. ``.neuro/checkpoint.ln``      — local active checkpoint set by
+                                            ``brian checkpoints download/use``.
       4. ``.brian/checkpoint.ln``        — auto-pulled best-run checkpoint
                                             (DEFAULT; written by ``brian best update``).
       5. local ``lfs_checkpoints/`` highest-step (fallback for offline use).
@@ -2635,6 +2733,19 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 latest.path_in_repo, repo_id=args.repo)
             if local is not None:
                 ckpt = str(local)
+
+    # Hop 3.5: .neuro/checkpoint.ln — local active checkpoint
+    # (written by `brian checkpoints download [--activate]` or `brian
+    # checkpoints use`). Uses the file directly — no HF download required.
+    if not ckpt:
+        local_path_str = _read_neuro_checkpoint_ln()
+        if local_path_str:
+            local_p = Path(local_path_str)
+            if not local_p.is_absolute():
+                local_p = REPO_ROOT / local_p
+            if local_p.is_file():
+                print(f"[chat] using active local checkpoint: {local_p}")
+                ckpt = str(local_p)
 
     # Hop 4: best-run pointer (DEFAULT when no explicit flag was given).
     # Skipped if --no-best is set or if --latest already resolved a ckpt.
@@ -3577,6 +3688,12 @@ def _build_parser() -> argparse.ArgumentParser:
                          "[defaults].branch, then current HEAD)")
     sd.add_argument("--scale", help="Scale variant from arch.neuro scales block "
                     "(e.g. 100m, 300m, 1b). Default: arch's scales.default")
+    sd.add_argument("--machine", default=None,
+                    help="GPU/machine tier for connectors that support it "
+                         "(currently Lightning AI). Substring match against "
+                         "the connector's enum, e.g. T4, A10G, A100, L4. "
+                         "Default: brian.toml [deploy].machine, then "
+                         "connector's own default.")
     sd.add_argument("--dna", help="path to evolved DNA file for training "
                     "(e.g., dna/evol/arch.dna). If set, trains from DNA instead of DSL arch")
     sd.add_argument("--label", help="Label suffix for the vast.ai instance")
@@ -3625,6 +3742,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Skip the pre-deploy hook (alias for top-level "
              "`brian --no-verify deploy`).",
+    )
+    sd.add_argument(
+        "--platform",
+        choices=["vast", "lightning"],
+        default=None,
+        help="Cloud provider to deploy on (default: brian.toml [deploy].platform, "
+             "then 'vast'). Overrides the config for this run only.",
     )
     sd.set_defaults(func=cmd_deploy)
 
@@ -4040,6 +4164,58 @@ def _build_parser() -> argparse.ArgumentParser:
         "-v", "--verbose", action="store_true",
         help="show reference-scan progress")
     sc_mig.set_defaults(func=cmd_migrate)
+
+    # checkpoints — local checkpoint manager
+    sc_ckpts = sub.add_parser(
+        "checkpoints",
+        help="List, download, and manage local inference checkpoints")
+    sc_ckpts_sub = sc_ckpts.add_subparsers(dest="ckpts_cmd", required=True)
+
+    sc_ckpts_list = sc_ckpts_sub.add_parser(
+        "list", help="List all HF Hub checkpoints (newest first)")
+    sc_ckpts_list.add_argument(
+        "--repo", default=None,
+        help="HF repo id (default: moritzroessler/BRIAN)")
+    sc_ckpts_list.add_argument(
+        "--prefix", default=None,
+        help="Filter by run-dir prefix")
+    sc_ckpts_list.add_argument(
+        "--limit", type=int, default=20,
+        help="Max entries to show (default 20)")
+
+    sc_ckpts_dl = sc_ckpts_sub.add_parser(
+        "download",
+        help="Download a checkpoint into local checkpoints/ and optionally "
+             "set it as active")
+    sc_ckpts_dl.add_argument(
+        "target", nargs="?", default=None,
+        help="Step number, path-in-repo, or hf:// URI")
+    sc_ckpts_dl.add_argument(
+        "--latest", action="store_true",
+        help="Download the highest-step checkpoint")
+    sc_ckpts_dl.add_argument(
+        "--repo", default=None, help="HF repo id")
+    sc_ckpts_dl.add_argument(
+        "--prefix", default=None, help="Filter by run-dir prefix")
+    sc_ckpts_dl.add_argument(
+        "--no-activate", dest="activate", action="store_false",
+        help="Don't write .neuro/checkpoint.ln after download")
+    sc_ckpts_dl.set_defaults(activate=True)
+
+    sc_ckpts_use = sc_ckpts_sub.add_parser(
+        "use",
+        help="Set an already-downloaded .pt file as the active local "
+             "checkpoint (.neuro/checkpoint.ln)")
+    sc_ckpts_use.add_argument(
+        "path", help="Local path to the .pt file")
+
+    sc_ckpts_active = sc_ckpts_sub.add_parser(
+        "active",
+        help="Show the current active local checkpoint "
+             "(.neuro/checkpoint.ln)")
+    sc_ckpts_active.set_defaults()
+
+    sc_ckpts.set_defaults(func=cmd_checkpoints)
 
     # update-readme
     sur = sub.add_parser(

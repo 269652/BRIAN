@@ -1,0 +1,388 @@
+# -*- coding: utf-8 -*-
+"""TDD contracts for the connector registry and platform dispatch.
+
+Contracts locked here
+─────────────────────
+  A. get_connector("vast") → VastConnector instance
+  B. get_connector("lightning") → LightningConnector instance
+  C. get_connector("unknown") → ValueError with available platforms listed
+  D. VastConnector.platform_name() == "vast"
+  E. LightningConnector.platform_name() == "lightning"
+  F. DeployConfig can be constructed with steps only; all other fields optional
+  G. VastConnector._build_env() propagates steps + all optional fields
+  H. VastConnector._build_env() skips zero/falsy cadence values (no clutter)
+  I. VastConnector.launch() calls bash + vast_train.sh subprocess
+  J. ProjectConfig.default_platform == "vast" by default
+  K. [deploy].platform in brian.toml → cfg.default_platform
+  L. BRIAN_DEFAULT_PLATFORM env override → cfg.default_platform
+  M. cmd_deploy --platform vast  → VastConnector.launch() called
+  N. cmd_deploy --platform lightning → LightningConnector.launch() called
+  O. cmd_deploy without --platform → cfg.default_platform connector used
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+from typing import List
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Fixtures
+# ─────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def capture_subprocess(monkeypatch):
+    """Replace subprocess.call so the test never launches vast_train.sh."""
+    calls: List[dict] = []
+
+    def _fake_call(args, *, cwd=None, env=None, **kwargs):
+        calls.append({"args": list(args), "cwd": cwd, "env": dict(env or {})})
+        return 0
+
+    monkeypatch.setattr("subprocess.call", _fake_call)
+    return calls
+
+
+@pytest.fixture
+def minimal_toml(tmp_path: Path, monkeypatch):
+    """A minimal brian.toml with only [deploy] platform set."""
+    def _make(platform: str) -> Path:
+        cfg = tmp_path / "brian.toml"
+        cfg.write_text(
+            f"[deploy]\nplatform = {platform!r}\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        return cfg
+    return _make
+
+
+# ─────────────────────────────────────────────────────────────────────
+# A-C: Registry
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_A_get_connector_vast():
+    from neuroslm.connectors import get_connector
+    from neuroslm.connectors.vast import VastConnector
+    c = get_connector("vast")
+    assert isinstance(c, VastConnector)
+
+
+def test_B_get_connector_lightning():
+    from neuroslm.connectors import get_connector
+    from neuroslm.connectors.lightning import LightningConnector
+    c = get_connector("lightning")
+    assert isinstance(c, LightningConnector)
+
+
+def test_C_get_connector_unknown_raises():
+    from neuroslm.connectors import get_connector
+    with pytest.raises(ValueError, match="Unknown platform"):
+        get_connector("nonexistent")
+
+
+def test_C_error_message_lists_available():
+    from neuroslm.connectors import get_connector
+    with pytest.raises(ValueError) as exc_info:
+        get_connector("bogus")
+    msg = str(exc_info.value)
+    assert "vast" in msg
+    assert "lightning" in msg
+
+
+# ─────────────────────────────────────────────────────────────────────
+# D-E: platform_name
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_D_vast_platform_name():
+    from neuroslm.connectors.vast import VastConnector
+    assert VastConnector.platform_name() == "vast"
+
+
+def test_E_lightning_platform_name():
+    from neuroslm.connectors.lightning import LightningConnector
+    assert LightningConnector.platform_name() == "lightning"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# F: DeployConfig construction
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_F_deploy_config_minimal():
+    from neuroslm.connectors.base import DeployConfig
+    cfg = DeployConfig(steps=1000)
+    assert cfg.steps == 1000
+    assert cfg.branch is None
+    assert cfg.arch is None
+    assert cfg.ood_every == 0
+    assert cfg.extra_env == {}
+
+
+def test_F_deploy_config_full():
+    from neuroslm.connectors.base import DeployConfig
+    cfg = DeployConfig(
+        steps=5000,
+        branch="feature/x",
+        arch="architectures/master",
+        scale="large",
+        label="my-run",
+        resume_from="hf://owner/repo/step1000.pt",
+        source_dna="dna/evol/arch.dna",
+        ood_every=3000,
+        log_every=20,
+        save_every=500,
+        push_every=2500,
+        push_backend="hf",
+        hf_repo_id="owner/repo",
+        push_optimizer=True,
+        extra_env={"CUSTOM": "1"},
+    )
+    assert cfg.steps == 5000
+    assert cfg.label == "my-run"
+    assert cfg.extra_env == {"CUSTOM": "1"}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# G-H: VastConnector._build_env
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_G_build_env_propagates_all_fields():
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.vast import VastConnector
+
+    cfg = DeployConfig(
+        steps=7000,
+        branch="master",
+        arch="architectures/current",
+        scale="large",
+        label="my-label",
+        resume_from="hf://owner/repo/step5000.pt",
+        source_dna="dna/evol/arch.dna",
+        ood_every=3000,
+        log_every=20,
+        save_every=500,
+        push_every=2500,
+        push_backend="hf",
+        hf_repo_id="owner/repo",
+        extra_env={"CUSTOM_VAR": "42"},
+    )
+    env = VastConnector()._build_env(cfg)
+
+    assert env["STEPS"] == "7000"
+    assert env["BRANCH"] == "master"
+    assert env["ARCH"] == "architectures/current"
+    assert env["SCALE"] == "large"
+    assert env["LABEL_SUFFIX"] == "my-label"
+    assert env["RESUME_FROM"] == "hf://owner/repo/step5000.pt"
+    assert env["BRIAN_SOURCE_DNA"] == "dna/evol/arch.dna"
+    assert env["OOD_EVERY"] == "3000"
+    assert env["LOG_EVERY"] == "20"
+    assert env["SAVE_EVERY"] == "500"
+    assert env["PUSH_EVERY"] == "2500"
+    assert env["CHECKPOINT_PUSH_BACKEND"] == "hf"
+    assert env["HF_REPO_ID"] == "owner/repo"
+    assert env["CUSTOM_VAR"] == "42"
+    assert env["USE_DSL"] == "1"
+    assert env["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_H_build_env_skips_zero_cadence():
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.vast import VastConnector
+
+    cfg = DeployConfig(steps=1000)  # all cadences default to 0
+    env = VastConnector()._build_env(cfg)
+
+    assert "OOD_EVERY" not in env
+    assert "LOG_EVERY" not in env
+    assert "SAVE_EVERY" not in env
+    assert "PUSH_EVERY" not in env
+
+
+def test_H_build_env_skips_none_fields():
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.vast import VastConnector
+
+    cfg = DeployConfig(steps=1000)
+    env = VastConnector()._build_env(cfg)
+
+    assert "BRANCH" not in env
+    assert "ARCH" not in env
+    assert "SCALE" not in env
+    assert "LABEL_SUFFIX" not in env
+    assert "RESUME_FROM" not in env
+    assert "BRIAN_SOURCE_DNA" not in env
+
+
+# ─────────────────────────────────────────────────────────────────────
+# I: VastConnector.launch() subprocess call
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_I_vast_launch_calls_vast_train_sh(capture_subprocess):
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.vast import VastConnector
+
+    cfg = DeployConfig(steps=500, branch="master")
+    rc = VastConnector().launch(cfg)
+
+    assert rc == 0
+    assert len(capture_subprocess) == 1
+    call = capture_subprocess[0]
+    # bash + path-to-vast_train.sh
+    assert len(call["args"]) == 2
+    assert call["args"][1].endswith("vast_train.sh")
+    assert call["env"]["STEPS"] == "500"
+    assert call["env"]["USE_DSL"] == "1"
+
+
+def test_I_vast_launch_cwd_is_repo_root(capture_subprocess):
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.vast import VastConnector
+
+    VastConnector().launch(DeployConfig(steps=1))
+    cwd = Path(capture_subprocess[0]["cwd"])
+    assert (cwd / "brian.toml").exists()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# J-L: ProjectConfig.default_platform
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_J_default_platform_is_vast(tmp_path, monkeypatch):
+    """No [deploy] section → default_platform == 'vast'."""
+    from neuroslm.project_config import load_project_config
+    cfg_file = tmp_path / "brian.toml"
+    cfg_file.write_text("[current]\narch = 'architectures/master'\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    cfg = load_project_config(start=tmp_path)
+    assert cfg.default_platform == "vast"
+
+
+def test_K_toml_deploy_section(tmp_path, monkeypatch):
+    """[deploy] platform = 'lightning' → cfg.default_platform == 'lightning'."""
+    from neuroslm.project_config import load_project_config
+    cfg_file = tmp_path / "brian.toml"
+    cfg_file.write_text(
+        "[current]\narch = 'architectures/master'\n\n[deploy]\nplatform = 'lightning'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    cfg = load_project_config(start=tmp_path)
+    assert cfg.default_platform == "lightning"
+
+
+def test_L_env_override_platform(tmp_path, monkeypatch):
+    """BRIAN_DEFAULT_PLATFORM env → cfg.default_platform."""
+    from neuroslm.project_config import load_project_config
+    cfg_file = tmp_path / "brian.toml"
+    cfg_file.write_text(
+        "[current]\narch = 'architectures/master'\n\n[deploy]\nplatform = 'vast'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("BRIAN_DEFAULT_PLATFORM", "lightning")
+    cfg = load_project_config(start=tmp_path)
+    assert cfg.default_platform == "lightning"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# M-O: CLI --platform dispatch
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _make_args(**kwargs) -> argparse.Namespace:
+    defaults = dict(
+        arch=None, steps=None, branch=None, scale=None, dna=None,
+        label=None, ood=None, resume=None, latest=False, hf_repo=None,
+        hf_prefix=None, no_verify=True, platform=None,
+    )
+    defaults.update(kwargs)
+    return argparse.Namespace(**defaults)
+
+
+@pytest.fixture
+def patch_connectors(monkeypatch):
+    """Patch get_connector to track which platform was requested."""
+    launched = []
+
+    class _FakeConnector:
+        def __init__(self, name):
+            self._name = name
+
+        def launch(self, config):
+            launched.append({"platform": self._name, "config": config})
+            return 0
+
+    def _fake_get_connector(platform: str):
+        return _FakeConnector(platform)
+
+    monkeypatch.setattr("neuroslm.connectors.get_connector", _fake_get_connector)
+    return launched
+
+
+@pytest.fixture
+def minimal_project_config(tmp_path, monkeypatch):
+    """A minimal project with brian.toml so load_project_config() works."""
+    cfg_file = tmp_path / "brian.toml"
+    cfg_file.write_text(
+        "[current]\narch = 'architectures/master'\n\n[deploy]\nplatform = 'vast'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "architectures" / "master").mkdir(parents=True)
+    (tmp_path / "architectures" / "master" / "arch.neuro").write_text(
+        "architecture test { d_sem: 64 }\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def test_M_platform_flag_vast(patch_connectors, minimal_project_config, monkeypatch):
+    """--platform vast → VastConnector.launch() called."""
+    from neuroslm.cli import cmd_deploy
+    args = _make_args(platform="vast", steps=100)
+    rc = cmd_deploy(args)
+    assert rc == 0
+    assert patch_connectors[0]["platform"] == "vast"
+
+
+def test_N_platform_flag_lightning(patch_connectors, minimal_project_config, monkeypatch):
+    """--platform lightning → LightningConnector.launch() called."""
+    from neuroslm.cli import cmd_deploy
+    args = _make_args(platform="lightning", steps=100)
+    rc = cmd_deploy(args)
+    assert rc == 0
+    assert patch_connectors[0]["platform"] == "lightning"
+
+
+def test_O_no_platform_uses_toml(patch_connectors, tmp_path, monkeypatch):
+    """No --platform flag → reads [deploy].platform from brian.toml."""
+    cfg_file = tmp_path / "brian.toml"
+    cfg_file.write_text(
+        "[current]\narch = 'architectures/master'\n\n[deploy]\nplatform = 'lightning'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "architectures" / "master").mkdir(parents=True)
+    (tmp_path / "architectures" / "master" / "arch.neuro").write_text(
+        "architecture test { d_sem: 64 }\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    from neuroslm.cli import cmd_deploy
+    args = _make_args(platform=None, steps=100)
+    rc = cmd_deploy(args)
+    assert rc == 0
+    assert patch_connectors[0]["platform"] == "lightning"

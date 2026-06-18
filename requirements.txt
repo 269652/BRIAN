@@ -19,3 +19,9 @@ transformers>=4.30
 # but pinning here documents the direct usage so a future
 # transformers bump can't accidentally drop it.
 huggingface_hub>=0.20
+# lightning-sdk — used by neuroslm.connectors.lightning.LightningConnector
+# to launch training runs on Lightning AI Studios. Optional at runtime
+# (the connector prints a clear install hint when missing) but listed
+# here so `pip install -r requirements.txt` provisions every code path
+# brian.toml's [deploy].platform can route to.
+lightning-sdk>=0.2; python_version >= "3.10"

@@ -563,6 +563,23 @@ training {
     scales: {
         default: "30m_p4"
 
+        # ── Ultra-fast iteration scale (mechanism design / DSL debugging) ──
+        # 8M trunk, no MoE experts loaded. Used when iterating on Φ-loss
+        # math, NFG topology mutations, or DSL compiler changes — anything
+        # where you need 30-60s/2k-step smoke runs to validate a code path
+        # before paying for a real run. Set EXPERTS=0 in env to also strip
+        # the multi_cortex block at load time.
+        iter_8m: {
+            d_model:       256
+            depth:         4
+            n_heads:       4
+            max_ctx:       512
+            batch_size:    4
+            seq_len:       256
+            grad_accum:    1
+            approx_params: "8M"
+        }
+
         30m_p4: {
             d_model:       512
             depth:         8

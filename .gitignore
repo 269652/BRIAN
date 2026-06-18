@@ -1,5 +1,7 @@
 # Checkpoints / model weights
 # LFS-tracked checkpoints are allowed
+# Local inference checkpoints (downloaded by `brian checkpoints download`)
+checkpoints/
 
 # Python caches
 __pycache__/

@@ -127,6 +127,20 @@ _DEFAULT_HF_REPO_ID = "moritzroessler/BRIAN"
 # (no ~500-step LR-warmup-shape recovery curve).
 _DEFAULT_PUSH_OPTIMIZER = False
 
+# ── deploy platform (2026-06-18) ─────────────────────────────────────
+# Which cloud provider to use for `brian deploy`. The connector for the
+# chosen platform is resolved by `neuroslm.connectors.get_connector`.
+# Override with BRIAN_DEFAULT_PLATFORM env or --platform CLI flag.
+_DEFAULT_PLATFORM = "vast"
+
+# ── deploy machine (2026-06-18) ──────────────────────────────────────
+# Default GPU/machine tier when the connector supports it (currently
+# Lightning AI). Substring match against the connector's enum, so values
+# like "T4", "A10G", "A100", "L4" all work. Empty = let the connector
+# pick its own default. Override with BRIAN_DEFAULT_MACHINE env or
+# ``brian deploy --machine T4``.
+_DEFAULT_MACHINE = ""
+
 
 # ─── data class ──────────────────────────────────────────────────────
 
@@ -197,6 +211,19 @@ class ProjectConfig:
     # ``.pt`` always has full optimiser state. See
     # ``neuroslm.checkpoint_push._maybe_strip_optimizer``.
     default_push_optimizer: bool = _DEFAULT_PUSH_OPTIMIZER
+    # ── Deploy platform (2026-06-18) ──
+    # Which cloud provider ``brian deploy`` uses. Resolved by
+    # ``neuroslm.connectors.get_connector``. Overridden by the
+    # ``--platform`` CLI flag and ``BRIAN_DEFAULT_PLATFORM`` env.
+    default_platform: str = _DEFAULT_PLATFORM
+    # ── Deploy machine (2026-06-18) ──
+    # GPU/machine tier hint passed through to connectors that support
+    # explicit machine selection (currently Lightning AI). Substring
+    # match against the connector's enum, e.g. "T4", "A10G", "A100",
+    # "L4". Empty string means "let the connector pick". Overridden by
+    # the ``--machine`` CLI flag and ``BRIAN_DEFAULT_MACHINE`` env.
+    default_machine: str = _DEFAULT_MACHINE
+
     # ── Per-hardware preset map ──
     # ``[hardware.<NAME>] preset = "..."`` sections feed this dict.
     # Looked up by ``cli._resolve_effective_preset`` AFTER the arch's
@@ -395,6 +422,9 @@ def load_project_config(
     defaults_section = (
         data.get("defaults", {}) if isinstance(data, dict) else {}
     )
+    deploy_section = (
+        data.get("deploy", {}) if isinstance(data, dict) else {}
+    )
     # ``[hardware.A100] preset = "large"`` deserialises as
     # ``data["hardware"] == {"A100": {"preset": "large"}}``.
     hardware_section = (
@@ -459,6 +489,12 @@ def load_project_config(
     default_push_optimizer = bool(
         defaults_section.get("push_optimizer", _DEFAULT_PUSH_OPTIMIZER)
     )
+    default_platform = str(
+        deploy_section.get("platform", _DEFAULT_PLATFORM)
+    )
+    default_machine = str(
+        deploy_section.get("machine", _DEFAULT_MACHINE)
+    )
 
     # ── env-var overrides (BRIAN_ prefix to avoid collisions) ──
     env_arch = os.environ.get("BRIAN_ARCH")
@@ -487,6 +523,8 @@ def load_project_config(
     env_default_push_optimizer = os.environ.get(
         "BRIAN_DEFAULT_PUSH_OPTIMIZER"
     )
+    env_default_platform = os.environ.get("BRIAN_DEFAULT_PLATFORM")
+    env_default_machine = os.environ.get("BRIAN_DEFAULT_MACHINE")
 
     if env_arch:
         arch = env_arch
@@ -581,6 +619,11 @@ def load_project_config(
         # truthy semantics most CLI users expect from a bool env.
         default_push_optimizer = env_default_push_optimizer.strip().lower() \
             in ("1", "true", "yes", "on")
+    if env_default_platform:
+        default_platform = env_default_platform
+    if env_default_machine is not None:
+        # Allow empty string to clear a brian.toml setting.
+        default_machine = env_default_machine
 
     return ProjectConfig(
         repo_root=repo_root,
@@ -604,6 +647,8 @@ def load_project_config(
         default_push_backend=default_push_backend,
         default_hf_repo_id=default_hf_repo_id,
         default_push_optimizer=default_push_optimizer,
+        default_platform=default_platform,
+        default_machine=default_machine,
         hardware_presets=hardware_presets,
     )
 
