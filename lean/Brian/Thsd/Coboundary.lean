@@ -1,7 +1,7 @@
 import Brian.Thsd.Sheaf
 
 /-
-  Brian.Thsd.Coboundary — δ⁰, δ¹ and the H¹ contradiction guard.
+  Brian.Thsd.Coboundary — δ⁰, δ¹ and the H¹ / Fiedler predicates.
 
   Mirrors `neuroslm/thsd/engine.py::CoboundaryOperator`. See
   `docs/formal_framework.md` §6.4 ("Triple-Guard linter").
@@ -12,35 +12,49 @@ import Brian.Thsd.Sheaf
   "obstruction to gluing local sections into a global one"
   (formal_framework.md §6.3).
 
-  For the H004 triple-guard soundness theorem we only need a
-  *predicate-level* abstraction: `H1Vanishes K` says H¹ = 0.
+  For the H004 triple-guard soundness theorem we need *predicate-level*
+  abstractions `H1Vanishes K` and `LambdaPositive K lamMin`. These are
+  declared as **opaque axioms** (not `True`) so that:
+
+    1. Any proof using them must go through
+       `Brian.Postulate.Coboundary.H1Vanishes_holds` /
+       `Brian.Postulate.Coboundary.LambdaPositive_holds` — a named
+       admission of the empirical content.
+    2. The pattern `def H1Vanishes _ : Prop := True` is banned by
+       CLAUDE.md §12.2 ("no `: True` obligations"); the opaque axiom
+       form is the correct substitute.
+
   The concrete cochain machinery is in `neuroslm/thsd/engine.py`;
-  the H004 proof is a tautology over the conjunction, so we do not
-  need a Lean-internal proof of `H1Vanishes` from cellular data.
+  the H004 proof is a tautology over the conjunction — what matters
+  is that the three predicates are *distinct and non-trivial*.
 -/
 namespace Brian.Thsd
 
 /-- Predicate: "the first cohomology of (K, F) vanishes."
 
-    Concretely this means every co-1-cycle is a co-1-boundary
-    (ker δ¹ = im δ⁰), but for the triple-guard soundness proof we
-    only need the predicate, not the construction. -/
-def H1Vanishes (_s : Sheaf) : Prop := True
+    Concretely: ker δ¹ = im δ⁰ for the sheaf cochain complex
+    C⁰ →^{δ⁰} C¹ →^{δ¹} C².  A non-trivial H¹ class is an
+    obstruction to gluing local sections into a global one
+    (docs/formal_framework.md §6.3).
+
+    Declared as an opaque axiom — not `True` — so consumers must
+    discharge it via `Brian.Postulate.Coboundary.H1Vanishes_holds`.
+    The full cochain machinery will eventually make this a real theorem
+    derived from `CoboundaryOperator`; for now the predicate exists as
+    a named obligation in the THSD vocabulary. -/
+-- @[brian_postulate]
+axiom H1Vanishes : Sheaf → Prop
 
 /-- Predicate: "the Fiedler eigenvalue λ₁(L) exceeds a threshold."
 
-    The full content is `λ₁(L) > λ_min` where L = δ⁰ᵀδ⁰ is the
-    sheaf Laplacian. -/
-def LambdaPositive (_s : Sheaf) (_lamMin : Nat) : Prop := True
+    `λ₁(L) > lamMin` where L = δ⁰ᵀδ⁰ is the sheaf Laplacian. A
+    positive Fiedler value guarantees algebraic connectivity: every
+    section can propagate across the sheaf graph.
 
-/-- Both predicates are stable under the H001 mutation in the
-    trivial-predicate model. The actual Brian library will
-    refine this to a real test on `couplingCount` once the
-    cochain machinery lands. -/
-theorem H1Vanishes_addCoupling (s : Sheaf) (α : Coupling) :
-    H1Vanishes s → H1Vanishes (s ⊕ α) := fun h => h
-
-theorem LambdaPositive_addCoupling (s : Sheaf) (α : Coupling) (lamMin : Nat) :
-    LambdaPositive s lamMin → LambdaPositive (s ⊕ α) lamMin := fun h => h
+    Declared as an opaque axiom — not `True` — so consumers must
+    discharge it via
+    `Brian.Postulate.Coboundary.LambdaPositive_holds`. -/
+-- @[brian_postulate]
+axiom LambdaPositive : Sheaf → Nat → Prop
 
 end Brian.Thsd
