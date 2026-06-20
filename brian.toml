@@ -145,9 +145,10 @@ push_optimizer = false
 # Values: "vast" | "lightning"
 platform = "lightning"
 # GPU/machine tier for connectors that support it.
+
 # Substring match: "T4", "A10G", "A100", "L4", "H100", etc.
 # Override with `brian deploy --machine A10G` or BRIAN_DEFAULT_MACHINE env.
-machine = "A100"
+machine = "T4"
 # Lightning AI teamspace to launch the Studio under. Empty = use the
 # SDK default (your personal teamspace). Set this if your account has
 # multiple teamspaces and you want a specific one. Override with

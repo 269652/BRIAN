@@ -302,26 +302,91 @@ class LightningConnector(BaseConnector):
     def launch(self, config: DeployConfig) -> int:
         """SSH-style deploy: clone repo on Studio, set up env, run training.
 
-        The training process is *detached* — the SDK call returns as
-        soon as the background ``nohup`` is in flight, so ``brian
-        deploy`` exits while training continues on the Studio.
+        Auth options (highest-precedence first):
+          1. ``LIGHTNING_SSH_TARGET=s_<id>@ssh.lightning.ai`` in .env /
+             shell — pure-SSH mode: Studio discovery via SDK is skipped
+             entirely.  Requires the SSH key at ``~/.lightning/lightning_rsa``
+             (downloaded once by ``lightning login`` or ``brian deploy``
+             with credentials, then reused forever).
+          2. ``lightning login`` (writes ``~/.lightning/credentials.json``)
+          3. ``LIGHTNING_USER_ID`` + ``LIGHTNING_API_KEY`` in .env / shell.
+
+        The training process is *detached* — the SSH call returns as soon
+        as the background ``nohup`` is in flight, so ``brian deploy`` exits
+        while training continues on the Studio.
         Re-attach via ``brian ps --platform lightning``.
         """
         # ── 1. Resolve auth from .env / env ──
         _bootstrap_lightning_secrets()
-        if not (os.environ.get("LIGHTNING_USER_ID") and
-                os.environ.get("LIGHTNING_API_KEY")):
-            print(
-                "[lightning] missing credentials.\n"
-                "  Set both LIGHTNING_USER_ID and LIGHTNING_API_KEY\n"
-                "  (in .env, your shell, or via `lightning login`).\n"
-                "  Get them from https://lightning.ai → Profile → "
-                "API Keys.",
-                file=sys.stderr,
-            )
-            return 1
 
-        # ── 2. Import SDK ──
+        branch = (config.branch
+                  or config.extra_env.get("BRANCH")
+                  or _git_current_branch())
+        repo_url = (config.extra_env.get("REPO_URL")
+                    or _git_repo_url()
+                    or "https://github.com/269652/BRIAN.git")
+
+        # ── 2. Check for pure-SSH mode (LIGHTNING_SSH_TARGET shortcut) ──
+        ssh_target_override = (
+            os.environ.get("LIGHTNING_SSH_TARGET")
+            or config.extra_env.get("LIGHTNING_SSH_TARGET")
+            or ""
+        )
+        if ssh_target_override:
+            key_path = self._try_existing_ssh_key()
+            if key_path is None:
+                # Attempt download with API key if available.
+                try:
+                    key_path = self._get_ssh_key()
+                except RuntimeError:
+                    pass
+            if key_path is None:
+                print(
+                    "[lightning] LIGHTNING_SSH_TARGET is set but no SSH key "
+                    "found at ~/.lightning/lightning_rsa.\n"
+                    "  Download it once by setting LIGHTNING_API_KEY and "
+                    "running `brian deploy` (it will be cached for future runs).",
+                    file=sys.stderr,
+                )
+                return 1
+            job_id = _short_id()
+            log_path = f"{REMOTE_LOGS}/{job_id}.log"
+            studio_name = (f"brian-{config.label}" if config.label
+                           else "brian-train")
+            machine_s = (
+                config.extra_env.get("LIGHTNING_MACHINE")
+                or config.scale
+                or "A100"
+            )
+            print(f"[lightning] mode        : pure-SSH (no SDK auth)")
+            print(f"[lightning] ssh_target  : {ssh_target_override}")
+            print(f"[lightning] SSH key     : {key_path}")
+            print(f"[lightning] studio      : {studio_name}")
+            print(f"[lightning] machine     : {machine_s}")
+            print(f"[lightning] repo        : {repo_url}")
+            print(f"[lightning] branch      : {branch}")
+            print(f"[lightning] arch        : {config.arch or '(default)'}")
+            print(f"[lightning] steps       : {config.steps}")
+            if config.resume_from:
+                print(f"[lightning] resume_from : {config.resume_from}")
+            print(f"[lightning] job_id      : {job_id}")
+            print(f"[lightning] remote log  : {log_path}")
+            return self._run_setup_and_train(
+                config=config,
+                key_path=key_path,
+                ssh_target=ssh_target_override,
+                repo_url=repo_url,
+                branch=branch,
+                job_id=job_id,
+                log_path=log_path,
+                studio_name=studio_name,
+                teamspace="(ssh-target)",
+                host="(ssh-target)",
+                machine_s=machine_s,
+                sdk_name="none",
+            )
+
+        # ── 3. Import SDK ──
         Studio, Machine, sdk_name = _import_lightning_sdk()
         if Studio is None:
             print(
@@ -332,11 +397,21 @@ class LightningConnector(BaseConnector):
             )
             return 1
 
-        # ── 3. Resolve user + teamspace ──
+        # ── 4. Resolve user + teamspace via SDK ──
         try:
             user = _get_authed_user_safe()
         except RuntimeError as exc:
-            print(f"[lightning] {exc}", file=sys.stderr)
+            print(
+                f"[lightning] SDK authentication failed: {exc}\n"
+                "  Options:\n"
+                "  1. Run `lightning login` (writes ~/.lightning/credentials)\n"
+                "  2. Set LIGHTNING_USER_ID + LIGHTNING_API_KEY in .env\n"
+                "     (get them from https://lightning.ai → Profile → API Keys)\n"
+                "  3. Set LIGHTNING_SSH_TARGET=s_<id>@ssh.lightning.ai in .env\n"
+                "     (copy from Lightning web UI → Studio → SSH; requires SSH key\n"
+                "      at ~/.lightning/lightning_rsa from a prior `lightning login`)",
+                file=sys.stderr,
+            )
             return 1
 
         requested_ts = (
@@ -350,21 +425,14 @@ class LightningConnector(BaseConnector):
             print(f"[lightning] {exc}", file=sys.stderr)
             return 1
 
-        # ── 4. Assemble launch parameters ──
+        # ── 5. Assemble launch parameters ──
         job_id = _short_id()
         studio_name = (f"brian-{config.label}" if config.label
                        else "brian-train")
         machine = self._resolve_machine(config, Machine)
-        branch = (config.branch
-                  or config.extra_env.get("BRANCH")
-                  or _git_current_branch())
-        repo_url = (config.extra_env.get("REPO_URL")
-                    or _git_repo_url()
-                    or "https://github.com/269652/BRIAN.git")
         log_path = f"{REMOTE_LOGS}/{job_id}.log"
 
-        # Pre-flight summary — any failure beyond this point is
-        # post-launch (cloud-side), not configuration-side.
+        # Pre-flight summary
         print(f"[lightning] SDK         : {sdk_name}")
         print(f"[lightning] user        : {user.name}")
         print(f"[lightning] teamspace   : {teamspace.name}")
@@ -379,7 +447,7 @@ class LightningConnector(BaseConnector):
         print(f"[lightning] job_id      : {job_id}")
         print(f"[lightning] remote log  : {log_path}")
 
-        # ── 5. Provision the Studio ──
+        # ── 6. Provision the Studio ──
         try:
             studio = Studio(
                 name=studio_name,
@@ -392,8 +460,6 @@ class LightningConnector(BaseConnector):
                   f"{exc}", file=sys.stderr)
             return 1
 
-        # Start the machine. Idempotent — already-running Studios
-        # surface a benign error we can swallow.
         print(f"[lightning] starting Studio on {machine} ...")
         try:
             studio.start(machine=machine)
@@ -406,19 +472,15 @@ class LightningConnector(BaseConnector):
                       f"{type(exc).__name__}: {exc}", file=sys.stderr)
                 return 1
 
-        # ── 6. Push env vars onto the Studio so the training process
-        #       sees HF_TOKEN / GITHUB_PAT / repo coordinates.
-        remote_env = self._build_remote_env(config, repo_url, branch,
-                                            job_id)
+        # ── 7. Push env vars onto the Studio ──
+        remote_env = self._build_remote_env(config, repo_url, branch, job_id)
         try:
             studio.set_env(remote_env, partial=True)
         except Exception as exc:
-            # set_env can race with the boot; we proceed and re-export
-            # the vars inline in the setup script as a belt-and-braces.
             print(f"[lightning] (note) set_env: {type(exc).__name__}: "
                   f"{exc}", file=sys.stderr)
 
-        # ── 7. Download SSH key and resolve SSH target ──
+        # ── 8. Get SSH key + target ──
         try:
             key_path = self._get_ssh_key()
             print(f"[lightning] SSH key : {key_path}")
@@ -428,14 +490,40 @@ class LightningConnector(BaseConnector):
         ssh_target = f"s_{studio._studio.id}@ssh.lightning.ai"
         print(f"[lightning] SSH target: {ssh_target}")
 
-        # Build the env-export prefix so every SSH session sees secrets.
+        return self._run_setup_and_train(
+            config=config,
+            key_path=key_path,
+            ssh_target=ssh_target,
+            repo_url=repo_url,
+            branch=branch,
+            job_id=job_id,
+            log_path=log_path,
+            studio_name=studio_name,
+            teamspace=teamspace.name,
+            host=user.name,
+            machine_s=str(machine),
+            sdk_name=sdk_name,
+            remote_env=remote_env,
+        )
+
+    def _run_setup_and_train(
+        self, config: DeployConfig, key_path: str, ssh_target: str,
+        repo_url: str, branch: str, job_id: str, log_path: str,
+        studio_name: str, teamspace: str, host: str, machine_s: str,
+        sdk_name: str, remote_env: Optional[dict] = None,
+    ) -> int:
+        """SSH into the Studio, run setup + detached training, register job."""
+        if remote_env is None:
+            remote_env = self._build_remote_env(config, repo_url, branch,
+                                                job_id)
+
         env_prefix = "".join(
             f"export {k}={shlex.quote(str(v))}\n"
             for k, v in remote_env.items()
             if v
         )
 
-        # ── 8. Run setup (clone + install) via SSH ──
+        # ── Setup (clone + install) ──
         setup_cmd = self._build_setup_command(repo_url, branch, log_path)
         print(f"[lightning] running setup via SSH (clone + install) ...")
         try:
@@ -452,7 +540,7 @@ class LightningConnector(BaseConnector):
             return exit_code or 1
         print(f"[lightning] setup OK")
 
-        # ── 9. Launch training as a detached background process via SSH ──
+        # ── Launch detached training ──
         train_cmd = self._build_train_command(config, log_path)
         print(f"[lightning] launching detached training via SSH:")
         print(f"            {train_cmd}")
@@ -469,25 +557,27 @@ class LightningConnector(BaseConnector):
             print(f"[lightning] launch exited {rc}", file=sys.stderr)
             return rc or 1
 
-        # ── 9. Persist job record so `brian ps` can re-attach ──
+        # ── Persist job record ──
         info = JobInfo(
             job_id=job_id,
             platform=self.platform_name(),
             label=config.label or "(none)",
             status=JobStatus.RUNNING.value,
-            machine=str(machine),
+            machine=machine_s,
             branch=branch,
             arch=config.arch or "",
             steps=config.steps,
             studio_name=studio_name,
-            teamspace=teamspace.name,
-            host=user.name,
+            teamspace=teamspace,
+            host=host,
             log_path=log_path,
             source_dna=config.source_dna or "",
             extra={
                 "sdk": sdk_name,
                 "repo_url": repo_url,
                 "resume_from": config.resume_from or "",
+                "ssh_target": ssh_target,
+                "ssh_key": key_path,
             },
         )
         path = register_job(info)
@@ -513,7 +603,7 @@ class LightningConnector(BaseConnector):
             return []
         # Bootstrap secrets once for the whole batch so SDK auth works.
         _bootstrap_lightning_secrets()
-        Studio, _Machine, _ = _import_lightning_sdk()
+        Studio, _, _ = _import_lightning_sdk()
         if Studio is None:
             return records  # SDK missing — return stale records as-is
 
@@ -554,7 +644,7 @@ class LightningConnector(BaseConnector):
         if info is None or info.platform != self.platform_name():
             return JobStatus.UNKNOWN
         _bootstrap_lightning_secrets()
-        Studio, _Machine, _ = _import_lightning_sdk()
+        Studio, _, _ = _import_lightning_sdk()
         if Studio is None:
             return JobStatus.UNKNOWN
         try:
@@ -578,29 +668,6 @@ class LightningConnector(BaseConnector):
             raise ValueError(
                 f"No Lightning job with id {job_id!r} in registry"
             )
-        _bootstrap_lightning_secrets()
-        Studio, _Machine, _ = _import_lightning_sdk()
-        if Studio is None:
-            raise RuntimeError("lightning-sdk is not installed")
-        user = _get_authed_user_safe()
-        teamspace = _resolve_teamspace_handle(user, info.teamspace)
-        try:
-            # create_ok=True for re-attach across all studio states.
-            s = Studio(name=info.studio_name, teamspace=teamspace,
-                       user=user, create_ok=True)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Could not attach to Studio {info.studio_name!r}: "
-                f"{type(exc).__name__}: {exc}"
-            ) from exc
-        # Refuse to tail when the Studio is stopped — ``Studio.run`` on
-        # a stopped Studio hangs trying to provision a shell session.
-        native = getattr(s, "status", None)
-        native_name = (native.name if hasattr(native, "name") else str(native))
-        if native_name in ("Stopped", "NotCreated", "Failed"):
-            return (f"(studio {info.studio_name!r} is {native_name}; "
-                    f"start it via the Lightning UI to inspect "
-                    f"{info.log_path or 'the log'})")
         log_path = info.log_path or f"{REMOTE_LOGS}/{job_id}.log"
         if log_path.startswith("~/"):
             quoted = '"$HOME/' + log_path[2:] + '"'
@@ -608,8 +675,37 @@ class LightningConnector(BaseConnector):
             quoted = shlex.quote(log_path)
         script = (f"tail -n {int(n)} {quoted} 2>/dev/null || "
                   f"echo '(log not yet created at {log_path})'")
-        # Prefer SSH; fall back to SDK run() so read-only ops work even
-        # when the SSH key hasn't been set up yet on this machine.
+
+        # ── Fast path: use stored SSH target + key from job record ──
+        stored_target = info.extra.get("ssh_target", "") if info.extra else ""
+        stored_key = info.extra.get("ssh_key", "") if info.extra else ""
+        key_path = (stored_key if stored_key and Path(stored_key).exists()
+                    else self._try_existing_ssh_key())
+        if stored_target and key_path:
+            out, _ = self._ssh_run(key_path, stored_target, script, timeout=30)
+            return out or ""
+
+        # ── SDK path: look up Studio to get SSH target ──
+        _bootstrap_lightning_secrets()
+        Studio, _, _ = _import_lightning_sdk()
+        if Studio is None:
+            raise RuntimeError("lightning-sdk is not installed")
+        try:
+            user = _get_authed_user_safe()
+            teamspace = _resolve_teamspace_handle(user, info.teamspace)
+            s = Studio(name=info.studio_name, teamspace=teamspace,
+                       user=user, create_ok=True)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not attach to Studio {info.studio_name!r}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        native = getattr(s, "status", None)
+        native_name = (native.name if hasattr(native, "name") else str(native))
+        if native_name in ("Stopped", "NotCreated", "Failed"):
+            return (f"(studio {info.studio_name!r} is {native_name}; "
+                    f"start it via the Lightning UI to inspect "
+                    f"{info.log_path or 'the log'})")
         try:
             key_path = self._get_ssh_key()
             ssh_target = f"s_{s._studio.id}@ssh.lightning.ai"
@@ -632,7 +728,7 @@ class LightningConnector(BaseConnector):
                   file=sys.stderr)
             return 1
         _bootstrap_lightning_secrets()
-        Studio, _Machine, _ = _import_lightning_sdk()
+        Studio, _, _ = _import_lightning_sdk()
         if Studio is None:
             return 1
         try:
@@ -668,14 +764,39 @@ class LightningConnector(BaseConnector):
     # ── internal helpers ────────────────────────────────────────────
 
     @staticmethod
-    def _get_ssh_key() -> str:
-        """Download (once) and return the Lightning SSH private key path.
+    def _try_existing_ssh_key() -> Optional[str]:
+        """Return the SSH key path if it already exists locally, else None.
 
-        Calls the SDK's internal helper which authenticates with
-        ``LIGHTNING_API_KEY`` and writes ``~/.lightning/lightning_rsa``
-        (or equivalent on Windows). Idempotent — subsequent calls skip
-        the download if the file already exists.
+        Does NOT contact Lightning servers — safe to call with no credentials.
         """
+        try:
+            from lightning_sdk.utils.config import _DEFAULT_CONFIG_FILE_PATH
+            import pathlib
+            key = pathlib.Path(_DEFAULT_CONFIG_FILE_PATH).parent / "lightning_rsa"
+            if key.exists():
+                return str(key)
+        except Exception:
+            pass
+        # Fallback: ~/.ssh/lightning_rsa
+        import pathlib
+        alt = pathlib.Path.home() / ".ssh" / "lightning_rsa"
+        if alt.exists():
+            return str(alt)
+        return None
+
+    @staticmethod
+    def _get_ssh_key() -> str:
+        """Return the Lightning SSH private key path, downloading if needed.
+
+        Checks for an existing key first (``~/.lightning/lightning_rsa``)
+        so repeated calls after the first credential setup are free.
+        Falls back to :func:`configure_ssh_internal` which needs either
+        ``lightning login`` local credentials or ``LIGHTNING_API_KEY``.
+        """
+        # Fast path: key already on disk → no API call needed.
+        existing = LightningConnector._try_existing_ssh_key()
+        if existing:
+            return existing
         try:
             from lightning_sdk.cli.utils.ssh_connection import (
                 configure_ssh_internal,
@@ -683,9 +804,11 @@ class LightningConnector(BaseConnector):
             return configure_ssh_internal()
         except Exception as exc:
             raise RuntimeError(
-                f"Could not download Lightning SSH key: "
+                f"Could not obtain Lightning SSH key: "
                 f"{type(exc).__name__}: {exc}\n"
-                "Run `lightning login` or set LIGHTNING_API_KEY in .env."
+                "Run `lightning login` or set LIGHTNING_API_KEY in .env,\n"
+                "OR copy ~/.lightning/lightning_rsa from a machine that\n"
+                "has already authenticated."
             ) from exc
 
     @staticmethod
