@@ -1,0 +1,74 @@
+[train_dsl] boot @ 2026-06-20T15:30:19Z
+[train_dsl] git_commit cd2f6b21d5e8ace850f4f93da00b210d91097909 (master)
+[train_dsl] arch_dsl_sha256 9a95bed1ca04c400a87830b809368639d31a1d51f63d9d72b9295a41315aea29 (/content/brian/architectures/SmolLM)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] GQA: n_kv_heads=8/8  RoPE base=500000
+
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 290/290 [00:00<00:00, 8539.85it/s]
+
+Loading weights:   0%|          | 0/148 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 148/148 [00:00<00:00, 6196.91it/s]
+[transformers] [1mGPT2LMHeadModel LOAD REPORT[0m from: microsoft/CodeGPT-small-py
+Key                                     | Status     |  | 
+----------------------------------------+------------+--+-
+transformer.h.{0...11}.attn.masked_bias | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 290/290 [00:00<00:00, 5599.05it/s]
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] TrunkOptMonitor attached (n_trainable=146.9M, pac_sigma=0.02, pac_delta=0.05)
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+
+Generating test split:   0%|          | 0/4358 [00:00<?, ? examples/s]
+Generating test split: 100%|██████████| 4358/4358 [00:00<00:00, 105803.84 examples/s]
+
+Generating train split:   0%|          | 0/1801350 [00:00<?, ? examples/s]
+Generating train split:   2%|▏         | 43000/1801350 [00:00<00:04, 414133.35 examples/s]
+Generating train split:   6%|▌         | 111000/1801350 [00:00<00:03, 561566.18 examples/s]
+Generating train split:  15%|█▍        | 264000/1801350 [00:02<00:15, 98693.76 examples/s] 
+Generating train split:  29%|██▊       | 517000/1801350 [00:02<00:05, 243950.80 examples/s]
+Generating train split:  36%|███▌      | 645000/1801350 [00:02<00:03, 324740.24 examples/s]
+Generating train split:  44%|████▍     | 792000/1801350 [00:02<00:02, 439926.73 examples/s]
+Generating train split:  52%|█████▏    | 936675/1801350 [00:02<00:01, 531329.27 examples/s]
+Generating train split:  59%|█████▉    | 1059675/1801350 [00:03<00:01, 421603.35 examples/s]
+Generating train split:  64%|██████▍   | 1157675/1801350 [00:03<00:01, 460372.65 examples/s]
+Generating train split:  69%|██████▉   | 1241675/1801350 [00:03<00:01, 477164.70 examples/s]
+Generating train split:  74%|███████▎  | 1326675/1801350 [00:03<00:00, 495194.38 examples/s]
+Generating train split:  78%|███████▊  | 1406675/1801350 [00:03<00:00, 460622.84 examples/s]
+Generating train split:  82%|████████▏ | 1480675/1801350 [00:04<00:00, 387759.97 examples/s]
+Generating train split:  86%|████████▌ | 1546675/1801350 [00:04<00:00, 428513.04 examples/s]
+Generating train split:  89%|████████▉ | 1600675/1801350 [00:08<00:03, 58740.14 examples/s] 
+Generating train split:  97%|█████████▋| 1749675/1801350 [00:08<00:00, 94583.68 examples/s]
+Generating train split: 100%|██████████| 1801350/1801350 [00:08<00:00, 211533.14 examples/s]
+
+Generating validation split:   0%|          | 0/3760 [00:00<?, ? examples/s]
+Generating validation split: 100%|██████████| 3760/3760 [00:00<00:00, 349525.33 examples/s]
+[train_dsl] GIF OOD probe armed
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,127,007,763  (trainable 146,910,675 · frozen 980,097,088)
+  checkpoint = 149,241,634 params ≈ 569.3 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=ON pcc=ON isotropy=ON cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] DAR domain labels ON — emitting (window, source_id) tuples
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[data:chat] using OpenHermes-2.5 (teknium/OpenHermes-2.5)
+step    20 | loss 6.7418 | lm 6.0274 | ppl 414.6 | gnorm 7.472 | lr 4.17e-06 | 171 tok/s | Φ 0.882 | λ₁ 0.075 | ign 0.00 | mesoLG 0.52 | troph 8/8 μ0.83 | NT[DA=0.41 NE=0.15 5HT=0.34 ACh=0.20 eCB=0.05 Glu=0.39 GABA=0.10] | osc[δ=0.347 θ=0.319 γ=0.334] | em[C2:ρ=0.00/τ=0.47/s=0.00 C4:Q=0.4 W=1 pl=255 C3:pc=3.816 VBB:β=1.00 σ=0.0183 kl=26011.740 C5:lat=1.00 C6:pac=0.00] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.596 kl=0.453 lm_ema=11.33 cx_ema=3.59] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | gif7[dgn=0.556 lr×1.000 klf=0.0] | nfo[R=0.48 R★=0.91 A=0.61 σA=0.28 cV=0.98 κ=0.10 α=0.010 Φκ=0.52] | hpa[load=0.02 cort=0.00 NE×1.00 T×1.00 LR×1.00] | trunk[budget=0.92 bpp=4.83e-08 erank=40.0 uni=2.64 α=1.09 R²=0.93 PR=1.6]
