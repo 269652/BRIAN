@@ -475,6 +475,23 @@ training {
     vbb_alpha:     0.001
     vbb_beta_init: 1.0
 
+    # ── Riemannian Motor Projection (RMP) ──────────────────────────
+    # Hyperbolic tanh-projection of h_motor before VBB posterior:
+    #   h_proj = ρ · tanh(‖h‖/ρ) · h/‖h‖,  ρ = 1/√R
+    # Caps activation magnitude geometrically; composes with LayerNorm.
+    # R is a learnable scalar initialized to motor_curvature.
+    motor_curvature: 1.0
+
+    # ── Bures Manifold Alignment (BMA) ─────────────────────────────
+    # Sliced W₂ between trunk and expert representation distributions.
+    # Gradient flows into trunk; expert is detached (frozen target).
+    # Prevents erank collapse: trunk must match expert variance profile.
+    # Ramp mirrors GIF: 0 → full weight over steps 500-3000.
+    bma_weight:        0.05
+    bma_n_projections: 64
+    bma_ramp_start:    500
+    bma_ramp_end:      3000
+
     # ── Geometric Information Funnel (GIF) ─────────────────────────
     # Three interlocking mechanisms that fix the train-PPL / OOD-PPL
     # gap divergence observed in every 10k run so far:

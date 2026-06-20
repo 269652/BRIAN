@@ -1882,6 +1882,9 @@ class BRIANHarness(nn.Module):
           (``vbb_log_beta_max``) clamps this at runtime — the parameter
           is unclamped in storage; the clamp is applied differentiably
           in ``_compute_pc_reentry_loss``.
+        * ``self._motor_R_raw`` — single learnable scalar whose softplus is
+          the Poincaré ball curvature R for the Riemannian Motor Projection
+          (RMP).  ``None`` when ``motor_curvature <= 0``.
 
         Total parameter cost at ``d_sem = 512``: 512×512 + 512 + 1 =
         262 657 params ≈ 0.21 % of a 122 M model — negligible.
@@ -1893,6 +1896,17 @@ class BRIANHarness(nn.Module):
         before the first ``compute_loss``, so anything added lazily
         from inside the loss would be missed by AdamW's param list.
         """
+        # ── Riemannian Motor Projection ───────────────────────────────
+        # Build independently of VBB so RMP works on the legacy PC path
+        # too.  softplus(_motor_R_raw) = R₀ at init (inverse softplus).
+        _rmp_c = float(getattr(self.training_config, "motor_curvature", 0.0))
+        if _rmp_c > 0.0 and self.d_sem is not None and int(self.d_sem) > 0:
+            _rmp_raw = math.log(math.expm1(max(_rmp_c, 1e-4)))
+            self._motor_R_raw = nn.Parameter(
+                torch.tensor(_rmp_raw, dtype=torch.float32))
+        else:
+            self._motor_R_raw = None
+
         alpha = float(getattr(self.training_config, "vbb_alpha", 0.0))
         if alpha <= 0.0 or self.d_sem is None or int(self.d_sem) <= 0:
             self._vbb_sigma_head = None
@@ -2059,14 +2073,19 @@ class BRIANHarness(nn.Module):
         log_beta_param = self._vbb_log_beta.to(device)
 
         mu = h_m.to(dtype=torch.float32)                  # (B, T, D)
-        # Normalise to zero-mean unit-variance per token before computing
-        # the VBB posterior.  Without this, raw motor activations with
-        # per-element magnitude ~277 (observed in prod) drive
-        # kl_per_dim = ½(σ² + μ² − 1 − log σ²) to ~38k, and as the GIF
-        # alpha schedule ramps toward 0.05 the VBB contribution reaches
-        # ~4 nats — matching the LM loss and destabilising training.
-        # LayerNorm collapses the μ² term to O(1) so KL stays < 10 and
-        # the VBB remains a gentle regulariser regardless of activation scale.
+        # Riemannian Motor Projection (RMP): tanh-map onto Poincaré ball.
+        # ρ = 1/√R caps ‖h_proj‖ ≤ ρ for any activation magnitude.
+        # Direction is preserved exactly (radial map).
+        if getattr(self, "_motor_R_raw", None) is not None:
+            _R   = F.softplus(self._motor_R_raw)
+            _rho = _R.rsqrt()
+            _nm  = mu.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+            mu   = _rho * torch.tanh(_nm / _rho) * mu / _nm
+            self._metrics["motor_curvature_R"] = float(_R.detach())
+            self._metrics["motor_rho"]         = float(_rho.detach())
+        # LayerNorm: collapse μ² to O(1) so KL stays bounded regardless
+        # of activation scale (LayerNorm + RMP are complementary: RMP
+        # constrains the geometry, LN normalises the statistics).
         mu = torch.nn.functional.layer_norm(mu, [mu.shape[-1]])
         # Per-element log-variance from the head. We work in float32
         # to keep the exp() stable under bf16 autocast.
@@ -2318,6 +2337,77 @@ class BRIANHarness(nn.Module):
         if mc is not None and hasattr(mc, "set_nt_levels"):
             mc.set_nt_levels(levels)
 
+    # ── Bures Manifold Alignment ──────────────────────────────────────────────
+
+    def _compute_bma_loss(self, base_weight: float) -> "torch.Tensor | None":
+        """Sliced Wasserstein-2 between trunk and expert representation distributions.
+
+        Approximates the Bures metric via k random projections u ~ S^{d-1}:
+
+            loss = (1/k) Σ_u ( √Var_trunk(u) - √Var_expert(u) )²
+
+        Gradient flows into h_motor (trunk learns to match expert variance
+        profile); h_sensory is detached (frozen expert provides the target).
+
+        A linear ramp schedule (bma_ramp_start → bma_ramp_end) mirrors the
+        GIF convention so the mechanism can be phased in after the LM reaches
+        its initial fit.  Metrics are logged even when eff_weight = 0 so the
+        dashboard shows the raw W₂ value pre-ramp.
+
+        Returns None when: base_weight ≤ 0, activations absent, or eff_weight=0
+        (to avoid a zero-scalar gradient entering the optimizer).
+        """
+        if base_weight <= 0.0:
+            return None
+        h_m = getattr(self.language_model, "_last_h_motor",   None)
+        h_s = getattr(self.language_model, "_last_h_sensory", None)
+        if h_m is None or h_s is None:
+            return None
+
+        # Flatten to (N, d) — gradient flows through trunk only
+        hm = h_m.reshape(-1, h_m.shape[-1]).to(dtype=torch.float32)
+        hs = h_s.reshape(-1, h_s.shape[-1]).to(dtype=torch.float32).detach()
+
+        d = hm.shape[-1]
+        k = int(getattr(self.training_config, "bma_n_projections", 64))
+
+        # Fresh random projections each step (unbiased estimator of sliced W₂)
+        u = F.normalize(
+            torch.randn(k, d, device=hm.device, dtype=hm.dtype), dim=-1
+        )  # (k, d)
+
+        p_trunk  = hm @ u.T   # (N, k)
+        p_expert = hs @ u.T   # (N, k)
+
+        var_trunk  = p_trunk.var(dim=0).clamp(min=1e-8)           # (k,)
+        var_expert = p_expert.var(dim=0).clamp(min=1e-8).detach() # (k,) no grad
+
+        # Sliced W₂ between 1-D Gaussians: |√σ_trunk - √σ_expert|²
+        raw_loss = ((var_trunk.sqrt() - var_expert.sqrt()) ** 2).mean()
+
+        # Linear ramp (step 0-indexed; same as vbb_alpha GIF schedule)
+        ramp_start = int(getattr(self.training_config, "bma_ramp_start", 0))
+        ramp_end   = int(getattr(self.training_config, "bma_ramp_end",   0))
+        step = self._global_step
+        if ramp_end > ramp_start and step < ramp_end:
+            alpha = max(0.0, (step - ramp_start) / (ramp_end - ramp_start))
+        elif step < ramp_start:
+            alpha = 0.0
+        else:
+            alpha = 1.0
+
+        eff_weight = base_weight * alpha
+
+        # Always log so dashboard shows pre-ramp W₂
+        self._metrics["bma_loss"]       = float(raw_loss.detach())
+        self._metrics["bma_weight"]     = eff_weight
+        self._metrics["bma_var_trunk"]  = float(var_trunk.mean().detach())
+        self._metrics["bma_var_expert"] = float(var_expert.mean().detach())
+
+        if eff_weight == 0.0:
+            return None
+        return eff_weight * raw_loss
+
     def compute_loss(self, ids: torch.Tensor, targets: torch.Tensor,
                      nt_levels: Optional[Dict[str, float]] = None) -> torch.Tensor:
         """Cross-entropy loss with optional per-sample clipping + aux losses.
@@ -2559,6 +2649,17 @@ class BRIANHarness(nn.Module):
             mspcc_loss = self._compute_mspcc_loss(base_weight=0.0)
             if mspcc_loss is not None:
                 total = total + mspcc_loss
+
+            # ── BMA: Bures Manifold Alignment ──
+            # Sliced W₂ between trunk and expert representation distributions.
+            # Penalises representation collapse (erank drop) by enforcing that
+            # the trunk's per-direction variance profile matches the expert's.
+            bma_w = float(getattr(self.training_config, "bma_weight", 0.0))
+            if bma_w > 0.0:
+                bma_loss = self._compute_bma_loss(bma_w)
+                if bma_loss is not None:
+                    total = total + bma_loss
+
         # Record the LM-portion so train_step can update MAT after the
         # backward pass without a second forward.
         self._last_lm_loss_value = float(loss_lm.detach().item())

@@ -924,6 +924,35 @@ class TrainingConfig:
     # Composes with all MDRV stabilisers (free-bits, β-ceiling, PEC).
     # 0.0 = off (Euclidean VBB, legacy path). Recommended: 1.0.
     vbb_curvature: float = 0.0
+    # ── Riemannian Motor Projection (RMP) ────────────────────────────
+    # Learnable hyperbolic projection of h_motor onto the Poincaré ball
+    # of curvature R before it enters the VBB posterior:
+    #   h_proj = ρ · tanh(‖h‖ / ρ) · (h / ‖h‖),   ρ = 1 / √R
+    # Caps the motor activation magnitude to ρ, preventing KL explosion
+    # for any activation scale.  Direction is preserved exactly.
+    # Composes with the LayerNorm normalisation (LayerNorm runs after).
+    # 0.0 = off (identity, legacy behaviour). Recommended: 1.0.
+    motor_curvature: float = 0.0
+    # ── Bures Manifold Alignment (BMA) ───────────────────────────────
+    # Sliced Wasserstein-2 loss between trunk and expert representation
+    # distributions.  Approximates the Bures metric via k random
+    # projections u ~ S^{d-1}:
+    #   loss = E_u[( √Var_trunk(u) - √Var_expert(u) )²]
+    # Gradient flows into h_motor; h_sensory is detached (frozen expert).
+    # Penalises representation collapse: when trunk erank collapses to
+    # a low-dim subspace its per-direction variances shrink, widening
+    # the W₂ gap to the diverse expert corpus.
+    # bma_weight = 0.0 → off.  Recommended: 0.05
+    bma_weight: float = 0.0
+    # Number of random projection directions for sliced W₂ approximation.
+    # JL lemma: k ≥ 64 approximates full Bures distance within ~10%.
+    bma_n_projections: int = 64
+    # Linear ramp schedule for bma_weight (matches GIF convention).
+    # Before bma_ramp_start: effective weight = 0.
+    # Between start and end: linear interpolation.
+    # After bma_ramp_end (or both == 0): full weight.
+    bma_ramp_start: int = 0
+    bma_ramp_end:   int = 0
     # ── HPB Phase 3 — Multi-Scale Predictive Coding Cascade (MSPCC) ──
     # When set to a dict with `enabled: true`, applies the VBB free-
     # energy term to EVERY adjacent layer pair (ℓ, ℓ+1) of the trunk
@@ -1158,6 +1187,18 @@ def parse_training_config(body: str) -> TrainingConfig:
     # HPB Phase 4 — Hyperbolic Bowtie Waist curvature.
     if "vbb_curvature" in props:
         cfg.vbb_curvature = float(props["vbb_curvature"])
+    # Riemannian Motor Projection (RMP).
+    if "motor_curvature" in props:
+        cfg.motor_curvature = float(props["motor_curvature"])
+    # Bures Manifold Alignment (BMA).
+    if "bma_weight" in props:
+        cfg.bma_weight = float(props["bma_weight"])
+    if "bma_n_projections" in props:
+        cfg.bma_n_projections = int(props["bma_n_projections"])
+    if "bma_ramp_start" in props:
+        cfg.bma_ramp_start = int(props["bma_ramp_start"])
+    if "bma_ramp_end" in props:
+        cfg.bma_ramp_end = int(props["bma_ramp_end"])
     # HPB Phase 3 — Multi-Scale Predictive Coding Cascade.
     if "mspcc" in props:
         cfg.mspcc = _parse_novel_topology_dict(props["mspcc"])
