@@ -418,31 +418,56 @@ class LightningConnector(BaseConnector):
             print(f"[lightning] (note) set_env: {type(exc).__name__}: "
                   f"{exc}", file=sys.stderr)
 
-        # ── 7. Run setup (clone + install) synchronously ──
-        setup_cmd = self._build_setup_command(repo_url, branch, log_path)
-        print(f"[lightning] running setup (clone + install) ...")
+        # ── 7. Download SSH key and resolve SSH target ──
         try:
-            out, exit_code = studio.run_with_exit_code(setup_cmd)
+            key_path = self._get_ssh_key()
+            print(f"[lightning] SSH key : {key_path}")
+        except RuntimeError as exc:
+            print(f"[lightning] {exc}", file=sys.stderr)
+            return 1
+        ssh_target = f"s_{studio._studio.id}@ssh.lightning.ai"
+        print(f"[lightning] SSH target: {ssh_target}")
+
+        # Build the env-export prefix so every SSH session sees secrets.
+        env_prefix = "".join(
+            f"export {k}={shlex.quote(str(v))}\n"
+            for k, v in remote_env.items()
+            if v
+        )
+
+        # ── 8. Run setup (clone + install) via SSH ──
+        setup_cmd = self._build_setup_command(repo_url, branch, log_path)
+        print(f"[lightning] running setup via SSH (clone + install) ...")
+        try:
+            out, exit_code = self._ssh_run(
+                key_path, ssh_target, env_prefix + setup_cmd, timeout=600
+            )
         except Exception as exc:
-            print(f"[lightning] setup failed: "
+            print(f"[lightning] setup SSH failed: "
                   f"{type(exc).__name__}: {exc}", file=sys.stderr)
             return 1
+        print(out[-4000:] if len(out) > 4000 else out)
         if exit_code != 0:
-            print(f"[lightning] setup exited {exit_code}:\n{out[-2000:]}",
-                  file=sys.stderr)
+            print(f"[lightning] setup exited {exit_code}", file=sys.stderr)
             return exit_code or 1
-        print(f"[lightning] setup OK ({len(out.splitlines())} lines)")
+        print(f"[lightning] setup OK")
 
-        # ── 8. Launch training as a detached background process ──
+        # ── 9. Launch training as a detached background process via SSH ──
         train_cmd = self._build_train_command(config, log_path)
-        print(f"[lightning] launching detached training:")
+        print(f"[lightning] launching detached training via SSH:")
         print(f"            {train_cmd}")
         try:
-            studio.run_and_detach(train_cmd, timeout=30)
+            out, rc = self._ssh_run(
+                key_path, ssh_target, env_prefix + train_cmd, timeout=60
+            )
         except Exception as exc:
-            print(f"[lightning] detach failed: "
+            print(f"[lightning] launch SSH failed: "
                   f"{type(exc).__name__}: {exc}", file=sys.stderr)
             return 1
+        print(out)
+        if rc != 0:
+            print(f"[lightning] launch exited {rc}", file=sys.stderr)
+            return rc or 1
 
         # ── 9. Persist job record so `brian ps` can re-attach ──
         info = JobInfo(
@@ -576,24 +601,27 @@ class LightningConnector(BaseConnector):
             return (f"(studio {info.studio_name!r} is {native_name}; "
                     f"start it via the Lightning UI to inspect "
                     f"{info.log_path or 'the log'})")
-        # ``shlex.quote`` wraps in single quotes, which SUPPRESS tilde
-        # expansion (``'~/brian/logs/x.log'`` is interpreted literally).
-        # Rewrite leading ``~/`` → ``$HOME/`` so the shell interpolates
-        # the user's home dir even inside the quoted path.
         log_path = info.log_path or f"{REMOTE_LOGS}/{job_id}.log"
         if log_path.startswith("~/"):
             quoted = '"$HOME/' + log_path[2:] + '"'
         else:
             quoted = shlex.quote(log_path)
-        cmd = (f"tail -n {int(n)} {quoted} 2>/dev/null || "
-               f"echo '(log not yet created at {log_path})'")
+        script = (f"tail -n {int(n)} {quoted} 2>/dev/null || "
+                  f"echo '(log not yet created at {log_path})'")
+        # Prefer SSH; fall back to SDK run() so read-only ops work even
+        # when the SSH key hasn't been set up yet on this machine.
         try:
-            out = s.run(cmd)
-        except Exception as exc:
-            raise RuntimeError(
-                f"tail_logs failed for {job_id}: "
-                f"{type(exc).__name__}: {exc}"
-            ) from exc
+            key_path = self._get_ssh_key()
+            ssh_target = f"s_{s._studio.id}@ssh.lightning.ai"
+            out, _ = self._ssh_run(key_path, ssh_target, script, timeout=30)
+        except Exception:
+            try:
+                out = s.run(script)
+            except Exception as exc2:
+                raise RuntimeError(
+                    f"tail_logs failed for {job_id}: "
+                    f"{type(exc2).__name__}: {exc2}"
+                ) from exc2
         return out or ""
 
     def stop(self, job_id: str) -> int:
@@ -638,6 +666,61 @@ class LightningConnector(BaseConnector):
         return 0
 
     # ── internal helpers ────────────────────────────────────────────
+
+    @staticmethod
+    def _get_ssh_key() -> str:
+        """Download (once) and return the Lightning SSH private key path.
+
+        Calls the SDK's internal helper which authenticates with
+        ``LIGHTNING_API_KEY`` and writes ``~/.lightning/lightning_rsa``
+        (or equivalent on Windows). Idempotent — subsequent calls skip
+        the download if the file already exists.
+        """
+        try:
+            from lightning_sdk.cli.utils.ssh_connection import (
+                configure_ssh_internal,
+            )
+            return configure_ssh_internal()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not download Lightning SSH key: "
+                f"{type(exc).__name__}: {exc}\n"
+                "Run `lightning login` or set LIGHTNING_API_KEY in .env."
+            ) from exc
+
+    @staticmethod
+    def _ssh_run(key_path: str, ssh_target: str, script: str,
+                 timeout: int = 300) -> "Tuple[str, int]":
+        """Execute *script* on a Lightning Studio via real SSH.
+
+        Uses ``bash --login`` so the remote ``~/.bashrc`` / PATH are
+        loaded — same environment the user gets when running
+        ``lightning studio ssh``.  The *script* is piped to stdin so
+        complex multi-line commands with arbitrary quoting work without
+        shell-escaping gymnastics on the caller side.
+
+        Returns ``(stdout+stderr, exit_code)``.
+        """
+        import subprocess as _sp
+        proc = _sp.run(
+            [
+                "ssh",
+                "-i", key_path,
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=/dev/null",
+                "-o", "BatchMode=yes",
+                "-o", "ServerAliveInterval=15",
+                "-o", "ServerAliveCountMax=4",
+                "-o", "ConnectTimeout=30",
+                ssh_target,
+                "bash", "--login",
+            ],
+            input=script,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return proc.stdout + proc.stderr, proc.returncode
 
     @staticmethod
     def _resolve_machine(config: DeployConfig, Machine) -> "Machine":

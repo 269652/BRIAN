@@ -95,8 +95,8 @@ branch = "master"
 # explicit value here so a box self-destruction (H24 mode of failure)
 # can never eat more than ~push_every steps of checkpoint progress.
 log_every = 20
-save_every = 2500
-push_every = 2500
+save_every = 2000
+push_every = 2000
 
 # ── OOD evaluation cadence (2026-06-18) ──
 # Mid-training WikiText-103 perplexity probe — runs the *real*
@@ -144,9 +144,8 @@ push_optimizer = false
 # neuroslm/connectors/. Override per-run with `brian deploy --platform X`.
 # Values: "vast" | "lightning"
 platform = "lightning"
-# GPU/machine tier for connectors that support it (currently Lightning AI).
-# Substring match against the connector's enum, e.g. "T4", "A10G", "A100",
-# "L4". Empty string = let the connector pick (currently T4 for Lightning).
+# GPU/machine tier for connectors that support it.
+# Substring match: "T4", "A10G", "A100", "L4", "H100", etc.
 # Override with `brian deploy --machine A10G` or BRIAN_DEFAULT_MACHINE env.
 machine = "A100"
 # Lightning AI teamspace to launch the Studio under. Empty = use the
