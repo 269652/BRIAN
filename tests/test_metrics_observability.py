@@ -393,11 +393,11 @@ class TestNfoFormatterAppearsInLog:
 class TestBrianTomlCheckpointCadence:
     """brian.toml at repo root must reflect the user's chosen cadence."""
 
-    def test_E1_save_every_is_2500(self):
-        """User asked for "checkpoint saving every 2.5k" on 2026-06-18."""
+    def test_E1_save_every_is_2000(self):
+        """User changed checkpoint cadence to 2k on 2026-06-20."""
         cfg = load_project_config()
-        assert cfg.default_save_every == 2500, (
-            f"brian.toml [defaults].save_every must be 2500 "
+        assert cfg.default_save_every == 2000, (
+            f"brian.toml [defaults].save_every must be 2000 "
             f"(got {cfg.default_save_every}). Update brian.toml.")
 
     def test_E2_ood_every_is_500(self):

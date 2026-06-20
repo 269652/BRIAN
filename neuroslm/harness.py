@@ -2059,6 +2059,15 @@ class BRIANHarness(nn.Module):
         log_beta_param = self._vbb_log_beta.to(device)
 
         mu = h_m.to(dtype=torch.float32)                  # (B, T, D)
+        # Normalise to zero-mean unit-variance per token before computing
+        # the VBB posterior.  Without this, raw motor activations with
+        # per-element magnitude ~277 (observed in prod) drive
+        # kl_per_dim = ½(σ² + μ² − 1 − log σ²) to ~38k, and as the GIF
+        # alpha schedule ramps toward 0.05 the VBB contribution reaches
+        # ~4 nats — matching the LM loss and destabilising training.
+        # LayerNorm collapses the μ² term to O(1) so KL stays < 10 and
+        # the VBB remains a gentle regulariser regardless of activation scale.
+        mu = torch.nn.functional.layer_norm(mu, [mu.shape[-1]])
         # Per-element log-variance from the head. We work in float32
         # to keep the exp() stable under bf16 autocast.
         log_var = sigma_head(mu)                          # (B, T, D)

@@ -156,17 +156,30 @@ class TestColabLogPusherOodAware:
     def test_colab_thread_has_short_poll_interval(self):
         # Instead of sleep(300), the thread must poll at a short interval
         # (≤30s) so it reacts quickly when [mid-ood] appears.
-        # We search for sleep(<= 30) near the pusher thread definition.
+        # Accept both literal: _t.sleep(15) and variable: _t.sleep(_POLL_SEC)
+        # where _POLL_SEC is defined as a small integer in the same cell.
         pusher_idx = COLAB.find("_log_pusher_thread")
-        pusher_block = COLAB[pusher_idx: pusher_idx + 2000]
+        pusher_block = COLAB[pusher_idx: pusher_idx + 3000]
         per_iter = re.search(r"_t\.sleep\(\s*(\d+)\s*\)", pusher_block)
-        assert per_iter is not None, (
-            "log pusher thread must have a _t.sleep() call for its poll interval"
-        )
-        assert int(per_iter.group(1)) <= 30, (
-            f"colab pusher poll interval must be ≤ 30s (was {per_iter.group(1)}s). "
-            "Long sleeps mean OOD results sit unshared for minutes."
-        )
+        if per_iter is not None:
+            assert int(per_iter.group(1)) <= 30, (
+                f"colab pusher poll interval must be ≤ 30s (was {per_iter.group(1)}s). "
+                "Long sleeps mean OOD results sit unshared for minutes."
+            )
+        else:
+            # Variable form: _t.sleep(_POLL_SEC) — verify _POLL_SEC ≤ 30
+            var_sleep = re.search(r"_t\.sleep\(\s*_POLL_SEC\s*\)", pusher_block)
+            assert var_sleep is not None, (
+                "log pusher thread must have _t.sleep(<int>) or _t.sleep(_POLL_SEC)"
+            )
+            # Find definition of _POLL_SEC before the pusher block
+            preamble = COLAB[:pusher_idx + 3000]
+            poll_def = re.search(r"_POLL_SEC\s*=\s*(\d+)", preamble)
+            assert poll_def is not None, "_POLL_SEC must be defined near the pusher"
+            assert int(poll_def.group(1)) <= 30, (
+                f"_POLL_SEC={poll_def.group(1)} exceeds 30s limit — "
+                "OOD results would sit unshared for too long."
+            )
 
     def test_colab_thread_tracks_last_ood_step(self):
         # The thread must track which OOD step it last pushed so it doesn't

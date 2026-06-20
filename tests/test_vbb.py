@@ -429,3 +429,66 @@ def test_mdrv_defaults_are_zero():
     assert cfg.vbb_free_bits == 0.0
     assert cfg.vbb_log_beta_max == 0.0
     assert cfg.vbb_entropy_eta == 0.0
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 7. h_m normalization — KL must be bounded regardless of activation scale
+# ──────────────────────────────────────────────────────────────────────
+
+def test_vbb_kl_bounded_under_large_hm():
+    """VBB KL must stay bounded even when h_m has large per-element magnitude.
+
+    Without LayerNorm on mu, kl_per_dim = ½(σ² + μ² − 1 − log σ²) is
+    dominated by the μ² term.  In production logs h_m reaches ~277 per
+    element (observed: kl≈38307), and with alpha ramping to 0.05 the VBB
+    loss contribution becomes ~4.2 (matching the LM loss), destabilising
+    training and causing NaN metrics.
+
+    After normalising h_m to zero-mean unit-variance before computing mu,
+    the KL should be < 10 for any h_m magnitude.
+    """
+    h = _make_harness_with_vbb(alpha=1e-3)
+    # Simulate exploded motor activations — magnitude ~277 per element,
+    # matching what was observed in production logs at step 240+.
+    mu = torch.full((2, 4, 16), 277.0)
+    s = torch.randn(2, 4, 16)
+    _stash_activations(h, mu, s)
+    h._compute_pc_reentry_loss(base_weight=0.1)
+    kl = h._metrics.get("vbb_kl", float("inf"))
+    assert kl < 10.0, (
+        f"VBB KL exploded to {kl:.1f} under large h_m magnitude; "
+        "expected <10 — h_m must be LayerNorm'd before computing mu"
+    )
+
+
+def test_vbb_kl_bounded_negative_large_hm():
+    """Same contract holds for large-negative h_m values."""
+    h = _make_harness_with_vbb(alpha=1e-3)
+    mu = torch.full((2, 4, 16), -300.0)
+    s = torch.randn(2, 4, 16)
+    _stash_activations(h, mu, s)
+    h._compute_pc_reentry_loss(base_weight=0.1)
+    kl = h._metrics.get("vbb_kl", float("inf"))
+    assert kl < 10.0, f"KL={kl:.1f} for negative large h_m; expected <10"
+
+
+def test_vbb_kl_near_zero_for_normalized_hm():
+    """After LayerNorm the mu is zero-mean unit-var; the KL approaches 0
+    when sigma is also near 1 (the prior).  The KL floor is no longer
+    dominated by activation scale."""
+    h = _make_harness_with_vbb(alpha=1e-3)
+    torch.manual_seed(7)
+    # Standard Gaussian h_m — LayerNorm should leave this roughly unit-scale
+    mu = torch.randn(4, 32, 16)
+    s = torch.randn(4, 32, 16)
+    _stash_activations(h, mu, s)
+    # Freeze sigma_head weights to zero so sigma≈1 (prior) → KL should be ~0
+    with torch.no_grad():
+        h._vbb_sigma_head.weight.zero_()
+        h._vbb_sigma_head.bias.zero_()
+    h._compute_pc_reentry_loss(base_weight=0.1)
+    kl = h._metrics.get("vbb_kl", float("inf"))
+    # At mu≈N(0,1) and sigma≈1: KL per dim ≈ 0 (unit Gaussian = prior)
+    assert kl < 1.0, (
+        f"KL={kl:.4f} for unit-scale h_m + unit sigma; expected <1.0"
+    )
