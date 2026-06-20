@@ -695,3 +695,231 @@ step  1340 | loss 9.5824 | lm 4.2114 | ppl 67.5 | gnorm 2.282 | lr 2.79e-04 | 57
 step  1360 | loss 9.7869 | lm 4.4513 | ppl 85.7 | gnorm 5.106 | lr 2.77e-04 | 580 tok/s | Φ 0.659 | λ₁ 0.075 | ign 0.78 | mesoLG 0.49 | troph 8/8 μ1.96 | NT[DA=0.04 NE=0.22 5HT=0.17 ACh=0.27 eCB=0.02 Glu=0.17 GABA=0.06] | osc[δ=0.393 θ=0.220 γ=0.387] | em[C2:ρ=0.08/τ=0.83/s=0.78 C4:Q=0.5 W=1 pl=255 C3:pc=0.165 VBB:β=1.02 σ=0.1786 kl=38298.742 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0018 cmd=0.000 Σ=0.002 w=0.00 chat=0.60] | cortex[α_eff=0.506 inh=0.000 λ=0.779 kl=0.193 lm_ema=10.74 cx_ema=3.31] | gif[α=0.0500 p=1.000 gap=1.40 ood_ema=11.03 ood_ce=10.36 iso_w=0.0100 ls=0.006 div=0.000] | gif7[dgn=0.700 lr×1.000 klf=0.0] | nfo[R=1.03 R★=2.11 A=1.07 σA=0.41 cV=1.00 κ=0.10 α=0.013 Φκ=0.16] | hpa[load=0.04 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.47 bpp=5.41e-08 erank=6.1 uni=2.36 α=1.33 R²=0.91 PR=1.0]
 step  1380 | loss 9.9210 | lm 4.5901 | ppl 98.5 | gnorm 2.594 | lr 2.87e-04 | 597 tok/s | Φ 0.679 | λ₁ 0.075 | ign 0.77 | mesoLG 0.48 | troph 8/8 μ1.93 | NT[DA=0.03 NE=0.15 5HT=0.17 ACh=0.30 eCB=0.02 Glu=0.21 GABA=0.05] | osc[δ=0.408 θ=0.277 γ=0.315] | em[C2:ρ=0.02/τ=0.80/s=0.77 C4:Q=0.5 W=1 pl=255 C3:pc=0.183 VBB:β=1.02 σ=0.2631 kl=38301.422 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0019 cmd=0.000 Σ=0.002 w=0.00 chat=0.60] | cortex[α_eff=0.506 inh=0.000 λ=0.685 kl=0.216 lm_ema=9.55 cx_ema=3.61] | gif[α=0.0500 p=1.000 gap=3.97 ood_ema=11.03 ood_ce=10.36 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.888 lr×1.000 klf=0.0] | nfo[R=1.21 R★=2.05 A=1.25 σA=0.37 cV=1.00 κ=0.10 α=0.014 Φκ=0.08] | hpa[load=0.03 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.49 bpp=5.04e-08 erank=5.0 uni=1.52 α=1.27 R²=0.88 PR=1.0]
 step  1400 | loss 10.2568 | lm 4.9247 | ppl 137.7 | gnorm 3.264 | lr 2.85e-04 | 533 tok/s | Φ 0.707 | λ₁ 0.075 | ign 0.78 | mesoLG 0.50 | troph 8/8 μ2.03 | NT[DA=0.06 NE=0.13 5HT=0.17 ACh=0.25 eCB=0.03 Glu=0.30 GABA=0.06] | osc[δ=0.481 θ=0.356 γ=0.163] | em[C2:ρ=0.16/τ=0.78/s=0.78 C4:Q=0.5 W=1 pl=255 C3:pc=0.138 VBB:β=1.02 σ=0.4915 kl=38303.262 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0020 cmd=0.000 Σ=0.002 w=0.00 chat=0.60] | cortex[α_eff=0.506 inh=0.000 λ=0.647 kl=0.235 lm_ema=8.45 cx_ema=3.52] | gif[α=0.0500 p=1.000 gap=11.32 ood_ema=10.90 ood_ce=9.78 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.837 lr×1.000 klf=0.0] | nfo[R=1.30 R★=1.98 A=1.33 σA=0.37 cV=1.00 κ=0.10 α=0.015 Φκ=0.05] | hpa[load=0.03 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.50 bpp=6.84e-08 erank=4.6 uni=2.45 α=1.41 R²=0.93 PR=1.0]
+step  1420 | loss 9.7528 | lm 4.3783 | ppl 79.7 | gnorm 2.401 | lr 2.96e-04 | 592 tok/s | Φ 0.456 | λ₁ 0.075 | ign 0.77 | mesoLG 0.52 | troph 8/8 μ2.10 | NT[DA=0.12 NE=0.10 5HT=0.18 ACh=0.19 eCB=0.05 Glu=0.44 GABA=0.10] | osc[δ=0.371 θ=0.321 γ=0.308] | em[C2:ρ=0.25/τ=0.78/s=0.77 C4:Q=0.6 W=37 pl=13 C3:pc=0.241 VBB:β=1.02 σ=0.4151 kl=38306.070 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0014 cmd=0.000 Σ=0.001 w=0.00 chat=0.60] | cortex[α_eff=0.506 inh=0.000 λ=0.702 kl=0.346 lm_ema=8.76 cx_ema=3.53] | gif[α=0.0500 p=1.000 gap=6.97 ood_ema=10.90 ood_ce=9.78 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.901 lr×1.000 klf=0.0] | nfo[R=0.96 R★=1.88 A=1.08 σA=0.46 cV=0.97 κ=0.10 α=0.015 Φκ=0.21] | hpa[load=0.03 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.35 bpp=6.41e-08 erank=6.1 uni=2.02 α=1.61 R²=0.96 PR=1.6]
+step  1440 | loss 9.2863 | lm 3.9138 | ppl 50.1 | gnorm 4.671 | lr 2.94e-04 | 603 tok/s | Φ 0.764 | λ₁ 0.075 | ign 0.76 | mesoLG 0.47 | troph 8/8 μ2.16 | NT[DA=0.12 NE=0.15 5HT=0.20 ACh=0.16 eCB=0.06 Glu=0.49 GABA=0.15] | osc[δ=0.376 θ=0.270 γ=0.354] | em[C2:ρ=0.36/τ=0.80/s=0.76 C4:Q=0.3 W=2 pl=170 C3:pc=0.279 VBB:β=1.02 σ=0.1803 kl=38301.133 C5:lat=1.53 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0022 cmd=0.000 Σ=0.002 w=0.00 chat=0.60] | cortex[α_eff=0.507 inh=0.000 λ=0.691 kl=0.170 lm_ema=8.37 cx_ema=3.88] | gif[α=0.0500 p=1.000 gap=14.71 ood_ema=10.90 ood_ce=9.78 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.731 lr×1.000 klf=0.0] | nfo[R=1.24 R★=2.12 A=1.28 σA=0.39 cV=1.00 κ=0.10 α=0.016 Φκ=0.06] | hpa[load=0.04 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.49 bpp=7.73e-08 erank=7.1 uni=3.66 α=1.31 R²=0.92 PR=1.0]
+step  1460 | loss 9.5512 | lm 4.1771 | ppl 65.2 | gnorm 3.306 | lr 3.04e-04 | 583 tok/s | Φ 0.525 | λ₁ 0.075 | ign 0.79 | mesoLG 0.50 | troph 8/8 μ2.14 | NT[DA=0.08 NE=0.20 5HT=0.21 ACh=0.09 eCB=0.05 Glu=0.39 GABA=0.34] | osc[δ=0.295 θ=0.355 γ=0.350] | em[C2:ρ=0.58/τ=0.85/s=0.79 C4:Q=-4.0 W=46 pl=10 C3:pc=0.255 VBB:β=1.02 σ=0.4074 kl=38303.551 C5:lat=1.60 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0019 cmd=0.000 Σ=0.002 w=0.00 chat=0.60] | cortex[α_eff=0.507 inh=0.000 λ=0.786 kl=0.301 lm_ema=9.22 cx_ema=3.63] | gif[α=0.0500 p=1.000 gap=5.25 ood_ema=10.90 ood_ce=9.78 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.834 lr×1.000 klf=0.0] | nfo[R=1.04 R★=1.91 A=1.24 σA=0.46 cV=0.98 κ=0.10 α=0.016 Φκ=0.18] | hpa[load=0.03 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.42 bpp=5.26e-08 erank=5.5 uni=3.75 α=1.55 R²=0.93 PR=1.3]
+step  1480 | loss 9.6390 | lm 4.2807 | ppl 72.3 | gnorm 2.185 | lr 3.02e-04 | 580 tok/s | Φ 0.408 | λ₁ 0.075 | ign 0.78 | mesoLG 0.52 | troph 8/8 μ2.08 | NT[DA=0.12 NE=0.08 5HT=0.21 ACh=0.08 eCB=0.04 Glu=0.43 GABA=0.33] | osc[δ=0.341 θ=0.355 γ=0.304] | em[C2:ρ=0.75/τ=0.94/s=0.78 C4:Q=-1.3 W=50 pl=10 C3:pc=0.199 VBB:β=1.02 σ=0.4641 kl=38304.230 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0017 cmd=0.000 Σ=0.002 w=0.00 chat=0.60] | cortex[α_eff=0.507 inh=0.000 λ=0.710 kl=0.389 lm_ema=8.62 cx_ema=3.51] | gif[α=0.0500 p=1.000 gap=6.91 ood_ema=10.90 ood_ce=9.78 iso_w=0.0100 ls=0.050 div=0.001] | gif7[dgn=0.916 lr×1.000 klf=0.0] | nfo[R=0.90 R★=1.78 A=1.08 σA=0.50 cV=0.95 κ=0.10 α=0.017 Φκ=0.26] | hpa[load=0.03 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.32 bpp=6.21e-08 erank=4.6 uni=2.55 α=1.69 R²=0.94 PR=1.4]
+step  1500 | loss 9.6216 | lm 4.2365 | ppl 69.2 | gnorm 3.672 | lr 3.13e-04 | 557 tok/s | Φ 0.423 | λ₁ 0.075 | ign 0.77 | mesoLG 0.45 | troph 8/8 μ2.11 | NT[DA=0.13 NE=0.23 5HT=0.22 ACh=0.08 eCB=0.06 Glu=0.46 GABA=0.41] | osc[δ=0.401 θ=0.344 γ=0.255] | em[C2:ρ=0.83/τ=1.00/s=0.77 C4:Q=-1.5 W=49 pl=10 C3:pc=0.218 VBB:β=1.02 σ=0.2110 kl=38305.500 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0016 cmd=0.000 Σ=0.002 w=0.00 chat=0.60] | cortex[α_eff=0.507 inh=0.000 λ=0.737 kl=0.287 lm_ema=8.79 cx_ema=3.67] | gif[α=0.0500 p=1.000 gap=6.23 ood_ema=10.79 ood_ce=9.80 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.806 lr×1.000 klf=0.0] | nfo[R=0.83 R★=1.46 A=1.13 σA=0.45 cV=0.97 κ=0.10 α=0.017 Φκ=0.26] | hpa[load=0.04 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.50 bpp=7.43e-08 erank=6.0 uni=2.36 α=1.69 R²=0.95 PR=1.6]
+[train_dsl] saved checkpoint /content/brian/lfs_checkpoints/20260620-153013_04a8da09_run/step1500.pt
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  ...run/step1500.pt.strip.tmp:   0%|          |  555kB /  597MB            [A[A
+
+
+  ...run/step1500.pt.strip.tmp:   0%|          |  555kB /  597MB            [A[A
+Processing Files (0 / 1)      :   0%|          |  555kB /  597MB, 54.2kB/s  
+
+New Data Upload               :   0%|          |  555kB /  134MB, 54.2kB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:   0%|          | 2.77MB /  597MB            [A[A
+Processing Files (0 / 1)      :   0%|          | 2.77MB /  597MB,  268kB/s  
+
+New Data Upload               :   2%|▏         | 2.77MB /  134MB,  268kB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:   2%|▏         | 11.1MB /  597MB            [A[A
+Processing Files (0 / 1)      :   2%|▏         | 11.1MB /  597MB, 1.06MB/s  
+
+New Data Upload               :   6%|▌         | 11.1MB /  201MB, 1.06MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:   4%|▍         | 26.1MB /  597MB            [A[A
+Processing Files (0 / 1)      :   4%|▍         | 26.1MB /  597MB, 2.47MB/s  
+
+New Data Upload               :  13%|█▎        | 26.1MB /  201MB, 2.47MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:   7%|▋         | 38.8MB /  597MB            [A[A
+Processing Files (0 / 1)      :   7%|▋         | 38.8MB /  597MB, 3.62MB/s  
+
+New Data Upload               :  19%|█▉        | 38.8MB /  201MB, 3.62MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:   9%|▊         | 51.6MB /  597MB            [A[A
+Processing Files (0 / 1)      :   9%|▊         | 51.6MB /  597MB, 4.74MB/s  
+
+New Data Upload               :  26%|██▌       | 51.6MB /  201MB, 4.74MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  11%|█         | 67.1MB /  597MB            [A[A
+Processing Files (0 / 1)      :  11%|█         | 67.1MB /  597MB, 6.09MB/s  
+
+New Data Upload               :  33%|███▎      | 67.1MB /  201MB, 6.09MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  12%|█▏        | 73.2MB /  597MB            [A[A
+Processing Files (0 / 1)      :  12%|█▏        | 73.2MB /  597MB, 6.52MB/s  
+
+New Data Upload               :  36%|███▋      | 73.2MB /  201MB, 6.52MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  13%|█▎        | 75.4MB /  597MB            [A[A
+Processing Files (0 / 1)      :  13%|█▎        | 75.4MB /  597MB, 6.57MB/s  
+
+New Data Upload               :  37%|███▋      | 75.4MB /  201MB, 6.57MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  13%|█▎        | 78.2MB /  597MB            [A[A
+Processing Files (0 / 1)      :  13%|█▎        | 78.2MB /  597MB, 6.67MB/s  
+
+New Data Upload               :  39%|███▉      | 78.2MB /  201MB, 6.67MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  14%|█▎        | 81.4MB /  597MB            [A[A
+Processing Files (0 / 1)      :  14%|█▎        | 81.4MB /  597MB, 6.82MB/s  
+
+New Data Upload               :  40%|████      | 81.4MB /  201MB, 6.82MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  15%|█▌        | 92.0MB /  597MB            [A[A
+Processing Files (0 / 1)      :  15%|█▌        | 92.0MB /  597MB, 7.62MB/s  
+
+New Data Upload               :  34%|███▍      | 92.0MB /  268MB, 7.62MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  18%|█▊        |  108MB /  597MB            [A[A
+Processing Files (0 / 1)      :  18%|█▊        |  108MB /  597MB, 8.86MB/s  
+
+New Data Upload               :  32%|███▏      |  108MB /  335MB, 8.86MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  21%|██        |  125MB /  597MB            [A[A
+Processing Files (0 / 1)      :  21%|██        |  125MB /  597MB, 10.3MB/s  
+
+New Data Upload               :  37%|███▋      |  125MB /  335MB, 10.3MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  25%|██▌       |  152MB /  597MB            [A[A
+Processing Files (0 / 1)      :  25%|██▌       |  152MB /  597MB, 12.4MB/s  
+
+New Data Upload               :  43%|████▎     |  144MB /  335MB, 11.7MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  37%|███▋      |  222MB /  597MB            [A[A
+Processing Files (0 / 1)      :  37%|███▋      |  222MB /  597MB, 18.4MB/s  
+
+New Data Upload               :  50%|████▉     |  167MB /  335MB, 13.5MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  52%|█████▏    |  311MB /  597MB            [A[A
+Processing Files (0 / 1)      :  52%|█████▏    |  311MB /  597MB, 25.8MB/s  
+
+New Data Upload               :  57%|█████▋    |  193MB /  335MB, 15.5MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  61%|██████    |  363MB /  597MB            [A[A
+Processing Files (0 / 1)      :  61%|██████    |  363MB /  597MB, 29.9MB/s  
+
+New Data Upload               :  64%|██████▎   |  213MB /  335MB, 16.9MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  65%|██████▌   |  390MB /  597MB            [A[A
+Processing Files (0 / 1)      :  65%|██████▌   |  390MB /  597MB, 31.6MB/s  
+
+New Data Upload               :  59%|█████▉    |  239MB /  402MB, 18.9MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  68%|██████▊   |  409MB /  597MB            [A[A
+Processing Files (0 / 1)      :  68%|██████▊   |  409MB /  597MB, 32.5MB/s  
+
+New Data Upload               :  64%|██████▍   |  258MB /  402MB, 20.1MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  71%|███████   |  423MB /  597MB            [A[A
+Processing Files (0 / 1)      :  71%|███████   |  423MB /  597MB, 33.1MB/s  
+
+New Data Upload               :  61%|██████    |  273MB /  447MB, 20.9MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  73%|███████▎  |  434MB /  597MB            [A[A
+Processing Files (0 / 1)      :  73%|███████▎  |  434MB /  597MB, 33.3MB/s  
+
+New Data Upload               :  64%|██████▎   |  284MB /  447MB, 21.4MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  77%|███████▋  |  457MB /  597MB            [A[A
+Processing Files (0 / 1)      :  77%|███████▋  |  457MB /  597MB, 34.6MB/s  
+
+New Data Upload               :  69%|██████▊   |  306MB /  447MB, 22.9MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  81%|████████▏ |  487MB /  597MB            [A[A
+Processing Files (0 / 1)      :  81%|████████▏ |  487MB /  597MB, 36.4MB/s  
+
+New Data Upload               :  75%|███████▌  |  336MB /  447MB, 25.0MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  86%|████████▋ |  515MB /  597MB            [A[A
+Processing Files (0 / 1)      :  86%|████████▋ |  515MB /  597MB, 38.0MB/s  
+
+New Data Upload               :  82%|████████▏ |  365MB /  447MB, 26.9MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  89%|████████▉ |  533MB /  597MB            [A[A
+Processing Files (0 / 1)      :  89%|████████▉ |  533MB /  597MB, 38.8MB/s  
+
+New Data Upload               :  86%|████████▌ |  383MB /  447MB, 27.9MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  92%|█████████▏|  550MB /  597MB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏|  550MB /  597MB, 39.3MB/s  
+
+New Data Upload               :  89%|████████▉ |  399MB /  447MB, 28.6MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  93%|█████████▎|  557MB /  597MB            [A[A
+Processing Files (0 / 1)      :  93%|█████████▎|  557MB /  597MB, 39.2MB/s  
+
+New Data Upload               :  91%|█████████ |  407MB /  447MB, 28.7MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  94%|█████████▍|  562MB /  597MB            [A[A
+Processing Files (0 / 1)      :  94%|█████████▍|  562MB /  597MB, 38.8MB/s  
+
+New Data Upload               :  92%|█████████▏|  412MB /  447MB, 28.5MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  95%|█████████▌|  570MB /  597MB            [A[A
+Processing Files (0 / 1)      :  95%|█████████▌|  570MB /  597MB, 38.6MB/s  
+
+New Data Upload               :  94%|█████████▍|  419MB /  447MB, 28.5MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  97%|█████████▋|  578MB /  597MB            [A[A
+Processing Files (0 / 1)      :  97%|█████████▋|  578MB /  597MB, 38.4MB/s  
+
+New Data Upload               :  96%|█████████▌|  427MB /  447MB, 28.6MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp:  98%|█████████▊|  586MB /  597MB            [A[A
+Processing Files (0 / 1)      :  98%|█████████▊|  586MB /  597MB, 38.3MB/s  
+
+New Data Upload               :  98%|█████████▊|  435MB /  447MB, 28.7MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp: 100%|█████████▉|  597MB /  597MB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉|  597MB /  597MB, 38.4MB/s  
+
+New Data Upload               : 100%|█████████▉|  446MB /  447MB, 29.0MB/s  [A
+
+
+  ...run/step1500.pt.strip.tmp: 100%|██████████|  597MB /  597MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 36.1MB/s  
+
+New Data Upload               : 100%|██████████|  447MB /  447MB, 27.3MB/s  [A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 36.1MB/s  
+
+New Data Upload               : 100%|██████████|  447MB /  447MB, 27.3MB/s  
+
+  ...run/step1500.pt.strip.tmp: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step1500.pt (optimizer stripped) → hf://moritzroessler/BRIAN/checkpoints/20260620-153013_04a8da09_run/step1500.pt
+[mid-ood] step 1500: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 1500: wikitext ppl=249.8 gap_ratio=3.61 (train_ppl=69.2) (50 seq, 6430 tok)
