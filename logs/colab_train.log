@@ -948,3 +948,214 @@ step  1940 | loss 9.2285 | lm 3.8686 | ppl 47.9 | gnorm 2.426 | lr 4.04e-04 | 57
 step  1960 | loss 9.3695 | lm 4.0053 | ppl 54.9 | gnorm 1.943 | lr 4.02e-04 | 585 tok/s | Φ 0.465 | λ₁ 0.075 | ign 0.65 | mesoLG 0.50 | troph 8/8 μ1.77 | NT[DA=0.19 NE=0.12 5HT=0.32 ACh=0.17 eCB=0.05 Glu=0.46 GABA=0.13] | osc[δ=0.350 θ=0.283 γ=0.366] | em[C2:ρ=0.77/τ=1.00/s=0.65 C4:Q=-3.9 W=68 pl=7 C3:pc=0.261 VBB:β=1.03 σ=0.3259 kl=38303.836 C5:lat=1.50 C6:pac=0.05] | reg[dar=0.000 pcc=0.000 iso=0.0028 cmd=0.000 Σ=0.003 w=0.00 chat=0.60] | cortex[α_eff=0.513 inh=0.000 λ=0.770 kl=0.307 lm_ema=7.85 cx_ema=3.36] | gif[α=0.0500 p=1.000 gap=10.50 ood_ema=10.39 ood_ce=9.71 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.932 lr×1.000 klf=0.0] | nfo[R=1.33 R★=2.30 A=1.49 σA=0.69 cV=1.00 κ=0.10 α=0.034 Φκ=0.06] | hpa[load=0.03 cort=0.03 NE×0.98 T×0.97 LR×0.98] | trunk[budget=0.33 bpp=5.56e-08 erank=6.8 uni=1.65 α=1.85 R²=0.98 PR=1.8]
 step  1980 | loss 9.4969 | lm 4.1407 | ppl 62.8 | gnorm 1.832 | lr 4.12e-04 | 574 tok/s | Φ 0.605 | λ₁ 0.075 | ign 0.64 | mesoLG 0.48 | troph 8/8 μ1.71 | NT[DA=0.08 NE=0.08 5HT=0.32 ACh=0.21 eCB=0.04 Glu=0.32 GABA=0.08] | osc[δ=0.351 θ=0.292 γ=0.357] | em[C2:ρ=0.67/τ=1.00/s=0.64 C4:Q=1.5 W=56 pl=8 C3:pc=0.259 VBB:β=1.04 σ=0.4671 kl=38298.770 C5:lat=1.67 C6:pac=0.04] | reg[dar=0.000 pcc=0.000 iso=0.0049 cmd=0.000 Σ=0.005 w=0.00 chat=0.60] | cortex[α_eff=0.514 inh=0.000 λ=0.830 kl=0.229 lm_ema=8.21 cx_ema=3.43] | gif[α=0.0500 p=1.000 gap=8.81 ood_ema=10.39 ood_ce=9.71 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.939 lr×1.000 klf=0.0] | nfo[R=2.09 R★=2.69 A=1.99 σA=0.45 cV=0.99 κ=0.10 α=0.035 Φκ=0.02] | hpa[load=0.03 cort=0.03 NE×0.98 T×0.97 LR×0.98] | trunk[budget=0.49 bpp=5.26e-08 erank=5.9 uni=1.38 α=1.57 R²=0.95 PR=1.1]
 step  2000 | loss 9.4609 | lm 4.0395 | ppl 56.8 | gnorm 1.915 | lr 4.10e-04 | 568 tok/s | Φ 0.664 | λ₁ 0.075 | ign 0.64 | mesoLG 0.54 | troph 8/8 μ1.81 | NT[DA=0.06 NE=0.10 5HT=0.32 ACh=0.29 eCB=0.06 Glu=0.41 GABA=0.04] | osc[δ=0.266 θ=0.359 γ=0.375] | em[C2:ρ=0.48/τ=1.00/s=0.64 C4:Q=0.7 W=7 pl=63 C3:pc=0.753 VBB:β=1.04 σ=0.3756 kl=38298.359 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.514 inh=0.000 λ=0.780 kl=0.186 lm_ema=7.59 cx_ema=3.83] | gif[α=0.0500 p=1.000 gap=16.49 ood_ema=10.30 ood_ce=9.51 iso_w=0.0100 ls=0.050 div=0.000] | gif7[dgn=0.934 lr×1.000 klf=0.0] | nfo[R=2.17 R★=2.70 A=2.06 σA=0.43 cV=0.99 κ=0.10 α=0.035 Φκ=0.03] | hpa[load=0.04 cort=0.03 NE×0.98 T×0.97 LR×0.98] | trunk[budget=0.46 bpp=5.26e-08 erank=5.6 uni=1.70 α=1.47 R²=0.94 PR=1.0]
+[train_dsl] saved checkpoint /content/brian/lfs_checkpoints/20260620-153013_04a8da09_run/step2000.pt
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  ...run/step2000.pt.strip.tmp:   0%|          |  555kB /  597MB            [A[A
+
+
+  ...run/step2000.pt.strip.tmp:   0%|          |  555kB /  597MB            [A[A
+Processing Files (0 / 1)      :   0%|          |  555kB /  597MB, 53.8kB/s  
+
+New Data Upload               :   0%|          |  555kB /  134MB, 53.8kB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:   1%|          | 4.44MB /  597MB            [A[A
+Processing Files (0 / 1)      :   1%|          | 4.44MB /  597MB,  427kB/s  
+
+New Data Upload               :   3%|▎         | 4.44MB /  134MB,  427kB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:   2%|▏         | 13.3MB /  597MB            [A[A
+Processing Files (0 / 1)      :   2%|▏         | 13.3MB /  597MB, 1.27MB/s  
+
+New Data Upload               :  10%|▉         | 13.3MB /  134MB, 1.27MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:   5%|▍         | 28.3MB /  597MB            [A[A
+Processing Files (0 / 1)      :   5%|▍         | 28.3MB /  597MB, 2.66MB/s  
+
+New Data Upload               :  14%|█▍        | 28.3MB /  201MB, 2.66MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:   7%|▋         | 42.2MB /  597MB            [A[A
+Processing Files (0 / 1)      :   7%|▋         | 42.2MB /  597MB, 3.91MB/s  
+
+New Data Upload               :  21%|██        | 42.2MB /  201MB, 3.91MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:   9%|▉         | 54.9MB /  597MB            [A[A
+Processing Files (0 / 1)      :   9%|▉         | 54.9MB /  597MB, 5.01MB/s  
+
+New Data Upload               :  27%|██▋       | 54.9MB /  201MB, 5.01MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  11%|█▏        | 68.2MB /  597MB            [A[A
+Processing Files (0 / 1)      :  11%|█▏        | 68.2MB /  597MB, 6.14MB/s  
+
+New Data Upload               :  34%|███▍      | 68.2MB /  201MB, 6.14MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  12%|█▏        | 70.5MB /  597MB            [A[A
+Processing Files (0 / 1)      :  12%|█▏        | 70.5MB /  597MB, 6.20MB/s  
+
+New Data Upload               :  35%|███▌      | 70.5MB /  201MB, 6.20MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  12%|█▏        | 72.1MB /  597MB            [A[A
+Processing Files (0 / 1)      :  12%|█▏        | 72.1MB /  597MB, 6.21MB/s  
+
+New Data Upload               :  36%|███▌      | 72.1MB /  201MB, 6.21MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  12%|█▏        | 73.8MB /  597MB            [A[A
+Processing Files (0 / 1)      :  12%|█▏        | 73.8MB /  597MB, 6.22MB/s  
+
+New Data Upload               :  37%|███▋      | 73.8MB /  201MB, 6.22MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  13%|█▎        | 76.0MB /  597MB            [A[A
+Processing Files (0 / 1)      :  13%|█▎        | 76.0MB /  597MB, 6.28MB/s  
+
+New Data Upload               :  38%|███▊      | 76.0MB /  201MB, 6.28MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  15%|█▍        | 88.7MB /  597MB            [A[A
+Processing Files (0 / 1)      :  15%|█▍        | 88.7MB /  597MB, 7.29MB/s  
+
+New Data Upload               :  33%|███▎      | 88.7MB /  268MB, 7.29MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  17%|█▋        |  104MB /  597MB            [A[A
+Processing Files (0 / 1)      :  17%|█▋        |  104MB /  597MB, 8.46MB/s  
+
+New Data Upload               :  39%|███▊      |  104MB /  268MB, 8.46MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  20%|██        |  120MB /  597MB            [A[A
+Processing Files (0 / 1)      :  20%|██        |  120MB /  597MB, 9.73MB/s  
+
+New Data Upload               :  45%|████▍     |  120MB /  268MB, 9.73MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  23%|██▎       |  140MB /  597MB            [A[A
+Processing Files (0 / 1)      :  23%|██▎       |  140MB /  597MB, 11.3MB/s  
+
+New Data Upload               :  42%|████▏     |  140MB /  335MB, 11.3MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  26%|██▋       |  157MB /  597MB            [A[A
+Processing Files (0 / 1)      :  26%|██▋       |  157MB /  597MB, 12.6MB/s  
+
+New Data Upload               :  47%|████▋     |  157MB /  335MB, 12.6MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  28%|██▊       |  166MB /  597MB            [A[A
+Processing Files (0 / 1)      :  28%|██▊       |  166MB /  597MB, 13.1MB/s  
+
+New Data Upload               :  49%|████▉     |  166MB /  335MB, 13.1MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  36%|███▌      |  215MB /  597MB            [A[A
+Processing Files (0 / 1)      :  36%|███▌      |  215MB /  597MB, 17.1MB/s  
+
+New Data Upload               :  52%|█████▏    |  176MB /  335MB, 13.7MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  46%|████▌     |  275MB /  597MB            [A[A
+Processing Files (0 / 1)      :  46%|████▌     |  275MB /  597MB, 22.0MB/s  
+
+New Data Upload               :  57%|█████▋    |  190MB /  335MB, 14.6MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  60%|█████▉    |  356MB /  597MB            [A[A
+Processing Files (0 / 1)      :  60%|█████▉    |  356MB /  597MB, 28.6MB/s  
+
+New Data Upload               :  64%|██████▍   |  215MB /  335MB, 16.4MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  65%|██████▌   |  390MB /  597MB            [A[A
+Processing Files (0 / 1)      :  65%|██████▌   |  390MB /  597MB, 30.9MB/s  
+
+New Data Upload               :  60%|█████▉    |  241MB /  402MB, 18.3MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  69%|██████▉   |  414MB /  597MB            [A[A
+Processing Files (0 / 1)      :  69%|██████▉   |  414MB /  597MB, 32.3MB/s  
+
+New Data Upload               :  66%|██████▌   |  265MB /  402MB, 20.0MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  73%|███████▎  |  437MB /  597MB            [A[A
+Processing Files (0 / 1)      :  73%|███████▎  |  437MB /  597MB, 33.5MB/s  
+
+New Data Upload               :  64%|██████▍   |  287MB /  447MB, 21.5MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  77%|███████▋  |  462MB /  597MB            [A[A
+Processing Files (0 / 1)      :  77%|███████▋  |  462MB /  597MB, 35.0MB/s  
+
+New Data Upload               :  70%|██████▉   |  313MB /  447MB, 23.2MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  82%|████████▏ |  487MB /  597MB            [A[A
+Processing Files (0 / 1)      :  82%|████████▏ |  487MB /  597MB, 36.4MB/s  
+
+New Data Upload               :  75%|███████▌  |  338MB /  447MB, 24.9MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  87%|████████▋ |  519MB /  597MB            [A[A
+Processing Files (0 / 1)      :  87%|████████▋ |  519MB /  597MB, 38.3MB/s  
+
+New Data Upload               :  82%|████████▏ |  369MB /  447MB, 27.0MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  92%|█████████▏|  551MB /  597MB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏|  551MB /  597MB, 40.1MB/s  
+
+New Data Upload               :  90%|████████▉ |  401MB /  447MB, 29.1MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp:  98%|█████████▊|  582MB /  597MB            [A[A
+Processing Files (0 / 1)      :  98%|█████████▊|  582MB /  597MB, 42.0MB/s  
+
+New Data Upload               :  97%|█████████▋|  433MB /  447MB, 31.2MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp: 100%|█████████▉|  596MB /  597MB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉|  596MB /  597MB, 42.3MB/s  
+
+New Data Upload               : 100%|█████████▉|  447MB /  447MB, 31.7MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp: 100%|█████████▉|  596MB /  597MB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉|  596MB /  597MB, 40.5MB/s  
+
+New Data Upload               : 100%|█████████▉|  447MB /  447MB, 30.4MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp: 100%|█████████▉|  597MB /  597MB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉|  597MB /  597MB, 39.7MB/s  
+
+New Data Upload               : 100%|█████████▉|  447MB /  447MB, 29.8MB/s  [A
+
+
+  ...run/step2000.pt.strip.tmp: 100%|██████████|  597MB /  597MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 38.1MB/s  
+
+New Data Upload               : 100%|██████████|  447MB /  447MB, 28.6MB/s  [A
+Processing Files (1 / 1)      : 100%|██████████|  597MB /  597MB, 38.1MB/s  
+
+New Data Upload               : 100%|██████████|  447MB /  447MB, 28.6MB/s  
+
+  ...run/step2000.pt.strip.tmp: 100%|██████████|  597MB /  597MB            
+[ckpt_push] ✓ pushed step2000.pt (optimizer stripped) → hf://moritzroessler/BRIAN/checkpoints/20260620-153013_04a8da09_run/step2000.pt
+[mid-ood] step 2000: WikiText-103 snapshot...
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 2000: wikitext ppl=197.6 gap_ratio=3.48 (train_ppl=56.8) (50 seq, 6430 tok)
