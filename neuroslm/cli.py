@@ -1886,80 +1886,73 @@ def _render_lightning_section(args: argparse.Namespace, _say) -> None:
         return
 
     import time as _time
-    hdr = (f"{'JOB ID':<22}  {'LABEL':<16}  {'STATUS':<10}  "
-           f"{'MACHINE':<8}  {'UP(m)':>5}  {'STEP':>6}  {'PPL':>8}  "
-           f"{'OOD-PPL':>11}  LAST")
+    # Match the vast.ai column layout exactly so both sections are visually
+    # identical — GPU = machine tier, $/hr = "-" (Lightning billing differs),
+    # PHASE = job status. TOK/S parsed from the log tail.
+    hdr = (f"{'ID':>10}  {'LABEL':<28}  {'GPU':<12}  {'$/hr':>5}  "
+           f"{'UP(m)':>6}  {'PHASE':<16}  {'STEP':>6}  {'PPL':>8}  "
+           f"{'OOD-PPL':>9}  {'TOK/S':>7}")
     _say(hdr)
-    _say("-" * min(len(hdr), 130))
+    _say("-" * len(hdr))
     now = int(_time.time())
     for j in jobs:
         up_m = max(0, (now - (j.started_at or now)) // 60)
-        label = (j.label or "(none)")[:16]
-        status = (j.status or "?")[:10]
-        machine = (j.machine or "?")[:8]
-        # Try a quick log tail for the most recent training line — but
-        # skip it for stopped/completed/failed since the cost of an
-        # SSH roundtrip per row is high. We use n=500 so the parser
-        # catches the latest `[mid-ood] step N: wikitext ppl=...` block
-        # which only fires every `ood_every` (default 500) steps —
-        # with `log_every=20` that means the OOD line sits ≥25 step
-        # lines back in the log, so n=20 would always miss it.
-        step_s, ppl_s, ood_s, last_s = "-", "-", "-", ""
-        if status in (JobStatus.RUNNING.value, JobStatus.STARTING.value):
+        label  = (j.label   or "(none)")[:28]
+        phase  = (j.status  or "?")[:16]
+        gpu    = (j.machine or "?")[:12]
+        # Tail the log for the most recent step/ppl/ood/tps. n=500 so the
+        # parser catches the latest [mid-ood] line (fired every ood_every
+        # steps, which with log_every=20 is ≥25 lines back).
+        step_s, ppl_s, ood_s, tps_s = "-", "-", "-", "-"
+        if j.status in (JobStatus.RUNNING.value, JobStatus.STARTING.value):
             try:
                 tail = connector.tail_logs(j.job_id, n=500)
-                step_s, ppl_s, ood_s, last_s = _summarise_lightning_tail(tail)
-            except Exception as e:
-                last_s = f"(tail err: {type(e).__name__})"
-        _say(f"{j.job_id:<22}  {label:<16}  {status:<10}  "
-             f"{machine:<8}  {up_m:>5}  {step_s:>6}  {ppl_s:>8}  "
-             f"{ood_s:>11}  {last_s[:48]}")
+                step_s, ppl_s, ood_s, tps_s = _summarise_lightning_tail(tail)
+            except Exception:
+                pass
+        _say(f"{str(j.job_id)[:10]:>10}  {label:<28}  {gpu:<12}  {'  -':>5}  "
+             f"{up_m:>6}  {phase:<16}  {step_s:>6}  {ppl_s:>8}  "
+             f"{ood_s:>9}  {tps_s:>7}")
 
 
 def _summarise_lightning_tail(tail: str) -> tuple:
-    """Extract ``(step, ppl, ood, last_line)`` from a tail of train.log.
+    """Extract ``(step, ppl, ood, tps)`` from a tail of train.log.
 
     Uses the same regexes as the vast parser so the per-step
     ``step N | loss … | ppl …`` line and the periodic
     ``[mid-ood] step N: wikitext ppl=…`` line both surface in the
-    Lightning ps table identically to the vast section.
+    Lightning ps table with the same columns as the vast section.
 
-    The OOD column is formatted as ``"<ppl>@<step>"`` (e.g.
-    ``"1550@500"``) when a mid-OOD line is present in the tail,
-    or ``"-"`` otherwise. This requires the caller to pass a tail
-    large enough to catch the most recent OOD eval line — see the
-    n=500 hint in `_render_lightning_section`.
+    Returns a 4-tuple matching the vast row layout:
+      (step_s, ppl_s, ood_s, tps_s)
     """
     if not tail:
-        return ("-", "-", "-", "")
-    # Reuse the module-level regexes if available; otherwise fall back.
-    step, ppl = None, None
+        return ("-", "-", "-", "-")
+    step, ppl, tps = None, None, None
     ood_step, ood_ppl = None, None
     try:
         for m in _STEP_RE.finditer(tail):
             step = int(m.group("step"))
-            ppl = float(m.group("ppl"))
+            ppl  = float(m.group("ppl"))
+            _t   = m.group("tps")
+            if _t:
+                tps = int(_t)
     except NameError:
         pass
     try:
         for m in _MID_OOD_RE.finditer(tail):
             ood_step = int(m.group("step"))
-            ood_ppl = float(m.group("ppl"))
+            ood_ppl  = float(m.group("ppl"))
     except NameError:
         pass
-    last_line = ""
-    for line in reversed(tail.strip().splitlines()):
-        line = line.strip()
-        if line:
-            last_line = line
-            break
     ood_s = (f"{ood_ppl:.0f}@{ood_step}"
              if ood_ppl is not None and ood_step is not None else "-")
+    tps_s = f"{tps/1000:.0f}k" if tps else "-"
     return (
         str(step) if step is not None else "-",
         f"{ppl:.1f}" if ppl is not None else "-",
         ood_s,
-        last_line,
+        tps_s,
     )
 
 

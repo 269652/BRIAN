@@ -419,21 +419,21 @@ class TestBrianTomlCheckpointCadence:
 # Root cause: `_render_lightning_section` only parsed `_STEP_RE`
 # (training ppl), never `_MID_OOD_RE`. The vast.ai render had the
 # OOD-PPL column, but Lightning didn't. Now `_summarise_lightning_tail`
-# returns `(step, ppl, ood, last_line)` and the table includes the
-# column between PPL and LAST.
+# returns `(step, ppl, ood, tps)` — same four columns as the vast row —
+# and the Lightning header matches the vast header exactly.
 
 class TestLightningPsOodPplColumn:
-    """`brian ps` Lightning table must surface `[mid-ood]` ppl."""
+    """`brian ps` Lightning table must match vast.ai column layout."""
 
-    def test_F1_empty_tail_returns_dashes_for_ood(self):
-        """No log content → OOD column shows '-' (not a crash)."""
+    def test_F1_empty_tail_returns_dashes(self):
+        """No log content → all columns show '-' (not a crash)."""
         from neuroslm.cli import _summarise_lightning_tail
-        step, ppl, ood, last = _summarise_lightning_tail("")
-        assert (step, ppl, ood, last) == ("-", "-", "-", "")
+        step, ppl, ood, tps = _summarise_lightning_tail("")
+        assert (step, ppl, ood, tps) == ("-", "-", "-", "-")
 
     def test_F2_tail_with_only_step_lines_has_dash_ood(self):
         """Training has started but OOD eval hasn't fired yet —
-        STEP/PPL populated, OOD still '-'."""
+        STEP/PPL/TOK/S populated, OOD still '-'."""
         from neuroslm.cli import _summarise_lightning_tail
         tail = (
             "step    20 | loss 6.98 | lm 6.32 | ppl 559.0 | gnorm 6.1 "
@@ -441,12 +441,13 @@ class TestLightningPsOodPplColumn:
             "step    40 | loss 6.89 | lm 6.41 | ppl 612.4 | gnorm 5.7 "
             "| lr 2.00e-05 | 643 tok/s | other stuff\n"
         )
-        step, ppl, ood, last = _summarise_lightning_tail(tail)
+        step, ppl, ood, tps = _summarise_lightning_tail(tail)
         assert step == "40", f"latest step should be 40, got {step!r}"
         assert ppl == "612.4", f"latest ppl should be 612.4, got {ppl!r}"
         assert ood == "-", (
             f"no [mid-ood] line in tail → OOD column must be '-', "
             f"got {ood!r}")
+        assert tps == "1k", f"tps should be '1k' (643 tok/s), got {tps!r}"
 
     def test_F3_tail_with_mid_ood_populates_column(self):
         """When `[mid-ood] step N: wikitext ppl=X` is in the tail,
@@ -460,11 +461,12 @@ class TestLightningPsOodPplColumn:
             "step   500 | loss 6.4 | lm 6.0 | ppl 398.2 | gnorm 4.0 "
             "| lr 1.00e-04 | 695 tok/s | other\n"
         )
-        step, ppl, ood, last = _summarise_lightning_tail(tail)
+        step, ppl, ood, tps = _summarise_lightning_tail(tail)
         assert step == "500"
         assert ppl == "398.2"
         assert ood == "1550@500", (
             f"OOD column must show '1550@500', got {ood!r}")
+        assert tps == "1k"
 
     def test_F4_latest_mid_ood_wins_over_earlier(self):
         """Multiple [mid-ood] blocks → table shows the most recent."""
