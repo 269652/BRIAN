@@ -163,7 +163,7 @@ def _bootstrap_lightning_secrets() -> None:
         from neuroslm.utils.secrets import bootstrap_secrets
         bootstrap_secrets(
             ["LIGHTNING_USER_ID", "LIGHTNING_API_KEY", "GITHUB_PAT",
-             "HF_TOKEN"],
+             "HF_TOKEN", "LIGHTNING_SSH_TARGET", "LIGHTNING_TEAMSPACE"],
             aliases={
                 "LIGHTNING_API_KEY": (
                     "LIGHTNING_AI",
