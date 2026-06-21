@@ -1846,17 +1846,24 @@ class BRIANHarness(nn.Module):
                         self._metrics["ste_ne"] = nt_sig["ne"]
                         self._metrics["ste_da"] = nt_sig["da"]
                         self._ste_sigma = sigma  # stash for compute_loss
-                    # Module 1: RG cascade on the post-norm hidden state
-                    h_rg = self._ste_rg(h_proj_input)
+                    # Module 1: RG cascade — detach input so the RG Jacobian
+                    # cannot amplify CE gradients back into the trunk.
+                    # The RG/GPE parameters still receive CE gradient via the
+                    # delta path below (their inputs are constants w.r.t. trunk).
+                    h_rg = self._ste_rg(h_proj_input.detach())
                     # Module 2: GPE phase field + order parameter ρ
                     h_gpe, rho = self._ste_gpe.forward_with_rho(h_rg)
                     self._metrics["ste_rho"] = rho.item()
-                    # Re-project enriched hidden state through LM head.
-                    # DSLLanguageModel.lm_head is a tied-weight nn.Parameter
-                    # (V×d), not a callable module — must use F.linear.
+                    # Add a residual delta to trunk logits (not replace them).
+                    # delta = F.linear(h_gpe - h_proj_input.detach(), lm_head)
+                    #       ≈ 0 at init (h_gpe ≈ h_hidden); grows as RG/GPE learn.
+                    # Trunk keeps its direct CE path; no gradient amplification.
                     lm_head = getattr(self.language_model, "lm_head", None)
                     if lm_head is not None:
-                        logits = torch.nn.functional.linear(h_gpe, lm_head)
+                        ste_delta = torch.nn.functional.linear(
+                            h_gpe - h_proj_input.detach(), lm_head
+                        )
+                        logits = logits + ste_delta
 
             # ── Multi-Trunk-V2 logits-mixture fusion ───────────────
             # When the cortex ensemble + fusion head are both built,
