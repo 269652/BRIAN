@@ -1622,3 +1622,81 @@ step  2200 | loss nan | lm nan | ppl nan | gnorm nan | lr 4.43e-04 | 240 tok/s |
 [train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
 [train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
 [train_dsl] GQA: n_kv_heads=8/8  RoPE base=500000
+
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 290/290 [00:00<00:00, 8598.71it/s]
+
+Loading weights:   0%|          | 0/148 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 148/148 [00:00<00:00, 8896.68it/s]
+[transformers] [1mGPT2LMHeadModel LOAD REPORT[0m from: microsoft/CodeGPT-small-py
+Key                                     | Status     |  | 
+----------------------------------------+------------+--+-
+transformer.h.{0...11}.attn.masked_bias | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 290/290 [00:00<00:00, 5065.61it/s]
+[train_dsl] DSL-LM parameters: total 1127.0M  (trainable 146.9M · frozen 980.1M); checkpoint will only save the trainable subset (frozen HF experts excluded via _CKPT_EXTERNAL_PREFIXES)
+[train_dsl] TrunkOptMonitor attached (n_trainable=146.9M, pac_sigma=0.02, pac_delta=0.05)
+`trust_remote_code` is not supported anymore.
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+
+Generating test split:   0%|          | 0/4358 [00:00<?, ? examples/s]
+Generating test split: 100%|██████████| 4358/4358 [00:00<00:00, 114438.33 examples/s]
+
+Generating train split:   0%|          | 0/1801350 [00:00<?, ? examples/s]
+Generating train split:   3%|▎         | 60000/1801350 [00:00<00:02, 592279.18 examples/s]
+Generating train split:   8%|▊         | 147000/1801350 [00:00<00:02, 753181.87 examples/s]
+Generating train split:  14%|█▍        | 260000/1801350 [00:00<00:02, 747093.06 examples/s]
+Generating train split:  19%|█▉        | 343000/1801350 [00:00<00:01, 772587.29 examples/s]
+Generating train split:  24%|██▍       | 428000/1801350 [00:00<00:02, 595579.26 examples/s]
+Generating train split:  28%|██▊       | 505000/1801350 [00:00<00:02, 638820.79 examples/s]
+Generating train split:  32%|███▏      | 584000/1801350 [00:00<00:02, 595259.16 examples/s]
+Generating train split:  36%|███▋      | 653000/1801350 [00:01<00:01, 616376.18 examples/s]
+Generating train split:  40%|████      | 722000/1801350 [00:01<00:01, 631795.55 examples/s]
+Generating train split:  45%|████▌     | 818000/1801350 [00:01<00:01, 625019.32 examples/s]
+Generating train split:  50%|████▉     | 893000/1801350 [00:01<00:01, 649661.92 examples/s]
+Generating train split:  54%|█████▍    | 978675/1801350 [00:01<00:01, 620932.85 examples/s]
+Generating train split:  59%|█████▉    | 1069675/1801350 [00:01<00:01, 609975.89 examples/s]
+Generating train split:  63%|██████▎   | 1133675/1801350 [00:01<00:01, 613551.63 examples/s]
+Generating train split:  67%|██████▋   | 1202675/1801350 [00:01<00:00, 630356.40 examples/s]
+Generating train split:  71%|███████   | 1280675/1801350 [00:01<00:00, 665892.25 examples/s]
+Generating train split:  75%|███████▍  | 1350675/1801350 [00:02<00:00, 500660.92 examples/s]
+Generating train split:  85%|████████▍ | 1523675/1801350 [00:05<00:02, 98456.63 examples/s] 
+Generating train split:  99%|█████████▊| 1777675/1801350 [00:05<00:00, 193762.57 examples/s]
+Generating train split: 100%|██████████| 1801350/1801350 [00:05<00:00, 326877.34 examples/s]
+
+Generating validation split:   0%|          | 0/3760 [00:00<?, ? examples/s]
+Generating validation split: 100%|██████████| 3760/3760 [00:00<00:00, 141376.81 examples/s]
+[train_dsl] GIF OOD probe armed
+[train_dsl] LR schedule from arch.neuro (preset rcc_bowtie_30m_p4 suppressed): lr=0.0005 wd=0.01 warmup=2400 min_ratio=0.1
+[train_dsl] mixed precision: bf16
+BRIANHarness:
+  vocab_size = 50257
+  d_sem      = 512
+  parameters = 1,127,007,764  (trainable 146,910,676 · frozen 980,097,088)
+  checkpoint = 149,241,635 params ≈ 569.3 MB (fp32) — frozen HF experts excluded
+  circuit populations = 0
+  sink population = 
+  loss clipping = True (factor=3.0)
+  optimizer = adamw (lr=0.0005)
+[train_dsl] device=cuda, warmup=2400/10000
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] PR2 OOD interventions: dar=ON pcc=ON isotropy=ON cmd=off adaptive_mixture=off
+[train_dsl] ══════════════════════════════════════════════
+[train_dsl] DAR domain labels ON — emitting (window, source_id) tuples
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[data:chat] using OpenHermes-2.5 (teknium/OpenHermes-2.5)
+step    20 | loss 6.6324 | lm 6.0257 | ppl 413.9 | gnorm 7.361 | lr 4.17e-06 | 176 tok/s | Φ 0.886 | λ₁ 0.075 | ign 0.00 | mesoLG 0.52 | troph 8/8 μ0.83 | NT[DA=0.28 NE=0.21 5HT=0.33 ACh=0.20 eCB=0.05 Glu=0.39 GABA=0.11] | osc[δ=0.347 θ=0.318 γ=0.334] | em[C2:ρ=0.00/τ=0.47/s=0.00 C4:Q=0.4 W=1 pl=255 C3:pc=3.816 VBB:β=1.00 σ=0.0183 kl=9590.315 C5:lat=1.00 C6:pac=0.00] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.654 kl=0.457 lm_ema=11.33 cx_ema=3.59] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | gif7[dgn=0.562 lr×1.000 klf=0.0] | nfo[R=0.48 R★=0.91 A=0.61 σA=0.28 cV=0.98 κ=0.10 α=0.010 Φκ=0.52] | hpa[load=0.02 cort=0.00 NE×1.00 T×1.00 LR×1.00] | trunk[budget=0.91 bpp=4.83e-08 erank=40.0 uni=2.65 α=1.09 R²=0.93 PR=1.6]
+step    40 | loss 6.8763 | lm 6.3037 | ppl 546.6 | gnorm 8.754 | lr 8.32e-06 | 592 tok/s | Φ 0.905 | λ₁ 0.075 | ign 0.70 | mesoLG 0.50 | troph 8/8 μ1.12 | NT[DA=0.14 NE=0.63 5HT=0.34 ACh=0.20 eCB=0.05 Glu=0.39 GABA=0.18] | osc[δ=0.285 θ=0.315 γ=0.400] | em[C2:ρ=0.07/τ=0.44/s=0.70 C4:Q=0.5 W=1 pl=255 C3:pc=1.596 VBB:β=1.00 σ=0.0183 kl=9590.313 C5:lat=1.00 C6:pac=0.04] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.697 kl=0.469 lm_ema=11.28 cx_ema=3.91] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | gif7[dgn=0.496 lr×1.000 klf=0.0] | nfo[R=0.52 R★=1.13 A=0.60 σA=0.31 cV=0.93 κ=0.10 α=0.010 Φκ=0.49] | hpa[load=0.05 cort=0.00 NE×1.00 T×1.00 LR×1.00] | trunk[budget=0.92 bpp=4.22e-08 erank=34.1 uni=2.55 α=1.15 R²=0.93 PR=1.7]
+step    60 | loss 7.2826 | lm 6.7309 | ppl 837.9 | gnorm 32.955 | lr 1.25e-05 | 642 tok/s | Φ 0.879 | λ₁ 0.075 | ign 0.81 | mesoLG 0.54 | troph 8/8 μ1.26 | NT[DA=0.13 NE=0.98 5HT=0.33 ACh=0.18 eCB=0.05 Glu=0.39 GABA=0.43] | osc[δ=0.373 θ=0.348 γ=0.278] | em[C2:ρ=0.28/τ=0.43/s=0.81 C4:Q=-0.4 W=1 pl=255 C3:pc=0.745 VBB:β=1.00 σ=0.0183 kl=9590.282 C5:lat=1.77 C6:pac=0.03] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.789 kl=0.438 lm_ema=11.13 cx_ema=4.45] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | gif7[dgn=0.150 lr×1.000 klf=0.0] | nfo[R=0.59 R★=1.52 A=0.70 σA=0.36 cV=0.99 κ=0.10 α=0.010 Φκ=0.46] | hpa[load=0.09 cort=0.01 NE×1.00 T×0.99 LR×1.00] | trunk[budget=0.92 bpp=4.16e-08 erank=24.6 uni=2.27 α=1.24 R²=0.94 PR=1.5]
+step    80 | loss 6.7311 | lm 6.1936 | ppl 489.6 | gnorm 6.629 | lr 1.66e-05 | 563 tok/s | Φ 0.889 | λ₁ 0.075 | ign 0.75 | mesoLG 0.51 | troph 8/8 μ1.29 | NT[DA=0.19 NE=0.17 5HT=0.35 ACh=0.17 eCB=0.05 Glu=0.39 GABA=0.15] | osc[δ=0.340 θ=0.394 γ=0.265] | em[C2:ρ=0.41/τ=0.46/s=0.75 C4:Q=-0.5 W=1 pl=255 C3:pc=0.380 VBB:β=1.00 σ=0.0183 kl=9590.135 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.683 kl=0.426 lm_ema=11.10 cx_ema=3.95] | gif[α=0.0010 p=0.000 ood_ema=0.00 ood_ce=0.00 iso_w=0.0000] | gif7[dgn=0.602 lr×1.000 klf=0.0] | nfo[R=0.59 R★=1.54 A=0.61 σA=0.35 cV=0.99 κ=0.10 α=0.010 Φκ=0.44] | hpa[load=0.10 cort=0.01 NE×0.99 T×0.99 LR×0.99] | trunk[budget=0.92 bpp=4.18e-08 erank=33.7 uni=2.45 α=1.10 R²=0.92 PR=1.5]
+step   100 | loss 6.4605 | lm 5.9546 | ppl 385.5 | gnorm 7.411 | lr 2.08e-05 | 523 tok/s | Φ 0.902 | λ₁ 0.075 | ign 0.75 | mesoLG 0.52 | troph 8/8 μ1.31 | NT[DA=0.23 NE=0.14 5HT=0.37 ACh=0.17 eCB=0.05 Glu=0.41 GABA=0.14] | osc[δ=0.409 θ=0.311 γ=0.279] | em[C2:ρ=0.45/τ=0.51/s=0.75 C4:Q=-0.5 W=1 pl=255 C3:pc=0.243 VBB:β=1.00 σ=0.0183 kl=9590.314 C5:lat=1.71 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.784 kl=0.375 lm_ema=10.81 cx_ema=3.78] | gif[α=0.0010 p=0.000 gap=1.46 ood_ema=11.28 ood_ce=11.28 iso_w=0.0000 div=0.003] | gif7[dgn=0.559 lr×1.000 klf=0.0] | nfo[R=0.61 R★=1.18 A=0.68 σA=0.31 cV=0.98 κ=0.10 α=0.010 Φκ=0.40] | hpa[load=0.11 cort=0.02 NE×0.99 T×0.98 LR×0.99] | trunk[budget=0.92 bpp=4.57e-08 erank=13.3 uni=2.52 α=1.37 R²=0.96 PR=1.3]
+step   120 | loss 6.4193 | lm 5.9159 | ppl 370.9 | gnorm 7.264 | lr 2.47e-05 | 552 tok/s | Φ 0.892 | λ₁ 0.075 | ign 0.75 | mesoLG 0.50 | troph 8/8 μ1.33 | NT[DA=0.22 NE=0.13 5HT=0.39 ACh=0.18 eCB=0.05 Glu=0.41 GABA=0.11] | osc[δ=0.380 θ=0.288 γ=0.332] | em[C2:ρ=0.25/τ=0.55/s=0.75 C4:Q=-0.5 W=1 pl=255 C3:pc=0.179 VBB:β=1.00 σ=0.0184 kl=9590.317 C5:lat=1.00 C6:pac=0.00] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.678 kl=0.396 lm_ema=10.81 cx_ema=3.65] | gif[α=0.0011 p=0.001 gap=1.59 ood_ema=11.28 ood_ce=11.28 iso_w=0.0000 ls=0.003 div=0.003] | gif7[dgn=0.567 lr×1.000 klf=0.0] | nfo[R=0.59 R★=1.11 A=0.72 σA=0.38 cV=1.00 κ=0.10 α=0.010 Φκ=0.42] | hpa[load=0.11 cort=0.02 NE×0.98 T×0.98 LR×0.99] | trunk[budget=0.92 bpp=4.21e-08 erank=34.0 uni=2.58 α=1.15 R²=0.93 PR=1.6]
+step   140 | loss 6.4863 | lm 5.9652 | ppl 389.6 | gnorm 8.934 | lr 2.92e-05 | 580 tok/s | Φ 0.892 | λ₁ 0.075 | ign 0.75 | mesoLG 0.51 | troph 8/8 μ1.35 | NT[DA=0.21 NE=0.17 5HT=0.40 ACh=0.20 eCB=0.05 Glu=0.42 GABA=0.10] | osc[δ=0.368 θ=0.265 γ=0.367] | em[C2:ρ=0.06/τ=0.53/s=0.75 C4:Q=-0.5 W=1 pl=255 C3:pc=0.175 VBB:β=1.00 σ=0.0184 kl=9590.249 C5:lat=1.00 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.788 kl=0.375 lm_ema=10.37 cx_ema=3.91] | gif[α=0.0012 p=0.004 gap=2.24 ood_ema=11.28 ood_ce=11.28 iso_w=0.0000 ls=0.025 div=0.002] | gif7[dgn=0.488 lr×1.000 klf=0.0] | nfo[R=0.52 R★=1.10 A=0.63 σA=0.32 cV=0.99 κ=0.10 α=0.010 Φκ=0.48] | hpa[load=0.13 cort=0.03 NE×0.98 T×0.97 LR×0.99] | trunk[budget=0.92 bpp=4.91e-08 erank=17.4 uni=2.58 α=1.40 R²=0.96 PR=1.6]
+step   160 | loss 6.4412 | lm 5.9413 | ppl 380.4 | gnorm 9.581 | lr 3.28e-05 | 557 tok/s | Φ 0.850 | λ₁ 0.075 | ign 0.75 | mesoLG 0.48 | troph 8/8 μ1.40 | NT[DA=0.21 NE=0.18 5HT=0.41 ACh=0.21 eCB=0.06 Glu=0.48 GABA=0.10] | osc[δ=0.382 θ=0.276 γ=0.343] | em[C2:ρ=0.06/τ=0.50/s=0.75 C4:Q=-0.5 W=1 pl=255 C3:pc=0.179 VBB:β=1.00 σ=0.0185 kl=9590.278 C5:lat=1.00 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.735 kl=0.316 lm_ema=9.73 cx_ema=4.05] | gif[α=0.0016 p=0.013 gap=5.03 ood_ema=11.28 ood_ce=11.28 iso_w=0.0001 ls=0.050 div=0.003] | gif7[dgn=0.463 lr×1.000 klf=0.0] | nfo[R=0.60 R★=1.25 A=0.69 σA=0.32 cV=0.97 κ=0.10 α=0.010 Φκ=0.42] | hpa[load=0.14 cort=0.03 NE×0.98 T×0.97 LR×0.98] | trunk[budget=0.93 bpp=4.81e-08 erank=20.0 uni=2.35 α=1.21 R²=0.93 PR=1.3]
+step   180 | loss 6.1648 | lm 5.6379 | ppl 280.9 | gnorm 8.243 | lr 3.75e-05 | 576 tok/s | Φ 0.899 | λ₁ 0.075 | ign 0.75 | mesoLG 0.46 | troph 8/8 μ1.44 | NT[DA=0.20 NE=0.17 5HT=0.43 ACh=0.20 eCB=0.07 Glu=0.48 GABA=0.10] | osc[δ=0.441 θ=0.236 γ=0.323] | em[C2:ρ=0.08/τ=0.47/s=0.75 C4:Q=-0.5 W=1 pl=255 C3:pc=0.188 VBB:β=1.00 σ=0.0185 kl=9590.296 C5:lat=1.68 C6:pac=0.02] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.664 kl=0.369 lm_ema=9.62 cx_ema=3.73] | gif[α=0.0025 p=0.030 gap=5.83 ood_ema=11.28 ood_ce=11.28 iso_w=0.0003 ls=0.050 div=0.001] | gif7[dgn=0.519 lr×1.000 klf=0.0] | nfo[R=0.54 R★=1.11 A=0.66 σA=0.32 cV=0.99 κ=0.10 α=0.010 Φκ=0.47] | hpa[load=0.16 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.93 bpp=5.35e-08 erank=32.4 uni=2.49 α=1.18 R²=0.93 PR=1.6]
+step   200 | loss 5.9704 | lm 5.4293 | ppl 228.0 | gnorm 9.480 | lr 4.07e-05 | 530 tok/s | Φ 0.810 | λ₁ 0.075 | ign 0.76 | mesoLG 0.49 | troph 8/8 μ1.53 | NT[DA=0.33 NE=0.16 5HT=0.45 ACh=0.20 eCB=0.09 Glu=0.58 GABA=0.10] | osc[δ=0.449 θ=0.210 γ=0.341] | em[C2:ρ=0.09/τ=0.45/s=0.76 C4:Q=-0.5 W=1 pl=255 C3:pc=0.204 VBB:β=1.00 σ=0.0186 kl=9590.282 C5:lat=1.49 C6:pac=0.01] | reg[dar=0.000 pcc=0.000 iso=0.0000 cmd=0.000 Σ=0.000 w=0.00 chat=0.60] | cortex[α_eff=0.500 inh=0.000 λ=0.749 kl=0.243 lm_ema=8.80 cx_ema=3.97] | gif[α=0.0036 p=0.052 gap=10.75 ood_ema=11.22 ood_ce=10.66 iso_w=0.0005 ls=0.050 div=0.003] | gif7[dgn=0.467 lr×1.000 klf=0.0] | nfo[R=0.58 R★=1.33 A=0.68 σA=0.31 cV=1.00 κ=0.10 α=0.011 Φκ=0.43] | hpa[load=0.16 cort=0.04 NE×0.97 T×0.96 LR×0.98] | trunk[budget=0.90 bpp=4.91e-08 erank=9.0 uni=2.09 α=1.53 R²=0.96 PR=1.2]
