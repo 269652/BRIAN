@@ -151,7 +151,7 @@ class OODProbe:
                 self.dataset_name,
                 self.dataset_config,
                 split=self.split,
-                trust_remote_code=True,
+                trust_remote_code=False,
             )
             # Filter to non-empty paragraphs
             texts = [r["text"] for r in ds if r["text"].strip()]

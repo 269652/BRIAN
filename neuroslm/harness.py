@@ -1839,11 +1839,12 @@ class BRIANHarness(nn.Module):
                     # Module 2: GPE phase field + order parameter ρ
                     h_gpe, rho = self._ste_gpe.forward_with_rho(h_rg)
                     self._metrics["ste_rho"] = rho.item()
-                    # Re-project enriched hidden state through LM head
-                    # (requires language_model to expose the head as `lm_head`)
+                    # Re-project enriched hidden state through LM head.
+                    # DSLLanguageModel.lm_head is a tied-weight nn.Parameter
+                    # (V×d), not a callable module — must use F.linear.
                     lm_head = getattr(self.language_model, "lm_head", None)
                     if lm_head is not None:
-                        logits = lm_head(h_gpe)
+                        logits = torch.nn.functional.linear(h_gpe, lm_head)
 
             # ── Multi-Trunk-V2 logits-mixture fusion ───────────────
             # When the cortex ensemble + fusion head are both built,
