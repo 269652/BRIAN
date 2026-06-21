@@ -2011,11 +2011,38 @@ class BRIANHarness(nn.Module):
                 return None
             probe = PCReentryProbe(dim=dim, device=h_m.device)
             self._pc_reentry_probe = probe
+        # ── Determine VBB mode early ─────────────────────────────────
+        # Must be computed before probe.step so we can normalise the inputs
+        # in VBB mode (prevents W from growing as ||h_s|| grows with rank
+        # collapse, which would make the detached prediction in residual_diff
+        # blow up even after we normalise h_s there).
+        # GIF-1: when GIF is enabled, use the scheduled α.
+        if self._gif is not None and self._gif.enabled:
+            alpha = self._gif.vbb_alpha(self._global_step)
+            self._metrics["gif_vbb_alpha"] = alpha
+        else:
+            alpha = float(getattr(self.training_config, "vbb_alpha", 0.0))
+        use_vbb = (alpha > 0.0
+                   and self._vbb_sigma_head is not None
+                   and self._vbb_log_beta is not None)
+
+        # Pre-normalise h_s (and h_m) once for VBB mode.  h_s_ln is reused
+        # in both probe.step and residual_diff so the computation is not
+        # duplicated.  The gradient path through h_s_ln is preserved for
+        # residual_diff (only probe.step receives the detached copy).
+        if use_vbb:
+            h_m_ln = F.layer_norm(h_m.to(dtype=torch.float32), [h_m.shape[-1]])
+            h_s_ln = F.layer_norm(h_s.to(dtype=torch.float32), [h_s.shape[-1]])
+
         # Run probe's internal SGD on a detached copy (telemetry path).
-        # We always pass the deterministic μ here so the probe learns
-        # the noise-free mapping (cleaner W).
+        # VBB mode: normalised inputs keep ||W|| bounded so the frozen-W
+        # prediction in residual_diff stays O(1) even after rank collapse.
+        # Legacy mode: pass raw tensors (unchanged behaviour).
         try:
-            probe.step(h_m.detach(), h_s.detach())
+            if use_vbb:
+                probe.step(h_m_ln.detach(), h_s_ln.detach())
+            else:
+                probe.step(h_m.detach(), h_s.detach())
         except Exception:
             pass
 
@@ -2036,18 +2063,8 @@ class BRIANHarness(nn.Module):
                 gaba = float(nt.get("GABA", 0.0))
                 gate_scalar = max(0.0, 1.0 + 0.5 * da - 0.7 * gaba)
 
-        # ── Branch on VBB ────────────────────────────────────────────
-        # GIF-1: when GIF is enabled, use the scheduled α instead of
-        # the static config value. The schedule ramps from α_start
-        # (loose, 0.001) to α_end (tight, 0.05) over training.
-        if self._gif is not None and self._gif.enabled:
-            alpha = self._gif.vbb_alpha(self._global_step)
-            self._metrics["gif_vbb_alpha"] = alpha
-        else:
-            alpha = float(getattr(self.training_config, "vbb_alpha", 0.0))
-        use_vbb = (alpha > 0.0
-                   and self._vbb_sigma_head is not None
-                   and self._vbb_log_beta is not None)
+        # ── Branch on VBB ─────────────────────────────────────────────
+        # (alpha and use_vbb were computed before probe.step above)
 
         if not use_vbb:
             # Legacy path: plain ‖s − W·m‖² with frozen W.
@@ -2101,11 +2118,14 @@ class BRIANHarness(nn.Module):
         eps = torch.randn_like(mu)
         mu_sample = mu + sigma * eps
 
-        # Residual using the frozen-W probe on the noised motor. The
-        # probe handles dtype/device internally and returns a scalar
-        # mean-squared residual. Gradient flows through `mu_sample`
-        # (→ μ and σ) and through `h_s`.
-        residual = probe.residual_diff(mu_sample, h_s)
+        # Residual using the frozen-W probe on the noised motor.  Use the
+        # pre-normalised h_s_ln (computed before probe.step above) rather
+        # than raw h_s so the comparison is unit-scale on both sides.
+        # Raw h_s grows as trunk rank collapses; (h_s − W·mu_sample)² then
+        # diverges to ∞ → loss NaN (observed step ~2160, erank=2.0).
+        # Gradient flows through mu_sample (→ μ and σ) and through h_s_ln
+        # (→ h_s via the LayerNorm Jacobian, which is well-conditioned).
+        residual = probe.residual_diff(mu_sample, h_s_ln)
         if residual is None:
             return None
 

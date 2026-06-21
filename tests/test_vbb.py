@@ -492,3 +492,43 @@ def test_vbb_kl_near_zero_for_normalized_hm():
     assert kl < 1.0, (
         f"KL={kl:.4f} for unit-scale h_m + unit sigma; expected <1.0"
     )
+
+
+def test_vbb_residual_finite_when_hs_large():
+    """Regression: when trunk representations collapse in rank and grow in
+    magnitude (observed at step 2160: troph μ=4.66→9.84, erank=2.0), the
+    raw h_s can reach enormous norms while mu_sample (LN-normalised h_m)
+    stays bounded.  residual_diff = (h_s − W·mu_sample)² then explodes to
+    ~8.4e6, driving loss to 16926 → inf → NaN.
+
+    h_m is already LayerNorm'd before residual_diff (line 2089 in harness.py).
+    h_s must be normalised to the same scale; otherwise the probe cannot keep
+    the residual finite as ||h_s|| grows.
+
+    After the fix, residual_diff must remain finite for any magnitude of h_s.
+    """
+    import math
+    h = _make_harness_with_vbb(alpha=1e-3)
+    torch.manual_seed(42)
+    # Normal-scale motor state (LN'd to unit-norm inside the harness)
+    h_m = torch.randn(2, 8, 16)
+    # Simulate the step-2160 scenario: h_s has grown ~100× (troph μ blew up)
+    # while h_m is still O(1). With no h_s normalisation the residual
+    # = (h_s − W·mu_sample)² ≈ ||h_s||² which is ~10000× normal.
+    h_s_large = torch.randn(2, 8, 16) * 300.0
+    _stash_activations(h, h_m, h_s_large)
+    loss = h._compute_pc_reentry_loss(base_weight=0.1)
+    assert loss is not None, "loss should not be None"
+    assert torch.isfinite(loss), (
+        f"VBB loss exploded to {loss.item():.3e} when h_s has large magnitude "
+        f"(simulating rank-collapse at step ~2160). "
+        "h_s must be LayerNorm'd before residual_diff, matching h_m treatment."
+    )
+    # Also check the residual metric itself is finite and bounded
+    residual = h._metrics.get("pc_reentry_loss", float("inf"))
+    assert math.isfinite(residual), (
+        f"pc_reentry_loss metric = {residual} (expected finite)"
+    )
+    assert residual < 1e4, (
+        f"pc_reentry_loss = {residual:.2e} (expected <1e4 after h_s normalisation)"
+    )
