@@ -1018,6 +1018,24 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
     if to_parts:
         trunk_str = " | trunk[" + " ".join(to_parts) + "]"
 
+    # ── STE (Semantic Turbulence Engine) telemetry ──
+    ste_str = ""
+    if "ste_rho" in m or "ste_sigma" in m:
+        sp = []
+        if "ste_sigma" in m:
+            sp.append(f"σ={m['ste_sigma']:.3f}")
+        if "ste_rho" in m:
+            sp.append(f"ρ={m['ste_rho']:.3f}")
+        if "ste_gaba" in m:
+            sp.append(f"G={m['ste_gaba']:.2f}")
+        if "ste_ne" in m:
+            sp.append(f"N={m['ste_ne']:.2f}")
+        if "ste_da" in m:
+            sp.append(f"D={m['ste_da']:.3f}")
+        if "ste_crit_loss" in m:
+            sp.append(f"crit={m['ste_crit_loss']:.4f}")
+        ste_str = " | ste[" + " ".join(sp) + "]"
+
     return (f"step {step:5d} | loss {avg_loss:.4f} | lm {avg_lm:.4f} "
             f"| ppl {ppl:.1f} | gnorm {gnorm:.3f} | lr {lr:.2e} "
             f"| {tok_per_s:.0f} tok/s "
@@ -1026,7 +1044,7 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
             f"| troph {t_act}/{t_tot} μ{t_mu:.2f} "
             f"| NT[{nt_str}]{osc_str}{em_str}{reg_str}"
             f"{cortex_str}{gif_str}{gif7_str}{nfo_str}"
-            f"{allostasis_str}{trunk_str}")
+            f"{allostasis_str}{trunk_str}{ste_str}")
 
 
 def _eval_pass_marks(rules, step: int,

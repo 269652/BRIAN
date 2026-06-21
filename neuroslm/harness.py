@@ -1815,17 +1815,29 @@ class BRIANHarness(nn.Module):
             # ── Semantic Turbulence Engine (STE) ───────────────────
             # Operates on the last transformer block output (h_motor),
             # which the DSLLanguageModel stashes after every forward.
-            # The RG cascade and GPE phase field refine h_motor in place;
-            # the refined state is passed back through the tied LM head.
-            # Criticality σ is measured between h_prev (first block) and
-            # h_motor (last block) as a proxy for the mean Jacobian norm.
-            # All three modules are no-ops when STE is disabled.
+            # STE wiring notes:
+            # - σ criticality is measured using _last_h_motor (pre-norm, raw
+            #   block output) and _last_h_sensory (first block), which gives the
+            #   true Frobenius-norm ratio across the full stack.
+            # - Modules 1+2 (RG cascade, GPE) operate on _last_hidden, which
+            #   is the post-final-rmsnorm state that DSLLanguageModel passes to
+            #   its lm_head.  Using pre-norm activations here would feed a
+            #   mis-scaled input to F.linear(h_gpe, lm_head).
             if self._ste_rg is not None:
                 h_m = getattr(self.language_model, "_last_h_motor", None)
                 h_s = getattr(self.language_model, "_last_h_sensory", None)
-                if h_m is not None and h_m.dim() == 3:
-                    # Module 3: measure criticality BEFORE enrichment
-                    if self._ste_criticality is not None and h_s is not None:
+                h_hidden = getattr(self.language_model, "_last_hidden", None)
+                # h_hidden may be None on stubs that don't set it; fall back
+                # to h_m (pre-norm) so tests with simple fake LMs still work.
+                h_proj_input = (
+                    h_hidden
+                    if (h_hidden is not None and h_hidden.dim() == 3)
+                    else h_m
+                )
+                if h_proj_input is not None and h_proj_input.dim() == 3:
+                    # Module 3: measure criticality on raw pre-norm activations
+                    if (self._ste_criticality is not None
+                            and h_m is not None and h_s is not None):
                         sigma = self._ste_criticality.measure_sigma(h_s, h_m)
                         self._ste_criticality.update_ema(sigma.item())
                         nt_sig = self._ste_criticality.nt_signals(sigma.item())
@@ -1834,8 +1846,8 @@ class BRIANHarness(nn.Module):
                         self._metrics["ste_ne"] = nt_sig["ne"]
                         self._metrics["ste_da"] = nt_sig["da"]
                         self._ste_sigma = sigma  # stash for compute_loss
-                    # Module 1: RG cascade on motor hidden state
-                    h_rg = self._ste_rg(h_m)
+                    # Module 1: RG cascade on the post-norm hidden state
+                    h_rg = self._ste_rg(h_proj_input)
                     # Module 2: GPE phase field + order parameter ρ
                     h_gpe, rho = self._ste_gpe.forward_with_rho(h_rg)
                     self._metrics["ste_rho"] = rho.item()
