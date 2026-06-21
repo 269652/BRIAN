@@ -1039,6 +1039,10 @@ class LightningConnector(BaseConnector):
             parts.append(f"--resume_from {shlex.quote(config.resume_from)}")
         if config.ood_every > 0:
             parts.append(f"--ood_every {int(config.ood_every)}")
+        if getattr(config, "seq_len", 0) > 0:
+            parts.append(f"--seq_len {int(config.seq_len)}")
+        if getattr(config, "batch_size", 0) > 0:
+            parts.append(f"--batch {int(config.batch_size)}")
 
         train_inner = " ".join(parts)
         # Wrap in cd + nohup + disown so the process survives the SDK

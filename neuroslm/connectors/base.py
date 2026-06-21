@@ -209,6 +209,8 @@ class DeployConfig:
     push_backend: str = "hf"
     hf_repo_id: str = "moritzroessler/BRIAN"
     push_optimizer: bool = False
+    seq_len: int = 0       # 0 = use trainer default (128); set e.g. 256 for P2
+    batch_size: int = 0    # 0 = use trainer default; forwarded as --batch N
     extra_env: dict = field(default_factory=dict)
 
 

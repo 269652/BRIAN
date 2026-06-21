@@ -939,6 +939,7 @@ class BRIANHarness(nn.Module):
             self.cortex_mix_logit = nn.Parameter(
                 torch.tensor([init_logit], dtype=torch.float32)
             )
+            self._build_context_gate(cfg)
             return
 
         # Lazy import so legacy runs that never enable multi_cortex
@@ -1088,6 +1089,27 @@ class BRIANHarness(nn.Module):
         self.cortex_mix_logit = nn.Parameter(
             torch.tensor([init_logit], dtype=torch.float32)
         )
+        self._build_context_gate(cfg)
+
+    # ── P3: Context-dependent fusion gate ─────────────────────────────
+
+    def _build_context_gate(self, cfg) -> None:
+        """Build the P3 per-sample alpha gate from trunk hidden state.
+
+        When ``context_gate_enabled=True``, the fusion alpha is modulated
+        per sample:
+            α_i = sigmoid(cortex_mix_logit + context_gate(h_trunk_last_i))
+        Gradient is blocked on h_trunk_last (detach) so the gate learns
+        WHICH contexts to trust experts vs trunk, not how to shape trunk.
+        """
+        if (cfg is None
+                or not getattr(cfg, "context_gate_enabled", False)
+                or getattr(self, "cortex_mix_logit", None) is None):
+            self.context_gate = None
+            return
+        self.context_gate = nn.Linear(self.d_sem, 1, bias=True)
+        nn.init.zeros_(self.context_gate.weight)
+        nn.init.zeros_(self.context_gate.bias)
 
     # ── Synthetic HPA axis (allostasis) ───────────────────────────────
 
@@ -1821,7 +1843,21 @@ class BRIANHarness(nn.Module):
                     cfg_mc is not None
                     and getattr(cfg_mc, "inhibition_enabled", False)
                 )
-                alpha = torch.sigmoid(self.cortex_mix_logit)  # (1,)
+
+                # P3: context-dependent alpha — modulate per sample when gate enabled.
+                # Falls back to global scalar when gate is None or h_motor missing.
+                if getattr(self, "context_gate", None) is not None:
+                    h_m = getattr(self.language_model, "_last_h_motor", None)
+                    if (h_m is not None and h_m.dim() == 3
+                            and h_m.shape[0] == logits.shape[0]):
+                        h_last = h_m[:, -1, :].detach()     # (B, D) — no gate->trunk grad
+                        ctx_logit = self.context_gate(h_last)  # (B, 1)
+                        alpha = torch.sigmoid(self.cortex_mix_logit + ctx_logit)  # (B, 1)
+                    else:
+                        alpha = torch.sigmoid(self.cortex_mix_logit)  # (1,) fallback
+                else:
+                    alpha = torch.sigmoid(self.cortex_mix_logit)  # (1,)
+
                 if inhibition_on:
                     # Inhibition is a non-trainable scalar (updated by
                     # the loss EMA loop). Multiply in autograd-graph so
@@ -1833,7 +1869,20 @@ class BRIANHarness(nn.Module):
                     alpha_eff = alpha * (1.0 - inhibition)
                 else:
                     alpha_eff = alpha
-                logits = (1.0 - alpha_eff) * logits + alpha_eff * cortex_logits
+
+                # Broadcast (B,1) → (B,1,1) so it multiplies cleanly with (B,T,V).
+                if alpha_eff.dim() == 2:
+                    alpha_eff = alpha_eff.unsqueeze(-1)
+
+                # P1: fusion mode branch.
+                _fusion_mode = getattr(cfg_mc, "fusion_mode", "logits_mixture")
+                if _fusion_mode == "additive_correction":
+                    # Trunk learns additive correction over detached expert predictions.
+                    # Gradient flows through trunk logits only; cortex is frozen prior.
+                    logits = cortex_logits.detach() + alpha_eff * logits
+                else:
+                    # Default logits_mixture: (1-α)·trunk + α·cortex.
+                    logits = (1.0 - alpha_eff) * logits + alpha_eff * cortex_logits
             else:
                 # Fusion path inactive — clear any stale stashes so a
                 # later distillation lookup can't pick them up across a

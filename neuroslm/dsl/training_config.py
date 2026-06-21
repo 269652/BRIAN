@@ -485,6 +485,13 @@ class MultiCortexConfig:
     fusion_mode: str = "logits_mixture"
     fusion_init: float = 0.5
 
+    # ── P3: Context-dependent fusion gate ──────────────────────────────
+    # When enabled, the trunk's last hidden state modulates α per sample:
+    #   α_sample = sigmoid(cortex_mix_logit + W·h_trunk_last)
+    # Different contexts (prose/code/math) produce different expert trust.
+    context_gate_enabled: bool = False
+    context_gate_dim: int = 64  # unused when enabled=False; kept for DSL parity
+
     # ── A: KL-distillation aux loss (trunk learns FROM cortex) ──
     # Hinton 2015 style: L_total += λ_t · T² · KL(softmax(cortex.detach()/T)
     # || softmax(lm/T)). The trunk distills the cortex's full output
@@ -1061,7 +1068,7 @@ _VALID_MULTI_CORTEX_WEIGHTS = {"stub", "gpt2"}
 #   "logits_mixture": late fusion via tied cortex_lm_head + sigmoid mix.
 #   "off":            build the ensemble but do not touch LM logits
 #                     (legacy "telemetry-only" semantics).
-_VALID_MULTI_CORTEX_FUSION_MODES = {"logits_mixture", "off"}
+_VALID_MULTI_CORTEX_FUSION_MODES = {"logits_mixture", "off", "additive_correction"}
 
 # Allowed `fitness.objectives` keys.  Adding a new objective here is the
 # *only* place the parser needs to learn about it — the FitnessComposer
@@ -1527,6 +1534,10 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
         m.fusion_mode = fm
     if "fusion_init" in props:
         m.fusion_init = float(props["fusion_init"])
+    if "context_gate_enabled" in props:
+        m.context_gate_enabled = _parse_bool(props["context_gate_enabled"])
+    if "context_gate_dim" in props:
+        m.context_gate_dim = int(props["context_gate_dim"])
 
     # ── A: distillation parameters ──
     if "distillation_enabled" in props:

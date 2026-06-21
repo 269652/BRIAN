@@ -256,6 +256,20 @@ training {
         bema_tau:            0.5,
         router_d_model:      256,
 
+        # â"€â"€ P1: Additive correction fusion mode â"€â"€
+        # logits = cortex.detach() + Î±Â·trunk  (trunk learns the DELTA over experts)
+        # Eliminates trunk-vs-expert competition; trunk starts with Î±=0.1 (small
+        # corrections) and gains influence as it learns to improve on expert predictions.
+        fusion_mode:         "additive_correction",
+        fusion_init:         0.1,
+
+        # â"€â"€ P3: Context-dependent fusion gate â"€â"€
+        # Î±_i = sigmoid(cortex_mix_logit + WÂ·h_trunk_last_i)
+        # Per-sample alpha conditioned on trunk's last hidden state; different
+        # context types (prose/code/math) produce different expert trust levels.
+        context_gate_enabled: true,
+        context_gate_dim:     64,
+
         # â"€â"€ Slot A: KL-distillation aux loss â"€â"€
         # The trunk learns FROM the cortex by matching its full output
         # distribution, not just argmax targets. Î»_t is a piecewise-
