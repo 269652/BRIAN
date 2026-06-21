@@ -2518,3 +2518,4 @@ step  7000 | loss 7.5740 | lm 3.6458 | ppl 38.3 | gnorm 0.891 | lr 1.98e-04 | 51
 `trust_remote_code` is not supported anymore.
 Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
 If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 7000: wikitext ppl=102.9 gap_ratio=2.68 (train_ppl=38.3) (50 seq, 6430 tok)
