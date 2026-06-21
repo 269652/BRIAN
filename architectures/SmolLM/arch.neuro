@@ -420,7 +420,7 @@ training {
     # Disabled by default (enabled: false) → bit-identical to baseline.
     # Enable for H-STE-A/B/C ablation experiments.
     semantic_turbulence: {
-        enabled:               false,
+        enabled:               true,
         n_rg_groups:           3,
         kolmogorov_init:       true,
         gpe_steps:             4,
