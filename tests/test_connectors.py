@@ -410,6 +410,78 @@ def test_P2_clone_url_no_pat_stays_plain():
     assert "x-access-token:@" not in setup
 
 
+def test_Q_list_jobs_uses_ssh_not_sdk_when_ssh_target_stored(tmp_path, monkeypatch):
+    """list_jobs() must not call Studio() (SDK) when ssh_target is in extra.
+
+    When running in pure-SSH mode (LIGHTNING_SSH_TARGET set), job records
+    store ssh_target + ssh_key in extra. list_jobs() should use SSH to check
+    whether the training process is still running, not trigger a browser
+    login via the SDK.
+    """
+    import json
+    from neuroslm.connectors.lightning import LightningConnector
+
+    # Create a fake SSH key so the key-exists check passes
+    fake_key = tmp_path / "fake_rsa"
+    fake_key.write_text("FAKE KEY")
+
+    # Write a fake job record with ssh_target in extra
+    jobs_dir = tmp_path / ".brian" / "jobs"
+    jobs_dir.mkdir(parents=True)
+    job = {
+        "job_id": "ln-test-001",
+        "platform": "lightning",
+        "status": "running",
+        "studio_name": "brian-train",
+        "label": "test-run",
+        "machine": "T4",
+        "teamspace": "(ssh-target)",
+        "host": "(ssh-target)",
+        "started_at": 1000000,
+        "log_path": "~/brian/logs/ln-test-001.log",
+        "extra": {
+            "ssh_target": "s_test@ssh.lightning.ai",
+            "ssh_key": str(fake_key),
+        },
+    }
+    (jobs_dir / "ln-test-001.json").write_text(json.dumps(job))
+    # _jobs_dir() uses _REPO_ROOT, not cwd — override via env var
+    monkeypatch.setenv("BRIAN_JOBS_DIR", str(jobs_dir))
+
+    sdk_called = []
+
+    def _fake_import_sdk():
+        sdk_called.append(True)
+        return None, None, None  # SDK unavailable
+
+    monkeypatch.setattr(
+        "neuroslm.connectors.lightning._import_lightning_sdk", _fake_import_sdk
+    )
+
+    ssh_calls = []
+
+    def _fake_ssh_run(key_path, ssh_target, script, timeout=30):
+        ssh_calls.append({"target": ssh_target, "script": script})
+        return "RUNNING", 0
+
+    # _ssh_run is a staticmethod — patch as plain function (pytest monkeypatch
+    # does NOT prepend self for non-descriptor attributes set on a class).
+    monkeypatch.setattr(LightningConnector, "_ssh_run", staticmethod(_fake_ssh_run))
+
+    connector = LightningConnector()
+    jobs = connector.list_jobs()
+
+    # Must have used SSH (not SDK) to determine status
+    assert ssh_calls, "list_jobs() must use SSH when ssh_target is in extra"
+    # SDK must not have been called (would trigger browser login)
+    assert not sdk_called, (
+        "list_jobs() must NOT call _import_lightning_sdk() when ssh_target is stored"
+    )
+    assert len(jobs) == 1
+    assert jobs[0].job_id == "ln-test-001"
+    assert jobs[0].status == "running"
+
+
 def test_O_no_platform_uses_toml(patch_connectors, tmp_path, monkeypatch):
     """No --platform flag → reads [deploy].platform from brian.toml."""
     cfg_file = tmp_path / "brian.toml"

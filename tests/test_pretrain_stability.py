@@ -374,6 +374,49 @@ class TestDARPCCActivation:
             f"activation_step ({activation}) must be ≤ 2500 so "
             f"interventions get ≥75% runway in a 10k-step run.")
 
+    def _parse_isotropy_weight(self, text: str) -> float:
+        """Extract isotropy.weight from the regularization block."""
+        m = re.search(r"isotropy\s*:\s*\{[^}]*weight\s*:\s*([\d.eE+-]+)",
+                      text, re.DOTALL)
+        assert m, "Could not locate isotropy.weight in SmolLM arch"
+        return float(m.group(1))
+
+    def _parse_bma_field(self, text: str, field: str) -> float:
+        """Extract a top-level bma_<field> value from arch.neuro."""
+        m = re.search(rf"{re.escape(field)}\s*:\s*([\d.eE+-]+)", text)
+        assert m, f"Could not locate {field} in SmolLM arch"
+        return float(m.group(1))
+
+    def test_I4_isotropy_weight_sufficient_to_prevent_rank_collapse(self):
+        """isotropy.weight must be ≥ 0.04 to meaningfully counteract rank collapse.
+
+        2026-06-21: weight=0.005 was 10× too small — isotropy contribution at
+        step 300 was ~0.0003 vs LM loss ~5.5 (ratio 0.005%). At ≥0.04 the
+        contribution is ~0.003 and begins to resist erank→7 collapse.
+        """
+        text = SMOLLM_ARCH.read_text(encoding="utf-8")
+        w = self._parse_isotropy_weight(text)
+        assert w >= 0.04, (
+            f"isotropy.weight ({w}) is too small to prevent rank collapse. "
+            f"Minimum: 0.04 (10× the broken 0.005 baseline). "
+            f"Erank collapsed 53→7 by step 300 with weight=0.005."
+        )
+
+    def test_I5_bma_ramp_end_tight_enough_for_early_rank_collapse(self):
+        """bma_ramp_end must be ≤ 1500 so BMA reaches ≥20% weight by step 300.
+
+        2026-06-21: bma_ramp_end=3000 meant only 10% weight at step 300,
+        contributing 0.005 — far too small while erank collapses 53→7.
+        At ramp_end=1500, step-300 weight is 20% (0.010), enough to register.
+        """
+        text = SMOLLM_ARCH.read_text(encoding="utf-8")
+        ramp_end = self._parse_bma_field(text, "bma_ramp_end")
+        assert ramp_end <= 1500, (
+            f"bma_ramp_end ({ramp_end}) ramps BMA too slowly: at step 300 "
+            f"only {100*300/ramp_end:.0f}% weight. Must be ≤1500 so BMA "
+            f"reaches ≥20% by step 300 (before erank collapse completes)."
+        )
+
     def test_I3_isotropy_activation_unchanged(self):
         """REGRESSION: isotropy fires before DAR/PCC (rank-collapse guard).
 

@@ -371,10 +371,18 @@ def test_lightning_short_id_format():
 
 
 def test_lightning_build_setup_command_includes_branch_and_pip():
-    """Setup script clones the right branch and installs deps."""
+    """Setup script clones the right branch and installs deps.
+
+    URL tokenization (GITHUB_PAT injection) now happens in Python before
+    _build_setup_command is called, so the command receives a pre-baked URL.
+    See test_P / test_P2 in test_connectors.py for the tokenization contract.
+    """
     from neuroslm.connectors.lightning import LightningConnector
+    # Simulate what _run_setup_and_train does: pass in the pre-tokenized URL
+    PAT = "ghp_testtoken123"
+    tokenized_url = f"https://x-access-token:{PAT}@github.com/owner/repo.git"
     cmd = LightningConnector._build_setup_command(
-        "https://github.com/owner/repo.git", "feature/x", "~/brian/logs/x.log"
+        tokenized_url, "feature/x", "~/brian/logs/x.log"
     )
     assert "git clone" in cmd
     assert "feature/x" in cmd
@@ -388,9 +396,11 @@ def test_lightning_build_setup_command_includes_branch_and_pip():
     assert "import torch" in cmd
     assert "transformers" in cmd
     assert "tiktoken" in cmd
-    # Token injection branch present
-    assert "GITHUB_PAT" in cmd
+    # Pre-baked URL must contain the token (tokenized by caller, not sed)
     assert "x-access-token" in cmd
+    assert PAT in cmd
+    # Bare GITHUB_PAT placeholder must NOT appear — tokenization was done in Python
+    assert "GITHUB_PAT" not in cmd
     # Sets up base + logs dirs
     assert "mkdir" in cmd
     assert "set -e" in cmd

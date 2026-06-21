@@ -522,6 +522,23 @@ class LightningConnector(BaseConnector):
             for k, v in remote_env.items()
             if v
         )
+        # Also write a .env on the remote so bootstrap_secrets() finds tokens
+        # if a code path calls it (e.g. after a nohup restart or subshell).
+        # Written to ~/brian/.env which is the first CWD-ancestor .env hit
+        # when training runs from ~/brian/repo.
+        dot_env_lines = "".join(
+            f"{k}={v}\n"
+            for k, v in remote_env.items()
+            if v and k in ("HF_TOKEN", "GITHUB_PAT", "GITHUB", "GITHUB_TOKEN",
+                           "HF_REPO_ID")
+        )
+        if dot_env_lines:
+            env_prefix += (
+                f"mkdir -p ~/brian && "
+                f"cat > ~/brian/.env << 'ENDOFENV'\n"
+                f"{dot_env_lines}"
+                f"ENDOFENV\n"
+            )
 
         # Tokenise the clone URL here in Python (not via sed-in-shell).
         # sed quoting is fragile: an empty PAT produces 'x-access-token:@...'
@@ -607,50 +624,74 @@ class LightningConnector(BaseConnector):
     def list_jobs(self) -> List[JobInfo]:
         """Refresh every persisted Lightning job's live status.
 
-        Each on-disk record is re-attached via the SDK (cheap — no
-        machine restart) so the status column reflects the current
-        Studio state, not the moment-of-launch value.
+        For pure-SSH jobs (ssh_target stored in extra) status is checked
+        via SSH without touching the SDK or triggering a browser login.
+        For SDK-launched jobs the SDK path is used as a fallback.
         """
         records = load_jobs(platform=self.platform_name())
         if not records:
             return []
-        # Bootstrap secrets once for the whole batch so SDK auth works.
-        _bootstrap_lightning_secrets()
-        Studio, _, _ = _import_lightning_sdk()
-        if Studio is None:
-            return records  # SDK missing — return stale records as-is
-
-        try:
-            user = _get_authed_user_safe()
-        except RuntimeError:
-            return records
 
         for r in records:
+            # ── Fast path: SSH-based status (no SDK needed) ──
+            stored_target = r.extra.get("ssh_target", "") if r.extra else ""
+            stored_key    = r.extra.get("ssh_key",    "") if r.extra else ""
+            key_path = (stored_key if stored_key and Path(stored_key).exists()
+                        else self._try_existing_ssh_key())
+            if stored_target and key_path:
+                r.status = self._ssh_status(r, key_path, stored_target)
+                continue
+
+            # ── SDK fallback (browser login if credentials absent) ──
             try:
+                _bootstrap_lightning_secrets()
+                Studio, _, _ = _import_lightning_sdk()
+                if Studio is None:
+                    continue
+                user = _get_authed_user_safe()
                 teamspace = _resolve_teamspace_handle(user, r.teamspace)
-                # SDK quirk: ``create_ok=False`` fails with "does not
-                # exist" on Stopped/Completed Studios — only currently
-                # Running ones are found. ``create_ok=True`` re-attaches
-                # to ANY existing Studio (and only creates a new one if
-                # the name truly isn't on the account). Safe here
-                # because we already know the studio existed at launch.
-                s = Studio(
-                    name=r.studio_name,
-                    teamspace=teamspace,
-                    user=user,
-                    create_ok=True,
-                )
+                s = Studio(name=r.studio_name, teamspace=teamspace,
+                           user=user, create_ok=True)
                 native = getattr(s.status, "value", str(s.status))
                 native_name = (native.name if hasattr(native, "name")
                                else str(native))
-                r.status = _STATUS_MAP.get(
-                    native_name, JobStatus.UNKNOWN
-                ).value
+                r.status = _STATUS_MAP.get(native_name, JobStatus.UNKNOWN).value
             except Exception:
-                # Studio deleted / unreachable — fall through with
-                # whatever was on disk (likely "running" → stale).
                 pass
         return records
+
+    def _ssh_status(self, r: "JobInfo", key_path: str,
+                    ssh_target: str) -> str:
+        """Return a JobStatus value string by SSHing into the Studio.
+
+        Checks whether the training process is still writing to the log
+        (via a 2-second ``tail -f`` poll), then falls back to checking
+        if any python train_dsl process is alive.
+        """
+        log_path = r.log_path or f"{REMOTE_LOGS}/{r.job_id}.log"
+        if log_path.startswith("~/"):
+            quoted_log = '"$HOME/' + log_path[2:] + '"'
+        else:
+            quoted_log = shlex.quote(log_path)
+        # Check for a live train_dsl process and log existence in one round-trip.
+        script = (
+            f"if pgrep -f train_dsl > /dev/null 2>&1; then echo RUNNING; "
+            f"elif [ -f {quoted_log} ]; then "
+            f"  tail -1 {quoted_log} | grep -q 'Traceback\\|Error\\|FAILED' "
+            f"  && echo FAILED || echo COMPLETED; "
+            f"else echo UNKNOWN; fi"
+        )
+        try:
+            out, _ = self._ssh_run(key_path, ssh_target, script, timeout=10)
+            result = out.strip().splitlines()[-1].strip() if out.strip() else "UNKNOWN"
+            mapping = {
+                "RUNNING":   JobStatus.RUNNING.value,
+                "COMPLETED": JobStatus.COMPLETED.value,
+                "FAILED":    JobStatus.FAILED.value,
+            }
+            return mapping.get(result, JobStatus.UNKNOWN.value)
+        except Exception:
+            return r.status or JobStatus.UNKNOWN.value
 
     def status(self, job_id: str) -> JobStatus:
         info = load_job(job_id)
@@ -896,6 +937,12 @@ class LightningConnector(BaseConnector):
             v = os.environ.get(k)
             if v:
                 env[k] = v
+        # checkpoint_push.py reads GITHUB or GITHUB_TOKEN for Git log pushes;
+        # forward GITHUB_PAT under both names so it is found regardless.
+        github_pat = os.environ.get("GITHUB_PAT", "").strip()
+        if github_pat:
+            env.setdefault("GITHUB", github_pat)
+            env.setdefault("GITHUB_TOKEN", github_pat)
         # Forward caller-supplied extras (minus Lightning-internal keys
         # that don't belong on the remote side).
         skip = {"LIGHTNING_MACHINE", "LIGHTNING_TEAMSPACE",
