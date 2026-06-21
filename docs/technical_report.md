@@ -886,3 +886,34 @@ This report is designed to be self-contained. You have:
 **Last verified:** 2026-06-01  
 **Next review:** After matched-compute baseline eval or new OOD results commit  
 **Maintainer:** User instructions in CLAUDE.md §documentation-sync
+
+### 9.2 Semantic Turbulence Engine (STE)
+
+**Status:** Implemented 2026-06-21. Disabled by default (zero behavioral change to
+current runs). Ablations H-STE-A/B/C planned.
+
+**Three interlocked physics-inspired mechanisms:**
+
+1. **RG Cascade** — Multi-scale sequence enrichment via Kolmogorov 5/3-law coupling
+   (λ_g ∝ 2^{-5g/6}). Coarse-grains the sequence at block sizes {2, 4, 8} and feeds
+   scale-specific projections + fluctuation residuals back into the hidden state.
+
+2. **GPE Phase Field** — Encodes the trunk's last block output as a complex superfluid
+   ψ ∈ ℂ^{d/2}, runs N=4 imaginary-time GPE steps (gradient descent on Ginzburg-Landau
+   free energy), then decodes. The order parameter ρ = |⟨ψ/|ψ|⟩|² ∈ [0,1] measures
+   semantic coherence and gates the P3 context-dependent α.
+
+3. **NT Criticality** — Tracks branching ratio σ = ‖h_motor‖/‖h_sensory‖ as a proxy
+   for the mean Jacobian norm. Adds (σ-1)² to the loss; generates GABA/NE/DA signals
+   based on distance from the Beggs & Plenz critical point σ*=1.
+
+**Implementation:** `neuroslm/emergent/semantic_turbulence.py` (3 classes)
+**DSL config:** `SemanticTurbulenceConfig` in `neuroslm/dsl/training_config.py`
+**Harness wiring:** `BRIANHarness._build_semantic_turbulence()` + forward pass + `compute_loss`
+
+**Evidence (Layer A — GREEN):** 78 tests across 4 test files confirm mathematical
+contracts (Kolmogorov ratios, GPE free-energy descent, σ=1 for identity, NT direction).
+See `docs/findings.md::H-STE`.
+
+**Predicted performance:** 2–4× OOD PPL reduction over H21 baseline at same parameter
+count and training budget (conservative estimate with 0.5 compounding factor across modules).

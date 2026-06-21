@@ -408,6 +408,30 @@ training {
         gamma_trophic:     1.0,
         gamma_lr:          0.5
     }
+
+    # ── Semantic Turbulence Engine (STE) — H-STE hypothesis ─────────────
+    # Three physics-inspired multi-scale mechanisms targeting 2-4× OOD
+    # PPL reduction over same-parameter baselines (see docs/findings.md).
+    #
+    # Module 1 — RG Cascade: Kolmogorov 5/3-law multi-scale attention.
+    # Module 2 — GPE Phase Field: superfluid semantic coherence (ρ order param).
+    # Module 3 — NT Criticality: Beggs & Plenz σ=1 branching ratio control.
+    #
+    # Disabled by default (enabled: false) → bit-identical to baseline.
+    # Enable for H-STE-A/B/C ablation experiments.
+    semantic_turbulence: {
+        enabled:               false,
+        n_rg_groups:           3,
+        kolmogorov_init:       true,
+        gpe_steps:             4,
+        gpe_coupling_init:     0.01,
+        gpe_dt:                0.01,
+        criticality_target:    1.0,
+        criticality_weight:    0.01,
+        criticality_da_reward: 0.1,
+        criticality_ema_alpha: 0.05,
+        rho_gate_enabled:      true
+    }
     # batch 16 x ctx 2048 = 32k tokens/step (same as old 32x1024) but
     # ctx is 2x richer. The 32x2048 combo OOM'd on cross-entropy (13 GiB
     # logit tensor at fp32). If you want to push back to batch=32, also

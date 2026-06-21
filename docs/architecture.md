@@ -2985,3 +2985,129 @@ complete) for the hand-written architecture code.
 ---
 
 *Last updated: 2026-05-19 (SRC-TEH §0, Phased Maturation §§0.10-0.12, Adaptive GWS §0.13, MAT-gated memory §0.14, Expert floor removal §0.15, Trophic recovery §0.16, GA loss-display fix §0.17, Benchmark cfg-round-trip §0.18, Checkpoint rotation §0.19 — see [`docs/RFC.md`](RFC.md)). §12 (`.neuro` DSL) added 2026-05-27 — full reference in [`docs/dsl.md`](dsl.md). Source of truth: `neuroslm/` and `architectures/` on branch `master`.*
+
+---
+
+## §13 — Semantic Turbulence Engine (STE)
+
+**Status:** Implemented (2026-06-21). Disabled by default. Enable via
+`semantic_turbulence { enabled: true }` in arch.neuro.
+
+### 13.1 Motivation
+
+BRIAN's transformer blocks operate at a single token scale. Turbulence
+theory (Kolmogorov 1941) and superfluid condensate physics (GPE 1961)
+both show that systems operating across multiple scales simultaneously
+achieve dramatically higher information transfer efficiency. The STE
+instantiates three such mechanisms, each motivated by a different physical
+regime.
+
+### 13.2 Module 1 — RenormalizationGroupCascade
+
+Partitions the sequence into G groups at token scales 2^g (g=1..G).
+For each group g:
+
+    H̄^(g)_b = (1/2^g) Σ_{t∈block_b} H_t          # coarse-grain
+    δH^(g)_t = H_t - H̄^(g)_{b(t)}                  # fluctuations
+    h_out    += proj_g(H̄^(g)) + λ_g · δH^(g)       # residual
+
+Coupling init: `λ_g = 2^{-5g/6}` (Kolmogorov 5/3-law energy cascade).
+Each group has an independent linear projection `proj_g: d→d`.
+Total attention overhead: T² + (T/2)² + (T/4)² = 1.3125 T² (for G=3).
+
+**Implementation:** `neuroslm/emergent/semantic_turbulence.py::RenormalizationGroupCascade`
+**Tests:** `tests/training/test_rg_cascade.py` (16 contracts)
+
+### 13.3 Module 2 — GrossPitaevskiiLayer
+
+Encodes the hidden state as a complex superfluid field:
+
+    ψ = view_as_complex(x.reshape(B, T, d//2, 2))  ∈ ℂ^{d/2}
+
+Runs N imaginary-time GPE Euler steps (gradient descent on free energy):
+
+    ψ_t ← ψ_t - Δτ · g · |ψ_t|² · ψ_t
+    ψ_t ← ψ_t · (‖ψ_0‖ / ‖ψ_t‖)   # norm-preserving rescale
+
+Order parameter measuring semantic coherence:
+
+    ρ = |⟨ψ / |ψ|⟩|²  ∈ [0, 1]
+
+`ρ → 1` (condensate): unambiguous context, all semantic "particles" in
+the same quantum state. `ρ → 0` (disordered): polysemous or uncertain.
+ρ gates the P3 context-dependent α when `rho_gate_enabled: true`.
+
+The interaction coupling `g = exp(log_g)` is a learnable parameter
+initialized to `gpe_coupling_init` (default 0.01, ReZero-style).
+
+**Implementation:** `neuroslm/emergent/semantic_turbulence.py::GrossPitaevskiiLayer`
+**Tests:** `tests/training/test_gpe_phase_field.py` (15 contracts)
+
+### 13.4 Module 3 — BranchingRatioMonitor
+
+Measures the layer-to-layer branching ratio as a Frobenius norm ratio:
+
+    σ ≈ ‖h_{motor}‖_F / ‖h_{sensory}‖_F
+
+(Exact for linear layers where h_next = J · h_prev; well-approximated
+for the EMA-smoothed NT control signal.)
+
+Critical point σ* = 1 (Beggs & Plenz 2003): maximises dynamic range,
+correlation length, and information transmission. NT mapping:
+
+| State | Condition | NT response |
+|---|---|---|
+| Supercritical | σ > σ* | GABA ↑ = max(0, σ-σ*) |
+| Subcritical | σ < σ* | NE ↑ = max(0, σ*-σ) |
+| Critical | σ ≈ σ* | DA = da_reward · exp(-|σ-σ*|/band) |
+
+Criticality loss added to total: `L_crit = weight · (σ - σ*)²`
+NT stress for allostasis: `s_σ = (σ - σ*)²`
+
+**Implementation:** `neuroslm/emergent/semantic_turbulence.py::BranchingRatioMonitor`
+**Tests:** `tests/training/test_criticality_control.py` (18 contracts)
+
+### 13.5 Harness integration
+
+`BRIANHarness._build_semantic_turbulence()` constructs all three modules
+when `semantic_turbulence.enabled = True`. In the forward pass:
+
+1. After `language_model(ids)`, retrieve `_last_h_motor` (last block output).
+2. Measure σ (criticality monitor) using `_last_h_sensory` as h_prev.
+3. Apply RG cascade: `h_rg = rg_cascade(h_motor)`
+4. Apply GPE: `h_gpe, ρ = gpe_layer.forward_with_rho(h_rg)`
+5. Re-project: `logits = language_model.lm_head(h_gpe)`
+6. In `compute_loss`: add `weight · (σ - σ*)²` to total loss.
+
+Metrics published: `ste_sigma`, `ste_rho`, `ste_gaba`, `ste_ne`, `ste_da`, `ste_crit_loss`.
+
+### 13.6 DSL configuration
+
+```neuro
+semantic_turbulence: {
+    enabled:               false,   # set true for H-STE ablations
+    n_rg_groups:           3,       # G = 3 → scales {2,4,8}
+    kolmogorov_init:       true,    # λ_g ∝ 2^{-5g/6}
+    gpe_steps:             4,       # N Euler steps
+    gpe_coupling_init:     0.01,    # g_0 (ReZero start)
+    gpe_dt:                0.01,    # Δτ
+    criticality_target:    1.0,     # σ* = 1 (Beggs & Plenz)
+    criticality_weight:    0.01,    # λ for (σ-σ*)² loss
+    criticality_da_reward: 0.1,     # DA amplitude at σ≈σ*
+    criticality_ema_alpha: 0.05,    # EMA α for σ tracking
+    rho_gate_enabled:      true     # gate P3 α by ρ
+}
+```
+
+### 13.7 Ablation protocol (H-STE)
+
+Three planned ablations in order of increasing parameter overhead:
+
+| Label | Config | New params | Predicted gain |
+|---|---|---|---|
+| **STE-A** | `criticality_weight: 0.01` only | 0 | 1.5× OOD PPL |
+| **STE-B** | STE-A + `n_rg_groups: 3` | ~5% | 2.0× OOD PPL |
+| **STE-C** | Full STE (all three) | ~12% | 2–4× OOD PPL |
+
+Baseline: H21 B5 row (gap_ratio=2.89 at step 3000).
+All ablations must be logged in `docs/findings.md` as H-STE-A/B/C.

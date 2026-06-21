@@ -719,6 +719,17 @@ class BRIANHarness(nn.Module):
         self._gif = None
         self._build_gif()
 
+        # ── Semantic Turbulence Engine (STE) ──
+        # Three physics-inspired mechanisms: RG cascade, GPE phase field,
+        # NT-mediated criticality control. All disabled by default →
+        # bit-identical to legacy behaviour.
+        self._ste_rg: Optional[nn.Module] = None
+        self._ste_gpe: Optional[nn.Module] = None
+        self._ste_criticality = None
+        self._ste_sigma_ema: float = 1.0
+        self._ste_sigma = None  # stashed per-forward for compute_loss
+        self._build_semantic_turbulence()
+
     @classmethod
     def from_language_model(cls, language_model: nn.Module,
                             vocab_size: int, d_sem: int,
@@ -790,6 +801,13 @@ class BRIANHarness(nn.Module):
         # GIF controller — see __init__.
         h._gif = None
         h._build_gif()
+        # Semantic Turbulence Engine — see __init__.
+        h._ste_rg = None
+        h._ste_gpe = None
+        h._ste_criticality = None
+        h._ste_sigma_ema = 1.0
+        h._ste_sigma = None
+        h._build_semantic_turbulence()
         # TRUNK-OPT monitor — optional observability layer (Phase 1).
         h._trunk_opt_monitor = None
         return h
@@ -1195,6 +1213,45 @@ class BRIANHarness(nn.Module):
             return
         from neuroslm.emergent.gif import GIFController
         self._gif = GIFController.from_config(self.training_config)
+
+    def _build_semantic_turbulence(self) -> None:
+        """Construct STE modules if semantic_turbulence.enabled in config.
+
+        When disabled (default), all three _ste_* attributes stay None and
+        every later check short-circuits — bit-identical to legacy behaviour.
+        """
+        ste_cfg = getattr(self.training_config, "semantic_turbulence", None)
+        if ste_cfg is None or not ste_cfg.enabled:
+            self._ste_rg = None
+            self._ste_gpe = None
+            self._ste_criticality = None
+            return
+        d = getattr(self, "d_sem", None) or self.training_config.scales.resolve(
+            getattr(self.training_config, "preset", "")
+        ).d_model
+        from neuroslm.emergent.semantic_turbulence import (
+            RenormalizationGroupCascade,
+            GrossPitaevskiiLayer,
+            BranchingRatioMonitor,
+        )
+        self._ste_rg = RenormalizationGroupCascade(
+            d_model=d,
+            n_groups=ste_cfg.n_rg_groups,
+            kolmogorov_init=ste_cfg.kolmogorov_init,
+        )
+        self._ste_gpe = GrossPitaevskiiLayer(
+            d_model=d,
+            gpe_steps=ste_cfg.gpe_steps,
+            gpe_coupling_init=ste_cfg.gpe_coupling_init,
+            gpe_dt=ste_cfg.gpe_dt,
+        )
+        self._ste_criticality = BranchingRatioMonitor(
+            target=ste_cfg.criticality_target,
+            ema_alpha=ste_cfg.criticality_ema_alpha,
+            da_reward=ste_cfg.criticality_da_reward,
+            weight=ste_cfg.criticality_weight,
+        )
+        self._ste_sigma_ema = ste_cfg.criticality_target
 
     def load_gif_probe(self, tokenizer, device: torch.device) -> bool:
         """Load the GIF OOD probe's held-out sequences.
@@ -1754,6 +1811,39 @@ class BRIANHarness(nn.Module):
                 sink = self._pick_sink_output(outputs)
                 sink = sink.reshape(batch, seq_len, self.d_sem)
                 logits = self.lm_head(sink)
+
+            # ── Semantic Turbulence Engine (STE) ───────────────────
+            # Operates on the last transformer block output (h_motor),
+            # which the DSLLanguageModel stashes after every forward.
+            # The RG cascade and GPE phase field refine h_motor in place;
+            # the refined state is passed back through the tied LM head.
+            # Criticality σ is measured between h_prev (first block) and
+            # h_motor (last block) as a proxy for the mean Jacobian norm.
+            # All three modules are no-ops when STE is disabled.
+            if self._ste_rg is not None:
+                h_m = getattr(self.language_model, "_last_h_motor", None)
+                h_s = getattr(self.language_model, "_last_h_sensory", None)
+                if h_m is not None and h_m.dim() == 3:
+                    # Module 3: measure criticality BEFORE enrichment
+                    if self._ste_criticality is not None and h_s is not None:
+                        sigma = self._ste_criticality.measure_sigma(h_s, h_m)
+                        self._ste_criticality.update_ema(sigma.item())
+                        nt_sig = self._ste_criticality.nt_signals(sigma.item())
+                        self._metrics["ste_sigma"] = sigma.item()
+                        self._metrics["ste_gaba"] = nt_sig["gaba"]
+                        self._metrics["ste_ne"] = nt_sig["ne"]
+                        self._metrics["ste_da"] = nt_sig["da"]
+                        self._ste_sigma = sigma  # stash for compute_loss
+                    # Module 1: RG cascade on motor hidden state
+                    h_rg = self._ste_rg(h_m)
+                    # Module 2: GPE phase field + order parameter ρ
+                    h_gpe, rho = self._ste_gpe.forward_with_rho(h_rg)
+                    self._metrics["ste_rho"] = rho.item()
+                    # Re-project enriched hidden state through LM head
+                    # (requires language_model to expose the head as `lm_head`)
+                    lm_head = getattr(self.language_model, "lm_head", None)
+                    if lm_head is not None:
+                        logits = lm_head(h_gpe)
 
             # ── Multi-Trunk-V2 logits-mixture fusion ───────────────
             # When the cortex ensemble + fusion head are both built,
@@ -2728,6 +2818,16 @@ class BRIANHarness(nn.Module):
                 bma_loss = self._compute_bma_loss(bma_w)
                 if bma_loss is not None:
                     total = total + bma_loss
+
+            # ── STE Module 3: Criticality loss (σ − σ*)² ──
+            # Added to the total loss so the optimizer pushes the
+            # branching ratio toward the critical point σ*=1.
+            if (self._ste_criticality is not None
+                    and hasattr(self, "_ste_sigma")
+                    and self._ste_sigma is not None):
+                crit_loss = self._ste_criticality.criticality_loss(self._ste_sigma)
+                total = total + crit_loss
+                self._metrics["ste_crit_loss"] = crit_loss.detach().item()
 
         # Record the LM-portion so train_step can update MAT after the
         # backward pass without a second forward.

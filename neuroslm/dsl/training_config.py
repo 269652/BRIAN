@@ -663,6 +663,42 @@ class FitnessObjective:
 
 
 @dataclass
+class SemanticTurbulenceConfig:
+    """Semantic Turbulence Engine (STE) — three interlocked physics-inspired mechanisms.
+
+    Module 1 — RG Cascade: partition layers into G groups operating at
+    scales 2^g.  Coarse-grain + fluctuation extraction with Kolmogorov
+    coupling λ_g ∝ 2^{-5g/6} (5/3-law turbulence energy cascade).
+
+    Module 2 — GPE Phase Field: encode the VBB hidden state as a complex
+    superfluid field ψ ∈ ℂ^{d/2}; run N imaginary-time GPE steps
+    (gradient descent on free energy); decode ρ = |⟨ψ⟩|² as semantic
+    coherence order parameter gating the P3 context gate.
+
+    Module 3 — NT-Mediated Criticality: track branching ratio
+    σ = mean Frobenius Jacobian norm; steer toward σ=1 via GABA/NE/DA
+    neuromodulator signals; add (σ-1)² as criticality loss.
+
+    Reference:
+      Kolmogorov (1941), Beggs & Plenz (2003), Gross & Pitaevskii (1961).
+    """
+    enabled: bool = False
+    # ── Module 1: RG Cascade ──────────────────────────────────────────
+    n_rg_groups: int = 3              # G groups; scale 2^g for group g
+    kolmogorov_init: bool = True      # init λ_g ∝ 2^{-5g/6} (5/3 law)
+    # ── Module 2: GPE Phase Field ─────────────────────────────────────
+    gpe_steps: int = 4                # N Euler steps in imaginary time
+    gpe_coupling_init: float = 0.01   # g: interaction strength (ReZero start)
+    gpe_dt: float = 0.01              # Δτ: imaginary-time step size
+    rho_gate_enabled: bool = True     # gate P3 α by order parameter ρ
+    # ── Module 3: NT-Mediated Criticality ────────────────────────────
+    criticality_target: float = 1.0   # σ* = 1 (Beggs & Plenz critical point)
+    criticality_weight: float = 0.01  # λ for (σ - σ*)² loss term
+    criticality_da_reward: float = 0.1  # DA bonus when σ ≈ σ*
+    criticality_ema_alpha: float = 0.05  # EMA smoothing for σ tracking
+
+
+@dataclass
 class FitnessConfig:
     """`fitness { ... }` block — central Multi-Objective-Fitness switch.
 
@@ -1022,6 +1058,12 @@ class TrainingConfig:
     # loop that's missing in the existing neuromod stack.
     # Disabled by default → legacy behaviour preserved bit-for-bit.
     allostasis: AllostasisConfig = field(default_factory=AllostasisConfig)
+    # Semantic Turbulence Engine — physics-inspired multi-scale dynamics
+    # (RG cascade + GPE superfluidity + neural criticality control).
+    # Disabled by default → bit-identical to legacy behaviour.
+    semantic_turbulence: SemanticTurbulenceConfig = field(
+        default_factory=SemanticTurbulenceConfig
+    )
     # Multi-Objective-Fitness central switchboard — wires existing aux
     # losses + new objectives (symbolic, metabolic, piso, nis_plus) into
     # a single declarative table. Disabled by default → legacy single-
@@ -1236,6 +1278,8 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.multi_cortex = _parse_multi_cortex(props["multi_cortex"])
     if "allostasis" in props:
         cfg.allostasis = _parse_allostasis(props["allostasis"])
+    if "semantic_turbulence" in props:
+        cfg.semantic_turbulence = _parse_semantic_turbulence(props["semantic_turbulence"])
     if "fitness" in props:
         cfg.fitness = _parse_fitness(props["fitness"])
     if "gif" in props:
@@ -1824,6 +1868,40 @@ def _parse_allostasis(body: str) -> AllostasisConfig:
             f"got {a.grad_norm_ceiling}"
         )
     return a
+
+
+def _parse_semantic_turbulence(body: str) -> SemanticTurbulenceConfig:
+    """Parse a `semantic_turbulence { ... }` block into a SemanticTurbulenceConfig.
+
+    All keys optional; omitted keys keep the dataclass defaults.
+    Unknown keys are silently ignored (forward-compat).
+    """
+    body = _strip_braces(body)
+    props = _split_top_level_kv(body)
+    cfg = SemanticTurbulenceConfig()
+    if "enabled" in props:
+        cfg.enabled = _parse_bool(props["enabled"])
+    if "n_rg_groups" in props:
+        cfg.n_rg_groups = int(props["n_rg_groups"])
+    if "kolmogorov_init" in props:
+        cfg.kolmogorov_init = _parse_bool(props["kolmogorov_init"])
+    if "gpe_steps" in props:
+        cfg.gpe_steps = int(props["gpe_steps"])
+    if "gpe_coupling_init" in props:
+        cfg.gpe_coupling_init = float(props["gpe_coupling_init"])
+    if "gpe_dt" in props:
+        cfg.gpe_dt = float(props["gpe_dt"])
+    if "rho_gate_enabled" in props:
+        cfg.rho_gate_enabled = _parse_bool(props["rho_gate_enabled"])
+    if "criticality_target" in props:
+        cfg.criticality_target = float(props["criticality_target"])
+    if "criticality_weight" in props:
+        cfg.criticality_weight = float(props["criticality_weight"])
+    if "criticality_da_reward" in props:
+        cfg.criticality_da_reward = float(props["criticality_da_reward"])
+    if "criticality_ema_alpha" in props:
+        cfg.criticality_ema_alpha = float(props["criticality_ema_alpha"])
+    return cfg
 
 
 def _parse_fitness_objective(name: str, body: str) -> FitnessObjective:

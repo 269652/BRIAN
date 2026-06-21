@@ -1289,3 +1289,107 @@ same parameter count.
 * `docs/formal_framework.md §13` — derivations of (I), (II), (III)
 * `scripts/diagnose_kl_distill_blowup.py` — kept as the prior-art
   baseline that the CFD design must out-perform
+
+---
+
+## H-STE — Semantic Turbulence Engine (2026-06-21)
+
+### Hypothesis
+
+BRIAN's single-scale attention lacks the multi-resolution structure that
+physical systems use to move information efficiently across scales. Three
+physics-inspired mechanisms, wired together, can push the trunk beyond
+the current gap_ratio floor:
+
+1. **RG Cascade (H-STE-RG):** Partitioning the sequence into G groups
+   at token scales 2^g and coupling them with Kolmogorov 5/3-law weights
+   λ_g ∝ 2^{-5g/6} creates a turbulence-like multi-scale enrichment of
+   the hidden states. Cost: ≈30% more attention compute; gain: 3× richer
+   scale structure per token.
+
+2. **GPE Phase Field (H-STE-GPE):** Encoding the VBB hidden state as a
+   complex superfluid ψ ∈ ℂ^{d/2} and running imaginary-time GPE steps
+   produces a semantic coherence order parameter ρ ∈ [0,1]. ρ→1 means
+   the model has condensed onto a single meaning; ρ→0 means genuinely
+   ambiguous context. ρ is the ideal signal for the P3 context gate
+   (high ρ → trust experts more → low α).
+
+3. **NT Criticality (H-STE-C):** Tracking the branching ratio σ = layer-
+   to-layer Frobenius norm ratio and steering toward σ=1 (Beggs & Plenz
+   critical point) maximises dynamic range and information transmission.
+   NT signals generated: GABA (σ>1), NE (σ<1), DA reward (σ≈1).
+
+**Predicted gains (conservative, assuming 0.5 compounding factor):**
+
+| Stage | Mechanism | Gain |
+|---|---|---|
+| STE-A | NT criticality only | 1.5× OOD PPL |
+| STE-B | Criticality + RG cascade | 2.0× OOD PPL |
+| STE-C | Full STE (all three) | 2–4× OOD PPL |
+
+### Spec
+
+- **Commit:** `HEAD` (2026-06-21, STE initial implementation)
+- **DSL block:** `architectures/SmolLM/arch.neuro` `semantic_turbulence { }` (line ~411)
+- **Config:** `neuroslm/dsl/training_config.py::SemanticTurbulenceConfig`
+- **Implementation:** `neuroslm/emergent/semantic_turbulence.py`
+- **Harness wiring:** `neuroslm/harness.py::_build_semantic_turbulence()` + forward pass
+
+### Tests (Layer A — CONFIRMED GREEN)
+
+| Test file | Tests | Contract |
+|---|---|---|
+| `tests/dsl/test_semantic_turbulence_dsl.py` | 29 | DSL parser round-trips all fields |
+| `tests/training/test_rg_cascade.py` | 16 | Kolmogorov λ_g ratios; coarse-grain shape; perfect reconstruction; Frobenius non-expansion; differentiable forward |
+| `tests/training/test_gpe_phase_field.py` | 15 | Complex encode/decode lossless; GPE step reduces free energy; ρ∈[0,1]; ρ→1 for aligned phases; ρ→0 for random phases |
+| `tests/training/test_criticality_control.py` | 18 | σ=1 for identity; σ>1 for amplification; EMA tracking; GABA↑ when σ>1; NE↑ when σ<1; DA↑ when σ≈1; criticality loss = weight×(σ-1)² |
+
+**All 78 Layer-A tests confirmed GREEN on 2026-06-21.**
+
+### Run (Layer B — PENDING)
+
+Not yet deployed. Ablation protocol:
+
+- **STE-A:** `enabled: true, criticality_weight: 0.01` (zero new params — pure loss term)
+- **STE-B:** `enabled: true, n_rg_groups: 3` (adds ~5% params in RG projections)
+- **STE-C:** `enabled: true` (full config — all three modules)
+
+**Baseline:** B5 H21 row (`gap_ratio=2.89, train_ppl=45.0, ood_ppl=130.1` at step 3000).
+**Target:** STE-C gap_ratio < 2.0 at matched training steps and parameter count.
+
+### Mathematical grounding
+
+**Module 1 — RG Cascade.** Kolmogorov (1941) showed that in isotropic
+turbulence, kinetic energy spectrum follows E(k) ∝ k^{-5/3}. The coupling
+λ_g ∝ 2^{-5g/6} mirrors this: coarser scales (smaller k in wavenumber
+space) carry more energy, finer scales (larger k) carry less. The
+Kolmogorov length `η = (ν³/ε)^{1/4}` sets the cutoff below which viscosity
+dissipates energy — here n_rg_groups sets the analogous cutoff.
+
+**Module 2 — GPE Phase Field.** The Gross-Pitaevskii equation for a
+trapped Bose-Einstein condensate:
+
+    iℏ ∂ψ/∂t = [-ℏ²∇²/2m + V(r) + g|ψ|²]ψ
+
+In imaginary time (t → -iτ), this becomes gradient descent on the
+Ginzburg-Landau free energy F[ψ] = ∫(|∇ψ|²/2m + V|ψ|² + g|ψ|⁴/2)dr.
+The equilibrium superfluid (condensate ground state) has |ψ|² = const
+and uniform phase — exactly the "semantically unambiguous context" we want.
+
+**Module 3 — Neural Criticality.** Beggs & Plenz (2003) showed that
+avalanche size distributions in rat cortex follow power-laws (P(s) ∝ s^{-3/2})
+only near the branching ratio σ=1, where each neuron triggers on average
+one other neuron. At σ=1: maximal dynamic range, longest correlation
+length, maximum information transmission. The NT loop (GABA/NE/DA)
+mirrors the biological neuromodulator control of cortical excitability.
+
+### Follow-up required
+
+1. Deploy STE-A (criticality only) as zero-cost ablation.
+2. Compare STE-A vs H21 baseline at same training budget.
+3. If STE-A confirms σ-drift, deploy STE-B and STE-C.
+4. Measure ρ trajectory — should climb as training progresses (semantic condensation).
+
+### Outcome
+
+🔵 **PENDING** — awaiting first training run.
