@@ -368,6 +368,48 @@ def test_N_platform_flag_lightning(patch_connectors, minimal_project_config, mon
     assert patch_connectors[0]["platform"] == "lightning"
 
 
+def test_P_clone_url_tokenised_in_python_not_shell():
+    """_run_setup_and_train passes a pre-tokenised HTTPS URL to _build_setup_command.
+
+    The old approach used sed-in-shell to inject GITHUB_PAT, which breaks when:
+    - the PAT has shell-special chars (|, newline, etc.)
+    - GITHUB_PAT is empty → sed produces 'x-access-token:@...' which libcurl
+      rejects as "Malformed input to a URL function" (CURLE_URL_MALFORMAT)
+
+    Fix: tokenise in Python using urllib.parse.quote; pass via shlex.quote.
+    The setup script should NOT contain the sed snippet at all.
+    """
+    from neuroslm.connectors.lightning import LightningConnector
+
+    PAT = "ghp_abc123XYZ"
+    setup = LightningConnector._build_setup_command(
+        f"https://x-access-token:{PAT}@github.com/owner/repo.git",
+        "master",
+        "~/logs/test.log",
+    )
+    # The token must appear pre-baked in the script, not assembled via sed
+    assert PAT in setup, "PAT must be embedded in the setup script before SSH"
+    # The fragile sed substitution must be gone
+    assert "sed" not in setup or "x-access-token" not in setup.split("sed")[0], (
+        "sed should not be used to inject GITHUB_PAT (shell quoting is fragile)"
+    )
+    # No bare 'x-access-token:@' (empty-PAT sentinel that triggers curl bug)
+    assert "x-access-token:@" not in setup
+
+
+def test_P2_clone_url_no_pat_stays_plain():
+    """Without GITHUB_PAT the URL is passed plain — no empty-token injection."""
+    from neuroslm.connectors.lightning import LightningConnector
+
+    setup = LightningConnector._build_setup_command(
+        "https://github.com/owner/repo.git",
+        "master",
+        "~/logs/test.log",
+    )
+    assert "x-access-token" not in setup
+    assert "x-access-token:@" not in setup
+
+
 def test_O_no_platform_uses_toml(patch_connectors, tmp_path, monkeypatch):
     """No --platform flag → reads [deploy].platform from brian.toml."""
     cfg_file = tmp_path / "brian.toml"

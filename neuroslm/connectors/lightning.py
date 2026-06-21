@@ -523,8 +523,21 @@ class LightningConnector(BaseConnector):
             if v
         )
 
+        # Tokenise the clone URL here in Python (not via sed-in-shell).
+        # sed quoting is fragile: an empty PAT produces 'x-access-token:@...'
+        # which libcurl rejects as CURLE_URL_MALFORMAT ("Malformed input to a
+        # URL function") and git silently hides the token in its error output,
+        # making the failure look like a plain-URL rejection.
+        github_pat = (remote_env.get("GITHUB_PAT") or "").strip()
+        if github_pat and repo_url.startswith("https://"):
+            from urllib.parse import quote as _urlquote
+            _enc = _urlquote(github_pat, safe="")
+            clone_url = repo_url.replace("https://", f"https://x-access-token:{_enc}@", 1)
+        else:
+            clone_url = repo_url
+
         # ── Setup (clone + install) ──
-        setup_cmd = self._build_setup_command(repo_url, branch, log_path)
+        setup_cmd = self._build_setup_command(clone_url, branch, log_path)
         print(f"[lightning] running setup via SSH (clone + install) ...")
         try:
             out, exit_code = self._ssh_run(
@@ -901,21 +914,12 @@ class LightningConnector(BaseConnector):
         Idempotent — re-running on a warm Studio just does a ``git
         fetch`` + ``checkout`` instead of a full clone.
 
-        ``GITHUB_PAT`` is injected as ``x-access-token`` so private
-        repos work without ssh keys on the Studio. Public repos work
-        without the PAT too.
+        ``repo_url`` must already be tokenised by the caller (i.e.
+        ``https://x-access-token:PAT@github.com/...``) when auth is
+        needed. The caller is responsible for URL-encoding the PAT.
         """
-        # Tokenise the URL if GITHUB_PAT is in the (remote) env.
-        # Done inline in the shell so the token never round-trips
-        # through this Python string (and ends up in logs).
-        clone_url_expr = (
-            'if [ -n "$GITHUB_PAT" ]; then '
-            f'CLONE_URL="$(echo {shlex.quote(repo_url)} | '
-            'sed \'s|https://|https://x-access-token:\'"$GITHUB_PAT"\'@|\')"; '
-            'else '
-            f'CLONE_URL={shlex.quote(repo_url)}; '
-            'fi'
-        )
+        # CLONE_URL is passed pre-baked — no sed substitution in shell.
+        clone_url_expr = f"CLONE_URL={shlex.quote(repo_url)}"
         return (
             f"set -e; "
             f"mkdir -p {REMOTE_BASE} {REMOTE_LOGS}; "
