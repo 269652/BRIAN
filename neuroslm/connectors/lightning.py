@@ -1045,10 +1045,17 @@ class LightningConnector(BaseConnector):
             parts.append(f"--batch {int(config.batch_size)}")
 
         train_inner = " ".join(parts)
+        # Kill any existing train_dsl processes before starting a new one so
+        # repeated `brian deploy` calls don't stack nohup processes on the
+        # Studio (which wastes GPU and causes concurrent checkpoint writes).
+        kill_prev = (
+            "pkill -f 'neuroslm.train_dsl' 2>/dev/null || true; sleep 1; "
+        )
         # Wrap in cd + nohup + disown so the process survives the SDK
         # detach. Append a "[train] done" marker so the log tail can
         # detect completion.
         return (
+            f"{kill_prev}"
             f"cd {REMOTE_REPO} && "
             f"mkdir -p {REMOTE_LOGS} && "
             f"nohup bash -c '{train_inner}; "

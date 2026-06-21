@@ -428,6 +428,26 @@ def test_lightning_build_train_command_detaches_and_redirects():
     assert "[launch] pid=" in cmd
 
 
+def test_lightning_build_train_command_kills_existing_before_launch():
+    """Redeploy must kill any running train_dsl before starting a new one.
+
+    Without this, each `brian deploy` stacks another nohup process on the
+    Studio — the old run keeps consuming GPU while the new one starts,
+    causing OOM or corrupted checkpoint writes from two concurrent writers.
+    """
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.lightning import LightningConnector
+    cfg = DeployConfig(steps=5000, arch="architectures/SmolLM")
+    cmd = LightningConnector._build_train_command(cfg, "~/brian/logs/test.log")
+    assert "pkill" in cmd, (
+        "train command must run pkill to stop any existing train_dsl process"
+    )
+    # Kill must precede the new launch
+    assert cmd.index("pkill") < cmd.index("nohup"), (
+        "pkill must appear before nohup in the train command"
+    )
+
+
 def test_lightning_build_remote_env_includes_secrets(monkeypatch):
     """Token env vars are forwarded; Lightning-internal vars are stripped."""
     from neuroslm.connectors.base import DeployConfig
