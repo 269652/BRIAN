@@ -303,3 +303,58 @@ def test_bma_is_scalar_tensor():
     loss = h._compute_bma_loss(base_weight=1.0)
     assert loss is not None
     assert loss.ndim == 0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# G. Gradient-explosion safety (regression tests for the step-2040 NaN crash)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def test_bma_gradient_bounded_when_trunk_near_collapse():
+    """When trunk variance ≈ 0 (near-erank-collapse), grad norm stays finite.
+
+    The sqrt gradient is 1/(2·√var). With var clamped to only 1e-8, the
+    amplification is 1/(2e-4) = 5000, which causes gradient explosion
+    (exactly the step-2040 NaN crash pattern: near-identical representations
+    → var≈1e-9 → clamp kicks in → 5000× amplification → NaN).
+
+    The fix raises the clamp floor so the worst-case amplification stays ≤ 50.
+    """
+    h = _make_harness_with_bma(weight=0.05, n_proj=64, d_sem=16)
+    torch.manual_seed(0)
+    # Nearly-collapsed trunk: base direction + tiny noise.
+    # var per projection ≈ noise² ≈ 1e-6 → sqrt grad ≈ 500 without fix.
+    base = torch.randn(1, 16)
+    noise = torch.randn(64, 16) * 1e-3
+    mu = (base + noise).requires_grad_(True)
+    s  = torch.randn(64, 16)
+    h.language_model._last_h_motor   = mu.view(8, 8, 16)
+    h.language_model._last_h_sensory = s.view(8, 8, 16)
+    loss = h._compute_bma_loss(base_weight=0.05)
+    assert loss is not None
+    loss.backward()
+    assert mu.grad is not None
+    grad_norm = mu.grad.norm().item()
+    assert not math.isnan(grad_norm), "gradient is NaN on near-collapsed trunk"
+    assert not math.isinf(grad_norm), "gradient is inf on near-collapsed trunk"
+    # With floor=1e-4 the worst-case amplification is 50; with 64 projections
+    # and weight 0.05 the gradient norm should stay below 500.
+    assert grad_norm < 500.0, (
+        f"gradient norm {grad_norm:.1f} too large — "
+        "variance clamp floor is too small"
+    )
+
+
+def test_bma_loss_finite_when_trunk_all_zeros():
+    """All-zero trunk (degenerate limit) → finite loss and finite gradient."""
+    h = _make_harness_with_bma(weight=0.05)
+    # Slightly-perturbed zero so gradients are nonzero but near-zero variance
+    mu = (torch.zeros(8, 8, 16) + torch.randn(8, 8, 16) * 1e-5).requires_grad_(True)
+    s  = torch.randn(8, 8, 16)
+    h.language_model._last_h_motor   = mu
+    h.language_model._last_h_sensory = s
+    loss = h._compute_bma_loss(base_weight=0.05)
+    assert loss is not None
+    assert torch.isfinite(loss), f"loss is not finite: {loss}"
+    loss.backward()
+    assert mu.grad is not None
+    assert torch.isfinite(mu.grad).all(), "gradient contains NaN/inf"

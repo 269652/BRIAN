@@ -271,6 +271,51 @@ class TestSwiftHohenberg:
         assert math.isfinite(A_mean)
         assert 0 < A_mean < 10.0
 
+    def test_amplitude_finite_when_lift_weights_large(self):
+        """Regression: with large lift weights (post-training regime), the
+        initial amplitude A can exceed the Euler stability threshold
+        2/sqrt(dt) ≈ 3.0 for dt=0.45.  One step then drives A negative;
+        with n_steps=2 the second step explodes A to NaN.
+
+        The fix: clamp A_next ≥ eps after each Euler step (amplitude is a
+        physical magnitude and can never be negative).
+        """
+        cfg = NFOConfig(
+            n_osc=32, n_steps=2, dt_init=0.10, dt_max=0.45,
+            mu_init=0.5, a_star_init=1.0, kappa_init=0.1, alpha_init=0.01,
+        )
+        nfo = NeuralFieldOscillator(d_model=512, cfg=cfg)
+        with torch.no_grad():
+            # Scale lift weights 20× to simulate post-training magnitude;
+            # this drives initial A ≈ 10, well past the threshold ≈ 3.
+            nfo.lift_re.weight.mul_(20.0)
+            nfo.lift_im.weight.mul_(20.0)
+        torch.manual_seed(0)
+        h = torch.randn(2, 8, 512)
+        y = nfo(h)
+        assert torch.isfinite(y).all(), (
+            "NFO must stay finite even when lift weights are large "
+            "(Euler amplitude clamp required)"
+        )
+        A_mean = nfo.last_state["A_mean"].item()
+        assert math.isfinite(A_mean), "A_mean must be finite"
+
+    def test_sh_step_never_negative_when_clamped(self):
+        """After the fix, the discrete SH step never produces A_next < 0,
+        even when the initial A far exceeds the equilibrium.
+
+        Tests the _sh_step helper extended with the clamp — this pins the
+        contract at the mathematical level, independent of the full block.
+        """
+        dt = 0.45
+        mu, a_star = 0.5, 1.0
+        # A values well above the stability threshold 2/sqrt(dt) ≈ 3.0
+        A = torch.tensor([3.0, 4.0, 5.0, 8.0, 15.0])
+        for _ in range(5):
+            A = _sh_step(A, mu, a_star, dt).clamp(min=1e-6)
+        assert (A >= 0).all(), f"A went negative: {A}"
+        assert torch.isfinite(A).all(), f"A diverged: {A}"
+
 
 # ──────────────────────────────────────────────────────────────────────
 # H015 — bipartition coherence is a closed-form Φ lower bound

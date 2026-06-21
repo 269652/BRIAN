@@ -310,7 +310,12 @@ class NeuralFieldOscillator(nn.Module):
             - 0.25 * (A * A - self.a_star * self.a_star) * A
             + kappa * R * (Abar - A)
         )
-        A_next = A + dt * A_dot
+        # Clamp to non-negative: amplitude is a physical magnitude (||z||)
+        # and cannot be negative.  Without the clamp, large A can drive
+        # A_dot ≈ -0.25*A³ to overshoot zero in one Euler step, and the
+        # subsequent step then explodes to NaN (Euler instability for
+        # stiff cubic nonlinearities, threshold A ≈ 2/sqrt(dt) ≈ 3).
+        A_next = (A + dt * A_dot).clamp(min=self.cfg.eps)
         # Re-cartesianise.
         z_re_next = A_next * torch.cos(phi_next)
         z_im_next = A_next * torch.sin(phi_next)
