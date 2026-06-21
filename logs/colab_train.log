@@ -1614,3 +1614,11 @@ step  2180 | loss inf | lm 5.8626 | ppl 351.6 | gnorm inf | lr 4.54e-04 | 573 to
 /content/brian/neuroslm/emergent/trunk_opt.py:486: UserWarning: torch.linalg.svd: During SVD computation with the selected cusolver driver, batches 0 failed to converge. A more accurate method will be used to compute the SVD as a fallback. Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html (Triggered internally at /pytorch/aten/src/ATen/native/cuda/linalg/BatchLinearAlgebraLib.cpp:692.)
   sv = torch.linalg.svdvals(H_f)
 step  2200 | loss nan | lm nan | ppl nan | gnorm nan | lr 4.43e-04 | 240 tok/s | Φ nan | λ₁ 0.075 | ign 0.97 | mesoLG 0.36 | troph 0/8 μnan | NT[DA=0.98 NE=0.99 5HT=0.24 ACh=0.17 eCB=0.87 Glu=0.99 GABA=0.53] | osc[δ=nan θ=nan γ=nan] | em[C2:ρ=0.95/τ=1.00/s=0.97 C4:Q=nan W=0 pl=511 C3:pc=nan VBB:β=nan σ=nan kl=nan C5:lat=1.00 C6:pac=0.00] | reg[dar=nan pcc=nan iso=nan cmd=0.000 Σ=nan w=0.10 chat=0.60] | cortex[α_eff=nan inh=0.560 λ=nan kl=0.000 lm_ema=nan cx_ema=nan] | gif[α=0.0500 p=1.000 gap=0.00 ood_ema=nan ood_ce=nan iso_w=0.0100 ls=0.002 div=nan] | gif7[dgn=nan lr×1.000 klf=nan] | nfo[R=nan R★=nan A=nan σA=nan cV=nan κ=nan α=nan Φκ=nan] | hpa[load=0.19 cort=0.07 NE×0.95 T×0.93 LR×0.97] | trunk[budget=nan bpp=0.00e+00 erank=1.0 uni=nan α=0.00 R²=0.00 PR=0.0]
+[train_dsl] boot @ 2026-06-21T06:33:22Z
+[train_dsl] git_commit 2d9679f2a3e17637b37a596bc38e586570b68193 (master)
+[train_dsl] arch_dsl_sha256 db5cba18abfff2c3cff79910bcfc3f04af0fe3b3cb9b1212944821eb0bb9a216 (/content/brian/architectures/SmolLM)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.0, pct_strength=0.0
+[train_dsl] GQA: n_kv_heads=8/8  RoPE base=500000
