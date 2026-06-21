@@ -375,17 +375,25 @@ class TestDARPCCActivation:
             f"interventions get ≥75% runway in a 10k-step run.")
 
     def test_I3_isotropy_activation_unchanged(self):
-        """REGRESSION: isotropy must continue to fire earlier than
-        DAR/PCC (rank-collapse guard). The fix to activation_step
-        should not perturb isotropy_activation_step."""
+        """REGRESSION: isotropy fires before DAR/PCC (rank-collapse guard).
+
+        2026-06-21: changed from 1000 → 0 so isotropy fires immediately.
+        Erank collapsed by step 200-300 in the resumed run; isotropy must
+        be active from step 0 to counter this.
+        """
         text = SMOLLM_ARCH.read_text(encoding="utf-8")
         reg = self._parse_reg_section(text)
         iso_step = int(reg.get("isotropy_activation_step", -1))
-        # SmolLM ships with isotropy_activation_step = 1000
-        assert iso_step == 1000, (
-            f"isotropy_activation_step must remain at 1000 "
-            f"(got {iso_step}). Isotropy guards rank-collapse and "
-            f"is independent of DAR/PCC activation policy.")
+        act_step = int(reg.get("activation_step", 0))
+        # Isotropy must activate at or before DAR/PCC (rank-collapse guard)
+        assert iso_step < act_step, (
+            f"isotropy_activation_step ({iso_step}) must be < activation_step ({act_step}). "
+            f"Isotropy guards rank-collapse and must fire before the main reg gate."
+        )
+        assert iso_step == 0, (
+            f"isotropy_activation_step should be 0 (fires immediately to prevent "
+            f"rank collapse in steps 0-300), got {iso_step}."
+        )
 
 
 if __name__ == "__main__":

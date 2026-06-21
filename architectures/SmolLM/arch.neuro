@@ -109,8 +109,8 @@ training {
     loss_var_window: 64
     loss_var_min_mult: 0.1
     # C) VBB KL floor (anti-collapse guard): prevent posterior collapse.
-    vbb_kl_floor: 1000.0
-    vbb_kl_floor_gamma: 0.01
+    vbb_kl_floor: 0.0
+    vbb_kl_floor_gamma: 0.0
     pct_trunk:     0.0
     pct_strength:  0.0
     # â”€â”€ HPB Phases 1-5 â€” novel-topology mechanisms ACTIVATED â”€â”€
@@ -170,7 +170,7 @@ training {
     # upper-bounds the Euclidean KL for any non-zero â€–Î¼â€– â€” making
     # Ïƒ-collapse harder by the construction of the geometry itself.
     # Composes with all MDRV stabilisers (free-bits, Î²-ceiling, PEC).
-    vbb_curvature: 1.0
+    vbb_curvature: 0.001
     # â”€â”€ Multi-Trunk-v2: thalamic multi-cortex routing (see Â§5.7) â”€â”€
     # Four specialist language cortices (math / code / chat / general)
     # mixed per token by neuroslm.cortex.ThalamicRouter.  The router
@@ -489,7 +489,7 @@ training {
     # Ramp mirrors GIF: 0 → full weight over steps 500-3000.
     bma_weight:        0.05
     bma_n_projections: 64
-    bma_ramp_start:    500
+    bma_ramp_start:    0
     bma_ramp_end:      3000
 
     # ── Geometric Information Funnel (GIF) ─────────────────────────
@@ -772,7 +772,7 @@ training {
         # â”€â”€ WARMUP RAMP â€” RESTORED 2026-06-17 â”€â”€
         warmup_steps: 2000
         activation_step: 2000
-    isotropy_activation_step: 1000   # erank guard: whitening fires ~3000 steps before DAR/PCC
+    isotropy_activation_step: 0   # erank guard: fires immediately (rank collapse begins step ~200)
 
         # warmup_steps controlled a linear 0â†’1 ramp on all aux loss
         # contributions. With every intervention disabled in this

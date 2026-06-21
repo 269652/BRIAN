@@ -494,6 +494,74 @@ def test_vbb_kl_near_zero_for_normalized_hm():
     )
 
 
+# ──────────────────────────────────────────────────────────────────────
+# 8. Jacobian inflation at D=512 — plateau root-cause contracts
+# ──────────────────────────────────────────────────────────────────────
+
+def test_vbb_curvature_jacobian_inflates_kl_at_d512():
+    """vbb_curvature=1.0 causes KL > 5000 when ‖LayerNorm(μ)‖ ≈ √D = 22.6.
+
+    After F.layer_norm over D=512 dimensions, each component has σ≈1 so
+    ‖μ‖ ≈ √D ≈ 22.6. wrapped_normal_kl adds the Jacobian correction:
+        (D−1) × log(sinh(√c × 22.6) / (√c × 22.6))
+    ≈ 511 × 18.8 ≈ 9590 nats.
+
+    This matches gif[kl=9588] observed at step 1000 of the 2026-06-21 run.
+    VBB contribution = 0.1 × (11 + 0.038 × kl_norm(9590)) ≈ 4 nats, matching
+    the observed total=7.53 vs lm=4.61 gap. This is the plateau root cause.
+    """
+    import torch.nn.functional as F
+    from neuroslm.emergent.hyperbolic import wrapped_normal_kl
+
+    D = 512
+    torch.manual_seed(42)
+    mu = F.layer_norm(torch.randn(1, 1, D), [D])
+    mu_norm = mu.norm(dim=-1).item()
+    assert 20.0 < mu_norm < 26.0, f"LN should give ‖μ‖≈22.6, got {mu_norm:.2f}"
+
+    log_var = torch.full((1, 1, D), -4.6)  # σ≈0.1 (observed after 1k steps)
+    kl = float(wrapped_normal_kl(mu, log_var, c=1.0, free_bits=0.1))
+
+    assert kl > 5000.0, (
+        f"c=1.0 Jacobian inflation at D={D} should give KL>5000 nats, "
+        f"got {kl:.1f}. This is the plateau root cause documented in the "
+        f"2026-06-21 training log (gif[kl=9588])."
+    )
+
+
+def test_vbb_low_curvature_bounds_kl_d512():
+    """vbb_curvature=0.001 bounds the Jacobian correction to ~40 nats.
+
+    x = √0.001 × 22.6 ≈ 0.71 → log(sinh(0.71)/0.71) ≈ 0.078
+    correction ≈ 511 × 0.078 ≈ 40 nats (vs ~9540 at c=1.0).
+
+    With kl_kappa=200: kl_norm = 200×log1p(42/200) ≈ 38.
+    VBB contribution at alpha=0.038: 0.038 × 38 × 0.1 ≈ 0.14 nats
+    (vs 2.96 nats at c=1.0). Frees ~2.8 nats for the LM signal.
+
+    This pins the arch.neuro change: vbb_curvature: 1.0 → 0.001.
+    """
+    import torch.nn.functional as F
+    from neuroslm.emergent.hyperbolic import wrapped_normal_kl
+
+    D = 512
+    torch.manual_seed(42)
+    mu = F.layer_norm(torch.randn(1, 1, D), [D])
+    log_var = torch.full((1, 1, D), -4.6)
+
+    kl = float(wrapped_normal_kl(mu, log_var, c=0.001, free_bits=0.1))
+
+    assert kl < 200.0, (
+        f"c=0.001 should give KL<200 nats (Euclidean-dominant, "
+        f"Jacobian ≈40 nats), got {kl:.1f}"
+    )
+    # Also verify it's still larger than free-bits floor (not zero — bottleneck intact)
+    assert kl > 5.0, (
+        f"c=0.001 KL should be >5 (free_bits=0.1 × D=512 gives floor), "
+        f"got {kl:.2f}"
+    )
+
+
 def test_vbb_residual_finite_when_hs_large():
     """Regression: when trunk representations collapse in rank and grow in
     magnitude (observed at step 2160: troph μ=4.66→9.84, erank=2.0), the

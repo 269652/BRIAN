@@ -358,3 +358,45 @@ def test_bma_loss_finite_when_trunk_all_zeros():
     loss.backward()
     assert mu.grad is not None
     assert torch.isfinite(mu.grad).all(), "gradient contains NaN/inf"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# G. Early-start anti-collapse contract (plateau fix: bma_ramp_start: 500→0)
+# ──────────────────────────────────────────────────────────────────────────
+
+def test_bma_fires_at_step_100_with_ramp_start_zero():
+    """ramp_start=0 makes BMA fire at step 100, inside the rank-collapse window.
+
+    In the 2026-06-21 run, erank collapsed from 40 to 3-6 by step 200-300.
+    With old ramp_start=500, BMA contributed nothing during steps 0-500.
+    Fix: bma_ramp_start: 500 → 0 in SmolLM arch.neuro.
+    """
+    D = 16
+    h = _make_harness_with_bma(weight=0.05, n_proj=32, ramp_start=0, ramp_end=3000, d_sem=D)
+    h._global_step = 100
+    torch.manual_seed(42)
+    mu = torch.randn(4, 8, D) * 0.01   # collapsed trunk (low variance)
+    s  = torch.randn(4, 8, D)           # diverse expert
+    _stash(h, mu.clone().requires_grad_(True), s.detach())
+    loss = h._compute_bma_loss(0.05)
+    # alpha = (100 - 0) / (3000 - 0) = 0.033 → eff_weight = 0.05 × 0.033 > 0
+    assert loss is not None, "BMA with ramp_start=0 must fire at step 100"
+    assert float(loss) > 0.0
+
+
+def test_bma_silent_at_step_100_with_ramp_start_500():
+    """ramp_start=500 (old value) keeps BMA silent at step 100.
+
+    Pins the regression: no anti-collapse gradient during steps 0-499
+    when ramp_start=500, exactly when erank collapse is observed.
+    """
+    D = 16
+    h = _make_harness_with_bma(weight=0.05, n_proj=32, ramp_start=500, ramp_end=3000, d_sem=D)
+    h._global_step = 100
+    torch.manual_seed(42)
+    mu = torch.randn(4, 8, D) * 0.01
+    s  = torch.randn(4, 8, D)
+    _stash(h, mu.clone(), s.detach())
+    loss = h._compute_bma_loss(0.05)
+    # alpha = max(0, (100 - 500) / 2500) = 0 → eff_weight = 0 → returns None
+    assert loss is None, "BMA with ramp_start=500 must not fire at step 100"
