@@ -1037,16 +1037,21 @@ class LMExpertEnsemble(nn.Module):
         self._last_routing_weights = weights
 
         # Compute every expert's logits in trunk-vocab space.
-        # We sum directly to keep peak memory at one (B, T, V_trunk)
-        # tensor instead of N of them.
+        # Same-tok experts run with autocast disabled so their logits land in
+        # fp32.  Without a cast, w_i (bf16) * e_logits (fp32) promotes to fp32
+        # and allocates a second (B,T,V) fp32 tensor (~6 GiB on CUDA) → OOM.
+        # Cast to router dtype before the multiply; the old fp32 tensor is freed
+        # when the name is rebound.  In-place accumulation saves one extra
+        # (B,T,V) alloc per subsequent expert.
         out: Optional[torch.Tensor] = None
         for i, expert in enumerate(self.experts):
             e_logits = expert(ids)                          # (B, T, V_trunk)
+            e_logits = e_logits.to(dtype=weights.dtype)    # fp32 → router dtype
             w_i = weights[..., i].unsqueeze(-1)             # (B, T, 1)
             if out is None:
                 out = w_i * e_logits
             else:
-                out = out + w_i * e_logits
+                out.add_(w_i * e_logits)                    # in-place accumulate
         assert out is not None  # guarded by len(experts) >= 1 in __init__
         return out
 

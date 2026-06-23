@@ -184,3 +184,100 @@ class TestLegacyEnsembleUnchanged:
             h = ens(ids)
         # Old contract: returns hidden states (B, T, d_target)
         assert h.shape == (2, 8, 32)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# dtype cast in the fusion loop
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestExpertDtypeCast:
+    """The _forward_same_tok docstring promises that fp32 expert logits
+    are "cast back to the harness's expected dtype in the fusion path."
+    This test pins that contract.
+
+    At training scale (B=16, T=2048, V=50257) an fp32 expert logit
+    tensor is 6.14 GiB.  Without the cast the ensemble allocates a
+    second 6.14 GiB tensor for ``w_i * e_logits`` (bf16 × fp32 → fp32)
+    → CUDA OOM on the A100.
+    """
+
+    def _make_mock_expert(self, vocab: int, domain: str,
+                          out_dtype: torch.dtype) -> nn.Module:
+        """A minimal expert stub: returns fixed fp32 logits."""
+        class _MockExpert(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.domain = domain
+                self._out_dtype = out_dtype
+                self._V = vocab
+
+            def forward(self, ids):
+                B, T = ids.shape
+                # Return ones so the weighted sum is predictable.
+                return torch.ones(B, T, self._V, dtype=self._out_dtype)
+
+        return _MockExpert()
+
+    def test_output_dtype_matches_router_dtype(self):
+        """Ensemble output must be in the router weight dtype (bf16
+        during training), not fp32 from the frozen experts."""
+        V = 64
+        d_model = 32
+
+        expert_a = self._make_mock_expert(V, "a", torch.float32)
+        expert_b = self._make_mock_expert(V, "b", torch.float32)
+
+        router = ThalamicRouter(
+            vocab_size=V,
+            d_model=d_model,
+            domains=["a", "b"],
+            lexicon=DomainLexicon.empty(domains=["a", "b"]),
+            lexical_bias_weight=0.0,
+            bema_tau=0.0,
+        ).to(torch.bfloat16)
+
+        ens = LMExpertEnsemble(experts=[expert_a, expert_b], router=router)
+
+        ids = torch.randint(0, V, (2, 8)).to(torch.long)
+        with torch.no_grad():
+            out = ens(ids)
+
+        assert out.dtype == torch.bfloat16, (
+            f"ensemble output should be bf16 (router dtype), got {out.dtype}; "
+            f"fp32 expert logits must be cast before accumulation to avoid "
+            f"allocating a duplicate fp32 (B,T,V) tensor in the fusion loop"
+        )
+
+    def test_weighted_sum_correct_after_cast(self):
+        """Cast must not break the mathematical weighted sum.
+
+        With uniform router weights (0.5, 0.5) and ones logits, the
+        expected output is all-ones."""
+        V = 32
+
+        expert_a = self._make_mock_expert(V, "a", torch.float32)
+        expert_b = self._make_mock_expert(V, "b", torch.float32)
+
+        router = ThalamicRouter(
+            vocab_size=V,
+            d_model=16,
+            domains=["a", "b"],
+            lexicon=DomainLexicon.empty(domains=["a", "b"]),
+            lexical_bias_weight=0.0,
+            bema_tau=0.0,
+        ).to(torch.bfloat16)
+
+        ens = LMExpertEnsemble(experts=[expert_a, expert_b], router=router)
+
+        ids = torch.randint(0, V, (1, 4))
+        with torch.no_grad():
+            out = ens(ids)
+
+        # Sum of router weights = 1, both experts return ones.
+        # Weighted sum = 1.0 * ones + 1.0 * ones weighted by (0.5, 0.5) = ones.
+        assert out.shape == (1, 4, V)
+        torch.testing.assert_close(
+            out, torch.ones(1, 4, V, dtype=out.dtype),
+            rtol=1e-2, atol=1e-2,
+        )
