@@ -236,7 +236,12 @@ trace "offer selected — building onstart heredoc"
 # cat blocks on write while bash blocks waiting for the subshell to exit.
 # Fix: write to a temp file (no pipe), then read with `read -r -d ''`
 # (reads until NUL = entire file, no pipe involved).
+# Additionally, the Python connector passes stdin=subprocess.DEVNULL so
+# bash never inherits a Windows console handle on fd 0 (which can break
+# msys2 fork() emulation for heredoc pipe writers on Windows Git Bash).
+trace "  step 1/4: calling mktemp"
 _onstart_tmp="$(mktemp)"
+trace "  step 2/4: writing heredoc to temp file $_onstart_tmp"
 cat > "$_onstart_tmp" <<ONSTART
 set -e
 export DEBIAN_FRONTEND=noninteractive
@@ -389,10 +394,11 @@ fi
 
 echo "── training exited; FAILED to self-destroy. Run: vastai destroy instance <contract_id> ──"
 ONSTART
-# Read entire temp file into ONSTART without a subshell pipe (avoids
-# the write-deadlock on Windows when the content exceeds pipe buffer).
-# `read -r -d ''` reads until NUL byte (EOF); exits 1 on EOF, hence `|| true`.
+trace "  step 3/4: reading temp file into ONSTART variable"
+# `read -r -d ''` reads until NUL byte (i.e. until EOF); exits 1 on EOF,
+# which `|| true` swallows.  No subshell pipe — reads directly from disk.
 read -r -d '' ONSTART < "$_onstart_tmp" || true
+trace "  step 4/4: cleanup"
 rm -f "$_onstart_tmp"
 trace "onstart heredoc built (${#ONSTART} chars)"
 

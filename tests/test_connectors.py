@@ -44,7 +44,7 @@ def capture_subprocess(monkeypatch):
     calls: List[dict] = []
 
     def _fake_call(args, *, cwd=None, env=None, **kwargs):
-        calls.append({"args": list(args), "cwd": cwd, "env": dict(env or {})})
+        calls.append({"args": list(args), "cwd": cwd, "env": dict(env or {}), **kwargs})
         return 0
 
     monkeypatch.setattr("subprocess.call", _fake_call)
@@ -255,6 +255,27 @@ def test_I_vast_launch_cwd_is_repo_root(capture_subprocess):
     VastConnector().launch(DeployConfig(steps=1))
     cwd = Path(capture_subprocess[0]["cwd"])
     assert (cwd / "brian.toml").exists()
+
+
+def test_I_vast_launch_stdin_devnull(capture_subprocess):
+    """launch() must pass stdin=subprocess.DEVNULL to bash.
+
+    On Windows, Python's stdin is a console handle (CONIN$). When bash
+    inherits that handle as fd 0, msys2's fork() emulation — used for
+    heredoc pipe writers inside Git Bash — behaves incorrectly and the
+    ~6 KB ONSTART heredoc deadlocks.  /dev/null (DEVNULL) is a regular
+    file descriptor that fork() can duplicate without issue.
+    """
+    import subprocess as _sp
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.vast import VastConnector
+
+    VastConnector().launch(DeployConfig(steps=100))
+    call = capture_subprocess[0]
+    assert call.get("stdin") is _sp.DEVNULL, (
+        "VastConnector.launch() must pass stdin=subprocess.DEVNULL to prevent "
+        "the Windows Git Bash console-handle bug that deadlocks heredoc pipes."
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -560,9 +581,13 @@ class TestVastTrainShPipeBufferFix:
         )
 
     def test_R5_trace_sequence_complete(self, vast_train_sh_src: str):
-        """All four [stage] trace markers must be present in order."""
+        """All six [stage] trace markers must be present in order."""
         markers = [
             "offer selected",
+            "step 1/4: calling mktemp",
+            "step 2/4: writing heredoc",
+            "step 3/4: reading temp file",
+            "step 4/4: cleanup",
             "onstart heredoc built",
             "calling: vastai create instance",
             "create call starting",

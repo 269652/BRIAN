@@ -54,7 +54,19 @@ class VastConnector(BaseConnector):
         bash = self._find_bash()
         script = str(REPO_ROOT / "scripts" / "vast_train.sh")
         print(f"$ {bash} {script}")
-        return subprocess.call([bash, script], cwd=str(REPO_ROOT), env=env)
+        # stdin=DEVNULL: on Windows, bash spawned by Python inherits the
+        # PowerShell console handle on fd 0 (CONIN$).  msys2's fork()
+        # emulation (used for heredoc pipe writers inside Git Bash) has a
+        # known quirk when fd 0 is a live console handle — the forked
+        # heredoc-writer process may not start correctly, causing the
+        # 6-KB ONSTART heredoc to deadlock.  /dev/null is a regular file
+        # descriptor that fork() duplicates without issue.
+        return subprocess.call(
+            [bash, script],
+            cwd=str(REPO_ROOT),
+            env=env,
+            stdin=subprocess.DEVNULL,
+        )
 
     # ── ps integration (unified job registry) ───────────────────────
     #
