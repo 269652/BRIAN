@@ -549,6 +549,56 @@ accelerates.
 
 ---
 
+### H24 — Pontryagin / Hopfion-lite topological-charge diagnostic (2026-06-23)
+
+**Hypothesis.** Each trained attention head, projected per-token onto
+S² via a learnable `Linear(head_dim, 3)`, traces a discrete map T→S².
+Its Berg-Lüscher signed solid-angle sum (`Q_h`) and inter-layer
+orientation decorrelation (`ε_ortho`) are *non-degenerate* observables
+of routing structure. We predict that across a healthy 10k run:
+
+1. **`Q_h` distribution per head is non-trivial** — at least ⅓ of heads
+   accumulate |Q_h| > 0.1 by step 1000 (sliding-triangle winding above
+   random-walk noise floor of ≈ 1/√T per head).
+2. **`ε_ortho` grows with training** — early layers and late layers
+   develop distinct projections; expect ε_ortho > 0.1 in the trained
+   model and a measurable monotone climb from step 0.
+3. **Pruning low-|Q_h| heads is safer** than pruning by random-or-norm —
+   the head-pruning robustness eval should show ≥ 30% fewer
+   degradations when low-|Q_h| heads are removed first vs random.
+
+- **Spec.** `architectures/master/arch.neuro` line 869 +
+  `architectures/SmolLM/arch.neuro` (synced) — block
+  `regularization { pontryagin_topo_charge: { enabled: true,
+  alpha: 0.0, gamma: 0.0, Q_target: 0.0, weight_init_std: 0.02 } }`.
+  Active in **DIAGNOSTIC MODE** only — Q_h and ε_ortho are logged
+  every step but zero is added to the loss budget. Penalty mode
+  (`alpha` or `gamma > 0`) is a follow-up experiment after the
+  baseline distribution of Q_h across heads is characterised.
+- **Mechanism.** `neuroslm/mechanisms/topo_charge.py` —
+  van Oosterom-Strang signed spherical-triangle area (atan2
+  formulation, stable across the full sphere; Berg-Lüscher 1981);
+  per-block forward hook installed by
+  `LanguageCortex.enable_topo_charge_capture_now()`; consumed by
+  `RegularizationController.collect_topo_charge_aux()`; auto-fired
+  by `BRIANHarness._topo_charge_aux_step()` after the cortex-fusion
+  compose site.
+- **TDD evidence.** 61 GREEN tests across 6 files: math contracts
+  (`tests/dsl/test_topo_charge.py`), §14 stub-detection meta-tests
+  (`tests/dsl/test_topo_charge_stub_audit.py`), DSL parse
+  (`tests/dsl/test_topo_charge_dsl_parse.py`), LanguageCortex hook
+  (`tests/dsl/test_topo_charge_attn_capture.py`), RegController glue
+  (`tests/dsl/test_topo_charge_regcontroller.py`), end-to-end inert-
+  gate (`tests/dsl/test_topo_charge_harness_integration.py` — pins
+  the load-bearing `torch.equal` zero-contribution invariant when
+  alpha=gamma=0).
+- **Outcome.** ⏳ **PENDING DEPLOY.** No metrics captured yet — diagnostic
+  is active in arch but the next training run is needed to gather
+  trajectories. Per CLAUDE.md §1e the deploy requires explicit user
+  authorisation; not initiated by this session.
+
+---
+
 ## What proved to solve or break things — the punchline list
 
 ### Things that demonstrably solved something

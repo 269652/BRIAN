@@ -745,6 +745,12 @@ class RegularizationController(nn.Module):
         self.freq_balance = FreqBalanceReweighter(
             cfg.freq_balance, vocab_size)
         self.cdga = CDGAController(cfg.cdga)
+        # Phase 1.3b: Pontryagin / Hopfion-lite topo-charge diagnostic.
+        # Lazy-built on first collect_topo_charge_aux call once we can
+        # see attn_per_layer[0].shape[-1] (head_dim). Lives as a
+        # SUBMODULE so its proj.weight enters the optimizer once
+        # constructed.
+        self.topo_charge_diag = None
         # Step counter for warmup. Incremented every collect_aux call
         # (which is exactly once per optimizer step).
         self.register_buffer(
@@ -875,5 +881,77 @@ class RegularizationController(nn.Module):
             "cmd": scaled_cmd,
             "total": total,
             "warmup_mult": lm_logits.new_tensor(mult),
+        }
+
+    # ── Phase 1.3b: Pontryagin / Hopfion-lite topo-charge diagnostic ──
+
+    def _build_topo_charge_diag(self, head_dim: int) -> None:
+        """Lazy-build the diagnostic once head_dim is known. Called
+        from collect_topo_charge_aux the first time it sees a non-
+        empty attn_per_layer list.
+
+        Registered as a submodule (assignment to self.topo_charge_diag
+        is detected by nn.Module's __setattr__) so its proj.weight
+        enters self.parameters() and the optimizer picks it up.
+        """
+        from neuroslm.mechanisms.topo_charge import TopoChargeDiagnostic
+        weight_init_std = float(
+            self.cfg.pontryagin_topo_charge.weight_init_std
+        )
+        self.topo_charge_diag = TopoChargeDiagnostic(
+            head_dim=int(head_dim),
+            weight_init_std=weight_init_std,
+        )
+
+    def collect_topo_charge_aux(
+        self,
+        attn_per_layer: list,
+    ) -> Dict[str, torch.Tensor]:
+        """Compute the topo-charge penalty + diagnostics.
+
+        Args:
+            attn_per_layer: list of (B, H, T, head_dim) tensors, one
+                per LanguageCortex block. Empty list -> zero loss +
+                zero metrics (no-op path).
+
+        Returns dict:
+            loss      : scalar Tensor. Exact zero when disabled OR
+                        when alpha = gamma = 0 (diagnostic-only).
+            Q_h_mean  : scalar Tensor. Mean of per-head winding over
+                        (B, H). Zero when disabled or empty input.
+            eps_ortho : scalar Tensor. Inter-layer decorrelation.
+
+        Lazy-builds self.topo_charge_diag on first call when the cfg
+        is enabled AND attn_per_layer is non-empty.
+        """
+        zero = torch.zeros(())
+        cfg = self.cfg.pontryagin_topo_charge
+        # No-op when disabled OR when there are no attention outputs
+        # to consume (capture flag is off, or model has 0 blocks).
+        if (not cfg.enabled) or (not attn_per_layer):
+            return {
+                "loss": zero, "Q_h_mean": zero, "eps_ortho": zero,
+            }
+        # Lazy build keyed on the first tensor's head_dim.
+        if self.topo_charge_diag is None:
+            head_dim = int(attn_per_layer[0].shape[-1])
+            self._build_topo_charge_diag(head_dim)
+        # Pin: move diagnostic to the input's device/dtype on first
+        # call. Safe to call every step -- no-op when already in
+        # place.
+        ref = attn_per_layer[0]
+        self.topo_charge_diag = self.topo_charge_diag.to(
+            device=ref.device, dtype=ref.dtype,
+        )
+        out = self.topo_charge_diag(attn_per_layer)
+        loss = self.topo_charge_diag.penalty(
+            Q_target=float(cfg.Q_target),
+            alpha=float(cfg.alpha),
+            gamma=float(cfg.gamma),
+        )
+        return {
+            "loss":      loss,
+            "Q_h_mean":  out["Q_h"].detach().mean(),
+            "eps_ortho": out["eps_ortho"].detach(),
         }
 

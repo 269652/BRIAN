@@ -671,6 +671,21 @@ Concentrations are computed in `TransmitterSystem`, updated each step based on a
 
 **Evidence:** `tests/test_cognitive_closure.py::test_survival_imperative_qualia_shift` [✅ CONFIRMED]
 
+### 9.6 Pontryagin / Hopfion-lite topological-charge diagnostic (H24, Phase 1 of THSD program)
+
+**Mechanism:** Each attention head's per-token output, projected onto **S²** via a learnable `Linear(head_dim, 3)`, traces a discrete map `T → S²`. Two diagnostics are accumulated:
+
+- **`Q_h`** — discrete winding (Berg-Lüscher / van Oosterom-Strang signed solid-angle sum): `Q_h = (1/4π) Σ_t Ω(n_t, n_{t+1}, n_{t+2})`.
+- **`ε_ortho`** — inter-layer orientation decorrelation: `ε_ortho = Σ_ℓ ⟨1 − n_{ℓ+1} · n_ℓ⟩` (the cheap half of the Hopf invariant; full Hopf-Poisson is out of scope per verifier 4/10 implementability).
+
+DSL surface: `regularization { pontryagin_topo_charge: { enabled: true, alpha: α, gamma: γ, Q_target: Q*, weight_init_std: σ } }`. With `α = γ = 0` (default in arch.neuro) the mechanism is **diagnostic-only**: Q_h and ε_ortho are logged every step but zero is added to the loss budget. Setting `α > 0` or `γ > 0` activates the soft penalty `α·(Q_h − Q*)² + γ·ε_ortho`.
+
+**Implementation:** `neuroslm/mechanisms/topo_charge.py` (library), `neuroslm/dsl/regularization.py` (config + parser, 8th `RegularizationConfig` entry), `neuroslm/modules/language.py` (`LanguageCortex.enable_topo_charge_capture_now()` — forward-hook installation, idempotent), `neuroslm/regularizers.py` (`RegularizationController.collect_topo_charge_aux()` — lazy-builds the diagnostic), `neuroslm/harness.py` (`BRIANHarness._topo_charge_aux_step()` — auto-fired after `_cortex_fusion_aux_step`).
+
+**TDD evidence:** 61 GREEN tests across 6 files including the §14 stub-detection meta-test (`tests/dsl/test_topo_charge_stub_audit.py`) and the load-bearing `torch.equal` inert-gate contract (`tests/dsl/test_topo_charge_harness_integration.py`). See `docs/findings.md` H24 for the falsifiable predictions.
+
+**References:** Berg, B. & Lüscher, M. (1981) *Nucl. Phys. B* 190; van Oosterom, A. & Strang, J. (1983) *IEEE Trans. Biomed. Eng.* 30. [⏳ DIAGNOSTIC ACTIVE, METRICS PENDING DEPLOY]
+
 ---
 
 ## 10. Training Dynamics & Failure Modes

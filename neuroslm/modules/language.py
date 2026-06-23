@@ -213,12 +213,27 @@ class LanguageCortex(nn.Module):
                  # regime the first synth-v1 run hit at step ~500.
                  fe_gate_enable: bool = False,
                  fe_gate_center: float = 1000.0,
-                 fe_gate_width: float = 300.0):
+                 fe_gate_width: float = 300.0,
+                 # ---- Topo-Charge diagnostic capture (Phase 1.3a) ----
+                 # When True, registers a forward hook on every block.attn
+                 # that stashes its output (reshaped to per-head form
+                 # (B, H, T, head_dim)) into self._last_attn_per_layer.
+                 # The list is cleared at the start of every forward().
+                 # Consumed by RegularizationController +
+                 # TopoChargeDiagnostic when
+                 # cfg.regularization.pontryagin_topo_charge.enabled.
+                 # Off by default -> zero memory / grad overhead.
+                 enable_attn_capture: bool = False):
         super().__init__()
         self.gradient_checkpointing = gradient_checkpointing
         self.dropout = float(dropout)
         self.n_nt = n_nt
+        self.n_heads = n_heads      # needed by the topo-capture hook reshape
         self.n_layers = n_layers
+        # Topo-Charge diagnostic capture (Phase 1.3a). Stays [] unless
+        # enable_attn_capture=True triggers per-block forward hooks.
+        self.enable_attn_capture = bool(enable_attn_capture)
+        self._last_attn_per_layer: list = []
         self.enable_memory_xattn = bool(enable_memory_xattn) and not baseline
         # PCT flags
         self.use_predictive_coding_trunk = bool(use_predictive_coding_trunk)
@@ -373,6 +388,70 @@ class LanguageCortex(nn.Module):
                 if p.dim() >= 2:
                     nn.init.normal_(p, mean=0.0, std=0.02)
 
+        # Phase 1.3a: Topo-Charge attention-output capture hooks.
+        # Registered ONLY when enable_attn_capture=True so the legacy
+        # path has zero overhead. Each hook reshapes the post-output-
+        # projection (B, T, d_model) tensor into per-head form
+        # (B, H, T, head_dim) and appends to self._last_attn_per_layer.
+        # The reshape treats the d_model axis as n_heads * head_dim
+        # contiguous chunks (the standard MHA layout); the head axis
+        # is then a feature partition for the diagnostic to compute
+        # per-head topological windings against.
+        if self.enable_attn_capture:
+            self._install_topo_charge_hooks()
+
+    def _install_topo_charge_hooks(self) -> None:
+        """Register a forward hook on every block.attn that appends
+        the per-head attention output to self._last_attn_per_layer.
+
+        Hooks are TAGGED with the attribute ``_topo_charge_capture``
+        so the audit tests can distinguish them from other hooks the
+        repo may register on the same modules. Idempotent -- if a
+        tagged hook is already present on a block, that block is
+        skipped (so repeated calls cannot install duplicates).
+        """
+        n_heads = self.n_heads
+        store = self._last_attn_per_layer        # captured by closure
+
+        def make_hook():
+            def hook(module, _input, output):
+                # CausalSelfAttention / DiffTransformerBlock attn modules
+                # return a Tensor; other variants may return tuples.
+                t = output[0] if isinstance(output, tuple) else output
+                if not isinstance(t, torch.Tensor) or t.dim() != 3:
+                    return
+                B, T, D = t.shape
+                if D % n_heads != 0:
+                    return
+                head_dim = D // n_heads
+                per_head = t.view(B, T, n_heads, head_dim).transpose(1, 2)
+                store.append(per_head)
+            # Tag so audit tests can identify our hook specifically.
+            hook._topo_charge_capture = True
+            return hook
+
+        for blk in self.blocks:
+            attn = getattr(blk, "attn", None)
+            if attn is None:
+                continue
+            already = any(
+                getattr(h, "_topo_charge_capture", False)
+                for h in attn._forward_hooks.values()
+            )
+            if already:
+                continue
+            attn.register_forward_hook(make_hook())
+
+    def enable_topo_charge_capture_now(self) -> None:
+        """Idempotently turn on topo-charge attention-output capture
+        AFTER construction. Used by the harness when
+        cfg.regularization.pontryagin_topo_charge.enabled but the
+        cortex was built with enable_attn_capture=False (the legacy
+        default). Sets the flag and installs hooks; safe to call
+        repeatedly."""
+        self.enable_attn_capture = True
+        self._install_topo_charge_hooks()
+
     def forward(self, ids: torch.Tensor, thought: torch.Tensor | None = None,
                 motor_bias: torch.Tensor | None = None,
                 nt: torch.Tensor | None = None,
@@ -396,6 +475,11 @@ class LanguageCortex(nn.Module):
             return_tap=False: (logits, sem, h, pred_coding_loss)
             return_tap=True:  (logits, sem, h, pred_coding_loss, tap_sem)
         """
+        # Phase 1.3a: clear the topo-charge attn-capture buffer at the
+        # START of every forward so repeated calls don't leak. Cheap
+        # no-op when the list is already empty (capture disabled).
+        if self.enable_attn_capture:
+            self._last_attn_per_layer.clear()
         h = self.emb_drop(self.tok_emb(ids))
         if thought is not None:
             bias = self.from_sem(thought.to(h.dtype)).unsqueeze(1)  # (B, 1, d_hidden)

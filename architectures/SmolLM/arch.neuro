@@ -861,6 +861,19 @@ training {
         #    established and an anchor batch loader is wired in).
         cdga: { enabled: false, alpha_max: 1.0,
                 warmup_steps: 2000, refresh_every: 4 }
+
+        # H. Pontryagin / Hopfion-lite topological-charge diagnostic
+        #    (Phase 1 of the 3-mechanism THSD program; see
+        #    docs/findings.md H23 and neuroslm/mechanisms/topo_charge.py).
+        #    Active with alpha=gamma=0 = DIAGNOSTIC ONLY: Q_h and
+        #    eps_ortho are logged every step, but zero is added to
+        #    the loss. Penalty mode (alpha or gamma > 0) is a follow-
+        #    up experiment after the baseline distribution of Q_h
+        #    across heads is characterised.
+        pontryagin_topo_charge: { enabled: true,
+                                  alpha: 0.0, gamma: 0.0,
+                                  Q_target: 0.0,
+                                  weight_init_std: 0.02 }
     }
 }
 

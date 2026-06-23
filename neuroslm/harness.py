@@ -879,6 +879,62 @@ class BRIANHarness(nn.Module):
             initial_chat_ratio=initial_chat_ratio,
         )
 
+    # ── Phase 1.3c: Pontryagin / Hopfion-lite topo-charge wiring ─────
+
+    def _topo_charge_aux_step(self, total: torch.Tensor) -> torch.Tensor:
+        """Compose the topo-charge penalty into the LM loss budget.
+
+        No-op when:
+          - cfg.regularization.pontryagin_topo_charge.enabled is False
+          - the language model has no _last_attn_per_layer stash (e.g.
+            non-trunk path, or capture flag never installed)
+
+        When enabled, lazy-installs the LanguageCortex capture hook on
+        first call so configs that flip enabled=True after construction
+        (the common case via DSL parse + harness boot) still wire up
+        correctly. The diagnostic itself lives on self.reg_controller
+        and is also lazy-built.
+
+        Records:
+          self._metrics["topo_loss"]      -- scalar contribution
+          self._metrics["topo_Q_h_mean"]  -- diagnostic
+          self._metrics["topo_eps_ortho"] -- diagnostic
+        Keys are ONLY set when the mechanism is enabled, so disabled
+        runs do not leak junk keys into metrics output.
+        """
+        rc = getattr(self, "reg_controller", None)
+        if rc is None:
+            return total
+        cfg_tc = getattr(
+            getattr(rc, "cfg", None), "pontryagin_topo_charge", None)
+        if cfg_tc is None or not cfg_tc.enabled:
+            return total
+        lm = self.language_model
+        if lm is None:
+            return total
+        # Lazy-install capture hooks on first call when enabled.
+        if (not getattr(lm, "enable_attn_capture", False)
+                and hasattr(lm, "enable_topo_charge_capture_now")):
+            lm.enable_topo_charge_capture_now()
+            # The current forward already happened with NO hooks; the
+            # stash is empty for THIS step. The next compute_loss
+            # call will see it populated. Skip this step's penalty.
+            return total
+        attn = getattr(lm, "_last_attn_per_layer", None)
+        if not attn:
+            return total
+        topo_out = rc.collect_topo_charge_aux(attn)
+        # Compose; structural zero when alpha=gamma=0.
+        total = total + topo_out["loss"]
+        # Telemetry.
+        with torch.no_grad():
+            self._metrics["topo_loss"] = float(topo_out["loss"].detach())
+            self._metrics["topo_Q_h_mean"] = float(
+                topo_out["Q_h_mean"].detach())
+            self._metrics["topo_eps_ortho"] = float(
+                topo_out["eps_ortho"].detach())
+        return total
+
     # ── Multi-Trunk-V2: specialist language cortex ensemble ─────────
     def _build_multi_cortex(self) -> None:
         """Build a `MultiCortexEnsemble` from `cfg.multi_cortex`.
@@ -2886,6 +2942,7 @@ class BRIANHarness(nn.Module):
         # All telemetry (kl, lambda, inhibition, alpha_eff) lands in
         # `_metrics` so the training-log line displays it.
         total = self._cortex_fusion_aux_step(total, targets)
+        total = self._topo_charge_aux_step(total)
 
         # ── Runtime metric registry update ──
         # Cheap runtime Phi proxy: per-token softmax entropy normalised
