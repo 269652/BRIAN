@@ -860,10 +860,20 @@ class LMExpert(nn.Module):
         # would inflate CE on trailing positions and re-introduce the
         # deploy 40923107 ``α_eff → 0`` regression for non-full-coverage
         # bridges.
+        #
+        # Allocate in the active AMP compute dtype (bf16 during training)
+        # rather than always fp32.  At B=16, T=2048, V=50257 an fp32 buffer
+        # is 6.14 GiB; if the fusion loop then casts it to bf16 both tensors
+        # are alive simultaneously (6.14 + 3.07 = 9.21 GiB peak) → OOM.
+        # Same pattern as LMExpertEnsemble._fuse_dtype detection.
+        if torch.is_autocast_enabled():
+            _out_dtype: torch.dtype = torch.get_autocast_gpu_dtype()
+        else:
+            _out_dtype = torch.float32
         out = torch.zeros(
             (B, T, self.vocab_size_trunk),
             device=device,
-            dtype=torch.float32,
+            dtype=_out_dtype,
         )
         # Track per-batch alignment coverage (sum across samples, then mean)
         n_aligned_total = 0

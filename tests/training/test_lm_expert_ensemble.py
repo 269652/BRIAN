@@ -554,3 +554,115 @@ class TestFusionDtypeDetection:
             f"under real CUDA bf16 autocast + fp32-param router, output must "
             f"be bf16; got {out.dtype}"
         )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Root-cause tests: _forward_bridge fp32 output buffer under bf16 autocast
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestBridgeBufferDtype:
+    """Pin that ``_forward_bridge`` allocates its output buffer in the AMP
+    compute dtype (not always fp32).
+
+    At B=16, T=2048, V=50257 an fp32 output buffer is 6.14 GiB per expert.
+    Even if the fusion loop casts to bf16 afterwards, the peak VRAM during
+    the cast is fp32 + bf16 simultaneously = 9.21 GiB → CUDA OOM on the
+    A100 (which also holds frozen expert weights, optimizer states, and
+    forward activations).
+
+    The fix: read the active AMP dtype at the TOP of ``_forward_bridge``
+    (same ``torch.is_autocast_enabled()`` / ``torch.get_autocast_gpu_dtype()``
+    pattern as the fusion loop) and allocate ``out`` in that dtype.
+
+    These tests use the real gpt2 ``LMExpert`` from the module fixture but
+    force ``is_same_tokenizer = False`` so ``_forward_bridge`` is exercised.
+    The vocab bridge for gpt2→gpt2 is identity (same tokenizer, 100% coverage)
+    so this is cheap: one small LM forward per sample, identity bridge apply.
+    """
+
+    def _bf16_patches(self):
+        return mock.patch.multiple(
+            "torch",
+            is_autocast_enabled=mock.Mock(return_value=True),
+            get_autocast_gpu_dtype=mock.Mock(return_value=torch.bfloat16),
+        )
+
+    def test_bridge_output_is_bf16_under_bf16_autocast(self, gpt2_experts):
+        """``_forward_bridge`` must return bf16 when the active AMP dtype is
+        bf16.  Before the fix, it always returned fp32 regardless of autocast,
+        causing a 6.14 GiB allocation + a 3.07 GiB cast copy = 9.21 GiB peak
+        → OOM even on a 40 GB A100."""
+        expert = gpt2_experts[0]
+        ids = torch.randint(0, expert.vocab_size_trunk, (1, 16))
+        orig = expert.is_same_tokenizer
+        expert.is_same_tokenizer = False
+        try:
+            with self._bf16_patches(), torch.no_grad():
+                out = expert._forward_bridge(ids)
+        finally:
+            expert.is_same_tokenizer = orig
+
+        assert out.dtype == torch.bfloat16, (
+            f"_forward_bridge must allocate output buffer in the AMP compute "
+            f"dtype (bf16) to avoid a 6.14 GiB fp32 allocation; got {out.dtype}"
+        )
+
+    def test_bridge_output_is_fp32_without_autocast(self, gpt2_experts):
+        """Without active autocast, ``_forward_bridge`` must return fp32 —
+        no silent downcast when running eval / CPU inference."""
+        expert = gpt2_experts[0]
+        ids = torch.randint(0, expert.vocab_size_trunk, (1, 8))
+        orig = expert.is_same_tokenizer
+        expert.is_same_tokenizer = False
+        try:
+            with torch.no_grad():
+                out = expert._forward_bridge(ids)
+        finally:
+            expert.is_same_tokenizer = orig
+
+        assert out.dtype == torch.float32, (
+            f"without autocast, _forward_bridge must return fp32 (no "
+            f"unexpected downcast), got {out.dtype}"
+        )
+
+    def test_bridge_output_dtype_matches_fp16_autocast(self, gpt2_experts):
+        """``_forward_bridge`` must respect fp16 AMP, not hard-code bf16."""
+        expert = gpt2_experts[0]
+        ids = torch.randint(0, expert.vocab_size_trunk, (1, 8))
+        orig = expert.is_same_tokenizer
+        expert.is_same_tokenizer = False
+        try:
+            with mock.patch.multiple(
+                "torch",
+                is_autocast_enabled=mock.Mock(return_value=True),
+                get_autocast_gpu_dtype=mock.Mock(return_value=torch.float16),
+            ), torch.no_grad():
+                out = expert._forward_bridge(ids)
+        finally:
+            expert.is_same_tokenizer = orig
+
+        assert out.dtype == torch.float16, (
+            f"under fp16 autocast, _forward_bridge must return fp16; got {out.dtype}"
+        )
+
+    def test_bridge_content_unchanged_after_dtype_fix(self, gpt2_experts):
+        """Switching the output buffer dtype must not change the VALUES —
+        logits must be the same (within bf16 rounding) as the fp32 path."""
+        expert = gpt2_experts[0]
+        ids = torch.randint(0, expert.vocab_size_trunk, (1, 8))
+        orig = expert.is_same_tokenizer
+        expert.is_same_tokenizer = False
+        try:
+            with torch.no_grad():
+                out_fp32 = expert._forward_bridge(ids)  # no autocast → fp32
+            with self._bf16_patches(), torch.no_grad():
+                out_bf16 = expert._forward_bridge(ids)  # bf16 autocast
+        finally:
+            expert.is_same_tokenizer = orig
+
+        # Cast fp32 to bf16 for comparison — only bf16 precision should differ.
+        torch.testing.assert_close(
+            out_bf16, out_fp32.to(torch.bfloat16),
+            rtol=1e-2, atol=1e-2,
+        )
