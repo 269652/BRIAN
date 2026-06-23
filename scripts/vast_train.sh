@@ -229,7 +229,15 @@ trace "offer selected — building onstart heredoc"
 # Heredoc with normal expansion: $BRANCH etc. expand HERE (locally) so the
 # values land in the onstart script as literals. Escape any in-container
 # variables (\$1 etc.) if you add them later.
-ONSTART="$(cat <<ONSTART
+#
+# IMPORTANT: do NOT use the $() pipe-capture pattern for this heredoc.
+# On Windows Git Bash, the $(…) pipe buffer is ~4-64 KB; the onstart
+# script is ~6 KB and can exceed it, causing a write-deadlock where
+# cat blocks on write while bash blocks waiting for the subshell to exit.
+# Fix: write to a temp file (no pipe), then read with `read -r -d ''`
+# (reads until NUL = entire file, no pipe involved).
+_onstart_tmp="$(mktemp)"
+cat > "$_onstart_tmp" <<ONSTART
 set -e
 export DEBIAN_FRONTEND=noninteractive
 date -u +"vast_train.sh boot @ %Y-%m-%dT%H:%M:%SZ"
@@ -381,7 +389,11 @@ fi
 
 echo "── training exited; FAILED to self-destroy. Run: vastai destroy instance <contract_id> ──"
 ONSTART
-)"
+# Read entire temp file into ONSTART without a subshell pipe (avoids
+# the write-deadlock on Windows when the content exceeds pipe buffer).
+# `read -r -d ''` reads until NUL byte (EOF); exits 1 on EOF, hence `|| true`.
+read -r -d '' ONSTART < "$_onstart_tmp" || true
+rm -f "$_onstart_tmp"
 trace "onstart heredoc built (${#ONSTART} chars)"
 
 # ─── Create the instance ─────────────────────────────────────────────────

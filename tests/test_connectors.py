@@ -500,3 +500,175 @@ def test_O_no_platform_uses_toml(patch_connectors, tmp_path, monkeypatch):
     rc = cmd_deploy(args)
     assert rc == 0
     assert patch_connectors[0]["platform"] == "lightning"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# R: vast_train.sh source contracts — pipe-buffer fix + deploy chain
+# ─────────────────────────────────────────────────────────────────────
+#
+# Root issue (Windows Git Bash, 2026-06-23): ONSTART="$(cat <<ONSTART…)"
+# creates a subshell-to-pipe path. The ONSTART heredoc is ~6 KB which
+# exceeds Windows pipe buffers (~4 KB in some Git Bash versions), so cat
+# blocks on write while bash blocks waiting for the subshell to exit —
+# deadlock. The fix: write to a temp file (no pipe), then read with
+# `read -r -d ''` (reads entire file without spawning a subshell pipe).
+
+@pytest.fixture(scope="module")
+def vast_train_sh_src() -> str:
+    return (REPO_ROOT / "scripts" / "vast_train.sh").read_text(encoding="utf-8")
+
+
+class TestVastTrainShPipeBufferFix:
+    """vast_train.sh must not use $(cat <<ONSTART…) to build the onstart
+    script — that pattern deadlocks on Windows when the content exceeds
+    the Git Bash pipe buffer."""
+
+    def test_R1_no_old_pipe_capture_pattern(self, vast_train_sh_src: str):
+        """The old ONSTART=\"$(cat <<ONSTART\" pattern must not appear."""
+        assert 'ONSTART="$(cat <<ONSTART' not in vast_train_sh_src, (
+            "vast_train.sh still uses the pipe-capture heredoc pattern "
+            "ONSTART=\"$(cat <<ONSTART…)\". This deadlocks on Windows Git Bash "
+            "when the ~6 KB onstart script exceeds the pipe buffer. "
+            "Use `cat > tmpfile <<ONSTART` + `read -r -d '' ONSTART < tmpfile` instead."
+        )
+
+    def test_R2_writes_to_temp_file(self, vast_train_sh_src: str):
+        """Must write the heredoc to a temp file to avoid the pipe deadlock."""
+        import re
+        assert re.search(r'cat\s+>\s+"\$_onstart_tmp"\s+<<ONSTART', vast_train_sh_src), (
+            "vast_train.sh must use `cat > \"$_onstart_tmp\" <<ONSTART` to write "
+            "the onstart script to a temp file (no pipe involved, avoids deadlock)."
+        )
+
+    def test_R3_reads_back_without_subshell_pipe(self, vast_train_sh_src: str):
+        """Must use `read -r -d '' ONSTART < file` to avoid a new pipe deadlock."""
+        assert "read -r -d '' ONSTART < " in vast_train_sh_src, (
+            "vast_train.sh must use `read -r -d '' ONSTART < \"$_onstart_tmp\"` to "
+            "load the file content without a subshell pipe. $(cat file) would "
+            "also have a pipe and could deadlock on large files."
+        )
+
+    def test_R4_cleans_up_temp_file(self, vast_train_sh_src: str):
+        """Temp file must be removed after ONSTART is read."""
+        idx_read = vast_train_sh_src.find("read -r -d '' ONSTART")
+        assert idx_read >= 0
+        # Within 100 chars after the read line there must be `rm -f $_onstart_tmp`
+        snippet = vast_train_sh_src[idx_read: idx_read + 200]
+        assert "rm -f" in snippet and "_onstart_tmp" in snippet, (
+            "The onstart temp file must be removed with `rm -f $_onstart_tmp` "
+            "immediately after reading it."
+        )
+
+    def test_R5_trace_sequence_complete(self, vast_train_sh_src: str):
+        """All four [stage] trace markers must be present in order."""
+        markers = [
+            "offer selected",
+            "onstart heredoc built",
+            "calling: vastai create instance",
+            "create call starting",
+        ]
+        positions = []
+        for m in markers:
+            idx = vast_train_sh_src.find(m)
+            assert idx >= 0, f"missing trace marker: {m!r}"
+            positions.append(idx)
+        assert positions == sorted(positions), (
+            "trace markers must appear in order: offer-selected → heredoc-built "
+            "→ calling-create → create-starting"
+        )
+
+    def test_R6_bash_syntax_valid(self):
+        """vast_train.sh must pass `bash -n` (no syntax errors).
+
+        Uses VastConnector._find_bash() to get the same bash binary that
+        the connector uses, so the syntax check matches the deploy environment.
+        Skipped when bash is not available on the current platform.
+        """
+        import subprocess
+        from neuroslm.connectors.vast import VastConnector
+        bash = VastConnector._find_bash()
+        if not bash:
+            pytest.skip("bash not found on this platform")
+        result = subprocess.run(
+            [bash, "-n", str(REPO_ROOT / "scripts" / "vast_train.sh")],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, (
+            f"bash -n vast_train.sh reported syntax errors:\n{result.stderr}"
+        )
+
+
+class TestVastTrainShOnstartContent:
+    """The ONSTART content (container-side script) must include all the
+    critical sections that make training work end-to-end."""
+
+    def test_R7_onstart_clones_repo(self, vast_train_sh_src: str):
+        assert "git clone" in vast_train_sh_src, (
+            "ONSTART must clone the repo inside the container."
+        )
+
+    def test_R8_onstart_runs_bootstrap(self, vast_train_sh_src: str):
+        assert "vast_bootstrap.sh" in vast_train_sh_src, (
+            "ONSTART must run scripts/vast_bootstrap.sh to install deps."
+        )
+
+    def test_R9_onstart_runs_training(self, vast_train_sh_src: str):
+        assert "vast_train_dsl_loop.sh" in vast_train_sh_src, (
+            "ONSTART must invoke vast_train_dsl_loop.sh for DSL training."
+        )
+
+    def test_R10_onstart_has_log_pusher(self, vast_train_sh_src: str):
+        assert "log_pusher.sh" in vast_train_sh_src, (
+            "ONSTART must start log_pusher.sh so training progress is "
+            "visible from git without SSH-ing into the instance."
+        )
+
+    def test_R11_no_ssh_flag_in_create(self, vast_train_sh_src: str):
+        """--ssh must NOT appear in the vastai create instance call.
+
+        vast.ai's /.launch spawns an ssh keepalive when --ssh is set.
+        The pytorch/pytorch image has no openssh-client, so /.launch
+        spins on 'ssh: command not found' forever and onstart-cmd never
+        runs (container idle, billed indefinitely).
+        """
+        import re
+        # Find the create instance block and check --ssh is absent
+        create_idx = vast_train_sh_src.find("create instance")
+        assert create_idx >= 0
+        create_block = vast_train_sh_src[create_idx: create_idx + 600]
+        assert "--ssh" not in create_block, (
+            "`vastai create instance` must NOT use --ssh: the pytorch image "
+            "lacks openssh-client, causing /.launch to spin forever and "
+            "preventing onstart-cmd from ever running."
+        )
+
+    def test_R12_create_has_timeout(self, vast_train_sh_src: str):
+        """The vastai create instance call must be wrapped with timeout."""
+        assert "timeout 120" in vast_train_sh_src, (
+            "vastai create instance must be wrapped with `timeout 120` "
+            "so a hung API call exits visibly instead of blocking forever."
+        )
+
+    def test_R13_vast_api_key_forwarded_to_container(self, vast_train_sh_src: str):
+        """VAST_API_KEY must be forwarded as an env var to the container."""
+        assert "VAST_API_KEY=$VAST_API_KEY" in vast_train_sh_src or \
+               "VAST_API_KEY=${VAST_API_KEY" in vast_train_sh_src, (
+            "The container env (-e VAST_API_KEY=...) must forward VAST_API_KEY "
+            "so the container can self-destroy after training."
+        )
+
+
+class TestBrianTomlPlatform:
+    """brian.toml must have platform = 'vast' so `brian deploy` targets
+    vast.ai by default."""
+
+    def test_R14_brian_toml_platform_is_vast(self):
+        import tomllib
+        toml_path = REPO_ROOT / "brian.toml"
+        with open(toml_path, "rb") as f:
+            data = tomllib.load(f)
+        platform = data.get("deploy", {}).get("platform", "")
+        assert platform == "vast", (
+            f"brian.toml [deploy].platform must be 'vast', got {platform!r}. "
+            "Run `brian deploy` to target vast.ai by default."
+        )
