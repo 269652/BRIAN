@@ -146,6 +146,38 @@ class TestVastTrainExportsOodEvery:
         )
 
 
+# ── Contract D2: _current_step defined before _compose_logfile call ───────
+
+class TestCurrentStepDefinedBeforeUse:
+    def test_current_step_defined_before_banner_dest(self):
+        """_current_step() must be defined before _BANNER_DEST=\"$(_compose_logfile)\".
+
+        _compose_logfile() calls _current_step() internally.  In bash, a function
+        must be defined (by execution of its definition) before it is invoked.
+        The _BANNER_DEST assignment is the earliest call to _compose_logfile, so
+        _current_step must appear before that line in the file.
+        """
+        # Position of the _current_step() function DEFINITION
+        def_pos = LOG_PUSHER.find("_current_step()")
+        assert def_pos >= 0, "_current_step() function must be defined in log_pusher.sh"
+
+        # Position of the earliest _compose_logfile() CALL (not definition)
+        # The first real call is _BANNER_DEST="$(_compose_logfile)" or ONESHOT's
+        # LOG_REL="$(_compose_logfile)" — whichever comes first.
+        banner_call_pos = LOG_PUSHER.find("_BANNER_DEST=")
+        oneshot_call_pos = LOG_PUSHER.find('LOG_REL="$(_compose_logfile)"')
+        first_call_pos = min(
+            p for p in [banner_call_pos, oneshot_call_pos] if p >= 0
+        )
+
+        assert def_pos < first_call_pos, (
+            f"_current_step() is defined at char {def_pos} but "
+            f"_compose_logfile() is first called at char {first_call_pos}. "
+            "Move _current_step() above the first _compose_logfile() call "
+            "or bash will report '_current_step: command not found'."
+        )
+
+
 # ── Contract E: Colab log pusher polls for [mid-ood] lines ────────────────
 
 class TestColabLogPusherOodAware:

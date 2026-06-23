@@ -182,7 +182,7 @@ def test_G_build_env_propagates_all_fields():
 
     assert env["STEPS"] == "7000"
     assert env["BRANCH"] == "master"
-    assert env["ARCH"] == "architectures/current"
+    assert env["ARCH"] == "current"  # "architectures/" prefix stripped
     assert env["SCALE"] == "large"
     assert env["LABEL_SUFFIX"] == "my-label"
     assert env["RESUME_FROM"] == "hf://owner/repo/step5000.pt"
@@ -224,6 +224,28 @@ def test_H_build_env_skips_none_fields():
     assert "LABEL_SUFFIX" not in env
     assert "RESUME_FROM" not in env
     assert "BRIAN_SOURCE_DNA" not in env
+
+
+def test_G2_build_env_strips_architectures_prefix():
+    """ARCH must be stripped of the 'architectures/' prefix so that
+    vast_train_dsl_loop.sh, which prepends 'architectures/' itself,
+    doesn't produce a doubled path like architectures/architectures/SmolLM."""
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.vast import VastConnector
+
+    # Full path as stored in brian.toml — must be stripped.
+    cfg = DeployConfig(steps=100, arch="architectures/SmolLM")
+    env = VastConnector()._build_env(cfg)
+    assert env["ARCH"] == "SmolLM", (
+        "ARCH env var must be 'SmolLM', not 'architectures/SmolLM'. "
+        "vast_train_dsl_loop.sh prepends 'architectures/' so passing the full "
+        "path produces architectures/architectures/SmolLM which doesn't exist."
+    )
+
+    # Bare name (no prefix) — must be preserved as-is.
+    cfg2 = DeployConfig(steps=100, arch="SmolLM")
+    env2 = VastConnector()._build_env(cfg2)
+    assert env2["ARCH"] == "SmolLM"
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -679,6 +701,19 @@ class TestVastTrainShOnstartContent:
                "VAST_API_KEY=${VAST_API_KEY" in vast_train_sh_src, (
             "The container env (-e VAST_API_KEY=...) must forward VAST_API_KEY "
             "so the container can self-destroy after training."
+        )
+
+    def test_R15_onstart_log_pusher_launch_receives_arch(self, onstart_template: str):
+        """The log_pusher.sh nohup launch must receive ARCH= so ARCH_NAME in
+        log_pusher.sh resolves to the real arch name rather than 'current'."""
+        idx = onstart_template.find("log_pusher.sh")
+        assert idx >= 0, "onstart template must contain log_pusher.sh launch"
+        # Look at the ~400 chars before the nohup line (env var prefix region)
+        context = onstart_template[max(0, idx - 400): idx + 100]
+        assert "ARCH=" in context, (
+            "The nohup bash scripts/log_pusher.sh launch must include ARCH= "
+            "so log filenames use the arch name (e.g. SmolLM) not 'current'. "
+            "Without ARCH, log_pusher.sh falls back to ARCH_NAME='current'."
         )
 
 

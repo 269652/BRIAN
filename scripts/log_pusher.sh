@@ -145,6 +145,13 @@ _start_step() {
     echo "${n:-0}"
 }
 
+_current_step() {
+    local n
+    n="$(grep -oE "^step[[:space:]]+[0-9]+" "$SOURCE_LOG" 2>/dev/null \
+                | tail -1 | awk '{print $2}')"
+    echo "${n:-0}"
+}
+
 _compose_logfile() {
     # New layout (2026-06-16): step range in filename, not generic train.log
     #
@@ -311,17 +318,6 @@ else
     echo "[log_pusher] TIME-DRIVEN (legacy): push every ${PUSH_INTERVAL}s"
     echo "[log_pusher] watching $SOURCE_LOG → $_BANNER_DEST"
 fi
-
-# ── Step parser ────────────────────────────────────────────────────────
-# Returns the most recent "step N" reported by the trainer in the live
-# log (matching ``_format_metrics_line`` in train_dsl.py — format
-# ``step <N> | loss …``). Returns 0 when the log is empty / no row yet.
-_current_step() {
-    local n
-    n="$(grep -oE "^step[[:space:]]+[0-9]+" "$SOURCE_LOG" 2>/dev/null \
-                | tail -1 | awk '{print $2}')"
-    echo "${n:-0}"
-}
 
 # Returns the step of the most recently completed OOD validation in the log.
 # train_dsl.py prints: "[mid-ood] step N: wikitext ppl=..."

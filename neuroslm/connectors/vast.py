@@ -103,7 +103,7 @@ echo "── starting log-pusher (background) ──"
 # write to a different filename than the snapshots.
 export BOOT_TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 echo "    BOOT_TIMESTAMP=$BOOT_TIMESTAMP (used in log filename prefix)"
-INSTANCE_ID="$(hostname)" PUSH_INTERVAL='__LOG_PUSH__' \\
+ARCH='__ARCH__' INSTANCE_ID="$(hostname)" PUSH_INTERVAL='__LOG_PUSH__' \\
     BRANCH='__BRANCH__' REPO_SLUG='__REPO_SLUG__' \\
     BOOT_TIMESTAMP="$BOOT_TIMESTAMP" \\
     OOD_EVERY='__OOD_EVERY__' \\
@@ -319,7 +319,12 @@ class VastConnector(BaseConnector):
         if config.branch:
             env["BRANCH"] = config.branch
         if config.arch:
-            env["ARCH"] = config.arch
+            # vast_train_dsl_loop.sh prepends "architectures/" to ARCH itself,
+            # so strip the prefix here to avoid "architectures/architectures/…".
+            arch_name = config.arch
+            if arch_name.startswith("architectures/"):
+                arch_name = arch_name[len("architectures/"):]
+            env["ARCH"] = arch_name
         if config.scale:
             env["SCALE"] = config.scale
         if config.label:
