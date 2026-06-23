@@ -30,7 +30,7 @@
 # This keeps arch.neuro free of implementation details and focuses it on
 # high-level architecture + wiring + constraints.
 
-architecture master {
+architecture master: {
     d_sem: 256,
     dt: 0.01
 }
@@ -358,7 +358,7 @@ training {
     # away unchecked over ~40 steps (run 38470012: NE 0.20â†'0.93,
     # gnorm 10â†'24, loss 12.6â†'15.4 between steps 460-500).
     #
-    # `allostasis { ... }` adds the missing piece â€" a synthetic HPA
+    # `allostasis: { ... }` adds the missing piece â€" a synthetic HPA
     # axis with two state vars:
     #   load(t) â€" fast EMA (Ï„â‰ˆ10) of multi-modal stress (NE/GABA
     #             excess, loss volatility, grad spikes), saturating.
@@ -1028,23 +1028,23 @@ import { surprise_gated_moe }            from "@lib/features/surprise_gated_moe"
 # To run an ablation just delete (or comment out) the matching block
 # to revert that mechanism to its bypassed baseline.
 
-feature hyperbolic_attention {
+feature hyperbolic_attention: {
     equation: hyperbolic_attention_eq,
     active:   true
 }
-feature rope_torus {
+feature rope_torus: {
     equation: rope_torus_eq,
     active:   true
 }
-feature hrr_memory {
+feature hrr_memory: {
     equation: hrr_memory_eq,
     active:   true
 }
-feature predictive_coding_residual {
+feature predictive_coding_residual: {
     equation: predictive_coding_residual_eq,
     active:   true
 }
-feature surprise_gated_moe {
+feature surprise_gated_moe: {
     equation: surprise_gated_moe_eq,
     active:   true
 }
@@ -1085,7 +1085,7 @@ import { cortex_code, cortex_general, cortex_reasoning } from "@lib/modules/cort
 # =============================================================================
 
 # Thalamic gating (sensory bottleneck control)
-synapse thalamus -> gws {
+synapse thalamus -> gws: {
     weight: 0.8, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
@@ -1233,7 +1233,7 @@ synapse dmn -> gws {
 }
 
 # Cerebellum â†' forward model (classical conditioning, motor learning)
-synapse cerebellum -> forward_m {
+synapse cerebellum -> forward_m: {
     weight: 0.6, neurotransmitter: "gaba",
     equation: @standard_synapse
 }
@@ -1252,27 +1252,27 @@ synapse cerebellum -> forward_m {
 # =============================================================================
 
 # (1) Reentry: deep motor -> sensory loop (closes the bowtie)
-synapse motor -> sensory {
+synapse motor -> sensory: {
     weight: 0.4, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 
 # (2) MoE parallel path: pfc -> reasoning_cortex -> motor
-synapse pfc -> reasoning_cortex {
+synapse pfc -> reasoning_cortex: {
     weight: 0.5, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
-synapse reasoning_cortex -> motor {
+synapse reasoning_cortex -> motor: {
     weight: 0.5, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 
 # (3) Lateral inhibition: dmn <-> reasoning_cortex (GABA)
-synapse dmn -> reasoning_cortex {
+synapse dmn -> reasoning_cortex: {
     weight: 0.3, neurotransmitter: "gaba",
     equation: @standard_synapse
 }
-synapse reasoning_cortex -> dmn {
+synapse reasoning_cortex -> dmn: {
     weight: 0.3, neurotransmitter: "gaba",
     equation: @standard_synapse
 }
@@ -1298,117 +1298,117 @@ synapse reasoning_cortex -> dmn {
 # =============================================================================
 
 # — Mesolimbic DA: VTA → NAcc (reward circuit)
-synapse vta -> nucleus_accumbens {
+synapse vta -> nucleus_accumbens: {
     weight: 0.9, neurotransmitter: "dopamine",
     equation: @standard_synapse
 }
 # — Mesocortical DA: VTA → PFC (motivational signal to executive control)
-synapse vta -> pfc {
+synapse vta -> pfc: {
     weight: 0.6, neurotransmitter: "dopamine",
     equation: @standard_synapse
 }
 # — VTA → BG (reward-salience gating of action selection)
-synapse vta -> bg {
+synapse vta -> bg: {
     weight: 0.7, neurotransmitter: "dopamine",
     equation: @standard_synapse
 }
 # — Nigrostriatal: SN → BG (classical motor DA pathway)
-synapse substantia_nigra -> bg {
+synapse substantia_nigra -> bg: {
     weight: 0.8, neurotransmitter: "dopamine",
     equation: @standard_synapse
 }
 # — Ventral striatum: NAcc → BG (motivational gating of dorsal striatum)
-synapse nucleus_accumbens -> bg {
+synapse nucleus_accumbens -> bg: {
     weight: 0.5, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 # — NAcc → motor (reward-driven action output)
-synapse nucleus_accumbens -> motor {
+synapse nucleus_accumbens -> motor: {
     weight: 0.4, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 # — LC → thalamus (NE: arousal amplifies thalamic relay gain)
-synapse locus_coeruleus -> thalamus {
+synapse locus_coeruleus -> thalamus: {
     weight: 0.5, neurotransmitter: "norepinephrine",
     equation: @standard_synapse
 }
 # — LC → amygdala (NE: stress arousal amplifies emotional reactivity)
-synapse locus_coeruleus -> amygdala {
+synapse locus_coeruleus -> amygdala: {
     weight: 0.6, neurotransmitter: "norepinephrine",
     equation: @standard_synapse
 }
 # — LC → PFC (NE inverted-U: moderate sharpens PFC, high degrades it)
-synapse locus_coeruleus -> pfc {
+synapse locus_coeruleus -> pfc: {
     weight: 0.4, neurotransmitter: "norepinephrine",
     equation: @standard_synapse
 }
 # — Raphe → amygdala (5HT: serotonergic suppression of fear / anxiety)
-synapse raphe_nuclei -> amygdala {
+synapse raphe_nuclei -> amygdala: {
     weight: 0.7, neurotransmitter: "serotonin",
     equation: @standard_synapse
 }
 # — Raphe → PFC (5HT: mood-state modulation of executive planning)
-synapse raphe_nuclei -> pfc {
+synapse raphe_nuclei -> pfc: {
     weight: 0.5, neurotransmitter: "serotonin",
     equation: @standard_synapse
 }
 # — Raphe → hippo (5HT: serotonergic memory consolidation gating)
-synapse raphe_nuclei -> hippo {
+synapse raphe_nuclei -> hippo: {
     weight: 0.4, neurotransmitter: "serotonin",
     equation: @standard_synapse
 }
 # — NBM → sensory (ACh: cholinergic top-down attention to sensory cortex)
-synapse nucleus_basalis -> sensory {
+synapse nucleus_basalis -> sensory: {
     weight: 0.5, neurotransmitter: "acetylcholine",
     equation: @standard_synapse
 }
 # — NBM → hippo (ACh: cholinergic encoding gate for episodic memory)
-synapse nucleus_basalis -> hippo {
+synapse nucleus_basalis -> hippo: {
     weight: 0.6, neurotransmitter: "acetylcholine",
     equation: @standard_synapse
 }
 # — NBM → PFC (ACh: cholinergic modulation of working memory)
-synapse nucleus_basalis -> pfc {
+synapse nucleus_basalis -> pfc: {
     weight: 0.3, neurotransmitter: "acetylcholine",
     equation: @standard_synapse
 }
 # — BG → VTA (striatal GABA inhibits VTA; disinhibition = reward signal)
-synapse bg -> vta {
+synapse bg -> vta: {
     weight: 0.4, neurotransmitter: "gaba",
     equation: @standard_synapse
 }
 # — Amygdala → VTA (stress/fear drives phasic DA burst; fight-or-flight)
-synapse amygdala -> vta {
+synapse amygdala -> vta: {
     weight: 0.5, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 # — Amygdala → LC (fear → NE surge; classical stress arousal pathway)
-synapse amygdala -> locus_coeruleus {
+synapse amygdala -> locus_coeruleus: {
     weight: 0.6, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 # — Amygdala → Raphe (chronic stress → 5HT depletion via raphe suppression)
-synapse amygdala -> raphe_nuclei {
+synapse amygdala -> raphe_nuclei: {
     weight: 0.4, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 # — Evaluator → VTA (scalar RPE → DA burst; temporal-difference learning)
-synapse evaluator -> vta {
+synapse evaluator -> vta: {
     weight: 0.7, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 # — ACC → LC (conflict/error monitoring → NE arousal for adaptive gain)
-synapse acc -> locus_coeruleus {
+synapse acc -> locus_coeruleus: {
     weight: 0.5, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 # — PFC → NBM (top-down cholinergic control: executive-attention coupling)
-synapse pfc -> nucleus_basalis {
+synapse pfc -> nucleus_basalis: {
     weight: 0.4, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 # — Hippo → Raphe (memory retrieval context modulates 5HT tone)
-synapse hippo -> raphe_nuclei {
+synapse hippo -> raphe_nuclei: {
     weight: 0.3, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
@@ -1438,63 +1438,63 @@ synapse hippo -> raphe_nuclei {
 # =============================================================================
 
 # — Inputs to Qualia
-synapse amygdala -> qualia {
+synapse amygdala -> qualia: {
     weight: 0.7, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
-synapse insula -> qualia {
+synapse insula -> qualia: {
     weight: 0.6, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
-synapse gws -> qualia {
+synapse gws -> qualia: {
     weight: 0.5, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
-synapse thought_transformer -> qualia {
+synapse thought_transformer -> qualia: {
     weight: 0.4, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
-synapse dmn -> qualia {
+synapse dmn -> qualia: {
     weight: 0.4, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
-synapse survival_imperatives -> qualia {
+synapse survival_imperatives -> qualia: {
     weight: 0.6, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 
 # — Qualia → emotions_vector (oscillatory semantic modulation of thought manifold)
-synapse qualia -> emotions_vector {
+synapse qualia -> emotions_vector: {
     weight: 0.8, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 
 # — Emotions vector → thought / GWS (affective coloring of cognition)
-synapse emotions_vector -> thought_transformer {
+synapse emotions_vector -> thought_transformer: {
     weight: 0.5, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
-synapse emotions_vector -> gws {
+synapse emotions_vector -> gws: {
     weight: 0.4, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 
 # — Qualia → DMN (qualia reshapes self-model and narrative)
-synapse qualia -> dmn {
+synapse qualia -> dmn: {
     weight: 0.5, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
 
 # — Qualia → NT release (qualia influences neuromodulatory output)
-synapse qualia -> vta {
+synapse qualia -> vta: {
     weight: 0.5, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
-synapse qualia -> raphe_nuclei {
+synapse qualia -> raphe_nuclei: {
     weight: 0.4, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
-synapse qualia -> locus_coeruleus {
+synapse qualia -> locus_coeruleus: {
     weight: 0.3, neurotransmitter: "glutamate",
     equation: @standard_synapse
 }
@@ -1507,19 +1507,19 @@ synapse qualia -> locus_coeruleus {
 # =============================================================================
 
 # PFC â€" DA (motivation), 5HT (impulse control), ACh (attention), GABA (inhibition)
-modulation dopamine -> pfc {
+modulation dopamine -> pfc: {
     effect: "multiplicative", gain: 0.6,
     equation: @multiplicative_modulation
 }
-modulation serotonin -> pfc {
+modulation serotonin -> pfc: {
     effect: "additive", gain: 0.3,
     equation: @additive_modulation
 }
-modulation acetylcholine -> pfc {
+modulation acetylcholine -> pfc: {
     effect: "multiplicative", gain: 0.4,
     equation: @multiplicative_modulation
 }
-modulation gaba -> pfc {
+modulation gaba -> pfc: {
     effect: "multiplicative", gain: 0.4,
     equation: @multiplicative_modulation
 }
@@ -1535,11 +1535,11 @@ modulation glutamate -> hippo {
 }
 
 # Basal ganglia â€" DA (motivation), GABA (competition)
-modulation dopamine -> bg {
+modulation dopamine -> bg: {
     effect: "multiplicative", gain: 0.7,
     equation: @multiplicative_modulation
 }
-modulation gaba -> bg {
+modulation gaba -> bg: {
     effect: "multiplicative", gain: 0.5,
     equation: @multiplicative_modulation
 }
@@ -1555,11 +1555,11 @@ modulation gaba -> thalamus {
 }
 
 # Sensory â€" ACh (attention), eCB (inhibition)
-modulation acetylcholine -> sensory {
+modulation acetylcholine -> sensory: {
     effect: "multiplicative", gain: 0.3,
     equation: @multiplicative_modulation
 }
-modulation endocannabinoid -> sensory {
+modulation endocannabinoid -> sensory: {
     effect: "multiplicative", gain: 0.3,
     equation: @multiplicative_modulation
 }
@@ -1575,7 +1575,7 @@ modulation acetylcholine -> dmn {
 }
 
 # GWS â€" DA (salience boost)
-modulation dopamine -> gws {
+modulation dopamine -> gws: {
     effect: "additive", gain: 0.5,
     equation: @additive_modulation
 }
@@ -1587,36 +1587,36 @@ modulation serotonin -> amygdala {
 }
 
 # ACC â€" DA (motivation)
-modulation dopamine -> acc {
+modulation dopamine -> acc: {
     effect: "multiplicative", gain: 0.5,
     equation: @multiplicative_modulation
 }
 
 # Qualia — DA (reward/pleasure → hedonic tone), 5HT (mood baseline),
 #           NE (arousal intensity), eCB (hedonic set-point / analgesia)
-modulation dopamine -> qualia {
+modulation dopamine -> qualia: {
     effect: "additive", gain: 0.6,
     equation: @additive_modulation
 }
-modulation serotonin -> qualia {
+modulation serotonin -> qualia: {
     effect: "multiplicative", gain: 0.5,
     equation: @multiplicative_modulation
 }
-modulation norepinephrine -> qualia {
+modulation norepinephrine -> qualia: {
     effect: "additive", gain: 0.4,
     equation: @additive_modulation
 }
-modulation endocannabinoid -> qualia {
+modulation endocannabinoid -> qualia: {
     effect: "additive", gain: 0.5,
     equation: @additive_modulation
 }
 
 # Survival imperatives — DA (reward reinforces drives), NE (stress heightens)
-modulation dopamine -> survival_imperatives {
+modulation dopamine -> survival_imperatives: {
     effect: "multiplicative", gain: 0.5,
     equation: @multiplicative_modulation
 }
-modulation norepinephrine -> survival_imperatives {
+modulation norepinephrine -> survival_imperatives: {
     effect: "additive", gain: 0.4,
     equation: @additive_modulation
 }
@@ -1680,19 +1680,19 @@ complex Thalamus {
 }
 
 # Global workspace (conscious space) â€" recurrent amplification & integration
-complex GlobalWorkspace {
-    stalk {
+complex GlobalWorkspace: {
+    stalk: {
         representation_dim: 512,
         fisher_information_metric: "information_geometry",
         local_constraints: ["narrative_consistency", "gradient_stability"]
     },
-    topology {
+    topology: {
         kind: "Tonnetz",
         spectral_gap: 0.35,
         dimension: 8,
         coherence_threshold: 0.98
     },
-    formal_spec {
+    formal_spec: {
         cohomology_floor: 0.008,
         phi_target: 0.85,
         phi_method: "geometric_IIT4",
@@ -1702,18 +1702,18 @@ complex GlobalWorkspace {
             prediction_lower_bound: 0.94
         }
     },
-    dynamics {
-        emission {
+    dynamics: {
+        emission: {
             trigger: "always",
             payload_dim: 96,
             lifetime_steps: 150
         },
-        release {
+        release: {
             rule: "rank_one_update",
             learning_rate: 0.001,
             target: "parameter_counts"
         },
-        nemori {
+        nemori: {
             enabled: true,
             consolidation_interval: 800,
             forgetting_floor: 0.005
@@ -1759,25 +1759,25 @@ complex PrefrontalCortex {
 }
 
 # Motor output layer â€" action generation
-complex MotorCortex {
-    stalk {
+complex MotorCortex: {
+    stalk: {
         representation_dim: 192,
         fisher_information_metric: "information_geometry",
         local_constraints: ["motor_smoothness"]
     },
-    topology {
+    topology: {
         kind: "Tonnetz",
         spectral_gap: 0.30,
         dimension: 5,
         coherence_threshold: 0.94
     },
-    formal_spec {
+    formal_spec: {
         cohomology_floor: 0.004,
         phi_target: 0.75,
         phi_method: "geometric_IIT4"
     },
-    dynamics {
-        nemori {
+    dynamics: {
+        nemori: {
             enabled: true,
             consolidation_interval: 1200,
             forgetting_floor: 0.012
@@ -1831,7 +1831,7 @@ import { sheaf_narrative_consistency, formal_phi_integration, formal_bowtie_topo
 # tests/dsl/test_language_cortex_lib.py.
 #
 # Historical:
-#   The old `multi_cortex { experts: [...], cfd_*: ..., distillation_*: ... }`
+#   The old `multi_cortex: { experts: [...], cfd_*: ..., distillation_*: ... }`
 #   block above (â‰ˆ120 lines) was the H21-H24 procedural surface. Every
 #   parameter was a magic key on a 1200-line god-block. This new
 #   declarative surface â€" `expert` / `distillation` / `funnel` / `warmup`
@@ -1839,7 +1839,7 @@ import { sheaf_narrative_consistency, formal_phi_integration, formal_bowtie_topo
 #   â€" replaces ALL of the cfd_* and distillation_* keys in the legacy
 #   block with reusable, validated, linter-aware IR rows.
 #
-# The legacy `multi_cortex { ... }` block is preserved for now because
+# The legacy `multi_cortex: { ... }` block is preserved for now because
 # the harness's neuromodulator stack (lateral_inhibition_kappa,
 # router_temp_nt_gain, distillation_5ht_gain, etc.) reads from it
 # directly. A follow-up PR will migrate those NT-mod parameters to
@@ -1914,7 +1914,7 @@ expert ReasoningExpert {
 #   (d_bottleneck = 512 matches the operative trunk d_model in
 #    rcc_bowtie_30m_p4; the funnel is a no-op projection for the
 #    legacy KL path but becomes load-bearing under CFD top-K.)
-module brain = LanguageCortex {
+module brain = LanguageCortex: {
     teacher_warmup_steps: 10000,
     d_bottleneck:         512,
     cfd_temperature:      4.0,
