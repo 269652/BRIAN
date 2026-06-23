@@ -1,0 +1,82 @@
+# -*- coding: utf-8 -*-
+# Z-loss — softmax/router log-partition regulariser.
+#
+# Implementation: neuroslm.losses.z_loss.ZLoss
+# Tests:          tests/losses/test_z_loss.py
+# Docs:           docs/mechanics/z_loss.md
+
+export mechanic z_loss {
+    category: "regularizer"
+    summary:  "Penalise the squared log-partition (logsumexp) of softmax logits to keep them from drifting — stabilises router and output softmaxes"
+
+    equation: """
+        # Z is the softmax normaliser (partition function) over the logits z.
+        Z(x)   = Σ_j exp(z_j(x))
+        logZ(x) = logsumexp_j z_j(x)
+
+        # Penalise the squared log-partition — pulls logits toward a controlled
+        # scale (logZ ≈ 0 ⇒ Σ exp(z) ≈ 1) without constraining their differences,
+        # so the resulting distribution is unchanged but the absolute scale is.
+        L_z = weight · (1/N) · Σ_x  logZ(x)²
+
+        # Added to the primary objective:
+        L_total = L_task + L_z
+    """
+
+    impl:    "neuroslm.losses.z_loss.ZLoss"
+    loss_fn: "neuroslm.losses.z_loss.z_loss"
+    zero_init: false
+
+    params: {
+        weight: {
+            default: 1e-4,
+            type: "float",
+            min: 0.0,
+            doc: "Coefficient on the squared-log-partition penalty; ST-MoE / PaLM use ~1e-4"
+        }
+    }
+
+    properties: {
+        scale_control:    "Penalises logZ², bounding the absolute logit scale without changing the softmax distribution"
+        bf16_stable:      "Keeps logsumexp small, preventing the large-logit overflow that destabilises low-precision softmax"
+        router_friendly:  "Originally for MoE routers; equally applies to the output (vocabulary) softmax"
+        distribution_safe:"Acts on the normaliser, not logit gaps — leaves argmax / relative probabilities intact"
+        cheap:            "One extra logsumefp reduction per softmax; negligible compute and memory"
+    }
+
+    when_to_use: """
+        Use when:
+        • Training MoE routers, where unbounded router logits cause unstable
+          expert assignment and training spikes
+        • The output softmax logits drift large in bf16/fp16 and you see loss
+          spikes or NaNs from softmax overflow
+        • You want a mild, distribution-preserving stabiliser that does not bias
+          the predicted probabilities
+
+        Standard weight is ~1e-4 (PaLM, ST-MoE). It composes additively with the
+        task loss and with auxiliary load-balancing losses on MoE routers.
+
+        Pairs well with: MoE load-balancing loss, gradient_clipping, mixed-precision
+        training, label_smoothing.
+    """
+
+    not_for: """
+        • As a substitute for load balancing — z-loss controls scale, not expert
+          utilisation
+        • Very small fp32 models with no observed logit drift (adds noise for
+          little benefit)
+        • Setting weight too high, which over-shrinks logits and can underfit the
+          target distribution
+    """
+
+    empirical_evidence: {
+        source: "Chowdhery et al. (2022) PaLM; Zoph et al. (2022) ST-MoE"
+        result: "Adding z-loss (≈1e-4) removed loss spikes and improved training stability for both router and output softmaxes at scale"
+        caveat: "A stabiliser, not an accuracy lever; oversized weight degrades the softmax fit"
+    }
+
+    references: [
+        "Chowdhery, Narang, Devlin et al. (2022) PaLM: Scaling Language Modeling with Pathways. arXiv 2204.02311",
+        "Zoph, Bello, Kumar et al. (2022) ST-MoE: Designing Stable and Transferable Sparse Expert Models. arXiv 2202.08906"
+    ]
+}

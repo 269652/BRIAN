@@ -1,0 +1,90 @@
+# -*- coding: utf-8 -*-
+# Weight tying — share input embedding and output projection weights.
+#
+# Implementation: neuroslm/modules/embedding.py::TiedEmbedding
+# Tests:          tests/dsl/test_block_wiring.py
+# Docs:           docs/mechanics/weight_tying.md
+
+export mechanic weight_tying {
+    category: "structure"
+    summary:  "Share the input embedding matrix with the output (unembedding) projection so they are one set of weights"
+
+    equation: """
+        # Untied: two independent matrices.
+        E   ∈ ℝ^{V × d}   (input embedding lookup)
+        W_o ∈ ℝ^{d × V}   (output projection / unembedding)
+
+        # Tied: the output projection IS the transpose of the embedding.
+        E   ∈ ℝ^{V × d}                       # the single shared matrix
+        emb(token) = E[token]                  # input: row lookup
+        logits     = Norm(x_L) · Eᵀ            # output: project against same E
+
+        # Parameter saving: V·d weights instead of 2·V·d. For a 50k vocab and
+        # d=768 that is ~38M params shared instead of duplicated. The tie also
+        # imposes the inductive bias that "the direction that represents token w
+        # on input is the direction that scores token w on output."
+    """
+
+    impl:    "neuroslm.modules.embedding.TiedEmbedding"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        tie: {
+            default: true,
+            type: "bool",
+            doc: "If true, the output projection reuses the (transposed) input embedding matrix; if false they are independent"
+        }
+        scale_logits: {
+            default: false,
+            type: "bool",
+            doc: "Optionally scale the tied logits by 1/sqrt(d) to match the embedding's init scale (stabilizes early training)"
+        }
+    }
+
+    properties: {
+        param_reduction:   "Saves V·d parameters — significant when the vocabulary dominates the parameter budget"
+        symmetric_bias:    "Forces input and output token representations to share one space (often helps generalization)"
+        gradient_coupling: """Embedding rows get gradient from both the lookup and the logit projection, densifying updates"""
+        small_model_win:   "Largest relative benefit on small models where the embedding is a big fraction of params"
+        scale_caveat:      "Embedding and logit paths prefer different init scales; scale_logits reconciles them"
+    }
+
+    when_to_use: """
+        Use when:
+        • The vocabulary embedding is a large fraction of the parameter budget
+          (small/medium models, large vocabularies) — tying is nearly free quality
+        • You want the regularizing inductive bias that input and output token
+          spaces coincide
+        • Memory or parameter count is constrained
+
+        Weight tying is a near-universal default in language models (it predates
+        transformers — Press & Wolf and Inan et al. both showed it improves LM
+        perplexity). The one wrinkle is scale: the embedding is initialized for a
+        lookup, the logit path wants a projection scale, so very large models
+        sometimes untie or add scale_logits to decouple the two roles.
+
+        Pairs well with: residual_stream (shared basis for embed/unembed),
+        prenorm_block / postnorm_block, depth_scaled_init.
+    """
+
+    not_for: """
+        • Very large models where the embedding is a tiny fraction of params and
+          untying buys a small quality gain at negligible relative cost
+        • Encoder-decoder setups with distinct source/target vocabularies that
+          should not share a representation
+        • Cases where input and output token semantics genuinely differ and the
+          symmetric-space bias hurts
+    """
+
+    empirical_evidence: {
+        source: "Press & Wolf (2017) Using the Output Embedding to Improve Language Models"
+        result: "Tying input and output embeddings reduced LM perplexity and cut parameter count substantially across several benchmarks"
+        caveat: "Largest gains at smaller scale; some very large models untie or rescale to decouple the two roles"
+    }
+
+    references: [
+        "Press & Wolf (2017) Using the Output Embedding to Improve Language Models. arXiv 1608.05859",
+        "Inan, Khosravi, Socher (2017) Tying Word Vectors and Word Classifiers: A Loss Framework for Language Modeling. arXiv 1611.01462"
+    ]
+}

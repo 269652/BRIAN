@@ -1,0 +1,97 @@
+# -*- coding: utf-8 -*-
+# WSD — Warmup-Stable-Decay learning-rate schedule.
+#
+# Implementation: neuroslm.optim.schedules.WarmupStableDecay
+# Tests:          tests/optim/test_wsd_schedule.py
+# Docs:           docs/mechanics/wsd_schedule.md
+
+export mechanic wsd_schedule {
+    category: "schedule"
+    summary:  "Warmup → long constant (stable) plateau → short final decay; the stable phase can be extended and checkpoints branched off mid-run"
+
+    equation: """
+        # Let  W = warmup_steps,  T = total_steps,
+        #      D = round(decay_frac · T)  (decay length),
+        #      S = T − W − D              (stable length, ≈ stable_frac · T).
+
+        # Phase 1 — linear warmup (0 .. W)
+        lr(t) = peak_lr · t / W                                  for t < W
+
+        # Phase 2 — stable plateau (W .. T−D)
+        lr(t) = peak_lr                                          for W ≤ t < T−D
+
+        # Phase 3 — final decay (T−D .. T); 1−sqrt anneal to (near) zero
+        progress = (t − (T − D)) / D                             ∈ [0, 1]
+        lr(t) = peak_lr · (1 − √progress)                        for t ≥ T−D
+    """
+
+    impl:    "neuroslm.optim.schedules.WarmupStableDecay"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        warmup_steps: {
+            default: 2000,
+            type: "int",
+            min: 0,
+            doc: "Steps of linear ramp from 0 up to the peak learning rate"
+        }
+        stable_frac: {
+            default: 0.8,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Fraction of total_steps spent on the constant-lr plateau"
+        }
+        decay_frac: {
+            default: 0.2,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Fraction of total_steps spent annealing lr to ~0 at the end (stable_frac + decay_frac ≈ 1)"
+        }
+    }
+
+    properties: {
+        extendable:       "The stable plateau has no fixed horizon — training can continue and decay can be triggered later"
+        branchable:       "A single stable run can spawn many checkpoints, each decayed for a different token budget"
+        compute_optimal:  "Matches cosine's final loss while removing cosine's lock-in to a pre-chosen total_steps"
+        short_decay:      "A brief final anneal (~10–20% of steps) recovers most of the loss drop a full cosine gives"
+        plateau_stable:   "The constant phase gives clean, comparable loss readings across the run"
+    }
+
+    when_to_use: """
+        Use when:
+        • The total token budget is not fixed in advance, or you want to keep
+          training past an initial target — the stable phase extends freely
+        • You want to branch multiple final models from one base run (decay the
+          shared stable checkpoint separately per target horizon)
+        • Studying scaling laws / data ablations where comparable plateau loss
+          across runs is valuable
+
+        Typical recipe: warmup ~1–4% of steps, stable_frac ≈ 0.8, decay_frac ≈ 0.2
+        with a 1−sqrt (or linear) anneal to ~0. Keep a stable-phase checkpoint so
+        you can re-decay onto a longer horizon later.
+
+        Pairs well with: adamw, muon, lion, gradient_clipping. A direct,
+        horizon-flexible alternative to cosine_schedule.
+    """
+
+    not_for: """
+        • Runs where the horizon is genuinely fixed and a single smooth curve is
+          preferred — plain cosine_schedule is simpler
+        • Setups that cannot afford to keep the pre-decay stable checkpoint
+        • Very short runs where the warmup+decay phases dominate the plateau
+    """
+
+    empirical_evidence: {
+        source: "Hu et al. (2024) MiniCPM; Hägele et al. (2024) Scaling Laws and Compute-Optimal Training with WSD"
+        result: "WSD matches cosine's final loss while allowing the stable phase to be extended and re-decayed for any horizon without re-warming up"
+        caveat: "The final decay shape (1−sqrt vs linear vs exp) and decay_frac matter; too short a decay underperforms cosine"
+    }
+
+    references: [
+        "Hu, Tu, Han et al. (2024) MiniCPM: Unveiling the Potential of Small Language Models with Scalable Training Strategies. arXiv 2404.06395",
+        "Hägele, Bakouch, Kosson et al. (2024) Scaling Laws and Compute-Optimal Training Beyond Fixed Training Durations. arXiv 2405.18392"
+    ]
+}

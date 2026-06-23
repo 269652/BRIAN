@@ -1,0 +1,108 @@
+# -*- coding: utf-8 -*-
+# Muon — momentum + Newton-Schulz orthogonalised update for 2D matrices.
+#
+# Implementation: neuroslm/optim/muon.py::Muon
+# Tests:          tests/optim/test_muon.py
+# Docs:           docs/mechanics/muon.md
+
+export mechanic muon {
+    category: "optimizer"
+    summary:  "MomentUm Orthogonalised by Newton-schulz: orthogonalise each 2D weight's update before applying it"
+
+    equation: """
+        # Per-parameter heavy-ball (optionally Nesterov) momentum buffer B
+        B_t = momentum · B_{t-1} + G_t
+        U_t = G_t + momentum · B_t        if nesterov else  B_t
+
+        # Orthogonalise the 2D update via a fixed-step Newton-Schulz iteration.
+        # Operates on the (possibly transposed so rows ≤ cols) matrix; the
+        # quintic iterate converges G's singular values toward 1 without ever
+        # forming GᵀG's SVD.
+        X₀ = U_t / (‖U_t‖_F + ε)
+        for k in 1..ns_steps:
+            A  = X_{k-1} X_{k-1}ᵀ
+            B' = b·A + c·A²                      # (a,b,c) ≈ (3.4445, −4.7750, 2.0315)
+            X_k = a·X_{k-1} + B' X_{k-1}
+        O_t = X_{ns_steps}                       # ≈ orthogonal factor of U_t
+
+        # Scaled parameter step (√(fan-out/fan-in) keeps RMS update ~constant)
+        W_t = W_{t-1} − lr · √(max(1, rows/cols)) · O_t
+
+        # 1D params (biases, norms, embeddings) fall back to AdamW.
+    """
+
+    impl:    "neuroslm.optim.muon.Muon"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        lr: {
+            default: 0.02,
+            type: "float",
+            min: 0.0,
+            doc: "Learning rate for the orthogonalised matrix step; ~10× larger than a comparable AdamW lr"
+        }
+        momentum: {
+            default: 0.95,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Heavy-ball momentum coefficient for the gradient buffer"
+        }
+        ns_steps: {
+            default: 5,
+            type: "int",
+            min: 1,
+            doc: "Number of Newton-Schulz quintic iterations; 5 suffices for bf16 in practice"
+        }
+        nesterov: {
+            default: true,
+            type: "bool",
+            doc: "Use Nesterov-style lookahead momentum in the update direction"
+        }
+    }
+
+    properties: {
+        orthogonal_update:  "Newton-Schulz pushes singular values toward 1, equalising step size across directions"
+        matrix_only:        "Only applied to ≥2D parameters; 1D params route to an AdamW fallback group"
+        svd_free:           "Quintic iteration avoids any eigen/SVD call — bf16-friendly and GPU-cheap"
+        rms_normalised:     "√(fan-out/fan-in) scaling keeps the update RMS comparable to Adam's"
+        memory_light:       "Stores one momentum buffer per param — no second-moment state for matrices"
+    }
+
+    when_to_use: """
+        Use when:
+        • Training transformers from scratch and you want faster wall-clock
+          convergence than AdamW at the same step budget
+        • The bulk of trainable params are 2D weight matrices (attention/MLP
+          projections) — Muon's benefit is proportional to that fraction
+        • You can afford a slightly larger lr search; Muon's optimal lr sits
+          ~5–15× above the AdamW optimum
+
+        Standard recipe: route all ≥2D weights through Muon and keep embeddings,
+        the LM head, biases, and norm gains on AdamW. Muon set NanoGPT speedrun
+        records and has been validated at multi-billion-param scale.
+
+        Pairs well with: cosine_schedule or wsd_schedule, weight_decay (decoupled),
+        z_loss for router stability.
+    """
+
+    not_for: """
+        • Models dominated by 1D params (pure embedding lookups, tiny heads)
+        • Fine-tuning where you must match a pre-trained optimiser trajectory
+        • Setups that cannot tolerate the per-step Newton-Schulz matmul cost on
+          very large matrices without distributed sharding
+    """
+
+    empirical_evidence: {
+        source: "Jordan et al. (2024) Muon optimizer; NanoGPT speedrun results"
+        result: "≈1.35× wall-clock speedup to GPT-2-scale val loss vs tuned AdamW on the NanoGPT speedrun"
+        caveat: "Gains measured on transformer LMs; benefit scales with the 2D-parameter fraction"
+    }
+
+    references: [
+        "Jordan, Jin, Boza, You et al. (2024) Muon: An optimizer for hidden layers in neural networks. https://kellerjordan.github.io/posts/muon/",
+        "Bernstein & Newhouse (2024) Old Optimizer, New Norm: An Anthology. arXiv 2409.20325",
+        "Higham (2008) Functions of Matrices: Theory and Computation. SIAM"
+    ]
+}

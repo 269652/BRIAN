@@ -1,0 +1,101 @@
+# -*- coding: utf-8 -*-
+# Mixture-of-Experts transformer block — sparse FFN sublayer wiring.
+#
+# Implementation: neuroslm/modules/blocks.py::MoEBlock
+# Tests:          tests/dsl/test_block_wiring.py
+# Docs:           docs/mechanics/moe_block.md
+
+export mechanic moe_block {
+    category: "structure"
+    summary:  "Transformer block whose dense FFN sublayer is replaced by a routed Mixture-of-Experts layer (+ optional shared expert)"
+
+    equation: """
+        # Attention sublayer is unchanged; the FFN sublayer becomes sparse.
+
+        x = x + Attn(Norm(x))            # standard attention residual
+
+        # --- MoE FFN sublayer (every moe_every_n-th block) ---
+        h = Norm(x)
+        g = softmax(W_router · h)        # router logits → gate weights, shape (T, n_experts)
+        top = TopK(g, k=top_k)           # keep top_k experts per token
+
+        y = Σ_{e ∈ top}  g_e · Expert_e(h)        # sparse routed mixture
+        y = y + SharedExpert(h)                    # optional always-on dense expert
+        x = x + y
+
+        # Only top_k of n_experts run per token, so FLOPs scale with top_k,
+        # not n_experts → parameter count decouples from per-token compute.
+        # An auxiliary load-balancing loss keeps the router from collapsing
+        # onto a few experts (see sparse_moe / shared_expert mechanics).
+    """
+
+    impl:    "neuroslm.modules.blocks.MoEBlock"
+    loss_fn: "neuroslm.modules.moe.load_balancing_loss"
+    zero_init: false
+
+    params: {
+        moe_every_n: {
+            default: 1,
+            type: "int",
+            doc: "Replace the FFN with MoE on every Nth block; 1 = every block, 2 = alternate dense/MoE (interleaved)"
+        }
+        n_experts: {
+            default: 8,
+            type: "int",
+            doc: "Total number of routed experts in the layer (the parameter-bearing pool)"
+        }
+        top_k: {
+            default: 2,
+            type: "int",
+            doc: "Number of experts activated per token; per-token FLOPs scale with top_k, not n_experts"
+        }
+    }
+
+    properties: {
+        compute_param_decouple: "Per-token FLOPs depend on top_k; total params depend on n_experts → cheap capacity"
+        hosts_sparse_moe:       "This is block-level wiring; the routed experts are the sparse_moe mechanic"
+        shared_expert_slot:     """Optional always-on dense expert captures common computation, freeing routed experts to specialize"""
+        interleave_friendly:    "moe_every_n>1 interleaves dense and MoE blocks to balance quality vs memory"
+        needs_aux_loss:         "Requires a load-balancing auxiliary loss to prevent router collapse onto few experts"
+    }
+
+    when_to_use: """
+        Use when:
+        • You want to grow model capacity (parameter count) without growing
+          per-token compute — the headline MoE trade
+        • Memory/VRAM can hold n_experts × FFN params but you cannot afford the
+          FLOPs of a dense FFN that wide
+        • Training at scale where the load-balancing loss has enough tokens to
+          keep all experts utilized
+
+        The block-level wiring here is the host: it decides WHERE MoE replaces
+        the FFN (moe_every_n), how many experts exist (n_experts), and how many
+        fire per token (top_k). The actual routing math lives in the sparse_moe /
+        shared_expert mechanics this block composes.
+
+        Pairs well with: prenorm_block (the attention half), residual_stream,
+        weight_tying. Interleave with dense blocks via moe_every_n=2 to cap
+        memory.
+    """
+
+    not_for: """
+        • Small models or small token budgets where the router cannot balance
+          load (experts starve, capacity is wasted)
+        • Memory-constrained deployments — all experts must be resident even
+          though only top_k run per token
+        • Settings without an auxiliary load-balancing loss — the router will
+          collapse onto a handful of experts
+    """
+
+    empirical_evidence: {
+        source: "Fedus et al. (2022) Switch Transformers; DeepSeek-AI (2024) DeepSeekMoE"
+        result: "Switch (top-1) matched dense T5 quality at ~7× lower training cost; shared+routed experts further improved specialization"
+        caveat: "Gains depend on enough tokens-per-expert; under-trained experts and routing instability erode the benefit at small scale"
+    }
+
+    references: [
+        "Fedus, Zoph, Shazeer (2022) Switch Transformers: Scaling to Trillion Parameter Models. arXiv 2101.03961",
+        "Shazeer, Mirhoseini, Maziarz et al. (2017) Outrageously Large Neural Networks: The Sparsely-Gated MoE Layer. arXiv 1701.06538",
+        "Dai, Deng, Zhao et al. (2024) DeepSeekMoE: Towards Ultimate Expert Specialization. arXiv 2401.06066"
+    ]
+}

@@ -497,6 +497,61 @@ class FeatureEndpointIR(NodeIR):
 
 
 # ──────────────────────────────────────────────────────────────────────
+# MechanicIR — richer spec block for reusable mechanics library
+# (see neuroslm/dsl/mechanic_parser.py for the full grammar)
+# ──────────────────────────────────────────────────────────────────────
+
+@dataclass
+class MechanicIR(NodeIR):
+    """IR node for a `mechanic NAME { ... }` block.
+
+    A mechanic block is a richer version of a feature: it carries the
+    full mathematical specification, implementation binding, parameter
+    schema, usage guidance, empirical evidence, and formal references in
+    one self-contained unit.  Mechanics live in ``mechanics/*.neuro`` and
+    are imported into any arch via::
+
+        import { name } from "@mechanics/name"
+
+    The compiler records the MechanicIR in the program and makes it
+    available to codegen, documentation generators, and arch analysers.
+    The actual runtime wiring still uses the existing ``regularization``,
+    ``training``, or ``feature`` blocks — MechanicIR is the specification
+    layer; those are the activation layer.
+
+    Pinned by ``tests/dsl/test_mechanic_parser.py``.
+    """
+    name: str = ""
+    id: str = ""
+    category: str = ""
+    summary: str = ""
+    equation: str = ""
+    impl: str = ""
+    loss_fn: str = ""
+    zero_init: bool = False
+    params: Dict = None
+    properties: Dict = None
+    when_to_use: str = ""
+    not_for: str = ""
+    empirical_evidence: Dict = None
+    formal_proof: str = ""
+    references: List[str] = None
+    exported: bool = False
+
+    def __post_init__(self):
+        if self.params is None:
+            self.params = {}
+        if self.properties is None:
+            self.properties = {}
+        if self.empirical_evidence is None:
+            self.empirical_evidence = {}
+        if self.references is None:
+            self.references = []
+        if not self.id:
+            self.id = self.name
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Expert / Funnel / Distillation / Warmup / ModuleInstance IRs
 #
 # These five blocks form the LanguageCortex DSL surface (2026-06-15).

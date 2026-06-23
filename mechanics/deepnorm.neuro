@@ -55,8 +55,8 @@ export mechanic deepnorm {
         depth_stable:     "Bounds the model update so training is stable up to ~1000 layers"
         post_norm:        "Keeps the post-LayerNorm placement (better quality than pre-norm) while fixing its instability"
         two_part:         "α scales the residual branch at runtime; β scales specific weights at init only"
-        depth_derived:    "α and β are functions of layer count N/M, not free hyperparameters"
-        identity_start:   "β-down-scaled init makes the network begin near identity, easing early optimisation"
+        depth_derived:    "α and β are functions of layer count N/M rather than free hyperparameters"
+        identity_start:   "β-down-scaled init makes the network begin near identity — easing early optimisation"
         warmup_free:      "Stabilises deep training without the long learning-rate warmup post-norm usually needs"
     }
 

@@ -1,0 +1,93 @@
+# -*- coding: utf-8 -*-
+# Depth-scaled initialization — bound residual-stream variance with depth.
+#
+# Implementation: neuroslm/modules/init.py::depth_scaled_init_
+# Tests:          tests/dsl/test_block_wiring.py
+# Docs:           docs/mechanics/depth_scaled_init.md
+
+export mechanic depth_scaled_init {
+    category: "structure"
+    summary:  "Scale residual-branch output projections by 1/sqrt(2N) at init so the residual stream variance stays bounded across N layers"
+
+    equation: """
+        # Each layer adds a branch output to the residual stream. With N layers
+        # and unit-variance branches, the stream variance grows ∝ N. Scaling the
+        # branch OUTPUT projections at init keeps it bounded.
+
+        # Standard init for a weight W (fan_in n_in):
+        W ~ Normal(0, σ²),  σ = 1/sqrt(n_in)
+
+        # Depth-scaled init for RESIDUAL output projections (W_o of Attn, W_out of FFN):
+        W_resid ~ Normal(0, σ² / (2N))        # the 1/sqrt(2N) factor on the std
+        # (2N = number of residual additions; 2 sublayers per block × N blocks)
+
+        # Effect: per-block write variance ≈ σ²/(2N), summed over 2N writes ≈ σ²,
+        # so Var[x_L] stays O(1) instead of O(N). The residual stream no longer
+        # saturates the final norm / softmax even in very deep stacks. Only the
+        # residual-branch OUTPUT projections are scaled; everything else uses
+        # standard init.
+    """
+
+    impl:    "neuroslm.modules.init.depth_scaled_init_"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        n_layers: {
+            default: 12,
+            type: "int",
+            doc: "Number of transformer blocks N; the scale factor depends on the total residual depth (2N additions)"
+        }
+        scale_mode: {
+            default: "1/sqrt(2N)",
+            type: "str",
+            doc: "Scaling rule for residual output projections; '1/sqrt(2N)' (GPT-2) or '1/sqrt(N)' for one-sublayer blocks"
+        }
+    }
+
+    properties: {
+        bounded_stream_variance: """Var[x_L] stays O(1) instead of growing O(N), so deep stacks don't saturate the head"""
+        residual_only:           "Only residual-branch output projections are rescaled; attention scores / inputs use standard init"
+        warmup_reduction:        "A well-bounded init reduces (or removes) the need for a long LR warmup"
+        gpt2_default:            "This is the GPT-2 residual-projection init (scale by 1/sqrt(2·n_layer))"
+        fixup_relative:          """Conceptually related to FixUp/T-Fixup, which rescale init to train deep nets without normalization"""
+    }
+
+    when_to_use: """
+        Use when:
+        • Training deep transformers (≥ 12 layers) and you want the residual
+          stream variance bounded from step 0
+        • You want to shorten or drop LR warmup (a bounded init is half of why
+          pre-norm trains without it)
+        • Reproducing GPT-2-class models, which apply exactly this 1/sqrt(2N)
+          scaling to the residual output projections
+
+        Depth-scaled init is the initialization-side partner of the residual
+        stream: prenorm gives the clean gradient path, this gives the bounded
+        forward variance. Together they make deep training forgiving. The scale
+        mode follows the residual-addition count — 2N for two-sublayer blocks,
+        N for single-sublayer (e.g. parallel) blocks.
+
+        Pairs well with: residual_stream, prenorm_block, parallel_block (use the
+        1/sqrt(N) mode), sandwich_norm.
+    """
+
+    not_for: """
+        • Shallow models (≤ 6 layers) where stream growth is negligible
+        • Architectures that already bound the stream another way (heavy norm,
+          ReZero zero-init gates) — double-bounding can under-scale the signal
+        • Non-residual networks where there is no accumulating stream to bound
+    """
+
+    empirical_evidence: {
+        source: "Radford et al. (2019) GPT-2; Zhang et al. (2019) FixUp Initialization"
+        result: "GPT-2 scaled residual output projections by 1/sqrt(2N) for stable deep training; FixUp showed proper init alone can train deep nets without normalization"
+        caveat: """The exact factor depends on the residual-addition count and block structure; mis-specifying N under- or over-scales the stream"""
+    }
+
+    references: [
+        "Radford, Wu, Child et al. (2019) Language Models are Unsupervised Multitask Learners (GPT-2)",
+        "Zhang, Dauphin, Ma (2019) Fixup Initialization: Residual Learning Without Normalization. arXiv 1901.09321",
+        "Nguyen & Salazar (2019) Transformers without Tears: Improving the Normalization of Self-Attention. arXiv 1910.05895"
+    ]
+}

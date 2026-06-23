@@ -1,0 +1,94 @@
+# -*- coding: utf-8 -*-
+# Pre-LayerNorm transformer block — normalize before each sublayer.
+#
+# Implementation: neuroslm/modules/blocks.py::PreNormBlock
+# Tests:          tests/dsl/test_block_wiring.py
+# Docs:           docs/mechanics/prenorm_block.md
+
+export mechanic prenorm_block {
+    category: "structure"
+    summary:  "Pre-LN transformer block: normalize inside each residual branch so the residual stream stays unnormalized"
+
+    equation: """
+        # Pre-norm places the LayerNorm INSIDE each residual branch,
+        # leaving the residual stream itself an un-normalized accumulator.
+
+        # Attention sublayer
+        a = Attn(Norm(x))               # Norm(·) = LayerNorm or RMSNorm
+        x = x + a                        # additive residual (identity skip)
+
+        # Feed-forward sublayer
+        f = FFN(Norm(x))
+        x = x + f
+
+        # Final norm before the LM head (un-normalized stream needs one tail norm)
+        out = Norm_final(x)
+
+        # Gradient view: ∂L/∂x_0 = ∂L/∂x_L · ∏(I + ∂branch/∂x)
+        # the identity term I guarantees a clean gradient path to layer 0,
+        # so deep stacks train without learning-rate warmup.
+    """
+
+    impl:    "neuroslm.modules.blocks.PreNormBlock"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        norm_position: {
+            default: "pre",
+            type: "str",
+            doc: "Placement of the normalization op relative to the sublayer; 'pre' wraps the sublayer input"
+        }
+        norm_type: {
+            default: "rmsnorm",
+            type: "str",
+            doc: "Normalizer used inside each branch; 'layernorm' or 'rmsnorm'"
+        }
+    }
+
+    properties: {
+        clean_gradient_path: "Identity skip + norm-inside-branch yields ∏(I + Jacobian); the I term reaches layer 0 directly"
+        no_warmup_needed:    """Gradient magnitude at init is well-conditioned, so linear LR warmup is optional"""
+        unnormalized_stream: "The residual stream grows in norm with depth; requires a final norm before the head"
+        depth_stable:        "Empirically trains stably to 100+ layers where post-norm diverges without care"
+        rmsnorm_compatible:  "Works with RMSNorm (no mean-centering) as a drop-in for LayerNorm"
+    }
+
+    when_to_use: """
+        Use when:
+        • Training a deep transformer (≥ 12 layers) from scratch
+        • You want to drop learning-rate warmup or shorten it
+        • Stability at scale matters more than the last fraction of a perplexity point
+        • The architecture uses RMSNorm (pre-norm is the standard pairing in
+          LLaMA, GPT-NeoX, PaLM, Mistral, etc.)
+
+        Pre-norm is the de-facto default for modern LLMs precisely because the
+        un-normalized identity skip makes optimization forgiving. The cost is a
+        slightly worse final loss than a well-tuned post-norm at the same size,
+        and a residual stream that grows with depth (hence the mandatory tail
+        norm before the LM head).
+
+        Pairs well with: residual_stream, depth_scaled_init, sandwich_norm
+        (for extreme depth), parallel_block (the parallel variant is pre-norm).
+    """
+
+    not_for: """
+        • Squeezing maximum final quality from a shallow, carefully-tuned model
+          (a warmed-up post-norm can edge it out)
+        • Architectures that depend on a normalized residual stream between layers
+        • Cases where you forgot the final tail norm — the un-normalized stream
+          will saturate the softmax
+    """
+
+    empirical_evidence: {
+        source: """Xiong et al. (2020) On Layer Normalization in the Transformer Architecture, ICML"""
+        result: "Pre-LN keeps gradients well-scaled at initialization and trains without warmup; post-LN requires warmup to avoid divergence"
+        caveat: "Final test BLEU/PPL can trail a carefully warmed-up post-LN by a small margin at fixed depth"
+    }
+
+    references: [
+        "Xiong, Yang, He et al. (2020) On Layer Normalization in the Transformer Architecture. arXiv 2002.04745",
+        "Baevski & Auli (2018) Adaptive Input Representations for Neural Language Modeling. arXiv 1809.10853",
+        "Wang, Li, Xiao et al. (2019) Learning Deep Transformer Models for Machine Translation. ACL"
+    ]
+}

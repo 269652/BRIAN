@@ -1,0 +1,91 @@
+# -*- coding: utf-8 -*-
+# Cosine schedule — linear warmup then cosine decay to a floor.
+#
+# Implementation: neuroslm.optim.schedules.CosineWithWarmup
+# Tests:          tests/optim/test_cosine_schedule.py
+# Docs:           docs/mechanics/cosine_schedule.md
+
+export mechanic cosine_schedule {
+    category: "schedule"
+    summary:  "Linear warmup to peak lr then half-cosine decay down to min_lr_ratio·peak by total_steps"
+
+    equation: """
+        # Phase 1 — linear warmup (steps 0 .. warmup_steps)
+        lr(t) = peak_lr · t / warmup_steps                        for t < warmup_steps
+
+        # Phase 2 — cosine decay (warmup_steps .. total_steps)
+        progress = (t − warmup_steps) / (total_steps − warmup_steps)   ∈ [0, 1]
+        cos_factor = 0.5 · (1 + cos(π · progress))                ∈ [0, 1]
+        lr(t) = peak_lr · ( min_lr_ratio + (1 − min_lr_ratio) · cos_factor )
+
+        # At t = total_steps:  lr = peak_lr · min_lr_ratio  (the floor)
+        # For t > total_steps: lr is clamped at the floor.
+    """
+
+    impl:    "neuroslm.optim.schedules.CosineWithWarmup"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        warmup_steps: {
+            default: 2000,
+            type: "int",
+            min: 0,
+            doc: "Steps of linear ramp from 0 up to the peak learning rate"
+        }
+        total_steps: {
+            default: 100000,
+            type: "int",
+            min: 1,
+            doc: "Step at which the cosine decay reaches its floor; the full training horizon"
+        }
+        min_lr_ratio: {
+            default: 0.1,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Floor as a fraction of peak lr (e.g. 0.1 decays to 10% of peak, not 0)"
+        }
+    }
+
+    properties: {
+        smooth_decay:    "Cosine annealing has no abrupt lr discontinuities, easing late-training optimisation"
+        nonzero_floor:   "min_lr_ratio keeps a small lr at the end, avoiding a fully frozen tail"
+        horizon_locked:  "The decay shape is tied to total_steps — changing the horizon reshapes the whole curve"
+        warmup_stable:   "Linear warmup avoids the early-step instability of a cold large lr"
+        ubiquitous:      "The de-facto default LR schedule for transformer LM pre-training"
+    }
+
+    when_to_use: """
+        Use when:
+        • The total training budget (total_steps) is fixed and known in advance —
+          cosine needs the horizon to shape its decay
+        • You want a smooth, well-understood schedule that is the field default
+        • A single training run rather than an open-ended / continually-extended one
+
+        Set warmup_steps to ~1–4% of total_steps (2k–4k is typical for a 100k-step
+        run), min_lr_ratio to 0.1 for LMs. The peak lr comes from the optimiser
+        spec, not this schedule.
+
+        Pairs well with: adamw, muon, lion, gradient_clipping, weight_decay.
+    """
+
+    not_for: """
+        • Open-ended runs whose length is not known up front — use wsd_schedule,
+          whose stable phase can be extended and decayed on demand
+        • Cases needing frequent checkpoints at varying horizons (re-deciding
+          total_steps re-shapes the entire curve)
+        • Cyclic / restart schedules (use SGDR warm restarts instead)
+    """
+
+    empirical_evidence: {
+        source: "Loshchilov & Hutter (2016) SGDR — Stochastic Gradient Descent with Warm Restarts (ICLR 2017)"
+        result: "Cosine annealing (single cycle) is a strong smooth decay that became the standard LR schedule for transformer LM pre-training"
+        caveat: "Optimal only when the horizon is fixed; mid-run horizon changes require re-deriving the curve"
+    }
+
+    references: [
+        "Loshchilov & Hutter (2016) SGDR: Stochastic Gradient Descent with Warm Restarts. arXiv 1608.03983 (ICLR 2017)",
+        "Vaswani et al. (2017) Attention Is All You Need. arXiv 1706.03762 (inverse-sqrt warmup precedent)"
+    ]
+}

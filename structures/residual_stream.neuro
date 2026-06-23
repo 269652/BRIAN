@@ -1,0 +1,93 @@
+# -*- coding: utf-8 -*-
+# The additive residual stream — shared linear communication channel.
+#
+# Implementation: neuroslm/modules/residual.py::ResidualStream
+# Tests:          tests/dsl/test_block_wiring.py
+# Docs:           docs/mechanics/residual_stream.md
+
+export mechanic residual_stream {
+    category: "structure"
+    summary:  "Treat the residual connection as a shared linear bus that every sublayer reads from and writes to additively"
+
+    equation: """
+        # Each sublayer i reads the running stream, computes a delta, and
+        # adds it back. The stream is a sum of all contributions to date.
+
+        x_0 = Embed(tokens)                          # stream initialized by embedding
+        x_i = x_{i-1} + scale · branch_i(x_{i-1})    # additive write
+        ...
+        logits = Unembed(Norm(x_L))                  # read by the head
+
+        # Linear-structure view (Elhage et al. 2021): unrolling the recursion,
+        x_L = Embed + Σ_i scale · branch_i(x_{i-1})
+        every sublayer's output lives in the SAME vector space, so heads and
+        MLPs in different layers can compose by reading/writing shared
+        subspaces — the residual stream is a communication channel, not just
+        an optimization trick. Gradient flow is the ResNet identity skip:
+        ∂x_L/∂x_0 = I + Σ ∂branch/∂x  → the I term never vanishes.
+    """
+
+    impl:    "neuroslm.modules.residual.ResidualStream"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        scale: {
+            default: 1.0,
+            type: "float",
+            doc: "Multiplier applied to each branch output before it is written to the stream (1.0 = standard residual)"
+        }
+        learned_scale: {
+            default: false,
+            type: "bool",
+            doc: "If true, `scale` becomes a per-branch learnable parameter (ReZero / LayerScale style)"
+        }
+    }
+
+    properties: {
+        identity_gradient_path: "The I term in ∂x_L/∂x_0 = I + ΣJ guarantees gradients reach layer 0 (ResNet)"
+        shared_vector_space:    """All sublayer outputs occupy one space, enabling cross-layer circuit composition"""
+        linear_superposition:   "The stream is a literal sum of contributions; features superpose additively"
+        bandwidth_limited:      "d_model fixes the channel width; many features share it via superposition"
+        norm_growth:            """With scale=1 the stream norm grows with depth, motivating a final norm before unembed"""
+    }
+
+    when_to_use: """
+        Use when:
+        • Building any deep transformer — the residual stream is the substrate
+          every block plugs into; this mechanic documents that substrate
+        • Reasoning about interpretability: the "communication channel" view is
+          the basis for circuit analysis (induction heads, name-mover heads)
+        • You want a learnable contribution scale (set learned_scale=true to get
+          ReZero/LayerScale behaviour without a separate gate module)
+
+        The residual stream is less a "feature" you add and more the contract
+        every other structural mechanic obeys: prenorm/postnorm/parallel blocks
+        all write deltas into it, MoE and MoD route writes into it, depth-scaled
+        init bounds its variance. Think of it as the bus on the motherboard.
+
+        Pairs well with: prenorm_block, depth_scaled_init (bounds stream
+        variance), weight_tying (Embed/Unembed share the stream's basis).
+    """
+
+    not_for: """
+        • Architectures without skip connections (plain stacked MLPs) — there is
+          no stream to speak of
+        • Cases needing a non-additive combination (gated/multiplicative mixing);
+          those break the linear-superposition interpretation
+        • Treating `scale` as a stability fix in isolation — pair it with proper
+          init (depth_scaled_init) rather than shrinking scale ad hoc
+    """
+
+    empirical_evidence: {
+        source: "He et al. (2016) Deep Residual Learning; Elhage et al. (2021) A Mathematical Framework for Transformer Circuits"
+        result: "Identity skips enabled 100+ layer training (ResNet); the linear residual stream lets transformer heads/MLPs compose across layers"
+        caveat: "The clean linear-channel view is an idealization — LayerNorm and nonlinearities introduce mild departures"
+    }
+
+    references: [
+        "He, Zhang, Ren, Sun (2016) Deep Residual Learning for Image Recognition. arXiv 1512.03385",
+        "Elhage, Nanda, Olsson et al. (2021) A Mathematical Framework for Transformer Circuits. Anthropic / Transformer Circuits Thread",
+        "Srivastava, Greff, Schmidhuber (2015) Highway Networks. arXiv 1505.00387"
+    ]
+}

@@ -1,0 +1,85 @@
+# -*- coding: utf-8 -*-
+# Gradient clipping — global-norm rescaling of the gradient.
+#
+# Implementation: torch.nn.utils.clip_grad_norm_
+# Tests:          tests/optim/test_gradient_clipping.py
+# Docs:           docs/mechanics/gradient_clipping.md
+
+export mechanic gradient_clipping {
+    category: "regularizer"
+    summary:  "Rescale the whole gradient so its global norm never exceeds max_norm — caps exploding-gradient steps without changing direction"
+
+    equation: """
+        # Global gradient norm over ALL parameters concatenated:
+        g_norm = ( Σ_p ‖g_p‖_{norm_type}^{norm_type} )^{1/norm_type}     # norm_type=2 ⇒ L2
+
+        # Uniform rescale only when the norm exceeds the threshold:
+        scale = min(1, max_norm / (g_norm + ε))
+        g_p ← scale · g_p           for every parameter p
+
+        # Direction is preserved exactly; only the magnitude is capped. The
+        # rescale is applied AFTER backward() and BEFORE optimizer.step().
+    """
+
+    impl:    "torch.nn.utils.clip_grad_norm_"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        max_norm: {
+            default: 1.0,
+            type: "float",
+            min: 0.0,
+            doc: "Maximum allowed global gradient norm; 1.0 is the standard transformer-LM value"
+        }
+        norm_type: {
+            default: 2.0,
+            type: "float",
+            min: 0.0,
+            doc: "Order of the norm (2.0 = L2 / Euclidean; inf = max-abs clipping)"
+        }
+    }
+
+    properties: {
+        direction_preserving: "Uniform global rescale keeps the gradient direction; only its magnitude is capped"
+        spike_protection:     "Bounds the damage of a single bad-batch gradient spike, preventing divergence"
+        global_norm:          "Clips across all params jointly, not per-tensor — relative scales between tensors are kept"
+        late_train_safety:    "Especially valuable in long runs / low precision where rare spikes cause NaNs"
+        cheap:                "One extra reduction + rescale per step; negligible cost"
+    }
+
+    when_to_use: """
+        Use when:
+        • Training transformers / RNNs where occasional gradient spikes cause loss
+          blow-ups or NaNs (near-universal default at max_norm=1.0)
+        • Mixed-precision (bf16/fp16) training, where overflow spikes are more
+          frequent
+        • Long-horizon runs that must survive rare pathological batches
+
+        Standard recipe: global L2 clip at max_norm=1.0, applied after backward and
+        before the optimiser step (and after AMP unscaling, if used). Monitor the
+        pre-clip g_norm — if it is constantly above max_norm, the lr is likely too
+        high.
+
+        Pairs well with: adamw, muon, lion, z_loss, mixed-precision training.
+    """
+
+    not_for: """
+        • As a fix for a fundamentally too-high learning rate — clipping masks the
+          symptom, not the cause
+        • Per-tensor clipping when you specifically need cross-tensor scale
+          preservation (use the global-norm form here)
+        • Workloads with no spike problem where the (small) overhead buys nothing
+    """
+
+    empirical_evidence: {
+        source: "Pascanu Mikolov & Bengio (2013) On the difficulty of training Recurrent Neural Networks (ICML 2013)"
+        result: "Global-norm clipping prevents the exploding-gradient divergence that otherwise destabilises deep recurrent / transformer training"
+        caveat: "A stability tool, not an accuracy lever; persistent clipping indicates the lr or init needs attention"
+    }
+
+    references: [
+        "Pascanu, Mikolov, Bengio (2013) On the difficulty of training Recurrent Neural Networks. arXiv 1211.5063 (ICML 2013)",
+        "Zhang, He, Sra, Jadbabaie (2020) Why Gradient Clipping Accelerates Training: A Theoretical Justification for Adaptivity. arXiv 1905.11881 (ICLR 2020)"
+    ]
+}

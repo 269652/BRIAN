@@ -1,0 +1,107 @@
+# -*- coding: utf-8 -*-
+# AdamW — Adam with decoupled weight decay.
+#
+# Implementation: torch.optim.AdamW
+# Tests:          tests/optim/test_adamw.py
+# Docs:           docs/mechanics/adamw.md
+
+export mechanic adamw {
+    category: "optimizer"
+    summary:  "Adam with weight decay decoupled from the gradient-based update (regularisation — not L2 in the loss)"
+
+    equation: """
+        # Biased first and second moment estimates
+        m_t = beta1 · m_{t-1} + (1 − beta1) · g_t
+        v_t = beta2 · v_{t-1} + (1 − beta2) · g_t²
+
+        # Bias correction
+        m̂_t = m_t / (1 − beta1ᵗ)
+        v̂_t = v_t / (1 − beta2ᵗ)
+
+        # Decoupled weight decay — applied directly to the parameter, NOT folded
+        # into g_t (this is the AdamW correction over the original L2 Adam).
+        θ_t = θ_{t-1} − lr · ( m̂_t / (√v̂_t + eps)  +  weight_decay · θ_{t-1} )
+    """
+
+    impl:    "torch.optim.AdamW"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        lr: {
+            default: 3e-4,
+            type: "float",
+            min: 0.0,
+            doc: "Base learning rate"
+        }
+        beta1: {
+            default: 0.9,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Exponential decay rate for the first moment (mean) estimate"
+        }
+        beta2: {
+            default: 0.95,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Exponential decay rate for the second moment (variance) estimate; 0.95 is the common LM setting"
+        }
+        eps: {
+            default: 1e-8,
+            type: "float",
+            min: 0.0,
+            doc: "Numerical stability term added to the denominator"
+        }
+        weight_decay: {
+            default: 0.1,
+            type: "float",
+            min: 0.0,
+            doc: "Decoupled weight decay coefficient (applied to θ, not the gradient)"
+        }
+    }
+
+    properties: {
+        decoupled_decay:  "Weight decay is independent of the adaptive lr, unlike L2-Adam where decay scales with 1/√v"
+        adaptive_lr:      "Per-parameter effective step sizes from the second-moment estimate"
+        bias_corrected:   "Early-step bias in m and v is corrected so warmup is well-conditioned"
+        default_baseline: "The standard, well-understood baseline optimiser for transformer LMs"
+        stateful:         "Two buffers (m, v) per parameter — 2× param memory in optimiser state"
+    }
+
+    when_to_use: """
+        Use when:
+        • You need a robust, well-understood baseline — AdamW is the default for
+          almost every transformer LM
+        • Comparing a new optimiser (Muon, Lion) against an established reference
+        • Training is sensitive to regularisation; decoupled decay lets you tune
+          weight_decay and lr independently
+
+        Conventional LM recipe: lr 1e-4–6e-4 with warmup, beta2 0.95 (lower than
+        the 0.999 vision default for noisier text gradients), weight_decay 0.1
+        applied to matrices but excluded from norms/biases/embeddings.
+
+        Pairs well with: cosine_schedule, wsd_schedule, gradient_clipping,
+        weight_decay (exclusion list), z_loss.
+    """
+
+    not_for: """
+        • Cases where Muon's orthogonalised update gives a clear wall-clock win
+          on a 2D-weight-dominated model
+        • Extreme-memory-constrained training where the 2× optimiser state is
+          prohibitive (consider 8-bit Adam or Lion)
+        • Folding decay into the loss as L2 — that is plain Adam, not AdamW
+    """
+
+    empirical_evidence: {
+        source: "Loshchilov & Hutter (2017/2019) Decoupled Weight Decay Regularization (ICLR 2019)"
+        result: "Decoupling weight decay from the adaptive step improves generalisation and decouples the optimal lr / wd hyperparameters"
+        caveat: "Benefit over L2-Adam is largest when weight_decay is tuned; with wd=0 the two coincide"
+    }
+
+    references: [
+        "Loshchilov & Hutter (2017) Decoupled Weight Decay Regularization. arXiv 1711.05101 (ICLR 2019)",
+        "Kingma & Ba (2014) Adam: A Method for Stochastic Optimization. arXiv 1412.6980"
+    ]
+}

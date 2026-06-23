@@ -1,0 +1,86 @@
+# -*- coding: utf-8 -*-
+# Dropout — stochastic activation masking for regularisation.
+#
+# Implementation: torch.nn.Dropout
+# Tests:          tests/regularizers/test_dropout.py
+# Docs:           docs/mechanics/dropout.md
+
+export mechanic dropout {
+    category: "regularizer"
+    summary:  "Randomly zero a fraction p of activations during training (inverted-dropout scaling) to prevent co-adaptation; identity at eval"
+
+    equation: """
+        # Training — sample an i.i.d. Bernoulli mask m, zero and rescale.
+        m_i ~ Bernoulli(1 − p)
+        ŷ_i = (m_i / (1 − p)) · x_i          # inverted dropout: kept units scaled by 1/(1−p)
+
+        # Evaluation — deterministic identity (the 1/(1−p) scaling at train time
+        # makes the expected activation match, so no test-time rescale is needed):
+        ŷ_i = x_i
+
+        # variant = "standard": elementwise mask (above).
+        # variant = "feature" / "2d": whole feature channels masked together
+        #                              (DropChannel / spatial dropout).
+    """
+
+    impl:    "torch.nn.Dropout"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        p: {
+            default: 0.0,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Probability of zeroing each unit; 0.0 disables dropout (common default for large-data LM pre-training)"
+        }
+        variant: {
+            default: "standard",
+            type: "str",
+            doc: "'standard' (elementwise), 'feature'/'2d' (channel-wise), or 'token' (whole-position) masking"
+        }
+    }
+
+    properties: {
+        prevents_coadaptation: "Forces units to be useful in many random sub-networks rather than co-adapting"
+        implicit_ensemble:     "Training approximates averaging an exponential family of thinned sub-networks"
+        train_eval_split:      "Active only in train mode; inverted scaling makes eval a plain identity"
+        zero_param:            "No learnable parameters — only the rate p and variant"
+        data_dependent:        "Helps on small/medium data; large-data LM pre-training often sets p=0"
+    }
+
+    when_to_use: """
+        Use when:
+        • The model overfits on limited data (small/medium corpora, fine-tuning)
+        • You want a cheap, parameter-free regulariser inside transformer blocks
+          (residual / attention / MLP dropout)
+        • Fine-tuning a pre-trained model, where modest dropout (0.1) curbs
+          overfitting to the downstream set
+
+        For large-scale LM pre-training on web-scale data, p is frequently 0.0 —
+        the data itself regularises and dropout slows convergence. Turn it on
+        (0.1) for fine-tuning or data-constrained runs. Use the feature/2d variant
+        for conv stacks where adjacent activations are correlated.
+
+        Pairs well with: weight_decay, label_smoothing, gradient_clipping.
+    """
+
+    not_for: """
+        • Large-data pre-training where it mostly slows convergence (use p=0)
+        • Right before a normalisation layer in ways that fight the variance
+          assumptions of BatchNorm (ordering matters)
+        • As a substitute for adequate data or weight decay on severe overfitting
+    """
+
+    empirical_evidence: {
+        source: "Srivastava et al. (2014) Dropout — A Simple Way to Prevent Neural Networks from Overfitting (JMLR)"
+        result: "Substantial test-error reductions across vision and speech benchmarks by approximating model averaging over thinned networks"
+        caveat: "Benefit is data-dependent; on very large corpora it can slow training for little generalisation gain (hence p=0 in many LM recipes)"
+    }
+
+    references: [
+        "Srivastava, Hinton, Krizhevsky et al. (2014) Dropout: A Simple Way to Prevent Neural Networks from Overfitting. JMLR 15(56):1929-1958",
+        "Hinton, Srivastava, Krizhevsky et al. (2012) Improving neural networks by preventing co-adaptation of feature detectors. arXiv 1207.0580"
+    ]
+}

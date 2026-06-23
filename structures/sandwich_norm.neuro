@@ -1,0 +1,92 @@
+# -*- coding: utf-8 -*-
+# Sandwich-LN — normalize before AND after each sublayer for deep stability.
+#
+# Implementation: neuroslm/modules/blocks.py::SandwichNormBlock
+# Tests:          tests/dsl/test_block_wiring.py
+# Docs:           docs/mechanics/sandwich_norm.md
+
+export mechanic sandwich_norm {
+    category: "normalization"
+    summary:  "Wrap each sublayer in two norms — pre-norm on the input AND post-norm on the branch output before the residual add"
+
+    equation: """
+        # Pre-norm normalizes the input; sandwich adds a SECOND norm on the
+        # branch output, bounding what each sublayer can write to the stream.
+
+        # Attention sublayer (sandwiched)
+        a = Attn(Norm_pre(x))            # pre-norm: clean input
+        a = Norm_post(a)                 # post-norm: bound the write magnitude
+        x = x + a
+
+        # Feed-forward sublayer (sandwiched)
+        f = FFN(Norm_pre(x))
+        f = Norm_post(f)
+        x = x + f
+
+        # The inner Norm_post caps the variance each branch injects into the
+        # residual stream, preventing the un-bounded growth pre-norm can show
+        # at extreme depth/width. Both norms use eps for numerical safety.
+    """
+
+    impl:    "neuroslm.modules.blocks.SandwichNormBlock"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        eps: {
+            default: 1e-6,
+            type: "float",
+            doc: "Numerical-stability epsilon added inside both the pre- and post-normalization ops"
+        }
+        norm_type: {
+            default: "rmsnorm",
+            type: "str",
+            doc: "Normalizer used for both the pre and post norms; RMSNorm is the common choice at scale"
+        }
+    }
+
+    properties: {
+        bounded_branch_write: "The inner post-norm caps the variance each sublayer adds to the residual stream"
+        extreme_depth_stable: "Tames the residual-norm growth that destabilizes plain pre-norm at large scale"
+        double_norm_cost:     "Two norms per sublayer instead of one — a small compute/latency overhead"
+        prenorm_compatible:   """Built on the pre-norm skeleton; the extra norm is additive, not a rewiring"""
+        scale_friendly:       "Adopted by CogView and Gemma2-class models specifically for stability at scale"
+    }
+
+    when_to_use: """
+        Use when:
+        • Plain pre-norm shows residual-stream norm blow-up or loss spikes at
+          extreme depth or width
+        • Training very large models where stability margin matters more than the
+          small extra cost of a second norm per sublayer
+        • You are reproducing CogView / Gemma2-style architectures that specify
+          sandwich (a.k.a. "norm-after") wiring
+
+        Sandwich-norm is the stability insurance pre-norm sometimes needs: it
+        keeps pre-norm's clean gradient path while bounding how much each branch
+        can write to the stream. The price is one extra normalization per
+        sublayer — cheap relative to a divergent run.
+
+        Pairs well with: prenorm_block (sandwich extends it), residual_stream,
+        depth_scaled_init, moe_block (stabilizes expert outputs at scale).
+    """
+
+    not_for: """
+        • Small/shallow models where plain pre-norm is already stable — the extra
+          norm is pure overhead
+        • Latency-critical inference where every normalization op counts
+        • Cases where post-norm already provides the needed boundedness
+    """
+
+    empirical_evidence: {
+        source: "Ding et al. (2021) CogView: Mastering Text-to-Image Generation via Transformers"
+        result: "Sandwich-LN stabilized training of a large transformer where plain pre-/post-LN suffered loss spikes and NaNs"
+        caveat: "The second norm adds a small compute cost; the benefit only materializes at depth/scale where stability is the bottleneck"
+    }
+
+    references: [
+        "Ding, Yang, Hong et al. (2021) CogView: Mastering Text-to-Image Generation via Transformers. arXiv 2105.13290",
+        "Gemma Team (2024) Gemma 2: Improving Open Language Models at a Practical Size. arXiv 2408.00118",
+        "Liu, Liu, Gao et al. (2020) Understanding the Difficulty of Training Transformers. arXiv 2004.08249"
+    ]
+}

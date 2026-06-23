@@ -1,0 +1,83 @@
+# -*- coding: utf-8 -*-
+# Weight decay — decoupled L2 shrinkage, with norm/bias/embedding exclusion.
+#
+# Implementation: neuroslm.optim.param_groups.build_decay_groups
+# Tests:          tests/optim/test_weight_decay_groups.py
+# Docs:           docs/mechanics/weight_decay.md
+
+export mechanic weight_decay {
+    category: "regularizer"
+    summary:  "Decoupled L2 weight shrinkage applied to the parameter at each step — typically excluding norm gains / biases / embeddings"
+
+    equation: """
+        # Decoupled (AdamW-style) decay — applied to θ directly, NOT folded into
+        # the gradient, so it is independent of the adaptive learning rate.
+        θ_t = θ_{t-1} − lr · ( update(g_t)  +  weight_decay · θ_{t-1} )
+
+        # Parameter partitioning:
+        #   decay group     = { p : p.ndim ≥ 2 }                 → weight_decay
+        #   no-decay group  = { biases, LayerNorm/RMSNorm gains,
+        #                        embeddings (if exclude_norm) }  → 0.0
+        # so that 1D scale/shift params and lookup tables are not shrunk toward 0.
+    """
+
+    impl:    "neuroslm.optim.param_groups.build_decay_groups"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        weight_decay: {
+            default: 0.1,
+            type: "float",
+            min: 0.0,
+            doc: "Decoupled L2 coefficient applied to the decay group; 0.1 is the standard LM value"
+        }
+        exclude_norm: {
+            default: true,
+            type: "bool",
+            doc: "Route LayerNorm/RMSNorm gains, biases, and embeddings to a no-decay (0.0) group"
+        }
+    }
+
+    properties: {
+        decoupled:       "Shrinkage is independent of the adaptive lr — unlike L2-in-loss, which couples to 1/√v under Adam"
+        selective:       "1D params (norms, biases) and embeddings are excluded; decaying them hurts more than it helps"
+        generalisation:  "Constrains the effective weight norm, improving generalisation and training stability"
+        param_group_impl:"Realised as optimiser param groups, not a loss term — no extra gradient computation"
+        composes:        "Stacks cleanly with dropout, label smoothing, and any optimiser update rule"
+    }
+
+    when_to_use: """
+        Use when:
+        • Training essentially any transformer — decoupled weight decay is a
+          near-universal default regulariser
+        • You want norm-budget control without coupling it to the lr schedule
+        • Overfitting or growing weight norms are observed
+
+        Standard recipe: weight_decay 0.1 on ≥2D weight matrices, exclude_norm=true
+        so LayerNorm/RMSNorm gains, biases, and (usually) embeddings sit in a 0.0
+        group. Always pair with a decoupled optimiser (AdamW/Lion/Muon) — applying
+        this decay rule to plain Adam re-introduces the lr coupling it avoids.
+
+        Pairs well with: adamw, lion, muon, cosine_schedule, dropout.
+    """
+
+    not_for: """
+        • Folding into the loss as an L2 term under an adaptive optimiser — that
+          is L2-Adam, which couples decay to the per-parameter lr (use AdamW)
+        • Decaying norm gains / biases / embeddings (the exclude_norm exclusions
+          exist precisely because that degrades quality)
+        • Setting it so high it dominates the task gradient and underfits
+    """
+
+    empirical_evidence: {
+        source: "Loshchilov & Hutter (2017/2019) Decoupled Weight Decay Regularization (ICLR 2019)"
+        result: "Decoupling decay from the adaptive step — with norm/bias exclusions — is the standard regularisation recipe for transformer LM training"
+        caveat: "Excluding the right parameter groups matters; decaying norms/embeddings can measurably hurt"
+    }
+
+    references: [
+        "Loshchilov & Hutter (2017) Decoupled Weight Decay Regularization. arXiv 1711.05101 (ICLR 2019)",
+        "Krogh & Hertz (1991) A Simple Weight Decay Can Improve Generalization. NeurIPS"
+    ]
+}

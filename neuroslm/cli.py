@@ -3346,7 +3346,10 @@ def _pick_local_latest_ckpt() -> Optional[str]:
 def cmd_test(args: argparse.Namespace) -> int:
     path = args.pattern if args.pattern else "tests/dsl/"
     cli = [sys.executable, "-m", "pytest", path, "-q"]
-    if not args.slow:
+    if args.slow:
+        # Override pyproject.toml addopts which globally applies `-m not slow`
+        cli.extend(["-o", "addopts="])
+    else:
         cli.extend(["-m", "not slow"])
     if args.verbose:
         cli.append("-v")
@@ -3718,6 +3721,122 @@ def _infer_equation_name(formula: str) -> str:
         if len(parts) >= 2:
             return "_".join(parts[:2])
         return "custom_equation"
+
+
+def cmd_model(args: argparse.Namespace) -> int:
+    """Load a standard model from a .neuro arch spec and run inference.
+
+    Reads the ``model { }`` block from <arch>/arch.neuro, builds the model,
+    loads HF weights (specified by ``weights: "hf:..."`` in the spec), then
+    runs the requested sub-command (ppl | generate).
+
+    Examples::
+
+        brian model ppl architectures/gpt2
+        brian model generate architectures/smollm2-135m --prompt "Hello world"
+        brian model ppl architectures/gpt2 --text "Once upon a time"
+    """
+    import math
+    from pathlib import Path
+
+    import torch
+    import torch.nn.functional as F
+
+    from neuroslm.dsl.model_spec import parse_model_block
+    from neuroslm.models import build_model
+
+    # ── Resolve arch path ────────────────────────────────────────────────
+    arch_path = Path(args.arch).resolve()
+    neuro_file = (arch_path / "arch.neuro") if arch_path.is_dir() else arch_path
+    if not neuro_file.exists():
+        print(f"[ERROR] not found: {neuro_file}", file=sys.stderr)
+        return 1
+
+    spec = parse_model_block(neuro_file.read_text(encoding="utf-8"))
+    s = spec.sheaf
+    print(f"[model] kind={spec.kind}  dim={s.dim}  depth={s.depth}  "
+          f"heads={s.heads}/{s.kv_heads}  vocab={s.vocab}  pos={s.pos}")
+
+    # ── Load weights ─────────────────────────────────────────────────────
+    tokenizer = None
+    if spec.weights and spec.weights.startswith("hf:"):
+        hf_id = spec.weights[3:]
+        print(f"[model] loading HF weights: {hf_id}")
+        try:
+            if spec.kind == "gpt2":
+                from transformers import GPT2LMHeadModel, GPT2Tokenizer
+                from neuroslm.models.gpt2 import GPT2Model, hf_to_model_state_dict
+                hf_model = GPT2LMHeadModel.from_pretrained(hf_id)
+                tokenizer = GPT2Tokenizer.from_pretrained(hf_id)
+                model = GPT2Model(spec)
+                model.load_state_dict(hf_to_model_state_dict(hf_model.state_dict(), spec))
+            else:
+                from transformers import AutoModelForCausalLM, AutoTokenizer
+                from neuroslm.models.llama import LlamaModel, hf_to_model_state_dict
+                hf_model = AutoModelForCausalLM.from_pretrained(hf_id)
+                tokenizer = AutoTokenizer.from_pretrained(hf_id)
+                model = LlamaModel(spec)
+                model.load_state_dict(hf_to_model_state_dict(hf_model.state_dict(), spec))
+            del hf_model  # free HF copy
+        except Exception as exc:
+            print(f"[ERROR] HF load failed: {exc}", file=sys.stderr)
+            return 1
+    else:
+        print("[model] no weights specified — using random init")
+        model = build_model(spec)
+
+    model.eval()
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"[model] params={n_params:,}")
+
+    # ── Sub-commands ─────────────────────────────────────────────────────
+    _WIKITEXT_SAMPLE = (
+        " = Valkyria Chronicles III = \n\n Senjō no Valkyria 3 : Unrecorded Chronicles "
+        "( Japanese : 戦場のヴァルキュリア3 ) , commonly referred to as Valkyria Chronicles III "
+        "outside Japan , is a tactical role-playing game developed by Sega and Media.Vision "
+        "for the PlayStation Portable . Released in January 2011 in Japan , it is the third "
+        "game in the Valkyria series . Employing the same fusion of tactical and real-time "
+        "gameplay as its predecessors , the story runs parallel to the first game ."
+    )
+
+    if args.model_cmd == "ppl":
+        if tokenizer is None:
+            print("[ERROR] PPL requires a tokenizer — set weights: in arch.neuro or use --hf",
+                  file=sys.stderr)
+            return 1
+        text = getattr(args, "text", None) or _WIKITEXT_SAMPLE
+        enc = tokenizer(text, return_tensors="pt")
+        input_ids = enc.input_ids[:, : s.context]
+        with torch.no_grad():
+            logits = model(input_ids[:, :-1])
+        targets = input_ids[:, 1:].reshape(-1)
+        loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets)
+        ppl = math.exp(loss.item())
+        n_tok = input_ids.size(1) - 1
+        print(f"[model] PPL = {ppl:.2f}  (tokens={n_tok})")
+        return 0
+
+    if args.model_cmd == "generate":
+        if tokenizer is None:
+            print("[ERROR] generate requires a tokenizer — set weights: in arch.neuro",
+                  file=sys.stderr)
+            return 1
+        prompt = getattr(args, "prompt", None) or "The quick brown fox"
+        n_tokens = getattr(args, "tokens", 50)
+        enc = tokenizer(prompt, return_tensors="pt")
+        ids = enc.input_ids
+        with torch.no_grad():
+            for _ in range(n_tokens):
+                logits = model(ids)
+                nxt = logits[:, -1, :].argmax(dim=-1, keepdim=True)
+                ids = torch.cat([ids, nxt], dim=1)
+                if ids.size(1) >= s.context:
+                    break
+        generated = tokenizer.decode(ids[0], skip_special_tokens=True)
+        print(f"[model] {generated}")
+        return 0
+
+    return 0
 
 
 def cmd_lint(args: argparse.Namespace) -> int:

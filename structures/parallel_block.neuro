@@ -1,0 +1,86 @@
+# -*- coding: utf-8 -*-
+# Parallel attention + FFN transformer block (GPT-J / PaLM wiring).
+#
+# Implementation: neuroslm/modules/blocks.py::ParallelBlock
+# Tests:          tests/dsl/test_block_wiring.py
+# Docs:           docs/mechanics/parallel_block.md
+
+export mechanic parallel_block {
+    category: "structure"
+    summary:  "Run attention and FFN on the SAME normalized input in parallel and sum both branches into the residual stream"
+
+    equation: """
+        # Standard (serial) pre-norm runs FFN on the post-attention stream.
+        # Parallel runs both sublayers off ONE shared norm of x and adds them.
+
+        h = Norm(x)                      # single shared normalization
+        a = Attn(h)                      # attention branch
+        f = FFN(h)                       # FFN branch — same input h
+        x = x + a + f                    # both branches added to the residual
+
+        # Because both branches read the same h, their input projections
+        # (W_qkv from Attn, W_in from FFN) can be FUSED into one big matmul,
+        # and the output projections (W_o, W_out) into another. One norm,
+        # two large GEMMs instead of two norms and four smaller GEMMs.
+    """
+
+    impl:    "neuroslm.modules.blocks.ParallelBlock"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        shared_norm: {
+            default: true,
+            type: "bool",
+            doc: "If true, attention and FFN share one Norm(x); if false each branch normalizes independently"
+        }
+        fuse_matmuls: {
+            default: true,
+            type: "bool",
+            doc: "Fuse the QKV and FFN-in projections into a single GEMM (and the two output projections into another)"
+        }
+    }
+
+    properties: {
+        latency_reduction:  "One norm + fused GEMMs cut per-block overhead; ~15% faster at large scale (PaLM)"
+        matmul_fusion:      "Shared input enables a single input-projection GEMM and a single output-projection GEMM"
+        weaker_at_small:    """The serial dependency FFN(Attn(x)) is lost; quality gap shows at small scale, vanishes at large"""
+        reduced_sync:       "Halves the number of all-reduce / activation-sync points per layer in model-parallel setups"
+        prenorm_based:      "Parallel wiring is a pre-norm variant — the residual stream stays un-normalized"
+    }
+
+    when_to_use: """
+        Use when:
+        • Throughput is the constraint and the model is large (≥ ~6B params),
+          where PaLM and GPT-J found the quality gap to serial blocks negligible
+        • You run model/tensor parallelism and want to halve per-layer sync points
+        • The hardware benefits from a few large fused GEMMs over many small ones
+
+        The trade-off is the lost serial dependency: serial blocks let the FFN
+        condition on the attention output, parallel blocks do not. At small scale
+        this costs measurable quality; at large scale the redundancy across depth
+        absorbs it and the speedup is free.
+
+        Pairs well with: prenorm_block (parallel IS pre-norm), weight_tying,
+        residual_stream, depth_scaled_init.
+    """
+
+    not_for: """
+        • Small models (< ~1B params) where the serial FFN(Attn(x)) dependency
+          measurably helps quality
+        • Architectures that require the FFN to read the post-attention stream
+        • Cases where matmul fusion isn't supported by the runtime (no speed win)
+    """
+
+    empirical_evidence: {
+        source: "Chowdhery et al. (2022) PaLM: Scaling Language Modeling with Pathways"
+        result: "Parallel attention+FFN gave ~15% faster training at large scale with negligible quality loss at 62B/540B"
+        caveat: "PaLM noted a small quality degradation at 8B that disappeared by 62B; small models should prefer serial"
+    }
+
+    references: [
+        "Chowdhery, Narang, Devlin et al. (2022) PaLM: Scaling Language Modeling with Pathways. arXiv 2204.02311",
+        "Wang & Komatsuzaki (2021) GPT-J-6B: A 6 Billion Parameter Autoregressive Language Model",
+        "Black, Biderman, Hallahan et al. (2022) GPT-NeoX-20B. arXiv 2204.06745"
+    ]
+}

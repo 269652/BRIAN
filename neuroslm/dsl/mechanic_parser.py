@@ -217,9 +217,20 @@ def _split_top_level_kv(body: str) -> Dict[str, str]:
                 i += 1
             val = body[start:i].strip()
         else:
-            # Bare scalar: read to end of line or comma
+            # Bare scalar: read to end of line, comment, or top-level comma —
+            # but a comma INSIDE a quoted string does not terminate the value
+            # (e.g. a citation "Ye et al., 2024").
             start = i
-            while i < n and body[i] not in "\n,#":
+            quote = ""
+            while i < n:
+                c = body[i]
+                if quote:
+                    if c == quote:
+                        quote = ""
+                elif c in ('"', "'"):
+                    quote = c
+                elif c in "\n,#":
+                    break
                 i += 1
             val = body[start:i].strip()
 

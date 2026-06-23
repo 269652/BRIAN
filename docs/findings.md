@@ -703,6 +703,46 @@ layers (inter-layer Josephson) provides a calibration signal that:
 
 ---
 
+## DSL v2 — `model { }` block (2026-06-23, commit `0b65c00`)
+
+**Type:** Infrastructure capability (not a falsifiable hypothesis; no Layer B artifact needed).
+
+**What shipped.**
+
+The DSL gained a first-class `model { ... }` block that declares any standard causal LM
+independent of the BRIAN brain subsystem. The block is parsed by
+`neuroslm/dsl/model_spec.py` into a `ModelSpec` + `SheafConfig` dataclass pair, and
+`neuroslm/models/__init__.py::build_model(spec)` instantiates the corresponding
+`nn.Module`.
+
+| `kind` value | Maps to | Architecture |
+|---|---|---|
+| `gpt2` | `neuroslm/models/gpt2.py::GPT2Model` | fused QKV/Conv1D→Linear, learned pos_embed, LayerNorm, GELU |
+| `llama` | `neuroslm/models/llama.py::LlamaModel` | RoPE, GQA, SwiGLU, RMSNorm (SmolLM2/LLaMA-family) |
+| `qwen` | `neuroslm/models/llama.py::LlamaModel` | same architecture family as llama |
+| `mistral` | `neuroslm/models/llama.py::LlamaModel` | same |
+| `brian` | (reserved — BRIAN trunk with THSD mechanisms) | KJPLA, Noether, topo charge, etc. |
+
+HF weight loading: each model module exports `hf_to_model_state_dict(hf_sd)` that
+remaps HuggingFace parameter names to the canonical internal scheme.
+
+**THSD framing.** Every LM is a cellular sheaf F where token hidden states are stalks
+and the attention+FFN block is the coboundary operator δ: C⁰(F) → C¹(F). GPT-2 and
+LLaMA-family models are *trivial* H¹ sheaves (no conservation laws, no THSD mechanisms).
+BRIAN is a *non-trivial* sheaf with Noether residuals (H25), topo-charge diagnostics
+(H24), and phase-lattice coupling (H26).
+
+**New arch.neuro files.**
+
+- `architectures/gpt2/arch.neuro` — GPT-2 124M (trivial H¹ sheaf)
+- `architectures/smollm2-135m/arch.neuro` — SmolLM2 135M (trivial H¹ sheaf, LLaMA family)
+- `architectures/qwen2.5-0.5b/arch.neuro` — Qwen2.5-0.5B (trivial H¹ sheaf, LLaMA family)
+
+**Tests.** See `tests/dsl/test_model_spec*.py` (parse + round-trip) and
+`tests/models/test_gpt2*.py` / `tests/models/test_llama*.py` (forward shape + HF loading).
+
+---
+
 ## What proved to solve or break things — the punchline list
 
 ### Things that demonstrably solved something

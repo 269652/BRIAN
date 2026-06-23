@@ -21,12 +21,13 @@ NeuroSLM (a.k.a. BRIAN) is a research project exploring whether **biologically-i
 - Actual snapshot: flat baseline at 80k steps beats BRIAN variants by ~3-4× on absolute PPL, but BRIAN wins **gap_ratio** by 15% (5.22 vs 6.12). Baseline got 11× more training steps — **compute asymmetry breaks the comparison.**
 - Resolution: Pending step-7000 baseline eval (~$3-5).
 
-**Recently shipped (commits `a133343` → `5fa7534`, June 2026):**
+**Recently shipped (commits `a133343` → `0b65c00`, June 2026):**
 1. `a133343` — `ImprovementGate` (Welch's t-test admission) + `TheoryOfMindIR` + `formal_framework.md` v0.2 §§7–11
 2. `6b36012` — `cortex_pre_head_norm` catastrophic-loss fix (8 tests)
 3. `1d3db5a` — KL distillation aux loss + NT-mediated α gating (22 tests); CLI error handling
 4. `23c18da` — DNA module bundler + source maps (`neuroslm/compiler/module_bundler.py`)
 5. `5fa7534` — DNA byte-identity round-trip test suite
+6. `0b65c00` — DSL v2 `model { sheaf { } }` block: `ModelSpec` + `SheafConfig` dataclasses, `parse_model_block()`, `build_model()` factory, `GPT2Model` + `LlamaModel` implementations with HF weight adapters, three new arch.neuro files (gpt2/smollm2-135m/qwen2.5-0.5b); THSD framing: trivial H¹ sheaf for gpt2/llama families, non-trivial reserved for `brian` kind (see §3.4)
 
 ---
 
@@ -353,6 +354,93 @@ Training + Activity Tracking
 - Mutation acceptance rate (% of mutations improving metrics)
 - Hot/cold path statistics
 - Rank increases via BDNF (NGA rank growth on high-Φ edges)
+
+### 3.4 DSL v2 — `model { }` Block (commit `0b65c00`, 2026-06-23)
+
+DSL v2 adds a first-class `model { ... }` block that declares any standard causal LM
+independently of the BRIAN brain subsystem. This makes the `.neuro` file the canonical
+spec for both pure HuggingFace-compatible models and BRIAN hybrids.
+
+#### Grammar
+
+```neuro
+model {
+    kind: gpt2          # gpt2 | llama | qwen | mistral | brian
+    weights: "hf:openai-community/gpt2"   # optional HF model ID
+    sheaf {
+        dim: 768        # d_model / stalk dimension
+        depth: 12       # number of attention+FFN blocks (coboundary operators)
+        heads: 12       # attention heads
+        kv_heads: 12    # GQA: < heads enables grouped-query attention
+        context: 1024   # max sequence length
+        vocab: 50257
+        pos: learned    # "none" | "learned" | "rope" | "alibi"
+        rope_base: 10000
+        ff_mult: 4.0
+        ff_act: gelu    # "gelu" | "swiglu" | "geglu" | "relu" | "silu"
+        norm: layernorm # "layernorm" | "rmsnorm"
+        norm_eps: 1e-5
+        tie_embed: true
+        bias: true
+    }
+}
+```
+
+Both `sheaf: { ... }` (colon syntax) and bare `sheaf { ... }` (block syntax) are
+accepted; `_normalize_block_syntax` in `neuroslm/dsl/model_spec.py` normalises the
+latter before parsing. Enum fields (`kind`, `pos`, `ff_act`, `norm`) are validated
+against fixed sets at parse time; unknown values raise `ValueError`.
+
+#### Parser and dataclasses
+
+- `neuroslm/dsl/model_spec.py` — `parse_model_block(text)` → `ModelSpec`
+- `ModelSpec` — `kind`, `weights: Optional[str]`, `sheaf: SheafConfig`
+- `SheafConfig` — all sheaf topology fields with typed defaults
+
+#### `kind` → implementation mapping
+
+| `kind` | Class | Architecture |
+|---|---|---|
+| `gpt2` | `neuroslm/models/gpt2.py::GPT2Model` | fused QKV/Conv1D→Linear, learned pos\_embed, LayerNorm, GELU, bias everywhere |
+| `llama` | `neuroslm/models/llama.py::LlamaModel` | RoPE, GQA, SwiGLU, RMSNorm (SmolLM2 / LLaMA-family) |
+| `qwen` | `LlamaModel` (same file) | Qwen2 / Qwen2.5 — identical architecture |
+| `mistral` | `LlamaModel` (same file) | Mistral family — same architecture |
+| `brian` | (reserved) | BRIAN trunk with full THSD mechanisms |
+
+Factory entry point: `neuroslm/models/__init__.py::build_model(spec: ModelSpec) → nn.Module`.
+The returned module exposes `forward(input_ids: LongTensor[B,T]) → FloatTensor[B,T,vocab]`
+and parameter names compatible with the HF weight-loading adapters.
+
+#### HF weight loading
+
+Each model module exports `hf_to_model_state_dict(hf_sd: dict) -> dict` that remaps
+HuggingFace parameter names to the canonical internal scheme, making
+`model.load_state_dict(hf_to_model_state_dict(hf_hub_download(...)))` the standard
+loading path.
+
+**End-to-end usage example:**
+```python
+from neuroslm.dsl.model_spec import parse_model_block
+from neuroslm.models import build_model
+spec = parse_model_block(open("architectures/gpt2/arch.neuro").read())
+model = build_model(spec)  # GPT2Model(spec)
+```
+
+#### THSD framing
+
+In the project's Topological Hyper-Sheaf-Dynamics (THSD) framework, every LM is a
+cellular sheaf F where token hidden states are stalks and the attention+FFN block is
+the coboundary operator δ: C⁰(F) → C¹(F). GPT-2 and LLaMA-family models are *trivial*
+H¹ sheaves — no conservation laws, no extra diagnostics. BRIAN is a *non-trivial* sheaf
+with Noether residuals (H25/§9.7), topological-charge diagnostics (H24/§9.6), and
+phase-lattice coupling (H26/§9.8). The `model { kind: brian }` reserved value is the
+hook for wiring the BRIAN trunk through this same infrastructure in future.
+
+#### New architecture files
+
+- `architectures/gpt2/arch.neuro` — GPT-2 124M
+- `architectures/smollm2-135m/arch.neuro` — SmolLM2 135M
+- `architectures/qwen2.5-0.5b/arch.neuro` — Qwen2.5-0.5B
 
 ---
 

@@ -1,0 +1,99 @@
+# -*- coding: utf-8 -*-
+# Lion — EvoLved Sign Momentum optimizer.
+#
+# Implementation: neuroslm/optim/lion.py::Lion
+# Tests:          tests/optim/test_lion.py
+# Docs:           docs/mechanics/lion.md
+
+export mechanic lion {
+    category: "optimizer"
+    summary:  "EvoLved sIgn mOmeNtum: update direction is the sign of an interpolated momentum — one state buffer and uniform step magnitude"
+
+    equation: """
+        # Interpolate current gradient and momentum, take the SIGN as direction.
+        # The two betas differ: a faster β1 for the applied direction, a slower
+        # β2 for the tracking buffer.
+        c_t   = sign( beta1 · m_{t-1} + (1 − beta1) · g_t )
+
+        # Decoupled weight decay (AdamW-style), then the sign step.
+        θ_t   = θ_{t-1} − lr · ( c_t + weight_decay · θ_{t-1} )
+
+        # Update the momentum buffer with the slower β2.
+        m_t   = beta2 · m_{t-1} + (1 − beta2) · g_t
+    """
+
+    impl:    "neuroslm.optim.lion.Lion"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        lr: {
+            default: 1e-4,
+            type: "float",
+            min: 0.0,
+            doc: "Learning rate; typically ~3–10× smaller than AdamW because every step has unit magnitude"
+        }
+        beta1: {
+            default: 0.9,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Interpolation factor for the applied update direction"
+        }
+        beta2: {
+            default: 0.99,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Decay rate for the tracked momentum buffer (slower than beta1)"
+        }
+        weight_decay: {
+            default: 1.0,
+            type: "float",
+            min: 0.0,
+            doc: "Decoupled weight decay; set larger than AdamW (~10×) since the sign step is lr-uniform"
+        }
+    }
+
+    properties: {
+        sign_update:     "Direction is sign(momentum) — every coordinate moves by exactly ±lr"
+        single_state:    "Only one momentum buffer per param (half AdamW's optimiser memory)"
+        decoupled_decay: "Weight decay applied directly to θ, AdamW-style"
+        uniform_step:    "Unit-magnitude update needs a smaller lr and larger weight_decay than Adam"
+        evolved:         "Discovered by symbolic program search over optimiser update rules, not hand-derived"
+    }
+
+    when_to_use: """
+        Use when:
+        • Optimiser-state memory matters — Lion stores one buffer vs AdamW's two
+        • You want a simple, robust alternative at large batch sizes, where the
+          sign update is empirically well-behaved
+        • Throughput per step matters and you can re-tune lr/wd (Lion needs a
+          ~3–10× smaller lr and ~3–10× larger weight_decay than AdamW)
+
+        Re-tuning is mandatory: porting AdamW hyperparameters directly will
+        diverge or stall. Start from lr ≈ AdamW_lr / 5 and weight_decay ≈
+        AdamW_wd × 5, then sweep.
+
+        Pairs well with: cosine_schedule, wsd_schedule, gradient_clipping,
+        large-batch training.
+    """
+
+    not_for: """
+        • Small-batch regimes where the sign update's coarse direction hurts
+        • Drop-in replacement without re-tuning lr and weight_decay
+        • Problems where per-coordinate adaptive magnitude (Adam's √v) is needed
+          to handle highly heterogeneous gradient scales
+    """
+
+    empirical_evidence: {
+        source: "Chen et al. (2023) Symbolic Discovery of Optimization Algorithms"
+        result: "Matches or exceeds AdamW on image classification and LM pre-training while using less optimiser memory and fewer FLOPs per step"
+        caveat: "Sensitive to lr/wd; reported gains assume the re-tuned hyperparameter regime, and benefits shrink at small batch sizes"
+    }
+
+    references: [
+        "Chen, Liang, Huang et al. (2023) Symbolic Discovery of Optimization Algorithms. arXiv 2302.06675",
+        "Kingma & Ba (2014) Adam: A Method for Stochastic Optimization. arXiv 1412.6980"
+    ]
+}

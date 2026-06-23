@@ -136,6 +136,29 @@ class PathResolver:
                     f"does not exist either; pass repo_root=... "
                     f"explicitly to PathResolver"
                 )
+        # ── @mechanics/<path> ── anchored at <repo_root>/mechanics/ ──
+        elif specifier.startswith("@mechanics/"):
+            rest = specifier[len("@mechanics/"):]
+            # Workspace-first: an unfolded DNA may bundle a local copy.
+            ws_candidate = (self.arch_root / "mechanics" / rest).resolve()
+            ws_resolved = self._try_resolve_file(ws_candidate)
+            if ws_resolved is not None:
+                try:
+                    ws_resolved.relative_to(self.arch_root)
+                    return ws_resolved
+                except ValueError:
+                    pass
+            if self.repo_root is not None:
+                scope_root = self.repo_root / "mechanics"
+                base = scope_root
+            else:
+                raise ValueError(
+                    f"specifier {specifier!r} uses the @mechanics/ prefix "
+                    f"but no repo root was discovered (no pyproject.toml "
+                    f"found by walking up from {self.arch_root}) and no "
+                    f"workspace-local mechanics/{rest} was found either; pass "
+                    f"repo_root=... explicitly to PathResolver"
+                )
         # ── @lib/<path> ── anchored at <repo_root>/lib/ ─────────────
         elif specifier.startswith("@lib/"):
             rest = specifier[len("@lib/"):]

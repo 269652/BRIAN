@@ -1,0 +1,87 @@
+# -*- coding: utf-8 -*-
+# EMA weights — exponential moving average / Polyak averaging of model weights.
+#
+# Implementation: neuroslm.optim.ema.ModelEMA
+# Tests:          tests/optim/test_ema_weights.py
+# Docs:           docs/mechanics/ema_weights.md
+
+export mechanic ema_weights {
+    category: "regularizer"
+    summary:  "Maintain a shadow copy of the weights as an exponential moving average (Polyak averaging) and evaluate with it for lower-variance often-better generalisation"
+
+    equation: """
+        # Shadow params θ' track the live params θ with decay near 1.
+        # Updated every `update_every` optimiser steps (after step()):
+        θ'_t = decay · θ'_{t-1} + (1 − decay) · θ_t
+
+        # The EMA approximates a uniform average over the recent trajectory with
+        # an effective window of ~ 1 / (1 − decay) steps (decay=0.9999 ⇒ ~10k).
+        # Training uses θ; evaluation / checkpointing uses θ' (Polyak average).
+        #
+        # Buffers (BN running stats, etc.) are typically copied, not EMA-averaged.
+    """
+
+    impl:    "neuroslm.optim.ema.ModelEMA"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        decay: {
+            default: 0.9999,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "EMA decay; higher = longer averaging window (0.9999 ≈ 10k-step effective window)"
+        }
+        update_every: {
+            default: 1,
+            type: "int",
+            min: 1,
+            doc: "Apply the EMA update every N optimiser steps (>1 reduces overhead; rescale decay accordingly)"
+        }
+    }
+
+    properties: {
+        variance_reduction: "Averaging over the trajectory damps the noise of the last SGD iterate"
+        eval_only:          "Training proceeds on the live weights; only evaluation/export uses the EMA copy"
+        better_minima:      "Polyak/EMA averaging often lands in flatter, better-generalising regions of the loss"
+        extra_memory:       "Holds a second full copy of the parameters (1× param memory overhead)"
+        decoupled:          "Sits beside any optimiser/schedule — does not alter the training trajectory itself"
+    }
+
+    when_to_use: """
+        Use when:
+        • Final-iterate evaluation is noisy and you want a smoother, often-stronger
+          model for eval/release (diffusion models, GANs, many SSL recipes)
+        • The lr does not decay fully to zero, so the live weights keep oscillating
+          near the optimum — EMA captures their average
+        • You can afford one extra copy of the parameters in memory
+
+        Set decay so the effective window 1/(1−decay) covers a meaningful slice of
+        late training (0.999–0.9999). Evaluate and checkpoint from the EMA weights;
+        keep training on the live ones. With update_every>1, adjust decay to keep
+        the same effective horizon.
+
+        Pairs well with: cosine_schedule / wsd_schedule, dropout, gradient_clipping.
+    """
+
+    not_for: """
+        • Memory-tight training where a second weight copy is unaffordable
+        • Runs whose lr already decays to ~0 (the final iterate is already the
+          average; EMA adds little)
+        • Treating EMA as a training regulariser — it does not change the gradient
+          trajectory, only what you evaluate
+    """
+
+    empirical_evidence: {
+        source: "Polyak & Juditsky (1992) Acceleration of Stochastic Approximation by Averaging; Tarvainen & Valpola (2017) Mean Teachers"
+        result: "Iterate averaging provably reduces estimator variance and yields better-generalising more stable models for evaluation across SSL generative and supervised settings"
+        caveat: "A pure eval-time benefit; choosing decay (effective window) is the key knob and is task/horizon dependent"
+    }
+
+    references: [
+        "Polyak & Juditsky (1992) Acceleration of Stochastic Approximation by Averaging. SIAM J. Control Optim. 30(4):838-855",
+        "Tarvainen & Valpola (2017) Mean teachers are better role models: Weight-averaged consistency targets. arXiv 1703.01780 (NeurIPS 2017)",
+        "Izmailov, Podoprikhin, Garipov et al. (2018) Averaging Weights Leads to Wider Optima and Better Generalization (SWA). arXiv 1803.05407 (UAI 2018)"
+    ]
+}

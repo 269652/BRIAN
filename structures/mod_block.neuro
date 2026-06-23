@@ -1,0 +1,100 @@
+# -*- coding: utf-8 -*-
+# Mixture-of-Depths block — token-level conditional computation.
+#
+# Implementation: neuroslm/modules/blocks.py::MoDBlock
+# Tests:          tests/dsl/test_block_wiring.py
+# Docs:           docs/mechanics/mod_block.md
+
+export mechanic mod_block {
+    category: "structure"
+    summary:  "Mixture-of-Depths: a router selects a capacity-limited subset of tokens to process; the rest skip the block via residual"
+
+    equation: """
+        # A per-block router scores every token; only the top-`capacity`
+        # fraction enter the (expensive) sublayer, the rest are passed through.
+
+        r = W_router · Norm(x)           # (T,) routing scores, one per token
+        C = round(capacity · T)          # static compute budget for this block
+        S = TopK(r, k=C)                 # indices of the C highest-scored tokens
+
+        # Selected tokens run the full block; unselected tokens take identity.
+        for t in 1..T:
+            if t ∈ S:
+                x_t = x_t + r_t · Block(Norm(x))_t   # processed (gated by score)
+            else:
+                x_t = x_t                             # skipped — pure residual
+
+        # FLOPs per block scale with `capacity` (e.g. 0.5 → half the tokens),
+        # while the residual stream still carries every token forward.
+        # An auxiliary predictor (aux_router) learns at inference time which
+        # tokens to route, since TopK over a future-dependent set is non-causal
+        # and must be approximated autoregressively.
+    """
+
+    impl:    "neuroslm.modules.blocks.MoDBlock"
+    loss_fn: "neuroslm.modules.mod.router_aux_loss"
+    zero_init: false
+
+    params: {
+        capacity: {
+            default: 0.5,
+            type: "float",
+            doc: "Fraction of tokens processed by the block per step (0.5 = half); the rest skip via residual",
+            min: 0.0,
+            max: 1.0
+        }
+        aux_router: {
+            default: true,
+            type: "bool",
+            doc: "Train an auxiliary predictor so token selection can be made causally at autoregressive inference"
+        }
+    }
+
+    properties: {
+        static_compute_budget: """TopK with a fixed capacity gives a known, hardware-friendly FLOP budget per block"""
+        token_conditional:     "Compute is spent on the tokens the router deems hardest; easy tokens skip"
+        residual_passthrough:  """Unselected tokens take the identity skip, so every token is still carried forward"""
+        causal_inference_gap:  "TopK selection is non-causal at train time; aux_router approximates it for generation"
+        scored_gate:           """Selected tokens are scaled by their router score, keeping the router in the gradient path"""
+    }
+
+    when_to_use: """
+        Use when:
+        • You want to cut FLOPs without shrinking the model — spend compute only
+          on tokens that need it (MoD trades depth per-token, not width)
+        • A predictable, static per-block compute budget matters (capacity is a
+          fixed fraction, unlike early-exit which is dynamic and irregular)
+        • Sequence lengths are long enough that skipping ~half the tokens per
+          block is a meaningful saving
+
+        MoD is the depth-axis cousin of MoE's width-axis sparsity: MoE picks
+        which experts a token uses, MoD picks whether a token uses the block at
+        all. The aux_router is essential — at inference the model must decide
+        causally which tokens to route, since the train-time TopK peeks across
+        the whole sequence.
+
+        Pairs well with: moe_block (combine width + depth sparsity, "MoDE"),
+        prenorm_block, residual_stream, differential_attention (cut the cost of
+        expensive heads).
+    """
+
+    not_for: """
+        • Short sequences where the routing overhead outweighs the FLOP saving
+        • Settings without the aux_router — generation quality degrades when the
+          inference-time selection cannot match the train-time TopK
+        • Tasks needing every token processed at every layer (dense reasoning
+          chains where uniform depth matters)
+    """
+
+    empirical_evidence: {
+        source: "Raposo et al. (2024) Mixture-of-Depths (Google DeepMind)"
+        result: "Matched baseline quality with up to ~50% fewer FLOPs per forward pass by routing only a capacity-limited token subset"
+        caveat: "Needs the learned aux router for causal inference; benefit is sensitive to capacity and sequence length"
+    }
+
+    references: [
+        "Raposo, Ritter, Richards et al. (2024) Mixture-of-Depths: Dynamically allocating compute in transformer-based language models. arXiv 2404.02258",
+        "Ainslie, Lee-Thorp, de Jong et al. (2023) CoLT5: Faster Long-Range Transformers with Conditional Computation. arXiv 2303.09752",
+        "Schuster, Fisch, Gupta et al. (2022) Confident Adaptive Language Modeling (early exit). arXiv 2207.07061"
+    ]
+}

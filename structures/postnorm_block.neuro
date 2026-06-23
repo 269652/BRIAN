@@ -1,0 +1,89 @@
+# -*- coding: utf-8 -*-
+# Post-LayerNorm transformer block — the original Transformer wiring.
+#
+# Implementation: neuroslm/modules/blocks.py::PostNormBlock
+# Tests:          tests/dsl/test_block_wiring.py
+# Docs:           docs/mechanics/postnorm_block.md
+
+export mechanic postnorm_block {
+    category: "structure"
+    summary:  "Post-LN transformer block (Vaswani 2017): normalize the residual sum after each sublayer"
+
+    equation: """
+        # Post-norm places the LayerNorm AFTER the residual addition,
+        # so the stream entering the next sublayer is always normalized.
+
+        # Attention sublayer
+        x = Norm(x + Attn(x))            # add THEN normalize
+
+        # Feed-forward sublayer
+        x = Norm(x + FFN(x))
+
+        out = x                          # stream is already normalized — no tail norm
+
+        # Gradient view: ∂L/∂x_0 passes through every Norm Jacobian, which
+        # rescales gradient magnitude per layer. Early in training this term
+        # is large at the top and small at the bottom → warmup compensates.
+    """
+
+    impl:    "neuroslm.modules.blocks.PostNormBlock"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        norm_position: {
+            default: "post",
+            type: "str",
+            doc: "Placement of the normalization op relative to the residual add; 'post' normalizes the sum"
+        }
+        norm_type: {
+            default: "layernorm",
+            type: "str",
+            doc: "Normalizer applied to the residual sum; 'layernorm' matches the original Transformer"
+        }
+    }
+
+    properties: {
+        normalized_stream:  """Every inter-layer activation is normalized, bounding the input scale to each sublayer"""
+        higher_final_ceiling: "Well-tuned post-norm often reaches a lower final loss than pre-norm at matched depth"
+        warmup_required:    "Gradient scale is ill-conditioned at init; linear LR warmup is needed to avoid divergence"
+        depth_sensitive:    """Without warmup or careful init, deep post-norm stacks can diverge early in training"""
+        no_tail_norm:       "The final activation is already normalized; no extra norm before the LM head"
+    }
+
+    when_to_use: """
+        Use when:
+        • Reproducing the original Transformer (Vaswani et al. 2017) or BERT-style
+          encoders that assume a normalized residual stream
+        • You can afford a learning-rate warmup schedule and careful initialization
+        • Depth is moderate (≤ 24 layers) and you want to chase the last bit of
+          final quality
+
+        Post-norm keeps every inter-layer activation normalized, which bounds the
+        input scale to each attention/FFN sublayer and frequently yields a lower
+        final loss — but only if warmup and init are tuned. Skip the warmup and
+        deep post-norm stacks diverge in the first few hundred steps.
+
+        Pairs well with: weight_tying, depth_scaled_init (mitigates the warmup
+        sensitivity), sandwich_norm (a post-norm relative that tames deep stacks).
+    """
+
+    not_for: """
+        • Very deep models (≥ 48 layers) trained from scratch without extra care
+          — pre-norm or sandwich-norm is safer
+        • Pipelines that cannot run a warmup schedule
+        • Drop-in replacement for pre-norm without re-tuning the LR schedule
+    """
+
+    empirical_evidence: {
+        source: """Vaswani et al. (2017) Attention Is All You Need, NeurIPS"""
+        result: "Original post-LN Transformer set SOTA WMT translation BLEU with a linear LR warmup over the first 4000 steps"
+        caveat: """Later work (Xiong 2020, Liu 2020) showed post-LN gradients are ill-conditioned at init and depend on warmup"""
+    }
+
+    references: [
+        "Vaswani, Shazeer, Parmar et al. (2017) Attention Is All You Need. arXiv 1706.03762",
+        "Liu, Liu, Gao et al. (2020) Understanding the Difficulty of Training Transformers (Admin init). arXiv 2004.08249",
+        "Xiong, Yang, He et al. (2020) On Layer Normalization in the Transformer Architecture. arXiv 2002.04745"
+    ]
+}

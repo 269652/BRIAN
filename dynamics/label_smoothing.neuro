@@ -1,0 +1,82 @@
+# -*- coding: utf-8 -*-
+# Label smoothing — soft-target cross-entropy.
+#
+# Implementation: torch.nn.CrossEntropyLoss(label_smoothing=…)
+# Tests:          tests/losses/test_label_smoothing.py
+# Docs:           docs/mechanics/label_smoothing.md
+
+export mechanic label_smoothing {
+    category: "regularizer"
+    summary:  "Replace the one-hot target with a soft target (1−smoothing on the truth; the rest spread over other classes) to curb overconfidence"
+
+    equation: """
+        # K = number of classes (vocab size), y = true class index.
+        # Soft target distribution q:
+        q_k = (1 − smoothing)            if k = y
+        q_k = smoothing / (K − 1)        otherwise
+
+        # Cross-entropy against the smoothed target (p = softmax logits):
+        L = − Σ_k q_k · log p_k
+          = (1 − smoothing) · (−log p_y)  +  (smoothing / (K−1)) · Σ_{k≠y} (−log p_k)
+
+        # Equivalently: standard CE plus a uniform-prior KL term that pulls the
+        # prediction away from a hard one-hot, lowering the max logit gap.
+    """
+
+    impl:    "torch.nn.CrossEntropyLoss"
+    loss_fn: "torch.nn.functional.cross_entropy"
+    zero_init: false
+
+    params: {
+        smoothing: {
+            default: 0.1,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Mass moved off the true label and spread over the others; 0.1 is the canonical value"
+        }
+    }
+
+    properties: {
+        anti_overconfidence: "Caps the target probability at 1−smoothing, preventing logits from diverging to ±∞"
+        better_calibration:  "Smoothed targets yield better-calibrated probabilities (lower ECE) than hard labels"
+        tighter_clusters:    "Penultimate representations of a class form tighter, more equidistant clusters"
+        cheap:               "Pure loss-side change — no extra parameters or forward cost"
+        biased_estimate:     "Trades a small increase in train NLL for regularisation; not a maximum-likelihood objective"
+    }
+
+    when_to_use: """
+        Use when:
+        • The model overfits / becomes overconfident and you want better
+          calibration (classification, NMT, LM with large vocab)
+        • Logits drift to extreme magnitudes; smoothing bounds the target and
+          keeps them in range
+        • You want a near-free regulariser that composes with any softmax head
+
+        smoothing = 0.1 is the standard starting point (Inception-v3, Transformer
+        NMT). For LMs evaluated by perplexity, note that smoothing shifts the
+        reported NLL — measure with the same smoothing as training, or report the
+        unsmoothed CE separately.
+
+        Pairs well with: dropout, weight_decay, z_loss, gradient_clipping.
+    """
+
+    not_for: """
+        • When exact maximum-likelihood / unbiased NLL is the objective (e.g.
+          density estimation, perplexity-critical eval without correction)
+        • Knowledge-distillation setups where the teacher already provides soft
+          targets (smoothing on top can wash out the signal)
+        • Tiny class counts where smoothing/(K−1) is a large per-class mass
+    """
+
+    empirical_evidence: {
+        source: "Szegedy et al. (2016) Rethinking the Inception Architecture; Müller et al. (2019) When Does Label Smoothing Help?"
+        result: "Improves top-1 accuracy and calibration across image classification and NMT; clarifies it helps generalisation/calibration but can hurt distillation"
+        caveat: "Degrades teacher-student distillation by erasing inter-class similarity in the logits"
+    }
+
+    references: [
+        "Szegedy, Vanhoucke, Ioffe et al. (2016) Rethinking the Inception Architecture for Computer Vision. arXiv 1512.00567 (CVPR 2016)",
+        "Müller, Kornblith, Hinton (2019) When Does Label Smoothing Help? arXiv 1906.02629 (NeurIPS 2019)"
+    ]
+}
