@@ -9,10 +9,10 @@
 # auto-pushes checkpoints to Git LFS (concurrent-push safe — see train.py).
 #
 # Secrets + config come from a local `.env` (copy from .env.example):
-#   VAST_API_KEY, GITHUB, [HF_TOKEN], [PRESET STEPS BATCH GRAD_ACCUM ...]
+#   VAST_API_KEY, GH_TOKEN, [HF_TOKEN], [PRESET STEPS BATCH GRAD_ACCUM ...]
 #
 # Usage:
-#   cp .env.example .env && edit .env       # add VAST_API_KEY + GITHUB
+#   cp .env.example .env && edit .env       # add VAST_API_KEY + GH_TOKEN
 #   bash scripts/vast_deploy.sh
 #
 # Re-run:    bash scripts/vast_deploy.sh             # keep healthy, replace stuck
@@ -37,9 +37,9 @@ else
 fi
 
 # Accept common alias names so either convention in .env works:
-#   VAST_API_KEY | VAST_AI        GITHUB | GITHUB_PAT | GH_TOKEN
+#   VAST_API_KEY | VAST_AI        GH_TOKEN | GH_TOKEN | GH_TOKEN_PAT
 VAST_API_KEY="${VAST_API_KEY:-${VAST_AI:-}}"
-GITHUB="${GITHUB:-${GITHUB_PAT:-${GH_TOKEN:-}}}"
+GH_TOKEN="${GH_TOKEN:-${GH_TOKEN:-${GH_TOKEN_PAT:-}}}"
 
 REPO_URL="${REPO_URL:-https://github.com/269652/BRIAN.git}"
 REPO_SLUG="${REPO_URL#https://github.com/}"; REPO_SLUG="${REPO_SLUG%.git}"
@@ -176,7 +176,7 @@ fi
 echo "  using vastai: $PYTHON -c '…vastai.cli.main:main' ($(vastai --version 2>/dev/null))"
 
 : "${VAST_API_KEY:?set VAST_API_KEY (or VAST_AI) in .env}"
-: "${GITHUB:?set GITHUB (or GITHUB_PAT) in .env}"
+: "${GH_TOKEN:?set GH_TOKEN (or GH_TOKEN_PAT) in .env}"
 vastai set api-key "$VAST_API_KEY" >/dev/null
 
 # ── Modes (flag-style, order-independent) ───────────────────────────────
@@ -257,9 +257,9 @@ if [ -n "$BEST_STEP" ] && [ -n "$RECREATE_ROLES" ]; then
     echo "── nothing to push (no commits ahead of origin/${_branch}) ──"
   else
     echo "── pushing ${_ahead} prune commit(s) to origin/${_branch} ──"
-    PUSH_URL="https://x-access-token:${GITHUB}@github.com/${REPO_SLUG}.git"
+    PUSH_URL="https://x-access-token:${GH_TOKEN}@github.com/${REPO_SLUG}.git"
     ( cd "$HERE" && git -c credential.helper= push "$PUSH_URL" HEAD 2>&1 \
-        | sed "s#${GITHUB}#***#g" | tail -3 ) || true
+        | sed "s#${GH_TOKEN}#***#g" | tail -3 ) || true
   fi
 elif [ -n "$BEST_STEP" ] && [ -z "$RECREATE_ROLES" ]; then
   echo "✗ --best-step given but no --recreate*; nothing to do. Pass " >&2
@@ -390,9 +390,9 @@ make_onstart() {
   cat <<ONSTART
 set -e
 export DEBIAN_FRONTEND=noninteractive
-export GITHUB='${GITHUB}' HF_TOKEN='${HF_TOKEN:-}'
+export GH_TOKEN='${GH_TOKEN}' HF_TOKEN='${HF_TOKEN:-}'
 cd /workspace
-git clone https://x-access-token:\${GITHUB}@github.com/${REPO_SLUG}.git brian || true
+git clone https://x-access-token:\${GH_TOKEN}@github.com/${REPO_SLUG}.git brian || true
 cd brian
 if [ -n "${BRANCH}" ]; then
   echo "── checking out branch ${BRANCH} ──"
@@ -410,7 +410,7 @@ PRESET='${PRESET}' STEPS='${STEPS}' BATCH='${BATCH}' GRAD_ACCUM='${GRAD_ACCUM}' 
 ONSTART
 }
 
-ENV_ARG="-e GITHUB=${GITHUB} -e HF_TOKEN=${HF_TOKEN:-}"
+ENV_ARG="-e GH_TOKEN=${GH_TOKEN} -e HF_TOKEN=${HF_TOKEN:-}"
 
 create_instance() {
   local offer="$1" role="$2" onstart="$3"

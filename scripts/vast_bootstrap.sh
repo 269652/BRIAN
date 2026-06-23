@@ -6,7 +6,7 @@
 # PyTorch/CUDA template, e.g. "pytorch/pytorch:2.x-cuda12.1-cudnn8-runtime").
 #
 # Required env vars (export before running, or edit the defaults below):
-#   GITHUB        GitHub personal-access-token with repo write (for LFS push)
+#   GH_TOKEN        GitHub personal-access-token with repo write (for LFS push)
 # Optional:
 #   HF_TOKEN      HuggingFace token (faster dataset downloads, higher limits)
 #   REPO_URL      defaults to the BRIAN repo
@@ -14,7 +14,7 @@
 #   GIT_NAME / GIT_EMAIL  commit identity for checkpoint pushes
 #
 # Usage:
-#   export GITHUB=ghp_xxx
+#   export GH_TOKEN=ghp_xxx
 #   export HF_TOKEN=hf_xxx          # optional
 #   bash scripts/vast_bootstrap.sh
 # ─────────────────────────────────────────────────────────────────────────
@@ -32,13 +32,13 @@ fi
 git lfs install --skip-smudge       # don't pull every old checkpoint blob
 
 echo "── 2. GitHub credentials ─────────────────────────────────────────"
-if [ -z "${GITHUB:-}" ]; then
-  echo "✗ GITHUB token not set. export GITHUB=ghp_... and rerun." >&2
+if [ -z "${GH_TOKEN:-}" ]; then
+  echo "✗ GH_TOKEN token not set. export GH_TOKEN=ghp_... and rerun." >&2
   exit 1
 fi
 # Persisted credential store — train.py's auto-push reads ~/.git-credentials
 git config --global credential.helper store
-printf 'https://x-access-token:%s@github.com\n' "$GITHUB" > ~/.git-credentials
+printf 'https://x-access-token:%s@github.com\n' "$GH_TOKEN" > ~/.git-credentials
 chmod 600 ~/.git-credentials
 git config --global user.name  "$GIT_NAME"
 git config --global user.email "$GIT_EMAIL"

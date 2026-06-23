@@ -141,7 +141,7 @@ def push_checkpoint_to_lfs(
         # ── Inject GITHUB token into remote if no credentials file ──
         creds_file = os.path.expanduser("~/.git-credentials")
         token = (
-            os.environ.get('GITHUB') or os.environ.get('GITHUB_TOKEN', '')
+            os.environ.get('GH_TOKEN') or os.environ.get('GITHUB') or os.environ.get('GITHUB_TOKEN', '')
         ).strip()
         if token and not os.path.exists(creds_file):
             result = subprocess.run(

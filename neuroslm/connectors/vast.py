@@ -48,7 +48,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 #
 # Variables locally expanded by Python before launch use __PLACEHOLDER__
 # markers.  All bash variables that must appear literally in the container
-# script ($BOOT_TIMESTAMP, ${GITHUB}, $(date …), etc.) are written as plain
+# script ($BOOT_TIMESTAMP, ${GH_TOKEN}, $(date …), etc.) are written as plain
 # characters — Python's str.replace() does not interpret $ or ${ }.
 #
 # Line-continuation backslashes for the container script are \\  (Python
@@ -71,7 +71,7 @@ date -u +"vast_train.sh boot @ %Y-%m-%dT%H:%M:%SZ"
     || (apt-get update -y && apt-get install -y git git-lfs)
 git lfs install --skip-smudge
 
-export GITHUB='__GITHUB__' HF_TOKEN='__HF_TOKEN__'
+export GH_TOKEN='__GH_TOKEN__' HF_TOKEN='__HF_TOKEN__'
 mkdir -p /workspace && cd /workspace
 
 # Clone with LFS smudge skipped -- full LFS pull would fetch every old
@@ -79,7 +79,7 @@ mkdir -p /workspace && cd /workspace
 # which the trainer fetches on its own when --resume is requested.
 echo "── cloning __BRANCH__ ──"
 GIT_LFS_SKIP_SMUDGE=1 git clone --branch '__BRANCH__' --single-branch \\
-    "https://x-access-token:${GITHUB}@github.com/__REPO_SLUG__.git" brian
+    "https://x-access-token:${GH_TOKEN}@github.com/__REPO_SLUG__.git" brian
 cd brian
 
 echo "── bootstrap (pip deps + targeted LFS pull) ──"
@@ -163,9 +163,9 @@ done
 if ! git diff --cached --quiet 2>/dev/null; then
     git commit -m "chkpt(dsl): final push @ $(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
         >/dev/null 2>&1 || echo "[onstart] commit failed"
-    PUSH_URL="https://x-access-token:${GITHUB}@github.com/__REPO_SLUG__.git"
+    PUSH_URL="https://x-access-token:${GH_TOKEN}@github.com/__REPO_SLUG__.git"
     timeout 600 git push "$PUSH_URL" "HEAD:__BRANCH__" 2>&1 \\
-        | sed "s#${GITHUB}#***#g" \\
+        | sed "s#${GH_TOKEN}#***#g" \\
         || echo "[onstart] checkpoint push failed (will not block destroy)"
 else
     echo "[onstart] no new checkpoints to commit"
@@ -279,14 +279,14 @@ class VastConnector(BaseConnector):
 
         Substitutes locally-expanded variables from *env* into the
         ``_ONSTART_TEMPLATE``.  Container-side variables ($BOOT_TIMESTAMP,
-        ${GITHUB}, $(date …), …) appear literally — Python str.replace()
+        ${GH_TOKEN}, $(date …), …) appear literally — Python str.replace()
         does not interpret $ characters.
         """
         repo_url = env.get("REPO_URL") or "https://github.com/269652/BRIAN.git"
         repo_slug = repo_url.removeprefix("https://github.com/").removesuffix(".git")
 
         subs = {
-            "__GITHUB__":       env.get("GITHUB", ""),
+            "__GH_TOKEN__":     env.get("GH_TOKEN", ""),
             "__HF_TOKEN__":     env.get("HF_TOKEN", ""),
             "__BRANCH__":       env.get("BRANCH", "master"),
             "__REPO_SLUG__":    repo_slug,

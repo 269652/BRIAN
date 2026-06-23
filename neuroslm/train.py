@@ -262,7 +262,7 @@ def push_checkpoint_to_lfs(ckpt_path: str, repo_root: str | None = None):
 
         # Prefer credential store (written by Colab cell 2); fall back to URL injection
         creds_file = os.path.expanduser("~/.git-credentials")
-        token = (os.environ.get('GITHUB') or os.environ.get('GITHUB_TOKEN', '')).strip()
+        token = (os.environ.get('GH_TOKEN') or os.environ.get('GITHUB') or os.environ.get('GITHUB_TOKEN', '')).strip()
         if token and not os.path.exists(creds_file):
             import re
             result = subprocess.run(["git", "remote", "get-url", "origin"],

@@ -23,13 +23,13 @@ from pathlib import Path
 
 env_path = Path(".env")
 for line in env_path.read_text().splitlines():
-    if line.startswith(("VAST_AI=", "GITHUB_PAT=", "VAST_API_KEY=", "GITHUB=")):
+    if line.startswith(("VAST_API_KEY=", "VAST_AI=", "GH_TOKEN=", "GITHUB_PAT=", "GITHUB=")):
         k, _, v = line.partition("=")
         os.environ.setdefault(k.strip(), v.strip())
 
 VAST_API_KEY = os.environ.get("VAST_API_KEY") or os.environ.get("VAST_AI")
-GITHUB = os.environ.get("GITHUB") or os.environ.get("GITHUB_PAT")
-assert VAST_API_KEY and GITHUB, "missing VAST_API_KEY or GITHUB in env"
+GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB") or os.environ.get("GITHUB_PAT")
+assert VAST_API_KEY and GH_TOKEN, "missing VAST_API_KEY or GH_TOKEN in env"
 
 
 def _pick_default_ckpt() -> str:
@@ -58,7 +58,7 @@ BATCH_SIZE = 4
 
 ONSTART = f"""set -e
 export DEBIAN_FRONTEND=noninteractive
-export GITHUB='{GITHUB}' HF_TOKEN='' VAST_API_KEY='{VAST_API_KEY}'
+export GH_TOKEN='{GH_TOKEN}' HF_TOKEN='' VAST_API_KEY='{VAST_API_KEY}'
 date -u +"ood-eval boot @ %Y-%m-%dT%H:%M:%SZ"
 
 (command -v git >/dev/null 2>&1 && command -v git-lfs >/dev/null 2>&1) \\
@@ -68,7 +68,7 @@ git lfs install --skip-smudge
 mkdir -p /workspace && cd /workspace
 echo "── cloning {BRANCH} ──"
 GIT_LFS_SKIP_SMUDGE=1 git clone --branch '{BRANCH}' --single-branch \\
-    "https://x-access-token:${{GITHUB}}@github.com/{REPO_SLUG}.git" brian
+    "https://x-access-token:${{GH_TOKEN}}@github.com/{REPO_SLUG}.git" brian
 cd brian
 echo "── pulling LFS object {CKPT} ──"
 git lfs pull --include='{CKPT}'
@@ -89,7 +89,7 @@ git config user.email "ood-eval@vast.local"
 git config user.name "ood-eval-bot"
 git add "{OUTPUT_FILE}" "{OUTPUT_FILE}.log" 2>/dev/null || true
 git commit -m "ood eval ({ROLE_TAG}) on {BRANCH}" 2>/dev/null || echo "nothing to commit"
-PUSH_URL="https://x-access-token:${{GITHUB}}@github.com/{REPO_SLUG}.git"
+PUSH_URL="https://x-access-token:${{GH_TOKEN}}@github.com/{REPO_SLUG}.git"
 for i in 1 2 3 4 5; do
     if git -c credential.helper= push "${{PUSH_URL}}" {BRANCH} 2>&1 | grep -q "{BRANCH} -> {BRANCH}"; then
         echo "✓ pushed"; break
@@ -158,7 +158,7 @@ print(f"picked offer {offer_id} (${offers[0]['dph_total']}/hr, "
 
 # Create the instance
 print("creating instance...")
-env_arg = f"-e GITHUB={GITHUB} -e HF_TOKEN= -e VAST_API_KEY={VAST_API_KEY}"
+env_arg = f"-e GH_TOKEN={GH_TOKEN} -e HF_TOKEN= -e VAST_API_KEY={VAST_API_KEY}"
 vastai("create", "instance", str(offer_id),
        "--image", VAST_IMAGE,
        "--disk", "60",

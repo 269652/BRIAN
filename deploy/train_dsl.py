@@ -16,13 +16,13 @@ from pathlib import Path
 
 env_path = Path(".env")
 for line in env_path.read_text().splitlines():
-    if line.startswith(("VAST_AI=", "GITHUB_PAT=", "VAST_API_KEY=", "GITHUB=")):
+    if line.startswith(("VAST_API_KEY=", "VAST_AI=", "GH_TOKEN=", "GH_TOKEN_PAT=", "GH_TOKEN=")):
         k, _, v = line.partition("=")
         os.environ.setdefault(k.strip(), v.strip())
 
 VAST_API_KEY = os.environ.get("VAST_API_KEY") or os.environ.get("VAST_AI")
-GITHUB = os.environ.get("GITHUB") or os.environ.get("GITHUB_PAT")
-assert VAST_API_KEY and GITHUB
+GH_TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GH_TOKEN") or os.environ.get("GH_TOKEN_PAT")
+assert VAST_API_KEY and GH_TOKEN
 
 BRANCH = os.environ.get("BRANCH", "arch/rcc-p4-loss-clip")
 REPO_SLUG = "269652/BRIAN"
@@ -89,7 +89,7 @@ launch_cmd = ("torchrun --nproc_per_node=" + str(hw.num_gpus)
 
 ONSTART = f"""set -e
 export DEBIAN_FRONTEND=noninteractive
-export GITHUB='{GITHUB}' HF_TOKEN='' VAST_API_KEY='{VAST_API_KEY}'
+export GH_TOKEN='{GH_TOKEN}' HF_TOKEN='' VAST_API_KEY='{VAST_API_KEY}'
 {scale_env}
 export DIST_STRATEGY={hw.dist_strategy}
 export NUM_GPUS={hw.num_gpus}
@@ -110,7 +110,7 @@ git lfs install --skip-smudge
 mkdir -p /workspace && cd /workspace
 echo "── cloning {BRANCH} ──"
 GIT_LFS_SKIP_SMUDGE=1 git clone --branch '{BRANCH}' --single-branch \\
-    "https://x-access-token:${{GITHUB}}@github.com/{REPO_SLUG}.git" brian
+    "https://x-access-token:${{GH_TOKEN}}@github.com/{REPO_SLUG}.git" brian
 cd brian
 
 echo "── bootstrap (pip deps, SKIP_LFS_RESUME=1) ──"
@@ -147,8 +147,8 @@ done
 git add logs/vast/benchmarks/ood/ood_mid_*.json 2>/dev/null || true
 if ! git diff --cached --quiet 2>/dev/null; then
     git commit -m "chkpt+mid-ood: training run @ $(date -u +%Y-%m-%dT%H:%M:%SZ)" >/dev/null 2>&1 || true
-    PUSH_URL="https://x-access-token:${{GITHUB}}@github.com/{REPO_SLUG}.git"
-    timeout 600 git push "$PUSH_URL" "HEAD:{BRANCH}" 2>&1 | sed "s#${{GITHUB}}#***#g" || true
+    PUSH_URL="https://x-access-token:${{GH_TOKEN}}@github.com/{REPO_SLUG}.git"
+    timeout 600 git push "$PUSH_URL" "HEAD:{BRANCH}" 2>&1 | sed "s#${{GH_TOKEN}}#***#g" || true
 fi
 
 echo "── self-destroy ──"
@@ -201,7 +201,7 @@ o = offers[0]
 print(f"picked offer {o['id']} ({o['gpu_name']} x{o.get('num_gpus','?')}, ${o['dph_total']}/hr)")
 
 print("creating instance...")
-env_arg = f"-e GITHUB={GITHUB} -e HF_TOKEN= -e VAST_API_KEY={VAST_API_KEY}"
+env_arg = f"-e GH_TOKEN={GH_TOKEN} -e HF_TOKEN= -e VAST_API_KEY={VAST_API_KEY}"
 vastai("create", "instance", str(o["id"]),
        "--image", VAST_IMAGE,
        "--disk", str(disk_gib),

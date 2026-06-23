@@ -45,7 +45,7 @@
 #   REPO_DIR=/workspace/brian
 #   INSTANCE_ID=$(hostname)
 #   BRANCH=<current git branch>
-#   GITHUB=<PAT>          required for the push
+#   GH_TOKEN=<PAT>        required for the push
 #   REPO_SLUG=269652/BRIAN
 #
 # Failure modes:
@@ -79,7 +79,7 @@ TOTAL_STEPS="${TOTAL_STEPS:-${STEPS:-?}}"
 # (regression: deploy 40923107 clobbered 40921910 on instance 38569395).
 BOOT_TIMESTAMP="${BOOT_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
 
-: "${GITHUB:?log_pusher: GITHUB PAT must be exported}"
+: "${GH_TOKEN:?log_pusher: GH_TOKEN must be exported}"
 
 cd "$REPO_DIR" || { echo "[log_pusher] cannot cd to $REPO_DIR" >&2; exit 1; }
 
@@ -184,7 +184,7 @@ _compose_logfile() {
 git config user.email "vast-train@brian.local" >/dev/null 2>&1 || true
 git config user.name  "vast-train"             >/dev/null 2>&1 || true
 
-PUSH_URL="https://x-access-token:${GITHUB}@github.com/${REPO_SLUG}.git"
+PUSH_URL="https://x-access-token:${GH_TOKEN}@github.com/${REPO_SLUG}.git"
 
 # ── Observability markers (2026-06-15) ─────────────────────────────────
 # /workspace/log_pusher.log is invisible to ``brian logs`` (it goes to a
@@ -243,7 +243,7 @@ _safe_push() {
     local pull_out
     if ! pull_out="$(git pull --rebase --autostash \
                         "$PUSH_URL" "$BRANCH" 2>&1 \
-                        | sed -E "s#${GITHUB}#***#g")"; then
+                        | sed -E "s#${GH_TOKEN}#***#g")"; then
         echo "[log_pusher] git pull --rebase --autostash FAILED:"
         echo "$pull_out"
         _mark_fail "pull-rebase failed:\n$pull_out"
@@ -262,7 +262,7 @@ _safe_push() {
     # Step C: push — now guaranteed fast-forward.
     local push_out
     if push_out="$(git push "$PUSH_URL" "${BRANCH}:${BRANCH}" 2>&1 \
-                       | sed -E "s#${GITHUB}#***#g")"; then
+                       | sed -E "s#${GH_TOKEN}#***#g")"; then
         _mark_ok
         return 0
     fi

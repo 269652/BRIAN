@@ -289,14 +289,14 @@ def test_bootstrap_required_raises(clean_env):
 
 
 def test_bootstrap_aliases_routed_per_name(clean_env):
-    clean_env.setenv("GH_TOKEN", "from-alias")
+    clean_env.setenv("GITHUB", "from-alias")
     out = bootstrap_secrets(
-        ["GITHUB"],
-        aliases={"GITHUB": ["GITHUB_TOKEN", "GH_TOKEN"]},
+        ["GH_TOKEN"],
+        aliases={"GH_TOKEN": ["GITHUB_TOKEN", "GITHUB", "GITHUB_PAT"]},
         verbose=False,
     )
-    assert out["GITHUB"] == "from-alias"
-    assert os.environ.get("GITHUB") == "from-alias"
+    assert out["GH_TOKEN"] == "from-alias"
+    assert os.environ.get("GH_TOKEN") == "from-alias"
 
 
 # ── SH-14: detect_environment ──────────────────────────────────────

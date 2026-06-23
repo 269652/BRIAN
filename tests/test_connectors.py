@@ -748,7 +748,7 @@ class TestBuildOnstart:
     def _build(self, **env_overrides) -> str:
         from neuroslm.connectors.vast import VastConnector
         env = {
-            "GITHUB": "ghp_test_token",
+            "GH_TOKEN": "ghp_test_token",
             "HF_TOKEN": "hf_test_token",
             "BRANCH": "master",
             "REPO_URL": "https://github.com/testuser/BRIAN.git",
@@ -771,9 +771,9 @@ class TestBuildOnstart:
         return VastConnector._build_onstart(env)
 
     def test_S1_github_token_substituted(self):
-        script = self._build(GITHUB="ghp_abc123")
+        script = self._build(GH_TOKEN="ghp_abc123")
         assert "ghp_abc123" in script
-        assert "__GITHUB__" not in script
+        assert "__GH_TOKEN__" not in script
 
     def test_S2_hf_token_substituted(self):
         script = self._build(HF_TOKEN="hf_xyz789")
@@ -824,7 +824,7 @@ class TestBuildOnstart:
     def test_S10_default_repo_url_fallback(self):
         """When REPO_URL is absent, falls back to the hardcoded BRIAN.git URL."""
         from neuroslm.connectors.vast import VastConnector
-        env = {"GITHUB": "tok", "HF_TOKEN": "hf", "BRANCH": "master"}
+        env = {"GH_TOKEN": "tok", "HF_TOKEN": "hf", "BRANCH": "master"}
         script = VastConnector._build_onstart(env)
         assert "269652/BRIAN" in script
         assert "__REPO_SLUG__" not in script

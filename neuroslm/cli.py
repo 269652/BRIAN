@@ -1116,7 +1116,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         config.source_dna = dna_path
 
     # ── Load secrets from .env before the connector reads os.environ ──
-    # VastConnector._build_env() does os.environ.copy(), so GITHUB /
+    # VastConnector._build_env() does os.environ.copy(), so GH_TOKEN /
     # HF_TOKEN / VAST_API_KEY must be in os.environ at call time.
     # bootstrap_secrets() walks CWD upward for a .env file and writes
     # found values into os.environ — it is a no-op when values are
@@ -1124,9 +1124,9 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     try:
         from neuroslm.utils.secrets import bootstrap_secrets
         bootstrap_secrets(
-            ["GITHUB", "HF_TOKEN", "VAST_API_KEY"],
+            ["GH_TOKEN", "HF_TOKEN", "VAST_API_KEY"],
             aliases={
-                "GITHUB":       ["GITHUB_TOKEN", "GITHUB_PAT", "GH_TOKEN"],
+                "GH_TOKEN":     ["GITHUB_TOKEN", "GITHUB", "GITHUB_PAT"],
                 "VAST_API_KEY": ["VAST_AI", "VASTAI_API_KEY"],
             },
             verbose=False,
@@ -3508,13 +3508,13 @@ def cmd_push(args: argparse.Namespace) -> int:
         return 1
     pat = None
     for line in env_path.read_text().splitlines():
-        if line.startswith("GITHUB_PAT="):
+        if line.startswith("GH_TOKEN="):
             pat = line.split("=", 1)[1].strip()
             break
-        if line.startswith("GITHUB="):
+        if line.startswith("GITHUB_PAT=") or line.startswith("GITHUB="):
             pat = line.split("=", 1)[1].strip()
     if not pat:
-        print("no GITHUB_PAT found in .env")
+        print("no GH_TOKEN found in .env")
         return 1
     branch = subprocess.check_output(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -4694,6 +4694,73 @@ def _build_parser() -> argparse.ArgumentParser:
         help="skip the auto-refresh of .brian/best_run.ln before "
              "rendering (CI / tests where logs/ may be unstable).")
     sur.set_defaults(func=cmd_update_readme)
+
+    # ── help ──────────────────────────────────────────────────────────────────
+    from neuroslm.cli_help import cmd_help, cmd_tease, cmd_cite
+
+    shelp = sub.add_parser(
+        "help",
+        help="Browse docs and platform descriptions in the terminal.")
+    shelp.add_argument(
+        "topic", nargs="?", default=None,
+        help="Topic to display: a doc name (cli, dsl, ste, runs, findings, …) "
+             "or 'platforms'. Omit for the full topic index.")
+    shelp.set_defaults(func=cmd_help)
+
+    # ── tease ─────────────────────────────────────────────────────────────────
+    stease = sub.add_parser(
+        "tease",
+        help="Peek at ledgers and logs: runs, log, findings.")
+    stease_sub = stease.add_subparsers(dest="what", required=True)
+
+    stease_runs = stease_sub.add_parser(
+        "runs", help="Show N most-recent run ledger entries (docs/runs.md).")
+    stease_runs.add_argument(
+        "--n", type=int, default=5,
+        help="number of entries to show (default: 5)")
+    stease_runs.add_argument(
+        "--format", choices=["terminal", "md"], default="terminal",
+        help="output format: terminal table (default) or markdown")
+    stease_runs.set_defaults(func=cmd_tease)
+
+    stease_log = stease_sub.add_parser(
+        "log",
+        help="Tail N lines from a training log (defaults to best run).")
+    stease_log.add_argument(
+        "path", nargs="?", default=None,
+        help="path to log file (relative to repo root). "
+             "Omit to use .brian/best_run.ln.")
+    stease_log.add_argument(
+        "--tail", type=int, default=10,
+        help="number of lines to tail (default: 10)")
+    stease_log.add_argument(
+        "--best", action="store_true",
+        help="explicitly tail the best-run log (.brian/best_run.ln)")
+    stease_log.set_defaults(func=cmd_tease)
+
+    stease_findings = stease_sub.add_parser(
+        "findings",
+        help="Show N most-recent hypothesis entries from docs/findings.md.")
+    stease_findings.add_argument(
+        "--n", type=int, default=3,
+        help="number of entries to show (default: 3)")
+    stease_findings.set_defaults(func=cmd_tease)
+
+    # ── cite ──────────────────────────────────────────────────────────────────
+    scite = sub.add_parser(
+        "cite",
+        help="Format a citation for a run in the ledger (docs/runs.md).")
+    scite.add_argument(
+        "run_id", nargs="?", default=None,
+        help="run ID to cite (e.g. 20260615-175931). "
+             "Omit and use --list to browse.")
+    scite.add_argument(
+        "--list", action="store_true",
+        help="list all citable run IDs from docs/runs.md")
+    scite.add_argument(
+        "--format", choices=["md", "text"], default="md",
+        help="output format (default: md)")
+    scite.set_defaults(func=cmd_cite)
 
     return p
 

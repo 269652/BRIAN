@@ -2,7 +2,7 @@
 """Cross-platform secrets resolver for notebooks and local scripts.
 
 The first cell of every notebook (Colab, Kaggle, local Jupyter) keeps
-re-implementing the same try/except chain to fetch ``GITHUB`` and
+re-implementing the same try/except chain to fetch ``GH_TOKEN`` and
 ``HF_TOKEN``. When one of those branches silently fails — as it did on
 the 2026-06-17 Colab run where ``capture_output=True`` swallowed every
 ``git push`` error — you don't find out until an hour of compute is
@@ -29,13 +29,13 @@ demoted to "missing" without taking down the chain; pass
 Typical use at the top of a notebook::
 
     from neuroslm.utils.secrets import bootstrap_secrets
-    bootstrap_secrets(["GITHUB", "HF_TOKEN"])
+    bootstrap_secrets(["GH_TOKEN", "HF_TOKEN"])
     # → both values are now in os.environ; subprocesses inherit them.
 
 Or, for a single value with custom aliases::
 
     from neuroslm.utils.secrets import get_secret
-    tok = get_secret("GITHUB", aliases=("GITHUB_TOKEN", "GH_TOKEN"))
+    tok = get_secret("GH_TOKEN", aliases=("GITHUB_TOKEN", "GITHUB_PAT"))
 
 To register a new backend (e.g. an internal vault)::
 
@@ -218,7 +218,7 @@ def get_secret(
         name: Primary key to look up in every backend.
         aliases: Alternative names tried *within each backend* before
             moving to the next backend. Lets you handle the common
-            ``GITHUB`` / ``GITHUB_TOKEN`` / ``GH_TOKEN`` triad without
+            ``GH_TOKEN`` / ``GITHUB_TOKEN`` / ``GITHUB_PAT`` triad without
             spamming three calls.
         default: Returned if no backend has the secret. ``None`` by
             default so callers can branch with ``if tok is None``.
@@ -247,7 +247,7 @@ def get_secret(
                     os.environ[name] = val
                     # Also mirror under the alias that hit, so downstream
                     # code looking up GITHUB_TOKEN finds it after we
-                    # resolved via GITHUB (or vice-versa).
+                    # resolved via GH_TOKEN (or vice-versa).
                     if key != name:
                         os.environ.setdefault(key, val)
                 if verbose:
@@ -272,12 +272,12 @@ def bootstrap_secrets(
 
     This is the one-liner you put at the top of a notebook::
 
-        bootstrap_secrets(["GITHUB", "HF_TOKEN"])
+        bootstrap_secrets(["GH_TOKEN", "HF_TOKEN"])
 
     Args:
         names: Iterable of primary secret names to resolve.
         aliases: Optional ``{name: [alias, …]}`` map. E.g.
-            ``{"GITHUB": ["GITHUB_TOKEN", "GH_TOKEN"]}``.
+            ``{"GH_TOKEN": ["GITHUB_TOKEN", "GITHUB_PAT"]}``.
         verbose: Print a one-line summary per secret (``set (12 chars)``
             or ``missing``). Set ``False`` for quiet operation.
         required: Names that MUST resolve; raises :class:`RuntimeError`

@@ -85,7 +85,7 @@ def deploy_module():
 
     # Stub env vars so the assert at top passes.
     os.environ.setdefault("VAST_API_KEY", "test-key")
-    os.environ.setdefault("GITHUB", "test-pat")
+    os.environ.setdefault("GH_TOKEN", "test-pat")
     os.environ.setdefault("ARCH", "master")
 
     spec = importlib.util.spec_from_loader("_deploy_train_helpers", loader=None)

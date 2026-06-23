@@ -4,19 +4,19 @@ chains in colab_run.ipynb to use neuroslm.utils.secrets.get_secret.
 
 Pattern matched (5 occurrences as of 2026-06-18):
 
-    _tok = os.environ.get("GITHUB", "").strip()
+    _tok = os.environ.get("GH_TOKEN", "").strip()
     if not _tok:
         try:
             from google.colab import userdata as _ud
-            _tok = (_ud.get("GITHUB") or "").strip()
+            _tok = (_ud.get("GH_TOKEN") or "").strip()
         except Exception: pass
 
 Replaced with:
 
     from neuroslm.utils.secrets import get_secret
-    _tok = get_secret("GITHUB", aliases=("GITHUB_TOKEN", "GH_TOKEN")) or ""
+    _tok = get_secret("GH_TOKEN", aliases=("GITHUB_TOKEN", "GITHUB_PAT")) or ""
 
-Variable name (``_tok`` vs ``_token``) and key name (``GITHUB`` vs
+Variable name (``_tok`` vs ``_token``) and key name (``GH_TOKEN`` vs
 ``HF_TOKEN``) are preserved by capturing them in the regex.
 
 Idempotent: re-running has no effect because the replacement no longer
@@ -35,7 +35,7 @@ NB = Path(r"c:\Users\morrossl\Documents\Private\SLM\colab_run.ipynb")
 # The literal try/except chain we want to collapse.
 # Captures:
 #   1. variable name (\w+, e.g. _tok / _token / _hf_tok)
-#   2. secret key  ("GITHUB" / "HF_TOKEN" / etc.)
+#   2. secret key  ("GH_TOKEN" / "HF_TOKEN" / etc.)
 PATTERN = re.compile(
     r'(\w+) = os\.environ\.get\("([^"]+)", ""\)\.strip\(\)\n'
     r'if not \1:\n'
@@ -51,9 +51,9 @@ PATTERN = re.compile(
 #     _token = ""
 #     try:
 #         from google.colab import userdata as _ud
-#         _token = (_ud.get("GITHUB") or "").strip()
+#         _token = (_ud.get("GH_TOKEN") or "").strip()
 #     except Exception:
-#         _token = os.environ.get("GITHUB", "").strip()
+#         _token = os.environ.get("GH_TOKEN", "").strip()
 PATTERN_INVERTED = re.compile(
     r'(\w+) = ""\n'
     r'try:\n'
@@ -68,13 +68,13 @@ PATTERN_INVERTED = re.compile(
 # We hoist those side effects out so they ALWAYS run when the token
 # resolves (regardless of which backend supplied it).
 #
-#     _tok = os.environ.get("GITHUB", "").strip()
+#     _tok = os.environ.get("GH_TOKEN", "").strip()
 #     if not _tok:
 #         try:
 #             from google.colab import userdata as _ud
-#             _tok = (_ud.get("GITHUB") or "").strip()
+#             _tok = (_ud.get("GH_TOKEN") or "").strip()
 #             if _tok:
-#                 os.environ["GITHUB"] = _tok
+#                 os.environ["GH_TOKEN"] = _tok
 #                 with open(os.path.expanduser("~/.git-credentials"), "w") as _f:
 #                     _f.write(f"https://{_tok}@github.com\n")
 #                 subprocess.run(["git", "config", "--global", "credential.helper", "store"], check=False)
@@ -96,7 +96,7 @@ PATTERN_WITH_SIDE_EFFECTS = re.compile(
 
 # Per-secret alias map: which alternate env-var names to try.
 ALIASES = {
-    "GITHUB":   ('"GITHUB_TOKEN", "GH_TOKEN"',),
+    "GH_TOKEN":   ('"GITHUB_TOKEN", "GITHUB_PAT"',),
     "HF_TOKEN": ('"HUGGINGFACE_TOKEN", "HUGGINGFACEHUB_API_TOKEN"',),
 }
 

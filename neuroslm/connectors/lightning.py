@@ -529,7 +529,7 @@ class LightningConnector(BaseConnector):
         dot_env_lines = "".join(
             f"{k}={v}\n"
             for k, v in remote_env.items()
-            if v and k in ("HF_TOKEN", "GITHUB_PAT", "GITHUB", "GITHUB_TOKEN",
+            if v and k in ("HF_TOKEN", "GH_TOKEN", "GITHUB", "GITHUB_PAT", "GITHUB_TOKEN",
                            "HF_REPO_ID")
         )
         if dot_env_lines:
@@ -933,16 +933,19 @@ class LightningConnector(BaseConnector):
             "PYTHONIOENCODING": "utf-8",
         }
         # Forward secrets that the training loop needs for pushes.
-        for k in ("HF_TOKEN", "GITHUB_PAT", "HF_REPO_ID"):
+        for k in ("HF_TOKEN", "HF_REPO_ID"):
             v = os.environ.get(k)
             if v:
                 env[k] = v
-        # checkpoint_push.py reads GITHUB or GITHUB_TOKEN for Git log pushes;
-        # forward GITHUB_PAT under both names so it is found regardless.
-        github_pat = os.environ.get("GITHUB_PAT", "").strip()
-        if github_pat:
-            env.setdefault("GITHUB", github_pat)
-            env.setdefault("GITHUB_TOKEN", github_pat)
+        # checkpoint_push.py reads GH_TOKEN (canonical) for Git log pushes;
+        # also accept legacy names so old .env files still work.
+        gh_token = (
+            os.environ.get("GH_TOKEN") or
+            os.environ.get("GITHUB") or
+            os.environ.get("GITHUB_PAT", "")
+        ).strip()
+        if gh_token:
+            env.setdefault("GH_TOKEN", gh_token)
         # Forward caller-supplied extras (minus Lightning-internal keys
         # that don't belong on the remote side).
         skip = {"LIGHTNING_MACHINE", "LIGHTNING_TEAMSPACE",

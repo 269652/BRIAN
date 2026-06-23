@@ -34,9 +34,9 @@ ENV_FILE="${ENV_FILE:-$HERE/.env}"
 [ -f "$ENV_FILE" ] && { set -a; . "$ENV_FILE"; set +a; }
 
 VAST_API_KEY="${VAST_API_KEY:-${VAST_AI:-}}"
-GITHUB="${GITHUB:-${GITHUB_PAT:-${GH_TOKEN:-}}}"
+GH_TOKEN="${GH_TOKEN:-${GITHUB:-${GITHUB_PAT:-}}}"
 : "${VAST_API_KEY:?set VAST_API_KEY/VAST_AI in .env}"
-: "${GITHUB:?set GITHUB/GITHUB_PAT in .env}"
+: "${GH_TOKEN:?set GH_TOKEN in .env}"
 
 : "${BRANCH:?BRANCH env required (the git branch with the trained checkpoint)}"
 CKPT="${CKPT:-lfs_checkpoints/neuroslm_large_107M_adamw_mix_best.pt}"
@@ -106,13 +106,13 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 (command -v git >/dev/null 2>&1 || apt-get update -y && apt-get install -y git git-lfs) || true
 git lfs install || true
-export GITHUB='${GITHUB}' HF_TOKEN='${HF_TOKEN:-}'
+export GH_TOKEN='${GH_TOKEN}' HF_TOKEN='${HF_TOKEN:-}'
 cd /workspace
 # Skip LFS smudge on clone — otherwise git auto-pulls EVERY tracked LFS file
 # (gigabytes of checkpoints) over a slow link before we even reach our
 # specific eval target. GIT_LFS_SKIP_SMUDGE leaves them as pointer files
 # until we explicitly pull only what we need.
-GIT_LFS_SKIP_SMUDGE=1 git clone https://x-access-token:\${GITHUB}@github.com/${REPO_SLUG}.git brian
+GIT_LFS_SKIP_SMUDGE=1 git clone https://x-access-token:\${GH_TOKEN}@github.com/${REPO_SLUG}.git brian
 cd brian
 GIT_LFS_SKIP_SMUDGE=1 git checkout ${BRANCH}
 echo "── pulling ONLY LFS object: ${CKPT} ──"
@@ -134,7 +134,7 @@ git config user.email "ood-eval@vast.local"
 git config user.name "ood-eval-bot"
 git add "${OUTPUT_FILE}" || true
 git commit -m "ood eval (${ROLE_TAG}) on ${BRANCH}" || echo "nothing to commit"
-PUSH_URL="https://x-access-token:\${GITHUB}@github.com/${REPO_SLUG}.git"
+PUSH_URL="https://x-access-token:\${GH_TOKEN}@github.com/${REPO_SLUG}.git"
 # Push retries against the race with concurrent training-instance LFS pushes.
 for i in 1 2 3 4 5; do
   if git -c credential.helper= push "\${PUSH_URL}" ${BRANCH} 2>&1 | tee /tmp/push.log | grep -q "${BRANCH} -> ${BRANCH}"; then
@@ -208,7 +208,7 @@ for o in offers:
 echo "── picked offer: $OFFER_ID ──"
 
 # ── Create the instance ──────────────────────────────────────────────────
-ENV_ARG="-e GITHUB=${GITHUB} -e HF_TOKEN=${HF_TOKEN:-} -e VAST_API_KEY=${VAST_API_KEY}"
+ENV_ARG="-e GH_TOKEN=${GH_TOKEN} -e HF_TOKEN=${HF_TOKEN:-} -e VAST_API_KEY=${VAST_API_KEY}"
 echo "── creating ood-eval instance (label neuroslm-ood-${ROLE_TAG}) ──"
 # No --ssh (same fix as vast_train.sh): vast.ai /.launch spins on
 # missing ssh and onstart never runs. We don't need ssh here.

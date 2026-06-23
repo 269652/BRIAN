@@ -16,7 +16,7 @@
 #   bash scripts/vast_train.sh <preset> <steps>     # +steps override
 #
 # Required in .env (or environment):
-#   GITHUB              - GitHub PAT with repo+lfs write access
+#   GH_TOKEN            - GitHub PAT with repo+lfs write access
 #   VAST_API_KEY        - vast.ai API key
 #   HF_TOKEN            - optional, for HuggingFace dataset downloads
 #
@@ -49,9 +49,9 @@ ENV_FILE="$HERE/.env"
 
 # ─── Required secrets ────────────────────────────────────────────────────
 VAST_API_KEY="${VAST_API_KEY:-${VAST_AI:-}}"
-GITHUB="${GITHUB:-${GITHUB_PAT:-${GH_TOKEN:-}}}"
+GH_TOKEN="${GH_TOKEN:-${GITHUB:-${GITHUB_PAT:-}}}"
 : "${VAST_API_KEY:?✗ set VAST_API_KEY in .env}"
-: "${GITHUB:?✗ set GITHUB (PAT with repo write) in .env}"
+: "${GH_TOKEN:?✗ set GH_TOKEN in .env}"
 
 # ─── Configuration (positional args > env > default) ─────────────────────
 PRESET="${1:-${PRESET:-rcc_bowtie_30m_p1}}"
@@ -264,9 +264,9 @@ PYTHONUNBUFFERED=1 timeout 120 "$PYTHON" -u -c \
     --image "$VAST_IMAGE" \
     --disk "$VAST_DISK" \
     --label "neuroslm-full" \
-    --env "-e GITHUB=$GITHUB -e HF_TOKEN=${HF_TOKEN:-} -e VAST_API_KEY=$VAST_API_KEY" \
+    --env "-e GH_TOKEN=$GH_TOKEN -e HF_TOKEN=${HF_TOKEN:-} -e VAST_API_KEY=$VAST_API_KEY" \
     --onstart-cmd "$ONSTART" 2>&1 \
-    | sed -E "s#${GITHUB}#***#g" \
+    | sed -E "s#${GH_TOKEN}#***#g" \
     | tee "$_CREATE_TMP"
 _CREATE_RC=${PIPESTATUS[0]}
 CREATE_OUT="$(cat "$_CREATE_TMP")"
@@ -299,12 +299,12 @@ if m:
 
 if [ -z "$INST_ID" ]; then
   echo "✗ instance create FAILED (no contract returned):" >&2
-  printf '%s\n' "$CREATE_OUT" | sed -E "s#${GITHUB}#***#g" | head -10 >&2
+  printf '%s\n' "$CREATE_OUT" | sed -E "s#${GH_TOKEN}#***#g" | head -10 >&2
   exit 1
 fi
 
 # Mask the PAT in case the dict was echoed earlier
-printf '%s\n' "$CREATE_OUT" | sed -E "s#${GITHUB}#***#g" | grep -E "success|new_contract" | head -2
+printf '%s\n' "$CREATE_OUT" | sed -E "s#${GH_TOKEN}#***#g" | grep -E "success|new_contract" | head -2
 
 # ─── Done — print follow-up commands ─────────────────────────────────────
 cat <<DONE
