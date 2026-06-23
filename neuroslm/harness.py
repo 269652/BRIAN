@@ -1619,17 +1619,15 @@ class BRIANHarness(nn.Module):
         cortex_logits = self._last_pre_fusion_cortex_logits
 
         # ── Per-pathway CE for EMA driving signal ──
-        # Both are honest cross-entropies on the same targets, computed
-        # in float32 for numerical stability.
+        # Honest cross-entropies on the same targets. Chunked over tokens so
+        # the internal fp32 softmax is bounded to (chunk, V) instead of a full
+        # (B*T, V) = 6.14 GiB spike per pathway (F.cross_entropy upcasts bf16
+        # internally regardless of input dtype, so no explicit .float() needed).
         with torch.no_grad():
-            B, T, V = lm_logits.shape
-            flat_t = targets.reshape(-1)
-            ce_lm = F.cross_entropy(
-                lm_logits.detach().float().reshape(-1, V), flat_t
-            ).item()
-            ce_cx = F.cross_entropy(
-                cortex_logits.detach().float().reshape(-1, V), flat_t
-            ).item()
+            ce_lm = self._chunked_flat_ce(
+                lm_logits.detach(), targets, reduction="mean").item()
+            ce_cx = self._chunked_flat_ce(
+                cortex_logits.detach(), targets, reduction="mean").item()
         # EMA bootstrap: first observation seeds the EMA so we don't
         # have a "warming up from 0" artefact that lets λ saturate
         # immediately on step 1.
@@ -1915,6 +1913,33 @@ class BRIANHarness(nn.Module):
 
     # ── Forward ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _fuse_logits(
+        lm_logits: torch.Tensor,
+        cortex_logits: torch.Tensor,
+        alpha_eff: torch.Tensor,
+        mode: str,
+    ) -> torch.Tensor:
+        """Combine trunk + cortex logits WITHOUT promoting the (B,T,V)
+        tensor to fp32.
+
+        ``alpha_eff`` is ``sigmoid(self.cortex_mix_logit ...)`` — a scalar
+        derived from an fp32 ``nn.Parameter``. Under bf16 autocast the trunk
+        ``lm_logits`` are bf16 (3.07 GiB at B=16 T=2048 V=50257); the naive
+        ``alpha_eff * lm_logits`` type-promotes them to fp32 (6.14 GiB),
+        which is the exact OOM site at the fusion add. Casting ``alpha_eff``
+        to the logit dtype first keeps the whole expression in bf16.
+
+        ``cortex_logits`` is assumed already in ``lm_logits.dtype`` (the
+        caller casts it). ``mode`` ∈ {"additive_correction", "logits_mixture"}.
+        """
+        a = alpha_eff.to(lm_logits.dtype) if torch.is_tensor(alpha_eff) else alpha_eff
+        if mode == "additive_correction":
+            # Trunk learns the additive DELTA over detached expert priors.
+            return cortex_logits.detach() + a * lm_logits
+        # Default logits_mixture: (1-α)·trunk + α·cortex.
+        return (1.0 - a) * lm_logits + a * cortex_logits
+
     def forward(self, ids: torch.Tensor,
                 nt_levels: Optional[Dict[str, float]] = None) -> torch.Tensor:
         """`ids` is `(batch, seq_len)`; returns logits `(batch, seq_len, vocab)`.
@@ -2113,24 +2138,26 @@ class BRIANHarness(nn.Module):
                 if alpha_eff.dim() == 2:
                     alpha_eff = alpha_eff.unsqueeze(-1)
 
-                # P1: fusion mode branch.
+                # P1: fusion mode branch. ``_fuse_logits`` casts alpha_eff to
+                # the logit dtype FIRST so the (B,T,V) tensor never promotes
+                # to fp32 (the 6.14 GiB OOM at the fusion add).
                 _fusion_mode = getattr(cfg_mc, "fusion_mode", "logits_mixture")
-                if _fusion_mode == "additive_correction":
-                    # Trunk learns additive correction over detached expert predictions.
-                    # Gradient flows through trunk logits only; cortex is frozen prior.
-                    logits = cortex_logits.detach() + alpha_eff * logits
-                else:
-                    # Default logits_mixture: (1-α)·trunk + α·cortex.
-                    logits = (1.0 - alpha_eff) * logits + alpha_eff * cortex_logits
+                logits = self._fuse_logits(
+                    logits, cortex_logits, alpha_eff, _fusion_mode,
+                )
             else:
                 # Fusion path inactive — clear any stale stashes so a
                 # later distillation lookup can't pick them up across a
                 # config change.
                 self._last_pre_fusion_lm_logits = None
                 self._last_pre_fusion_cortex_logits = None
-        # Return float32 logits regardless of autocast dtype, so loss math
-        # downstream is numerically stable.
-        return logits.float()
+        # Return logits in their compute dtype (bf16 under autocast, fp32 in
+        # eval). A blanket ``.float()`` here forces the full (B,T,V) tensor to
+        # fp32 (6.14 GiB), doubling resident memory through the whole loss.
+        # The loss path (`_compute_loss_from_logits`, `_chunked_flat_ce`)
+        # chunks its CE and upcasts per (chunk, V) slice, so fp32 stability is
+        # preserved without ever materialising a full fp32 logit tensor.
+        return logits
 
     def _pick_sink_output(self, outputs: Dict[str, torch.Tensor]) -> torch.Tensor:
         """Return the tensor that goes to the LM head.
@@ -2827,10 +2854,10 @@ class BRIANHarness(nn.Module):
             and getattr(self.reg_controller.freq_balance, "_fitted", False)
         )
         if use_freq_balance:
-            B, T, V = logits.shape
-            flat_l = logits.reshape(-1, V)
             flat_t = targets.reshape(-1)
-            per_tok = F.cross_entropy(flat_l, flat_t, reduction="none")
+            # Chunked per-token CE (grad-carrying) — avoids a full (B*T, V)
+            # fp32 forward+backward spike when freq-balance owns the LM loss.
+            per_tok = self._chunked_flat_ce(logits, targets, reduction="none")
             loss_lm = self.reg_controller.freq_balance(per_tok, flat_t)
         else:
             loss_lm = self._compute_loss_from_logits(logits, targets)
@@ -2877,13 +2904,13 @@ class BRIANHarness(nn.Module):
                 and self.language_model is not None):
             h_last = getattr(self.language_model, "_last_hidden", None)
             if h_last is not None:
-                # Per-sample CE for DAR's reweighting path. Computed
-                # cheaply here from the already-materialised logits.
+                # Per-sample CE for DAR's reweighting path. Chunked over
+                # tokens so it does not spike a full (B*T, V) fp32 softmax
+                # alongside the resident logits.
                 with torch.no_grad():
                     B = logits.shape[0]
-                    flat_l = logits.reshape(-1, logits.shape[-1])
-                    flat_t = targets.reshape(-1)
-                    per_tok = F.cross_entropy(flat_l, flat_t, reduction="none")
+                    per_tok = self._chunked_flat_ce(
+                        logits, targets, reduction="none")
                     per_sample_ce = per_tok.reshape(B, -1).mean(dim=1)
                 # Optional domain labels (DAR is no-op without them).
                 domain_labels = None
@@ -3212,6 +3239,49 @@ class BRIANHarness(nn.Module):
                 key = k if k.startswith("gene_") else f"gene_{k}"
                 self._metrics[key] = v
         return out["phi_loss"]
+
+    @staticmethod
+    def _chunked_flat_ce(
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        *,
+        reduction: str = "mean",
+        chunk: int = 1024,
+    ) -> torch.Tensor:
+        """Cross-entropy over the flattened token dim without ever building a
+        full ``(B*T, V)`` fp32 softmax/grad tensor.
+
+        ``F.cross_entropy`` upcasts bf16 inputs to fp32 internally; doing it
+        on the whole ``(B*T, V)`` tensor allocates 6.14 GiB at B=16 T=2048
+        V=50257. Slicing the token dim into ``chunk``-sized pieces bounds that
+        fp32 spike to ``(chunk, V)``. Used for the KL per-pathway CE driving
+        signal and the DAR per-sample CE — both previously full-tensor spikes.
+
+        ``reduction`` ∈ {"mean", "sum", "none"}. "none" returns the per-token
+        loss in flat ``(B*T,)`` order.
+        """
+        V = logits.shape[-1]
+        flat = logits.reshape(-1, V)
+        tgt = targets.reshape(-1)
+        N = flat.shape[0]
+        if N <= chunk:
+            return F.cross_entropy(flat, tgt, reduction=reduction)
+        if reduction == "none":
+            parts = []
+            for s in range(0, N, chunk):
+                e = min(s + chunk, N)
+                parts.append(F.cross_entropy(
+                    flat[s:e], tgt[s:e], reduction="none"))
+            return torch.cat(parts, dim=0)
+        # mean / sum: accumulate a scalar so no full per-token tensor lives.
+        total = flat.new_zeros((), dtype=torch.float32)
+        for s in range(0, N, chunk):
+            e = min(s + chunk, N)
+            total = total + F.cross_entropy(
+                flat[s:e], tgt[s:e], reduction="sum").float()
+        if reduction == "sum":
+            return total
+        return total / N
 
     def _compute_loss_from_logits(self, logits: torch.Tensor,
                                   targets: torch.Tensor) -> torch.Tensor:
