@@ -1,0 +1,96 @@
+# -*- coding: utf-8 -*-
+# Fisher-Rao Retrieval — precision-weighted similarity metric for retrieval.
+#
+# Implementation: neuroslm/thsd/engine.py (CellularSheaf + Fisher metric)
+# Config:         neuroslm/dsl/thsd_ir.py
+# Docs:           docs/mechanics/fisher_rao_retrieval.md
+
+export mechanic fisher_rao_retrieval {
+    category: "training_dynamics"
+    summary:  "Fisher-Rao information metric on the stalk of each brain-region simplex; precision-weighted inner product replaces Euclidean similarity"
+
+    equation: """
+        # Standard cosine/dot similarity (what this replaces):
+        sim(h_a, h_b) = h_a · h_b / (‖h_a‖ · ‖h_b‖)
+
+        # Fisher-Rao information metric (on a statistical manifold):
+        # Given a parametrised family p(x; θ), the Fisher information matrix:
+        F(θ)_{ij} = E_x [ ∂ log p(x;θ)/∂θ_i · ∂ log p(x;θ)/∂θ_j ]
+
+        # For a Gaussian family q(z|h) = N(h, Σ) with learned precision:
+        Σ^{-1}(h) = diag(softplus(W_prec · h))    (diagonal precision matrix)
+
+        # Fisher-Rao inner product:
+        ⟨h_a, h_b⟩_F = h_a^T · Σ^{-1}(h) · h_b   (h = mean field; context-dependent)
+
+        # Precision-weighted similarity:
+        sim_FR(h_a, h_b) = ⟨h_a, h_b⟩_F / (√⟨h_a,h_a⟩_F · √⟨h_b,h_b⟩_F)
+
+        # Sheaf stalk geometry (THSD):
+        # Each brain-region simplex σ has a stalk with Fisher information metric
+        # The coboundary operator ∂ maps stalks to edges; consistency requires
+        # the Fisher metric to be compatible with the sheaf morphisms
+        F_restriction : F_σ → F_τ   for each face τ ≤ σ
+    """
+
+    impl:    "neuroslm.thsd.engine.CellularSheaf"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        precision_rank: {
+            default: -1,
+            type: "int",
+            doc: "Rank of learned precision; -1 = diagonal (d separate scalars), 0 = scalar (one scalar), k = rank-k"
+        }
+        precision_init: {
+            default: 1.0,
+            type: "float",
+            doc: "Initial precision value (diagonal elements); 1.0 = Euclidean metric at init"
+        }
+    }
+
+    properties: {
+        geometry_aware:     "Accounts for the curvature of the representation manifold"
+        information_geometry: "Derived from the Fisher information of q(z|h) — theoretically grounded in Rao 1945"
+        context_dependent:  "Precision matrix Σ^{-1}(h) depends on the representation; different contexts have different metrics"
+        euclidean_at_init:  "With precision_init=1 and diagonal rank: reduces to Euclidean inner product at step 0"
+        sheaf_compatible:   "Provides the metric structure for THSD sheaf stalks"
+    }
+
+    when_to_use: """
+        Use in the THSD (Topological Hyper-Sheaf Dynamics) framework where each
+        brain region's stalk requires a Riemannian metric for consistency checking.
+
+        The Fisher-Rao metric accounts for the heterogeneous precision of different
+        representation dimensions. High-precision dimensions matter more in similarity
+        computation; low-precision dimensions are down-weighted.
+
+        In retrieval contexts (e.g. episodic memory, HRR, kNN): Fisher-Rao similarity
+        is more appropriate than cosine similarity when the representation space is
+        not isotropic (different dimensions have different signal-to-noise ratios).
+
+        Pairs with: episodic_memory (retrieval metric), kjpla_phase_lattice (the
+        Kuramoto phases define a natural Riemannian metric on the phase torus).
+    """
+
+    not_for: """
+        • Implementations where full d×d precision matrix is needed: diagonal rank
+          only captures axis-aligned anisotropy
+        • Very early training (step < 1000): precision matrix is unstable; use
+          Euclidean similarity until representations stabilise
+    """
+
+    empirical_evidence: {
+        source: "Rao, C. R. (1945) Information and accuracy attainable in the estimation of statistical parameters"
+        result: "Fisher-Rao metric is the unique intrinsic metric on the statistical manifold (Cencov 1982)"
+        internal: "Used as the stalk metric in THSD; formal properties verified in formal_framework.md §6"
+    }
+
+    references: [
+        "Rao, C. R. (1945) Information and accuracy attainable. Bull. Calcutta Math. Soc. 37: 81-91",
+        "Amari, S. (1985) Differential-Geometrical Methods in Statistics. Springer",
+        "Cencov, N. (1982) Statistical Decision Rules and Optimal Inference. AMS",
+        "Internal: docs/formal_framework.md §6 (Fisher information metric on sheaf stalks)"
+    ]
+}

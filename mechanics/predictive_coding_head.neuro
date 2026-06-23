@@ -1,0 +1,115 @@
+# -*- coding: utf-8 -*-
+# Predictive Coding Residual — PC reentry between layer states.
+#
+# Implementation: neuroslm/modules/predictive_coding_residual.py
+# Equation:       lib/features/predictive_coding_residual.neuro
+# Config:         neuroslm/dsl/training_config.py (pc_reentry_weight)
+# Tests:          tests/ (predictive_coding_residual)
+# Docs:           docs/mechanics/predictive_coding_head.md
+
+export mechanic predictive_coding_head {
+    category: "training_dynamics"
+    summary:  "PC reentry: motor hidden state predicts sensory hidden state; prediction error adds to loss; NT-gated gradient flows through both populations"
+
+    equation: """
+        # Two paired populations from the bowtie architecture:
+        h_sensory ∈ ℝ^{B, T, d_s}    # bottom-up sensory stream
+        h_motor   ∈ ℝ^{B, T, d_m}    # top-down motor / planning stream
+
+        # Learned projection (motor → sensory prediction):
+        ĥ_sensory = W_pc · h_motor      W_pc ∈ ℝ^{d_s × d_m}
+
+        # Prediction residual:
+        r_pc = ‖h_sensory − ĥ_sensory‖²    (per token, mean over B·T)
+
+        # NT gate (optional; pc_reentry_nt_gate = true):
+        gate = clip(1 + 0.5·DA − 0.7·GABA, 0, ∞)
+        # gate > 1 when DA high (curiosity/reward) → strengthen prediction constraint
+        # gate < 1 when GABA high (cortical inhibition) → weaken constraint
+
+        # Gradient flows through BOTH h_sensory and h_motor:
+        L_pc = pc_reentry_weight · gate · r_pc
+
+        # VBB upgrade (when vbb_alpha > 0):
+        # Replace r_pc with variational free energy (Friston 2010):
+        # z ~ N(μ, σ²I) where μ = h_motor, σ = sigma_head(h_motor)
+        # L_VBB = γ_NT · ( β·r_pc − log β + α·KL[q ‖ N(0,I)] )
+        # β = self-throttling precision (converges to β* = 1/(2·E[r_pc]))
+    """
+
+    impl:    "neuroslm.modules.predictive_coding_residual.PredictiveCodingResidual"
+    loss_fn: "neuroslm.harness.BrainHarness._compute_pc_reentry_loss"
+    zero_init: false
+
+    params: {
+        pc_reentry_weight: {
+            default: 0.1,
+            type: "float",
+            doc: "Weight on L_pc (prediction error); 0 = disabled"
+        }
+        pc_reentry_nt_gate: {
+            default: true,
+            type: "bool",
+            doc: "If true, gate by (1 + 0.5·DA − 0.7·GABA); else gate=1"
+        }
+        vbb_alpha: {
+            default: 0.001,
+            type: "float",
+            doc: "KL weight in VBB upgrade; 0.001 = very loose IB (mostly plain prediction residual)"
+        }
+        vbb_beta_init: {
+            default: 1.0,
+            type: "float",
+            doc: "Initial precision β (learnable; converges to 1/(2·E[r]))"
+        }
+    }
+
+    properties: {
+        bidirectional_gradient:   "Gradient flows through BOTH h_sensory and h_motor; enforces mutual predictability"
+        nt_gated:                 "DA (curiosity) strengthens; GABA (inhibition) weakens the prediction constraint"
+        pc_rao_ballard:           "Implements Rao & Ballard (1999) predictive coding at the bowtie waist"
+        vbb_upgrade:              "With vbb_alpha>0, becomes variational free energy (Friston 2010)"
+        cycle_consistency:        "Motor predicting sensory = a soft world-model constraint (closed causal loop)"
+        self_throttling:          "β precision is learnable and converges to β* = 1/(2·E[r]) — calibrated generative model"
+    }
+
+    when_to_use: """
+        Use when the model has explicitly separated 'sensory' (bottom-up) and
+        'motor' (top-down) hidden states, as in a bowtie topology. The prediction
+        residual enforces that the motor stream encodes enough information to
+        reconstruct the sensory stream — a soft world-model constraint.
+
+        NT gating makes this adaptive: in high-DA (curious) contexts, the model
+        is pushed harder to predict; in high-GABA (inhibited) contexts, the
+        constraint relaxes. This is the computational correlate of active inference
+        (Friston & Stephan 2007).
+
+        Enable VBB upgrade (vbb_alpha > 0) when you want information-theoretic
+        pressure at the bottleneck. Start with vbb_alpha=0.001 (very loose);
+        increase via GIF-1 schedule.
+
+        Pairs with: vbb (VBB IS the upgrade of this mechanic), mspcc (extends
+        prediction residual to all layer pairs), riemannian_motor_projection
+        (caps h_motor magnitude before the prediction step).
+    """
+
+    not_for: """
+        • Architectures without distinct sensory/motor population split
+        • pc_reentry_weight > 0.5: prediction residual can overpower CE
+          (observed: train-PPL halved while wiki-PPL barely moved — the self-distillation
+          amplifier effect described in arch.neuro Jun 2026 surgery)
+    """
+
+    empirical_evidence: {
+        source: "Internal: arch.neuro Jun 2026 surgery (C3 reentry as NT-gated trunk loss)"
+        result: "At pc_reentry_weight=0.1 with NT gate: stable contribution alongside main CE loss"
+        caveat: "Without VBB: observed self-distillation amplifier effect at high weight (gap 4.3→6.8 by step 4000)"
+    }
+
+    references: [
+        "Rao, R. & Ballard, D. (1999) Predictive coding in the visual cortex. Nat Neurosci 2(1): 79-87",
+        "Friston, K. & Stephan, K. (2007) Free-energy and the brain. Synthese 159(3): 417-458",
+        "Friston, K. (2010) The free-energy principle: a unified brain theory? Nat Rev Neurosci",
+        "Internal: lib/features/predictive_coding_residual.neuro"
+    ]
+}

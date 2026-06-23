@@ -1,0 +1,108 @@
+# -*- coding: utf-8 -*-
+# PCC — Predictive Contrastive Coding.
+#
+# Implementation: neuroslm/regularizers.py::PCCLoss
+# Config:         neuroslm/dsl/regularization.py::PCCConfig
+# Tests:          tests/dsl/test_regularization.py
+# Docs:           docs/mechanics/pcc.md
+
+export mechanic pcc {
+    category: "regularizer"
+    summary:  "InfoNCE contrastive loss between a token's representation and its future self; builds predictive features"
+
+    equation: """
+        # Project hidden state at selected layers to a shared embedding space
+        z_t = proj(h_t^(n))        n ∈ selected layers
+
+        # Positive: future representation at horizon k
+        z_pos = proj(h_{t+k}^(n))
+
+        # Negatives: representations from other documents in a circular buffer
+        z_neg_j ~ buffer    j = 1..n_negatives    (cross-document negatives)
+
+        # InfoNCE loss (temperature τ)
+        L_pcc = −log( exp(<z_t, z_pos>/τ) / Σ_j exp(<z_t, z_neg_j>/τ) )
+
+        # Scaled contribution
+        L_total += weight · L_pcc
+    """
+
+    impl:    "neuroslm.regularizers.PCCLoss"
+    loss_fn: "neuroslm.regularizers.PCCLoss.compute"
+    zero_init: false
+
+    params: {
+        k: {
+            default: 4,
+            type: "int",
+            min: 1,
+            doc: "Prediction horizon: how many tokens ahead the positive is"
+        }
+        n_negatives: {
+            default: 64,
+            type: "int",
+            min: 1,
+            doc: "Number of cross-document negatives per anchor"
+        }
+        tau: {
+            default: 0.1,
+            type: "float",
+            min: 0.0,
+            exclusive_min: true,
+            doc: "InfoNCE temperature; lower = sharper distribution"
+        }
+        layers: {
+            default: "[]",
+            type: "list[int]",
+            doc: "Which layers to apply PCC at; [] = all layers"
+        }
+        weight: {
+            default: 0.1,
+            type: "float",
+            doc: "Global scale on L_pcc before entering total loss"
+        }
+    }
+
+    properties: {
+        contrastive_signal:   "Model must predict future representations — forces temporal abstraction"
+        cross_doc_negatives:  "Buffer of past embeddings acts as hard negatives from different contexts"
+        layer_agnostic:       "Applies at any subset of layers; deeper layers benefit more"
+        saturates_at_warmup:  "Raw InfoNCE ≈ log(n_negatives+1) when features are not yet predictive"
+        weight_scaling:       "weight=0.1 keeps PCC ≈ 10% of LM loss magnitude at convergence"
+    }
+
+    when_to_use: """
+        Use when the model memorises training-distribution surface statistics
+        but generalises poorly (high OOD gap).
+
+        PCC forces the model to build representations useful for predicting
+        future context — an implicit world-model pressure that generalises
+        better than pure CE on local tokens.
+
+        Typical setting: k=4 (one short sentence ahead), n_negatives=64,
+        tau=0.1, weight=0.05, layers=[] (all layers). Activate after 2000
+        warm-up steps (raw InfoNCE at early training is dominated by noise).
+
+        Pairs well with: isotropy (prevents collapse of the representation space
+        that PCC operates in), dar (adversarial domain invariance).
+    """
+
+    not_for: """
+        • Sequences shorter than k+1 tokens (no valid positive)
+        • Very early training (step < ~1000): positives and negatives are
+          indistinguishable noise; the buffer populates with garbage
+        • weight > 0.5: saturated InfoNCE can dominate and freeze LM convergence
+    """
+
+    empirical_evidence: {
+        source: "Oord, Li, Vinyals (2018) Contrastive Predictive Coding. arXiv 1807.03748"
+        result: "CPC on speech: 11-14 dB absolute WER reduction; analogous benefit expected for LM OOD"
+        internal: "Internal arc (2026-06): weight=0.05 contributed to partial OOD recovery"
+    }
+
+    references: [
+        "Oord, Li, Vinyals (2018) Representation Learning with CPC. arXiv 1807.03748",
+        "He, Fan, Wu, Xie, Girshick (2020) Momentum Contrast for Unsupervised Visual Learning. CVPR",
+        "Internal: docs/technical_report.md §3.B"
+    ]
+}

@@ -1,0 +1,88 @@
+# -*- coding: utf-8 -*-
+# Riemannian Motor Projection (RMP) — hyperbolic tanh-projection of h_motor.
+#
+# Implementation: neuroslm/harness.py (within _compute_pc_reentry_loss)
+# Config:         neuroslm/dsl/training_config.py (motor_curvature)
+# Docs:           docs/mechanics/riemannian_motor_projection.md
+
+export mechanic riemannian_motor_projection {
+    category: "training_dynamics"
+    summary:  "Hyperbolic tanh-projection of h_motor: h_proj = ρ·tanh(‖h‖/ρ)·h/‖h‖ with learnable curvature R=1/ρ²; caps magnitude geometrically"
+
+    equation: """
+        # Poincaré ball radius ρ (learnable):
+        ρ = 1 / √R      where R = softplus(R_raw), R_raw initialised to motor_curvature
+
+        # Projection onto Poincaré ball:
+        h_proj = ρ · tanh(‖h‖ / ρ) · (h / ‖h‖)
+
+        # Properties:
+        #   ‖h_proj‖ < ρ   always (strict: stays inside ball)
+        #   h_proj ≈ h     when ‖h‖ << ρ  (identity in the linear regime)
+        #   ‖h_proj‖ → ρ   as ‖h‖ → ∞   (magnitude is asymptotically capped)
+
+        # Relationship to hyperbolic distance (Poincaré ball model):
+        d_hyp(0, h_proj) = 2·arctanh(‖h_proj‖/ρ) = 2·(‖h‖/ρ)  in the linear regime
+        → distance in hyperbolic space is PROPORTIONAL to ‖h‖; no blowup
+
+        # Composes with LayerNorm:
+        # If h has already been layer-normalised, ‖h‖ ≈ √d_model
+        # RMP then caps ‖h_proj‖ at ρ ≈ 1/√motor_curvature
+        # Net effect: tighter bound than LayerNorm alone (which still allows outliers)
+    """
+
+    impl:    "neuroslm.harness.BrainHarness._riemannian_motor_project"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        motor_curvature: {
+            default: 1.0,
+            type: "float",
+            min: 0.0,
+            exclusive_min: true,
+            doc: "Initial curvature R; ρ_init = 1/√motor_curvature"
+        }
+    }
+
+    properties: {
+        asymptotic_bound:    "‖h_proj‖ < ρ = 1/√R always; bounded regardless of raw ‖h‖"
+        learnable_radius:    "ρ is derived from a learnable R_raw via softplus; adapts during training"
+        identity_near_zero:  "tanh(x) ≈ x for small x; near-identity when ‖h‖ << ρ"
+        no_gradient_clipping:"Projection is differentiable everywhere; no hard gradient cut"
+        hyperbolic_geometry: "Provides a consistent metric on h_motor embeddings (Poincaré ball)"
+    }
+
+    when_to_use: """
+        Use when the motor hidden state (h_motor) can grow large activations that
+        destabilise the VBB posterior estimation. The tanh-projection provides a
+        differentiable ceiling on magnitude.
+
+        Particularly useful in conjunction with VBB (the posterior encoder operates
+        on h_proj instead of h_motor): very large ‖h_motor‖ would push the encoder
+        into a numerically difficult regime. RMP prevents this geometrically.
+
+        motor_curvature=1.0 gives ρ=1 which is relatively tight for typical hidden
+        states (d_model=512 → ‖h‖ ≈ √512 ≈ 22 after LayerNorm). If you want a
+        looser projection, use motor_curvature=0.01 (ρ=10).
+    """
+
+    not_for: """
+        • Models where h_motor is already bounded (e.g. hard tanh or clamp):
+          RMP adds no benefit and introduces extra computation
+        • motor_curvature very large (ρ << 1): maps almost all of h_motor to the
+          ball boundary; representation becomes almost-binary
+    """
+
+    empirical_evidence: {
+        source: "Internal: arch.neuro comment (Jun 2026 surgery; motor_curvature: 1.0)"
+        result: "Shipped as part of VBB upgrade; isolated ablation pending"
+        caveat: "Provides geometric stability guarantee; empirical effect on PPL not yet isolated"
+    }
+
+    references: [
+        "Nickel & Kiela (2017) Poincaré Embeddings for Learning Hierarchical Representations. NeurIPS",
+        "Ganea, Bécigneul, Hofmann (2018) Hyperbolic Neural Networks. NeurIPS",
+        "Internal: neuroslm/harness.py::_compute_pc_reentry_loss"
+    ]
+}

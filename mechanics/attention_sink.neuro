@@ -1,0 +1,94 @@
+# -*- coding: utf-8 -*-
+# Attention Sink (StreamingLLM) — keep the first few tokens as global anchors.
+#
+# Implementation: neuroslm/modules/attention_sink.py
+#                 neuroslm/dsl/nn_ops.py::attention_sink()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/attention_sink.md
+
+export mechanic attention_sink {
+    category: "attention"
+    summary:  "Always retains the first n_sink tokens in the KV cache alongside a rolling window, stabilising softmax and enabling infinite-length streaming"
+
+    equation: """
+        # KV cache = [ first n_sink tokens ]  ⊕  [ rolling window of last w tokens ]
+        # for query at position i, the visible key set is:
+        keep(i) = {0, 1, ..., n_sink−1}  ∪  {i−w+1, ..., i}
+
+        mask_{i,j} = 0     if  j ∈ keep(i)
+                   = −∞    otherwise
+        A = softmax( (q_i · k_jᵀ)/√d_k + mask )
+
+        # WHY sinks matter:
+        #   softmax forces Σ_j A_{i,j} = 1, so attention must dump probability
+        #   mass *somewhere* even when no key is relevant. Early tokens absorb
+        #   this "no-op" mass (they are visible to every position during
+        #   training). Evicting them (naive window) destabilises the softmax
+        #   and perplexity explodes. Keeping n_sink anchors fixes it.
+        #
+        # RoPE caveat: positions are assigned by *cache slot*, not original
+        #   index, so the sink tokens stay at the front of the rotary frame.
+    """
+
+    impl:    "neuroslm.modules.attention_sink.AttentionSink"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        n_sink_tokens: {
+            default: 4,
+            type: "int",
+            min: 1,
+            doc: "Number of initial tokens always kept as global attention anchors; 4 captures most of the sink mass"
+        }
+        window_size: {
+            default: 1024,
+            type: "int",
+            min: 1,
+            doc: "Size of the rolling recent-token window kept alongside the sinks"
+        }
+    }
+
+    properties: {
+        infinite_streaming:  "Constant-memory generation over unbounded streams — cache never grows past n_sink + window_size"
+        softmax_stability:   "Sink tokens absorb surplus probability mass, preventing the perplexity blow-up of naive eviction"
+        no_retraining:       "Works at inference on already-trained models; it is a cache-management policy, not new weights"
+        rope_slot_relabel:   "Assigns rotary positions by cache slot so anchors stay phase-coherent after window roll"
+        cheap_addon:         "A tiny always-keep set bolted onto sliding-window attention; negligible extra cost"
+    }
+
+    when_to_use: """
+        Use when:
+        • Streaming / never-ending generation where the KV cache would otherwise
+          grow without bound (chat servers, agents, live transcription).
+        • You already use sliding-window attention and observe a perplexity spike
+          once the earliest tokens are evicted — sinks fix exactly that failure.
+        • You need constant memory + stable quality without retraining the model.
+
+        n_sink_tokens=4 captures nearly all of the sink mass in practice; raising
+        it past ~8 rarely helps. window_size is chosen for the local context you
+        want to preserve. Remember to assign RoPE positions by cache slot.
+
+        Pairs well with: sliding_window_attention (its natural host), rope,
+        GroupedQueryAttention.
+    """
+
+    not_for: """
+        • Fixed-length, fully-cached contexts where the whole sequence fits — no
+          eviction happens, so there is nothing for sinks to stabilise.
+        • Tasks needing genuine recall of evicted middle tokens — sinks restore
+          softmax stability, not the lost content outside the window.
+        • Encoder/bidirectional models (sinks are a causal-decode cache policy).
+    """
+
+    empirical_evidence: {
+        source: "Xiao et al. (2023) StreamingLLM, MIT / Meta AI"
+        result: "Stable perplexity and constant memory over 4M+ token streams; naive window eviction diverges, keeping 4 sink tokens restores stability"
+        caveat: "Sinks preserve fluency, not factual recall of tokens evicted from the window"
+    }
+
+    references: [
+        "Xiao, Tian, Chen, Han, Lewis (2023) Efficient Streaming Language Models with Attention Sinks. arXiv 2309.17453",
+        "Han, Xiao, Tsvetkov, Han et al. (2023) LM-Infinite: Simple On-the-Fly Length Generalization. arXiv 2308.16137"
+    ]
+}

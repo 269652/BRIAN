@@ -1,0 +1,88 @@
+# -*- coding: utf-8 -*-
+# Frequency-Balanced Cross-Entropy — token-frequency reweighting.
+#
+# Implementation: neuroslm/regularizers.py::FreqBalanceLoss
+# Config:         neuroslm/dsl/regularization.py::FreqBalanceConfig
+# Docs:           docs/mechanics/freq_balance.md
+
+export mechanic freq_balance {
+    category: "regularizer"
+    summary:  "Reweight per-token CE loss by inverse token frequency ratio between training and OOD distributions"
+
+    equation: """
+        # Pre-computed unigram frequencies on training and OOD (probe) data
+        freq_train[v]  = P_train(v)    # training-distribution unigram
+        freq_target[v] = P_ood(v)      # OOD-distribution unigram (e.g. WikiText-103)
+
+        # Frequency ratio (with smoothing exponent β)
+        ratio[v] = ( freq_target[v] / (freq_train[v] + ε) ) ^ β
+
+        # Clip and mean-normalise the weights
+        w[v] = clip(ratio[v], w_min, w_max) / mean(clip(ratio, w_min, w_max))
+
+        # Weighted cross-entropy
+        L_freq = mean( w[target_token_ids] · CE_per_token )
+    """
+
+    impl:    "neuroslm.regularizers.FreqBalanceLoss"
+    loss_fn: "neuroslm.regularizers.FreqBalanceLoss.compute"
+    zero_init: false
+
+    params: {
+        beta: {
+            default: 0.5,
+            type: "float",
+            doc: "Smoothing exponent; 0=uniform, 0.5=sqrt-smoothing, 1.0=exact inverse freq"
+        }
+        w_min: {
+            default: 0.2,
+            type: "float",
+            doc: "Minimum weight clip floor (prevents zero-weight tokens)"
+        }
+        w_max: {
+            default: 5.0,
+            type: "float",
+            doc: "Maximum weight clip ceiling (prevents loss explosion on rare tokens)"
+        }
+    }
+
+    properties: {
+        mean_normalised:   "Weights are mean-normalised so average loss scale is unchanged"
+        gradient_bias:     "Gradient flows more strongly through OOD-distribution tokens"
+        no_new_params:     "Pure loss reweighting — no extra trainable parameters"
+        requires_corpus:   "freq_train and freq_target must be pre-computed on representative corpora"
+    }
+
+    when_to_use: """
+        Use when you know the OOD distribution's token frequencies differ
+        significantly from training (e.g. training on code + chat, OOD target
+        is academic prose with rare punctuation and domain vocabulary).
+
+        Requires a one-time corpus scan to build frequency tables. Once built,
+        the overhead is a lookup + clip per token per batch.
+
+        beta=0.5 (square-root smoothing) is the standard choice (Mikolov 2013):
+        rare tokens get some boost without extreme weights for hapax legomena.
+
+        Pairs well with: dar (domain adaptation at representation level while
+        freq_balance adapts the loss-level gradient).
+    """
+
+    not_for: """
+        • No pre-computed frequency tables: requires corpus scan up front
+        • OOD distribution unknown at training time
+        • Very small vocabularies (< 1000 tokens): frequency tables are noisy
+    """
+
+    empirical_evidence: {
+        source: "Mikolov et al. (2013) Distributed Representations of Words. NIPS"
+        result: "Subsampling by inverse frequency improves word embedding quality"
+        internal: "Not yet ablated on this architecture (requires corpus scan)"
+    }
+
+    references: [
+        "Mikolov, Sutskever, Chen, Corrado, Dean (2013) Distributed Representations. NIPS",
+        "Cui, Jia, Liu, Belongie, Vasconcelos (2019) Class-Balanced Loss Based on Effective Number. CVPR",
+        "Internal: docs/technical_report.md §3.F"
+    ]
+}

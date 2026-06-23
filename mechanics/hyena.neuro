@@ -1,0 +1,107 @@
+# -*- coding: utf-8 -*-
+# Hyena — implicit long convolutions + data-controlled gating via FFT.
+#
+# Implementation: neuroslm/modules/hyena.py
+#                 neuroslm/dsl/nn_ops.py::hyena_operator()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/hyena.md
+
+export mechanic hyena {
+    category: "sequence_mixer"
+    summary:  "Subquadratic attention substitute: interleaved implicit long convolutions and elementwise gating"
+
+    equation: """
+        # Hyena replaces attention with a recurrence of (long conv, gate) pairs.
+        # From input u, project N+1 = order+1 branches:
+        #   (x¹, ..., x^N, v) = Linear(u)  then a short causal depthwise conv
+        #                                   (short_filter_len) per branch.
+
+        # Long convolution filters are IMPLICIT — parameterized by a small MLP
+        # over positional encodings, NOT stored as length-T weight vectors:
+        #   h^n_t = window(t) · (FFN_θ(PositionalEmb(t)))      t = 0..T-1
+        # so an arbitrarily long filter costs O(filter_order) parameters.
+
+        # Hyena recurrence: alternate elementwise gating (data control) with a
+        # long causal convolution (token mixing):
+        #   z⁰ = v
+        #   zⁿ = x^n ⊙ ( h^n ∗ z^{n-1} )      for n = 1..N        # ⊙ gate, ∗ causal conv
+        #   y  = Linear(z^N)
+
+        # Each long causal conv is evaluated by FFT (the subquadratic core):
+        #   h ∗ z = IFFT( FFT(pad(h)) ⊙ FFT(pad(z)) )           # O(T log T)
+        # so the whole operator is O(N · T log T) — subquadratic in T, vs O(T²)
+        # for attention. The conv is causal via zero-padding to length 2T.
+
+        # "Data-controlled": the elementwise x^n ⊙ (·) gates make the linear
+        # operator's effective kernel depend on the input, mimicking attention's
+        # content addressing without forming a T×T score matrix.
+    """
+
+    impl:    "neuroslm.modules.hyena.HyenaOperator"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        order: {
+            default: 2,
+            type: "int",
+            doc: "Number N of (gate, long-conv) stages in the Hyena recurrence; order=2 ≈ a single gated conv"
+        }
+        filter_order: {
+            default: 64,
+            type: "int",
+            doc: "Width of the implicit-filter MLP that parameterizes the long convolution kernels"
+        }
+        short_filter_len: {
+            default: 3,
+            type: "int",
+            doc: "Kernel width of the short causal depthwise conv applied to each projected branch"
+        }
+    }
+
+    properties: {
+        subquadratic:        "O(N·T log T) via FFT long convolutions — no quadratic attention matrix"
+        implicit_filters:    "Filters parameterized by a tiny MLP over positions; cost independent of T"
+        data_controlled:     "Elementwise gates make the linear operator's kernel input-dependent (attention-like)"
+        causal_via_padding:  "Long convs are made causal by zero-padding to length 2T before the FFT"
+        global_receptive:    "A single long conv reaches the full context length unlike a fixed local kernel"
+    }
+
+    when_to_use: """
+        Use when:
+        • Context is long and you want a global-receptive, subquadratic token
+          mixer without the O(T²) attention matrix
+        • Filters should span the whole sequence cheaply — implicit
+          parameterization decouples filter length from parameter count
+        • The task benefits from convolutional inductive bias plus content gating
+          (long-range language modelling, genomics, audio)
+
+        Hyena's two ingredients are essential together: long convolutions give
+        the global receptive field, and the data-controlled gates recover the
+        content-dependence that a plain conv lacks. Removing either collapses
+        quality toward a static convolution.
+
+        Pairs well with: a short causal conv pre-mix (already inside the block),
+        RMSNorm, and an FFT-conv kernel for the O(T log T) path.
+    """
+
+    not_for: """
+        • Short sequences where O(T²) attention is cheap and the FFT overhead
+          (padding to 2T, transform cost) is not amortized
+        • Strict O(1)-per-step streaming decode — the FFT conv is not naturally a
+          constant-memory recurrence (needs a recurrent/SSM reformulation)
+        • Tasks dominated by exact arbitrary-token associative recall, where
+          full attention still leads
+    """
+
+    empirical_evidence: {
+        source: "Poli, Massaroli, Nguyen, Fu, Dao, Baccus, Bengio, Ermon, Ré (2023) Hyena Hierarchy"
+        result: "Matches attention quality on language and image tasks while being up to ~100× faster than FlashAttention at sequence length 64k"
+        caveat: "Speedup grows with T; at short context the FFT path offers little benefit"
+    }
+
+    references: [
+        "Poli, Massaroli, Nguyen et al. (2023) Hyena Hierarchy: Towards Larger Convolutional Language Models. arXiv 2302.10866",
+        "Romero, Kuzina, Bekkers, Tomczak, Hoogendoorn (2022) CKConv: Continuous Kernel Convolution. arXiv 2102.02611"
+    ]
+}

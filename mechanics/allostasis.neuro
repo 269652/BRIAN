@@ -1,0 +1,114 @@
+# -*- coding: utf-8 -*-
+# Allostasis — Synthetic HPA Axis (slow homeostatic stress damping).
+#
+# Implementation: neuroslm/harness.py::AllostasisController (class)
+# Config:         neuroslm/dsl/training_config.py::AllostasisConfig
+# Tests:          tests/training/test_allostasis.py (38 contracts)
+# Docs:           docs/mechanics/allostasis.md
+
+export mechanic allostasis {
+    category: "training_dynamics"
+    summary:  "Synthetic HPA axis: integrates multi-modal stress over ~40 steps to damp NE runaway, trophic growth, and LR during sustained crisis"
+
+    equation: """
+        # Stress sources (all normalised to [0, 1] excess above baseline):
+        s_NE   = relu(z_NE   − ne_baseline)   / (1 − ne_baseline)
+        s_GABA = relu(z_GABA − gaba_baseline) / (1 − gaba_baseline)
+        s_loss = relu(L_t    − L_ema)         / max(L_ema, 1)      # loss spike
+        s_grad = relu(‖g‖    − grad_norm_ceiling) / grad_norm_ceiling
+
+        # Multi-modal stress composite
+        stress_t = clip(w_ne·s_NE + w_gaba·s_GABA + w_loss·s_loss + w_grad·s_grad, 0, 1)
+
+        # Two-timescale HPA dynamics
+        load_t  = (1 − α_load) · load_{t-1}  + α_load · stress_t     # τ ≈ 10 steps (fast EMA)
+        cort_t  = (1 − α_cort) · cort_{t-1}  + α_cort · load_t       # τ ≈ 50 steps (slow integrator)
+
+        # Three downstream effectors (all in [0, 1])
+        ne_mult    = 1 − γ_NE    · cort_t     # caps NE release (closes LC runaway loop)
+        troph_mult = 1 − γ_T     · cort_t     # halts BDNF growth during crisis
+        lr_mult    = 1 − γ_LR    · cort_t     # damps optimizer LR
+
+        # Applied at each step:
+        z_NE_eff  = z_NE    · ne_mult
+        BDNF_eff  = BDNF    · troph_mult
+        lr_eff    = lr_base · lr_mult
+    """
+
+    impl:    "neuroslm.harness.AllostasisController"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        load_ema_alpha: {
+            default: 0.10,
+            type: "float",
+            doc: "EMA α for fast load integrator (τ ≈ 10 steps)"
+        }
+        cort_ema_alpha: {
+            default: 0.02,
+            type: "float",
+            doc: "EMA α for slow cortisol integrator (τ ≈ 50 steps)"
+        }
+        w_ne:   { default: 0.30, type: "float", doc: "Weight of NE stress channel" }
+        w_gaba: { default: 0.20, type: "float", doc: "Weight of GABA stress channel" }
+        w_loss: { default: 0.30, type: "float", doc: "Weight of loss-spike stress channel" }
+        w_grad: { default: 0.20, type: "float", doc: "Weight of grad-norm stress channel (sum of weights = 1.0)" }
+        ne_baseline:        { default: 0.25, type: "float", doc: "NE below this → zero contribution to stress" }
+        gaba_baseline:      { default: 0.20, type: "float", doc: "GABA below this → zero contribution to stress" }
+        grad_norm_ceiling:  { default: 5.0,  type: "float", doc: "Grad norm above this → full grad stress channel" }
+        suppress_ne:        { default: true,  type: "bool", doc: "Apply ne_mult to NE output" }
+        suppress_trophic:   { default: true,  type: "bool", doc: "Apply troph_mult to BDNF growth signals" }
+        suppress_lr:        { default: true,  type: "bool", doc: "Apply lr_mult to optimizer LR" }
+        gamma_ne:           { default: 0.7,  type: "float", doc: "NE effector gain (ne_mult = 1 − 0.7·cort)" }
+        gamma_trophic:      { default: 1.0,  type: "float", doc: "Trophic effector gain" }
+        gamma_lr:           { default: 0.5,  type: "float", doc: "LR effector gain" }
+    }
+
+    properties: {
+        acute_vs_chronic:    "5× ratio (α_load/α_cort = 0.10/0.02) → single bad batch leaves cort≈0; sustained 200-step stress drives cort>0.25"
+        no_model_params:     "Pure control system — no trainable parameters; runs entirely in harness"
+        three_axes:          "Independent suppression of NE, BDNF, and LR; any subset can be enabled"
+        lc_loop_closed:      "ne_mult feeds back to z_NE preventing positive-feedback LC runaway"
+        diagnostic_logging:  "load, cort, ne_mult, troph_mult, lr_mult logged every step"
+    }
+
+    when_to_use: """
+        Use when the model has a neurotransmitter homeostasis stack (NE, GABA,
+        DA, 5HT, etc.) and you observe NE runaway patterns: NE rising monotonically
+        over 40+ steps while grad_norm follows (positive-feedback loop between
+        LC → NE → sharper routing → harder gradient → more NE).
+
+        The 5× timescale separation (α_load=0.10, α_cort=0.02) is the key:
+        • A single bad batch raises load briefly but leaves cort ≈ 0 → no damping
+        • A sustained 200-step stress pattern raises cort past 0.25 → dampers bite
+
+        This was the exact failure mode in run 38470012 (NE 0.20→0.93,
+        gnorm 10→24, loss 12.6→15.4 between steps 460-500).
+
+        Pairs well with: multi_cortex (router temperature NE coupling is a key
+        NE consumer), nfo (phase dynamics add another NT feedback channel).
+        Requires: neurotransmitter homeostat stack (nt_homeostat_step, etc.).
+    """
+
+    not_for: """
+        • Models without a neurotransmitter stack (no NE/GABA signals → suppress_ne
+          and suppress_trophic have no effect; only lr damping would fire)
+        • Training runs under 500 steps (cort integrator needs time to develop)
+        • suppress_lr + very aggressive clipping: lr_mult·lr_base can go below
+          effective learning threshold if γ_LR > 0.8 and cort is sustained near 1
+    """
+
+    empirical_evidence: {
+        source: "Internal: docs/findings.md H21 (Allostasis / synthetic HPA axis)"
+        result: "38-contract test suite (tests/training/test_allostasis.py) including smoking-gun replay of steps 460-500 runaway: cort correctly rises past 0.25 and all three effectors activate"
+        lesson: "Without allostasis: run 38470012 diverged; with allostasis: same trajectory stabilised in replay"
+    }
+
+    references: [
+        "Sterling, P. & Eyer, J. (1988) Allostasis: a new paradigm to explain arousal pathology",
+        "McEwen, B. (1998) Protective and Damaging Effects of Stress Mediators. NEJM",
+        "Locus coeruleus positive-feedback model: Aston-Jones & Cohen (2005) Annu Rev Neurosci",
+        "Internal: tests/training/test_allostasis.py (38 contracts)"
+    ]
+}

@@ -1,0 +1,107 @@
+# -*- coding: utf-8 -*-
+# Sparse MoE — sparsely-gated mixture-of-experts with top-k token routing.
+#
+# Implementation: neuroslm/modules/moe.py::SparseMoE
+#                 neuroslm/dsl/nn_ops.py::sparse_moe()
+# Loss:           neuroslm/modules/moe.py::load_balancing_loss
+# Tests:          tests/dsl/test_moe.py
+# Docs:           docs/mechanics/sparse_moe.md
+
+export mechanic sparse_moe {
+    category: "routing"
+    summary:  "Sparsely-gated MoE: a router sends each token to its top-k experts, with a load-balancing auxiliary loss"
+
+    equation: """
+        # n_experts FFN experts E_1..E_n; a linear router W_r : (d, n_experts).
+        logits = x W_r                              # (B·T, n_experts)
+        p      = softmax(logits)                     # routing distribution
+
+        # Top-k gate: keep the k highest experts, renormalise their weights.
+        idx    = top_k_indices(p, k = top_k)         # (B·T, k)
+        g      = p[idx] / Σ p[idx]                    # (B·T, k)   renormalised gates
+
+        # Capacity: each expert processes at most
+        #   C = capacity_factor · (k · B·T / n_experts)  tokens; overflow is dropped.
+        y = Σ_{j∈idx}  g_j · E_j(x)                   # (B·T, d)
+
+        # ── Load-balancing auxiliary loss (Switch Transformer, Eq. 4) ──
+        # f_i = fraction of tokens routed to expert i (top-1 dispatch)
+        # P_i = mean router probability mass on expert i
+        L_aux = aux_loss_weight · n_experts · Σ_i f_i · P_i
+
+        # Total objective: L = L_task + L_aux  (encourages uniform expert usage).
+    """
+
+    impl:    "neuroslm.modules.moe.SparseMoE"
+    loss_fn: "neuroslm.modules.moe.load_balancing_loss"
+    zero_init: false
+
+    params: {
+        n_experts: {
+            default: 8,
+            type: "int",
+            doc: "Number of parallel FFN experts the router can dispatch to"
+        }
+        top_k: {
+            default: 2,
+            type: "int",
+            doc: "Experts each token is routed to (k=1 is Switch; k=2 is GShard/Mixtral)"
+        }
+        capacity_factor: {
+            default: 1.25,
+            type: "float",
+            doc: "Slack multiplier on per-expert token capacity; >1 reduces token dropping"
+        }
+        aux_loss_weight: {
+            default: 0.01,
+            type: "float",
+            doc: "Weight α on the load-balancing auxiliary loss (Switch uses ~1e-2)"
+        }
+    }
+
+    properties: {
+        conditional_compute: "Each token activates only top_k of n_experts FFNs — params scale, FLOPs do not"
+        load_balanced:       "Auxiliary loss pushes the router toward uniform expert utilisation"
+        token_choice:        "Tokens choose experts (vs expert_choice_routing where experts choose tokens)"
+        capacity_drop:       "Tokens exceeding an expert's capacity are dropped (or routed to residual)"
+        sparse_gradient:     "Only selected experts receive gradient on a given token"
+    }
+
+    when_to_use: """
+        Use when:
+        • You want to grow model capacity (parameters) without proportionally growing
+          per-token compute — MoE decouples params from FLOPs
+        • Training at scale where a dense model of equivalent quality would be too
+          expensive to run per token
+        • You can tolerate the systems complexity of routing, capacity, and the
+          all-to-all dispatch that distributed MoE requires
+
+        top_k=2 (GShard/Mixtral) gives the router a fallback expert and trains more
+        stably than top_k=1 (Switch); capacity_factor 1.0–1.5 trades dropped tokens
+        against wasted compute. Keep aux_loss_weight small (~1e-2): too large and the
+        router optimises for balance over quality.
+
+        Pairs well with: shared_expert (always-on expert for common features),
+        expert-parallel sharding, RMSNorm pre-norm blocks.
+    """
+
+    not_for: """
+        • Small models / single-GPU setups where the routing and capacity machinery
+          costs more than the dense FFN it replaces
+        • Latency-critical inference where dropped tokens or load imbalance is
+          unacceptable — consider expert_choice_routing for guaranteed balance
+        • Situations needing a deterministic, balance-free forward pass
+    """
+
+    empirical_evidence: {
+        source: "Fedus et al. (2021) Switch Transformers"
+        result: "Switch (top-1 MoE) reaches the same quality as dense T5 with up to ~7× faster pretraining wall-clock at matched compute, scaling to trillion-parameter models"
+        caveat: "Gains require expert-parallel hardware; token dropping and router instability need tuning at small scale"
+    }
+
+    references: [
+        "Shazeer et al. (2017) Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer. arXiv 1701.06538",
+        "Fedus, Zoph, Shazeer (2021) Switch Transformers: Scaling to Trillion Parameter Models. arXiv 2101.03961",
+        "Jiang et al. (2024) Mixtral of Experts. arXiv 2401.04088"
+    ]
+}

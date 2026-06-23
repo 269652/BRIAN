@@ -1,0 +1,144 @@
+# -*- coding: utf-8 -*-
+# NFO — Neural Field Oscillator.
+#
+# Implementation: neuroslm/modules/neural_field_oscillator.py::NeuralFieldOscillator
+#                 neuroslm/emergent/nfo_coherence.py::NFOCoherenceProbe
+# Config:         neuroslm/dsl/training_config.py::NFOConfig
+# Hypotheses:     H015, H016, H017, H018 (see hypothesis/proofs/)
+# Docs:           docs/mechanics/nfo.md
+
+export mechanic nfo {
+    category: "attention"
+    summary:  "Residual block: Kuramoto oscillators on the sequence + Swift-Hohenberg amplitude control + coherence-gated write-back (ReZero)"
+
+    equation: """
+        # Inputs: h_in ∈ ℝ^{B, T, d_model}
+
+        # ── Part 1: Polar lift ──
+        # Embed h_in into M complex oscillators z = A·e^{iφ}
+        re, im = split(W_lift · h_in)      z = re + i·im    z ∈ ℂ^{B, T, M}
+        A = |z|,  φ = arg(z)               # amplitude and phase
+
+        # ── Part 2: Kuramoto graph synchronisation ──
+        # Coupling matrix K = causal softmax-attention over polar embedding
+        K_{ts} = softmax_{s≤t}( cos(φ_t, φ_s) / √M )   # causal coupling
+        Δφ_t   = Σ_s K_{ts} · sin(φ_s − φ_t)            # phase update
+        φ_t   += dt · Δφ_t                               # Euler step (dt = 0.1)
+        z_kur  = A · e^{i·φ}
+
+        # ── Part 3: Swift-Hohenberg amplitude flow ──
+        # Cubic damping toward learnable set-point A*:
+        dA/dt = A · (μ − A²)   where μ = softplus(mu_init)  (set-point control)
+        A_new = A + dt · A · (μ − A²)
+        z_sh  = A_new · e^{i·φ}       (A_new = Swift-Hohenberg-stabilised amplitude)
+
+        # Contraction bound (H017): dt ≤ 0.51 guarantees ‖z_sh‖ ≤ max(A*, A_0)
+        # → Lyapunov-stable, no exploding-feature pathology
+
+        # ── Part 4: Coherence-gated write-back (ReZero) ──
+        # Local order parameter (per-token mean-field coherence):
+        R_t = ‖(1/M) Σ_m z_sh_{t,m} / |z_sh_{t,m}|‖   R_t ∈ [0, 1]
+        g_t = R_t / max_m R_m                            # coherence gate
+
+        # Bipartition-coherence Φ lower bound (H015):
+        Φ_κ = -log(1/M · Σ_m |mean_t(e^{iφ_{t,m}})|²)  # logged, not optimised
+
+        z_prime = z_sh   # (optionally apply additional mixing)
+
+        # Read-back and write (zero-init discipline):
+        h_out = h_in + W_out_zero_init · (g ⊙ Re(z_prime))
+        # W_out starts at zero → step-0 output bit-identical to h_in (H018)
+    """
+
+    impl:    "neuroslm.modules.neural_field_oscillator.NeuralFieldOscillator"
+    loss_fn: ""
+    zero_init: true
+
+    params: {
+        n_osc: {
+            default: 32,
+            type: "int",
+            doc: "M = number of complex oscillators per token position"
+        }
+        n_steps: {
+            default: 2,
+            type: "int",
+            min: 1,
+            doc: "Number of Euler integration steps (Kuramoto + Swift-Hohenberg)"
+        }
+        kappa_init: {
+            default: 0.1,
+            type: "float",
+            doc: "Initial Kuramoto coupling strength κ (learnable)"
+        }
+        alpha_init: {
+            default: 0.01,
+            type: "float",
+            doc: "Initial coherence gate gain α (learnable; ReZero-like start)"
+        }
+        mu_init: {
+            default: 0.5,
+            type: "float",
+            doc: "Initial Swift-Hohenberg set-point A* = softplus(mu_init)"
+        }
+        a_star_init: {
+            default: 1.0,
+            type: "float",
+            doc: "Alternative: direct A* initialisation (overrides mu_init if set)"
+        }
+        expose_phi_lower_bound: {
+            default: true,
+            type: "bool",
+            doc: "Log Φ_κ (bipartition coherence lower bound) to telemetry each step"
+        }
+    }
+
+    properties: {
+        rezero_contract:      "W_out zero-init → step-0 output = h_in; training starts at clean baseline (H018)"
+        lyapunov_stable:      "Swift-Hohenberg with dt≤0.51 is contractive (H017); no exploding amplitudes"
+        coherence_gated:      "Only highly synchronised tokens write back; less synchronised tokens contribute less"
+        phi_lower_bound:      "R_t / Φ_κ is a closed-form lower bound on IIT Φ (H015)"
+        causal_coupling:      "Kuramoto coupling uses causal softmax — autoregressively valid"
+        information_preserving: "Coherence gate preserves mutual information between input and output (H016)"
+    }
+
+    when_to_use: """
+        Use when you want the model to exhibit explicit phase-synchrony dynamics
+        across token positions — a computational analogue of neural binding by
+        synchrony (Singer 1999).
+
+        The coherence gate R_t means: tokens that are more 'in phase' with their
+        neighbours get amplified; incoherent tokens are damped. This is a
+        soft attention mechanism based on phase coherence rather than content
+        similarity.
+
+        Pairs with: kjpla_phase_lattice (KJPLA uses Josephson coupling between
+        layers while NFO uses Kuramoto within a layer — complementary),
+        allostasis (HPA damping protects against NE runaway that would otherwise
+        corrupt the coherence signal).
+
+        The Φ_κ readout (expose_phi_lower_bound=true) is a free diagnostic:
+        it measures something analogous to integrated information without
+        extra compute.
+    """
+
+    not_for: """
+        • Short sequences (T < 4): insufficient token pool for Kuramoto coupling
+        • n_steps > 4: step cost grows linearly; use n_steps=2 (verified: H017 bound satisfied)
+        • dt > 0.51: Swift-Hohenberg contraction bound violated; amplitudes may explode
+    """
+
+    empirical_evidence: {
+        source: "Internal: hypothesis/proofs/ H015-H018 (four verified Lean proofs)"
+        result: "H015: Φ_κ lower bound verified. H016: information-preserving gate. H017: contractive. H018: zero-init identity"
+        lesson: "All four proofs are COMPLETE (no sorry) and verified against Lean 4 / Mathlib4"
+    }
+
+    references: [
+        "Kuramoto, Y. (1984) Chemical Oscillations, Waves, and Turbulence. Springer",
+        "Cross, M. & Hohenberg, P. (1993) Pattern formation outside equilibrium. Rev. Mod. Phys. 65",
+        "Singer, W. (1999) Neuronal synchrony: a versatile code. Neuron 24, 49",
+        "Muller, L. et al. (2018) Cortical travelling waves. Nat. Rev. Neurosci. 19",
+        "Tononi, G. (2016) Consciousness as integrated information"
+    ]
+}

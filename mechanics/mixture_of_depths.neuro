@@ -1,0 +1,84 @@
+# -*- coding: utf-8 -*-
+# Mixture of Depths — sparse token routing through expensive layers.
+#
+# Implementation: neuroslm/dsl/nn_ops.py::mod_block()
+#                 neuroslm/modules/mixture_of_depths.MoDBlock
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/mixture_of_depths.md
+
+export mechanic mixture_of_depths {
+    category: "routing"
+    summary:  "Route only the top-C tokens through attention+FFN; unrouted tokens get identity residual"
+
+    equation: """
+        # Per-token routing score via a 2-layer MLP
+        h = SiLU(x W_r1 + b_r1)
+        score_t = h W_r2 + b_r2   ∈ ℝ    for each token t
+
+        # Select top-C tokens (C = capacity_ratio · T)
+        C = max(1, ⌊T · capacity_ratio⌋)
+        selected_idx = top_C_indices(score, dim=T)    # sorted to preserve causal order
+
+        # Route selected tokens through expensive block (e.g. DiffAttn + SwiGLU)
+        x_sel = x[selected_idx]
+        h_sel = Block(x_sel)    # attention + FFN on subset only
+
+        # Scatter back; unselected tokens get identity
+        out = scatter(x, selected_idx, x_sel + h_sel)
+    """
+
+    impl:    "neuroslm.modules.mixture_of_depths.MoDBlock"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        capacity_ratio: {
+            default: 0.5,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Fraction of tokens routed through the expensive block (0.5 = half)"
+        }
+    }
+
+    properties: {
+        compute_saving:     "O(capacity_ratio) of attention + FFN FLOPs vs dense block"
+        identity_residual:  "Unrouted tokens get x (identity), preserving gradient flow"
+        causal_preserved:   "Top-k indices are sorted before gather; causal ordering intact"
+        differentiable:     "Routing scores have gradients; top-k selection uses straight-through"
+        adaptive_capacity:  "capacity_ratio can be scheduled (ramp from 0.5 to 0.3 over training)"
+    }
+
+    when_to_use: """
+        Use when:
+        • Compute budget is constrained and you can afford to skip tokens
+        • Later layers (near the output) have more uniform token importance;
+          early layers route more tokens to avoid starving the residual stream
+        • Pairing with expensive attention variants (differential_attention,
+          kjpla_phase_lattice) to keep their cost affordable
+
+        Typical setting: capacity_ratio=0.5 in later half of the stack,
+        capacity_ratio=0.9 in early layers to preserve gradient diversity.
+
+        Pairs well with: differential_attention (expensive block to be routed),
+        allostasis (HPA axis can modulate capacity_ratio via NE level).
+    """
+
+    not_for: """
+        • Tasks requiring full-sequence attention at every token (summarisation
+          of very long documents where every token is load-bearing)
+        • Very short sequences (T < 16) where routing overhead exceeds savings
+        • Distillation setups where the teacher always attends to all tokens
+    """
+
+    empirical_evidence: {
+        source: "Raposo et al. (2024) Mixture of Depths, Google DeepMind"
+        result: "Matched dense-model loss with 12.5% fewer FLOPs by routing 50% of tokens"
+        caveat: "Evaluated on large-scale training; small models may not benefit as much"
+    }
+
+    references: [
+        "Raposo, Ritter, Richards et al. (2024) Mixture of Depths. arXiv 2404.02258",
+        "Internal: neuroslm/dsl/nn_ops.py::mod_block (functional reference)"
+    ]
+}

@@ -1,0 +1,94 @@
+# -*- coding: utf-8 -*-
+# CDGA — Cross-Distribution Gradient Alignment.
+#
+# Implementation: neuroslm/regularizers.py::CDGARegularizer
+# Config:         neuroslm/dsl/regularization.py::CDGAConfig
+# Docs:           docs/mechanics/cdga.md
+# Equations:      lib/cdga.neuro
+
+export mechanic cdga {
+    category: "regularizer"
+    summary:  "Gradient surgery: subtract the component of the training gradient that conflicts with an OOD anchor gradient"
+
+    equation: """
+        # Compute gradients on two batches
+        g_train  = ∇_θ L(x_train; θ)    # standard training gradient
+        g_anchor = ∇_θ L(x_anchor; θ)   # OOD anchor (e.g. WikiText prose)
+
+        # Conflict coefficient: how much does g_train hurt the anchor?
+        c = max(0, −⟨g_train, g_anchor⟩ / ⟨g_anchor, g_anchor⟩)
+
+        # Project out conflicting component (α linearly ramped to alpha_max)
+        g_aligned = g_train − α · c · g_anchor
+
+        # Apply g_aligned as the parameter update instead of g_train
+        θ ← θ − lr · g_aligned
+    """
+
+    impl:    "neuroslm.regularizers.CDGARegularizer"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        alpha_max: {
+            default: 1.0,
+            type: "float",
+            min: 0.0,
+            doc: "Maximum projection strength; 1.0=full projection, 0=telemetry only"
+        }
+        warmup_steps: {
+            default: 2000,
+            type: "int",
+            min: 0,
+            doc: "Steps over which α ramps from 0 to alpha_max"
+        }
+        refresh_every: {
+            default: 4,
+            type: "int",
+            min: 1,
+            doc: "Re-sample anchor batch every N optimizer steps"
+        }
+    }
+
+    properties: {
+        no_harm_floor:     "c = max(0, ...) — surgery only fires when training ACTIVELY hurts anchor"
+        gradient_surgery:  "Does not add any auxiliary loss; modifies the gradient directly"
+        anchor_no_update:  "Anchor gradient is computed but NOT used to update params — OOD probing only"
+        pcgrad_analogue:   "Single-task analogue of PCGrad where 'task 2' is the OOD distribution"
+        cost:              "+25% step time when anchor batch = 1/4 training batch (refresh_every=4)"
+    }
+
+    when_to_use: """
+        Use when the training gradient and an OOD gradient point in conflicting
+        directions — and you can afford to hold a second 'anchor' batch in memory.
+
+        Requires an explicit OOD anchor loader (e.g. a WikiText-103 batch
+        sampled at each optimizer step). If no anchor loader is available,
+        disable (alpha_max=0 = telemetry only: c is logged but not applied).
+
+        Warmup of 2000 steps is important: before the LM forms features,
+        both gradients are noise and surgery is a coin-flip.
+
+        Pairs well with: dar (adversarial at representation level while CDGA
+        is adversarial at gradient level — orthogonal axes).
+    """
+
+    not_for: """
+        • Architectures where anchor data is unavailable or very expensive
+        • Anchor batches that are too different from training (e.g. code model
+          with anchor = medical notes): surgery may overconstrain the gradient
+        • refresh_every=1: doubles step time; acceptable only at small batch
+    """
+
+    empirical_evidence: {
+        source: "Yu, Chen, Guestrin (2020) PCGrad: Gradient Surgery for Multi-Task Learning. NeurIPS"
+        result: "PCGrad: 15% task improvement on multi-task benchmarks; CDGA is a single-task special case"
+        internal: "Not yet ablated on this architecture"
+    }
+
+    references: [
+        "Yu, Chen, Kumar, Guestrin, Ma (2020) PCGrad. NeurIPS",
+        "Internal: lib/cdga.neuro (canonical equations)",
+        "Internal: docs/technical_report.md §3.G"
+    ]
+}

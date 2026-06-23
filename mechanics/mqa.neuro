@@ -1,0 +1,82 @@
+# -*- coding: utf-8 -*-
+# Multi-Query Attention — all query heads share a single K/V head.
+#
+# Implementation: neuroslm/modules/mqa.py
+#                 neuroslm/dsl/nn_ops.py::multi_query_attention()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/mqa.md
+
+export mechanic mqa {
+    category: "attention"
+    summary:  "All query heads attend to one shared key/value head, collapsing the KV cache to a single head for fast decoding"
+
+    equation: """
+        # n_heads query heads, exactly ONE key/value head
+        Q ∈ (B, n_heads, T, d_k)
+        K, V ∈ (B, 1, T, d_k)                # single shared write-head
+
+        # Broadcast the single KV head across all query heads
+        K̂ = K.expand(B, n_heads, T, d_k)
+        V̂ = V.expand(B, n_heads, T, d_k)
+
+        # Standard scaled-dot-product attention per query head
+        A_h = softmax((Q_h K̂ᵀ) / √d_k)
+        out_h = A_h V̂
+
+        # MQA is the kv_heads = 1 limit of GQA.
+        # KV cache size = (single head) vs (n_heads) for MHA  → n_heads× smaller.
+    """
+
+    impl:    "neuroslm.modules.mqa.MultiQueryAttention"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        n_heads: {
+            default: 32,
+            type: "int",
+            min: 1,
+            doc: "Number of query heads (all share the single KV head)"
+        }
+    }
+
+    properties: {
+        max_kv_reduction:    "Smallest possible KV cache: a single head — n_heads× less than MHA"
+        fastest_decode:      "Minimal memory traffic per decode step → highest tok/s of the attention family"
+        single_write_head:   "Only one K and one V projection; reduces parameters in the attention block"
+        memory_bound_win:    "Targets the autoregressive decode bottleneck (bandwidth, not FLOPs)"
+        quality_cost:        "Sharing one KV head can degrade quality and training stability vs MHA/GQA"
+    }
+
+    when_to_use: """
+        Use when:
+        • Decode throughput / KV-cache memory is the dominant constraint and you
+          accept a quality trade-off (early PaLM, some inference-first models).
+        • Extreme batch-size serving where per-sequence KV cache must be tiny.
+        • As the kv_heads=1 endpoint of a GQA sweep, to measure the floor.
+
+        In practice GQA (kv_heads≈4–8) usually dominates MQA: nearly the same
+        speed with markedly better quality. Reach for pure MQA only when the
+        single-head cache is a hard requirement.
+
+        Pairs well with: rope, sliding_window_attention, attention_sink.
+    """
+
+    not_for: """
+        • Quality-critical training from scratch where GQA's small extra cache is
+          affordable — GQA almost always wins the quality/speed frontier.
+        • Small head counts (n_heads ≤ 4) where the cache saving is marginal.
+        • Models that show training instability under a single shared KV head.
+    """
+
+    empirical_evidence: {
+        source: "Shazeer (2019) Multi-Query Attention, Google"
+        result: "Large decode-time speedups from the n_heads× smaller KV cache; small perplexity regression vs MHA"
+        caveat: "Quality loss motivated GQA (2023) as the interpolated successor — MQA is now mostly the efficiency endpoint"
+    }
+
+    references: [
+        "Shazeer (2019) Fast Transformer Decoding: One Write-Head is All You Need. arXiv 1911.02150",
+        "Ainslie, Lee-Thorp, de Jong, Zemlyanskiy, Lebrón, Sanghai (2023) GQA. arXiv 2305.13245"
+    ]
+}

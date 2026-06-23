@@ -1,0 +1,86 @@
+# -*- coding: utf-8 -*-
+# Differential Attention — noise-cancelling dual-softmax attention.
+#
+# Implementation: neuroslm/modules/differential_attention.py
+#                 neuroslm/dsl/nn_ops.py::differential_attention()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/differential_attention.md
+
+export mechanic differential_attention {
+    category: "attention"
+    summary:  "Noise-cancelling attention: each head pair computes two softmax maps and subtracts them"
+
+    equation: """
+        # Split each head's Q and K into equal halves
+        Q = [Q₁ | Q₂]   (B, H, T, d_k/2) each half
+        K = [K₁ | K₂]   (B, H, T, d_k/2) each half
+
+        # Independently normalize + apply RoPE to each half
+        Q₁, Q₂ = F.normalize(Q₁), F.normalize(Q₂)
+        K₁, K₂ = F.normalize(K₁), F.normalize(K₂)
+
+        # Two softmax attention maps
+        A₁ = softmax((Q₁ K₁ᵀ) / √(d_k/2))   ∈ Δ^T   # primary
+        A₂ = softmax((Q₂ K₂ᵀ) / √(d_k/2))   ∈ Δ^T   # anti-phase
+
+        # Differential combination with per-head learned gate
+        λ_h = sigmoid(λ_init_h)                         # ∈ (0, 1)
+        output_h = (A₁ − λ_h · A₂) @ V
+
+        # Per-head-dim RMSNorm before output projection
+        output = RMSNorm(output_h)  then  W_O
+    """
+
+    impl:    "neuroslm.modules.differential_attention.DifferentialAttention"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        lambda_init: {
+            default: 0.8,
+            type: "float",
+            doc: "Initial value before sigmoid; λ_h = sigmoid(lambda_init)"
+        }
+    }
+
+    properties: {
+        noise_cancellation: "A₁ and A₂ represent correlated noise; their difference cancels it"
+        bounded_lambda:     "λ_h = sigmoid(λ_init) ∈ (0,1) ensures A₁ − λA₂ is a valid combination"
+        gqa_compatible:     "Supports GQA (n_kv_heads < n_heads) via expansion of K₁, K₂, V"
+        causal_preserved:   "Both A₁ and A₂ use the same causal mask"
+        rezero_trivial:     "At λ=0.5 and equal A₁≈A₂, output≈0; at λ=0 reduces to standard attention"
+    }
+
+    when_to_use: """
+        Use when:
+        • Attention redundancy is observed (heads collapse to similar patterns)
+        • Hallucination or repetition is a problem (anti-phase cancels spurious mass)
+        • Model depth ≥ 12 layers (shallow models benefit less from head diversity)
+        • Training from scratch (λ can learn freely; fine-tuning from MHA weights needs
+          λ_init tuned so early outputs match the pre-trained checkpoint)
+
+        The key trade-off: each head pair uses d_k/2 per half instead of d_k,
+        so it implicitly halves per-head key dimension. This is fine for most
+        transformer widths (d_k ≥ 32 per half is sufficient for stable attention).
+
+        Pairs well with: Mixture-of-Depths (reduces cost of expensive heads),
+        GroupedQueryAttention (further reduces KV cache), cosine_lm_head.
+    """
+
+    not_for: """
+        • Very small d_k (< 16 per half) — attention becomes numerically noisy
+        • Architectures where head dimension parity isn't guaranteed
+        • Drop-in replacement for pre-trained MHA without λ warm-up schedule
+    """
+
+    empirical_evidence: {
+        source: "Ye et al. (2024) Differential Transformer, Microsoft Research"
+        result: "~15% lower perplexity on language modelling vs MHA at matched parameters"
+        caveat: "Evaluated on large-scale English LM; small-scale results vary"
+    }
+
+    references: [
+        "Ye, Dong, Jia et al. (2024) Differential Transformer. arXiv 2410.05258",
+        "Michel, Levy, Neubig (2019) Are Sixteen Heads Really Better than One? NeurIPS"
+    ]
+}

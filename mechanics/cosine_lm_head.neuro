@@ -1,0 +1,93 @@
+# -*- coding: utf-8 -*-
+# Cosine LM Head — norm-invariant output projection.
+#
+# Implementation: neuroslm/dsl/nn_ops.py::cosine_lm_head
+# Equation:       lib/gif.neuro::gif_cosine_lm_head
+# Tests:          tests/dsl/test_cosine_head.py
+# Docs:           docs/mechanics/cosine_lm_head.md
+
+export mechanic cosine_lm_head {
+    category: "training_dynamics"
+    summary:  "Replace linear LM head with cosine-similarity logits: z_i = τ·cos(h, W_i); eliminates magnitude as a domain-confidence DoF"
+
+    equation: """
+        # Standard linear head (what this replaces):
+        z_i = h · W_i    (h ∈ ℝ^d, W_i ∈ ℝ^d → z_i ∈ ℝ)
+
+        # Cosine head (norm-invariant):
+        ĥ   = h / ‖h‖                             # unit-sphere hidden state
+        Ŵ_i = W_i / ‖W_i‖                         # unit-sphere word embeddings
+        z_i = τ · (ĥ · Ŵ_i)                       # τ = learnable scalar temperature
+
+        # τ initialisation:
+        τ_init = √d_model   (so that initial logit variance ≈ 1, matching linear head)
+
+        # Logit bound: z_i ∈ [−τ, +τ] for all i     (compact output range)
+        # Gradient through τ: ∂L/∂τ = Σ_i ∂L/∂z_i · (ĥ · Ŵ_i)
+
+        # Root-cause addressed:
+        # Model grows ‖h‖ and ‖W_i‖ for domain-frequent tokens → high confidence
+        # OOD tokens have small ‖W_i‖ → low confidence independent of angular proximity
+        # Cosine head: confidence is ONLY angular proximity → generalises across domains
+    """
+
+    impl:    "neuroslm.dsl.nn_ops.cosine_lm_head"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        tau_init: {
+            default: -1.0,
+            type: "float",
+            doc: "Initial temperature; -1 = sqrt(d_model)"
+        }
+        learnable_tau: {
+            default: true,
+            type: "bool",
+            doc: "If false, τ is fixed (not learned); useful for ablating tau adaptation"
+        }
+    }
+
+    properties: {
+        norm_invariant:     "Logit depends only on angular proximity; ‖h‖ and ‖W‖ magnitude is irrelevant"
+        bounded_logits:     "z_i ∈ [−τ, +τ]; bounded even without LR schedule or weight decay"
+        consistent_with_qk: "Matches unit-sphere Q/K normalisation in RoPE / KJPLA attention heads"
+        single_new_param:   "Only one additional scalar (τ) vs standard linear head"
+        drop_in:            "Can replace nn.Linear LM head in any transformer without architecture change"
+    }
+
+    when_to_use: """
+        Use when you observe 'norm-mediated confidence asymmetry': the model's
+        in-distribution predictions grow increasingly confident (‖W_i‖ large for
+        frequent tokens) while OOD tokens stay under-confident, causing OOD-PPL
+        to plateau or diverge even as train-PPL falls.
+
+        Requires that the hidden state h has consistent norm across domains. If h
+        is LayerNorm'd before the head, ‖h‖ ≈ √d, and the cosine head is
+        equivalent to a linear head on normalised inputs (it's a no-op benefit).
+        The cosine head is most powerful when h can grow arbitrary norms.
+
+        Part of GIF-6. Pairs with: isotropy (prevents hidden-state collapse
+        which would make ĥ noisy), vbb (constrains ‖h‖ via IB pressure).
+    """
+
+    not_for: """
+        • Models where hidden state is already RMSNorm'd or LayerNorm'd before
+          the LM head — cosine head provides no new invariance in that case
+        • tau_init >> √d_model: overconfident logits; warm up τ if needed
+        • learnable_tau=false AND small τ: can prevent the model from ever being
+          confident enough to predict rare tokens correctly
+    """
+
+    empirical_evidence: {
+        source: "Liu, Jia, Bhatt (2022) Same Pre-training Loss, Better Downstream. arXiv:2205.00214"
+        result: "Cosine head consistently matches or outperforms linear head on downstream generalisation"
+        internal: "Wired as GIF-6; isolated ablation vs. linear head pending"
+    }
+
+    references: [
+        "Liu, Jia, Bhatt (2022) Same Pre-training Loss, Better Downstream: ImplicitCosine. arXiv",
+        "Wang, Liu et al. (2020) Improving Neural LM with Consistent Predictions. ACL",
+        "Internal: lib/gif.neuro (gif_cosine_lm_head equation)"
+    ]
+}

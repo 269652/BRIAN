@@ -1,0 +1,171 @@
+# -*- coding: utf-8 -*-
+# Semantic Turbulence Engine (STE) — three physics-inspired multi-scale mechanisms.
+#
+# Implementation: neuroslm/emergent/semantic_turbulence.py
+# Config:         neuroslm/dsl/training_config.py::SemanticTurbulenceConfig
+# Docs:           docs/mechanics/semantic_turbulence.md
+
+export mechanic semantic_turbulence {
+    category: "attention"
+    summary:  "Three physics-inspired mechanisms: RG cascade (Kolmogorov multi-scale), GPE superfluid field (coherence), NT criticality (Beggs-Plenz branching ratio)"
+
+    equation: """
+        # ── Module 1: Renormalisation Group Cascade (RG) ──────────────────────
+        # G groups operating at token scales 2^g (g=0,...,G-1)
+        # Block mean pooling (coarse-graining):
+        H̄^(g)_t = mean_{τ ∈ block_g(t)} h_{τ}        block_g = 2^g consecutive tokens
+        δH^(g)_t = h_t − H̄^(g)_t                     # fluctuation field
+
+        # Scale-specific attention on the coarse stream:
+        H̃^(g) = attention(H̄^(g))
+
+        # Kolmogorov 5/3-law coupling initialisation:
+        λ_g = 2^{-5g/6}    # energy cascade: λ₀=1, λ₁≈0.56, λ₂≈0.31
+
+        # Residual write-back:
+        h_{rg} = h + Σ_g λ_g · upsample(H̃^(g) + λ_g · δH^(g))
+
+        # ── Module 2: Gross-Pitaevskii Equation (GPE) Layer ────────────────────
+        # Encode h_rg as a complex superfluid field ψ ∈ ℂ^{d/2}
+        ψ = Linear_{d → d} (h_rg), split into (re, im)
+
+        # Imaginary-time GPE integration (N = gpe_steps):
+        ψ_t ← ψ_t − Δτ · (−∇²ψ_t/2 + g·|ψ_t|²·ψ_t)
+        ∇²ψ ≈ FFT-based Laplacian (or finite difference for small d)
+        Δτ = gpe_dt,  g = gpe_coupling (learnable)
+
+        # Norm-preserving rescaling after each step:
+        ψ_t ← ψ_t / ‖ψ_t‖
+
+        # Superfluid order parameter (semantic coherence):
+        ρ = |⟨ψ/|ψ|⟩|²    ρ ∈ [0, 1]
+        # ρ→1: condensate = semantically unambiguous context
+        # ρ→0: disordered = highly polysemous / uncertain
+
+        # Optional ρ gate on write-back:
+        h_gpe = h_rg + ρ · Re(ψ)  (ρ gates the contribution by coherence)
+
+        # ── Module 3: NT Criticality Monitor (Branching Ratio) ────────────────
+        # Layer-to-layer branching ratio:
+        σ_ℓ = (1/T) Σ_t ‖∂h_{ℓ+1,t} / ∂h_{ℓ,t}‖_F
+        σ   = mean_ℓ(σ_ℓ)
+
+        # Criticality target (Beggs & Plenz 2003: σ* ≈ 1):
+        L_criticality = criticality_weight · (σ − criticality_target)²
+
+        # NT feedback (closes control loop):
+        if σ > σ*: increase GABA (dampen); reward = 0
+        if σ < σ*: increase NE (excite);   reward = 0
+        if σ ≈ σ*: DA reward → optimizer reinforces current state
+        DA_increment = criticality_da_reward · max(0, 1 − |σ − σ*|)
+    """
+
+    impl:    "neuroslm.emergent.semantic_turbulence.SemanticTurbulenceEngine"
+    loss_fn: "neuroslm.emergent.semantic_turbulence.SemanticTurbulenceEngine.compute_criticality_loss"
+    zero_init: true
+
+    params: {
+        n_rg_groups: {
+            default: 3,
+            type: "int",
+            min: 1,
+            doc: "G = number of RG scale groups; group g operates at block_size=2^g"
+        }
+        kolmogorov_init: {
+            default: true,
+            type: "bool",
+            doc: "Init λ_g ∝ 2^{-5g/6} (Kolmogorov 5/3 law); false = uniform 1.0"
+        }
+        gpe_steps: {
+            default: 4,
+            type: "int",
+            min: 1,
+            doc: "N = number of imaginary-time GPE integration steps"
+        }
+        gpe_coupling_init: {
+            default: 0.01,
+            type: "float",
+            doc: "Initial g (self-interaction strength); small = near-free condensate"
+        }
+        gpe_dt: {
+            default: 0.01,
+            type: "float",
+            doc: "Imaginary-time step Δτ for GPE integration"
+        }
+        criticality_target: {
+            default: 1.0,
+            type: "float",
+            doc: "Target branching ratio σ* (1.0 = critical point)"
+        }
+        criticality_weight: {
+            default: 0.01,
+            type: "float",
+            doc: "Weight on L_criticality = weight · (σ − σ*)²"
+        }
+        criticality_da_reward: {
+            default: 0.1,
+            type: "float",
+            doc: "DA increment when σ ≈ σ* (closes NT reward loop)"
+        }
+        criticality_ema_alpha: {
+            default: 0.05,
+            type: "float",
+            doc: "EMA α for smoothing σ estimates (reduces step-to-step noise)"
+        }
+        rho_gate_enabled: {
+            default: true,
+            type: "bool",
+            doc: "If true, GPE write-back is gated by ρ (coherence); else full write-back"
+        }
+    }
+
+    properties: {
+        three_modules:       "RG cascade + GPE + NT criticality are independently wired and can be disabled"
+        kolmogorov_init:     "λ_g ∝ 2^{-5g/6} implements energy cascade scale-free prior"
+        superfluid_analogy:  "GPE superfluid → semantic condensate: high-ρ context = unambiguous meaning"
+        critical_dynamics:   "σ=1 branching ratio: maximum dynamic range + information transmission (Beggs & Plenz)"
+        nt_closed_loop:      "DA/NE/GABA NT channels respond to σ; closes a feedback loop through the harness"
+        rezero_rg:           "RG λ_g scalars start small (Kolmogorov law); step-0 near-identity"
+    }
+
+    when_to_use: """
+        Use when you want multi-scale attention dynamics (RG) combined with a
+        coherence-based gating signal (GPE order parameter ρ) and a criticality
+        regulariser that keeps the trunk near the edge of chaos (σ=1).
+
+        The three modules are designed to compose:
+        - RG cascade enriches the representation at multiple timescales
+        - GPE measures how 'coherent' the enriched representation is
+        - NT criticality uses the branching ratio to keep the dynamics near critical
+
+        For the criticality module to close the NT loop, the harness must expose
+        DA/NE/GABA modification points (i.e. must have a NT homeostat wired in).
+        Without NT wiring, set criticality_da_reward=0 and the criticality penalty
+        still fires but the NT loop is silent.
+
+        Pairs with: nfo (NFO adds phase-synchrony within a layer; STE adds
+        multi-scale + superfluid dynamics), allostasis (HPA prevents sustained
+        NT runaway that STE criticality could otherwise trigger).
+    """
+
+    not_for: """
+        • Sequences shorter than 2^{n_rg_groups} tokens: coarsest group has no content
+        • gpe_steps > 8: GPE becomes computationally expensive; use n_steps=4
+        • criticality_weight > 0.1: branching-ratio penalty can dominate CE early
+        • Without NT harness: DA/NE/GABA feedback channels silently fire to no effect
+    """
+
+    empirical_evidence: {
+        source: "Internal: docs/findings.md H-STE hypothesis"
+        result: "Hypothesis: 2-4× OOD PPL reduction over same-parameter baseline; ablation ongoing"
+        caveat: "Full STE stack not yet ablated; enabled in master arch (enabled: true) for H-STE-A/B/C experiments"
+    }
+
+    references: [
+        "Kolmogorov, A. (1941) Local structure of turbulence in incompressible fluid. Proc. USSR Acad. Sci.",
+        "Gross, E. (1961) Structure of quantised vortex. Nuovo Cimento 20: 454",
+        "Pitaevskii, L. (1961) Vortex lines in an imperfect Bose gas. JETP 13: 451",
+        "Beggs, J. & Plenz, D. (2003) Neuronal avalanches in neocortical circuits. J Neurosci",
+        "Internal: neuroslm/emergent/semantic_turbulence.py"
+    ]
+}

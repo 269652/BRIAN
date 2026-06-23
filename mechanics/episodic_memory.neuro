@@ -1,0 +1,125 @@
+# -*- coding: utf-8 -*-
+# Episodic kNN Memory — Memorizing Transformers / RETRO-style episodic cache.
+#
+# Implementation: neuroslm/modules/differentiable_memory.py (or similar)
+# Config:         neuroslm/dsl/training_config.py (episodic_memory block)
+# Docs:           docs/mechanics/episodic_memory.md
+
+export mechanic episodic_memory {
+    category: "attention"
+    summary:  "External episodic key-value cache: write hidden states, retrieve k nearest neighbours, blend into residual via zero-init α gate (ReZero)"
+
+    equation: """
+        # Memory: M slots, key-value pairs
+        keys   = K_mem ∈ ℝ^{slots × d_key}    (normalised key embeddings)
+        values = V_mem ∈ ℝ^{slots × d_val}    (stored value embeddings)
+
+        # ── Write gate ──
+        # 'all': write every token's hidden state unconditionally
+        # 'surprise': write only tokens with high surprise (nll_local > nll_global quantile)
+        if write_gate == "all":
+            K_mem[tail+j] = q_j    for j in 0..T  (circular buffer; FIFO)
+        elif write_gate == "surprise":
+            mask_j = (surprise_j > quantile(surprise, write_quantile))
+            K_mem[tail+j] = q_j  for j where mask_j
+
+        # ── Read / Retrieval ──
+        q_t   = W_q · h_t                     # query projection
+        # k-nearest-neighbours in cosine similarity:
+        scores_t = q_t · K_mem.T / (‖q_t‖ · ‖K_mem‖)
+        top_k_idx = argtopk(scores_t, k=k)
+        top_k_val = V_mem[top_k_idx]           # ∈ ℝ^{k × d_val}
+
+        # Softmax-weighted aggregate:
+        attn_t    = softmax(scores_t[top_k_idx] / √d_key)
+        retrieved_t = attn_t @ top_k_val       # ∈ ℝ^{d_val}
+
+        # ── Write-back (ReZero) ──
+        h_out_t = h_t + α_mem · retrieved_t
+        # α_mem is a learnable scalar, initialised to alpha_init=0
+        # → step-0: h_out = h_in (bit-identical to baseline)
+        # → training: gradient lifts α off zero proportionally to retrieval benefit
+    """
+
+    impl:    "neuroslm.modules.differentiable_memory.EpisodicMemory"
+    loss_fn: ""
+    zero_init: true
+
+    params: {
+        slots: {
+            default: 4096,
+            type: "int",
+            min: 1,
+            doc: "Maximum number of key-value pairs in the memory bank"
+        }
+        k: {
+            default: 32,
+            type: "int",
+            min: 1,
+            doc: "Number of nearest neighbours to retrieve per query"
+        }
+        alpha_init: {
+            default: 0.0,
+            type: "float",
+            doc: "Initial blend coefficient α; 0.0 = ReZero start (baseline-identical)"
+        }
+        write_gate: {
+            default: "all",
+            type: "str",
+            doc: "'all' (write every token) or 'surprise' (write only high-surprise tokens)"
+        }
+        write_quantile: {
+            default: 0.8,
+            type: "float",
+            doc: "Quantile threshold for surprise write gate (write top 20% most surprising)"
+        }
+    }
+
+    properties: {
+        rezero_contract:      "alpha_init=0 → h_out = h_in at step 0; baseline-identical forward"
+        fifo_buffer:          "Circular buffer; oldest memories are evicted as new ones arrive"
+        differentiable:       "α is learnable; retrieval weights are softmax-differentiable"
+        no_positional_bias:   "kNN retrieval is position-agnostic; episodic, not sequential"
+        surprise_gating:      "write_gate='surprise' writes only memorable moments (high nll_local - nll_global)"
+    }
+
+    when_to_use: """
+        Use when you want the model to have an explicit episodic memory of past
+        hidden states, and to blend retrieved information into the current
+        representation.
+
+        This is the Memorizing Transformers architecture (Wu et al. 2022) applied
+        at an arbitrary layer. Unlike KV-cache (which stores past attention keys),
+        this stores raw hidden states and retrieves them by content similarity.
+
+        alpha_init=0.0 (ReZero) is critical: the memory starts silent and only
+        activates as the gradient finds it useful. This prevents memory noise from
+        hurting the baseline.
+
+        write_gate='all' is the safe Phase-5 baseline. Upgrade to 'surprise' once
+        the baseline is characterised.
+
+        Pairs with: grid_positions (grid-cell positions provide a stable address
+        space for episodic encoding), predictive_coding_head (surprise computed
+        by local vs global LM loss).
+    """
+
+    not_for: """
+        • Very short context runs: insufficient history to fill the memory bank
+        • alpha_init > 0 without warmup: retrieved noise can corrupt early training
+        • slots > 65536: memory lookup becomes a bottleneck (use FAISS or product
+          quantisation for very large banks)
+    """
+
+    empirical_evidence: {
+        source: "Wu, Rabe, Hutchins, Szegedy (2022) Memorizing Transformers. ICLR"
+        result: "kNN memory lookup improves perplexity on long documents by 10-13%"
+        internal: "HPB Phase 5: enabled with write_gate='all', alpha_init=0 (ReZero); ablation pending"
+    }
+
+    references: [
+        "Wu, Rabe, Hutchins, Szegedy (2022) Memorizing Transformers. ICLR 2022",
+        "Borgeaud et al. (2022) Improving Language Models by Retrieving from Trillions of Tokens (RETRO). ICML",
+        "Internal: neuroslm/dsl/training_config.py (episodic_memory block)"
+    ]
+}

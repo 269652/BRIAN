@@ -1,0 +1,103 @@
+# -*- coding: utf-8 -*-
+# Linear Attention — kernel feature maps give an O(N) recurrent attention.
+#
+# Implementation: neuroslm/modules/linear_attention.py
+#                 neuroslm/dsl/nn_ops.py::linear_attention()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/linear_attention.md
+
+export mechanic linear_attention {
+    category: "sequence_mixer"
+    summary:  "Attention without softmax: a kernel feature map φ makes it an O(N) recurrent sum of states"
+
+    equation: """
+        # Softmax attention computes, per query i:
+        #   o_i = Σ_j  [ exp(qᵢ·kⱼ) / Σ_j' exp(qᵢ·kⱼ') ] vⱼ        # O(T²)
+        #
+        # Replace exp(qᵢ·kⱼ) with a positive kernel κ(qᵢ,kⱼ) = φ(qᵢ)·φ(kⱼ):
+        #
+        #   o_i = Σ_j (φ(qᵢ)·φ(kⱼ)) vⱼ / Σ_j (φ(qᵢ)·φ(kⱼ))
+        #       = φ(qᵢ)ᵀ (Σ_j φ(kⱼ) vⱼᵀ) / (φ(qᵢ)ᵀ Σ_j φ(kⱼ))
+        #
+        # The associativity of matmul lets us hoist the key/value sums OUT of
+        # the per-query loop: define
+        #   S = Σ_j φ(kⱼ) vⱼᵀ   ∈ ℝ^{d_φ × d_v}   (the "state" / KV summary)
+        #   z = Σ_j φ(kⱼ)       ∈ ℝ^{d_φ}         (the normalizer)
+        # then
+        #   o_i = (φ(qᵢ)ᵀ S) / (φ(qᵢ)ᵀ z + eps)    # O(1) per query, O(N) total
+
+        # Causal / autoregressive recurrent form (prefix sums of state):
+        #   S_t = S_{t-1} + φ(k_t) v_tᵀ
+        #   z_t = z_{t-1} + φ(k_t)
+        #   o_t = (φ(q_t)ᵀ S_t) / (φ(q_t)ᵀ z_t + eps)
+
+        # Default feature map (elu+1, ensures positivity → valid attention):
+        #   φ(x) = elu(x) + 1   ≥ 0
+
+        # Chunked parallel training form: split T into chunks; within a chunk
+        # use the quadratic form (small), carry the prefix state S across
+        # chunks — recovering full parallelism with O(N) total work.
+    """
+
+    impl:    "neuroslm.modules.linear_attention.LinearAttention"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        feature_map: {
+            default: "elu",
+            type: "str",
+            doc: "Positive feature map φ; 'elu' uses φ(x)=elu(x)+1. Also 'relu', 'softmax', 'identity'"
+        }
+        eps: {
+            default: 1e-6,
+            type: "float",
+            doc: "Stabilizer added to the denominator φ(qᵢ)ᵀz to avoid divide-by-zero"
+        }
+    }
+
+    properties: {
+        linear_complexity:  "O(N·d²) time and O(d²) state — no T×T attention matrix"
+        recurrent_state:    "Causal form is a running KV summary S_t, enabling O(1)/step decoding"
+        constant_kv_memory: "Fixed d_φ×d_v state replaces the growing softmax KV cache"
+        parallel_chunked:   "Chunk-wise training keeps full GPU parallelism at O(N) total work"
+        kernel_choice:      "φ must be non-negative for the result to be a convex attention combination"
+    }
+
+    when_to_use: """
+        Use when:
+        • Sequence length is large enough that the O(T²) softmax matrix
+          dominates time or memory
+        • Constant-memory autoregressive generation is needed (recurrent state
+          instead of a KV cache that grows with context)
+        • A simple, attention-shaped drop-in is preferred over a full SSM
+
+        The trade-off vs softmax attention is expressivity: collapsing the keys
+        into a fixed-size state S loses the sharp, content-addressed retrieval
+        that softmax provides. Choice of feature map φ matters — elu+1 is a
+        cheap default, but it cannot reproduce the peaky distributions softmax
+        achieves, which is why gated and higher-order variants exist.
+
+        Pairs well with: gating on the state (see gated_linear_attention),
+        RMSNorm, and rotary position embeddings.
+    """
+
+    not_for: """
+        • Tasks dominated by precise long-range copy / associative recall —
+          the fixed-size state bottleneck loses sharp retrieval
+        • Short sequences where O(T²) is already cheap (no benefit, slight overhead)
+        • Cases needing the exact softmax distribution (e.g. distillation from a
+          softmax teacher where attention maps must match)
+    """
+
+    empirical_evidence: {
+        source: "Katharopoulos, Vyas, Pappas, Fleuret (2020) Transformers are RNNs"
+        result: "Up to 4000× faster autoregressive inference than softmax attention at long context, with comparable quality on autoregressive image and speech tasks"
+        caveat: "Quality gap to softmax widens on tasks requiring sharp token-level recall"
+    }
+
+    references: [
+        "Katharopoulos, Vyas, Pappas, Fleuret (2020) Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention. arXiv 2006.16236",
+        "Choromanski et al. (2021) Rethinking Attention with Performers. arXiv 2009.14794"
+    ]
+}

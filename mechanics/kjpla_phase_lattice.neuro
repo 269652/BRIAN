@@ -1,0 +1,112 @@
+# -*- coding: utf-8 -*-
+# KJPLA — Kuramoto-Josephson Phase Lattice Attention (Phase 3, THSD program).
+#
+# Implementation: neuroslm/mechanisms/kjpla.py
+# Tests:          tests/dsl/test_kjpla_attention.py
+#                 tests/dsl/test_kjpla_dsl_parse.py
+# Docs:           docs/mechanics/kjpla_phase_lattice.md
+
+export mechanic kjpla_phase_lattice {
+    category: "attention"
+    summary:  "Per-head phase φ evolving via Kuramoto sync and Josephson inter-layer coupling; phase gates attention logits"
+
+    equation: """
+        # Content-carrier phase: projects query to a scalar phase per head
+        φ₀_h[b,h,t] = Σ_d w_h[d] · q[b,h,t,d]       # w_h init=0 → φ₀=0 at start
+
+        # Intra-layer Kuramoto synchronisation
+        φ₁_h = φ₀_h + η · (1/H) Σ_j sin(φ₀_j − φ₀_h)
+        # η init=0 → no sync at step 0
+
+        # Phase-gated attention logit (additive bias)
+        logit_h(t,s) = (q_t·k_s) / √d_k  +  β_h · cos(φ₁_h(t) − φ₁_h(s))
+        # β_h init=0 → identical to vanilla attention at step 0
+
+        # Inter-layer Josephson order parameter (per layer ℓ)
+        Δ_h = 2π·h / (H·L)                              # target phase stride
+        R_ℓ[h] = |⟨ e^{i(φ₁_ℓ − φ_{ℓ−1} − Δ_h)} ⟩_t|  # coherence in [0,1]
+
+        # Josephson coupling loss (added to LM loss)
+        L_J = −(1/L) Σ_{ℓ=1}^{L} K̄_h · R_ℓ
+        # K_h init=0 → L_J=0 at step 0
+
+        # Optional phase-entropy floor loss (prevents all heads syncing to one phase)
+        H_φ = −Σ_h p_h log p_h    (p_h = |φ₁_h|² / Σ |φ₁_j|²)
+        L_ent = max(0, ε_H − H_φ)  when entropy_strength > 0
+    """
+
+    impl:    "neuroslm.mechanisms.kjpla.KJPLAttention"
+    loss_fn: "neuroslm.mechanisms.kjpla.josephson_loss"
+    zero_init: true
+
+    params: {
+        josephson_strength: {
+            default: 0.0,
+            type: "float",
+            min: 0.0,
+            doc: "Weight on L_J; 0.0 = diagnostic-only (R_ℓ logged, no gradient)"
+        }
+        entropy_strength: {
+            default: 0.0,
+            type: "float",
+            min: 0.0,
+            doc: "Weight on phase-entropy floor loss; 0.0 = disabled"
+        }
+        eps_H: {
+            default: 0.5,
+            type: "float",
+            min: 0.0,
+            exclusive_min: true,
+            doc: "Entropy floor in nats; penalised when H_φ < eps_H"
+        }
+    }
+
+    properties: {
+        rezero_contract:      "All phase params (η, β_h, K_h, w_h) init=0; step-0 output == vanilla CausalSelfAttention (bit-exact)"
+        phi_bfloat16:         "Phase stash stored in bfloat16 to halve memory overhead (closed FIX 9)"
+        delta_h_nonpersistent:"delta_h is a non-persistent buffer — reconstructed from (n_heads, n_layers) on load"
+        josephson_R_in_01:    "R_ℓ ∈ [0, 1] by construction (magnitude of mean complex exponential)"
+        kuramoto_fixed_point: "φ₁ = φ₀ when η=0 (torch.equal verified by test)"
+        loss_additive:        "L_J adds to LM loss; at josephson_strength=0 gradient flow is zero"
+        backward_reaches_K_h: "Backward from L_J reaches K_h.grad (verified by torch.autograd)"
+    }
+
+    when_to_use: """
+        Use when you want binding-by-synchrony: heads across layers that process
+        related concepts should phase-lock (R_ℓ → 1).
+
+        Start with josephson_strength=0 (diagnostic mode) for several thousand
+        steps to observe the distribution of R_ℓ across heads. If R_ℓ is already
+        high (>0.8) without pressure, phase structure is emerging naturally and you
+        may not need the loss. If R_ℓ is low (~0.2), add josephson_strength=0.05.
+
+        The entropy floor (entropy_strength, eps_H) prevents degenerate solutions
+        where all heads collapse to a single phase (R_ℓ = 1 trivially). Typical
+        setting: entropy_strength=0.01, eps_H=0.3-0.5.
+
+        Pairs well with: divisive_grad_norm (phases can produce gradient spikes),
+        allostasis (HPA axis suppresses NE runaway during phase transitions).
+    """
+
+    not_for: """
+        • Architectures with n_heads=1 (no intra-layer sync to compute)
+        • Very deep stacks (L > 24) with high josephson_strength — the −K̄R product
+          accumulates and can dominate the LM loss
+        • Inference-only deployments (the phase stash adds O(B·H·T) memory per layer)
+    """
+
+    empirical_evidence: {
+        source: "Internal: docs/findings.md H26 (KJPLA-v2, 2026-06)"
+        result: "R_mean=0.31 at step 0 (random init); rises to ~0.6 by step 5k with josephson_strength=0.05"
+        caveat: "Diagnostic-only run; penalty-mode (strength>0) is a planned follow-up"
+    }
+
+    formal_proof: "hypothesis/proofs/H026_kjpla_rezero.lean (pending full proof)"
+
+    references: [
+        "Kuramoto (1975) Self-entrainment of a population of coupled non-linear oscillators",
+        "Josephson (1962) Possible new effects in superconductive tunnelling. Phys. Lett.",
+        "Cohen, Dieleman, Welling (2019) Gauge Equivariant Convolutional Networks. ICML",
+        "Internal: docs/formal_framework.md §8 (KJPLA derivation)"
+    ]
+}

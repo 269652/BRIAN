@@ -1,0 +1,108 @@
+# -*- coding: utf-8 -*-
+# Multi-head Latent Attention — low-rank KV compression + decoupled RoPE.
+#
+# Implementation: neuroslm/modules/mla.py
+#                 neuroslm/dsl/nn_ops.py::multihead_latent_attention()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/mla.md
+
+export mechanic mla {
+    category: "attention"
+    summary:  "Caches a small joint latent for K and V (low-rank), with a separate decoupled RoPE branch, slashing KV-cache size while keeping MHA-grade quality"
+
+    equation: """
+        # ── KV down-projection to a shared latent (this is the ONLY KV cache) ──
+        c^{KV}_t = W^{DKV} · h_t                # (B, T, kv_lora_rank)   ← cached
+
+        # Up-project at use time to per-head K(content) and V
+        k^C_t = W^{UK} · c^{KV}_t               # (B, n_h, T, d_h)   content part of key
+        v_t   = W^{UV} · c^{KV}_t               # (B, n_h, T, d_h)
+
+        # ── Decoupled RoPE branch (separate small key, position-carrying) ──
+        k^R_t = RoPE( W^{KR} · h_t )            # (B, 1, T, rope_head_dim)  ← also cached (1 head)
+        # Final key = concat of content and rotary parts
+        k_t = [ k^C_t ; k^R_t ]
+
+        # ── Query low-rank path + its own RoPE branch ──
+        c^Q_t = W^{DQ} · h_t                    # (B, T, q_lora_rank)
+        q^C_t = W^{UQ} · c^Q_t                  # content query
+        q^R_t = RoPE( W^{QR} · c^Q_t )          # rotary query
+        q_t   = [ q^C_t ; q^R_t ]
+
+        # ── Attention as usual over the assembled q,k,v ──
+        A = softmax( (q_t k_tᵀ) / √(d_h + rope_head_dim) )
+        out = A · v_t
+
+        # Cache footprint per token = kv_lora_rank + rope_head_dim
+        #   (≪ 2 · n_h · d_h of MHA)
+    """
+
+    impl:    "neuroslm.modules.mla.MultiHeadLatentAttention"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        kv_lora_rank: {
+            default: 512,
+            type: "int",
+            min: 1,
+            doc: "Dimension of the shared compressed KV latent c^{KV} — the dominant term in cache size"
+        }
+        q_lora_rank: {
+            default: 1536,
+            type: "int",
+            min: 1,
+            doc: "Rank of the query down-projection (reduces query-path params/activations; not cached)"
+        }
+        rope_head_dim: {
+            default: 64,
+            type: "int",
+            min: 1,
+            doc: "Dimension of the decoupled RoPE branch carried per token (the rotary key is a single shared head)"
+        }
+    }
+
+    properties: {
+        latent_kv_cache:     "Caches one low-rank latent (kv_lora_rank + rope_head_dim) instead of full per-head K and V"
+        decoupled_rope:      "Position is carried by a separate RoPE branch so compression does not fight rotary equivariance"
+        mha_grade_quality:   "Unlike MQA/GQA, the low-rank latent retains near-MHA quality at a far smaller cache"
+        matrix_absorption:   "W^{UK}/W^{UV} can be folded into the query/output projections at inference for fewer ops"
+        param_efficient:     "q_lora_rank shrinks the query path's parameter and activation cost"
+    }
+
+    when_to_use: """
+        Use when:
+        • You want both small KV cache AND MHA-grade quality, beyond what GQA
+          gives — MLA is the DeepSeek-V2/V3 attention.
+        • Long-context decoder serving where cache memory dominates but you
+          refuse the quality hit of aggressive GQA/MQA.
+        • Large models where the matrix-absorption trick recovers MQA-like
+          decode speed from the compressed latent.
+
+        Tuning: kv_lora_rank sets the quality/cache frontier (512 is the
+        DeepSeek-V2 setting for d_model≈5120). rope_head_dim≈64 is typical.
+        q_lora_rank trades query-path capacity for activation savings.
+
+        Pairs well with: rope (its decoupled branch IS RoPE), and MoE FFNs
+        (the DeepSeek-V2 pairing).
+    """
+
+    not_for: """
+        • Small models where the extra projection machinery outweighs the cache
+          win — plain GQA is simpler and competitive at small scale.
+        • Encoder/bidirectional settings (designed for causal decode caching).
+        • Implementations that cannot afford the up-projection / absorption
+          bookkeeping (more moving parts than MHA/GQA).
+    """
+
+    empirical_evidence: {
+        source: "DeepSeek-AI (2024) DeepSeek-V2 Technical Report"
+        result: "KV cache reduced ~93% vs MHA while matching or exceeding MHA quality; enabled efficient long-context serving in DeepSeek-V2/V3"
+        caveat: "Benefits are clearest at large scale; the design complexity rarely pays off for small models"
+    }
+
+    references: [
+        "DeepSeek-AI (2024) DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model. arXiv 2405.04434",
+        "DeepSeek-AI (2024) DeepSeek-V3 Technical Report. arXiv 2412.19437"
+    ]
+}

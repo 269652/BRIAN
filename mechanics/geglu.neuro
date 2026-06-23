@@ -1,0 +1,86 @@
+# -*- coding: utf-8 -*-
+# GeGLU — GELU-gated linear-unit feed-forward block.
+#
+# Implementation: neuroslm/modules/feedforward.py::GeGLU
+#                 neuroslm/dsl/nn_ops.py::geglu()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/geglu.md
+
+export mechanic geglu {
+    category: "feedforward"
+    summary:  "GELU-gated FFN: one projection is GELU-activated and gates another before down-projection"
+
+    equation: """
+        # Three projections from model dim d → hidden dim h (= ff_mult · d)
+        # W_gate, W_up : (d, h)    W_down : (h, d)
+
+        g = x W_gate            # (B, T, h)   gate pre-activation
+        u = x W_up              # (B, T, h)   value branch
+
+        # GELU gate:  GELU(z) = z · Φ(z)   with Φ the standard-normal CDF
+        #             (tanh approximation: 0.5z(1 + tanh[√(2/π)(z + 0.044715 z³)]))
+        GeGLU(x) = (GELU(g) ⊙ u) W_down         # (B, T, d)
+
+        # Same parameter-matching convention as SwiGLU:
+        # h = (2/3)·4d ≈ 2.6667·d  →  ff_mult default = 2.6667.
+    """
+
+    impl:    "neuroslm.modules.feedforward.GeGLU"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        ff_mult: {
+            default: 2.6667,
+            type: "float",
+            doc: "Hidden width as a multiple of d_model; 2/3·4 keeps params ≈ a dense 4d FFN"
+        }
+        bias: {
+            default: false,
+            type: "bool",
+            doc: "Add bias terms to the three linear projections (most modern LMs omit them)"
+        }
+    }
+
+    properties: {
+        gated_nonlinearity: "Multiplicative gate (GELU(g) ⊙ u) is more expressive than a pointwise GELU"
+        gaussian_gate:      "GELU weights inputs by the standard-normal CDF — a smooth, probabilistic gate"
+        three_matrices:     "Uses W_gate, W_up, W_down — one more matrix than a dense FFN"
+        param_matched:      "ff_mult = 2.6667 keeps parameter count ≈ a 4d dense FFN"
+        gemma_default:      "GeGLU is the FFN used in the Gemma family"
+    }
+
+    when_to_use: """
+        Use when:
+        • You want a gated FFN and prefer the GELU activation lineage (Gemma, the
+          original GLU-variants T5 ablations) over Swish
+        • Upgrading a dense GELU FFN — GeGLU strictly improves perplexity at matched
+          parameters in Shazeer's ablations
+        • The rest of the stack already uses GELU and you want activation consistency
+
+        GeGLU and SwiGLU are near-equivalent in quality; the choice is largely a
+        lineage/consistency decision. Keep ff_mult at 2.6667 to stay parameter-matched
+        with a 4d dense FFN.
+
+        Pairs well with: RMSNorm pre-norm blocks, rotary attention, logit soft-capping
+        (as in Gemma).
+    """
+
+    not_for: """
+        • Extremely parameter-constrained models where the third matrix is costly
+        • Quantisation schemes that require a piecewise-linear activation (GELU is not)
+        • Drop-in replacement of a pre-trained 2-matrix FFN without re-training
+    """
+
+    empirical_evidence: {
+        source: "Shazeer (2020) GLU Variants Improve Transformer"
+        result: "GEGLU ties with SwiGLU for the lowest log-perplexity among FFN variants on T5 span-corruption pretraining"
+        caveat: "Measured on encoder-decoder T5; decoder-only transfer (e.g. Gemma) is reproduced but exact deltas vary"
+    }
+
+    references: [
+        "Shazeer (2020) GLU Variants Improve Transformer. arXiv 2002.05202",
+        "Gemma Team (2024) Gemma: Open Models Based on Gemini Research and Technology. arXiv 2403.08295",
+        "Hendrycks & Gimpel (2016) Gaussian Error Linear Units (GELUs). arXiv 1606.08415"
+    ]
+}

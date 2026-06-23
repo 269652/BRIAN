@@ -1,0 +1,91 @@
+# -*- coding: utf-8 -*-
+# Divisive Gradient Normalization — smooth cortical gain control.
+#
+# Implementation: neuroslm/emergent/gif7.py::divisive_grad_normalize
+# Equation:       lib/gif.neuro::gif_divisive_grad_norm
+# Tests:          tests/dsl/test_gif7_gradient_equilibrium.py
+# Docs:           docs/mechanics/divisive_grad_norm.md
+
+export mechanic divisive_grad_norm {
+    category: "training_dynamics"
+    summary:  "Replace hard gradient clip with smooth divisive normalisation: g' = g·c/√(c²+‖g‖²)"
+
+    equation: """
+        # Hard gradient clip (what this replaces):
+        g_clip = g · min(1, max_norm / ‖g‖)     (discontinuous at ‖g‖ = max_norm)
+
+        # Divisive gradient normalisation:
+        g'(t) = g(t) · c / √(c² + ‖g‖(t)²)
+
+        # c = semi-saturation constant = gnorm at which signal is HALVED
+        # Properties:
+        #   ‖g‖ << c  →  g' ≈ g         (linear, full gradient)
+        #   ‖g‖ >> c  →  g' ≈ c·g/‖g‖  (compressive, magnitude c)
+        # Signal is C∞ smooth — no discontinuity at the clip threshold
+        # Monotonically compressive — always ‖g'‖ ≤ ‖g‖
+
+        # Biological analogue (Heeger 1992 V1 contrast gain control):
+        r_i = s_i² / (c² + Σ_j s_j²)   (divisive normalisation of neural firing)
+        This mechanic implements the gradient-domain version.
+    """
+
+    impl:    "neuroslm.emergent.gif7.divisive_grad_normalize"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        c: {
+            default: 1.0,
+            type: "float",
+            min: 0.0,
+            exclusive_min: true,
+            doc: "Semi-saturation constant; gnorm at which gradient is halved"
+        }
+    }
+
+    properties: {
+        smooth:             "C∞ — no discontinuity at any gnorm value"
+        monotone:           "‖g'‖ ≤ ‖g‖ always; never amplifies"
+        direction_preserved: "g' is parallel to g; only magnitude is modified"
+        adam_compatible:    "No discontinuity means Adam m/v estimates remain consistent across the c boundary"
+        biological_analogy: "Implements Heeger (1992) V1 contrast gain control in gradient space"
+    }
+
+    when_to_use: """
+        Use as a drop-in replacement for torch.nn.utils.clip_grad_norm_() when
+        gradient spikes are causing loss divergence and you want a smooth
+        alternative to hard clipping.
+
+        Hard clipping creates a step-function discontinuity in the gradient at
+        the clip boundary. This miscalibrates Adam's m and v estimates near the
+        boundary (the distribution of g seen by the optimizer changes character
+        at gnorm=max_norm). Divisive normalisation is continuous everywhere.
+
+        c should be set to the typical healthy gnorm (e.g. p90 of gnorm at a
+        stable training step). If gnorm during a spike is 5× typical, c=1.0
+        means g' = g·c/√(1+25) ≈ g/5 — a 5× reduction, same as hard clip but
+        smoothly.
+
+        Part of GIF-7A. Pairs with: loss_variance_damping (GIF-7B, the
+        complementary lr-side stabiliser), allostasis (HPA-level stability).
+    """
+
+    not_for: """
+        • Very small c (c << gnorm_typical): effectively zeroes the gradient at
+          all normal gnorm values — training stops learning
+        • Models where gradient direction is critical (e.g. sign-SGD variants):
+          direction is preserved here, so this is safe
+    """
+
+    empirical_evidence: {
+        source: "Heeger (1992) Normalisation of cell responses in cat striate cortex. Visual Neuroscience"
+        result: "Divisive normalisation accounts for V1 gain control; mathematical properties match"
+        internal: "GIF-7A: replaced hard clip in neuroslm; isolated ablation pending"
+    }
+
+    references: [
+        "Heeger, D. (1992) Normalisation of cell responses in cat striate cortex. Vis Neurosci 9: 181-197",
+        "Carandini & Heeger (2012) Normalisation as a canonical neural computation. Nat Rev Neurosci",
+        "Internal: lib/gif.neuro (gif_divisive_grad_norm equation)"
+    ]
+}

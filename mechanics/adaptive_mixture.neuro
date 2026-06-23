@@ -1,0 +1,126 @@
+# -*- coding: utf-8 -*-
+# Adaptive Mixture Controller — closed-loop data-ratio controller.
+#
+# Implementation: neuroslm/regularizers.py::AdaptiveMixtureController
+# Config:         neuroslm/dsl/regularization.py::AdaptiveMixtureConfig
+# Docs:           docs/mechanics/adaptive_mixture.md
+
+export mechanic adaptive_mixture {
+    category: "regularizer"
+    summary:  "Closed-loop PI controller that adjusts the chat/prose training-data ratio to keep OOD entropy at target"
+
+    equation: """
+        # Measure token entropy on a held-out prose probe
+        H_t = −E_{x ∈ prose_probe} [ Σ_v p_θ(v|x) log p_θ(v|x) ]
+
+        # Low-pass filter the measurement (EMA)
+        H_ema_t = (1 − α_ema) · H_ema_{t-1} + α_ema · H_t
+
+        # Balance direction (entropy parity — CORRECTED from legacy "amplify"):
+        #   If H_ema > target → model is uncertain on prose → reduce chat fraction
+        chat_ratio_{t+1} = clip(
+            chat_ratio_t · (H_target / H_ema_t)^γ,
+            [min_ratio, max_ratio]
+        )
+
+        # Slew-rate limit: max change per update step
+        Δ = clip(chat_ratio_{t+1} − chat_ratio_t, −max_step_delta, +max_step_delta)
+        chat_ratio_{t+1} = chat_ratio_t + Δ
+    """
+
+    impl:    "neuroslm.regularizers.AdaptiveMixtureController"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        target_entropy: {
+            default: 4.5,
+            type: "float",
+            doc: "Target prose-probe entropy in nats; controller drives H_ema toward this"
+        }
+        probe_interval: {
+            default: 100,
+            type: "int",
+            min: 1,
+            doc: "Measure entropy every N training steps"
+        }
+        gamma: {
+            default: 2.0,
+            type: "float",
+            doc: "Control gain exponent; higher = more aggressive ratio adjustment"
+        }
+        min_ratio: {
+            default: 0.10,
+            type: "float",
+            doc: "Minimum chat fraction (prose always gets ≥ 1-max_ratio)"
+        }
+        max_ratio: {
+            default: 0.50,
+            type: "float",
+            doc: "Maximum chat fraction; prose always ≥ 50%"
+        }
+        direction: {
+            default: "balance",
+            type: "str",
+            doc: "'balance' (entropy parity, CORRECT) or 'amplify' (legacy bug — kept for ablation)"
+        }
+        controller_warmup_steps: {
+            default: 2000,
+            type: "int",
+            doc: "No controller updates for first N steps (model too noisy at init)"
+        }
+        max_step_delta: {
+            default: 0.03,
+            type: "float",
+            doc: "Maximum |Δchat_ratio| per update; slew-rate limiter"
+        }
+        entropy_ema_alpha: {
+            default: 0.1,
+            type: "float",
+            doc: "EMA smoothing coefficient for entropy observation (0.1 = ~10 probe smoothing)"
+        }
+    }
+
+    properties: {
+        closed_loop:         "Controller adjusts data ratio based on measured model entropy"
+        entropy_parity:      "Drives H_prose → H_target regardless of starting ratio"
+        bang_bang_prevention: "Three damping mechanisms: warmup, slew-rate limit, EMA smoothing"
+        direction_matters:   "balance: high entropy → less chat; amplify: high entropy → more chat (WRONG)"
+        no_param_change:     "Pure data curriculum — changes batch sampling, not model parameters"
+    }
+
+    when_to_use: """
+        Use when training on a mixture of domains (e.g. chat + prose + code)
+        and you want the model's capability on prose to remain stable while
+        the dominant training signal is chat.
+
+        Requires a held-out prose probe dataset (e.g. 50 WikiText-103 sequences)
+        that is sampled at probe_interval steps. The probe is evaluated with
+        no_grad (no parameter update).
+
+        Critical invariants:
+        • direction must be 'balance' (not 'amplify') — see arch.neuro history
+        • max_ratio ≤ 0.50 so prose always gets at least half the tokens
+        • controller_warmup_steps ≥ 2000 (controller sees noisy H at init)
+
+        Pairs well with: dar (domain-invariant representations + data balance),
+        gif (adaptive IB schedule also responds to OOD gap).
+    """
+
+    not_for: """
+        • Single-domain training (no ratio to control)
+        • When the probe set is too small (< 20 sequences): entropy estimate is noisy
+        • direction='amplify': this is the legacy bug mode — do not use
+    """
+
+    empirical_evidence: {
+        source: "Internal: docs/findings.md (2026-06-03 PR-B analysis)"
+        result: "balance direction: stable; amplify direction: chat_ratio ran 0.60→0.80 in <100 steps, prose ppl collapsed"
+        lesson: "direction='amplify' caused 2026-06-03 gap_ratio regression; fixed by correcting sign"
+    }
+
+    references: [
+        "Internal: docs/technical_report.md §3.E",
+        "Internal: arch.neuro training.adaptive_mixture comments (2026-06-03 surgery)"
+    ]
+}

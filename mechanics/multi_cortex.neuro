@@ -1,0 +1,138 @@
+# -*- coding: utf-8 -*-
+# Multi-Cortex Fusion — multi-expert LM ensemble with KL distillation.
+#
+# Implementation: neuroslm/experts.py::LMExpertEnsemble
+#                 neuroslm/harness.py::_cortex_fusion_aux_step
+# Config:         neuroslm/dsl/training_config.py::MultiCortexConfig
+# Tests:          tests/training/test_lm_expert_harness_integration.py
+# Docs:           docs/mechanics/multi_cortex.md
+
+export mechanic multi_cortex {
+    category: "routing"
+    summary:  "Frozen pretrained LM experts route logits through a per-token context gate; trunk learns a delta correction; KL distillation transfers expertise"
+
+    equation: """
+        # Expert roster (each expert e_i is a frozen pretrained LM):
+        experts = [(model_id, domain, freeze=True), ...]
+
+        # VocabBridge: map expert vocabulary → trunk vocabulary
+        logits_e_i ∈ ℝ^{B, T, V_expert} → bridge → ℝ^{B, T, V_trunk}
+
+        # Per-token routing (ThalamicRouter):
+        #   Lexical bias: initial routing based on token identity
+        #   Learnable head: zero-init, refines routing from content
+        #   NE gain: router_temp multiplied by (1 + k_NE · z_NE)
+        gate_i  = softmax( W_router · h_trunk + lexical_bias_i )[i]   # per-expert weight
+        gate_i *= clamp(1 + k_NE · z_NE, 0.1, 10.0)                 # NE temperature gain
+
+        # Additive correction fusion (fusion_mode = "additive_correction"):
+        logits_cortex = Σ_i gate_i · logits_e_i
+        logits_fused  = logits_cortex.detach() + α · logits_trunk    # trunk learns the DELTA
+
+        # Context-dependent α gate (P3):
+        α_i = sigmoid(cortex_mix_logit + W_gate · h_trunk_last_i)   # per-sample, conditioned on context
+
+        # Lateral expert inhibition (GABA-mediated):
+        gate_eff_i = gate_i · (1 − κ_GABA · z_GABA / Σ_j gate_j)  # competitive inhibition
+
+        # KL distillation loss (trunk learns from expert distribution):
+        # Capacity-Funneled Distillation (CFD — H006):
+        #   (1) top-K sparsification: keep K highest-prob tokens in teacher
+        top_K_mask   = argtopk(logits_cortex_softmax, K)
+        logits_teacher_K = logits_cortex_softmax[top_K_mask] + (1/V_rest) on rest
+        #   (2) entropy-matched temperature: T_eff = T0 · max(1, H_student / H_teacher)
+        T_eff = T0 · max(1, H(softmax(logits_trunk)) / H(logits_teacher_K))
+        #   (3) gradient-alignment gate:
+        cos_sim = ⟨g_lm, g_kl⟩ / (‖g_lm‖·‖g_kl‖)  (on last-bias probe)
+        λ_eff   = λ0 · max(0, (1 + cos_sim) / 2)    # zero if gradients conflict
+        L_KL    = λ_eff · KL(softmax(logits_trunk/T_eff) ‖ logits_teacher_K/T_eff) · T_eff²
+
+        # Cortex inhibition (trunk outperforms → retire expert):
+        inhibit_t = (1−α_inh)·inhibit_{t-1} + α_inh · σ(lm_loss−cx_loss)
+        logits_eff = logits_cortex.detach()·(1−inhibit_t) + α·logits_trunk
+
+        # NT-mediated distillation λ (5HT/DA gain):
+        λ_nt = clamp(1 + k_5HT·z_5HT − k_DA·z_DA, 0, 2)
+        L_KL *= λ_nt   # trust teacher more when stressed (5HT), explore when rewarded (DA)
+    """
+
+    impl:    "neuroslm.experts.LMExpertEnsemble"
+    loss_fn: "neuroslm.harness.BrainHarness._cortex_fusion_aux_step"
+    zero_init: true
+
+    params: {
+        n_cortices:     { default: 3,    type: "int",   doc: "Number of expert LMs in the ensemble" }
+        domains:        { default: "[\"general\", \"code\", \"reasoning\"]", type: "list[str]", doc: "Expert domain labels" }
+        freeze_weights: { default: true, type: "bool",  doc: "Freeze expert LM weights; only trunk is trained" }
+        lexical_bias_weight: { default: 2.0, type: "float", doc: "Strength of lexical prior in routing" }
+        bema_tau:            { default: 0.5, type: "float", doc: "BEMA biological damping τ for router" }
+        router_d_model:      { default: 256, type: "int",   doc: "Dimension of router hidden state" }
+        fusion_mode:         { default: "additive_correction", type: "str", doc: "'additive_correction' or 'gate_mix'" }
+        fusion_init:         { default: 0.1, type: "float", doc: "Initial α for trunk delta (additive correction)" }
+        context_gate_enabled: { default: true, type: "bool", doc: "Enable per-sample α conditioning on trunk state" }
+        context_gate_dim:    { default: 64, type: "int", doc: "Dimension of context gate hidden state" }
+        distillation_enabled:     { default: true, type: "bool", doc: "Enable KL distillation from experts to trunk" }
+        distillation_lambda_max:  { default: 1.0, type: "float", doc: "Peak distillation weight" }
+        distillation_temperature: { default: 4.0, type: "float", doc: "Base temperature for soft targets" }
+        distillation_gap_floor:   { default: 0.1, type: "float", doc: "Gap below which distillation goes idle" }
+        distillation_gap_ceiling: { default: 2.0, type: "float", doc: "Gap above which distillation is at max λ" }
+        cfd_enabled:             { default: true,  type: "bool", doc: "Enable Capacity-Funneled Distillation" }
+        cfd_topk_start:          { default: 4,     type: "int",  doc: "K at start of CFD anneal" }
+        cfd_topk_end:            { default: 32,    type: "int",  doc: "K at end of CFD anneal" }
+        cfd_topk_anneal_steps:   { default: 1500,  type: "int",  doc: "Steps to anneal K from start to end" }
+        cfd_temperature_floor:   { default: 1.0,   type: "float", doc: "Floor on T_eff" }
+        inhibition_enabled:       { default: true,  type: "bool",  doc: "Enable cortex retirement gate" }
+        inhibition_ema_alpha:     { default: 0.05,  type: "float", doc: "EMA α for inhibition signal" }
+        lateral_inhibition_kappa: { default: 0.5,   type: "float", doc: "GABA-mediated expert competition strength" }
+        router_temp_nt_gain:      { default: 0.5,   type: "float", doc: "NE gain on router temperature" }
+        distillation_5ht_gain:    { default: 0.4,   type: "float", doc: "5HT multiplier on distillation λ" }
+        distillation_da_gain:     { default: 0.4,   type: "float", doc: "DA multiplier on distillation λ" }
+    }
+
+    properties: {
+        vocab_bridge:           "VocabBridge maps expert vocab → trunk vocab; no random projection (eliminates ln(V) CE floor)"
+        cfd_no_harm:            "Gradient-alignment gate ensures distillation never fights the LM gradient"
+        expert_retirement:      "Inhibition gate: expert auto-retires when trunk surpasses it (~20× FLOP savings)"
+        nt_modulated:           "Router temperature (NE), distillation λ (5HT/DA), inhibition gate (GABA) all NT-coupled"
+        additive_correction:    "trunk output = expert.detach() + α·trunk_delta; trunk learns correction, not full distribution"
+        zero_init_contract:     "At fusion_init=0.1 and step 0: trunk delta is near-zero; model starts ≈ as experts predict"
+    }
+
+    when_to_use: """
+        Use when you want to bootstrap a small trunk model with domain expertise
+        from larger pretrained LMs, without training from scratch.
+
+        The additive correction fusion (logits = expert.detach() + α·trunk) means
+        the trunk starts by predicting corrections to the expert ensemble. The
+        expert ensemble provides a strong initial prior; the trunk learns to improve
+        on it over time.
+
+        Critical: all experts must share the same tokenizer (trunk_tokenizer) for
+        VocabBridge alignment. If experts use different tokenizers, a byte-fallback
+        bridge must be wired in.
+
+        Pairs with: allostasis (NE runaway damping protects the router temperature
+        NE coupling), gif (GIF-2 OOD probe EMA corrects the gap signal used by
+        the distillation λ schedule).
+    """
+
+    not_for: """
+        • All-from-scratch runs with no pretrained experts
+        • Very small trunk (d_model < 128): correction delta too small to matter
+        • Cross-family experts with radically different tokenizers (byte-fallback bridge needed)
+        • distillation_lambda_max > 2.0 without CFD: KL can dominate CE (the H22 pathology)
+    """
+
+    empirical_evidence: {
+        source: "Internal: docs/findings.md H22 (SmolLM2 upgrade), H23 (bridge alignment), H24 (CFD)"
+        result: "VocabBridge lowers initial CE from ~10.85 (random projection) to ~3-5 nats. CFD prevents teacher-too-strong pathology"
+        caveat: "Additive correction + CFD + inhibition are the current best config; standalone ablations of each are ongoing"
+    }
+
+    references: [
+        "Hinton, Vinyals, Dean (2015) Distilling the Knowledge in a Neural Network. NeurIPS Workshop",
+        "Anil et al. (2022) Larger Language Models Do In-Context Learning Differently. arXiv",
+        "Internal: neuroslm/experts.py, neuroslm/harness.py::_cortex_fusion_aux_step",
+        "Internal: tests/training/test_lm_expert_harness_integration.py (smoking-gun CE contract)"
+    ]
+}

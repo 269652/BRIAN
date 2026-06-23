@@ -1,0 +1,106 @@
+# -*- coding: utf-8 -*-
+# BMA — Bures Manifold Alignment.
+#
+# Implementation: neuroslm/harness.py (within training step)
+# Config:         neuroslm/dsl/training_config.py (bma_weight, bma_n_projections, bma_ramp_*)
+# Docs:           docs/mechanics/bures_manifold_alignment.md
+
+export mechanic bures_manifold_alignment {
+    category: "training_dynamics"
+    summary:  "Sliced Wasserstein₂ between trunk and expert representation distributions; gradient flows into trunk to prevent erank collapse"
+
+    equation: """
+        # Two distributions of hidden states (same sequence, same positions):
+        H_trunk  ∈ ℝ^{N×d}   (trunk hidden states, full gradient)
+        H_expert ∈ ℝ^{N×d}   (expert hidden states, DETACHED — frozen target)
+
+        # Sliced Wasserstein₂ (avoids O(N³) assignment; uses J random projections):
+        W₂²(H_trunk, H_expert) ≈ (1/J) · Σ_{j=1}^J W₁²(H_trunk·v_j, H_expert·v_j)
+
+        where v_j ∈ ℝ^d are uniform random unit-sphere directions
+        and W₁²(a, b) = mean_k (sort(a)_k − sort(b)_k)²   (1D Wasserstein)
+
+        # Scheduled weight:
+        w_bma(t) = bma_weight · clip((t − bma_ramp_start) / (bma_ramp_end − bma_ramp_start), 0, 1)
+
+        # Loss:
+        L_BMA = w_bma(t) · W₂²(H_trunk, H_expert.detach())
+
+        # Gradient flows through H_trunk → W matrices of trunk (pushes variance profile
+        # toward expert distribution variance profile → prevents erank collapse)
+    """
+
+    impl:    "neuroslm.harness.BrainHarness._compute_bma_loss"
+    loss_fn: "neuroslm.harness.BrainHarness._compute_bma_loss"
+    zero_init: false
+
+    params: {
+        bma_weight: {
+            default: 0.05,
+            type: "float",
+            doc: "Peak W₂ loss weight (at bma_ramp_end)"
+        }
+        bma_n_projections: {
+            default: 64,
+            type: "int",
+            min: 1,
+            doc: "J = number of random projections for sliced W₂ approximation"
+        }
+        bma_ramp_start: {
+            default: 0,
+            type: "int",
+            doc: "Step at which ramp begins; 0 = immediate (recommended: earlier than erank collapse)"
+        }
+        bma_ramp_end: {
+            default: 1000,
+            type: "int",
+            doc: "Step at which ramp reaches full bma_weight (was 3000 — too slow for step-300 erank collapse)"
+        }
+    }
+
+    properties: {
+        expert_detached:     "Expert hidden states are detached; only trunk is pushed toward expert geometry"
+        sliced_w2:           "Avoids O(N³) transport cost; J=64 projections give accurate W₂ approximation"
+        erank_guard:         "Trunk must match expert variance profile → erank stays near expert erank"
+        ramp_schedule:       "Scheduled to reach full weight before erank collapses (step ~300)"
+        no_new_params:       "Pure auxiliary loss; no learnable parameters added"
+    }
+
+    when_to_use: """
+        Use when a multi-cortex ensemble is present and you observe erank collapse
+        in the trunk's hidden representations (effective rank drops dramatically
+        early in training — observed: erank 53→7 by step 300 without BMA).
+
+        The Wasserstein₂ loss pushes the trunk's distribution of hidden states
+        to match the expert ensemble's distribution (in terms of variance profile,
+        not mean). This is a soft geometric constraint: the trunk's representations
+        must be at least as 'spread out' as the frozen experts.
+
+        bma_ramp_end=1000 is critical: the original setting of 3000 was too slow
+        (only 10% of the full weight by step 300 when collapse was already occurring).
+
+        Pairs with: multi_cortex (BMA is driven by the same expert hidden states
+        that multi_cortex uses for routing), isotropy (isotropy is a related but
+        orthogonal constraint — Gram-matrix-based vs Wasserstein-based).
+    """
+
+    not_for: """
+        • Models without frozen expert ensembles: no reference distribution to align to
+        • bma_weight > 0.1 combined with large batch: W₂ computation is O(N·J) but
+          can dominate CE if weight is too large
+        • Very small N (N < J): sliced W₂ approximation degrades; use exact W₂ (OT solver)
+    """
+
+    empirical_evidence: {
+        source: "Internal: arch.neuro comment (Jun 2026; erank collapse 53→7 at step 300)"
+        result: "BMA with ramp_end=1000 fires at full weight by step 300; slows erank collapse"
+        caveat: "Isolated BMA ablation pending; deployed alongside isotropy in master arch"
+    }
+
+    references: [
+        "Rabin, Peyré, Delon, Bernot (2011) Wasserstein Barycenter and its Application to Texture Mixing. SSVM",
+        "Kolouri, Park, Rohde (2016) Sliced and Radon Wasserstein Barycenters. CVPR",
+        "Bures, D. (1969) An extension of Kakutani's theorem on infinite product measures. Trans AMS",
+        "Internal: neuroslm/harness.py::_compute_bma_loss"
+    ]
+}

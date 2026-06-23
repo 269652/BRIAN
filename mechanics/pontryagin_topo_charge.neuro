@@ -1,0 +1,114 @@
+# -*- coding: utf-8 -*-
+# Pontryagin / Hopfion-lite Topological-Charge Diagnostic.
+#
+# Implementation: neuroslm/mechanisms/topo_charge.py
+# Config:         neuroslm/dsl/regularization.py::PontryaginTopoChargeConfig
+# Tests:          tests/dsl/test_topo_charge.py (planned)
+# Docs:           docs/mechanics/pontryagin_topo_charge.md
+
+export mechanic pontryagin_topo_charge {
+    category: "physics"
+    summary:  "Skyrmion topological-charge diagnostic on attention heads; optional soft penalty toward integer Q"
+
+    equation: """
+        # Project attention-head output to unit sphere S^2
+        # h_head ∈ ℝ^{B, H, T, d_head}  →  n_h = F.normalize(h_head[..., :3], dim=-1)
+        n_h : T → S^2   (discrete map from token-position to sphere)
+
+        # Berg-Lueschner (1981) discrete Pontryagin charge on triangulated surface
+        # Triangles: consecutive token triplets (i, i+1, i+2) along the sequence
+        # van Oosterom-Strang (1983) spherical solid angle per triangle:
+        tan(Ω/2) = (n_a · (n_b × n_c)) / (1 + n_a·n_b + n_b·n_c + n_c·n_a)
+        Ω_abc  = 2 · atan2(n_a · (n_b × n_c),  1 + n_a·n_b + n_b·n_c + n_c·n_a)
+
+        Q_h = (1 / 4π) · Σ_{triangles} Ω_abc        Q_h ∈ ℝ (ideally ℤ for smooth fields)
+
+        # Soft penalty toward nearest integer
+        Q̂_h    = round(Q_h)                          # detached target
+        L_Q    = α · Σ_h (Q_h − Q̂_h)²               # penalty toward ℤ
+
+        # Hopfion-lite inter-layer decorrelation diagnostic
+        eps_ortho = Σ_{ℓ=0}^{L-2} mean(1 − n_{ℓ+1} · n_ℓ)   # logged, not optimized
+
+        # Optional diversity penalty (gamma > 0)
+        L_div = gamma · (eps_ortho − Q_target)²
+
+        # Total contribution
+        L_total += L_Q + L_div
+    """
+
+    impl:    "neuroslm.mechanisms.topo_charge.PontryaginTopoCharge"
+    loss_fn: "neuroslm.mechanisms.topo_charge.PontryaginTopoCharge.compute_loss"
+    zero_init: false
+
+    params: {
+        alpha: {
+            default: 0.0,
+            type: "float",
+            min: 0.0,
+            doc: "Weight on L_Q (penalty toward integer Q); 0.0 = diagnostic-only"
+        }
+        gamma: {
+            default: 0.0,
+            type: "float",
+            min: 0.0,
+            doc: "Weight on L_div (inter-layer decorrelation target); 0.0 = diagnostic-only"
+        }
+        Q_target: {
+            default: 0.0,
+            type: "float",
+            doc: "Target for the diversity penalty (typically 0 = decorrelated layers)"
+        }
+        weight_init_std: {
+            default: 0.02,
+            type: "float",
+            doc: "Std for any learnable projection weights (unused in current diagnostic mode)"
+        }
+    }
+
+    properties: {
+        diagnostic_at_zero:   "Both alpha=0 AND gamma=0 → diagnostic-only; Q_h and eps_ortho logged, zero added to loss"
+        atan2_stable:         "van Oosterom-Strang atan2 form avoids acos near antipodal boundary"
+        integer_homotopy:     "Q_h ∈ ℤ classifies homotopy classes of T→S^2 maps (pi_2(S^2)=ℤ)"
+        no_forward_pass_change: "This module drains AFTER the LM forward step; trunk topology not modified"
+        hopfion_descoped:     "Full Hopf integral (pi_3(S^2)→ℤ via FFT-Poisson on 3-torus) out of scope; eps_ortho is the cheap proxy"
+    }
+
+    when_to_use: """
+        Phase 1 of the three-mechanism THSD research program (Phase 2 = Liouville
+        Symplectic, Phase 3 = KJPLA). Run in diagnostic-only mode first (alpha=0,
+        gamma=0) to characterise the distribution of Q_h across heads and layers.
+
+        Healthy range: Q_h ≈ 0 (smooth topologically-trivial field). High |Q_h|
+        (≥ 1) indicates a head is computing a topologically non-trivial mapping;
+        this can be a feature (structural diversity) or a problem (skyrmion defects
+        blocking gradient flow).
+
+        Once the baseline Q_h distribution is characterised (H23 finding), enable
+        alpha > 0 to gently push Q_h toward 0 (or toward 1 to encourage structure).
+
+        Pairs with: liouville_symplectic (Phase 2), kjpla_phase_lattice (Phase 3).
+        All three share the THSD formal framework (docs/formal_framework.md).
+    """
+
+    not_for: """
+        • Models where d_head < 3: cannot project to S^2
+        • alpha > 0.1: soft penalty can dominate CE before Q_h is well-characterised
+        • Discrete-token models with very short contexts (T < 3): no triangles to sum
+    """
+
+    empirical_evidence: {
+        source: "Internal: docs/findings.md H23 (Pontryagin / Phase 1 THSD)"
+        result: "Diagnostic mode shows Q_h ≈ O(ε) at init, confirming smooth init; distribution under training TBD"
+        caveat: "Penalty mode (alpha>0) is a planned follow-up experiment after H23 baseline is recorded"
+    }
+
+    formal_proof: "hypothesis/proofs/H023_pontryagin_homotopy.lean (pending)"
+
+    references: [
+        "Berg, B. & Lueschner, M. (1981) Nuclear Physics B 190(3): 412-424",
+        "van Oosterom, A. & Strang, J. (1983) IEEE Trans. Biomed. Eng. 30(2): 125-126",
+        "Skyrme, T. (1961) A non-linear field theory. Proc. Royal Soc. A",
+        "Internal: docs/formal_framework.md §8 (Pontryagin charge derivation)"
+    ]
+}

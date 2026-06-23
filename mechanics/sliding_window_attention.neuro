@@ -1,0 +1,87 @@
+# -*- coding: utf-8 -*-
+# Sliding-Window Attention — each token attends only to a fixed local window.
+#
+# Implementation: neuroslm/modules/sliding_window.py
+#                 neuroslm/dsl/nn_ops.py::sliding_window_attention()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/sliding_window_attention.md
+
+export mechanic sliding_window_attention {
+    category: "attention"
+    summary:  "Restricts each query to a fixed-size local window of recent keys, giving linear-in-sequence cost and a bounded KV cache"
+
+    equation: """
+        # Window of size w; causal so only past keys count
+        # Allowed key set for query i:
+        #   j ∈ [ max(0, i − w + 1) , i ]
+
+        mask_{i,j} = 0       if  (i − w) < j ≤ i        # in window
+                   = −∞      otherwise                  # outside / future
+
+        scores_{i,j} = (q_i · k_j) / √d_k  +  mask_{i,j}
+        A = softmax(scores)
+        out_i = Σ_{j} A_{i,j} v_j
+
+        # Receptive field grows with depth:
+        #   after L stacked sliding-window layers, token i can influence
+        #   information up to ~ L · w tokens away (like a CNN's growing field).
+        #
+        # Cost: O(T · w) attention instead of O(T²); KV cache capped at w tokens.
+    """
+
+    impl:    "neuroslm.modules.sliding_window.SlidingWindowAttention"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        window_size: {
+            default: 4096,
+            type: "int",
+            min: 1,
+            doc: "Number of past tokens (inclusive of self) each query may attend to; caps both compute and KV cache"
+        }
+    }
+
+    properties: {
+        linear_cost:         "Attention is O(T · window_size), not O(T²) — scalable to long sequences"
+        bounded_kv_cache:    "Decode only needs the last window_size keys/values; cache never grows past w"
+        layered_receptive:   "Stacking L layers yields an effective field of ≈ L · window_size (CNN-like growth)"
+        locality_prior:      "Built-in recency bias; most language dependencies are local, so quality loss is small"
+        rolling_buffer:      "Implementable as a fixed-size rolling KV buffer for constant-memory streaming"
+    }
+
+    when_to_use: """
+        Use when:
+        • Sequences are long enough that full O(T²) attention is too expensive,
+          and most useful context is local (long documents, code, audio).
+        • You want a bounded, constant-size KV cache for streaming inference.
+        • The model has enough depth that L · window_size covers the dependencies
+          you care about (Mistral-7B: 32 layers × 4096 window ≈ 131k field).
+
+        Choose window_size from the dependency length, not the sequence length:
+        4096 (Mistral) is a strong default; smaller windows trade global reach
+        for speed. Combine with a few full-attention layers if rare long-range
+        links matter.
+
+        Pairs well with: attention_sink (sinks restore lost global anchors),
+        rope, GroupedQueryAttention.
+    """
+
+    not_for: """
+        • Tasks with critical long-range dependencies that exceed L · window_size
+          (e.g. retrieval over a key far outside every layer's reach).
+        • Very shallow models, where the effective receptive field stays small.
+        • Cases needing exact global attention (the window hard-masks far keys).
+    """
+
+    empirical_evidence: {
+        source: "Beltagy et al. (2020) Longformer; Mistral AI (2023) Mistral 7B"
+        result: "Mistral 7B with a 4096 sliding window matches/exceeds larger dense-attention models while serving long context cheaply"
+        caveat: "Pure sliding window can lose distant anchors; production stacks add attention sinks or occasional global layers"
+    }
+
+    references: [
+        "Beltagy, Peters, Cohan (2020) Longformer: The Long-Document Transformer. arXiv 2004.05150",
+        "Jiang, Sablayrolles, Mensch et al. (2023) Mistral 7B. arXiv 2310.06825"
+    ]
+}

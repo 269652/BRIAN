@@ -1,0 +1,95 @@
+# -*- coding: utf-8 -*-
+# Gated MLP — generic GLU-family feed-forward with configurable gate activation.
+#
+# Implementation: neuroslm/modules/feedforward.py::GatedMLP
+#                 neuroslm/dsl/nn_ops.py::gated_mlp()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/gated_mlp.md
+
+export mechanic gated_mlp {
+    category: "feedforward"
+    summary:  "Generic gated-linear-unit FFN with a configurable gate activation (SwiGLU/GeGLU/ReGLU as special cases)"
+
+    equation: """
+        # Three projections from model dim d → hidden dim h (= ff_mult · d)
+        # W_gate, W_up : (d, h)    W_down : (h, d)
+
+        g = x W_gate            # (B, T, h)   gate pre-activation
+        u = x W_up              # (B, T, h)   value branch
+
+        # Configurable gate activation σ (selected by `activation`):
+        #   "silu" → Swish(z) = z·sigmoid(z)        (SwiGLU)
+        #   "gelu" → z·Φ(z)                          (GeGLU)
+        #   "relu" → max(0, z)                       (ReGLU)
+        #   "sigmoid"/"tanh"/"identity" → bilinear-style GLU variants
+        GatedMLP(x) = (σ(g) ⊙ u) W_down         # (B, T, d)
+
+        # Default ff_mult = 4.0 (the classic dense-FFN width). Note that with a
+        # 3-matrix gated FFN this is ~1.5× the parameters of a dense 4d FFN;
+        # set ff_mult = 2.6667 to match a dense 4d FFN's parameter count.
+    """
+
+    impl:    "neuroslm.modules.feedforward.GatedMLP"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        ff_mult: {
+            default: 4.0,
+            type: "float",
+            doc: "Hidden width as a multiple of d_model; 4.0 is the classic FFN width (not param-matched for 3 matrices)"
+        }
+        activation: {
+            default: "silu",
+            type: "str",
+            doc: "Gate activation: silu|gelu|relu|sigmoid|tanh|identity — selects the GLU variant"
+        }
+        bias: {
+            default: false,
+            type: "bool",
+            doc: "Add bias terms to the three linear projections"
+        }
+    }
+
+    properties: {
+        family_abstraction: "One module; SwiGLU/GeGLU/ReGLU/bilinear are recovered by setting `activation`"
+        gated_nonlinearity: "Multiplicative gate (σ(g) ⊙ u) is more expressive than a pointwise activation"
+        three_matrices:     "Uses W_gate, W_up, W_down — one more matrix than a dense FFN"
+        ablation_friendly:  "Swapping `activation` enables clean A/B comparisons of GLU variants"
+        default_width:      "ff_mult = 4.0 is the classic dense width — set 2.6667 for param parity"
+    }
+
+    when_to_use: """
+        Use when:
+        • You want to A/B different gate activations from one code path rather than
+          maintaining separate SwiGLU / GeGLU / ReGLU modules
+        • Running GLU-variant ablations (this mechanism is the parametric superset)
+        • You need a config-driven FFN whose activation is chosen at compile time
+
+        Prefer the concrete `swiglu` / `geglu` mechanics when the choice is already
+        fixed — they document the param-matched ff_mult convention. Use `gated_mlp`
+        when the activation is itself an experimental knob. Remember ff_mult = 4.0
+        here is NOT parameter-matched to a dense 4d FFN; drop to 2.6667 for parity.
+
+        Pairs well with: RMSNorm pre-norm blocks, any attention variant.
+    """
+
+    not_for: """
+        • Cases where the activation is fixed for the whole project — use `swiglu`
+          or `geglu` directly for clearer intent and the correct default ff_mult
+        • Parameter-tight budgets at ff_mult = 4.0 (this is ~1.5× a dense 4d FFN)
+        • A non-gated dense FFN — that is a different (simpler) mechanism
+    """
+
+    empirical_evidence: {
+        source: "Shazeer (2020) GLU Variants Improve Transformer"
+        result: "Across the GLU family, gated FFNs (SwiGLU/GEGLU/ReGLU) outperform non-gated dense FFNs on T5 span-corruption pretraining; SwiGLU/GEGLU are best"
+        caveat: "Relative ranking of variants is stable; absolute deltas depend on scale and dataset"
+    }
+
+    references: [
+        "Shazeer (2020) GLU Variants Improve Transformer. arXiv 2002.05202",
+        "Dauphin et al. (2017) Language Modeling with Gated Convolutional Networks. arXiv 1612.08083",
+        "Touvron et al. (2023) LLaMA: Open and Efficient Foundation Language Models. arXiv 2302.13971"
+    ]
+}

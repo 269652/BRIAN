@@ -1,0 +1,106 @@
+# -*- coding: utf-8 -*-
+# VBB — Variational Bowtie Bottleneck.
+#
+# Implementation: neuroslm/regularizers.py::VBBLoss  (or neuroslm/modules/vbb.py)
+# Config:         lib/gif.neuro::vbb_alpha_schedule
+# Docs:           docs/mechanics/vbb.md
+
+export mechanic vbb {
+    category: "training_dynamics"
+    summary:  "Friston-style variational free energy at the bowtie bottleneck: F = KL(q‖p) − E_q[log p(x|z)]"
+
+    equation: """
+        # Bowtie bottleneck: h_bot ∈ ℝ^{B, d_bot}  (narrowest hidden state)
+
+        # Reparameterisation encoder: q(z|h_bot) = N(μ, σ²I)
+        μ, log_σ = split(Linear_{d_bot → 2·d_z}(h_bot))
+        σ         = exp(0.5 · log_σ)
+        z         = μ + σ · ε,   ε ~ N(0, I)
+
+        # Fixed Gaussian prior
+        p(z) = N(0, I)
+
+        # KL divergence (analytical for Gaussian q/p):
+        KL(q‖p) = 0.5 · Σ_j (σ_j² + μ_j² − 1 − log σ_j²)
+
+        # Reconstruction expectation (reuse LM CE as proxy, no extra decoder):
+        E_q[log p(x|z)] ≈ −L_CE    (single Monte-Carlo sample z → pass through decoder)
+
+        # Variational free energy (Friston, 2010):
+        F_VBB = KL(q‖p) − E_q[log p(x|z)]
+              = KL(q‖p) + L_CE
+
+        # Scheduled contribution (GIF α schedule):
+        L_total += α_vbb(t) · KL(q‖p)      # CE term already in main loss
+
+        # α schedule (from lib/gif.neuro::gif_vbb_alpha_schedule):
+        α_vbb(t) = α_max · min(t / warmup_steps, 1.0)
+    """
+
+    impl:    "neuroslm.regularizers.VBBLoss"
+    loss_fn: "neuroslm.regularizers.VBBLoss.compute"
+    zero_init: true
+
+    params: {
+        alpha_max: {
+            default: 0.1,
+            type: "float",
+            doc: "Maximum KL weight after warmup (α_max in GIF schedule)"
+        }
+        warmup_steps: {
+            default: 2000,
+            type: "int",
+            doc: "Steps over which α_vbb ramps from 0 to alpha_max"
+        }
+        d_z: {
+            default: -1,
+            type: "int",
+            doc: "Bottleneck latent dimension; -1 = same as d_bot (no compression)"
+        }
+    }
+
+    properties: {
+        friston_free_energy:  "F = KL(q‖p) − reconstruction is Friston 2010 variational free energy"
+        bottleneck_only:      "Encoder/decoder operate ONLY on h_bot (narrowest layer); downstream trunk unchanged"
+        ib_implicit:          "KL penalty is equivalent to information bottleneck I(z;h_bot) upper bound"
+        gif_scheduled:        "Typically driven by gif_vbb_alpha_schedule (ramp from GIF); standalone ramp also valid"
+        zero_init_contract:   "At α_vbb=0 (warmup step 0), zero KL added — training starts identical to baseline"
+    }
+
+    when_to_use: """
+        Use at the narrowest hidden state of a bowtie-topology model to compress
+        the representation toward a Gaussian prior while retaining reconstruction
+        ability.
+
+        The Friston free-energy interpretation: the model is minimising surprise
+        (CE) subject to maintaining compact (low-KL) beliefs about the state.
+        High KL → model is over-confident in a non-Gaussian bottleneck
+        representation. Low KL → representation is near the prior (maximally
+        compressed).
+
+        Part of the GIF (Geometric Information Funnel) pipeline:
+        GIF = VBB (bottleneck IB) + OOD probe EMA + isotropy whitening.
+
+        alpha_max=0.1 is conservative. If KL is large at the end of warmup,
+        reduce alpha_max or increase warmup_steps.
+    """
+
+    not_for: """
+        • Non-bowtie models (no clear bottleneck layer)
+        • Large d_z without enough capacity: reconstruction degrades
+        • alpha_max > 0.5: KL can dominate CE before bottleneck stabilises
+    """
+
+    empirical_evidence: {
+        source: "Kingma & Welling (2013) Auto-Encoding Variational Bayes. ICLR 2014"
+        result: "VAE: competitive reconstructions with compact latent space"
+        internal: "VBB as a scheduled auxiliary loss — not yet ablated standalone (part of GIF)"
+    }
+
+    references: [
+        "Friston, K. (2010) The free-energy principle: a unified brain theory? Nat Rev Neurosci",
+        "Kingma, D. & Welling, M. (2014) Auto-Encoding Variational Bayes. ICLR",
+        "Tishby, N. & Schwartz-Ziv, R. (2017) Opening the Black Box of Deep Neural Networks. ITW",
+        "Internal: lib/gif.neuro (gif_vbb_alpha_schedule)"
+    ]
+}

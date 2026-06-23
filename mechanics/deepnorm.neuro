@@ -1,0 +1,97 @@
+# -*- coding: utf-8 -*-
+# DeepNorm — depth-scaled residual + init for stable 1000-layer transformers.
+#
+# Implementation: neuroslm/modules/deepnorm.py
+#                 neuroslm/dsl/nn_ops.py::deepnorm()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/deepnorm.md
+
+export mechanic deepnorm {
+    category: "normalization"
+    summary:  "Up-scales the residual branch by α and down-scales sublayer init by β so post-norm transformers train at extreme depth"
+
+    equation: """
+        # DeepNorm modifies the post-LayerNorm residual connection:
+        x_{l+1} = LayerNorm( α · x_l + Sublayer(x_l) )
+
+        # and down-scales the initialization of the sublayer's projection
+        # weights (ffn out, value, output projections) by a factor β:
+        W ← β · W_init
+
+        # α bounds the magnitude of the residual update so it cannot explode
+        # with depth; β keeps the sublayer's contribution small at init so the
+        # network starts near an identity mapping. The two are derived from the
+        # number of encoder (N) and decoder (M) layers:
+        #
+        #   Encoder-only:   α = (2N)^(1/4)            β = (8N)^(−1/4)
+        #   Decoder-only:   α = (2M)^(1/4)            β = (8M)^(−1/4)
+        #   Encoder–decoder (encoder):
+        #                   α = 0.81·(N⁴ M)^(1/16)    β = 0.87·(N⁴ M)^(−1/16)
+        #   Encoder–decoder (decoder):
+        #                   α = (3M)^(1/4)            β = (12M)^(−1/4)
+        #
+        # The defaults below (α=1, β=1) are placeholders meaning "no scaling";
+        # in practice α,β are computed from the layer count, not hand-set.
+    """
+
+    impl:    "neuroslm.modules.deepnorm.DeepNorm"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        alpha: {
+            default: 1.0,
+            type: "float",
+            doc: "Residual up-scale α (DEPTH-DERIVED). Decoder-only: α=(2M)^(1/4). Default 1.0 = no scaling"
+        }
+        beta: {
+            default: 1.0,
+            type: "float",
+            doc: "Init down-scale β (DEPTH-DERIVED). Decoder-only: β=(8M)^(−1/4). Default 1.0 = no scaling"
+        }
+    }
+
+    properties: {
+        depth_stable:     "Bounds the model update so training is stable up to ~1000 layers"
+        post_norm:        "Keeps the post-LayerNorm placement (better quality than pre-norm) while fixing its instability"
+        two_part:         "α scales the residual branch at runtime; β scales specific weights at init only"
+        depth_derived:    "α and β are functions of layer count N/M, not free hyperparameters"
+        identity_start:   "β-down-scaled init makes the network begin near identity, easing early optimisation"
+        warmup_free:      "Stabilises deep training without the long learning-rate warmup post-norm usually needs"
+    }
+
+    when_to_use: """
+        Use when:
+        • Building very deep transformers (dozens to ~1000 layers) that diverge with naïve post-norm
+        • You want post-norm quality without its training instability
+        • Scaling depth rather than width and hitting gradient explosion / vanishing
+        • Reproducing DeepNet-style ultra-deep encoder/decoder stacks
+
+        Compute α and β from the actual layer count using the formulas above —
+        do NOT leave them at the placeholder default of 1.0 for a real deep run.
+        For a 100-layer decoder-only model, α=(2·100)^(1/4)≈3.76 and
+        β=(8·100)^(−1/4)≈0.19. The β scaling is applied once at initialization
+        to the ffn-output, value, and output projection weights.
+
+        Pairs well with: LayerNorm (DeepNorm is a LayerNorm variant), standard MHA,
+        flash_attention. It is an alternative to pre-norm (rmsnorm/layernorm
+        pre-norm) when post-norm quality at depth is the goal.
+    """
+
+    not_for: """
+        • Shallow or moderate-depth models (≤ ~24 layers) where standard pre-norm is simpler and sufficient
+        • Pre-norm architectures — DeepNorm specifically rehabilitates POST-norm; mixing the two is incoherent
+        • Setups using α=β=1 placeholders unchanged — that disables the mechanism and provides no stability benefit
+    """
+
+    empirical_evidence: {
+        source: "Wang et al. (2022) DeepNet — Scaling Transformers to 1000 Layers — Microsoft Research"
+        result: "Trained a stable 1000-layer (200-block encoder-decoder) transformer that outperformed shallower baselines on multilingual machine translation"
+        caveat: "α,β must be set from depth via the formulas; the benefit is specific to very deep post-norm stacks"
+    }
+
+    references: [
+        "Wang, Ma, Dong, Huang, Zhang, Wei (2022) DeepNet: Scaling Transformers to 1,000 Layers. arXiv 2203.00555",
+        "Liu et al. (2020) Understanding the Difficulty of Training Transformers (Admin init). arXiv 2004.08249"
+    ]
+}

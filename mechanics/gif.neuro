@@ -1,0 +1,128 @@
+# -*- coding: utf-8 -*-
+# GIF — Geometric Information Funnel.
+#
+# Canonical equations: lib/gif.neuro
+# Implementation:      neuroslm/emergent/gif.py, neuroslm/emergent/gif7.py
+# Tests:               tests/dsl/test_gif_config.py, tests/dsl/test_gif_head_diversity.py,
+#                      tests/dsl/test_gif7_gradient_equilibrium.py
+# Docs:                docs/mechanics/gif.md
+
+export mechanic gif {
+    category: "training_dynamics"
+    summary:  "Geometric Information Funnel: 7 interlocking sub-mechanisms that close the train-PPL / OOD-PPL gap"
+
+    equation: """
+        # GIF is a composite of 7 sub-mechanisms (see lib/gif.neuro for canonical equations):
+
+        # GIF-1: Scheduled VBB tightening (Friston free energy at bottleneck)
+        α_vbb(t) = α_start + (α_end − α_start) · clip((t − ramp_start) / (ramp_end − ramp_start), 0, 1)
+        L_VBB    = α_vbb(t) · KL(q‖p)     [see vbb.neuro for full VBB math]
+
+        # GIF-2: OOD probe EMA (corrects cortex gates to track real generalisation)
+        lm_ema_ood_t = (1 − α_ema) · lm_ema_ood_{t-1} + α_ema · CE_ood(t)
+
+        # GIF-3: Isotropy schedule (locks in with VBB ramp)
+        w_iso(t) = w_max · clip((t − ramp_start) / (ramp_end − ramp_start), 0, 1)
+        L_iso    = w_iso(t) · ‖GG^T / N − I‖_F²   [see isotropy.neuro for full math]
+
+        # GIF-4: Gap-driven label smoothing (Bayesian simplex shrinkage)
+        gap_ratio = OOD_PPL / train_PPL
+        ε(t)      = ε_max · clip(gap_ratio / target_gap − 1, 0, 1)
+        L_CE_smooth = (1 − ε) · L_CE + ε · L_CE_uniform
+
+        # GIF-5: Attention head diversity loss
+        L_div = w_div · (2 / (H·(H−1))) · Σ_{i<j} max(0, cos(Q_i, Q_j))²
+        w_div = w₀   · log(1 + gap_ratio / target_gap)
+
+        # GIF-6: Cosine LM head (norm-invariant logits)
+        z_i = τ · cos(h, W_i) = τ · (h/‖h‖) · (W_i/‖W_i‖)
+
+        # GIF-7A: Divisive gradient normalization
+        g'  = g · c / √(c² + ‖g‖²)     (replaces hard gradient clip)
+
+        # GIF-7B: Loss-variance metaplastic damping (BCM rule)
+        lr_eff = lr_sched · max(min_mult, min(1, σ_ref / σ_L))
+
+        # GIF-7C: VBB KL floor (anti-collapse guard)
+        L_floor = γ_floor · max(0, KL_min − KL(q‖p))²
+    """
+
+    impl:    "neuroslm.emergent.gif.GIFController"
+    loss_fn: "neuroslm.emergent.gif.GIFController.compute_loss"
+    zero_init: true
+
+    params: {
+        # GIF-1: VBB schedule
+        vbb_alpha_start:  { default: 0.001, type: "float", doc: "Loose IB weight during infancy" }
+        vbb_alpha_end:    { default: 0.05,  type: "float", doc: "Tight IB weight at maturity" }
+        vbb_ramp_start:   { default: 1000,  type: "int",   doc: "Step when IB tightening begins" }
+        vbb_ramp_end:     { default: 5000,  type: "int",   doc: "Step when IB tightening completes" }
+        # GIF-2: OOD probe EMA
+        ood_probe_alpha:  { default: 0.1,   type: "float", doc: "EMA coefficient for OOD CE probe" }
+        ood_probe_interval: { default: 100, type: "int",   doc: "Evaluate OOD probe every N steps" }
+        # GIF-3: Isotropy schedule (reuses VBB ramp bounds)
+        iso_weight_max:   { default: 0.05,  type: "float", doc: "Peak isotropy weight at maturity" }
+        # GIF-4: Label smoothing
+        label_smooth_max: { default: 0.1,   type: "float", doc: "Max smoothing ε at gap >> target" }
+        target_gap:       { default: 2.0,   type: "float", doc: "Target OOD/train PPL ratio" }
+        # GIF-5: Head diversity
+        head_div_w0:      { default: 0.01,  type: "float", doc: "Base weight for head diversity loss" }
+        # GIF-6: Cosine head
+        cosine_head:      { default: true,  type: "bool",  doc: "Replace linear LM head with cosine head" }
+        cosine_head_tau_init: { default: -1.0, type: "float", doc: "Init τ; -1 = sqrt(d_model)" }
+        # GIF-7A: Divisive grad norm
+        divisive_grad_c:  { default: 1.0,   type: "float", doc: "Semi-saturation constant for divisive grad norm" }
+        # GIF-7B: Loss variance damping
+        loss_var_window:  { default: 50,    type: "int",   doc: "Rolling window for σ_L estimation" }
+        loss_var_min_mult: { default: 0.1,  type: "float", doc: "Minimum lr_eff / lr_sched ratio" }
+        # GIF-7C: KL floor
+        kl_floor:         { default: 10.0,  type: "float", doc: "Minimum acceptable KL below which floor fires" }
+        kl_floor_gamma:   { default: 0.1,   type: "float", doc: "Weight on KL floor penalty" }
+    }
+
+    properties: {
+        composite:          "GIF = 7 sub-mechanisms; each can be individually disabled"
+        triple_failure_fix: "Addresses: (1) pre-fusion EMA signal, (2) VBB at zero α, (3) zero OOD regularisation"
+        maturational:       "GIF-1/3 schedules implement cortical myelination analogy: loose early, tight late"
+        gap_reactive:       "GIF-4/5 strengthen automatically when OOD gap exceeds target"
+        zero_at_start:      "All zero_init sub-mechanisms contribute zero loss at step 0 (clean baseline)"
+        bcm_analogue:       "GIF-7B is a computational implementation of the BCM sliding threshold rule"
+    }
+
+    when_to_use: """
+        Use GIF as a drop-in OOD-gap closing package when:
+        - Training on mixed-domain data (chat + prose + code)
+        - Observing train-PPL / OOD-PPL gap growing after step ~1000
+        - Using a multi-cortex / expert distillation stack (GIF-2 directly
+          improves cortex gate calibration)
+        - Post-warmup regularisation is desired without tuning individual α values
+
+        The typical deployment is: enable GIF with defaults, run for 5k steps,
+        inspect gap_ratio at step 5k vs. step 1k. If gap_ratio decreases, GIF
+        is working. If not, check which sub-mechanism is dominant via the
+        per-component loss logs.
+
+        Pairs with: multi_cortex (GIF-2 corrects distillation lambda),
+        isotropy (GIF-3 reuses IsotropyLoss), vbb (GIF-1 drives VBB schedule).
+    """
+
+    not_for: """
+        • Single-domain training without OOD target (GIF-2/4/5 cannot function)
+        • Very short runs (< 2k steps): VBB ramp and isotropy schedule idle
+        • Models without a bottleneck: VBB encoder has no meaningful layer to operate on
+    """
+
+    empirical_evidence: {
+        source: "Internal: docs/findings.md post-H22 forensic + H24 (GIF design document)"
+        result: "Root-cause identification of triple failure: pre-fusion EMA + VBB α=0.001 + zero OOD reg"
+        caveat: "Full GIF stack ablation pending; individual components (isotropy, VBB) have separate evidence"
+    }
+
+    references: [
+        "Internal: lib/gif.neuro (canonical equations GIF-1 through GIF-7)",
+        "Tishby & Schwartz-Ziv (2017) Opening the Black Box of Deep Neural Networks via Information. ITW",
+        "Mu & Viswanath (2018) All-But-The-Top: Simple and Effective Postprocessing for Word Representations",
+        "Bienenstock, Cooper, Munro (1982) Theory for the development of neuron selectivity. J Neurosci",
+        "Heeger (1992) Normalization of cell responses in cat striate cortex. Visual Neurosci"
+    ]
+}

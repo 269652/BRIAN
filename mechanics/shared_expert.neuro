@@ -1,0 +1,102 @@
+# -*- coding: utf-8 -*-
+# Shared expert isolation — always-on expert(s) alongside routed experts.
+#
+# Implementation: neuroslm/modules/moe.py::SharedExpertMoE
+#                 neuroslm/dsl/nn_ops.py::shared_expert()
+# Tests:          tests/dsl/test_moe.py
+# Docs:           docs/mechanics/shared_expert.md
+
+export mechanic shared_expert {
+    category: "routing"
+    summary:  "DeepSeekMoE shared-expert isolation: a few always-on experts capture common knowledge so routed experts specialise"
+
+    equation: """
+        # n_shared always-active experts  S_1..S_s  (every token passes through all).
+        # n_routed routed experts         E_1..E_n  dispatched top-k by a router W_r.
+
+        # 1) Shared (dense) path — runs for every token, no routing:
+        y_shared = Σ_{m=1..n_shared}  S_m(x)                  # (B·T, d)
+
+        # 2) Routed (sparse) path — top-k of the n_routed experts:
+        p   = softmax(x W_r)                                  # (B·T, n_routed)
+        idx = top_k_indices(p, k = top_k)
+        g   = p[idx] / Σ p[idx]                               # renormalised gates
+        y_routed = Σ_{j∈idx}  g_j · E_j(x)                    # (B·T, d)
+
+        # 3) Combine:
+        y = y_shared + y_routed                               # (B·T, d)
+
+        # Fine-grained + shared isolation (DeepSeekMoE): splitting experts finer and
+        # reserving n_shared always-on experts reduces redundancy across the routed
+        # experts, freeing them to specialise. A load-balancing aux loss still
+        # applies to the ROUTED experts only.
+    """
+
+    impl:    "neuroslm.modules.moe.SharedExpertMoE"
+    loss_fn: "neuroslm.modules.moe.load_balancing_loss"
+    zero_init: false
+
+    params: {
+        n_shared: {
+            default: 1,
+            type: "int",
+            doc: "Number of always-on shared experts every token passes through"
+        }
+        n_routed: {
+            default: 64,
+            type: "int",
+            doc: "Number of fine-grained routed experts the router dispatches among"
+        }
+        top_k: {
+            default: 6,
+            type: "int",
+            doc: "Routed experts activated per token (DeepSeekMoE uses fine-grained k)"
+        }
+    }
+
+    properties: {
+        common_knowledge:   "Shared experts absorb features common to all tokens, reducing routed-expert redundancy"
+        specialisation:     "With common knowledge offloaded, routed experts can specialise more sharply"
+        fine_grained:       "Pairs with a large n_routed (fine expert splitting) for higher routing flexibility"
+        always_on_path:     "The shared path is dense (no routing), so it never drops a token"
+        routed_aux_loss:    "Load-balancing aux loss applies to the routed experts only"
+    }
+
+    when_to_use: """
+        Use when:
+        • Building a fine-grained MoE and you observe routed experts redundantly
+          relearning the same common patterns — shared experts isolate that knowledge
+        • You want a guaranteed dense fallback path so no token is left without compute
+          even under imperfect routing
+        • Following the DeepSeekMoE recipe: many fine-grained routed experts (large
+          n_routed) + a small number of shared experts + fine-grained top_k
+
+        n_shared = 1 with a large n_routed and moderate top_k is the canonical
+        DeepSeekMoE setting. The shared path adds a fixed per-token FLOP cost (it is
+        dense), so size shared experts modestly. Combine with the routed-expert
+        load-balancing aux loss; the shared experts are exempt by construction.
+
+        Pairs well with: sparse_moe / expert_choice_routing (the routed path),
+        expert-parallel sharding.
+    """
+
+    not_for: """
+        • Coarse MoE with few large experts — shared-expert isolation pays off most
+          with fine-grained routed experts
+        • Ultra-tight FLOP budgets where even one always-on dense expert is too costly
+        • Settings where you specifically want every token's compute to be fully
+          conditional (no dense path at all)
+    """
+
+    empirical_evidence: {
+        source: "Dai et al. (2024) DeepSeekMoE"
+        result: "DeepSeekMoE 16B matches LLaMA2-7B quality with ~40% of the compute; shared-expert isolation + fine-grained splitting outperform conventional GShard top-2 MoE at equal params/FLOPs"
+        caveat: "Gains are reported at scale with expert-parallel training; small-scale benefit depends on n_routed granularity"
+    }
+
+    references: [
+        "Dai et al. (2024) DeepSeekMoE: Towards Ultimate Expert Specialization in Mixture-of-Experts Language Models. arXiv 2401.06066",
+        "DeepSeek-AI (2024) DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model. arXiv 2405.04434",
+        "Fedus, Zoph, Shazeer (2021) Switch Transformers. arXiv 2101.03961"
+    ]
+}

@@ -1,0 +1,94 @@
+# -*- coding: utf-8 -*-
+# Logit Soft-Cap — bounded tanh squashing of attention and output logits.
+#
+# Implementation: neuroslm/modules/logit_soft_cap.py
+#                 neuroslm/dsl/nn_ops.py::logit_soft_cap()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/logit_soft_cap.md
+
+export mechanic logit_soft_cap {
+    category: "attention"
+    summary:  "Tanh soft-cap that smoothly bounds attention scores and final logits to ±cap — taming spikes without hard clipping"
+
+    equation: """
+        # Smooth, differentiable bound on a logit tensor x with cap c:
+        soft_cap(x, c) = c · tanh(x / c)
+
+        # Properties of the map:
+        #   |soft_cap(x, c)| < c          for all x        (strict bound)
+        #   soft_cap(x, c) ≈ x            for |x| ≪ c       (near-identity in range)
+        #   d/dx soft_cap = 1 − tanh²(x/c) ∈ (0, 1]         (always positive grad)
+
+        # Applied in two places:
+        # 1. Attention scores, before the softmax:
+        S = soft_cap(Q Kᵀ / √d, attn_cap)
+        A = softmax(S)
+        # 2. Final vocabulary logits, before the cross-entropy:
+        z = soft_cap(W_O h, final_logit_cap)
+
+        # Unlike hard clipping (which has zero gradient outside the clip range),
+        # tanh soft-cap keeps a non-zero gradient everywhere, so saturated
+        # entries can still recover during training.
+    """
+
+    impl:    "neuroslm.modules.logit_soft_cap.LogitSoftCap"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        attn_cap: {
+            default: 50.0,
+            type: "float",
+            doc: "Soft-cap applied to pre-softmax attention scores (Gemma 2 default)"
+        }
+        final_logit_cap: {
+            default: 30.0,
+            type: "float",
+            doc: "Soft-cap applied to final vocabulary logits before the loss (Gemma 2 default)"
+        }
+    }
+
+    properties: {
+        smooth_bound:     "tanh squashing strictly bounds outputs into the open interval (−cap … cap) while staying differentiable"
+        nonzero_gradient: "Gradient 1 − tanh²(x/c) is positive everywhere — saturated logits can still recover"
+        near_identity:    "For |x| ≪ cap the map ≈ x — in-range logits pass through essentially unchanged"
+        spike_control:    "Caps the rare extreme logits responsible for loss spikes and softmax overflow"
+        two_site:         "Distinct caps for attention scores (≈50) and output logits (≈30)"
+        flash_caveat:     "Soft-capping attention scores is incompatible with some fused FlashAttention kernels"
+    }
+
+    when_to_use: """
+        Use when:
+        • Training exhibits loss spikes driven by a few runaway logits
+        • Final-layer logits grow large enough to risk softmax/cross-entropy overflow
+        • You want a smoother alternative to hard gradient/logit clipping
+        • Reproducing the Gemma 2 recipe (attn_cap=50, final_logit_cap=30)
+
+        Soft-capping is a gentler regularizer than clipping: in-range values pass
+        through nearly untouched, only the tail is compressed. Tune the cap to sit
+        comfortably above the typical logit magnitude so normal training is
+        unaffected and only outliers are squashed.
+
+        Pairs well with: qk_norm (attacks the same instability from the Q/K side),
+        rmsnorm, flash_attention (apply only the final_logit cap if the attention
+        kernel cannot fuse the score-level cap).
+    """
+
+    not_for: """
+        • Models that already train stably with no logit blow-up — adds a small bias for no gain
+        • Pipelines locked to a fused attention kernel that cannot apply a pre-softmax score cap
+          (use the final-logit cap only, or switch kernels)
+        • Settings needing exactly-calibrated raw logits (the cap distorts large-magnitude logits)
+    """
+
+    empirical_evidence: {
+        source: "Team Gemma (2024) Gemma 2 Technical Report — Google DeepMind"
+        result: "Attention soft-cap (50.0) and final-logit soft-cap (30.0) were part of the stable Gemma 2 training recipe across 2B–27B scales"
+        caveat: "Reported as a recipe ingredient rather than an isolated ablation; the score-level cap conflicts with some FlashAttention kernels"
+    }
+
+    references: [
+        "Team Gemma (2024) Gemma 2: Improving Open Language Models at a Practical Size. arXiv 2408.00118",
+        "Bello, Zoph, Vaswani, Shlens, Le (2017) Neural Combinatorial Optimization with Reinforcement Learning (early use of c·tanh logit clipping). arXiv 1611.09940"
+    ]
+}

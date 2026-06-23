@@ -1,0 +1,107 @@
+# -*- coding: utf-8 -*-
+# RetNet — retention with parallel / recurrent / chunkwise duality.
+#
+# Implementation: neuroslm/modules/retnet.py
+#                 neuroslm/dsl/nn_ops.py::retention()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/retnet.md
+
+export mechanic retnet {
+    category: "sequence_mixer"
+    summary:  "Retention: fixed exponential decay γ gives one op with parallel, recurrent, and chunkwise forms"
+
+    equation: """
+        # Retention replaces softmax with a decay-masked inner product.
+        # Per head with scalar decay rate γ ∈ (0,1):
+
+        # PARALLEL form (training, O(T²) but fully parallel):
+        #   D_{n,m} = γ^{n-m}  if n ≥ m  else 0          # causal decay mask
+        #   Retention(X) = (Q Kᵀ ⊙ D) V
+        # (rotary-style xpos embeddings are folded into Q, K.)
+
+        # RECURRENT form (inference, O(1)/step, constant memory):
+        #   S_n = γ · S_{n-1} + k_nᵀ v_n      ∈ ℝ^{d_k × d_v}   # retention state
+        #   o_n = q_n S_n
+        # This is exactly the parallel form — D's geometric decay IS γ-scaling
+        # of a running outer-product state. No softmax ⇒ the two forms are
+        # algebraically identical (the "retention duality").
+
+        # CHUNKWISE form (long-sequence training, O(N) overall):
+        #   Split T into chunks of length C. For chunk i with inner index t:
+        #     inner  = (Q_i K_iᵀ ⊙ D) V_i                 # intra-chunk (parallel)
+        #     cross  = (Q_i ⊙ γ^{t+1}) · S_{i-1}          # carry prior state, decayed
+        #     S_i    = K_iᵀ (V_i ⊙ γ^{C-t-1}) + γ^C · S_{i-1}
+        #     o_i    = inner + cross
+        #   Parallel inside a chunk, recurrent across chunks → linear in N.
+
+        # Multi-Scale Retention (MSR): each head h gets a distinct γ_h spread
+        # geometrically over [decay_min, decay_max], giving multi-timescale memory.
+    """
+
+    impl:    "neuroslm.modules.retnet.MultiScaleRetention"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        n_heads: {
+            default: 8,
+            type: "int",
+            doc: "Number of retention heads; each head gets a distinct decay γ_h (multi-scale)"
+        }
+        decay_min: {
+            default: 0.96875,
+            type: "float",
+            doc: "Smallest per-head decay (fastest forgetting); γ for head 0. 0.96875 = 1 - 2^-5"
+        }
+        decay_max: {
+            default: 0.998,
+            type: "float",
+            doc: "Largest per-head decay (longest memory); γ for the last head"
+        }
+    }
+
+    properties: {
+        three_form_duality:  "Same op as parallel (train), recurrent (decode), chunkwise (long-seq) — no softmax"
+        linear_inference:    "Recurrent form is O(1) time and constant memory per generated token"
+        parallel_training:   "Parallel form trains like attention; chunkwise gives O(N) at long context"
+        multi_scale_memory:  "Per-head γ_h spread over [decay_min, decay_max] models multiple timescales"
+        no_kv_cache:         "Fixed d_k×d_v state replaces the growing KV cache"
+        fixed_decay:         "γ is a fixed schedule, not input-dependent — simpler than GLA/Mamba gating"
+    }
+
+    when_to_use: """
+        Use when:
+        • You want attention-quality training (parallel form) AND O(1) recurrent
+          decoding from the *same* weights with no approximation gap
+        • Long-context training throughput matters — the chunkwise form is O(N)
+          while staying matmul-heavy
+        • A simple, robust fixed-decay memory is preferable to a learned gate
+
+        Retention's appeal is the exact three-way duality: because there is no
+        softmax, the parallel and recurrent forms compute identical outputs, so
+        you train in parallel and deploy recurrently with no behavioral shift.
+        The cost is that decay γ is fixed per head (not content-dependent), so
+        on tasks needing selective forgetting GLA or Mamba can do better.
+
+        Pairs well with: xpos / rotary embeddings (assumed by the formulation),
+        RMSNorm, and a SwiGLU FFN (the original "RetNet" block recipe).
+    """
+
+    not_for: """
+        • Tasks needing content-dependent forgetting — γ is a fixed geometric
+          schedule, not a learned gate
+        • Short sequences where the parallel O(T²) form has no chunkwise payoff
+        • Precise arbitrary-token copy beyond the fixed-state capacity
+    """
+
+    empirical_evidence: {
+        source: "Sun, Dong, Huang, Ma, Xia, Xue, Wang, Wei (2023) Retentive Network"
+        result: "Comparable LM perplexity to Transformers above ~2B params with 8.4× higher decoding throughput and 70% memory savings at long context"
+        caveat: "Crossover vs Transformer quality is scale-dependent; fixed decay limits selective recall"
+    }
+
+    references: [
+        "Sun, Dong, Huang et al. (2023) Retentive Network: A Successor to Transformer for Large Language Models. arXiv 2307.08621",
+        "Sun, Dong, Patra et al. (2022) A Length-Extrapolatable Transformer (xPos). arXiv 2212.10554"
+    ]
+}

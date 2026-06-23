@@ -1,0 +1,94 @@
+# -*- coding: utf-8 -*-
+# QK-Norm — normalize queries and keys before the dot product for stability.
+#
+# Implementation: neuroslm/modules/qk_norm.py
+#                 neuroslm/dsl/nn_ops.py::qk_norm()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/qk_norm.md
+
+export mechanic qk_norm {
+    category: "attention"
+    summary:  "Normalize Q and K (per-head) before Q·Kᵀ so attention logits cannot blow up during training"
+
+    equation: """
+        # Per-head normalization applied to queries and keys before scoring.
+        # With norm_type = "rmsnorm" (default):
+        Q̂ = RMSNorm(Q) · g_q,   RMSNorm(x) = x / √(mean(x²) + eps)
+        K̂ = RMSNorm(K) · g_k
+
+        # With norm_type = "l2":
+        Q̂ = Q / (‖Q‖₂ + eps),   K̂ = K / (‖K‖₂ + eps)
+
+        # Attention then uses the normalized projections:
+        A = softmax(Q̂ K̂ᵀ / √d)
+        O = A V
+
+        # Effect: the raw magnitude of Q and K no longer feeds the logit scale.
+        # A learned per-head gain (g_q, g_k) restores controllable temperature,
+        # but its growth is bounded and slow compared to unnormalized projections,
+        # which can drift to huge norms and cause attention-logit / loss spikes.
+    """
+
+    impl:    "neuroslm.modules.qk_norm.QKNorm"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        eps: {
+            default: 1e-6,
+            type: "float",
+            doc: "Numerical floor in the normalization denominator"
+        }
+        norm_type: {
+            default: "rmsnorm",
+            type: "str",
+            doc: "Normalizer applied to Q and K: 'rmsnorm' (default) or 'l2'"
+        }
+    }
+
+    properties: {
+        logit_bounded:    "Normalized Q and K make the pre-softmax logit scale independent of projection magnitude"
+        spike_resistant:  "Removes the attention-logit-growth failure mode that destabilises large-scale training"
+        per_head:         "Normalization is applied independently per attention head"
+        cheap:            "One RMSNorm/L2 per Q and K projection — negligible FLOP and memory cost"
+        rope_order:       "Applied to Q and K — compose with RoPE by normalizing before the rotary embedding"
+        lr_tolerant:      "Permits higher learning rates and larger models without divergence"
+    }
+
+    when_to_use: """
+        Use when:
+        • Training large or deep transformers where attention logits grow unbounded
+        • You observe loss spikes traced to exploding max-attention-logits
+        • Scaling width/depth and want the same recipe to remain stable (ViT-22B regime)
+        • Half-precision training where large logits overflow before the softmax
+
+        QK-Norm is now a near-default in modern recipes (Gemma 2, Chameleon, ViT-22B):
+        the cost is one extra norm per head, the benefit is a removed divergence mode.
+        Choose 'rmsnorm' for the common case; 'l2' gives unit-norm Q,K (cosine-style
+        attention) which couples naturally with an explicit learned temperature.
+
+        Pairs well with: rmsnorm (trunk norm), logit_soft_cap (bounds residual
+        logit growth), flash_attention (apply QK-Norm to Q,K before the kernel).
+    """
+
+    not_for: """
+        • Tiny models that already train stably — the extra norm is harmless but unneeded
+        • Fine-tuning a pre-trained MHA checkpoint without adapting the logit temperature,
+          since normalization changes the effective attention scale
+        • Cases where attention temperature must exactly match an unnormalized baseline
+          for ablation parity
+    """
+
+    empirical_evidence: {
+        source: "Dehghani et al. (2023) Scaling ViT to 22 Billion Parameters — Google"
+        result: "QK-Norm removed the attention-logit-growth instability that otherwise diverged training at 22B scale and enabled stable optimisation at large width"
+        caveat: "Benefit is most pronounced at scale / high learning rate; small models gain little"
+    }
+
+    references: [
+        "Henry, Dachapally, Pawar, Chen (2020) Query-Key Normalization for Transformers. Findings of EMNLP",
+        "Dehghani, Djolonga, Mustafa et al. (2023) Scaling Vision Transformers to 22 Billion Parameters. arXiv 2302.05442",
+        "Team Gemma (2024) Gemma 2: Improving Open Language Models at a Practical Size. arXiv 2408.00118",
+        "Chameleon Team (2024) Chameleon: Mixed-Modal Early-Fusion Foundation Models. arXiv 2405.09818"
+    ]
+}

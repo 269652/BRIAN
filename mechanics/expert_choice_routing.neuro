@@ -1,0 +1,92 @@
+# -*- coding: utf-8 -*-
+# Expert-choice routing — experts select their top tokens (perfect load balance).
+#
+# Implementation: neuroslm/modules/moe.py::ExpertChoiceRouting
+#                 neuroslm/dsl/nn_ops.py::expert_choice_routing()
+# Tests:          tests/dsl/test_moe.py
+# Docs:           docs/mechanics/expert_choice_routing.md
+
+export mechanic expert_choice_routing {
+    category: "routing"
+    summary:  "Inverted MoE routing: each expert picks its top-capacity tokens, giving exact load balance with no auxiliary loss"
+
+    equation: """
+        # n_experts FFN experts; router scores S = softmax(x W_r) over experts.
+        # S has shape (n_experts, B·T) after transpose (expert × token).
+        S = softmax(x W_r)ᵀ                          # (n_experts, B·T)
+
+        # Per-expert capacity (tokens each expert keeps):
+        #   C = capacity_factor · (B·T / n_experts)
+        # Each EXPERT selects its top-C tokens (top-k along the token axis):
+        I, G = top_k(S, k = C, dim = token_axis)     # indices + gate weights per expert
+
+        # Each token may be picked by 0, 1, or several experts.
+        y_t = Σ_{i : t ∈ I_i}  G_{i,t} · E_i(x_t)     # (B·T, d)
+
+        # Load balance is EXACT by construction: every expert receives exactly C
+        # tokens, so no load-balancing auxiliary loss is needed (L_aux = 0).
+    """
+
+    impl:    "neuroslm.modules.moe.ExpertChoiceRouting"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        n_experts: {
+            default: 8,
+            type: "int",
+            doc: "Number of parallel FFN experts"
+        }
+        capacity_factor: {
+            default: 2.0,
+            type: "float",
+            doc: "Tokens kept per expert as C = capacity_factor · (B·T / n_experts); >1 lets popular tokens get multiple experts"
+        }
+    }
+
+    properties: {
+        exact_balance:      "Every expert keeps exactly C tokens — load is perfectly uniform by construction"
+        no_aux_loss:        "No load-balancing auxiliary loss is required (unlike token-choice top-k MoE)"
+        variable_compute:   "A token may be chosen by 0..n_experts experts — compute per token varies"
+        expert_choice:      "Experts choose tokens (inverse of token-choice sparse_moe)"
+        no_token_drop:      "No hard drop of 'overflow' tokens; instead some tokens may receive no expert"
+    }
+
+    when_to_use: """
+        Use when:
+        • Load imbalance and the brittleness of an auxiliary balancing loss are the
+          main pain points of token-choice MoE — expert-choice removes both
+        • You want every expert fully and equally utilised without tuning aux_loss_weight
+        • Variable per-token compute (some tokens get more experts, some get none) is
+          acceptable for your task
+
+        capacity_factor ≈ 2.0 lets the more informative tokens be selected by several
+        experts while routine tokens may be selected by few or none — a useful
+        adaptive-compute property. Note the asymmetry: in autoregressive decoding the
+        'expert picks top tokens over the sequence' assumption needs care, since
+        future tokens are not yet available; expert-choice is most natural for
+        encoder / non-causal or chunked settings.
+
+        Pairs well with: shared_expert (covers tokens no expert selected), large
+        n_experts where balance matters most.
+    """
+
+    not_for: """
+        • Strictly causal autoregressive decoding without chunking — top-token
+          selection over a sequence can leak across the causal boundary
+        • Tasks that require every token to receive exactly the same compute
+        • Settings where 'some tokens get zero experts' is unacceptable without a
+          shared/always-on fallback expert
+    """
+
+    empirical_evidence: {
+        source: "Zhou et al. (2022) Mixture-of-Experts with Expert Choice Routing"
+        result: "Expert-choice routing reaches a given quality with >2× faster training convergence than top-1/top-2 token-choice MoE, with perfect load balance and no auxiliary loss"
+        caveat: "Benchmarked primarily on encoder-style and non-causal settings; causal LM use needs chunked routing"
+    }
+
+    references: [
+        "Zhou et al. (2022) Mixture-of-Experts with Expert Choice Routing. arXiv 2202.09368",
+        "Fedus, Zoph, Shazeer (2021) Switch Transformers. arXiv 2101.03961"
+    ]
+}

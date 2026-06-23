@@ -1,0 +1,115 @@
+# -*- coding: utf-8 -*-
+# Liouville Symplectic Residual — Hamiltonian-preserving latent dynamics.
+#
+# Implementation: neuroslm/mechanisms/liouville_symplectic.py
+# Config:         neuroslm/dsl/regularization.py::LiouvilleSymplecticConfig
+# Tests:          tests/dsl/test_liouville_symplectic.py
+# Docs:           docs/mechanics/liouville_symplectic.md
+
+export mechanic liouville_symplectic {
+    category: "physics"
+    summary:  "Stoermer-Verlet leapfrog step on a learned Hamiltonian; Noether loss penalises energy non-conservation"
+
+    equation: """
+        # Split d_model into canonical coordinates (equal halves)
+        [q₀, p₀] = x    q₀, p₀ ∈ ℝ^{d/2}
+
+        # Hamiltonian H(q, p) = KE(p) + V(q) + W(q)
+        KE(p) = (1/2) ‖M^{-1/2} p‖²    M = diag(softplus(m)) > 0  (learned mass matrix)
+        V(q)  = q-only potential (QOnlyPotential subclass):
+                - QuadraticPotential: (1/2) ‖Aq‖²
+                - SwiGLU variant: swiglu(q; W₁, W₂, W₃)
+
+        # Stoermer-Verlet leapfrog (one step, dtau = τ)
+        p_{1/2} = p₀ − (τ/2) · ∇_q H(q₀, p₀)
+        q₁      = q₀ + τ    · M^{-1} · p_{1/2}
+        p₁      = p_{1/2} − (τ/2) · ∇_q H(q₁, p_{1/2})
+
+        # Symplectic invariant: Jacobian det = 1 (Liouville's theorem)
+        det(∂(q₁,p₁)/∂(q₀,p₀)) = 1   (by triangular-shear construction)
+
+        # Noether residual (energy conservation check)
+        L_Noether = (H(q₁, p₁) − H(q₀, p₀))²
+
+        # Scaled contribution
+        L_total += noether_strength · L_Noether
+    """
+
+    impl:    "neuroslm.mechanisms.liouville_symplectic.LiouvilleSymplecticBlock"
+    loss_fn: "neuroslm.mechanisms.liouville_symplectic.LiouvilleSymplecticBlock.noether_loss"
+    zero_init: false
+
+    params: {
+        noether_strength: {
+            default: 0.0,
+            type: "float",
+            min: 0.0,
+            doc: "Weight on L_Noether; 0.0 = diagnostic-only (H_diff logged, no gradient)"
+        }
+        dtau_init: {
+            default: 0.1,
+            type: "float",
+            min: 0.0,
+            exclusive_min: true,
+            doc: "Initial leapfrog stride τ (learned during training)"
+        }
+        potential_kind: {
+            default: "quadratic",
+            type: "str",
+            doc: "'quadratic' (closed-form, det(J)=1 guaranteed) or 'swiglu'"
+        }
+        w_rank: {
+            default: 4,
+            type: "int",
+            min: 1,
+            doc: "Rank of the LowRankPairwise W(q) potential"
+        }
+    }
+
+    properties: {
+        symplectic_by_construction: "Each leapfrog substep is a triangular shear with det(J)=1; the full step composes to det=1"
+        type_enforced_qonly:        "QOnlyPotential ABC enforces q-only potential at construction time; p cannot leak into V"
+        noether_zero_at_convergence:"L_Noether = 0 in exact arithmetic; finite only due to discretisation error"
+        diagnostic_mode:            "At noether_strength=0: H_diff and L_Noether are logged but not used for updates"
+        hairer_wanner_bound:        "Under leapfrog, L_Noether ≤ O(τ²) per step (Geometric Numerical Integration, Ch IX)"
+    }
+
+    when_to_use: """
+        Use when you want the latent dynamics of the model to respect Hamiltonian
+        structure — i.e. the 'energy' in the hidden state is approximately conserved
+        under the transformer's operations.
+
+        The Noether loss encourages the learned Hamiltonian H to be conserved,
+        which is equivalent to the dynamics being symplectic / volume-preserving.
+        This is a form of structural regularisation that can prevent representation
+        collapse (energy going to zero = trivial representations).
+
+        Start with noether_strength=0 (diagnostic mode) to observe the distribution
+        of H_diff. Healthy values: H_diff ≈ 0 (energy conserved). If H_diff
+        systematically drifts, add noether_strength=0.01.
+
+        Pairs well with: kjpla_phase_lattice (both are physics-inspired; share
+        the THSD formal framework), pontryagin_topo_charge (all three THSD phases).
+    """
+
+    not_for: """
+        • Very deep models (L > 16): leapfrog stack accumulates error over many layers
+        • swiglu potential without careful initialisation: energy can diverge early
+        • noether_strength > 0.1: Noether loss can dominate CE and prevent token learning
+    """
+
+    empirical_evidence: {
+        source: "Internal: docs/findings.md H25 (Liouville Symplectic, Phase 2 THSD)"
+        result: "Diagnostic-only mode (H25): H_diff ≈ O(τ²) per step, confirming leapfrog bound"
+        caveat: "Penalty mode (noether_strength>0) is a planned follow-up experiment"
+    }
+
+    formal_proof: "hypothesis/proofs/H025_liouville_det1.lean (pending)"
+
+    references: [
+        "Hairer, Lubich, Wanner (2006) Geometric Numerical Integration. Springer Series 31",
+        "Stoermer (1907); Verlet (1967) Computer experiments on classical fluids. Phys. Rev.",
+        "Greydanus, Dzamba, Yosinski (2019) Hamiltonian Neural Networks. NeurIPS",
+        "Internal: docs/formal_framework.md §9 (Liouville derivation)"
+    ]
+}

@@ -1,0 +1,98 @@
+# -*- coding: utf-8 -*-
+# Isotropy — online representation whitening loss.
+#
+# Implementation: neuroslm/regularizers.py::IsotropyLoss
+# Config:         neuroslm/dsl/regularization.py::IsotropyConfig
+# Tests:          tests/dsl/test_regularization.py
+# Docs:           docs/mechanics/isotropy.md
+
+export mechanic isotropy {
+    category: "regularizer"
+    summary:  "Push the token-embedding Gram matrix toward the identity; prevents rank collapse"
+
+    equation: """
+        # Collect last-layer token hidden states into a rolling buffer
+        H_buf ∈ ℝ^{N×d}    N = buffer size (e.g. 4096)
+
+        # Gram (covariance) matrix
+        G = H_bufᵀ H_buf / N    ∈ ℝ^{d×d}
+
+        # Frobenius isotropy loss
+        L_iso = ‖G − I‖_F² / d²
+
+        # Log-determinant variant (sharper but numerically delicate)
+        L_iso = −log|det(G)| / d
+
+        # Scaled contribution
+        L_total += weight · L_iso
+    """
+
+    impl:    "neuroslm.regularizers.IsotropyLoss"
+    loss_fn: "neuroslm.regularizers.IsotropyLoss.compute"
+    zero_init: false
+
+    params: {
+        weight: {
+            default: 0.05,
+            type: "float",
+            min: 0.0,
+            doc: "Scale on L_iso; 0.05 gives ~1% of LM loss at moderate collapse"
+        }
+        buffer: {
+            default: 4096,
+            type: "int",
+            min: 64,
+            doc: "Number of token embeddings in the rolling buffer"
+        }
+        distance: {
+            default: "frobenius",
+            type: "str",
+            doc: "Loss variant: 'frobenius' (smooth) or 'log_det' (sharper)"
+        }
+    }
+
+    properties: {
+        rank_guard:         "L_iso = 0 iff G = I (perfect isotropy); increases when erank collapses"
+        mean_normalised:    "Dividing by d² keeps scale O(1) regardless of model width"
+        rolling_buffer:     "Buffer is updated online; no second pass over data required"
+        frobenius_is_smooth:"Frobenius norm is L-smooth everywhere; log_det can be numerically unstable"
+        early_fire_ok:      "Unlike DAR/PCC, isotropy can fire from step ~200 (rank collapses early)"
+    }
+
+    when_to_use: """
+        Almost always. Representation rank collapse (erank → 1) is universal in
+        transformer language models and begins within the first 200-500 steps.
+
+        The isotropy loss is low-weight (0.01-0.05 of LM loss), numerically
+        stable (Frobenius variant), and has essentially no downside at small
+        weight. It should be the FIRST regulariser to activate.
+
+        Set isotropy_activation_step=0 (or early, ~500) regardless of the
+        global activation_step gate for other regularisers.
+
+        weight history: 0.005 was too weak (erank 53→7 by step 300 unchecked);
+        0.05 successfully arrests collapse at erank ≥ 20 in the same run.
+
+        Pairs well with: pcc (both maintain representation diversity from
+        different angles), bures_manifold_alignment (W₂ alignment prevents
+        expert-trunk erank divergence).
+    """
+
+    not_for: """
+        • log_det variant on very narrow models (d < 64): numerically fragile
+        • buffer >> available GPU RAM: buffer is kept on CPU but moved for loss
+        • weight > 0.5: dominates LM loss and prevents feature learning
+    """
+
+    empirical_evidence: {
+        source: "Internal: arch.neuro 2026-06-21 surgery note"
+        result: "weight 0.005→0.05: erank stabilised at ≥20 vs collapse to 7 at old weight"
+        reference: "docs/findings.md §regularization-isotropy-2026-06-21"
+    }
+
+    references: [
+        "Mu, Viswanath (2018) All-but-the-Top: Simple and Effective Postprocessing for Word Vectors. ICLR",
+        "Ethayarajh (2019) How Contextual are Contextualized Word Representations? EMNLP",
+        "Internal: docs/technical_report.md §3.C"
+    ]
+}

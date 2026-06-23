@@ -1,0 +1,92 @@
+# -*- coding: utf-8 -*-
+# LayerNorm — per-token re-centering and re-scaling normalization.
+#
+# Implementation: neuroslm/modules/layernorm.py
+#                 neuroslm/dsl/nn_ops.py::layernorm()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/layernorm.md
+
+export mechanic layernorm {
+    category: "normalization"
+    summary:  "Normalizes each token's features to zero mean and unit variance — then applies a learned gain and bias"
+
+    equation: """
+        # For an input vector x ∈ ℝ^d (per token, per layer):
+        μ = (1/d) · Σᵢ xᵢ                       # feature mean
+        σ² = (1/d) · Σᵢ (xᵢ − μ)²               # feature variance
+
+        # Normalize, then apply learned per-feature gain g and bias b:
+        x̂ᵢ = (xᵢ − μ) / √(σ² + eps)
+        yᵢ = gᵢ · x̂ᵢ + bᵢ
+
+        # Normalization is over the feature dimension d only, independently
+        # per token (and per batch element) — unlike BatchNorm, there is no
+        # dependence on other examples, so it behaves identically at train
+        # and inference time and needs no running statistics.
+        #
+        # With bias = false the term bᵢ is dropped (g · x̂ only); this is the
+        # common "no-bias" LayerNorm variant used in many modern stacks.
+    """
+
+    impl:    "neuroslm.modules.layernorm.LayerNorm"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        eps: {
+            default: 1e-5,
+            type: "float",
+            doc: "Numerical floor added to the variance before the square root"
+        }
+        bias: {
+            default: true,
+            type: "bool",
+            doc: "Learn a per-feature additive bias b. When false, only the gain g is learned"
+        }
+    }
+
+    properties: {
+        recenter_rescale: "Removes both the mean (re-center) and the scale (re-scale) of each token's features"
+        batch_independent:"Statistics are per-token, so train and eval behave identically — no running stats"
+        gradient_stable:  "Reduces internal covariate shift, smoothing the loss landscape for deeper nets"
+        affine:           "Learned gain g and optional bias b restore representational capacity after normalization"
+        sequence_safe:    "Independent of sequence length and batch size, unlike BatchNorm"
+        canonical:        "The original Transformer / BERT / GPT-2 normalizer"
+    }
+
+    when_to_use: """
+        Use when:
+        • Reproducing the original Transformer, BERT, or GPT-2 exactly
+        • Mean-centering is known to matter for the task or modality
+        • You want the most widely-validated, conservative normalization choice
+        • A learned bias term is part of the architecture you are matching
+
+        LayerNorm is the textbook normalizer: robust and well-understood. For
+        new decoder-only LLMs, RMSNorm is usually preferred (cheaper, drops the
+        mean-centering with no measured quality loss) — reach for LayerNorm when
+        you need exact baseline parity or the re-centering specifically. Set
+        bias=false to match the no-bias variant common in recent models.
+
+        Pairs well with: standard MHA, flash_attention, residual connections.
+        Used pre-norm or post-norm depending on the architecture (pre-norm is
+        the modern default for training stability at depth).
+    """
+
+    not_for: """
+        • Cost-sensitive large decoder stacks where RMSNorm gives the same stability cheaper
+        • Convolutional vision backbones that conventionally use BatchNorm / GroupNorm
+        • Settings where the extra mean-subtraction and bias are pure overhead with no measured benefit
+    """
+
+    empirical_evidence: {
+        source: "Ba / Kiros / Hinton (2016) Layer Normalization — University of Toronto"
+        result: "Stabilises and accelerates training of RNNs and Transformers — working identically at train and test time with no batch-size dependence"
+        caveat: "Slightly more compute than RMSNorm (two reductions + bias); modern LLM ablations find re-centering contributes little"
+    }
+
+    references: [
+        "Ba, Kiros, Hinton (2016) Layer Normalization. arXiv 1607.06450",
+        "Xiong et al. (2020) On Layer Normalization in the Transformer Architecture. arXiv 2002.04745",
+        "Vaswani et al. (2017) Attention Is All You Need. arXiv 1706.03762"
+    ]
+}

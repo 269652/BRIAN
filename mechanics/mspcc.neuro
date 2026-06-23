@@ -1,0 +1,105 @@
+# -*- coding: utf-8 -*-
+# MSPCC — Multi-Scale Predictive Coding Cascade.
+#
+# Implementation: neuroslm/emergent/mspcc.py
+# Config:         neuroslm/dsl/training_config.py (mspcc block)
+# Docs:           docs/mechanics/mspcc.md
+
+export mechanic mspcc {
+    category: "training_dynamics"
+    summary:  "Generalises single-waist VBB into a per-layer cascade: MDRV-VBB free energy at every adjacent layer pair, geometrically weighted toward the deepest pair"
+
+    equation: """
+        # MSPCC applies one MDRV-VBB term per adjacent layer pair (ℓ, ℓ+1):
+
+        # Prediction residual (h_{ℓ+1} from h_ℓ):
+        ĥ_ℓ    = W_ℓ · h_ℓ                         # learned predictor
+        r_ℓ    = ‖h_{ℓ+1} − ĥ_ℓ‖²                  # reconstruction error
+
+        # Reparameterised posterior q(z_ℓ | h_ℓ) = N(μ_ℓ, σ_ℓ²I)
+        μ_ℓ, log_σ_ℓ = split(Linear(h_ℓ))
+        z_ℓ    = μ_ℓ + σ_ℓ · ε,   ε ~ N(0, I)
+
+        # KL divergence per layer pair:
+        KL_ℓ   = 0.5 · Σ_d (σ_{ℓ,d}² + μ_{ℓ,d}² − 1 − log σ_{ℓ,d}²)
+
+        # Posterior Entropy Commitment (PEC) — anti-collapse Jeffreys prior:
+        PEC_ℓ  = −η · 0.5 · E[log σ_ℓ²]            # → +∞ as σ→0; collapse is Lyapunov-unstable
+
+        # Self-throttling β (Lagrange multiplier surrogate):
+        β_ℓ    = 1 / (2 · r_ℓ.detach())             # β* = 1/(2·E[r]) self-throttles
+        L_ℓ    = β_ℓ · r_ℓ − log β_ℓ + α · KL_ℓ + PEC_ℓ
+
+        # Layer weights (geometric decay from deepest pair):
+        λ_ℓ = λ₀ · decay^{(L−2)−ℓ}       ℓ = 0, …, L−2
+        # λ₀ = base_weight, decay = layer_weight_decay
+        # → bowtie waist (ℓ=L-2) gets weight λ₀; shallowest gets λ₀·decay^{L-2}
+
+        # Total MSPCC loss:
+        L_MSPCC = Σ_{ℓ=0}^{L-2} λ_ℓ · L_ℓ
+
+        # Composes additively with single-waist VBB
+    """
+
+    impl:    "neuroslm.emergent.mspcc.mspcc_loss"
+    loss_fn: "neuroslm.emergent.mspcc.mspcc_loss"
+    zero_init: false
+
+    params: {
+        base_weight: {
+            default: 0.02,
+            type: "float",
+            doc: "λ₀ — weight on the deepest layer pair (bowtie waist)"
+        }
+        layer_weight_decay: {
+            default: 0.5,
+            type: "float",
+            doc: "Geometric decay factor per layer away from deepest; 0.5 = each shallower layer gets half the weight"
+        }
+    }
+
+    properties: {
+        geometric_cascade:    "λ_ℓ decays geometrically; waist pair dominates, shallow pairs regularise compositionally"
+        mdrv_stabilisers:     "Free-bits, β-ceiling, PEC applied per layer pair; same hyperparams as single-waist VBB"
+        additive_with_vbb:    "MSPCC composes additively with VBB; can run alongside or as replacement"
+        no_new_hyperparam:    "Reuses vbb_alpha, vbb_free_bits, vbb_log_beta_max, vbb_entropy_eta; only adds base_weight and layer_weight_decay"
+        predictive_hierarchy: "Generalisation of Sønderby et al. Ladder VAE to arbitrary depth"
+    }
+
+    when_to_use: """
+        Use as a generalisation of VBB when you want information-theoretic pressure
+        at EVERY layer pair, not just the bottleneck. The geometric weighting ensures
+        the waist still dominates while shallow pairs contribute a weak compositional
+        regulariser.
+
+        Per Felleman & Van Essen (1991): cortical hierarchy narrows with depth.
+        MSPCC imposes this via exponentially decaying per-layer IB pressure.
+
+        Shares all VBB parameters — enable alongside VBB (additive) or replace VBB
+        with MSPCC (set vbb_alpha=0, mspcc.base_weight=0.001 as a conservative start).
+
+        Pairs with: vbb (single-waist complement), gif (GIF-1 VBB schedule applies to
+        the waist term; MSPCC provides additional cascade), riemannian_motor_projection
+        (RMP projects h_motor before the VBB posterior; same applies at each layer pair).
+    """
+
+    not_for: """
+        • Very shallow models (L < 4): cascade has too few terms; single-waist VBB is simpler
+        • base_weight > 0.1: shallow terms can dominate CE before representation stabilises
+        • Without MDRV stabilisers (free-bits/PEC): KL collapse is observed at step ~2040
+          (the exact failure mode that motivated MDRV)
+    """
+
+    empirical_evidence: {
+        source: "Sønderby, Raiko, Maaløe, Kaae Sønderby, Winther (2016) Ladder VAE. NeurIPS"
+        result: "Hierarchical IB per latent level: each latent captures information at different abstraction"
+        internal: "HPB Phase 3: enabled in master arch (mspcc: {enabled: true, base_weight: 0.02}); ablation pending"
+    }
+
+    references: [
+        "Sønderby et al. (2016) Ladder VAE. NeurIPS",
+        "Whittington & Bogacz (2017) Predictive coding ≡ backprop. PLoS Comput Biol",
+        "Felleman & Van Essen (1991) Distributed hierarchical processing in primate cerebral cortex. Cereb Cortex",
+        "Internal: neuroslm/emergent/mspcc.py"
+    ]
+}

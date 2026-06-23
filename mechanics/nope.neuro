@@ -1,0 +1,83 @@
+# -*- coding: utf-8 -*-
+# NoPE — No Positional Encoding. Causal masking alone supplies order information.
+#
+# Implementation: neuroslm/modules/nope.py
+#                 neuroslm/dsl/nn_ops.py::nope()  (identity on Q/K)
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/nope.md
+
+export mechanic nope {
+    category: "position"
+    summary:  "No explicit position signal; the causal mask alone lets the network infer token order"
+
+    equation: """
+        # No rotation, no additive bias, no position embedding table.
+        q'_m = q_m
+        k'_n = k_n
+        scores_{i,j} = (q_i · k_j) / √d_k          # standard logits
+        A = softmax(mask_causal(scores))           # ONLY the causal mask differs by position
+
+        # Why order is still recoverable (decoder-only, causal):
+        #   token at position i can attend to {0..i} but not {i+1..T}.
+        #   The *count* of visible keys (i + 1) is a monotone function of i,
+        #   so a causal transformer can implicitly construct a positional
+        #   signal from the attention denominator / cumulative statistics.
+        #   => no parametric position encoding is required.
+    """
+
+    impl:    "neuroslm.modules.nope.NoPositionalEncoding"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        enabled: {
+            default: true,
+            type: "bool",
+            doc: "Toggle. When true, no position signal is injected (pure NoPE). When false, the layer is a no-op pass-through expecting another mechanic (RoPE/ALiBi) to provide position"
+        }
+    }
+
+    properties: {
+        zero_params:         "Literally no position parameters and no Q/K modification — the cheapest possible scheme"
+        causal_only:         "Order recovery relies entirely on the causal mask; meaningless for bidirectional attention"
+        length_extrapolation:"Surprisingly strong generalization to longer sequences in small/medium decoder LMs"
+        compositional:       "Frees the model from a fixed position basis, which helps some algorithmic / length-generalization tasks"
+        simplicity:          "Removes a whole hyperparameter axis (base, slopes, table size) from the architecture"
+    }
+
+    when_to_use: """
+        Use when:
+        • Decoder-only (causal) model where the mask already encodes order.
+        • Length generalization on algorithmic / synthetic tasks where explicit
+          position schemes overfit to the training length.
+        • You want the simplest possible architecture as a clean baseline before
+          adding RoPE/ALiBi (good for A/B ablations).
+
+        NoPE works specifically because causality breaks the permutation
+        symmetry: each position sees a different prefix, so the network can
+        derive an implicit clock from cumulative attention statistics. This does
+        NOT hold for encoders.
+
+        Pairs well with: deep narrow decoders, attention_sink, sliding_window
+        (the locality is then purely mask-driven).
+    """
+
+    not_for: """
+        • Bidirectional / encoder models — without a causal mask there is no
+          order signal at all and tokens become permutation-invariant.
+        • Very large-context decoders where explicit relative position (RoPE)
+          measurably outperforms implicit order recovery.
+        • Tasks requiring exact absolute index arithmetic.
+    """
+
+    empirical_evidence: {
+        source: "Kazemnejad et al. (2023) The Impact of Positional Encoding on Length Generalization, Mila"
+        result: "NoPE matches or beats explicit position encodings on length generalization across several decoder-only reasoning tasks"
+        caveat: "Studied mainly at small/medium scale; large-scale long-context behaviour is less established"
+    }
+
+    references: [
+        "Kazemnejad, Padhi, Natesan Ramamurthy, Das, Reddy (2023) The Impact of Positional Encoding on Length Generalization in Transformers. arXiv 2305.19466",
+        "Haviv, Ram, Press, Izsak, Levy (2022) Transformer Language Models without Positional Encodings Still Learn Positional Information. arXiv 2203.16634"
+    ]
+}

@@ -1,0 +1,118 @@
+# -*- coding: utf-8 -*-
+# Mamba — selective state space model with hardware-aware parallel scan.
+#
+# Implementation: neuroslm/modules/mamba_ssm.py
+#                 neuroslm/dsl/nn_ops.py::mamba_ssm()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/mamba_ssm.md
+
+export mechanic mamba_ssm {
+    category: "sequence_mixer"
+    summary:  "Selective SSM: input-dependent A,B,C run as an O(N) hardware-aware parallel scan"
+
+    equation: """
+        # Per-channel continuous SSM, discretized with input-dependent step Δ
+        #   h'(t) = A h(t) + B x(t)
+        #   y(t)  = C h(t) + D x(t)
+        # with state h ∈ ℝ^{d_state} per channel (d_state = N).
+
+        # Selection: B, C, Δ are FUNCTIONS of the input (this breaks LTI)
+        Δ = softplus(Linear_Δ(x) + dt_bias)        # (B, T, D)   input-dependent step
+        B = Linear_B(x)                             # (B, T, N)   input-dependent
+        C = Linear_C(x)                             # (B, T, N)   input-dependent
+        A = -exp(A_log)                             # (D, N)      learned, < 0  (stable)
+
+        # Zero-order-hold discretization (per timestep, per channel)
+        Ā = exp(Δ ⊙ A)                              # (B, T, D, N)
+        B̄ = Δ ⊙ B                                  # (B, T, D, N)
+
+        # Recurrent form (inference, O(1) state per step)
+        h_t = Ā_t ⊙ h_{t-1} + B̄_t ⊙ x_t
+        y_t = Σ_n C_t,n · h_t,n + D ⊙ x_t
+
+        # Parallel / chunked training form (the "selective scan"):
+        # the recurrence h_t = Ā_t h_{t-1} + B̄_t x_t is a first-order linear
+        # recurrence, so y is computed by an associative parallel scan over T.
+        # Associative operator on pairs (a, b):
+        #   (a₁,b₁) ⊕ (a₂,b₂) = (a₂·a₁ ,  a₂·b₁ + b₂)
+        # Scan runs in O(N) work, O(log N) depth, kept in SRAM (kernel fusion)
+        # so the (B,T,D,N) discretized tensors are never materialized in HBM.
+
+        # A short causal depthwise conv (width d_conv) precedes the SSM,
+        # and the block is wrapped in a gated MLP with expansion factor `expand`.
+    """
+
+    impl:    "neuroslm.modules.mamba_ssm.MambaBlock"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        d_state: {
+            default: 16,
+            type: "int",
+            doc: "SSM hidden state size N per channel; larger N = more memory capacity, more compute"
+        }
+        d_conv: {
+            default: 4,
+            type: "int",
+            doc: "Kernel width of the causal depthwise conv applied before the selective scan"
+        }
+        expand: {
+            default: 2,
+            type: "int",
+            doc: "Inner expansion factor; d_inner = expand · d_model"
+        }
+        dt_rank: {
+            default: "auto",
+            type: "str",
+            doc: "Low-rank dim of the Δ projection; 'auto' = ceil(d_model / 16)"
+        }
+    }
+
+    properties: {
+        linear_complexity:  "O(N) time and O(1) recurrent state per step — no quadratic attention matrix"
+        selective:          "B, C, Δ depend on x, so the model can context-dependently keep or forget state"
+        hardware_aware:     "Selective scan is a fused kernel keeping discretized states in SRAM, not HBM"
+        recurrent_inference: "Constant memory autoregressive decoding (unrolls the scan one step at a time)"
+        parallel_training:  "Associative scan gives parallel-over-time training equivalent to the recurrence"
+        no_kv_cache:        "Fixed-size state replaces the growing KV cache of attention"
+    }
+
+    when_to_use: """
+        Use when:
+        • Sequence length is long (≥ 2k–8k) and the quadratic attention matrix
+          is the throughput / memory bottleneck
+        • Constant-memory autoregressive inference matters (no growing KV cache)
+        • The task has a strong recurrent / streaming structure (audio, DNA,
+          long-document LM) where input-dependent forgetting is valuable
+
+        The selection mechanism is what separates Mamba from earlier LTI SSMs
+        (S4): because A is fixed but B, C, Δ are input-dependent, the model can
+        choose to propagate or reset state based on content — recovering much of
+        the content-addressing that LTI SSMs lack.
+
+        Pairs well with: a few interleaved attention layers (hybrid stacks),
+        RMSNorm, and SSD/Mamba-2 for matmul-friendly throughput at scale.
+    """
+
+    not_for: """
+        • Very short sequences where attention's quadratic cost is negligible —
+          the scan kernel overhead is not amortized
+        • Tasks needing exact long-range associative recall / copying of
+          arbitrary tokens (pure SSMs underperform attention on in-context copy)
+        • Hardware without a fused selective-scan kernel — the naive PyTorch
+          materialization of (B,T,D,N) tensors is HBM-bound and slow
+    """
+
+    empirical_evidence: {
+        source: "Gu & Dao (2023) Mamba: Linear-Time Sequence Modeling with Selective State Spaces"
+        result: "Matches or exceeds Transformers up to ~1.4B params with 5× higher inference throughput and linear scaling in sequence length"
+        caveat: "Pure SSMs lag attention on associative-recall tasks; hybrids close the gap"
+    }
+
+    references: [
+        "Gu, Dao (2023) Mamba: Linear-Time Sequence Modeling with Selective State Spaces. arXiv 2312.00752",
+        "Gu, Goel, Ré (2021) Efficiently Modeling Long Sequences with Structured State Spaces (S4). arXiv 2111.00396",
+        "Dao, Gu (2024) Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality (Mamba-2). arXiv 2405.21060"
+    ]
+}

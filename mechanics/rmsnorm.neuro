@@ -1,0 +1,90 @@
+# -*- coding: utf-8 -*-
+# RMSNorm — Root Mean Square Layer Normalization (no mean-centering).
+#
+# Implementation: neuroslm/modules/rmsnorm.py
+#                 neuroslm/dsl/nn_ops.py::rmsnorm()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/rmsnorm.md
+
+export mechanic rmsnorm {
+    category: "normalization"
+    summary:  "Re-scales activations by their root-mean-square only — LayerNorm without mean subtraction or bias"
+
+    equation: """
+        # For an input vector x ∈ ℝ^d (per token, per layer):
+        RMS(x) = √( (1/d) · Σᵢ xᵢ² + eps )
+
+        # Normalize by the RMS, then apply a learned per-feature gain g:
+        ŷᵢ = ( xᵢ / RMS(x) ) · gᵢ
+
+        # Compared to LayerNorm:
+        #   LayerNorm: ŷ = ((x − μ) / √(σ² + eps)) · g + b   (re-centers AND re-scales)
+        #   RMSNorm:   ŷ = (x / RMS(x)) · g                  (re-scales only)
+        #
+        # Dropping the mean-subtraction (μ) and the bias (b) makes RMSNorm
+        # cheaper and, empirically, just as effective. The re-scaling
+        # invariance is what gives the stabilising effect; re-centering
+        # contributes little. With elementwise_affine = false, the gain g
+        # is fixed at 1 and the op is purely a normalization.
+    """
+
+    impl:    "neuroslm.modules.rmsnorm.RMSNorm"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        eps: {
+            default: 1e-6,
+            type: "float",
+            doc: "Numerical floor added inside the RMS square root"
+        }
+        elementwise_affine: {
+            default: true,
+            type: "bool",
+            doc: "Learn a per-feature gain g. When false, RMSNorm is parameter-free"
+        }
+    }
+
+    properties: {
+        rescale_invariant:"Output is invariant to the input's overall scale — the stabilising property of LayerNorm"
+        no_recentering:   "Skips mean subtraction — re-scaling alone provides the benefit"
+        bias_free:        "No learned bias term — fewer parameters than LayerNorm"
+        cheaper:          "One reduction (Σxᵢ²) instead of two (mean then variance); faster on GPU"
+        de_facto_default: "Standard norm in LLaMA / Mistral / Gemma and most modern decoder stacks"
+        scale_only_grad:  "Gradient flows through the gain g and the RMS denominator only"
+    }
+
+    when_to_use: """
+        Use when:
+        • Building a modern decoder-only transformer (the prevailing default)
+        • You want LayerNorm-level stability at lower compute and parameter cost
+        • Half-precision training where a cheaper, numerically simple norm helps
+        • Matching LLaMA/Mistral/Gemma-style architectures for transfer or comparison
+
+        RMSNorm is the safe default normalizer for new transformer stacks. Use
+        eps=1e-6 for fp32/bf16; consider a slightly larger eps in fp16. Set
+        elementwise_affine=false only when you deliberately want a parameter-free
+        normalization (e.g. ablations isolating the re-scaling effect).
+
+        Pairs well with: qk_norm (which is itself usually an RMSNorm on Q,K),
+        flash_attention, logit_soft_cap. Used pre-norm (before each sublayer)
+        in essentially all current LLMs.
+    """
+
+    not_for: """
+        • Architectures that specifically rely on mean-centering (some vision/CNN designs)
+        • Exact reproduction of an original Transformer / BERT recipe that used LayerNorm + bias
+        • Cases where a learned bias term is known to be load-bearing for the task
+    """
+
+    empirical_evidence: {
+        source: "Zhang & Sennrich (2019) Root Mean Square Layer Normalization — NeurIPS"
+        result: "Matches LayerNorm quality on machine translation and language modelling while running 7–64% faster by dropping mean-centering"
+        caveat: "Speedup magnitude depends on hardware and sequence shape; quality is task-dependent but broadly on par with LayerNorm"
+    }
+
+    references: [
+        "Zhang, Sennrich (2019) Root Mean Square Layer Normalization. arXiv 1910.07467 (NeurIPS 2019)",
+        "Touvron et al. (2023) LLaMA: Open and Efficient Foundation Language Models. arXiv 2302.13971"
+    ]
+}

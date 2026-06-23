@@ -1,0 +1,98 @@
+# -*- coding: utf-8 -*-
+# DAR — Distributional Adversarial Reweighting.
+#
+# Implementation: neuroslm/regularizers.py::DARReweighter
+# Config:         neuroslm/dsl/regularization.py::DARConfig
+# Tests:          tests/dsl/test_regularization.py
+# Docs:           docs/mechanics/dar.md
+
+export mechanic dar {
+    category: "regularizer"
+    summary:  "Re-weight training samples adversarially to equalise source distributions; prevents shortcut learning"
+
+    equation: """
+        # Gradient Reversal Layer (Ganin & Lempitsky 2015)
+        # Forward: y = x    Backward: ∂L/∂x → −α · ∂L/∂x
+        GRL_α(x): forward=x, backward gradient multiplied by −α
+
+        # Source discriminator: predict which domain a hidden state came from
+        d(h) = sigmoid(W_d · GRL_α(h))    # domain logit ∈ (0,1)
+
+        # Discriminator loss: binary cross-entropy on domain labels
+        L_disc = BCE(d(h), domain_label)
+
+        # Sample reweighting: upweight minority-domain samples
+        w_i = exp(λ · L_ce_i · 1[minority(i)])
+
+        # Total loss (weighted CE + adversarial discriminator)
+        L_total = E[w_i · L_ce_i] + weight · L_disc
+    """
+
+    impl:    "neuroslm.regularizers.DARReweighter"
+    loss_fn: "neuroslm.regularizers.DARReweighter.compute_loss"
+    zero_init: false
+
+    params: {
+        lam: {
+            default: 1.0,
+            type: "float",
+            doc: "Reweighting temperature λ; higher = stronger minority upweighting"
+        }
+        hidden: {
+            default: 64,
+            type: "int",
+            doc: "Discriminator MLP hidden dim"
+        }
+        grl_alpha: {
+            default: 0.1,
+            type: "float",
+            doc: "GRL gradient flip scale α (Ganin et al. default)"
+        }
+        weight: {
+            default: 0.1,
+            type: "float",
+            doc: "Global scale on L_disc before entering total loss"
+        }
+    }
+
+    properties: {
+        adversarial_gradient: "GRL reverses gradient to the discriminator, making encoder domain-invariant"
+        minority_upweight:    "Rare domain samples get higher CE weight; prevents majority-domain overfitting"
+        zero_when_disabled:   "weight=0 reduces to standard CE (no reweighting, no discriminator)"
+        warmup_required:      "Should not fire before LM has baseline features (activation_step ≥ 2000)"
+    }
+
+    when_to_use: """
+        Use when training data has domain imbalance (e.g. 70% chat, 30% prose)
+        and the model collapses to the majority domain.
+
+        The discriminator forces the encoder to learn domain-invariant representations.
+        The sample reweighter compensates for minority exposure at the loss level.
+
+        Typical setting: grl_alpha=0.1, weight=0.05, lam=1.0, warmup via
+        regularization { activation_step: 2000, warmup_steps: 2000 }.
+
+        Pairs well with: pcc (contrastive coding pushes representations apart),
+        adaptive_mixture (controller keeps domain ratio balanced in data),
+        isotropy (prevents collapse of domain-invariant representations).
+    """
+
+    not_for: """
+        • Single-domain training (no domain boundary to adversarialise)
+        • Very small discriminator hidden dim (< 16) on high-dimensional hidden states
+        • Early training (step < ~1000): hidden states are random, discriminator
+          learns nothing useful and its gradient reversal adds noise to the encoder
+    """
+
+    empirical_evidence: {
+        source: "Internal OOD arc (RCC-Bowtie, 2026-05/06)"
+        result: "DAR with weight=0.05 contributed to gap_ratio improvement when combined with PCC+isotropy"
+        caveat: "Isolated ablation not yet done; confounded with other interventions"
+    }
+
+    references: [
+        "Ganin, Lempitsky (2015) Unsupervised Domain Adaptation by Backpropagation. ICML",
+        "Ganin et al. (2016) Domain-Adversarial Training of Neural Networks. JMLR 17(59)",
+        "Internal: docs/technical_report.md §3.A"
+    ]
+}

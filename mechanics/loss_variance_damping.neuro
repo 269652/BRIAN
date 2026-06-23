@@ -1,0 +1,100 @@
+# -*- coding: utf-8 -*-
+# Loss-Variance Metaplastic Damping — BCM sliding-threshold LR modulation.
+#
+# Implementation: neuroslm/emergent/gif7.py::LossVarianceDamper
+# Equation:       lib/gif.neuro::gif_loss_variance_damping
+# Tests:          tests/dsl/test_gif7_gradient_equilibrium.py
+# Docs:           docs/mechanics/loss_variance_damping.md
+
+export mechanic loss_variance_damping {
+    category: "training_dynamics"
+    summary:  "BCM-rule metaplastic damping: reduces lr_eff when loss variance exceeds a healthy reference σ_ref"
+
+    equation: """
+        # Rolling loss standard deviation over a window of k steps
+        σ_L(t) = std(L_{t-k}, ..., L_t)
+
+        # Reference volatility (calibrated during late warmup)
+        σ_ref  = σ_L measured at step t_ref  (typically step 2000, post-warmup)
+
+        # BCM-rule effective learning rate
+        lr_eff(t) = lr_sched(t) · max(min_mult, min(1, σ_ref / σ_L(t)))
+
+        # Behaviour:
+        #   σ_L(t) ≤ σ_ref  →  lr_eff = lr_sched   (no reduction; stable training)
+        #   σ_L(t) > σ_ref  →  lr_eff < lr_sched   (reduces proportionally to excess volatility)
+        #   min_mult floor   →  lr never goes below min_mult · lr_sched
+
+        # Biological analogue (Bienenstock-Cooper-Munro 1982):
+        θ_M = sliding plasticity threshold ← history of post-synaptic activity
+        Long-run: dw/dt ∝ x(y − θ_M)  (stabilising: high activity lowers θ_M)
+        Here:  σ_L(t) plays the role of post-synaptic activity
+               σ_ref  plays the role of the sliding threshold θ_M
+    """
+
+    impl:    "neuroslm.emergent.gif7.LossVarianceDamper"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        window_k: {
+            default: 50,
+            type: "int",
+            min: 2,
+            doc: "Rolling window size in steps for σ_L estimation"
+        }
+        sigma_ref_step: {
+            default: 2000,
+            type: "int",
+            doc: "Step at which σ_ref is calibrated (should be post-warmup)"
+        }
+        min_mult: {
+            default: 0.1,
+            type: "float",
+            doc: "Floor on lr_eff / lr_sched; prevents lr from going to zero"
+        }
+    }
+
+    properties: {
+        bcm_analogue:      "Implements BCM sliding threshold: σ_L(t) rises → threshold auto-adjusts → lr drops"
+        calibrated:        "σ_ref is measured from the actual run, not a hyperparameter guess"
+        lr_floor:          "min_mult ensures training never fully stops (no zero-gradient trap)"
+        self_correcting:   "When loss stabilises after a volatility spike, lr_eff recovers automatically"
+        adam_compatible:   "Applied to the lr_sched BEFORE Adam step; compatible with any optimiser"
+    }
+
+    when_to_use: """
+        Use when training loss shows high step-to-step volatility after the
+        warmup phase — especially when batch difficulty varies across domains
+        (VBB collapse, mixed-domain batches).
+
+        Example failure mode this fixes: Train-PPL oscillating 3.7× (26→95
+        within 50 steps) due to batch difficulty variance. Gap ratio
+        OOD/train becomes noise-dominated and the gap diagnostic is useless.
+
+        The calibration step (sigma_ref_step=2000) should be post-warmup. If
+        the run is short (< 3k steps), use sigma_ref_step=500.
+
+        Part of GIF-7B. Pairs with: divisive_grad_norm (GIF-7A, gradient-side
+        stability), allostasis (HPA-level sustained-stress damping).
+    """
+
+    not_for: """
+        • Training distributions with naturally high loss variance (e.g. multi-task
+          runs where loss jumps across tasks) — σ_L would permanently clamp lr
+        • Very short windows (window_k < 10): σ_L estimate is noisy; use larger window
+        • min_mult = 0: learning can stop completely during volatility spikes
+    """
+
+    empirical_evidence: {
+        source: "Internal: GIF-7B forensic (post-H22 train-PPL oscillation 26→95)"
+        result: "Loss variance 3.7× oscillation identified as root cause of gap-ratio noise-dominance"
+        caveat: "Isolated LossVarianceDamper ablation pending; deployed as part of GIF"
+    }
+
+    references: [
+        "Bienenstock, Cooper, Munro (1982) Theory for the development of neuron selectivity. J Neurosci",
+        "Cooper, Intrator, Blais, Shouval (2004) Theory of Cortical Plasticity. World Scientific",
+        "Internal: lib/gif.neuro (gif_loss_variance_damping equation)"
+    ]
+}

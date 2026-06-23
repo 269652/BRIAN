@@ -1,0 +1,88 @@
+# -*- coding: utf-8 -*-
+# Tonnetz Attention — toroidal harmonic-topology masking.
+#
+# Implementation: neuroslm/dsl/nn_ops.py::causal_self_attention_tonnetz()
+# Tests:          tests/dsl/test_tonnetz_attention.py
+# Docs:           docs/mechanics/tonnetz_attention.md
+
+export mechanic tonnetz_attention {
+    category: "attention"
+    summary:  "Causal attention with a toroidal (Tonnetz) mask: tokens attend to harmonically-related positions"
+
+    equation: """
+        # Circular distance between positions i and j modulo period P
+        circ(i, j) = min( |i−j| mod P,  P − |i−j| mod P )
+
+        # Allowed positions: within bandwidth B = P/4 of i, OR in local window W
+        allowed(i, j) = (circ(i, j) ≤ B) OR (|i−j| ≤ W)
+
+        # Additive mask: 0 if allowed, −∞ if blocked
+        tonnetz_mask[i, j] = 0 if allowed(i,j) else −∞
+
+        # Combined mask (Tonnetz ∩ causal)
+        attn_mask = causal_mask + tonnetz_mask
+
+        # Standard scaled-dot-product attention with the combined mask
+        output = SDPA(Q, K, V, attn_mask=attn_mask, is_causal=False)
+    """
+
+    impl:    "neuroslm.dsl.nn_ops.causal_self_attention_tonnetz"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        tonnetz_period: {
+            default: 12,
+            type: "int",
+            min: 2,
+            doc: "Torus period P (default 12 = musical octave). Period 0 disables."
+        }
+        local_window: {
+            default: 12,
+            type: "int",
+            min: 1,
+            doc: "Local bypass window W; tokens within W positions always attend"
+        }
+    }
+
+    properties: {
+        periodic_topology:  "Tokens at distance k·P 'rhyme' and can attend; others are suppressed"
+        locality_preserved: "Local window ensures short-range dependencies are never cut"
+        causal_preserved:   "Tonnetz mask composes additively with the causal mask; future is still masked"
+        cached_mask:        "Mask is recomputed per (T, period) pair and cached; amortised cost O(1)"
+        hallucination_bound:"Suppresses unbounded long-range attention mass (convex-hull theory)"
+    }
+
+    when_to_use: """
+        Use when:
+        • Long sequences where most long-range attention is noise (prose, code)
+        • You want to bias attention toward rhythmically-related positions (poetry,
+          music tokens, source-code indentation levels)
+        • Reducing effective receptive field to battle hallucination on OOD lengths
+
+        Musical analogy: period=12 is one octave; tokens 12 apart share harmonic content.
+        In text, period=12 captures sentence-level periodicity; period=16 captures
+        paragraph-level structure.
+
+        Pairs well with: cosine_lm_head (both fight OOD gap), gif (adaptive scheduling),
+        mixture_of_depths (expensive Tonnetz only on selected tokens).
+    """
+
+    not_for: """
+        • Short sequences (T < 2·period) — mask is too restrictive
+        • Global attention tasks (cross-document, retrieval) — deliberately cuts long range
+        • Very small period (< 4) — bandwidth=1 may disconnect the graph
+    """
+
+    empirical_evidence: {
+        source: "Internal ablation (RCC-Bowtie OOD push arc 2026-05)"
+        result: "MAT-phase-gated Tonnetz reduced OOD gap_ratio from 7.0 to ~5.5 in 3k steps"
+        caveat: "Conditional on MAT-phase gating; without gating it hurts early-train PPL"
+    }
+
+    references: [
+        "Euler (1739) — Tonnetz lattice for harmonic relationships",
+        "Cohn (1997) — Neo-Riemannian theory and the Tonnetz (Music Theory Spectrum)",
+        "Internal: docs/findings.md H-PCT arc (2026-05)"
+    ]
+}

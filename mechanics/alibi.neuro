@@ -1,0 +1,90 @@
+# -*- coding: utf-8 -*-
+# ALiBi — Attention with Linear Biases. Position via a distance penalty on logits.
+#
+# Implementation: neuroslm/modules/alibi.py
+#                 neuroslm/dsl/nn_ops.py::alibi_bias()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/alibi.md
+
+export mechanic alibi {
+    category: "position"
+    summary:  "Adds a head-specific linear penalty proportional to query-key distance directly to attention logits"
+
+    equation: """
+        # Per-head slope (geometric sequence; ratio depends on n_heads)
+        # For n_heads a power of 2:
+        m_h = 2^(−8h / n_heads)            for h = 1 .. n_heads
+        # max_slope caps/anchors the steepest head's penalty (m_1 ≈ max_slope)
+
+        # Biased logits: subtract slope × distance (j ≤ i, causal)
+        scores_{i,j} = (q_i · k_j) / √d_k  −  m_h · (i − j)
+
+        # Softmax as usual
+        A = softmax(scores)               # nearer keys win, far keys decay
+
+        # Equivalently, a static (non-learned) bias matrix per head:
+        B_h[i, j] = −m_h · (i − j)        # 0 on diagonal, grows with distance
+    """
+
+    impl:    "neuroslm.modules.alibi.ALiBiBias"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        n_heads: {
+            default: 12,
+            type: "int",
+            min: 1,
+            doc: "Number of attention heads; sets the geometric slope schedule m_h = 2^(−8h/n_heads)"
+        }
+        max_slope: {
+            default: 0.5,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Anchor for the steepest head's slope (m_1); smaller = softer global penalty"
+        }
+    }
+
+    properties: {
+        no_added_params:     "Slopes are fixed constants, not learned; no embedding table and no extra weights"
+        length_extrapolation:"Strong train-short / test-long extrapolation — the headline ALiBi result"
+        recency_bias:        "Each head has a built-in locality prior; high-slope heads attend locally, low-slope heads stay global"
+        cheap_to_apply:      "A single broadcasted additive bias matrix; no rotation, no per-token rewrite"
+        causal_natural:      "Distance (i − j) is defined for causal masks; bias is added before the softmax mask"
+    }
+
+    when_to_use: """
+        Use when:
+        • You must train on short sequences but evaluate on much longer ones —
+          ALiBi extrapolates better than learned/sinusoidal embeddings.
+        • You want a zero-parameter position scheme that is trivially cheap.
+        • A recency/locality inductive bias is desirable (LM, streaming text).
+
+        The slope schedule is the only knob: with n_heads heads the slopes form
+        a geometric sequence so different heads cover different distance scales.
+        max_slope anchors the steepest head; lower it if early training is
+        unstable from over-aggressive local penalties.
+
+        Pairs well with: sliding_window_attention (both encode locality),
+        GroupedQueryAttention, attention_sink.
+    """
+
+    not_for: """
+        • Tasks needing precise long-range absolute or relative indexing — the
+          monotone distance penalty suppresses far-but-relevant keys.
+        • Bidirectional encoders (the (i − j) penalty is built for causal order).
+        • Mixing with RoPE on the same head dims (two competing position schemes).
+    """
+
+    empirical_evidence: {
+        source: "Press, Smith, Lewis (2021) ALiBi, Univ. of Washington / Facebook AI"
+        result: "Train on 1024 tokens, extrapolate to 2048+ with lower perplexity than sinusoidal/RoPE baselines at matched train length"
+        caveat: "Gains are about extrapolation; in-distribution perplexity can trail RoPE on some setups"
+    }
+
+    references: [
+        "Press, Smith, Lewis (2021) Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation. arXiv 2108.12409",
+        "Su, Lu, Pan, Wen, Liu (2021) RoFormer (RoPE comparison baseline). arXiv 2104.09864"
+    ]
+}

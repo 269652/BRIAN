@@ -1,0 +1,94 @@
+# -*- coding: utf-8 -*-
+# Grouped-Query Attention — share K/V across groups of query heads.
+#
+# Implementation: neuroslm/modules/gqa.py
+#                 neuroslm/dsl/nn_ops.py::grouped_query_attention()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/gqa.md
+
+export mechanic gqa {
+    category: "attention"
+    summary:  "Interpolates between MHA and MQA: g key/value heads shared across n_heads queries, shrinking the KV cache g/n_heads×"
+
+    equation: """
+        # n_heads query heads, kv_heads (= g) key/value heads, g | n_heads
+        group_size = n_heads / kv_heads
+
+        # Project queries to all n_heads, but K/V to only kv_heads
+        Q ∈ (B, n_heads, T, d_k)
+        K, V ∈ (B, kv_heads, T, d_k)
+
+        # Repeat each KV head group_size times to align with query heads
+        K̂ = repeat_interleave(K, group_size, dim=heads)   # (B, n_heads, T, d_k)
+        V̂ = repeat_interleave(V, group_size, dim=heads)
+
+        # Standard scaled-dot-product attention per head
+        A_h = softmax((Q_h K̂_hᵀ) / √d_k)
+        out_h = A_h V̂_h
+
+        # Limits:
+        #   kv_heads = n_heads  → Multi-Head Attention (MHA)
+        #   kv_heads = 1        → Multi-Query Attention (MQA)
+    """
+
+    impl:    "neuroslm.modules.gqa.GroupedQueryAttention"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        n_heads: {
+            default: 32,
+            type: "int",
+            min: 1,
+            doc: "Number of query heads"
+        }
+        kv_heads: {
+            default: 4,
+            type: "int",
+            min: 1,
+            doc: "Number of shared key/value heads; must divide n_heads. KV cache shrinks by kv_heads/n_heads"
+        }
+    }
+
+    properties: {
+        kv_cache_reduction:  "KV cache memory drops to kv_heads/n_heads of MHA — the decisive win for long-context decoding"
+        quality_preserving:  "With kv_heads≈8 quality is near-MHA, far closer than MQA at the same cache budget"
+        bandwidth_bound_fix: "Decode is memory-bandwidth bound; fewer KV heads means less to load per step → higher tok/s"
+        tunable_tradeoff:    "kv_heads is a single dial between MHA quality and MQA efficiency"
+        uptrainable:         "An MHA checkpoint can be converted to GQA by mean-pooling KV heads + short uptraining"
+    }
+
+    when_to_use: """
+        Use when:
+        • Deploying a decoder LM where KV-cache memory and decode bandwidth are
+          the bottleneck (long context, large batch serving).
+        • You want most of MHA's quality at a fraction of the cache — the modern
+          default for LLaMA-2/3 70B, Mistral, Qwen.
+        • Converting an existing MHA model: mean-pool KV heads into kv_heads
+          groups and uptrain ~5% of original steps.
+
+        Choosing kv_heads: 8 is a common sweet spot for large models; 4 is a good
+        aggressive default for small/medium models. Must divide n_heads evenly.
+
+        Pairs well with: rope, sliding_window_attention, attention_sink,
+        differential_attention (GQA-compatible by design).
+    """
+
+    not_for: """
+        • Tiny models where n_heads is already small (≤4) — grouping buys little.
+        • Cases demanding maximum per-head KV diversity (e.g. some retrieval
+          heads) where collapsing KV heads measurably hurts.
+        • kv_heads that does not divide n_heads (the group repeat is undefined).
+    """
+
+    empirical_evidence: {
+        source: "Ainslie et al. (2023) GQA, Google Research"
+        result: "Near-MHA quality at ~MQA speed; uptrained T5-XXL GQA recovers MHA quality with a small fraction of training compute"
+        caveat: "Optimal kv_heads is model-scale dependent; too few KV heads regresses toward MQA's quality loss"
+    }
+
+    references: [
+        "Ainslie, Lee-Thorp, de Jong, Zemlyanskiy, Lebrón, Sanghai (2023) GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints. arXiv 2305.13245",
+        "Shazeer (2019) Fast Transformer Decoding: One Write-Head is All You Need. arXiv 1911.02150"
+    ]
+}

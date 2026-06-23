@@ -1,0 +1,106 @@
+# -*- coding: utf-8 -*-
+# Gated Linear Attention (GLA) — data-dependent forgetting on a linear-attention state.
+#
+# Implementation: neuroslm/modules/gated_linear_attention.py
+#                 neuroslm/dsl/nn_ops.py::gated_linear_attention()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/gated_linear_attention.md
+
+export mechanic gated_linear_attention {
+    category: "sequence_mixer"
+    summary:  "Linear attention plus a learned per-channel forget gate, trained in a chunked parallel form"
+
+    equation: """
+        # Plain linear attention accumulates state with no decay:
+        #   S_t = S_{t-1} + k_t v_tᵀ
+        # GLA inserts a DATA-DEPENDENT diagonal gate G_t = diag(α_t), so older
+        # key/value contributions are multiplicatively forgotten:
+        #
+        #   α_t = σ(Linear_α(x_t)) ∈ (0,1)^{d_k}        # per-channel forget gate
+        #   S_t = (α_t 𝟙ᵀ) ⊙ S_{t-1} + k_t v_tᵀ        # gated recurrence  (S ∈ ℝ^{d_k×d_v})
+        #   o_t = q_tᵀ S_t
+
+        # Unrolling shows each pair gets a cumulative decay product:
+        #   S_t = Σ_{j≤t}  ( Π_{j<r≤t} α_r ) ⊙ (k_j v_jᵀ)
+        # Define b_t = Π_{r≤t} α_r (cumulative product). Then a key at j is
+        # weighted by b_t / b_j — a relative, content-dependent decay.
+
+        # Chunked parallel (hardware-efficient) training form:
+        #   • Split T into chunks of size `chunk_size` (C).
+        #   • Within a chunk: a quadratic intra-chunk term computed in parallel,
+        #       with the decay ratios b applied to (Q Kᵀ) and masked causally.
+        #   • Across chunks: carry the running state S between chunks, scaled by
+        #       the chunk's total decay (the "inter-chunk" recurrence).
+        #   This "chunkwise" form is O(N) overall yet uses dense matmuls, so it
+        #   saturates tensor cores (secondary-chunk algorithm of Yang et al.).
+
+        # k/v are projected with separate expansion ratios expand_k, expand_v.
+    """
+
+    impl:    "neuroslm.modules.gated_linear_attention.GatedLinearAttention"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        expand_k: {
+            default: 0.5,
+            type: "float",
+            doc: "Key projection expansion ratio; d_k = expand_k · d_model"
+        }
+        expand_v: {
+            default: 1.0,
+            type: "float",
+            doc: "Value projection expansion ratio; d_v = expand_v · d_model"
+        }
+        chunk_size: {
+            default: 64,
+            type: "int",
+            doc: "Sequence chunk length C for the chunkwise parallel scan (intra/inter-chunk split)"
+        }
+    }
+
+    properties: {
+        data_dependent_decay: "Forget gate α_t = σ(Linear(x_t)) lets the model choose what to keep per channel"
+        linear_complexity:    "O(N) total via the chunkwise recurrence; O(d_k·d_v) state"
+        matmul_bound:         "Chunkwise form uses dense matmuls, saturating tensor cores unlike a pure scan"
+        recurrent_inference:  "Gated state recurrence gives constant-memory autoregressive decoding"
+        generalizes_la:       "α_t ≡ 1 recovers plain linear attention; constant α recovers fixed-decay retention"
+    }
+
+    when_to_use: """
+        Use when:
+        • You want linear attention's O(N) cost but plain (un-decayed) linear
+          attention's state saturates / smears over long context
+        • Per-channel, content-dependent forgetting is desirable (the gate can
+          learn fast-forgetting and slow-forgetting channels)
+        • Training throughput matters — the chunkwise form keeps the GPU dense
+          and matmul-bound, unlike a token-by-token scan
+
+        GLA sits between plain linear attention (no decay) and Mamba-style
+        selective SSMs (input-dependent A): GLA's gate is diagonal and acts on
+        the KV state directly, which is exactly what makes the chunkwise matmul
+        form clean. The expand_k < expand_v default keeps the key dimension
+        (and thus the d_k×d_v state) compact.
+
+        Pairs well with: short causal conv pre-mix, RMSNorm, and hybrid stacks
+        that interleave a few full-attention layers for sharp recall.
+    """
+
+    not_for: """
+        • Short sequences where O(T²) attention is already cheap
+        • Tasks needing exact arbitrary-token copy beyond what a fixed state holds
+        • Hardware/implementations lacking the chunkwise kernel — the naive
+          gated scan is sequential and underutilizes the GPU
+    """
+
+    empirical_evidence: {
+        source: "Yang, Wang, Shen, Panda, Kim (2023) Gated Linear Attention Transformers"
+        result: "Matches/exceeds LLaMA-style Transformers and Mamba at 340M–1.3B params while training with higher throughput at long context via the chunkwise algorithm"
+        caveat: "Benefit over plain linear attention is largest on long-context recall-style benchmarks"
+    }
+
+    references: [
+        "Yang, Wang, Shen, Panda, Kim (2023) Gated Linear Attention Transformers with Hardware-Efficient Training. arXiv 2312.06635",
+        "Katharopoulos, Vyas, Pappas, Fleuret (2020) Transformers are RNNs. arXiv 2006.16236"
+    ]
+}

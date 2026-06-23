@@ -1,0 +1,96 @@
+# -*- coding: utf-8 -*-
+# Rotary Position Embedding (RoPE) — relative position via rotation of Q/K.
+#
+# Implementation: neuroslm/modules/rope.py
+#                 neuroslm/dsl/nn_ops.py::apply_rotary_emb()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/rope.md
+
+export mechanic rope {
+    category: "position"
+    summary:  "Encodes absolute position by rotating Q/K pairs; dot products become relative-position dependent"
+
+    equation: """
+        # For each head dim split into 2D pairs (i = 0 .. d/2-1)
+        # inverse frequencies (geometric series in θ = rope_base)
+        θ_i = rope_base^(-2i / d)                      # d = rotated dim
+
+        # Rotation angle at position m for pair i
+        φ_{m,i} = m · θ_i
+
+        # Rotation matrix applied per 2D pair (x_2i, x_2i+1)
+        R(φ) = [ cos φ   −sin φ ]
+               [ sin φ    cos φ ]
+
+        # Rotate query/key (only the first `partial_rotary_factor·d` dims)
+        q'_m = R(φ_m) · q_m
+        k'_n = R(φ_n) · k_n
+
+        # Key identity: the rotated dot product depends ONLY on (m − n)
+        ⟨q'_m, k'_n⟩ = Re[ Σ_i (q_{m,i} k*_{n,i}) · e^{i(m−n)θ_i} ]
+                     = f(q_m, k_n, m − n)              # relative
+    """
+
+    impl:    "neuroslm.modules.rope.RotaryEmbedding"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        rope_base: {
+            default: 10000,
+            type: "float",
+            doc: "Base θ for the inverse-frequency geometric series; larger base = longer effective context (NTK/linear scaling tunes this)"
+        }
+        partial_rotary_factor: {
+            default: 1.0,
+            type: "float",
+            min: 0.0,
+            max: 1.0,
+            doc: "Fraction of head dim to rotate; <1.0 leaves the tail dims position-free (GPT-NeoX/Phi style)"
+        }
+    }
+
+    properties: {
+        relative_position:   "Dot products depend only on (m − n), giving translation-equivariant attention without learned tables"
+        no_added_params:     "Rotation is parameter-free; only Q and K are touched, V and the residual stream are untouched"
+        length_extrapolation:"Modest extrapolation beyond train length; improved by NTK-aware / linear / YaRN base scaling"
+        kv_cache_friendly:   "Rotation is applied per-token at write time, so cached K stays valid for autoregressive decoding"
+        norm_preserving:     "Rotation is orthogonal, so ‖q'‖ = ‖q‖ — it never changes attention logit scale"
+    }
+
+    when_to_use: """
+        Use when:
+        • Training a decoder-only LM from scratch (RoPE is the de-facto default —
+          LLaMA, Mistral, Qwen, GPT-NeoX all use it)
+        • You need relative-position behaviour without an explicit bias table
+        • You want a parameter-free position scheme that plays well with KV-caching
+
+        Tuning notes:
+        • rope_base=10000 is the classic default; raise it (e.g. 1e6) when
+          training or fine-tuning for long context to slow frequency rotation.
+        • partial_rotary_factor<1.0 (e.g. 0.25–0.5) frees some dims to act as
+          content-only channels (GPT-NeoX, Phi) — useful when a model mixes
+          local and global reasoning.
+
+        Pairs well with: GroupedQueryAttention, sliding_window_attention,
+        attention_sink (sinks + RoPE is the StreamingLLM long-context recipe).
+    """
+
+    not_for: """
+        • Encoder/bidirectional models where learned absolute embeddings are fine
+        • Tasks needing exact absolute index recovery (RoPE is relative by design)
+        • Drop-in onto a model trained with a *different* rope_base without a
+          re-scaling schedule — abruptly changing base degrades attention
+    """
+
+    empirical_evidence: {
+        source: "Su et al. (2021) RoFormer, Zhuiyi Technology"
+        result: "Consistent perplexity and downstream gains over sinusoidal/learned absolute embeddings; now standard in LLaMA-family models"
+        caveat: "Native extrapolation past training length is limited; long-context use needs base scaling (NTK/YaRN)"
+    }
+
+    references: [
+        "Su, Lu, Pan, Wen, Liu (2021) RoFormer: Enhanced Transformer with Rotary Position Embedding. arXiv 2104.09864",
+        "Peng, Quesnelle, Fan, Shippole (2023) YaRN: Efficient Context Window Extension of Large Language Models. arXiv 2309.00071"
+    ]
+}

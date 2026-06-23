@@ -1,0 +1,106 @@
+# -*- coding: utf-8 -*-
+# Multi-Scale Grid-Cell Positions — H16, provable length-OOD extrapolation.
+#
+# Implementation: neuroslm/dsl/nn_ops.py (or modules/grid_positions.py)
+# Config:         neuroslm/dsl/training_config.py (grid_positions block)
+# Hypotheses:     H16 (multi-scale grid-cell positions)
+# Docs:           docs/mechanics/grid_positions.md
+
+export mechanic grid_positions {
+    category: "attention"
+    summary:  "Multi-scale sinusoidal grid-cell positional encoding at K φ-ratio scales; provable length-OOD extrapolation via co-prime period tiling"
+
+    equation: """
+        # K scales at the golden ratio φ = 1.618... (Sargolini 2006; Stensola 2012)
+        # Scale k has period P_k = base_period · φ^k
+        P_k = base_period · scale_ratio^k     k = 0, 1, ..., K-1
+
+        # Grid-cell features per position t, per scale k:
+        gc_{t,k} = [sin(2π·t / P_k),  cos(2π·t / P_k)]    ∈ ℝ²
+
+        # Stack: f_t = concat(gc_{t,0}, ..., gc_{t,K-1}) ∈ ℝ^{2K}
+
+        # Zero-init projection to d_model (Phase 1 contract):
+        pos_emb_t = W_grid · f_t    W_grid ∈ ℝ^{d_model × 2K}, zero-initialised
+        # → step-0: pos_emb = 0; forward identical to baseline (Phase 1)
+        # → training: gradient lifts W_grid off zero as position encoding adds signal
+
+        # Length-OOD extrapolation (co-prime tiling argument):
+        # For any two periods P_i, P_j with P_i/P_j irrational (guaranteed if
+        # scale_ratio=φ, since φ = (1+√5)/2 is algebraically irrational):
+        # The combined grid (gc_{t,i}, gc_{t,j}) tiles aperiodically.
+        # There exists T* such that for T > T*, no two positions t < T* have
+        # the same (gc_{t,i}, gc_{t,j}) embedding as any seen position t' < T*.
+        # Formally: ∀ε>0 ∃ T* s.t. for t > T*, d(f_t, f_{t'}) > ε for all t' < T*.
+        # This gives provable out-of-context-length generalisation.
+    """
+
+    impl:    "neuroslm.dsl.nn_ops.grid_cell_positions"
+    loss_fn: ""
+    zero_init: true
+
+    params: {
+        n_scales: {
+            default: 4,
+            type: "int",
+            min: 1,
+            doc: "K = number of grid-cell scales; output dimension = 2K"
+        }
+        scale_ratio: {
+            default: 1.6180339887,
+            type: "float",
+            doc: "Period ratio between adjacent scales; default = φ (golden ratio) for provable OOD extrapolation"
+        }
+        base_period: {
+            default: 16.0,
+            type: "float",
+            doc: "Period of the finest scale (P_0 = base_period tokens)"
+        }
+    }
+
+    properties: {
+        rezero_contract:       "W_grid zero-init → pos_emb=0 at step 0; forward bit-identical to baseline"
+        phi_ratio:             "Golden ratio φ ensures periods are algebraically irrational → aperiodic tiling"
+        ood_extrapolation:     "H16 hypothesis: co-prime periods give provable OOD length generalisation"
+        sargolini_biology:     "Grid-cell multi-scale encoding is the spatial encoding strategy in EC (Sargolini 2006)"
+        compact_feature:       "2K features for K scales (K=4 → 8 features → linear to d_model)"
+        no_learned_positions:  "Pure sinusoidal; only W_grid is learned (can be zero-init)"
+    }
+
+    when_to_use: """
+        Use when:
+        1. You want positional encoding that generalises beyond the training context length
+        2. You want a biologically-grounded position encoding (grid cells in entorhinal cortex)
+        3. RoPE is already being used and you want a complementary multi-scale signal
+
+        The zero-init projection (Phase 1 contract) means this composes safely
+        with any existing positional encoding: add grid_positions output to the
+        existing positional encoding, and training starts at the baseline.
+
+        scale_ratio = φ ≈ 1.618 is the biologically-motivated choice. Other irrational
+        ratios (√2 ≈ 1.414, e ≈ 2.718) also provide OOD extrapolation but without the
+        Fibonacci tiling properties.
+
+        Pairs with: episodic_memory (grid addresses map to memory slots),
+        nfo (NFO Φ_κ readout shares the topological substrate with grid positions).
+    """
+
+    not_for: """
+        • Models where absolute position is irrelevant (bag-of-words, set encoders)
+        • Very short fixed-length sequences: OOD extrapolation benefit is zero
+        • base_period >> max_context_length: finest-scale grid is nearly DC; no position signal
+    """
+
+    empirical_evidence: {
+        source: "Sargolini, F. et al. (2006) Conjunctive representation of position, direction, speed. Science"
+        result: "EC grid cells tile space at multiple scales with ~φ ratio; used for spatial navigation"
+        internal: "H16 hypothesis: enabled in master arch (n_scales=4, scale_ratio=φ); extrapolation ablation pending"
+    }
+
+    references: [
+        "Sargolini, F. et al. (2006) Conjunctive Representation of Position, Direction, Speed. Science 312",
+        "Stensola, H. et al. (2012) The Entorhinal Grid Map is Discretized. Nature 492",
+        "Weiss, Y. et al. (2016) Random Features for Shift-Invariant Kernels. arXiv",
+        "Internal: neuroslm/dsl/training_config.py (grid_positions block)"
+    ]
+}

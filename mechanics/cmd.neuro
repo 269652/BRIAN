@@ -1,0 +1,91 @@
+# -*- coding: utf-8 -*-
+# CMD — Cross-Module Disagreement.
+#
+# Implementation: neuroslm/regularizers.py::CMDLoss
+# Config:         neuroslm/dsl/regularization.py::CMDConfig
+# Tests:          tests/dsl/test_regularization.py
+# Docs:           docs/mechanics/cmd.md
+
+export mechanic cmd {
+    category: "regularizer"
+    summary:  "Penalise Jensen-Shannon divergence between two output heads; forces complementary predictions"
+
+    equation: """
+        # Two read-out heads (e.g. LM head vs. narrative head)
+        p_a = softmax(W_a · h_a)    # head A probability distribution
+        p_b = softmax(W_b · h_b)    # head B probability distribution
+
+        # Jensen-Shannon divergence (bounded in [0, ln 2])
+        m   = 0.5 · (p_a + p_b)
+        JSD = 0.5 · KL(p_a ‖ m) + 0.5 · KL(p_b ‖ m)
+
+        # Alternative divergences
+        KL_sym = 0.5 · KL(p_a ‖ p_b) + 0.5 · KL(p_b ‖ p_a)
+        L1_div  = ‖p_a − p_b‖_1
+
+        # Penalise similarity (promote disagreement)
+        L_cmd = −weight · JSD    (note: negative — maximise divergence)
+    """
+
+    impl:    "neuroslm.regularizers.CMDLoss"
+    loss_fn: "neuroslm.regularizers.CMDLoss.compute"
+    zero_init: false
+
+    params: {
+        weight: {
+            default: 0.05,
+            type: "float",
+            doc: "Scale on L_cmd; negative sign already included"
+        }
+        divergence: {
+            default: "jsd",
+            type: "str",
+            doc: "Divergence measure: 'jsd' (bounded), 'kl_sym', 'l1'"
+        }
+        heads: {
+            default: "[\"lm\", \"narrative\"]",
+            type: "list[str]",
+            doc: "Names of the two heads to compare (must exist in model)"
+        }
+    }
+
+    properties: {
+        bounded_jsd:        "JSD ∈ [0, ln 2]; never diverges unlike KL"
+        complementarity:    "Maximising JSD forces heads to predict different token distributions"
+        requires_two_heads: "Model must have at least 2 prediction heads wired up"
+        oom_risk:           "Computes two full V×V softmaxes; disabled by default (memory) at large batch"
+    }
+
+    when_to_use: """
+        Use when the model has multiple prediction heads and you want them
+        to disagree — i.e. each head should specialise on different aspects
+        of the prediction (LM vs. narrative, LM vs. domain-specific).
+
+        Not a standard regulariser — most models have only one LM head.
+        Relevant when the architecture explicitly has multiple heads reading
+        from different module-level representations (GWS vs. PFC, etc.).
+
+        Pairs well with: dar (DAR makes encoder domain-invariant while CMD
+        keeps heads domain-specific), multi_cortex (cortex outputs can be
+        treated as heads).
+    """
+
+    not_for: """
+        • Single-head architectures (nothing to disagree about)
+        • Large batch × long sequence: two full softmaxes over V tokens
+          can OOM; use small batch or chunked CE
+        • Vocabulary-aligned heads only (meaningless to compare softmaxes
+          over different token spaces)
+    """
+
+    empirical_evidence: {
+        source: "Internal (RCC-Bowtie, 2026-06)"
+        result: "Disabled due to OOM at batch=16 seq=2048; not yet ablated at smaller batch"
+        caveat: "No isolated ablation result available"
+    }
+
+    references: [
+        "Li, Liang et al. (2019) Rethinking the Usage of Batch Normalization and Dropout. arXiv",
+        "Internal: docs/technical_report.md §3.D"
+    ]
+}

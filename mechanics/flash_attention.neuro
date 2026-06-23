@@ -1,0 +1,106 @@
+# -*- coding: utf-8 -*-
+# Flash Attention — IO-aware exact attention via tiling + online softmax.
+#
+# Implementation: neuroslm/modules/flash_attention.py
+#                 neuroslm/dsl/nn_ops.py::flash_attention()
+# Tests:          tests/dsl/test_nn_ops_equivalence.py
+# Docs:           docs/mechanics/flash_attention.md
+
+export mechanic flash_attention {
+    category: "attention"
+    summary:  "Exact attention computed in SRAM tiles with online softmax — never materializes the N×N score matrix"
+
+    equation: """
+        # Standard attention (what we compute, exactly):
+        O = softmax(Q Kᵀ / √d) V          (B, H, T, d)
+
+        # The N×N matrix S = Q Kᵀ is NEVER written to HBM. Instead we tile:
+        #   Q is split into blocks of size B_q rows
+        #   K, V are split into blocks of size B_kv rows
+        # and accumulate the softmax online (running max + running sum).
+
+        # For each query block i, iterate over key/value blocks j:
+        S_ij = Q_i K_jᵀ / √d                          (B_q, B_kv)
+        m_ij = rowmax(S_ij)                            # block max
+        m_new = max(m_prev, m_ij)                      # running max
+        P_ij = exp(S_ij − m_new)                       # rescaled scores
+        l_new = exp(m_prev − m_new) · l_prev + rowsum(P_ij)
+        O_i  = exp(m_prev − m_new) · O_i + P_ij V_j    # rescale + accumulate
+        m_prev, l_prev = m_new, l_new
+
+        # After the last block:
+        O_i = O_i / l_prev                             # final normalization
+
+        # Memory: O(N) instead of O(N²). Recompute S in the backward pass
+        # from stored (m, l) rather than caching the full attention matrix.
+        # FlashAttention-2 additionally reduces non-matmul FLOPs and improves
+        # work partitioning across warps / thread-blocks.
+    """
+
+    impl:    "neuroslm.modules.flash_attention.FlashAttention"
+    loss_fn: ""
+    zero_init: false
+
+    params: {
+        block_size_q: {
+            default: 128,
+            type: "int",
+            doc: "Rows of Q processed per tile (B_q). Larger = more SRAM, fewer passes"
+        }
+        block_size_kv: {
+            default: 64,
+            type: "int",
+            doc: "Rows of K/V processed per tile (B_kv). Tuned to fit SRAM with B_q"
+        }
+        causal: {
+            default: true,
+            type: "bool",
+            doc: "Apply causal mask. When true, fully-masked KV blocks are skipped entirely"
+        }
+    }
+
+    properties: {
+        exactness:         "Bit-for-bit equal to standard softmax attention up to floating-point order — not an approximation"
+        memory_linear:     "Peak memory is O(N) in sequence length — no N×N matrix in HBM"
+        io_aware:          "Optimised for the GPU memory hierarchy (SRAM vs HBM) rather than FLOP count alone"
+        recompute_backward:"Backward pass recomputes S from stored softmax statistics — trades compute for memory"
+        causal_skip:       "Causal masking lets fully-masked KV tiles be skipped for roughly 2× speedup at long context"
+        drop_in:           "Mathematically identical output → safe replacement for any scaled-dot-product attention"
+    }
+
+    when_to_use: """
+        Use when:
+        • Sequence length is long (T ≥ 1024) and the N×N score matrix dominates memory
+        • Training or inference is HBM-bandwidth bound, not FLOP bound
+        • You want exact attention (not a low-rank / kernel approximation) with lower memory
+        • Targeting modern GPUs with a meaningful SRAM/HBM gap (A100, H100, etc.)
+
+        Block sizes trade SRAM occupancy against the number of HBM passes.
+        Defaults (B_q=128, B_kv=64) are a robust starting point for d_head=64–128
+        on Ampere/Hopper; retune for very small or very large head dims.
+
+        Pairs well with: qk_norm (stabilises long-context logits), logit_soft_cap,
+        rmsnorm. The output is identical to vanilla attention, so it composes
+        with any positional scheme (RoPE, ALiBi) applied to Q/K before the kernel.
+    """
+
+    not_for: """
+        • CPU-only or memory-flat hardware — the SRAM/HBM tiling advantage disappears
+        • Very short sequences (T ≤ 128) where the kernel-launch overhead dominates
+        • Attention variants that need the explicit N×N matrix (e.g. some interpretability
+          probes, custom per-entry score regularizers) — those require materialization
+        • Naïve reimplementation in pure PyTorch eager mode — the win requires a fused kernel
+    """
+
+    empirical_evidence: {
+        source: "Dao et al. (2022) FlashAttention — Stanford / Tri Dao"
+        result: "Up to 3× faster GPT-2 training and 7.6× speedup on long-context attention vs standard PyTorch with 10–20× memory reduction"
+        caveat: "Speedups are hardware- and shape-dependent; eager-mode reimplementations see little benefit"
+    }
+
+    references: [
+        "Dao, Fu, Ermon, Rudra, Ré (2022) FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness. arXiv 2205.14135",
+        "Dao (2023) FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning. arXiv 2307.08691",
+        "Milakov, Gimelshein (2018) Online normalizer calculation for softmax. arXiv 1805.02867"
+    ]
+}
