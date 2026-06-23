@@ -267,10 +267,17 @@ def _load_lm_cached(model_id: str):
         return cached
     from transformers import AutoModelForCausalLM
 
+    # Load in bfloat16: frozen expert output is already bf16, so the
+    # fusion loop's `.to(bf16)` becomes a no-op.  Without this, each
+    # expert produces a fp32 (B, T, V) tensor (6.1 GB at B=16 T=2048
+    # V=50257) and `.to(bf16)` allocates a second 3.1 GB copy while the
+    # fp32 is still alive — 9.2 GB peak just for the conversion → OOM.
+    _bf16 = torch.bfloat16
+
     # Path 1: safetensors-only (works on every torch version)
     try:
         lm = AutoModelForCausalLM.from_pretrained(
-            model_id, use_safetensors=True,
+            model_id, use_safetensors=True, torch_dtype=_bf16,
         )
     except Exception as exc:
         msg = str(exc)
@@ -304,6 +311,7 @@ def _load_lm_cached(model_id: str):
             model_id,
             use_safetensors=False,
             weights_only=False,
+            torch_dtype=_bf16,
         )
 
     lm.eval()

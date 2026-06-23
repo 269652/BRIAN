@@ -557,6 +557,145 @@ class TestFusionDtypeDetection:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Expert loader dtype — root-cause guard for CUDA OOM at B=16 T=2048
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestExpertLoaderDtype:
+    """_load_lm_cached must request bfloat16 from HF.
+
+    Without torch_dtype=bfloat16:
+      - expert model params are fp32 → forward output is fp32
+      - fusion loop does e_logits.to(bf16): allocates a NEW 3.07 GiB
+        bf16 tensor while the fp32 original (6.13 GiB) is still alive
+      - peak = 9.2 GiB just for this cast → CUDA OOM at B=16 T=2048 V=50257
+
+    With torch_dtype=bfloat16:
+      - expert output is already bf16 → .to(bf16) is a no-op (same tensor)
+      - peak during fusion = out (3.07 GiB) + e_logits (3.07 GiB) = 6.14 GiB
+    """
+
+    def _call_loader_fresh(self, model_id: str, fake_model):
+        """Call _load_lm_cached with a clean cache entry for model_id."""
+        import neuroslm.experts as exp_mod
+        # Remove any cached entry so the loader actually calls from_pretrained
+        exp_mod._LM_CACHE.pop(model_id, None)
+        try:
+            return exp_mod._load_lm_cached(model_id)
+        finally:
+            exp_mod._LM_CACHE.pop(model_id, None)
+
+    def test_safetensors_path_requests_bfloat16(self):
+        """Safetensors load path must pass torch_dtype=bfloat16."""
+        from transformers import AutoModelForCausalLM
+        fake = mock.MagicMock()
+        fake.eval = mock.MagicMock(return_value=fake)
+
+        with mock.patch.object(
+            AutoModelForCausalLM, "from_pretrained", return_value=fake
+        ) as mock_fp:
+            self._call_loader_fresh("__test_model__", fake)
+            kwargs = mock_fp.call_args[1]
+            assert kwargs.get("torch_dtype") == torch.bfloat16, (
+                f"_load_lm_cached safetensors path did not pass "
+                f"torch_dtype=bfloat16; got {kwargs}. "
+                f"Without this, expert forward returns fp32 (6.13 GiB at "
+                f"B=16 T=2048 V=50257) and .to(bf16) allocates a second "
+                f"3.07 GiB copy → 9.2 GiB peak → CUDA OOM."
+            )
+
+    def test_legacy_bin_path_requests_bfloat16(self):
+        """Legacy .bin fallback path must also pass torch_dtype=bfloat16."""
+        from transformers import AutoModelForCausalLM
+        fake = mock.MagicMock()
+        fake.eval = mock.MagicMock(return_value=fake)
+
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call (safetensors) fails → triggers legacy fallback
+                raise OSError("no file named model.safetensors not found")
+            return fake
+
+        with mock.patch.object(
+            AutoModelForCausalLM, "from_pretrained", side_effect=side_effect
+        ) as mock_fp, mock.patch("warnings.warn"):
+            self._call_loader_fresh("__test_legacy_model__", fake)
+            # Second call is the legacy .bin path
+            assert mock_fp.call_count == 2, "expected safetensors attempt + legacy fallback"
+            legacy_kwargs = mock_fp.call_args_list[1][1]
+            assert legacy_kwargs.get("torch_dtype") == torch.bfloat16, (
+                f"legacy .bin fallback path did not pass torch_dtype=bfloat16; "
+                f"got {legacy_kwargs}"
+            )
+
+    def test_bf16_expert_output_is_noop_cast_under_autocast(self):
+        """When an expert already returns bf16, e_logits.to(bf16) must return
+        the SAME tensor object (no new allocation).
+
+        This is the memory-safety invariant: if .to() returns a new tensor,
+        we're holding two (B,T,V) buffers simultaneously.
+        """
+        V = 256
+
+        class _Bf16Expert(nn.Module):
+            domain = "x"
+
+            def forward(self, ids):
+                B, T = ids.shape
+                return torch.ones(B, T, V, dtype=torch.bfloat16)
+
+        router = ThalamicRouter(
+            vocab_size=V, d_model=16, domains=["x", "y"],
+            lexicon=DomainLexicon.empty(domains=["x", "y"]),
+            lexical_bias_weight=0.0, bema_tau=0.0,
+        )
+
+        class _Bf16ExpertY(nn.Module):
+            domain = "y"
+
+            def forward(self, ids):
+                B, T = ids.shape
+                return torch.ones(B, T, V, dtype=torch.bfloat16)
+
+        ens = LMExpertEnsemble(
+            experts=[_Bf16Expert(), _Bf16ExpertY()], router=router
+        )
+
+        ids = torch.randint(0, V, (2, 4))
+        # Capture the tensor returned by expert(ids) to test .to() is a no-op
+        captured = []
+        _orig_forward = _Bf16Expert.forward
+
+        def _spy_forward(self2, ids2):
+            t = _orig_forward(self2, ids2)
+            captured.append(t)
+            return t
+
+        _Bf16Expert.forward = _spy_forward
+
+        with mock.patch.multiple(
+            "torch",
+            is_autocast_enabled=mock.Mock(return_value=True),
+            get_autocast_gpu_dtype=mock.Mock(return_value=torch.bfloat16),
+        ), torch.no_grad():
+            ens(ids)
+
+        _Bf16Expert.forward = _orig_forward  # restore
+
+        assert len(captured) == 1
+        raw = captured[0]
+        # .to(same_dtype) must return the same storage — data_ptr check
+        assert raw.to(torch.bfloat16).data_ptr() == raw.data_ptr(), (
+            "e_logits.to(bf16) on a bf16 tensor must be a no-op (same tensor); "
+            "if this fails, two full (B,T,V) buffers exist simultaneously"
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Root-cause tests: _forward_bridge fp32 output buffer under bf16 autocast
 # ──────────────────────────────────────────────────────────────────────
 
