@@ -3858,6 +3858,18 @@ def cmd_lint(args: argparse.Namespace) -> int:
                 iteration_fixes += 1
                 total_fixes += 1
 
+        # Autofix bare `key {` → `key: {` block syntax (file-wide, one pass)
+        if args.autofix and any(d.code == "missing-block-colon" for d in diags):
+            from neuroslm.dsl.neuro_linter import autofix_block_colon_syntax
+            content = linter_file.read_text(encoding='utf-8')
+            new_content = autofix_block_colon_syntax(content)
+            if new_content != content:
+                linter_file.write_text(new_content, encoding='utf-8')
+                n_fixed = sum(1 for d in diags if d.code == "missing-block-colon")
+                print(f"[AUTOFIX] {n_fixed} bare block(s) rewritten to `key: {{` in {linter_file.name}")
+                iteration_fixes += n_fixed
+                total_fixes += n_fixed
+
         # Write all equations to lib/equations.neuro
         if equations_to_add:
             lib_content = lib_equations_file.read_text(encoding='utf-8') if lib_equations_file.exists() else ""

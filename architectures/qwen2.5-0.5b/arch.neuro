@@ -1,0 +1,40 @@
+# -*- coding: utf-8 -*-
+# Qwen2.5-0.5B -- THSD cellular sheaf definition (trivial H1, Qwen/LLaMA family)
+#
+# kind=qwen: maps to LlamaModel (Qwen2 architecture is identical to LLaMA).
+# RoPE with large base (1M), RMSNorm, GQA (14 heads / 2 kv), SwiGLU,
+# bias in q_proj/k_proj only (handled by spec.sheaf.bias=false for v/o_proj,
+# and presence in HF state_dict triggers conditional copy in hf_to_model_state_dict).
+#
+# THSD framing: trivial H1 sheaf -- RoPE with 1M theta provides long-range
+# positional coupling in the C1 interaction space.
+#
+# Load HF weights:
+#   from neuroslm.models.llama import LlamaModel, hf_to_model_state_dict
+#   from neuroslm.dsl.model_spec import parse_model_block
+#   spec = parse_model_block(open("architectures/qwen2.5-0.5b/arch.neuro").read())
+#   model = LlamaModel(spec)
+#
+# Reference: Qwen2.5 Technical Report (Qwen Team, 2024)
+# HF model ID: Qwen/Qwen2.5-0.5B
+
+model {
+    kind: qwen
+    weights: "hf:Qwen/Qwen2.5-0.5B"
+    sheaf {
+        dim: 896
+        depth: 24
+        heads: 14
+        kv_heads: 2
+        context: 32768
+        vocab: 151936
+        pos: rope
+        rope_base: 1000000
+        ff_mult: 3.5
+        ff_act: swiglu
+        norm: rmsnorm
+        norm_eps: 1e-6
+        tie_embed: true
+        bias: false
+    }
+}

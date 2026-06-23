@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# SmolLM2-135M -- THSD cellular sheaf definition (trivial H1, LLaMA family)
+#
+# kind=llama: RoPE, RMSNorm, separate Q/K/V projections, GQA (9 heads / 3 kv),
+# SwiGLU feed-forward, no bias, weight-tied lm_head.
+#
+# THSD framing: trivial H1 sheaf -- RoPE provides a phase-structured coboundary
+# that encodes positional information into the C1 interaction space.
+#
+# Load HF weights:
+#   from neuroslm.models.llama import LlamaModel, hf_to_model_state_dict
+#   from neuroslm.dsl.model_spec import parse_model_block
+#   spec = parse_model_block(open("architectures/smollm2-135m/arch.neuro").read())
+#   model = LlamaModel(spec)
+#
+# Reference: HuggingFaceTB/SmolLM2-135M (LLaMA architecture variant)
+# HF model ID: HuggingFaceTB/SmolLM2-135M
+
+model {
+    kind: llama
+    weights: "hf:HuggingFaceTB/SmolLM2-135M"
+    sheaf {
+        dim: 576
+        depth: 30
+        heads: 9
+        kv_heads: 3
+        context: 2048
+        vocab: 49152
+        pos: rope
+        rope_base: 10000
+        ff_mult: 3.5
+        ff_act: swiglu
+        norm: rmsnorm
+        norm_eps: 1e-5
+        tie_embed: true
+        bias: false
+    }
+}

@@ -336,3 +336,98 @@ config {
         diags = lint_file(f)
         warnings = [d for d in diags if d.code == "enum-style-declaration"]
         assert len(warnings) == 0
+
+
+class TestBlockColonSyntax:
+    """Test detection and autofix of bare `key {` block syntax."""
+
+    def test_nested_bare_block_warns(self, tmp_neuro_file):
+        """Nested `key {` without colon emits missing-block-colon warning."""
+        content = """
+model {
+    kind: gpt2
+    sheaf {
+        dim: 768
+    }
+}
+"""
+        f = tmp_neuro_file(content)
+        diags = lint_file(f)
+        codes = [d.code for d in diags]
+        assert "missing-block-colon" in codes
+
+    def test_colon_syntax_no_warning(self, tmp_neuro_file):
+        """`key: {` colon syntax does not trigger warning."""
+        content = """
+model {
+    kind: gpt2
+    sheaf: {
+        dim: 768
+    }
+}
+"""
+        f = tmp_neuro_file(content)
+        diags = lint_file(f)
+        codes = [d.code for d in diags]
+        assert "missing-block-colon" not in codes
+
+    def test_top_level_block_no_warning(self, tmp_neuro_file):
+        """Top-level blocks like `model {` and `training {` don't warn."""
+        content = """
+model {
+    kind: gpt2
+}
+training {
+    optimizer: adamw
+}
+"""
+        f = tmp_neuro_file(content)
+        diags = lint_file(f)
+        codes = [d.code for d in diags]
+        assert "missing-block-colon" not in codes
+
+    def test_multiple_bare_blocks_all_warned(self, tmp_neuro_file):
+        """All bare nested blocks are flagged individually."""
+        content = """
+model {
+    sheaf {
+        dim: 768
+    }
+    extra {
+        x: 1
+    }
+}
+"""
+        f = tmp_neuro_file(content)
+        diags = lint_file(f)
+        mc = [d for d in diags if d.code == "missing-block-colon"]
+        assert len(mc) >= 2
+
+    def test_autofix_adds_colon(self, tmp_neuro_file):
+        """autofix_block_colon_syntax rewrites bare `key {` → `key: {`."""
+        from neuroslm.dsl.neuro_linter import autofix_block_colon_syntax
+        original = "model {\n    sheaf {\n        dim: 768\n    }\n}\n"
+        fixed = autofix_block_colon_syntax(original)
+        assert "sheaf: {" in fixed
+
+    def test_autofix_preserves_colon_syntax(self, tmp_neuro_file):
+        """autofix is idempotent: `key: {` is unchanged."""
+        from neuroslm.dsl.neuro_linter import autofix_block_colon_syntax
+        original = "sheaf: {\n    dim: 768\n}\n"
+        fixed = autofix_block_colon_syntax(original)
+        assert fixed == original
+
+    def test_autofix_idempotent(self, tmp_neuro_file):
+        """Applying autofix twice gives the same result."""
+        from neuroslm.dsl.neuro_linter import autofix_block_colon_syntax
+        original = "model {\n    sheaf {\n        dim: 768\n    }\n}\n"
+        once = autofix_block_colon_syntax(original)
+        twice = autofix_block_colon_syntax(once)
+        assert once == twice
+
+    def test_autofix_skips_strings(self, tmp_neuro_file):
+        """Strings containing `word {` are not rewritten."""
+        from neuroslm.dsl.neuro_linter import autofix_block_colon_syntax
+        original = 'model {\n    comment: "use sheaf { } syntax"\n}\n'
+        fixed = autofix_block_colon_syntax(original)
+        assert '"use sheaf { } syntax"' in fixed

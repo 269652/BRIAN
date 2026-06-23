@@ -99,6 +99,7 @@ class NeuroLinter:
         # Pass 1: structural validation
         self._check_brace_matching()
         self._check_syntax()
+        self._check_block_colon_syntax()
 
         # Pass 2: reference validation (only if no syntax errors)
         if not any(d.severity == Severity.ERROR for d in self.diagnostics):
@@ -541,6 +542,50 @@ class NeuroLinter:
         self.diagnostics.append(Diagnostic(
             self.file, line, col, Severity.INFO, code, message
         ))
+
+    def _check_block_colon_syntax(self):
+        """Warn when a nested `key {` block uses bare syntax instead of `key: {`.
+
+        Top-level blocks (column 0) are not flagged — they are block declarations,
+        not key-value pairs.  Only indented blocks (inside another block) need the
+        colon.  The autofix rewrites bare `key {` → `key: {` file-wide.
+        """
+        pattern = re.compile(r'^(\s+)([a-zA-Z_]\w*)\s*\{')
+        for line_no, line in enumerate(self.lines, 1):
+            stripped = line.lstrip()
+            if stripped.startswith('#'):
+                continue
+            m = pattern.match(line)
+            if m:
+                word = m.group(2)
+                col = len(m.group(1)) + 1
+                self._warning(
+                    line_no, col, "missing-block-colon",
+                    f"Bare block syntax `{word} {{` — add colon: `{word}: {{`; "
+                    f"run `brian lint --autofix` to fix automatically"
+                )
+
+
+def autofix_block_colon_syntax(text: str) -> str:
+    """Rewrite bare `key {` block syntax to `key: {` colon syntax in DSL text.
+
+    String-aware: content inside ``"..."`` or ``'...'`` is never rewritten.
+    Idempotent: text already using ``key: {`` is returned unchanged.
+
+    Used by ``brian lint --autofix`` to normalise .neuro files to the
+    explicit colon form that the DSL parser requires.
+    """
+    # Split text on string literals; process only the non-literal segments.
+    parts = re.split(r'("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\')', text)
+    result = []
+    for i, part in enumerate(parts):
+        if i % 2 == 1:
+            result.append(part)          # string literal — preserve verbatim
+        else:
+            # Replace `identifier {` (not already preceded by `:`) → `identifier: {`
+            fixed = re.sub(r'(?<![:\w])(\b[a-zA-Z_]\w*)\s*\{', r'\1: {', part)
+            result.append(fixed)
+    return ''.join(result)
 
 
 def lint_file(file_path: Path) -> List[Diagnostic]:
