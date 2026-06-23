@@ -935,6 +935,39 @@ class BRIANHarness(nn.Module):
                 topo_out["eps_ortho"].detach())
         return total
 
+    # ── Phase 2: Liouville Symplectic Residual wiring ─────────────────
+
+    def _symplectic_aux_step(self, total: torch.Tensor) -> torch.Tensor:
+        """Compose the Noether residual into the LM loss budget.
+
+        No-op when cfg.regularization.liouville_symplectic.enabled is
+        False or when the language model has no _last_hidden stash.
+
+        Records:
+            self._metrics["noether_loss"]   -- scalar contribution
+            self._metrics["noether_H_diff"] -- diagnostic
+        Keys are ONLY set when the mechanism is enabled.
+        """
+        rc = getattr(self, "reg_controller", None)
+        if rc is None:
+            return total
+        cfg_sym = getattr(
+            getattr(rc, "cfg", None), "liouville_symplectic", None)
+        if cfg_sym is None or not cfg_sym.enabled:
+            return total
+        lm = self.language_model
+        if lm is None:
+            return total
+        h_last = getattr(lm, "_last_hidden", None)
+        if h_last is None:
+            return total
+        sym_out = rc.collect_symplectic_aux(h_last)
+        total = total + sym_out["loss"]
+        with torch.no_grad():
+            self._metrics["noether_loss"] = float(sym_out["loss"].detach())
+            self._metrics["noether_H_diff"] = float(sym_out["H_diff"])
+        return total
+
     # ── Multi-Trunk-V2: specialist language cortex ensemble ─────────
     def _build_multi_cortex(self) -> None:
         """Build a `MultiCortexEnsemble` from `cfg.multi_cortex`.
@@ -2943,6 +2976,7 @@ class BRIANHarness(nn.Module):
         # `_metrics` so the training-log line displays it.
         total = self._cortex_fusion_aux_step(total, targets)
         total = self._topo_charge_aux_step(total)
+        total = self._symplectic_aux_step(total)
 
         # ── Runtime metric registry update ──
         # Cheap runtime Phi proxy: per-token softmax entropy normalised

@@ -599,6 +599,63 @@ of routing structure. We predict that across a healthy 10k run:
 
 ---
 
+### H25 — Liouville Symplectic Residual: Noether-conserved hidden channels (2026-06-23)
+
+**Hypothesis.** Splitting `d_model` into canonical coordinates `(q, p)`
+and running one Stoermer-Verlet leapfrog step of a learned Hamiltonian
+`H = KE(p) + V(q) + W(q)` provides two durable inductive biases:
+
+1. **Symplectic structure (det J = 1 exactly).** Each leapfrog substep is
+   a triangular shear; their composition preserves phase-space volume by
+   construction. We predict that models trained with `noether_strength > 0`
+   develop lower rank-collapse risk (erank stays higher) and smoother
+   loss trajectories compared to the baseline.
+2. **Noether residual signal.** `L_Noether = (H_final − H_initial)²` is
+   identically zero for a perfectly-conserved Hamiltonian. With
+   `noether_strength > 0` the optimizer is rewarded for organizing the
+   hidden state so that phase-space energy is preserved across the layer.
+   We predict `noether_H_diff < 0.1` after 5k steps (current value on
+   random inputs ≈ 0.5–2.0).
+3. **Long-context stability.** A symplectic channel that conserves energy
+   along the sequence axis provides a stable propagation path for
+   long-range dependencies. We predict gap_ratio improvement of ≥ 10% at
+   T ≥ 1024 vs a matched baseline without the mechanism.
+
+- **Spec.** `architectures/master/arch.neuro` + `architectures/SmolLM/arch.neuro`
+  — block `regularization { liouville_symplectic: { enabled: true,
+  noether_strength: 0.0, dtau_init: 0.1, potential_kind: quadratic,
+  w_rank: 4 } }`. Active in **DIAGNOSTIC MODE** — `noether_loss` and
+  `noether_H_diff` are logged every step; zero added to the loss budget.
+  Penalty mode (`noether_strength > 0`) is a follow-up experiment.
+- **Mechanism.** `neuroslm/mechanisms/liouville_symplectic.py` —
+  `LiouvilleSymplecticBlock` wraps one explicit Stoermer-Verlet step
+  (half-kick → drift → half-kick) with `torch.autograd.grad(create_graph=True)`
+  for `∂_q H`. `QOnlyPotential` abstract base enforces the `forward(q)`
+  type signature at construction time (type-level det(J)=1 guarantee).
+  `LowRankPairwise(W)` is the token-interaction term (q-only by construction).
+  Noether residual stashed as `_last_noether`. Block runs on the final
+  hidden state exposed by `language_model._last_hidden`; consumed by
+  `RegularizationController.collect_symplectic_aux()`; auto-fired by
+  `BRIANHarness._symplectic_aux_step()` after `_topo_charge_aux_step`.
+- **TDD evidence.** 39 GREEN tests across 4 files:
+  - `tests/dsl/test_liouville_symplectic.py` (14 tests) — math contracts:
+    `QOnlyPotential` type rejection, `QuadraticPotential.energy` vs hand-
+    computed, fp64 `det(J)=1` invariant (atol=1e-9), HLW H-oscillation
+    bound for 1-D harmonic oscillator over 100 steps, mass positivity,
+    Noether = (H_final−H_initial)², FD vs autograd grad on dtau.
+  - `tests/dsl/test_liouville_symplectic_dsl_parse.py` (9 tests) — DSL
+    parse surface: defaults, full block, field validation.
+  - `tests/dsl/test_liouville_symplectic_regcontroller.py` (10 tests) —
+    disabled/diagnostic/active paths, lazy-build reuse, odd-d_model grace.
+  - `tests/dsl/test_liouville_symplectic_harness.py` (6 tests) — inert-
+    gate `torch.equal` zero-contribution (noether_strength=0), keys set
+    when enabled, backward from total does not crash.
+- **Outcome.** ⏳ **PENDING DEPLOY.** No metrics captured yet — diagnostic
+  active in arch, next training run needed. Per CLAUDE.md §1e the deploy
+  requires explicit user authorisation; not initiated by this session.
+
+---
+
 ## What proved to solve or break things — the punchline list
 
 ### Things that demonstrably solved something

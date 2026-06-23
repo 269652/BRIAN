@@ -751,6 +751,11 @@ class RegularizationController(nn.Module):
         # SUBMODULE so its proj.weight enters the optimizer once
         # constructed.
         self.topo_charge_diag = None
+        # Phase 2: LiouvilleSymplecticBlock — lazy-built on first
+        # collect_symplectic_aux call using h_last.shape[-1]. Lives as
+        # a SUBMODULE so dtau / raw_M / potential params enter the
+        # optimizer once constructed.
+        self._symplectic_block = None
         # Step counter for warmup. Incremented every collect_aux call
         # (which is exactly once per optimizer step).
         self.register_buffer(
@@ -954,4 +959,62 @@ class RegularizationController(nn.Module):
             "Q_h_mean":  out["Q_h"].detach().mean(),
             "eps_ortho": out["eps_ortho"].detach(),
         }
+
+    # ── Phase 2: Liouville Symplectic Residual diagnostic ─────────────
+
+    def collect_symplectic_aux(
+        self, h_last: torch.Tensor
+    ) -> dict:
+        """Run one leapfrog step on h_last and return the Noether residual.
+
+        Args:
+            h_last: (B, T, d_model) final hidden state from the LM.
+
+        Returns dict with:
+            loss    -- noether_strength * (H_final - H_initial)^2; scalar.
+                       Exact zero when cfg.liouville_symplectic is disabled
+                       OR when noether_strength == 0 (diagnostic-only).
+            H_diff  -- |H_final - H_initial|, detached scalar (diagnostic).
+
+        Odd d_model: returns zero loss gracefully (d_model must be even
+        for the q/p split; the harness skips the block rather than crash).
+        """
+        zero = torch.zeros((), device=h_last.device, dtype=h_last.dtype)
+        cfg_sym = self.cfg.liouville_symplectic
+        if not cfg_sym.enabled:
+            return {"loss": zero, "H_diff": zero}
+
+        d_model = h_last.shape[-1]
+        if d_model % 2 != 0:
+            return {"loss": zero, "H_diff": zero}
+
+        # Lazy-build on first call.
+        if self._symplectic_block is None:
+            from neuroslm.mechanisms.liouville_symplectic import (
+                LiouvilleSymplecticBlock,
+            )
+            self._symplectic_block = LiouvilleSymplecticBlock(
+                d_model=int(d_model),
+                dtau_init=float(cfg_sym.dtau_init),
+                potential_kind=cfg_sym.potential_kind,
+                w_rank=int(cfg_sym.w_rank),
+            ).to(device=h_last.device, dtype=h_last.dtype)
+
+        blk = self._symplectic_block
+        # Ensure the block lives on the same device/dtype as the input
+        # (handles the first-time device mismatch on accelerator moves).
+        if next(blk.parameters()).device != h_last.device:
+            blk = blk.to(device=h_last.device, dtype=h_last.dtype)
+            self._symplectic_block = blk
+
+        # Run the leapfrog; output (q_1, p_1) is discarded; _last_noether
+        # is the side-effect we consume.
+        _ = blk(h_last)
+        noether = blk._last_noether          # (H_final - H_initial)^2
+        H_initial = blk._last_H_initial
+        H_final = blk._last_H_final
+        H_diff = (H_final - H_initial).abs().detach()
+
+        loss = float(cfg_sym.noether_strength) * noether
+        return {"loss": loss, "H_diff": H_diff}
 

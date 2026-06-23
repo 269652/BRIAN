@@ -283,6 +283,33 @@ class PontryaginTopoChargeConfig:
     weight_init_std: float = 0.02 # std of Linear(head_dim, 3) init
 
 
+# ── Intervention I: Liouville Symplectic Residual ────────────────────
+
+@dataclass
+class LiouvilleSymplecticConfig:
+    """Noether-residual regularizer from the leapfrog of a learned Hamiltonian.
+
+    Splits d_model into canonical coordinates (q, p) and advances them
+    via one Stoermer-Verlet step of H(q,p) = KE(p) + V(q) + W(q).
+    The Noether residual L_Noether = (H_final - H_initial)^2 is added
+    to the LM loss with weight noether_strength. At noether_strength=0
+    the block runs as a diagnostic (H_diff is logged) with zero loss
+    contribution.
+
+    Fields:
+        enabled          -- wire the mechanism at all (False = zero overhead).
+        noether_strength -- weight on L_Noether (>= 0).
+        dtau_init        -- initial leapfrog stride (> 0).
+        potential_kind   -- "quadratic" (closed-form, stable) or "swiglu".
+        w_rank           -- rank of the LowRankPairwise W potential.
+    """
+    enabled: bool = False
+    noether_strength: float = 0.0
+    dtau_init: float = 0.1
+    potential_kind: str = "quadratic"
+    w_rank: int = 4
+
+
 # ── Top-level container ──────────────────────────────────────────────
 
 @dataclass
@@ -312,6 +339,8 @@ class RegularizationConfig:
     cdga: CDGAConfig = field(default_factory=CDGAConfig)
     pontryagin_topo_charge: PontryaginTopoChargeConfig = field(
         default_factory=PontryaginTopoChargeConfig)
+    liouville_symplectic: LiouvilleSymplecticConfig = field(
+        default_factory=LiouvilleSymplecticConfig)
     warmup_steps: int = 2000
     activation_step: int = 0
     """First global step at which any aux loss may be non-zero.
@@ -354,6 +383,7 @@ class RegularizationConfig:
             self.freq_balance.enabled,
             self.cdga.enabled,
             self.pontryagin_topo_charge.enabled,
+            self.liouville_symplectic.enabled,
         ])
 
 
@@ -404,6 +434,9 @@ def parse_regularization_block(body: str) -> RegularizationConfig:
     if "pontryagin_topo_charge" in props:
         cfg.pontryagin_topo_charge = _parse_pontryagin_topo_charge(
             props["pontryagin_topo_charge"])
+    if "liouville_symplectic" in props:
+        cfg.liouville_symplectic = _parse_liouville_symplectic(
+            props["liouville_symplectic"])
 
     return cfg
 
@@ -546,6 +579,24 @@ def _parse_pontryagin_topo_charge(raw: str) -> PontryaginTopoChargeConfig:
         raise ValueError(
             f"pontryagin_topo_charge.weight_init_std="
             f"{out.weight_init_std} must be > 0")
+    return out
+
+
+def _parse_liouville_symplectic(raw: str) -> LiouvilleSymplecticConfig:
+    p = _split_top_level_kv(_strip_braces(raw))
+    out = LiouvilleSymplecticConfig()
+    if "enabled" in p:           out.enabled = _parse_bool(p["enabled"])
+    if "noether_strength" in p:  out.noether_strength = float(p["noether_strength"])
+    if "dtau_init" in p:         out.dtau_init = float(p["dtau_init"])
+    if "potential_kind" in p:    out.potential_kind = _strip_quotes(p["potential_kind"])
+    if "w_rank" in p:            out.w_rank = int(p["w_rank"])
+    if out.noether_strength < 0.0:
+        raise ValueError(
+            f"liouville_symplectic.noether_strength={out.noether_strength} "
+            f"must be >= 0")
+    if out.dtau_init <= 0.0:
+        raise ValueError(
+            f"liouville_symplectic.dtau_init={out.dtau_init} must be > 0")
     return out
 
 

@@ -1123,10 +1123,11 @@ class LMExpertEnsemble(nn.Module):
             e_logits = expert(ids)                          # (B, T, V_trunk) fp32
             e_logits = e_logits.to(dtype=_fuse_dtype)      # fp32 → _fuse_dtype
             w_i = weights[..., i].unsqueeze(-1)             # (B, T, 1) _fuse_dtype
+            e_logits.mul_(w_i)                              # in-place: avoid 3GB intermediate
             if out is None:
-                out = w_i * e_logits
+                out = e_logits
             else:
-                out.add_(w_i * e_logits)                    # in-place accumulate
+                out.add_(e_logits)                          # in-place accumulate
         assert out is not None  # guarded by len(experts) >= 1 in __init__
         return out
 

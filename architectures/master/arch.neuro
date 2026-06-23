@@ -874,6 +874,17 @@ training {
                                   alpha: 0.0, gamma: 0.0,
                                   Q_target: 0.0,
                                   weight_init_std: 0.02 }
+        # Phase 2: Liouville Symplectic Residual. Runs one leapfrog step
+        # on the final hidden state to produce the Noether residual
+        # (H_final - H_initial)^2. At noether_strength=0 this is
+        # diagnostic-only (logs noether_loss and noether_H_diff every
+        # step with zero loss contribution). Penalty mode
+        # (noether_strength > 0) is a follow-up experiment (H25).
+        liouville_symplectic: { enabled: true,
+                                noether_strength: 0.0,
+                                dtau_init: 0.1,
+                                potential_kind: quadratic,
+                                w_rank: 4 }
     }
 }
 
