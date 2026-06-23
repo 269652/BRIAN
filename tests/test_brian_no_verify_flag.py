@@ -189,6 +189,112 @@ class TestDeploySkipsHookWhenNoVerify:
 # ──────────────────────────────────────────────────────────────────────
 
 
+class TestDeployYoloAlias:
+    """``brian deploy yolo`` is sugar for ``brian deploy --no-verify``."""
+
+    def test_yolo_parses_as_arch_yolo(self):
+        """Argparse gives us arch='yolo'; cmd_deploy must intercept it."""
+        from neuroslm.cli import _build_parser
+
+        parser = _build_parser()
+        ns = parser.parse_args(["deploy", "yolo"])
+        assert ns.arch == "yolo"
+
+    def _fake_cfg(self):
+        """Return a minimal project config mock that prevents real I/O."""
+        from unittest.mock import MagicMock
+        cfg = MagicMock()
+        cfg.default_platform = "vast"
+        cfg.default_steps = 0
+        cfg.default_branch = None
+        cfg.is_dna_mode = False
+        cfg.dna = None
+        cfg.arch = None
+        cfg.default_ood_every = 0
+        cfg.default_log_every = 100
+        cfg.default_save_every = 1000
+        cfg.default_push_every = 1000
+        cfg.default_push_backend = "hf"
+        cfg.default_hf_repo_id = "moritzroessler/BRIAN"
+        cfg.default_push_optimizer = False
+        cfg.default_machine = None
+        cfg.default_teamspace = None
+        return cfg
+
+    def _yolo_ns(self, **overrides) -> argparse.Namespace:
+        defaults = dict(
+            arch="yolo", steps=None, branch=None, scale=None,
+            dna=None, label=None, ood=None, no_verify=False,
+            resume=None, latest=False, hf_repo=None, hf_prefix=None,
+            platform=None, machine=None, teamspace=None,
+        )
+        defaults.update(overrides)
+        return argparse.Namespace(**defaults)
+
+    def test_yolo_skips_hook(self):
+        """``brian deploy yolo`` must NOT call _run_hook."""
+        from neuroslm import cli as cli_mod
+
+        # get_connector and load_project_config are local imports inside
+        # cmd_deploy, so patch at their source modules.
+        with patch.object(cli_mod, "_run_hook", return_value=0) as hook_mock, \
+             patch("neuroslm.project_config.load_project_config",
+                   return_value=self._fake_cfg()), \
+             patch("neuroslm.connectors.get_connector") as mock_gc:
+            mock_gc.return_value.launch.return_value = 0
+            cli_mod.cmd_deploy(self._yolo_ns())
+
+        assert not hook_mock.called, (
+            "brian deploy yolo must skip the pre-deploy hook"
+        )
+
+    def test_yolo_clears_arch(self):
+        """``brian deploy yolo`` must not pass 'yolo' as the arch path."""
+        from neuroslm import cli as cli_mod
+        from neuroslm.connectors import DeployConfig
+
+        launched_configs: list[DeployConfig] = []
+
+        class FakeConnector:
+            def launch(self, config: DeployConfig) -> int:
+                launched_configs.append(config)
+                return 0
+
+        with patch.object(cli_mod, "_run_hook", return_value=0), \
+             patch("neuroslm.project_config.load_project_config",
+                   return_value=self._fake_cfg()), \
+             patch("neuroslm.connectors.get_connector",
+                   return_value=FakeConnector()):
+            cli_mod.cmd_deploy(self._yolo_ns())
+
+        assert launched_configs, "connector.launch must have been called"
+        assert launched_configs[0].arch != "yolo", (
+            "the yolo alias must not forward 'yolo' as the arch path; "
+            f"got config.arch={launched_configs[0].arch!r}"
+        )
+
+    def test_end_to_end_yolo_argv(self):
+        """Full argv: ``brian deploy yolo`` -> hook skipped."""
+        from neuroslm.cli import _build_parser
+        from neuroslm import cli as cli_mod
+
+        parser = _build_parser()
+        ns = parser.parse_args(["deploy", "yolo"])
+
+        with patch.object(cli_mod, "_run_hook", return_value=0) as hook_mock, \
+             patch("neuroslm.project_config.load_project_config",
+                   return_value=self._fake_cfg()), \
+             patch("neuroslm.connectors.get_connector") as mock_gc:
+            mock_gc.return_value.launch.return_value = 0
+            try:
+                ns.func(ns)
+            except (SystemExit, Exception):
+                pass
+        assert not hook_mock.called, (
+            "end-to-end 'brian deploy yolo' must skip the pre-deploy hook"
+        )
+
+
 class TestArgvRouting:
     def test_top_level_no_verify_reaches_cmd_deploy(self):
         """End-to-end: ``brian --no-verify deploy`` -> cmd_deploy sees

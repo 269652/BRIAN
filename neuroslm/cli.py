@@ -974,7 +974,13 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         brian deploy                              # all from brian.toml
         brian deploy --steps 50000               # override steps
         brian deploy --platform lightning        # use Lightning AI
+        brian deploy yolo                         # alias for --no-verify
     """
+    # ── yolo alias: `brian deploy yolo` → deploy --no-verify ──
+    if getattr(args, "arch", None) == "yolo":
+        args.arch = None
+        args.no_verify = True
+
     # ── Pre-deploy hook ──
     if getattr(args, "no_verify", False):
         print("[deploy] pre-deploy hook SKIPPED (--no-verify)")
