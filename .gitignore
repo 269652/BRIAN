@@ -136,3 +136,5 @@ lean/build/
 # arch source here on every `brian train --dna=... | --arch=...`
 # invocation. Pure runtime cache; rebuilt fresh every call.
 .neuro/arch/temp/
+
+.claude/settings.local.json
