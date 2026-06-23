@@ -54,6 +54,7 @@ class SheafConfig:
     # Output head
     tie_embed: bool = True
     bias: bool = False
+    qkv_bias: bool = False  # bias in q/k/v projections (Qwen2 style; independent of bias)
 
 
 @dataclass
@@ -200,5 +201,7 @@ def _parse_sheaf(raw: str) -> SheafConfig:
         out.tie_embed = _parse_bool(p["tie_embed"])
     if "bias" in p:
         out.bias = _parse_bool(p["bias"])
+    if "qkv_bias" in p:
+        out.qkv_bias = _parse_bool(p["qkv_bias"])
 
     return out

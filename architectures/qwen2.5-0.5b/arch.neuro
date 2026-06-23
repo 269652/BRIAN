@@ -36,5 +36,6 @@ model {
         norm_eps: 1e-6
         tie_embed: true
         bias: false
+        qkv_bias: true
     }
 }

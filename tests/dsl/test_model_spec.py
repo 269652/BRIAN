@@ -175,6 +175,7 @@ class TestParseQwenBlock:
             norm: rmsnorm
             tie_embed: true
             bias: false
+            qkv_bias: true
         }
     }
     """
@@ -190,6 +191,10 @@ class TestParseQwenBlock:
     def test_parse_vocab_151936(self):
         spec = parse_model_block(self.DSL)
         assert spec.sheaf.vocab == 151936
+
+    def test_parse_qkv_bias_true(self):
+        spec = parse_model_block(self.DSL)
+        assert spec.sheaf.qkv_bias is True
 
 
 class TestParseValidation:

@@ -4007,6 +4007,102 @@ def cmd_lint(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Studio command
+# ---------------------------------------------------------------------------
+
+def cmd_studio_start(args: argparse.Namespace) -> int:
+    """Start Brian Studio: REST+MCP server on :1984, Next.js client on :2049."""
+    import os
+    import signal
+    import time
+    import webbrowser
+    from pathlib import Path
+
+    repo_root = Path(__file__).parent.parent
+    studio_dir = repo_root / "studio"
+    client_dir = studio_dir / "client"
+
+    server_port = 1984
+    client_port = 2049
+
+    procs = []
+
+    def _shutdown(sig=None, frame=None):
+        print("\n[studio] shutting down…")
+        for p in procs:
+            try:
+                p.terminate()
+            except Exception:
+                pass
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _shutdown)
+
+    # ── Python REST+MCP server ──────────────────────────────────────────────
+    import subprocess
+    server_cmd = [
+        sys.executable, "-m", "uvicorn",
+        "studio.server.app:app",
+        "--host", args.host,
+        "--port", str(server_port),
+        "--reload",
+        "--reload-dir", str(studio_dir / "server"),
+        "--log-level", "warning",
+    ]
+    server_proc = subprocess.Popen(server_cmd, cwd=repo_root)
+    procs.append(server_proc)
+
+    print(f"\n  Brian Studio")
+    print(f"  ─────────────────────────────────────────────")
+    print(f"  Server  (REST+MCP) : http://localhost:{server_port}")
+    print(f"  API docs           : http://localhost:{server_port}/docs")
+    print(f"  MCP endpoint       : http://localhost:{server_port}/mcp")
+
+    if args.server_only:
+        print(f"\n  --server-only: Next.js client not started")
+        print(f"  Press Ctrl-C to stop\n")
+        try:
+            server_proc.wait()
+        except (KeyboardInterrupt, SystemExit):
+            _shutdown()
+        return 0
+
+    # ── Next.js client ──────────────────────────────────────────────────────
+    node_modules = client_dir / "node_modules"
+    if not node_modules.exists():
+        print(f"\n  Installing npm dependencies (first run)…")
+        result = subprocess.run(
+            ["npm", "install"],
+            cwd=client_dir,
+            capture_output=False,
+        )
+        if result.returncode != 0:
+            print("[studio] npm install failed — run 'npm install' in studio/client manually")
+
+    client_env = {**os.environ, "PORT": str(client_port)}
+    client_cmd = ["npm", "run", "dev", "--", "--port", str(client_port)]
+    client_proc = subprocess.Popen(client_cmd, cwd=client_dir, env=client_env)
+    procs.append(client_proc)
+
+    print(f"  Studio  (Next.js)  : http://localhost:{client_port}")
+    print(f"  ─────────────────────────────────────────────")
+    print(f"  Press Ctrl-C to stop\n")
+
+    if not args.no_browser:
+        time.sleep(4)  # wait for Next.js to compile
+        webbrowser.open(f"http://localhost:{client_port}")
+
+    try:
+        server_proc.wait()
+    except (KeyboardInterrupt, SystemExit):
+        _shutdown()
+
+    return 0
+
+
 # ── update-readme ──────────────────────────────────────────────────────
 
 def cmd_update_readme(args: argparse.Namespace) -> int:
@@ -4278,6 +4374,19 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="IIT-grade: populations + synapses + modulations + NT dynamics")
     sw.add_argument("--out", help="write Wolfram code to this .m file")
     sw.set_defaults(func=cmd_wolfram)
+
+    # model — standard-arch inference (DSL v2 model{} block)
+    sm = sub.add_parser("model",
+                        help="Load a standard model (GPT-2/LLaMA/Qwen) from arch.neuro and run PPL or generation")
+    sm.add_argument("arch", help="Architecture directory (e.g. architectures/gpt2) or path to arch.neuro")
+    sm_sub = sm.add_subparsers(dest="model_cmd", required=True)
+    sm_ppl = sm_sub.add_parser("ppl", help="Compute WikiText-103 perplexity")
+    sm_ppl.add_argument("--tokens", type=int, default=512, help="Max tokens to evaluate on")
+    sm_gen = sm_sub.add_parser("generate", help="Greedy-decode N tokens from a prompt")
+    sm_gen.add_argument("prompt", nargs="?", default="The quick brown fox",
+                        help="Prompt text (default: 'The quick brown fox')")
+    sm_gen.add_argument("--tokens", type=int, default=50, help="Number of tokens to generate")
+    sm.set_defaults(func=cmd_model)
 
     # lint
     sl = sub.add_parser("lint",
@@ -4998,6 +5107,44 @@ def _build_parser() -> argparse.ArgumentParser:
         "--format", choices=["md", "text"], default="md",
         help="output format (default: md)")
     scite.set_defaults(func=cmd_cite)
+
+    # ── studio ────────────────────────────────────────────────────────────────
+    sstudio = sub.add_parser(
+        "studio",
+        help="Brian Studio — visual language model editor (REST+MCP server + Next.js UI)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Brian Studio: build, compose, test and deploy language models "
+            "using a visual drag-and-drop editor.\n\n"
+            "  Server: http://localhost:1984  (port 1984 — Orwell)\n"
+            "  Studio: http://localhost:2049  (port 2049 — Blade Runner)\n"
+            "  MCP:    http://localhost:1984/mcp"
+        ),
+    )
+    sstudio_sub = sstudio.add_subparsers(dest="studio_cmd", required=True)
+
+    sstudio_start = sstudio_sub.add_parser(
+        "start",
+        help="Start the Brian Studio server (port 1984) and client (port 2049)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Launches the Brian Studio REST+MCP server on port 1984 and the\n"
+            "Next.js visual editor on port 2049. Opens a browser automatically.\n\n"
+            "  Server (REST+MCP): http://localhost:1984\n"
+            "  Studio (Next.js):  http://localhost:2049\n"
+            "  API docs:          http://localhost:1984/docs"
+        ),
+    )
+    sstudio_start.add_argument(
+        "--no-browser", action="store_true",
+        help="Don't open the browser automatically")
+    sstudio_start.add_argument(
+        "--server-only", action="store_true",
+        help="Start only the Python REST+MCP server, not the Next.js client")
+    sstudio_start.add_argument(
+        "--host", default="0.0.0.0",
+        help="Server bind host (default: 0.0.0.0)")
+    sstudio_start.set_defaults(func=cmd_studio_start)
 
     return p
 

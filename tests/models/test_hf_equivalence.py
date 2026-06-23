@@ -116,9 +116,11 @@ class TestSmolLM2HFEquivalence:
 
     @pytest.fixture(scope="class")
     def hf_model_and_tokenizer(self):
+        import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID)
-        hf_model = AutoModelForCausalLM.from_pretrained(self.MODEL_ID)
+        hf_model = AutoModelForCausalLM.from_pretrained(
+            self.MODEL_ID, torch_dtype=torch.float32)
         hf_model.eval()
         return hf_model, tokenizer
 
@@ -128,6 +130,7 @@ class TestSmolLM2HFEquivalence:
         from neuroslm.dsl.model_spec import ModelSpec
         hf_model, _ = hf_model_and_tokenizer
         cfg = hf_model.config
+        hf_sd = hf_model.state_dict()
         spec = ModelSpec()
         spec.kind = "llama"
         spec.sheaf.dim = cfg.hidden_size
@@ -143,8 +146,9 @@ class TestSmolLM2HFEquivalence:
         spec.sheaf.norm = "rmsnorm"
         spec.sheaf.tie_embed = cfg.tie_word_embeddings
         spec.sheaf.bias = False
+        spec.sheaf.qkv_bias = "model.layers.0.self_attn.q_proj.bias" in hf_sd
         model = LlamaModel(spec)
-        model.load_state_dict(hf_to_model_state_dict(hf_model.state_dict(), spec))
+        model.load_state_dict(hf_to_model_state_dict(hf_sd, spec))
         model.eval()
         return model
 
@@ -152,7 +156,7 @@ class TestSmolLM2HFEquivalence:
         hf_model, tokenizer = hf_model_and_tokenizer
         input_ids = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 8]])
         with torch.no_grad():
-            hf_logits = hf_model(input_ids).logits
+            hf_logits = hf_model(input_ids).logits.float()
             our_logits = our_model(input_ids)
         assert torch.allclose(hf_logits, our_logits, rtol=1e-3, atol=1e-3), \
             f"Max diff: {(hf_logits - our_logits).abs().max().item():.2e}"
@@ -173,7 +177,8 @@ class TestQwen25HFEquivalence:
     def hf_model_and_tokenizer(self):
         from transformers import AutoModelForCausalLM, AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID)
-        hf_model = AutoModelForCausalLM.from_pretrained(self.MODEL_ID)
+        hf_model = AutoModelForCausalLM.from_pretrained(
+            self.MODEL_ID, torch_dtype=torch.float32)
         hf_model.eval()
         return hf_model, tokenizer
 
@@ -183,6 +188,7 @@ class TestQwen25HFEquivalence:
         from neuroslm.dsl.model_spec import ModelSpec
         hf_model, _ = hf_model_and_tokenizer
         cfg = hf_model.config
+        hf_sd = hf_model.state_dict()
         spec = ModelSpec()
         spec.kind = "qwen"
         spec.sheaf.dim = cfg.hidden_size
@@ -198,8 +204,9 @@ class TestQwen25HFEquivalence:
         spec.sheaf.norm = "rmsnorm"
         spec.sheaf.tie_embed = getattr(cfg, "tie_word_embeddings", True)
         spec.sheaf.bias = False
+        spec.sheaf.qkv_bias = "model.layers.0.self_attn.q_proj.bias" in hf_sd
         model = LlamaModel(spec)
-        model.load_state_dict(hf_to_model_state_dict(hf_model.state_dict(), spec))
+        model.load_state_dict(hf_to_model_state_dict(hf_sd, spec))
         model.eval()
         return model
 
@@ -207,7 +214,7 @@ class TestQwen25HFEquivalence:
         hf_model, tokenizer = hf_model_and_tokenizer
         input_ids = torch.tensor([[1, 2, 3, 4, 5, 6, 7, 8]])
         with torch.no_grad():
-            hf_logits = hf_model(input_ids).logits
+            hf_logits = hf_model(input_ids).logits.float()
             our_logits = our_model(input_ids)
         assert torch.allclose(hf_logits, our_logits, rtol=1e-3, atol=1e-3), \
             f"Max diff: {(hf_logits - our_logits).abs().max().item():.2e}"

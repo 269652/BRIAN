@@ -71,7 +71,8 @@ class LlamaAttention(nn.Module):
     """GQA + RoPE attention matching HF LlamaAttention / Qwen2Attention."""
 
     def __init__(self, dim: int, n_heads: int, n_kv_heads: int,
-                 max_ctx: int, rope_base: float = 10000.0, bias: bool = False):
+                 max_ctx: int, rope_base: float = 10000.0, bias: bool = False,
+                 qkv_bias: bool = False):
         super().__init__()
         assert dim % n_heads == 0
         self.n_heads = n_heads
@@ -81,9 +82,10 @@ class LlamaAttention(nn.Module):
         self._rope_base = float(rope_base)
         self._max_ctx = max_ctx
 
-        self.q_proj = nn.Linear(dim, n_heads * self.head_dim, bias=bias)
-        self.k_proj = nn.Linear(dim, n_kv_heads * self.head_dim, bias=bias)
-        self.v_proj = nn.Linear(dim, n_kv_heads * self.head_dim, bias=bias)
+        # qkv_bias: bias in q/k/v projections (Qwen2 uses this; separate from o_proj)
+        self.q_proj = nn.Linear(dim, n_heads * self.head_dim, bias=qkv_bias)
+        self.k_proj = nn.Linear(dim, n_kv_heads * self.head_dim, bias=qkv_bias)
+        self.v_proj = nn.Linear(dim, n_kv_heads * self.head_dim, bias=qkv_bias)
         self.o_proj = nn.Linear(n_heads * self.head_dim, dim, bias=False)
 
         # Precompute RoPE buffers (non-persistent — reconstructed on load)
@@ -142,11 +144,13 @@ class LlamaBlock(nn.Module):
 
     def __init__(self, dim: int, n_heads: int, n_kv_heads: int, ff_dim: int,
                  max_ctx: int, rope_base: float = 10000.0,
-                 norm_eps: float = 1e-5, bias: bool = False):
+                 norm_eps: float = 1e-5, bias: bool = False,
+                 qkv_bias: bool = False):
         super().__init__()
         self.input_layernorm = RMSNorm(dim, eps=norm_eps)
         self.attn = LlamaAttention(dim, n_heads, n_kv_heads, max_ctx,
-                                   rope_base=rope_base, bias=bias)
+                                   rope_base=rope_base, bias=bias,
+                                   qkv_bias=qkv_bias)
         self.post_attention_layernorm = RMSNorm(dim, eps=norm_eps)
         self.mlp = LlamaMLP(dim, ff_dim)
 
@@ -178,7 +182,7 @@ class LlamaModel(nn.Module):
                 dim=s.dim, n_heads=s.heads, n_kv_heads=s.kv_heads,
                 ff_dim=ff_dim, max_ctx=s.context,
                 rope_base=float(s.rope_base), norm_eps=s.norm_eps,
-                bias=s.bias,
+                bias=s.bias, qkv_bias=s.qkv_bias,
             )
             for _ in range(s.depth)
         ])
@@ -240,12 +244,13 @@ def hf_to_model_state_dict(hf_sd: Dict[str, torch.Tensor],
         out[f"{pu}.attn.v_proj.weight"] = hf_sd[f"{ph}.self_attn.v_proj.weight"]
         out[f"{pu}.attn.o_proj.weight"] = hf_sd[f"{ph}.self_attn.o_proj.weight"]
 
-        # Optional biases (Qwen2 has q_proj/k_proj bias)
-        for proj in ("q_proj", "k_proj", "v_proj", "o_proj"):
-            bias_key = f"{ph}.self_attn.{proj}.bias"
-            our_key = f"{pu}.attn.{proj}.bias"
-            if bias_key in hf_sd:
-                out[our_key] = hf_sd[bias_key]
+        # QKV biases: only when spec has qkv_bias=True (Qwen2/Qwen2.5 pattern)
+        if spec.sheaf.qkv_bias:
+            for proj in ("q_proj", "k_proj", "v_proj"):
+                bias_key = f"{ph}.self_attn.{proj}.bias"
+                our_key = f"{pu}.attn.{proj}.bias"
+                if bias_key in hf_sd:
+                    out[our_key] = hf_sd[bias_key]
 
         # MLP
         out[f"{pu}.mlp.gate_proj.weight"] = hf_sd[f"{ph}.mlp.gate_proj.weight"]
