@@ -223,184 +223,23 @@ echo "  cost   \$$DPH/hr  reliability $RELI"
 # bash is invoked via `subprocess.call`, and a slow `vastai create` looks
 # like a total hang because no markers appear until exit.
 trace() { printf '[stage] %s\n' "$*" >&2; }
-trace "offer selected — building onstart heredoc"
+trace "offer selected — loading onstart script"
 
-# ─── Build the onstart script (runs INSIDE the vast container) ───────────
-# Heredoc with normal expansion: $BRANCH etc. expand HERE (locally) so the
-# values land in the onstart script as literals. Escape any in-container
-# variables (\$1 etc.) if you add them later.
-#
-# IMPORTANT: do NOT use the $() pipe-capture pattern for this heredoc.
-# On Windows Git Bash, the $(…) pipe buffer is ~4-64 KB; the onstart
-# script is ~6 KB and can exceed it, causing a write-deadlock where
-# cat blocks on write while bash blocks waiting for the subshell to exit.
-# Fix: write to a temp file (no pipe), then read with `read -r -d ''`
-# (reads until NUL = entire file, no pipe involved).
-# Additionally, the Python connector passes stdin=subprocess.DEVNULL so
-# bash never inherits a Windows console handle on fd 0 (which can break
-# msys2 fork() emulation for heredoc pipe writers on Windows Git Bash).
-trace "  step 1/4: calling mktemp"
-_onstart_tmp="$(mktemp)"
-trace "  step 2/4: writing heredoc to temp file $_onstart_tmp"
-cat > "$_onstart_tmp" <<ONSTART
-set -e
-export DEBIAN_FRONTEND=noninteractive
-date -u +"vast_train.sh boot @ %Y-%m-%dT%H:%M:%SZ"
-
-# Make sure git + git-lfs are installed (image may not include them).
-(command -v git >/dev/null 2>&1 && command -v git-lfs >/dev/null 2>&1) \\
-    || (apt-get update -y && apt-get install -y git git-lfs)
-git lfs install --skip-smudge
-
-export GITHUB='${GITHUB}' HF_TOKEN='${HF_TOKEN:-}'
-mkdir -p /workspace && cd /workspace
-
-# Clone with LFS smudge skipped — full LFS pull would fetch every old
-# checkpoint over the network. We only need the resume target (if any),
-# which the trainer fetches on its own when --resume is requested.
-echo "── cloning ${BRANCH} ──"
-GIT_LFS_SKIP_SMUDGE=1 git clone --branch '${BRANCH}' --single-branch \\
-    "https://x-access-token:\${GITHUB}@github.com/${REPO_SLUG}.git" brian
-cd brian
-
-echo "── bootstrap (pip deps + targeted LFS pull) ──"
-# When FRESH=1 we are not resuming, so skip the wholesale adamw-ckpt LFS
-# pull in bootstrap step 6 (saves 5-10 min and 3-5 GB transfer).
-if [ "${FRESH}" = "1" ]; then
-  SKIP_LFS_RESUME=1 bash scripts/vast_bootstrap.sh
-else
-  bash scripts/vast_bootstrap.sh
-fi
-
-echo "── starting log-pusher (background) ──"
-# Push the current training log to git every PUSH_INTERVAL seconds so
-# progress is visible from any clone without SSH-ing into the instance.
-# Default 300s ≈ every ~200 train steps at typical ~1.5s/step.
-#
-# BOOT_TIMESTAMP is computed ONCE here so the filename prefix and the
-# train_dsl boot-stamp line in the log share the same UTC moment. Both
-# the background pusher (below) and the final one-shot pusher (after
-# training) must see the same value, otherwise the final commit would
-# write to a different filename than the snapshots.
-export BOOT_TIMESTAMP="\$(date -u +%Y%m%dT%H%M%SZ)"
-echo "    BOOT_TIMESTAMP=\$BOOT_TIMESTAMP (used in log filename prefix)"
-INSTANCE_ID="\$(hostname)" PUSH_INTERVAL='${LOG_PUSH_INTERVAL}' \\
-    BRANCH='${BRANCH}' REPO_SLUG='${REPO_SLUG}' \\
-    BOOT_TIMESTAMP="\$BOOT_TIMESTAMP" \\
-    OOD_EVERY='${OOD_EVERY}' \\
-    nohup bash scripts/log_pusher.sh > /workspace/log_pusher.log 2>&1 &
-LOG_PUSHER_PID=\$!
-echo "    log_pusher pid=\$LOG_PUSHER_PID"
-
-echo "── starting training ──"
-if [ "${USE_DSL}" = "1" ]; then
-    echo "    DSL mode: arch=${ARCH} scale=${SCALE:-default} steps=${STEPS} batch=${BATCH} seq_len=${SEQ_LEN} d_sem=${D_SEM} ood_every=${OOD_EVERY}"
-    ARCH='${ARCH}' SCALE='${SCALE:-}' STEPS='${STEPS}' BATCH='${BATCH}' \\
-        SEQ_LEN='${SEQ_LEN}' D_SEM='${D_SEM}' \\
-        SAVE_EVERY='${SAVE_EVERY}' LOG_EVERY='${LOG_EVERY}' \\
-        OOD_EVERY='${OOD_EVERY}' \\
-        bash scripts/vast_train_dsl_loop.sh 2>&1 | tee /workspace/train.log
-else
-    echo "    Brain mode: preset=${PRESET} steps=${STEPS} batch=${BATCH} grad_accum=${GRAD_ACCUM}"
-    PRESET='${PRESET}' STEPS='${STEPS}' BATCH='${BATCH}' GRAD_ACCUM='${GRAD_ACCUM}' \\
-        OPT=adamw SAVE_EVERY='${SAVE_EVERY}' LOG_EVERY='${LOG_EVERY}' \\
-        FRESH='${FRESH}' \\
-        bash scripts/vast_train_loop.sh 2>&1 | tee /workspace/train.log
-fi
-
-echo "── stopping log-pusher ──"
-kill \$LOG_PUSHER_PID 2>/dev/null || true
-sleep 2   # give it a moment to exit cleanly
-
-# ── Final log push (one-shot) ──────────────────────────────────────
-# Run a single iteration of the pusher loop with PUSH_INTERVAL=1 so it
-# attempts exactly one commit+push of the complete train.log. The loop
-# is unbounded so we wrap with timeout — but we want it to exit ASAP,
-# not poll for 60s. Solution: send SIGTERM after the first cycle (~5s
-# at worst on a successful push).
-#
-# Reuse the same BOOT_TIMESTAMP as the background pusher so the final
-# commit writes to the same filename, not a fresh one.
-SOURCE_LOG=/workspace/train.log INSTANCE_ID="\$(hostname)" \\
-    PUSH_INTERVAL=1 BRANCH='${BRANCH}' REPO_SLUG='${REPO_SLUG}' \\
-    BOOT_TIMESTAMP="\$BOOT_TIMESTAMP" \\
-    timeout 30 bash scripts/log_pusher.sh 2>&1 | head -10 \\
-    || echo "[onstart] final log push: timeout/exit (best-effort)"
-
-# ── Final checkpoint push (DSL trainer doesn't push on save) ──────
-# vast_train_dsl_loop's train_dsl.py saves checkpoints to lfs_checkpoints/
-# locally but doesn't push them — unlike Brain's train.py. Push every
-# dsl_arch_*.pt that landed during this run so the artefacts survive
-# the instance destroy.
-echo "── pushing final checkpoints ──"
-cd /workspace/brian
-ls -la lfs_checkpoints/dsl_arch_*.pt 2>/dev/null || echo "[onstart] no DSL checkpoints to push"
-git config user.email "vast-train@brian.local" || true
-git config user.name  "vast-train"             || true
-for ckpt in lfs_checkpoints/dsl_arch_*.pt; do
-    [ -e "\$ckpt" ] || continue
-    git add "\$ckpt" 2>/dev/null || true
-done
-if ! git diff --cached --quiet 2>/dev/null; then
-    git commit -m "chkpt(dsl): final push @ \$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
-        >/dev/null 2>&1 || echo "[onstart] commit failed"
-    PUSH_URL="https://x-access-token:\${GITHUB}@github.com/${REPO_SLUG}.git"
-    timeout 600 git push "\$PUSH_URL" "HEAD:${BRANCH}" 2>&1 \\
-        | sed "s#\${GITHUB}#***#g" \\
-        || echo "[onstart] checkpoint push failed (will not block destroy)"
-else
-    echo "[onstart] no new checkpoints to commit"
-fi
-
-# ── Self-destroy the vast instance ────────────────────────────────
-# Without this the container stays "running" after onstart exits and
-# bills you indefinitely. Verified 2026-05-30 on 38469631 (8 hours
-# idle after training completed, ~\$10 wasted). Uses the INSTANCE_ID
-# env var that vast.ai injects into every container, fallback to
-# looking ourselves up by container label.
-echo "── self-destroying instance ──"
-if ! command -v vastai >/dev/null 2>&1; then
-    pip install -q vastai 2>&1 | tail -3 || true
-fi
-if [ -n "\${VAST_API_KEY:-}" ] && command -v vastai >/dev/null 2>&1; then
-    vastai set api-key "\$VAST_API_KEY" >/dev/null 2>&1 || true
-    # Vast injects \$CONTAINER_ID and \$VAST_CONTAINERLABEL; the contract
-    # id is usually exposed as \$INSTANCE_ID. Try them in order.
-    SELF_ID="\${INSTANCE_ID:-\${VAST_CONTAINER_ID:-}}"
-    if [ -z "\$SELF_ID" ]; then
-        # Fall back: find our instance by label match.
-        SELF_ID="\$(vastai show instances --raw 2>/dev/null \\
-            | python3 -c "import sys, json
-data = json.load(sys.stdin)
-for i in (data or []):
-    if i.get('label') == 'neuroslm-full':
-        print(i.get('id', '')); break" 2>/dev/null)"
-    fi
-    if [ -n "\$SELF_ID" ]; then
-        echo "[onstart] vastai destroy instance \$SELF_ID"
-        # `yes y` answers the interactive confirmation prompt (no -y
-        # available in this vastai version). Without this the command
-        # hangs waiting for stdin and the instance never destroys.
-        yes y | vastai destroy instance "\$SELF_ID" 2>&1 || echo "[onstart] destroy failed"
-        # The destroy command kills our container — anything past this
-        # never executes. The echo below is reached only if destroy failed.
-        sleep 30
-    else
-        echo "[onstart] could not determine vast instance id; not destroying"
-    fi
-else
-    echo "[onstart] VAST_API_KEY not in env or vastai CLI missing — cannot self-destroy"
-fi
-
-echo "── training exited; FAILED to self-destroy. Run: vastai destroy instance <contract_id> ──"
-ONSTART
-trace "  step 3/4: reading temp file into ONSTART variable"
-# `read -r -d ''` reads until NUL byte (i.e. until EOF); exits 1 on EOF,
-# which `|| true` swallows.  No subshell pipe — reads directly from disk.
-read -r -d '' ONSTART < "$_onstart_tmp" || true
-trace "  step 4/4: cleanup"
-rm -f "$_onstart_tmp"
-trace "onstart heredoc built (${#ONSTART} chars)"
+# ─── Load the onstart script (runs INSIDE the vast container) ────────────
+# VastConnector._build_onstart() in Python wrote the fully-expanded onstart
+# script to a temp file and passed its path via ONSTART_FILE.  Reading
+# line-by-line into a variable avoids all bash heredoc / pipe-buffer issues
+# on Windows Git Bash: the former <<ONSTART heredoc deadlocked because bash's
+# internal heredoc pipe writer fills synchronously and the ~6 KB content
+# exceeded the ~4 KB pipe buffer.
+: "${ONSTART_FILE:?ONSTART_FILE must be set — use brian deploy, not this script directly}"
+ONSTART=""
+while IFS= read -r _onstart_line || [ -n "$_onstart_line" ]; do
+    ONSTART="${ONSTART}${_onstart_line}"$'\n'
+done < "$ONSTART_FILE"
+unset _onstart_line
+[ -n "$ONSTART" ] || { printf '✗ ONSTART empty — ONSTART_FILE=%s\n' "$ONSTART_FILE" >&2; exit 1; }
+trace "onstart script loaded (${#ONSTART} chars)"
 
 # ─── Create the instance ─────────────────────────────────────────────────
 trace "calling: vastai create instance $OFFER_ID --image $VAST_IMAGE --disk $VAST_DISK"

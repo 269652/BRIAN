@@ -524,15 +524,15 @@ def test_O_no_platform_uses_toml(patch_connectors, tmp_path, monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# R: vast_train.sh source contracts — pipe-buffer fix + deploy chain
+# R: vast_train.sh source contracts — no-heredoc onstart + deploy chain
 # ─────────────────────────────────────────────────────────────────────
 #
-# Root issue (Windows Git Bash, 2026-06-23): ONSTART="$(cat <<ONSTART…)"
-# creates a subshell-to-pipe path. The ONSTART heredoc is ~6 KB which
-# exceeds Windows pipe buffers (~4 KB in some Git Bash versions), so cat
-# blocks on write while bash blocks waiting for the subshell to exit —
-# deadlock. The fix: write to a temp file (no pipe), then read with
-# `read -r -d ''` (reads entire file without spawning a subshell pipe).
+# Root issue (Windows Git Bash, 2026-06-23): bash's internal heredoc pipe
+# writer fills synchronously on Windows.  The ~6 KB ONSTART content exceeds
+# the ~4 KB pipe buffer, so the writer blocks and the whole process deadlocks.
+# Fix: Python builds and writes the onstart script to a NamedTemporaryFile
+# (VastConnector._build_onstart), passes the path as ONSTART_FILE, and
+# vast_train.sh reads it line-by-line with `while IFS= read -r` (no pipe).
 
 @pytest.fixture(scope="module")
 def vast_train_sh_src() -> str:
@@ -540,55 +540,43 @@ def vast_train_sh_src() -> str:
 
 
 class TestVastTrainShPipeBufferFix:
-    """vast_train.sh must not use $(cat <<ONSTART…) to build the onstart
-    script — that pattern deadlocks on Windows when the content exceeds
-    the Git Bash pipe buffer."""
+    """vast_train.sh must not use bash heredocs to build the onstart script."""
 
     def test_R1_no_old_pipe_capture_pattern(self, vast_train_sh_src: str):
         """The old ONSTART=\"$(cat <<ONSTART\" pattern must not appear."""
         assert 'ONSTART="$(cat <<ONSTART' not in vast_train_sh_src, (
             "vast_train.sh still uses the pipe-capture heredoc pattern "
             "ONSTART=\"$(cat <<ONSTART…)\". This deadlocks on Windows Git Bash "
-            "when the ~6 KB onstart script exceeds the pipe buffer. "
-            "Use `cat > tmpfile <<ONSTART` + `read -r -d '' ONSTART < tmpfile` instead."
+            "when the ~6 KB onstart script exceeds the pipe buffer."
         )
 
-    def test_R2_writes_to_temp_file(self, vast_train_sh_src: str):
-        """Must write the heredoc to a temp file to avoid the pipe deadlock."""
-        import re
-        assert re.search(r'cat\s+>\s+"\$_onstart_tmp"\s+<<ONSTART', vast_train_sh_src), (
-            "vast_train.sh must use `cat > \"$_onstart_tmp\" <<ONSTART` to write "
-            "the onstart script to a temp file (no pipe involved, avoids deadlock)."
+    def test_R2_reads_via_while_loop(self, vast_train_sh_src: str):
+        """Must read ONSTART_FILE with a while-read loop (no pipe, no heredoc)."""
+        assert "while IFS= read -r _onstart_line" in vast_train_sh_src, (
+            "vast_train.sh must read the onstart file with "
+            "`while IFS= read -r _onstart_line … done < \"$ONSTART_FILE\"` "
+            "to avoid bash heredoc / pipe-buffer deadlock on Windows Git Bash."
         )
 
-    def test_R3_reads_back_without_subshell_pipe(self, vast_train_sh_src: str):
-        """Must use `read -r -d '' ONSTART < file` to avoid a new pipe deadlock."""
-        assert "read -r -d '' ONSTART < " in vast_train_sh_src, (
-            "vast_train.sh must use `read -r -d '' ONSTART < \"$_onstart_tmp\"` to "
-            "load the file content without a subshell pipe. $(cat file) would "
-            "also have a pipe and could deadlock on large files."
+    def test_R3_uses_onstart_file_env_var(self, vast_train_sh_src: str):
+        """Must reference ONSTART_FILE (set by the Python connector)."""
+        assert "ONSTART_FILE" in vast_train_sh_src, (
+            "vast_train.sh must reference ONSTART_FILE, the path written by "
+            "VastConnector._build_onstart() before launching bash."
         )
 
-    def test_R4_cleans_up_temp_file(self, vast_train_sh_src: str):
-        """Temp file must be removed after ONSTART is read."""
-        idx_read = vast_train_sh_src.find("read -r -d '' ONSTART")
-        assert idx_read >= 0
-        # Within 100 chars after the read line there must be `rm -f $_onstart_tmp`
-        snippet = vast_train_sh_src[idx_read: idx_read + 200]
-        assert "rm -f" in snippet and "_onstart_tmp" in snippet, (
-            "The onstart temp file must be removed with `rm -f $_onstart_tmp` "
-            "immediately after reading it."
+    def test_R4_unsets_loop_variable(self, vast_train_sh_src: str):
+        """Loop variable _onstart_line must be unset after the while loop."""
+        assert "unset _onstart_line" in vast_train_sh_src, (
+            "vast_train.sh must `unset _onstart_line` after the while-read "
+            "loop to avoid leaking the loop variable into the rest of the script."
         )
 
     def test_R5_trace_sequence_complete(self, vast_train_sh_src: str):
-        """All six [stage] trace markers must be present in order."""
+        """All four [stage] trace markers must be present in order."""
         markers = [
             "offer selected",
-            "step 1/4: calling mktemp",
-            "step 2/4: writing heredoc",
-            "step 3/4: reading temp file",
-            "step 4/4: cleanup",
-            "onstart heredoc built",
+            "onstart script loaded",
             "calling: vastai create instance",
             "create call starting",
         ]
@@ -598,7 +586,7 @@ class TestVastTrainShPipeBufferFix:
             assert idx >= 0, f"missing trace marker: {m!r}"
             positions.append(idx)
         assert positions == sorted(positions), (
-            "trace markers must appear in order: offer-selected → heredoc-built "
+            "trace markers must appear in order: offer-selected → onstart-loaded "
             "→ calling-create → create-starting"
         )
 
@@ -623,27 +611,38 @@ class TestVastTrainShPipeBufferFix:
         )
 
 
+@pytest.fixture(scope="module")
+def onstart_template() -> str:
+    """The raw _ONSTART_TEMPLATE string from vast.py (before placeholder sub)."""
+    from neuroslm.connectors.vast import _ONSTART_TEMPLATE
+    return _ONSTART_TEMPLATE
+
+
 class TestVastTrainShOnstartContent:
     """The ONSTART content (container-side script) must include all the
-    critical sections that make training work end-to-end."""
+    critical sections that make training work end-to-end.
 
-    def test_R7_onstart_clones_repo(self, vast_train_sh_src: str):
-        assert "git clone" in vast_train_sh_src, (
+    These tests check _ONSTART_TEMPLATE in vast.py — the content was moved
+    from bash <<ONSTART heredoc to Python to fix the pipe-buffer deadlock.
+    """
+
+    def test_R7_onstart_clones_repo(self, onstart_template: str):
+        assert "git clone" in onstart_template, (
             "ONSTART must clone the repo inside the container."
         )
 
-    def test_R8_onstart_runs_bootstrap(self, vast_train_sh_src: str):
-        assert "vast_bootstrap.sh" in vast_train_sh_src, (
+    def test_R8_onstart_runs_bootstrap(self, onstart_template: str):
+        assert "vast_bootstrap.sh" in onstart_template, (
             "ONSTART must run scripts/vast_bootstrap.sh to install deps."
         )
 
-    def test_R9_onstart_runs_training(self, vast_train_sh_src: str):
-        assert "vast_train_dsl_loop.sh" in vast_train_sh_src, (
+    def test_R9_onstart_runs_training(self, onstart_template: str):
+        assert "vast_train_dsl_loop.sh" in onstart_template, (
             "ONSTART must invoke vast_train_dsl_loop.sh for DSL training."
         )
 
-    def test_R10_onstart_has_log_pusher(self, vast_train_sh_src: str):
-        assert "log_pusher.sh" in vast_train_sh_src, (
+    def test_R10_onstart_has_log_pusher(self, onstart_template: str):
+        assert "log_pusher.sh" in onstart_template, (
             "ONSTART must start log_pusher.sh so training progress is "
             "visible from git without SSH-ing into the instance."
         )
@@ -696,4 +695,128 @@ class TestBrianTomlPlatform:
         assert platform == "vast", (
             f"brian.toml [deploy].platform must be 'vast', got {platform!r}. "
             "Run `brian deploy` to target vast.ai by default."
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# S: VastConnector._build_onstart() contracts
+#
+# The Python-side onstart builder replaces the bash <<ONSTART heredoc
+# (which deadlocked on Windows Git Bash due to pipe-buffer overflow).
+# These tests pin the substitution logic and launch integration.
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestBuildOnstart:
+    """_build_onstart() substitutes all __PLACEHOLDER__ markers correctly."""
+
+    def _build(self, **env_overrides) -> str:
+        from neuroslm.connectors.vast import VastConnector
+        env = {
+            "GITHUB": "ghp_test_token",
+            "HF_TOKEN": "hf_test_token",
+            "BRANCH": "master",
+            "REPO_URL": "https://github.com/testuser/BRIAN.git",
+            "FRESH": "1",
+            "ARCH": "architectures/current",
+            "SCALE": "large",
+            "STEPS": "10000",
+            "BATCH": "32",
+            "GRAD_ACCUM": "4",
+            "SEQ_LEN": "512",
+            "D_SEM": "256",
+            "OOD_EVERY": "500",
+            "SAVE_EVERY": "2000",
+            "LOG_EVERY": "20",
+            "PRESET": "",
+            "USE_DSL": "1",
+            "LOG_PUSH_INTERVAL": "300",
+        }
+        env.update(env_overrides)
+        return VastConnector._build_onstart(env)
+
+    def test_S1_github_token_substituted(self):
+        script = self._build(GITHUB="ghp_abc123")
+        assert "ghp_abc123" in script
+        assert "__GITHUB__" not in script
+
+    def test_S2_hf_token_substituted(self):
+        script = self._build(HF_TOKEN="hf_xyz789")
+        assert "hf_xyz789" in script
+        assert "__HF_TOKEN__" not in script
+
+    def test_S3_branch_substituted(self):
+        script = self._build(BRANCH="feature/test-branch")
+        assert "feature/test-branch" in script
+        assert "__BRANCH__" not in script
+
+    def test_S4_repo_slug_derived_from_url(self):
+        script = self._build(REPO_URL="https://github.com/myorg/myrepo.git")
+        assert "myorg/myrepo" in script
+        assert "__REPO_SLUG__" not in script
+
+    def test_S5_steps_substituted(self):
+        script = self._build(STEPS="7777")
+        assert "7777" in script
+        assert "__STEPS__" not in script
+
+    def test_S6_arch_substituted(self):
+        script = self._build(ARCH="architectures/SmolLM")
+        assert "architectures/SmolLM" in script
+        assert "__ARCH__" not in script
+
+    def test_S7_no_placeholders_remain(self):
+        """No __PLACEHOLDER__ markers must survive substitution."""
+        script = self._build()
+        import re
+        remaining = re.findall(r"__[A-Z_]+__", script)
+        assert not remaining, (
+            f"Unsubstituted placeholders remain in onstart script: {remaining}"
+        )
+
+    def test_S8_script_starts_with_set_e(self):
+        """Container script must start with `set -e` for fail-fast behaviour."""
+        script = self._build()
+        assert script.startswith("set -e"), (
+            "Onstart script must begin with `set -e` so any failing command "
+            "aborts the container run visibly."
+        )
+
+    def test_S9_fresh_flag_substituted(self):
+        script = self._build(FRESH="0")
+        assert "__FRESH__" not in script
+
+    def test_S10_default_repo_url_fallback(self):
+        """When REPO_URL is absent, falls back to the hardcoded BRIAN.git URL."""
+        from neuroslm.connectors.vast import VastConnector
+        env = {"GITHUB": "tok", "HF_TOKEN": "hf", "BRANCH": "master"}
+        script = VastConnector._build_onstart(env)
+        assert "269652/BRIAN" in script
+        assert "__REPO_SLUG__" not in script
+
+
+class TestOnstartFileInLaunchEnv:
+    """VastConnector.launch() must set ONSTART_FILE in the subprocess env."""
+
+    def test_S11_onstart_file_in_env(self, capture_subprocess):
+        """launch() must pass ONSTART_FILE to the bash subprocess."""
+        from neuroslm.connectors.base import DeployConfig
+        from neuroslm.connectors.vast import VastConnector
+
+        VastConnector().launch(DeployConfig(steps=100))
+        call = capture_subprocess[0]
+        assert "ONSTART_FILE" in call["env"], (
+            "VastConnector.launch() must set ONSTART_FILE in the env passed to "
+            "bash so vast_train.sh can read the onstart script without a heredoc."
+        )
+
+    def test_S12_onstart_file_is_path_string(self, capture_subprocess):
+        """ONSTART_FILE must be a non-empty string (a file path)."""
+        from neuroslm.connectors.base import DeployConfig
+        from neuroslm.connectors.vast import VastConnector
+
+        VastConnector().launch(DeployConfig(steps=100))
+        onstart_file = capture_subprocess[0]["env"].get("ONSTART_FILE", "")
+        assert isinstance(onstart_file, str) and len(onstart_file) > 0, (
+            "ONSTART_FILE must be a non-empty file path string."
         )

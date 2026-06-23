@@ -124,20 +124,24 @@ class TestOodSentinelGate:
         )
 
 
-# ── Contract D: vast_train.sh exports OOD_EVERY to log pusher ─────────────
+# ── Contract D: onstart script exports OOD_EVERY to log pusher ───────────
+# (log_pusher.sh is launched from _ONSTART_TEMPLATE in neuroslm/connectors/vast.py,
+# not from vast_train.sh directly — the heredoc was moved to Python to fix the
+# pipe-buffer deadlock on Windows Git Bash.)
 
 class TestVastTrainExportsOodEvery:
     def test_ood_every_in_log_pusher_launch(self):
         # The `nohup bash scripts/log_pusher.sh` invocation must carry
         # OOD_EVERY so the daemon knows which mode to use.
-        # We find the block that contains `log_pusher.sh` and check for
-        # OOD_EVERY in a nearby few hundred chars.
-        idx = VAST_TRAIN.find("log_pusher.sh")
-        assert idx >= 0, "vast_train.sh must launch log_pusher.sh"
+        # The log_pusher.sh launch is now inside _ONSTART_TEMPLATE in vast.py.
+        from neuroslm.connectors.vast import _ONSTART_TEMPLATE
+        onstart = _ONSTART_TEMPLATE
+        idx = onstart.find("log_pusher.sh")
+        assert idx >= 0, "onstart template must launch log_pusher.sh"
         # Look at the preceding ~400 chars (env var prefix before the nohup)
-        context = VAST_TRAIN[max(0, idx - 400): idx + 100]
+        context = onstart[max(0, idx - 400): idx + 100]
         assert "OOD_EVERY" in context, (
-            "vast_train.sh must export OOD_EVERY to the log_pusher.sh "
+            "onstart script must export OOD_EVERY to the log_pusher.sh "
             "background process so it can switch to OOD-sentinel mode"
         )
 
