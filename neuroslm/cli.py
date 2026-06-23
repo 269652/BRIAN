@@ -4269,6 +4269,20 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="Lines of log to pull when --logs is set (default 200)")
     sps.set_defaults(func=cmd_ps)
 
+    # psi — alias for `ps --it --interval 1`
+    spsi = sub.add_parser("psi", help="Interactive process watch (alias: ps --it --interval 1)")
+    spsi.add_argument("--interval", type=float, default=1.0,
+                      help="seconds between refreshes (default 1)")
+    spsi.add_argument("--platform", choices=["all", "vast", "lightning"],
+                      default="all",
+                      help="restrict to one cloud platform (default: all)")
+    spsi.add_argument("--all", action="store_true",
+                      help="include non-neuroslm instances too (vast only)")
+    spsi.set_defaults(func=lambda a: cmd_ps(argparse.Namespace(
+        it=True, interval=a.interval, platform=a.platform,
+        all=a.all, colab=None, logs=None, tail=200,
+    )))
+
     # destroy
     sde = sub.add_parser("destroy", help="Tear down vast instance(s)")
     sde.add_argument("instance_id", nargs="?")
