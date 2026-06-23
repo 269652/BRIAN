@@ -947,11 +947,15 @@ class LMExpert(nn.Module):
             )
             trunk_offsets = trunk_enc["offset_mapping"]
             expert_offsets = expert_enc["offset_mapping"]
-            # Truncate at min(T, _expert_max_ctx) — see docstring
-            # "Safety guards".  The T-cap avoids wasted re-tokenisation
-            # work; the _expert_max_ctx-cap prevents position-embedding
-            # out-of-bounds (GPT-2: n_positions=1024, trunk seq_len=2048).
-            _expert_cap = min(T, self._expert_max_ctx)
+            # Truncate at min(T, _expert_max_ctx, _BRIDGE_T_MAX).
+            # _expert_max_ctx: prevents PE out-of-bounds (GPT-2: 1024).
+            # _BRIDGE_T_MAX: memory guard — large-vocab experts (Qwen2:
+            # V=151936) produce a (1, T, V) bf16 tensor per sample;
+            # at T=2048 that's ~594 MiB which OOMs on constrained GPUs
+            # alongside trunk activations.  At T=512 it's ~150 MiB.
+            # Positions beyond the cap stay as abstain (zeros → uniform).
+            _BRIDGE_T_MAX = 512
+            _expert_cap = min(T, self._expert_max_ctx, _BRIDGE_T_MAX)
             expert_input_ids_list = expert_enc["input_ids"][:_expert_cap]
             expert_offsets = expert_offsets[:_expert_cap]
             expert_input_ids = torch.tensor(
