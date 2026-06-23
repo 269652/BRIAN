@@ -28,6 +28,7 @@ from neuroslm.dsl.regularization import (
     DARConfig, PCCConfig, IsotropyConfig, CMDConfig, AdaptiveMixtureConfig,
     FreqBalanceConfig, CDGAConfig,
     RegularizationConfig,
+    KJPLAPhaseLatticeConfig,
 )
 
 
@@ -1017,4 +1018,44 @@ class RegularizationController(nn.Module):
 
         loss = float(cfg_sym.noether_strength) * noether
         return {"loss": loss, "H_diff": H_diff}
+
+    # ── Phase 3: KJPLA-v2 Josephson inter-layer coupling ──────────────
+
+    def collect_kjpla_aux(
+        self,
+        total: torch.Tensor,
+        phi_list: list,
+        kjpla_layers: list,
+        metrics: "dict | None" = None,
+    ) -> torch.Tensor:
+        """Compute Josephson inter-layer loss from stashed phases and return
+        updated total.
+
+        Args:
+            total:        Current accumulated scalar loss.
+            phi_list:     List[Tensor(B,H,T) bfloat16], one per layer.
+            kjpla_layers: List[KJPLAttention], one per layer (for K_h, delta_h).
+            metrics:      Optional dict to accumulate diagnostic scalars.
+
+        Returns updated total (unchanged when disabled or josephson_strength=0).
+        """
+        cfg_kjpla = self.cfg.kjpla_phase_lattice
+        if not cfg_kjpla.enabled:
+            return total
+
+        from neuroslm.mechanisms.kjpla import josephson_loss as _j_loss
+
+        K_h_list = [m.K_h for m in kjpla_layers]
+        delta_h_list = [m.delta_h for m in kjpla_layers]
+        j_loss = _j_loss(phi_list, K_h_list, delta_h_list)
+
+        if metrics is not None:
+            key = "josephson_loss"
+            metrics[key] = j_loss.detach().item() if j_loss.requires_grad or j_loss.is_leaf else j_loss.item()
+
+        strength = float(cfg_kjpla.josephson_strength)
+        if strength > 0.0:
+            total = total + strength * j_loss
+
+        return total
 

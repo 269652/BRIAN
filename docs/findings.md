@@ -654,6 +654,53 @@ and running one Stoermer-Verlet leapfrog step of a learned Hamiltonian
   active in arch, next training run needed. Per CLAUDE.md §1e the deploy
   requires explicit user authorisation; not initiated by this session.
 
+### H26 — KJPLA-v2: Kuramoto-Josephson Phase Lattice Attention (2026-06-23)
+
+**Hypothesis.** Equipping each attention head with a per-(head, layer, token)
+phase φ and coupling phases across heads (intra-layer Kuramoto) and across
+layers (inter-layer Josephson) provides a calibration signal that:
+
+1. **Head diversity (Kuramoto sync).** Phases converge toward a shared mean
+   when η > 0, but distinct phases survive when w_h encodes divergent content
+   signals. We predict that PLV (Phase Locking Value) per head remains
+   heterogeneous (std > 0.1) across heads after 2k steps — not collapsed.
+2. **Josephson inter-layer coupling.** When K_h > 0, the optimizer is rewarded
+   for maintaining a layer-to-layer phase stride of Δ_h = 2πh/(H·L). We predict
+   the order parameter R_ℓ climbs toward 0.8+ over 5k steps (random init ≈ 0.0).
+3. **OOD gap_ratio.** With josephson_strength > 0, we predict gap_ratio ≤ 4.9
+   (H22 baseline: 6.55) at matched step count, motivated by the phase ordering
+   inducing more structured cross-layer information routing.
+
+- **Spec.** `architectures/master/arch.neuro` + `architectures/SmolLM/arch.neuro`
+  — block `regularization { kjpla_phase_lattice: { enabled: true,
+  josephson_strength: 0.0, entropy_strength: 0.0, eps_H: 0.5 } }`. Active in
+  **DIAGNOSTIC MODE** — `josephson_loss` (= 0 at K_h=0) logged every step.
+  Penalty mode (`josephson_strength > 0`) is a follow-up experiment.
+- **Mechanism.** `neuroslm/mechanisms/kjpla.py` — `KJPLAttention` replaces
+  `CausalSelfAttention` in the trunk. Phases init to zero (w_h=0, η=β_h=K_h=0)
+  so step-0 loss is bit-identical to vanilla (`torch.equal`, not allclose). Phase
+  stash is bfloat16 (memory discipline). delta_h is a non-persistent buffer
+  (deterministic from n_heads·n_layers, not saved in state_dict).
+  `josephson_loss` function computes L_J = −(1/L)Σ K̄_h · R_ℓ standalone
+  (testable independent of forward). Consumed by
+  `RegularizationController.collect_kjpla_aux()`; auto-fired by
+  `BRIANHarness._kjpla_aux_step()` after `_symplectic_aux_step`.
+- **TDD evidence.** 65 GREEN tests across 4 files:
+  - `tests/dsl/test_kjpla_attention.py` (35 tests) — bit-identity at zero init
+    (`torch.equal`), bfloat16 phi stash, delta_h non-persistent, Josephson
+    R=1 when phi stride matches delta_h, FD vs autograd on beta_h (atol=1e-3),
+    Kuramoto: eta=0 gives phi1==phi0, backward reaches K_h.grad, T=1/GQA
+    boundary cases.
+  - `tests/dsl/test_kjpla_dsl_parse.py` (18 tests) — DSL parse: defaults,
+    full block, josephson_strength/entropy_strength/eps_H validation.
+  - `tests/dsl/test_kjpla_regcontroller.py` (6 tests) — disabled/diagnostic/
+    active paths, no-key-leak when disabled, backward from total.
+  - `tests/dsl/test_kjpla_harness.py` (6 tests) — _kjpla_aux_step wiring,
+    no-key-leak when disabled, backward from total.
+- **Outcome.** ⏳ **PENDING DEPLOY.** Mechanism wired and diagnostic active;
+  first training run needed to observe R_ℓ trajectory. Per CLAUDE.md §1e the
+  deploy requires explicit user authorisation; not initiated by this session.
+
 ---
 
 ## What proved to solve or break things — the punchline list

@@ -495,12 +495,15 @@ with EvolutionaryTrainingContext("dna/base.dna", "checkpoints/") as ctx:
 | motor, CPC, RSSM, novel aux | embodied + optional modules | 0.05–0.1 × maturation |
 | `topo_loss` (H24) | `α·(Q_h − Q*)² + γ·ε_ortho` from `topo_charge` diagnostic | `α`, `γ` (default 0 = diagnostic-only) |
 | `noether_loss` (H25) | `λ·(H_final − H_initial)²` leapfrog Noether residual | `λ` (default 0 = diagnostic-only) |
+| `josephson_loss` (H26) | `−(1/L)Σ K̄_h·R_ℓ` inter-layer Josephson phase coupling | `λ_J` (default 0 = diagnostic-only) |
 
 The maturation gate `_aux_w_scale ∈ [0.001, 1.0]` suppresses all aux losses until step ${MATURATION_STEP_THRESHOLD} (or lm\_loss < ${MATURATION_LM_LOSS_THRESHOLD}), so the LM gradient dominates during early training.
 
 The `topo_loss` row (Phase 1 of the 3-mechanism THSD program) is enabled in arch.neuro by default as **diagnostic-only** (`α = γ = 0`): per-head Berg-Lüscher discrete windings `Q_h` and inter-layer orientation decorrelation `ε_ortho` are logged every step but zero is added to the loss. See `docs/findings.md` H24 + `neuroslm/mechanisms/topo_charge.py`. Activating the soft penalty (`α > 0` or `γ > 0`) is a follow-up experiment.
 
 The `noether_loss` row (Phase 2 of the THSD program) is enabled in arch.neuro by default as **diagnostic-only** (`λ = 0`): `noether_H_diff = |H_final − H_initial|` is logged every step but zero is added to the loss. The Liouville symplectic residual block runs one leapfrog step on the final hidden state; det(J) = 1 is guaranteed by the triangular-shear structure of the Stoermer-Verlet integrator. See `docs/findings.md` H25 + `neuroslm/mechanisms/liouville_symplectic.py`.
+
+The `josephson_loss` row (Phase 3 of the THSD program) is enabled in arch.neuro by default as **diagnostic-only** (`λ_J = 0`): the Josephson order parameter R_ℓ is logged every step but zero is added to the loss. Each attention head carries a per-(head, layer, token) phase φ with intra-layer Kuramoto sync (η) and inter-layer Josephson coupling (K_h). At zero init all scalars are zero, so step-0 loss is bit-identical to vanilla (`torch.equal`). See `docs/findings.md` H26 + `neuroslm/mechanisms/kjpla.py`.
 
 ---
 

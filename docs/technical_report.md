@@ -706,6 +706,29 @@ DSL surface: `regularization { liouville_symplectic: { enabled: true, noether_st
 
 **References:** Hairer, Lubich & Wanner (2006) *Geometric Numerical Integration*, Springer; Stoermer (1907); Verlet (1967). [⏳ DIAGNOSTIC ACTIVE, METRICS PENDING DEPLOY]
 
+### 9.8 KJPLA-v2: Kuramoto-Josephson Phase Lattice Attention (H26, Phase 3 of THSD program)
+
+**Mechanism:** Each attention head carries a per-(head, layer, token) phase `φ ∈ ℝ` derived from the query vectors:
+
+```
+φ₀_h(t) = Σ_d  w_h[d] · q[b,h,t,d]          # content-carrier phase
+φ₁_h(t) = φ₀_h(t) + η · (1/H) Σ_j sin(φ₀_j − φ₀_h)   # Kuramoto sync
+logit(t,s) = (q·k)/√d  +  β_h · cos(φ₁_h(t) − φ₁_h(s)) # phase-gated attn
+```
+
+The inter-layer Josephson coupling loss (consumed by the harness):
+`L_J = −(1/L) Σ_ℓ K̄_h · R_ℓ`, where `R_ℓ = |⟨e^{i(φ_ℓ − φ_{ℓ-1} − Δ_h)}⟩_t|` is the Kuramoto order parameter measuring how well layer-to-layer phase strides match the target `Δ_h = 2πh/(H·L)`.
+
+All scalars (η, β_h, K_h) and the content-carrier w_h init to zero (ReZero convention), so at step 0 the forward pass is **bit-identical** to vanilla `CausalSelfAttention` (verified by `torch.equal`, not allclose). Phase stash is bfloat16 (memory discipline). `delta_h` is a non-persistent buffer reconstructed deterministically on load.
+
+DSL surface: `regularization { kjpla_phase_lattice: { enabled: true, josephson_strength: λ_J, entropy_strength: λ_H, eps_H: ε } }`. With `λ_J = 0` (default) the mechanism is **diagnostic-only**: `josephson_loss` is logged every step, zero added to the loss budget.
+
+Wiring: `KJPLAttention` ← `language_model._last_kjpla_{phi_list,layers}` ← `RegularizationController.collect_kjpla_aux()` ← `BRIANHarness._kjpla_aux_step()` (called after `_symplectic_aux_step`).
+
+**TDD evidence:** 65 GREEN tests across 4 files: bit-identity (`torch.equal`), bfloat16 phi stash, delta_h non-persistent (not in state_dict), Josephson R=1 when phase stride matches target, backward reaches K_h.grad, FD vs autograd on beta_h (atol=1e-3), T=1/GQA boundary cases. See `docs/findings.md` H26 for the falsifiable predictions.
+
+**References:** Kuramoto, Y. (1984) *Chemical Oscillations, Waves and Turbulence*, Springer; Josephson, B.D. (1962) *Phys. Lett.* 1(7). [⏳ DIAGNOSTIC ACTIVE, METRICS PENDING DEPLOY]
+
 ---
 
 ## 10. Training Dynamics & Failure Modes

@@ -310,6 +310,36 @@ class LiouvilleSymplecticConfig:
     w_rank: int = 4
 
 
+# ── Intervention J: KJPLA-v2 Phase Lattice Attention ────────────────
+
+@dataclass
+class KJPLAPhaseLatticeConfig:
+    """Kuramoto-Josephson Phase Lattice Attention config.
+
+    Adds per-(head, layer, token) phase φ with:
+      - Intra-layer Kuramoto sync (eta)
+      - Inter-layer Josephson order parameter R_ℓ (K_h)
+      - Phase-gated attention logits (beta_h)
+
+    At josephson_strength=0 the mechanism runs diagnostically (R_ℓ is
+    logged) with zero loss contribution.  At josephson_strength>0 the
+    term L_J = -(1/L) Σ K̄_h · R_ℓ is added to the loss.
+
+    entropy_strength > 0 adds a soft phase-entropy floor loss to prevent
+    phase collapse (all heads synchronize to the same phase).
+
+    Fields:
+        enabled            -- wire the mechanism (False = zero overhead).
+        josephson_strength -- weight on the Josephson coupling loss (>= 0).
+        entropy_strength   -- weight on the phase-entropy floor loss (>= 0).
+        eps_H              -- entropy floor in nats (> 0).
+    """
+    enabled: bool = False
+    josephson_strength: float = 0.0
+    entropy_strength: float = 0.0
+    eps_H: float = 0.5
+
+
 # ── Top-level container ──────────────────────────────────────────────
 
 @dataclass
@@ -341,6 +371,8 @@ class RegularizationConfig:
         default_factory=PontryaginTopoChargeConfig)
     liouville_symplectic: LiouvilleSymplecticConfig = field(
         default_factory=LiouvilleSymplecticConfig)
+    kjpla_phase_lattice: KJPLAPhaseLatticeConfig = field(
+        default_factory=KJPLAPhaseLatticeConfig)
     warmup_steps: int = 2000
     activation_step: int = 0
     """First global step at which any aux loss may be non-zero.
@@ -384,6 +416,7 @@ class RegularizationConfig:
             self.cdga.enabled,
             self.pontryagin_topo_charge.enabled,
             self.liouville_symplectic.enabled,
+            self.kjpla_phase_lattice.enabled,
         ])
 
 
@@ -437,6 +470,9 @@ def parse_regularization_block(body: str) -> RegularizationConfig:
     if "liouville_symplectic" in props:
         cfg.liouville_symplectic = _parse_liouville_symplectic(
             props["liouville_symplectic"])
+    if "kjpla_phase_lattice" in props:
+        cfg.kjpla_phase_lattice = _parse_kjpla_phase_lattice(
+            props["kjpla_phase_lattice"])
 
     return cfg
 
@@ -579,6 +615,27 @@ def _parse_pontryagin_topo_charge(raw: str) -> PontryaginTopoChargeConfig:
         raise ValueError(
             f"pontryagin_topo_charge.weight_init_std="
             f"{out.weight_init_std} must be > 0")
+    return out
+
+
+def _parse_kjpla_phase_lattice(raw: str) -> KJPLAPhaseLatticeConfig:
+    p = _split_top_level_kv(_strip_braces(raw))
+    out = KJPLAPhaseLatticeConfig()
+    if "enabled" in p:              out.enabled = _parse_bool(p["enabled"])
+    if "josephson_strength" in p:   out.josephson_strength = float(p["josephson_strength"])
+    if "entropy_strength" in p:     out.entropy_strength = float(p["entropy_strength"])
+    if "eps_H" in p:                out.eps_H = float(p["eps_H"])
+    if out.josephson_strength < 0.0:
+        raise ValueError(
+            f"kjpla_phase_lattice.josephson_strength="
+            f"{out.josephson_strength} must be >= 0")
+    if out.entropy_strength < 0.0:
+        raise ValueError(
+            f"kjpla_phase_lattice.entropy_strength="
+            f"{out.entropy_strength} must be >= 0")
+    if out.eps_H <= 0.0:
+        raise ValueError(
+            f"kjpla_phase_lattice.eps_H={out.eps_H} must be > 0")
     return out
 
 

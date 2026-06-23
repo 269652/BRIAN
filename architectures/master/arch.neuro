@@ -885,6 +885,13 @@ training {
                                 dtau_init: 0.1,
                                 potential_kind: quadratic,
                                 w_rank: 4 }
+        # Phase 3: KJPLA-v2 Phase Lattice Attention (H26).
+        # Diagnostic-only at josephson_strength=0 (step-0 loss unchanged).
+        # Penalty mode (josephson_strength > 0) is a follow-up experiment.
+        kjpla_phase_lattice: { enabled: true,
+                               josephson_strength: 0.0,
+                               entropy_strength: 0.0,
+                               eps_H: 0.5 }
     }
 }
 

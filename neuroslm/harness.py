@@ -968,6 +968,40 @@ class BRIANHarness(nn.Module):
             self._metrics["noether_H_diff"] = float(sym_out["H_diff"])
         return total
 
+    # ── Phase 3: KJPLA-v2 Phase Lattice Attention wiring ─────────────
+
+    def _kjpla_aux_step(self, total: torch.Tensor) -> torch.Tensor:
+        """Compose the Josephson inter-layer loss into the LM loss budget.
+
+        No-op when cfg.regularization.kjpla_phase_lattice.enabled is False
+        or when the language model has no _last_kjpla_phi_list stash.
+
+        Records:
+            self._metrics["josephson_loss"] -- scalar contribution
+        Key is ONLY set when the mechanism is enabled.
+        """
+        rc = getattr(self, "reg_controller", None)
+        if rc is None:
+            return total
+        cfg_kjpla = getattr(
+            getattr(rc, "cfg", None), "kjpla_phase_lattice", None)
+        if cfg_kjpla is None or not cfg_kjpla.enabled:
+            return total
+        lm = self.language_model
+        if lm is None:
+            return total
+        phi_list = getattr(lm, "_last_kjpla_phi_list", None)
+        kjpla_layers = getattr(lm, "_last_kjpla_layers", None)
+        if phi_list is None or not phi_list or kjpla_layers is None:
+            return total
+
+        metrics: dict = {}
+        total = rc.collect_kjpla_aux(total, phi_list, kjpla_layers, metrics)
+        with torch.no_grad():
+            for k, v in metrics.items():
+                self._metrics[k] = float(v) if not isinstance(v, float) else v
+        return total
+
     # ── Multi-Trunk-V2: specialist language cortex ensemble ─────────
     def _build_multi_cortex(self) -> None:
         """Build a `MultiCortexEnsemble` from `cfg.multi_cortex`.
@@ -2977,6 +3011,7 @@ class BRIANHarness(nn.Module):
         total = self._cortex_fusion_aux_step(total, targets)
         total = self._topo_charge_aux_step(total)
         total = self._symplectic_aux_step(total)
+        total = self._kjpla_aux_step(total)
 
         # ── Runtime metric registry update ──
         # Cheap runtime Phi proxy: per-token softmax entropy normalised
