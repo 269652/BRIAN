@@ -323,9 +323,17 @@ class SurpriseHead(nn.Module):
         nll_local = F.cross_entropy(
             local_logits.reshape(B * T, -1),
             self._labels.reshape(B * T), reduction="none").reshape(B, T)
-        nll_global = F.cross_entropy(
-            global_logits.reshape(B * T, -1),
-            self._labels.reshape(B * T), reduction="none").reshape(B, T)
+        # nll_global: chunked + no_grad to avoid a single (B*T, V) fp32
+        # softmax alloc (~6 GiB at B=16, T=2048, V=50257 on CUDA).
+        _CHUNK = 512
+        labels_flat = self._labels.reshape(B * T)
+        global_flat = global_logits.detach().reshape(B * T, -1)
+        with torch.no_grad():
+            nll_global = torch.cat([
+                F.cross_entropy(global_flat[i:i + _CHUNK],
+                                labels_flat[i:i + _CHUNK], reduction="none")
+                for i in range(0, B * T, _CHUNK)
+            ]).reshape(B, T)
         return (nll_local - nll_global).detach()
 
 

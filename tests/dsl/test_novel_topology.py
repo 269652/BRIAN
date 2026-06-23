@@ -232,6 +232,52 @@ class TestSurpriseHead:
             f"|mean|={surp.abs().mean().item():.3f}"
         )
 
+    def test_nll_global_chunked_matches_direct(self):
+        """nll_global must be computed in a no_grad+chunked pass to avoid
+        allocating a single (B*T, V) fp32 softmax buffer.  At training
+        scale (B=16, T=2048, V=50257) the direct allocation is ~6.14 GiB
+        and triggers CUDA OOM.  The chunked result must be numerically
+        identical to the direct F.cross_entropy reference.
+        """
+        import torch.nn.functional as F
+        from neuroslm.dsl.novel_topology import SurpriseHead
+
+        V = 50257
+        D = 64
+        B, T = 2, 8
+
+        torch.manual_seed(99)
+        head = SurpriseHead(d_model=D, vocab=V, dim=32, local_window=4)
+        head.train()
+
+        hidden = torch.randn(B, T, D)
+        global_logits = torch.randn(B, T, V)
+        labels = torch.randint(0, V, (B, T))
+
+        # Reference surprise computed directly (fine on CPU at this scale)
+        with torch.no_grad():
+            x = hidden.transpose(1, 2)
+            x = F.pad(x, (head.local_window - 1, 0))
+            z = F.silu(head.local_conv(x)).transpose(1, 2)
+            local_logits = head.head(z)
+            nll_local_ref = F.cross_entropy(
+                local_logits.reshape(B * T, -1),
+                labels.reshape(B * T), reduction="none"
+            ).reshape(B, T)
+            nll_global_ref = F.cross_entropy(
+                global_logits.reshape(B * T, -1),
+                labels.reshape(B * T), reduction="none"
+            ).reshape(B, T)
+        expected = (nll_local_ref - nll_global_ref)
+
+        head.set_labels(labels)
+        surprise = head(hidden, global_logits)
+
+        assert surprise is not None
+        assert surprise.shape == (B, T)
+        assert torch.isfinite(surprise).all()
+        torch.testing.assert_close(surprise, expected, rtol=1e-4, atol=1e-4)
+
     def test_surprise_gates_episodic_writes(self):
         """When BOTH surprise_head and episodic_memory are on, only
         the top-`write_quantile` surprising tokens should be written
