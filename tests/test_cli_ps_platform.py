@@ -3,15 +3,27 @@
 
 Contracts locked here
 ─────────────────────
-  P1. `brian ps --platform lightning` against an empty registry prints a
-      friendly "no Lightning jobs registered" message and exits 0.
-  P2. `brian ps --platform lightning` lists registered Lightning jobs.
+  P1. `brian ps --platform lightning` against an empty registry shows fallback
+      message and exits 0 (no section header, no table).
+  P2. `brian ps --platform lightning` lists registered running Lightning jobs
+      in the unified table with "l" platform code.
   P3. `brian ps --platform vast` skips the Lightning section entirely.
   P4. `brian ps --logs <job_id>` dispatches to the right connector's
       tail_logs() and returns 0.
   P5. `brian ps --logs <unknown_id>` returns 1 with an error message.
   P6. `brian stop <job_id>` dispatches to the connector's stop().
   P7. `brian stop <unknown_id>` returns 1 with an error message.
+
+  Q1. No active instances across all platforms → single fallback message, no
+      table and no per-platform section headers.
+  Q2. Active instances present → unified table with a "P" column (platform
+      code: v/l/c).
+  Q3. `--all` flag shows stopped/completed instances that would otherwise
+      be filtered from the table.
+  Q4. Stopped Lightning job hidden by default, shown with --all.
+  Q5. Legend line "v=vast.ai  l=lightning" appears after the table when rows
+      are rendered.
+  Q6. Fallback message when no active instances includes "--all" hint.
 """
 from __future__ import annotations
 
@@ -87,10 +99,11 @@ def test_P1_ps_platform_lightning_empty_registry(jobs_dir, stub_vast):
         rc = cmd_ps(args)
     out = buf.getvalue()
     assert rc == 0
-    assert "── Lightning AI ──" in out
-    assert "no Lightning jobs registered" in out
-    # Lightning-only run skips the vast section header
+    # Unified format: no per-platform section headers
+    assert "── Lightning AI ──" not in out
     assert "── vast.ai ──" not in out
+    # No active instances → fallback message shown
+    assert "no active" in out.lower() or "No active" in out
 
 
 def test_P2_ps_platform_lightning_lists_registered(jobs_dir, stub_vast,
@@ -134,8 +147,10 @@ def test_P3_ps_platform_vast_skips_lightning_section(jobs_dir, stub_vast,
         rc = cmd_ps(args)
     out = buf.getvalue()
     assert rc == 0
-    assert "── vast.ai ──" in out
+    # Unified format: no per-platform section headers
+    assert "── vast.ai ──" not in out
     assert "── Lightning AI ──" not in out
+    # Lightning job must never appear in vast-only view
     assert "ln-hidden" not in out
 
 
@@ -256,3 +271,143 @@ def test_P7_stop_notimplemented_connector_returns_1(jobs_dir, monkeypatch):
     assert rc == 1
     assert "does not support stop" in err.getvalue()
     assert "brian destroy" in err.getvalue()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Q: Unified table + active-only filtering contracts
+# ─────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def stub_lightning_no_jobs(monkeypatch):
+    """Lightning connector returns no jobs (empty registry)."""
+    monkeypatch.setattr(
+        "neuroslm.cli._collect_lightning_rows",
+        lambda args: [],
+    )
+
+
+@pytest.fixture
+def stub_lightning_stopped(monkeypatch):
+    """Lightning connector returns one stopped job."""
+    from neuroslm.connectors import JobStatus
+    monkeypatch.setattr(
+        "neuroslm.cli._collect_lightning_rows",
+        lambda args: [{
+            "plat": "l", "id": "ln-stopped", "label": "old-run",
+            "gpu": "T4", "cost": None, "uptime_mins": 100,
+            "phase": JobStatus.STOPPED.value, "is_active": False,
+            "_step_s": "-", "_ppl_s": "-", "_ood_s": "-", "_tps_s": "-",
+        }],
+    )
+
+
+@pytest.fixture
+def stub_lightning_running(monkeypatch):
+    """Lightning connector returns one running job."""
+    monkeypatch.setattr(
+        "neuroslm.cli._collect_lightning_rows",
+        lambda args: [{
+            "plat": "l", "id": "ln-running", "label": "active-run",
+            "gpu": "T4", "cost": None, "uptime_mins": 30,
+            "phase": "running", "is_active": True,
+            "_step_s": "5000", "_ppl_s": "42.1", "_ood_s": "-", "_tps_s": "12k",
+        }],
+    )
+
+
+def test_Q1_no_active_instances_shows_fallback(
+        jobs_dir, stub_vast, stub_lightning_no_jobs):
+    """No active instances on any platform → fallback message, no table."""
+    from neuroslm.cli import cmd_ps
+    args = _make_ps_args(platform="all")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cmd_ps(args)
+    out = buf.getvalue()
+    assert rc == 0
+    # No table header
+    assert "─────" not in out or "No active" in out
+    # Fallback message
+    assert "no active" in out.lower()
+    # No per-platform section headers
+    assert "── Lightning AI ──" not in out
+    assert "── vast.ai ──" not in out
+
+
+def test_Q2_active_rows_render_unified_table_with_plat_column(
+        jobs_dir, stub_vast, stub_lightning_running):
+    """Active instances → one table with 'P' header column, no section headers."""
+    from neuroslm.cli import cmd_ps
+    args = _make_ps_args(platform="all")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cmd_ps(args)
+    out = buf.getvalue()
+    assert rc == 0
+    # Table header has a platform column
+    assert "P " in out or "  P  " in out or "P\n" in out or "P " in out
+    # Job appears
+    assert "ln-running" in out
+    assert "active-run" in out
+    # No section headers
+    assert "── Lightning AI ──" not in out
+    assert "── vast.ai ──" not in out
+
+
+def test_Q3_stopped_lightning_hidden_by_default(
+        jobs_dir, stub_vast, stub_lightning_stopped):
+    """Stopped lightning job must not appear in the table unless --all."""
+    from neuroslm.cli import cmd_ps
+    args = _make_ps_args(platform="all", all=False)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        cmd_ps(args)
+    out = buf.getvalue()
+    assert "ln-stopped" not in out
+    assert "old-run" not in out
+
+
+def test_Q4_all_flag_shows_stopped_instances(
+        jobs_dir, stub_vast, stub_lightning_stopped):
+    """--all reveals stopped lightning instances that would otherwise be hidden."""
+    from neuroslm.cli import cmd_ps
+    args = _make_ps_args(platform="all", all=True)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        cmd_ps(args)
+    out = buf.getvalue()
+    assert "ln-stopped" in out
+    assert "old-run" in out
+
+
+def test_Q5_legend_appears_after_table(
+        jobs_dir, stub_vast, stub_lightning_running):
+    """Legend line appears at the bottom of the table when rows are shown."""
+    from neuroslm.cli import cmd_ps
+    args = _make_ps_args(platform="all")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        cmd_ps(args)
+    out = buf.getvalue()
+    # Legend present
+    assert "v=vast" in out
+    assert "l=lightning" in out
+    # Legend after the table rows
+    table_pos = out.find("ln-running")
+    legend_pos = out.find("v=vast")
+    assert table_pos >= 0
+    assert legend_pos > table_pos
+
+
+def test_Q6_fallback_includes_all_hint(
+        jobs_dir, stub_vast, stub_lightning_no_jobs):
+    """Fallback message when no active instances includes the --all hint."""
+    from neuroslm.cli import cmd_ps
+    args = _make_ps_args(platform="all", all=False)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        cmd_ps(args)
+    out = buf.getvalue()
+    assert "no active" in out.lower()
+    assert "--all" in out

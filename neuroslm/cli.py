@@ -1115,6 +1115,25 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         config.arch = str(workspace.arch_root)
         config.source_dna = dna_path
 
+    # ── Load secrets from .env before the connector reads os.environ ──
+    # VastConnector._build_env() does os.environ.copy(), so GITHUB /
+    # HF_TOKEN / VAST_API_KEY must be in os.environ at call time.
+    # bootstrap_secrets() walks CWD upward for a .env file and writes
+    # found values into os.environ — it is a no-op when values are
+    # already exported or the .env is absent.
+    try:
+        from neuroslm.utils.secrets import bootstrap_secrets
+        bootstrap_secrets(
+            ["GITHUB", "HF_TOKEN", "VAST_API_KEY"],
+            aliases={
+                "GITHUB":       ["GITHUB_TOKEN", "GITHUB_PAT", "GH_TOKEN"],
+                "VAST_API_KEY": ["VAST_AI", "VASTAI_API_KEY"],
+            },
+            verbose=False,
+        )
+    except Exception:
+        pass
+
     # ── Dispatch to connector ──
     try:
         connector = get_connector(platform)
@@ -1712,6 +1731,141 @@ def _scan_recent_destroyed(top_n: int = 3) -> list:
     return rows[:top_n]
 
 
+# ── Vast.ai "actual_status" values that mean the container is gone ──
+_INACTIVE_VAST_STATUSES = frozenset(
+    ("stopped", "destroyed", "offline", "exited", "failed")
+)
+# ── Lightning JobStatus values that mean the run is still live ──
+_ACTIVE_LN_STATUSES = frozenset(("pending", "starting", "running", "stopping"))
+
+
+def _collect_vast_rows(args: argparse.Namespace) -> "tuple[list, str | None]":
+    """Query vast.ai and return (row_dicts, error_msg_or_None).
+
+    Each row dict has: plat="v", id, label, gpu, cost, uptime_mins,
+    is_active, and all keys from _parse_status() (step, ppl, phase, …).
+    """
+    import json
+    vastai = _vastai_exe()
+    raw, rc = _run_capture([vastai, "show", "instances", "--raw"])
+    offline_marker = any(s in raw.lower() for s in
+                         ("connection", "failed to resolve", "could not resolve",
+                          "timed out", "getaddrinfo", "no route to host"))
+    if offline_marker or (not raw.strip() and rc != 0):
+        return [], "(vast.ai offline — destroyed-instance history may still show below)"
+    if rc != 0 and "DEPRECATED" not in raw:
+        return [], f"vastai error: {raw[:200]}"
+    data: list = []
+    start = raw.find("[")
+    if start >= 0:
+        depth = 0; end = start; in_str = False; esc = False
+        for i in range(start, len(raw)):
+            ch = raw[i]
+            if in_str:
+                if esc: esc = False
+                elif ch == "\\": esc = True
+                elif ch == '"': in_str = False
+            elif ch == '"': in_str = True
+            elif ch == "[": depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0: end = i + 1; break
+        try:
+            data = json.loads(raw[start:end])
+        except json.JSONDecodeError:
+            return [], "(can't parse vastai response)"
+    rows = []
+    show_all = getattr(args, "all", False)
+    for inst in data:
+        label = inst.get("label") or ""
+        if not show_all and not label.startswith("neuroslm"):
+            continue
+        iid = inst.get("id")
+        actual_status = (inst.get("actual_status") or "").lower()
+        is_active = actual_status not in _INACTIVE_VAST_STATUSES
+        log, _ = _run_capture([vastai, "logs", str(iid)])
+        status = _parse_status(log)
+        rows.append({
+            "plat": "v",
+            "id": str(iid),
+            "label": label or "(no label)",
+            "gpu": inst.get("gpu_name", "?"),
+            "cost": inst.get("dph_total", 0),
+            "uptime_mins": int(inst.get("uptime_mins", 0) or 0),
+            "is_active": is_active,
+            **status,
+        })
+    return rows, None
+
+
+def _collect_lightning_rows(args: argparse.Namespace) -> list:
+    """Query the Lightning job registry and return row dicts.
+
+    Each row dict has: plat="l", id, label, gpu, cost=None,
+    uptime_mins, phase, is_active, _step_s, _ppl_s, _ood_s, _tps_s
+    (pre-formatted strings from the log tail).
+    """
+    try:
+        from neuroslm.connectors import LightningConnector, JobStatus
+    except Exception:
+        return []
+    try:
+        connector = LightningConnector()
+        jobs = connector.list_jobs()
+    except Exception:
+        return []
+    if not jobs:
+        return []
+    import time as _time
+    now = int(_time.time())
+    rows = []
+    for j in jobs:
+        up_m = max(0, (now - (j.started_at or now)) // 60)
+        is_active = (j.status or "").lower() in _ACTIVE_LN_STATUSES
+        step_s = ppl_s = ood_s = tps_s = "-"
+        if j.status in (JobStatus.RUNNING.value, JobStatus.STARTING.value):
+            try:
+                tail = connector.tail_logs(j.job_id, n=500)
+                step_s, ppl_s, ood_s, tps_s = _summarise_lightning_tail(tail)
+            except Exception:
+                pass
+        rows.append({
+            "plat": "l",
+            "id": str(j.job_id)[:10],
+            "label": j.label or "(none)",
+            "gpu": j.machine or "?",
+            "cost": None,
+            "uptime_mins": up_m,
+            "phase": j.status or "?",
+            "is_active": is_active,
+            "_step_s": step_s, "_ppl_s": ppl_s, "_ood_s": ood_s, "_tps_s": tps_s,
+        })
+    return rows
+
+
+def _format_unified_row(r: dict) -> str:
+    """Format one row for the unified brian ps table.
+
+    Handles both vast rows (raw numeric step/ppl/tps) and lightning rows
+    (pre-formatted _step_s / _ppl_s / _ood_s / _tps_s strings).
+    """
+    if "_step_s" in r:
+        step_s, ppl_s, ood_s, tps_s = r["_step_s"], r["_ppl_s"], r["_ood_s"], r["_tps_s"]
+    else:
+        step_s = str(r["step"]) if r.get("step") is not None else "-"
+        ppl_s  = f"{r['ppl']:.1f}" if r.get("ppl") is not None else "-"
+        ood_s  = (f"{r['mid_ood_ppl']:.0f}@{r['mid_ood_step']}"
+                  if r.get("mid_ood_ppl") is not None else "-")
+        tps_s  = f"{r['tps']/1000:.0f}k" if r.get("tps") else "-"
+    cost_s = f"{r['cost']:.2f}" if r.get("cost") else "-"
+    return (
+        f"{r['plat']:>1}  {str(r['id'])[:10]:>10}  {r['label'][:28]:<28}  "
+        f"{r['gpu'][:12]:<12}  {cost_s:>5}  {r.get('uptime_mins', 0):>6}  "
+        f"{r.get('phase', '?')[:16]:<16}  {step_s:>6}  {ppl_s:>8}  "
+        f"{ood_s:>9}  {tps_s:>7}"
+    )
+
+
 def _render_ps_once(args: argparse.Namespace, out=None) -> int:
     """Single ps render — extracted from cmd_ps so --it can call it in a loop.
 
@@ -1720,11 +1874,12 @@ def _render_ps_once(args: argparse.Namespace, out=None) -> int:
     that would normally hit stderr also route to `out` so the watch
     redraw stays atomic.
 
-    Renders one section per cloud platform (vast, lightning) — gated by
-    ``--platform`` so ``brian ps --platform lightning`` shows only
-    Lightning jobs without spending a vastai roundtrip.
+    Collects rows from all requested platforms, filters to active-only
+    (unless ``--all``), then renders one unified table with a platform
+    code column (v/l/c). Empty platforms produce no section header and
+    no error message — the unified fallback fires only when every
+    platform yields zero active rows.
     """
-    import json
     sink = out if out is not None else sys.stdout
     def _say(msg: str = "") -> None:
         sink.write(msg + "\n")
@@ -1732,8 +1887,7 @@ def _render_ps_once(args: argparse.Namespace, out=None) -> int:
     show_vast = platform_filter in ("all", "vast")
     show_lightning = platform_filter in ("all", "lightning")
 
-    # Polished header (one-time; not re-emitted in watch mode because the
-    # caller already prints the per-tick timestamp line).
+    # Header (one-time; not re-emitted in watch mode)
     if out is None:
         _say("Brian Task Manager — training monitor (vast.ai + Lightning AI)")
         _say("  Interactive: brian ps --it --interval 1")
@@ -1741,15 +1895,41 @@ def _render_ps_once(args: argparse.Namespace, out=None) -> int:
         _say("  Logs:        brian ps --logs <job_id> [--tail 200] [--it]")
         _say("")
 
+    # ── Collect from every requested platform ─────────────────────────
+    rows: list = []
+    status_msgs: list = []
     if show_vast:
-        _render_vast_section(args, _say)
-
+        vast_rows, vast_err = _collect_vast_rows(args)
+        rows.extend(vast_rows)
+        if vast_err:
+            status_msgs.append(vast_err)
     if show_lightning:
-        if show_vast:
-            _say()
-        _render_lightning_section(args, _say)
+        rows.extend(_collect_lightning_rows(args))
 
-    # ── Recently destroyed instances (vast-only history) ──
+    for msg in status_msgs:
+        _say(msg)
+
+    # ── Filter: show only active unless --all ─────────────────────────
+    show_all = getattr(args, "all", False)
+    display = rows if show_all else [r for r in rows if r.get("is_active", True)]
+
+    # ── Unified table ──────────────────────────────────────────────────
+    if display:
+        hdr = (f"{'P':>1}  {'ID':>10}  {'LABEL':<28}  {'GPU':<12}  {'$/hr':>5}  "
+               f"{'UP(m)':>6}  {'PHASE':<16}  {'STEP':>6}  {'PPL':>8}  "
+               f"{'OOD-PPL':>9}  {'TOK/S':>7}")
+        _say(hdr)
+        _say("-" * len(hdr))
+        for r in display:
+            _say(_format_unified_row(r))
+        _say("")
+        _say("Legend: v=vast.ai  l=lightning  c=colab")
+    else:
+        hint = (" (pass --all to include stopped/completed instances)"
+                if not show_all else "")
+        _say(f"No active instances{hint}.")
+
+    # ── Recent destroyed (vast history, shown regardless of filters) ──
     if show_vast:
         destroyed = _scan_recent_destroyed(top_n=5)
         if destroyed:
