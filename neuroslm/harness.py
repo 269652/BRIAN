@@ -210,6 +210,7 @@ def cfd_effective_temperature(
     T_0: float,
     floor_multiplier: float = 1.0,
     eps: float = 1e-6,
+    chunk: int = 4096,
 ) -> float:
     """Stage 2 — entropy-matched temperature.
 
@@ -227,6 +228,13 @@ def cfd_effective_temperature(
     student can plausibly match. This is the self-paced curriculum
     that reveals teacher detail as the student earns capacity.
 
+    Memory: the two scalar entropies are accumulated over ``chunk``-sized
+    slices of the flattened token dim, so at most a ``(chunk, V)`` softmax
+    is ever resident. The naive form built FOUR full ``(B, T, V)`` tensors
+    (s_soft, t_soft, log_s, log_t) simultaneously — 12.3 GiB at B=16
+    T=2048 V=50257, which OOMed the SmolLM deploy. The chunked result is
+    numerically identical (entropy is a per-row mean).
+
     Args:
         student_logits: (..., V) student logits (any shape; entropy
             averaged over leading dims).
@@ -236,22 +244,38 @@ def cfd_effective_temperature(
             so T_eff ≥ T_0 always; set > 1.0 to enforce a minimum
             softening).
         eps: numerical guard against H(p_t) → 0.
+        chunk: number of flattened token rows processed per slice.
 
     Returns:
         T_eff: scalar Python float (so it can be used as a multiplier
         in subsequent softmax calls without re-entering autograd).
     """
+    T0 = float(T_0)
+    V = student_logits.size(-1)
+    s_flat = student_logits.reshape(-1, V)
+    t_flat = teacher_logits.reshape(-1, V)
+    N = s_flat.size(0)
+    if N == 0:
+        return T0 * float(floor_multiplier)
     with torch.no_grad():
-        s_soft = F.softmax(student_logits / float(T_0), dim=-1)
-        t_soft = F.softmax(teacher_logits / float(T_0), dim=-1)
-        # Per-position entropy then mean over leading dims.
-        log_s = F.log_softmax(student_logits / float(T_0), dim=-1)
-        log_t = F.log_softmax(teacher_logits / float(T_0), dim=-1)
-        H_s = -(s_soft * log_s).sum(dim=-1).mean().item()
-        H_t = -(t_soft * log_t).sum(dim=-1).mean().item()
+        h_s_sum = s_flat.new_zeros((), dtype=torch.float32)
+        h_t_sum = t_flat.new_zeros((), dtype=torch.float32)
+        for c0 in range(0, N, chunk):
+            c1 = min(c0 + chunk, N)
+            # softmax = log_softmax.exp() exactly (same input), so this is
+            # bit-equivalent to the 4-tensor form but holds ≤2 (chunk, V)
+            # tensors at a time.
+            log_s = F.log_softmax(s_flat[c0:c1] / T0, dim=-1)
+            h_s_sum = h_s_sum + (-(log_s.exp() * log_s).sum(dim=-1)).sum().float()
+            del log_s
+            log_t = F.log_softmax(t_flat[c0:c1] / T0, dim=-1)
+            h_t_sum = h_t_sum + (-(log_t.exp() * log_t).sum(dim=-1)).sum().float()
+            del log_t
+        H_s = (h_s_sum / N).item()
+        H_t = (h_t_sum / N).item()
     ratio = H_s / max(H_t, eps)
     multiplier = max(float(floor_multiplier), ratio)
-    return float(T_0) * multiplier
+    return T0 * multiplier
 
 
 def cfd_grad_alignment_gate(

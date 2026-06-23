@@ -204,6 +204,86 @@ class TestCFDStage2EntropyMatch:
         )
 
 
+class TestCFDStage2ChunkedMemory:
+    """`cfd_effective_temperature` must compute its two scalar entropies
+    WITHOUT materialising four full ``(B, T, V)`` softmax/log-softmax
+    tensors at once (the 12.3 GiB spike that OOMed the SmolLM deploy at
+    B=16 T=2048 V=50257). It chunks over the flattened token dim; the
+    result must be numerically identical to the naive full computation.
+    """
+
+    @staticmethod
+    def _ref_T_eff(student, teacher, T0, floor=1.0, eps=1e-6):
+        """Naive 4-tensor reference — the pre-fix formula."""
+        s = F.softmax(student / T0, dim=-1)
+        t = F.softmax(teacher / T0, dim=-1)
+        ls = F.log_softmax(student / T0, dim=-1)
+        lt = F.log_softmax(teacher / T0, dim=-1)
+        H_s = -(s * ls).sum(-1).mean().item()
+        H_t = -(t * lt).sum(-1).mean().item()
+        ratio = H_s / max(H_t, eps)
+        return T0 * max(float(floor), ratio)
+
+    def test_chunked_matches_full_reference(self) -> None:
+        """Chunked T_eff must equal the naive full-tensor reference."""
+        student = _make_logits(seed=30, sharpness=0.7)
+        teacher = _make_logits(seed=31, sharpness=3.0)
+        T0 = 4.0
+        got = cfd_effective_temperature(student, teacher, T0)
+        ref = self._ref_T_eff(student, teacher, T0)
+        assert math.isclose(got, ref, rel_tol=1e-4, abs_tol=1e-4), (
+            f"chunked T_eff {got} must match full reference {ref}"
+        )
+
+    def test_chunk_size_invariance(self) -> None:
+        """T_eff must be independent of the internal chunk size — proof
+        the chunked entropy reduction is correct."""
+        student = _make_logits(seed=32, sharpness=0.5)
+        teacher = _make_logits(seed=33, sharpness=4.0)
+        T0 = 3.0
+        # BATCH*SEQLEN = 32 flattened tokens; chunk=3 forces many chunks.
+        t_small = cfd_effective_temperature(student, teacher, T0, chunk=3)
+        t_big = cfd_effective_temperature(student, teacher, T0, chunk=100000)
+        assert math.isclose(t_small, t_big, rel_tol=1e-5, abs_tol=1e-5), (
+            f"T_eff must not depend on chunk size; got chunk=3 -> {t_small}, "
+            f"chunk=huge -> {t_big}"
+        )
+
+    def test_floor_multiplier_respected_when_chunked(self) -> None:
+        """With a sharp student (low H) the entropy ratio < 1, so T_eff
+        collapses to T_0 * floor_multiplier — must hold under chunking."""
+        student = _make_logits(seed=34, sharpness=6.0)   # sharp, low H
+        teacher = _make_logits(seed=35, sharpness=1.0)   # diffuse, high H
+        T0 = 2.0
+        t_eff = cfd_effective_temperature(
+            student, teacher, T0, floor_multiplier=1.5, chunk=4)
+        assert math.isclose(t_eff, T0 * 1.5, rel_tol=1e-4, abs_tol=1e-4), (
+            f"sharp student → T_eff = T_0 * floor_multiplier = {T0 * 1.5}; "
+            f"got {t_eff}"
+        )
+
+    def test_chunking_bounds_softmax_calls(self) -> None:
+        """For N > chunk the helper must issue MULTIPLE log_softmax calls —
+        proof no single full (N, V) tensor is built."""
+        from unittest import mock
+        student = _make_logits(seed=36, sharpness=1.0)  # 32 tokens
+        teacher = _make_logits(seed=37, sharpness=2.0)
+        real_lsm = F.log_softmax
+        calls = {"n": 0}
+
+        def _counting(*args, **kwargs):
+            calls["n"] += 1
+            return real_lsm(*args, **kwargs)
+
+        with mock.patch.object(F, "log_softmax", _counting):
+            cfd_effective_temperature(student, teacher, 4.0, chunk=8)
+        # 32 tokens / 8 per chunk = 4 chunks, 2 log_softmax each = 8 calls.
+        assert calls["n"] >= 8, (
+            f"expected >=8 chunked log_softmax calls (4 chunks x 2 pathways); "
+            f"got {calls['n']} — chunking not happening, full spike remains"
+        )
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Stage 3 — gradient-alignment gate contract
 # ──────────────────────────────────────────────────────────────────────
