@@ -71,10 +71,12 @@ __all__ = [
     "LMExpert",
     "LMExpertEnsemble",
     "VocabBridge",
+    "_LOGIT_CHUNK_T",
     "_align_by_char_offsets",
     "_align_by_char_offsets_exact",
     "_load_lm_cached",
     "_load_tokenizer_cached",
+    "_split_lm",
     "build_lm_expert_ensemble",
     "register_expert_alias",
     "resolve_expert_alias",
@@ -668,6 +670,32 @@ def _align_by_char_offsets_exact(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Memory-efficient forward helpers
+# ──────────────────────────────────────────────────────────────────────
+
+_LOGIT_CHUNK_T: int = 256
+# Maximum positions per chunk when applying lm_head in _forward_same_tok.
+# Peak GPU tensor at the head step: (B, _LOGIT_CHUNK_T, V) = 384 MB at
+# B=16, V=50257 bf16 — vs 3 GB for the full T=2048 sequence.
+
+
+def _split_lm(lm):
+    """Return (backbone, lm_head) if the model exposes them, else (None, None).
+
+    GPT-2:          (lm.transformer, lm.lm_head)
+    Llama/SmolLM2:  (lm.model,       lm.lm_head)
+    Unknown layout: (None, None) — caller falls back to lm(ids) directly.
+    """
+    lm_head = getattr(lm, 'lm_head', None)
+    if lm_head is None:
+        return None, None
+    backbone = getattr(lm, 'model', None) or getattr(lm, 'transformer', None)
+    if backbone is None:
+        return None, None
+    return backbone, lm_head
+
+
+# ──────────────────────────────────────────────────────────────────────
 # LMExpert
 # ──────────────────────────────────────────────────────────────────────
 
@@ -780,6 +808,10 @@ class LMExpert(nn.Module):
             self._expert_max_ctx = 2048
             self._expert_vocab_size = 0
 
+        # Split backbone + lm_head for memory-efficient chunked forward.
+        # (None, None) for unknown architectures → falls back to lm() directly.
+        self._backbone, self._lm_head = _split_lm(self.lm)
+
     # ── public ───────────────────────────────────────────────────────
 
     @property
@@ -789,55 +821,66 @@ class LMExpert(nn.Module):
             return not p.requires_grad
         return True
 
-    def forward(self, ids: torch.Tensor) -> torch.Tensor:
-        """``ids: (B, T)`` (trunk-vocab) ⇒ ``(B, T, V_trunk)`` logits.
+    def forward_cpu(self, ids: torch.Tensor) -> torch.Tensor:
+        """Like ``forward()`` but always returns a CPU tensor.
 
-        Fast path (same tok): ``self.lm(ids).logits`` directly.
-        Bridge path (cross tok): per-sample retokenise, run expert,
-        align back to trunk positions, project via the vocab bridge.
+        Used by :class:`LMExpertEnsemble` to accumulate all expert outputs
+        on CPU, avoiding simultaneous large GPU buffers.  The ensemble moves
+        the final sum to the target device once after all experts run.
         """
         if ids.dim() != 2:
             raise ValueError(
                 f"expected (B, T) ids, got shape {tuple(ids.shape)}"
             )
-
         if self.is_same_tokenizer:
             return self._forward_same_tok(ids)
         return self._forward_bridge(ids)
 
+    def forward(self, ids: torch.Tensor) -> torch.Tensor:
+        """``ids: (B, T)`` (trunk-vocab) ⇒ ``(B, T, V_trunk)`` logits on same device."""
+        return self.forward_cpu(ids).to(ids.device)
+
     # ── internals ────────────────────────────────────────────────────
 
     def _forward_same_tok(self, ids: torch.Tensor) -> torch.Tensor:
-        """Fast path: native LM forward. The expert's own pretrained
-        head produces logits directly in trunk vocab space.
+        """Fast path: chunked backbone + lm_head, accumulated on CPU.
 
-        Autocast is disabled inside the expert forward — the frozen
-        pretrained head lives in its loaded dtype (fp32 for legacy
-        ``.bin`` repos like gpt2) and any bf16 leakage from the
-        outer training step can corrupt its CUBLAS matmuls. The
-        bridged logits are cast back to the harness's expected dtype
-        in the fusion path. Regression-pinned by
-        ``tests/training/test_lm_expert_bridge_safety.py``.
+        Peak GPU footprint: (B, _LOGIT_CHUNK_T, d) hidden states
+        + (B, _LOGIT_CHUNK_T, V) one head chunk = ~431 MB at B=16 (vs
+        3 GB for the full T=2048 sequence in the old one-shot path).
+
+        Falls back to a full ``self.lm(ids)`` forward for architectures
+        where ``_split_lm`` couldn't extract backbone + head.
+
+        Returns a CPU tensor; callers that need it on GPU should call
+        ``.to(device)`` — ``forward()`` does this automatically.
         """
         B, T = ids.shape
         cap = min(T, self._expert_max_ctx)
-        with torch.amp.autocast(
-            device_type=ids.device.type, enabled=False,
-        ):
-            out = self.lm(input_ids=ids[:, :cap])
-        part = out.logits  # (B, cap, V_trunk)
-        self.last_alignment_coverage = cap / T if T > 0 else 1.0
-        if cap == T:
-            return part
-        # Positions cap..T-1 are beyond the expert's context limit.
-        # Fill them with zeros (abstain → uniform softmax, CE = ln V).
         if torch.is_autocast_enabled():
-            _dtype: torch.dtype = torch.get_autocast_gpu_dtype()
+            _out_dtype: torch.dtype = torch.get_autocast_gpu_dtype()
         else:
-            _dtype = torch.float32
-        full = torch.zeros(B, T, part.shape[-1], dtype=_dtype, device=ids.device)
-        full[:, :cap] = part.to(dtype=_dtype)
-        return full
+            _out_dtype = torch.float32
+        out_cpu = torch.zeros(
+            (B, T, self.vocab_size_trunk), device="cpu", dtype=_out_dtype
+        )
+        with torch.amp.autocast(device_type=ids.device.type, enabled=False):
+            if self._backbone is not None:
+                hidden = self._backbone(
+                    input_ids=ids[:, :cap]
+                ).last_hidden_state  # (B, cap, d_expert)
+                for t0 in range(0, cap, _LOGIT_CHUNK_T):
+                    t1 = min(t0 + _LOGIT_CHUNK_T, cap)
+                    chunk = self._lm_head(hidden[:, t0:t1]).to(dtype=_out_dtype)
+                    out_cpu[:, t0:t1].copy_(chunk.cpu())
+                    del chunk
+                del hidden
+            else:
+                part = self.lm(input_ids=ids[:, :cap]).logits.to(dtype=_out_dtype)
+                out_cpu[:, :cap].copy_(part.cpu())
+                del part
+        self.last_alignment_coverage = cap / T if T > 0 else 1.0
+        return out_cpu
 
     def _forward_bridge(self, ids: torch.Tensor) -> torch.Tensor:
         """Bridge path: per-sample re-tokenise, run expert, align via
@@ -895,41 +938,18 @@ class LMExpert(nn.Module):
         """
         B, T = ids.shape
         device = ids.device
-        # Initialize the output buffer to zeros so any trailing positions
-        # the per-sample bridge can't fill (e.g. ``t_count < T`` due to
-        # character-offset edge cases) softmax to a uniform distribution
-        # — CE = ln(V) on any target, the right "no information" baseline.
-        # Filling with a constant negative value (the old ``_ABSTAIN_LOGIT``)
-        # would inflate CE on trailing positions and re-introduce the
-        # deploy 40923107 ``α_eff → 0`` regression for non-full-coverage
-        # bridges.
-        #
-        # Allocate in the active AMP compute dtype (bf16 during training)
-        # rather than always fp32.  At B=16, T=2048, V=50257 an fp32 buffer
-        # is 6.14 GiB; if the fusion loop then casts it to bf16 both tensors
-        # are alive simultaneously (6.14 + 3.07 = 9.21 GiB peak) → OOM.
-        # Same pattern as LMExpertEnsemble._fuse_dtype detection.
         if torch.is_autocast_enabled():
             _out_dtype: torch.dtype = torch.get_autocast_gpu_dtype()
         else:
             _out_dtype = torch.float32
-        # Allocate on CPU to avoid a 3+ GiB GPU pre-allocation while trunk
-        # activations are still in memory.  Per-sample GPU results are pulled
-        # to CPU as they complete; the full tensor is moved to GPU once at the
-        # end, after all per-sample temporaries have been freed.
         out_cpu = torch.zeros(
-            (B, T, self.vocab_size_trunk),
-            device="cpu",
-            dtype=_out_dtype,
+            (B, T, self.vocab_size_trunk), device="cpu", dtype=_out_dtype,
         )
-        # Track per-batch alignment coverage (sum across samples, then mean)
         n_aligned_total = 0
         n_positions_total = 0
 
         for b in range(B):
             sample_ids = ids[b].tolist()
-            # Decode the sample to a string, then encode with both
-            # tokenizers WITH offsets so we can align positions.
             text = self._trunk_tokenizer.decode(
                 sample_ids, skip_special_tokens=False
             )
@@ -949,26 +969,18 @@ class LMExpert(nn.Module):
             expert_offsets = expert_enc["offset_mapping"]
             # Truncate at min(T, _expert_max_ctx, _BRIDGE_T_MAX).
             # _expert_max_ctx: prevents PE out-of-bounds (GPT-2: 1024).
-            # _BRIDGE_T_MAX: memory guard — large-vocab experts (Qwen2:
-            # V=151936) produce a (1, T, V) bf16 tensor per sample;
-            # at T=2048 that's ~594 MiB which OOMs on constrained GPUs
-            # alongside trunk activations.  At T=512 it's ~150 MiB.
-            # Positions beyond the cap stay as abstain (zeros → uniform).
+            # _BRIDGE_T_MAX: memory guard — Qwen2 (V=151936) at T=512 is
+            # ~150 MiB per sample; at T=2048 it's ~594 MiB → OOM.
+            # With sparse head (backbone path), this only matters for the
+            # fallback (no-backbone) path, but we keep it as a belt-and-
+            # suspenders guard against unknown large-vocab architectures.
             _BRIDGE_T_MAX = 512
             _expert_cap = min(T, self._expert_max_ctx, _BRIDGE_T_MAX)
             expert_input_ids_list = expert_enc["input_ids"][:_expert_cap]
             expert_offsets = expert_offsets[:_expert_cap]
             expert_input_ids = torch.tensor(
                 expert_input_ids_list, dtype=torch.long, device=device,
-            ).unsqueeze(0)  # (1, T_expert <= T)
-            # Clamp to the model's actual wte size. Tokenizers can carry
-            # added special tokens beyond the loaded checkpoint's
-            # vocab_size (CodeGPT-small-py: tok=50295, model wte=50257);
-            # an OOB id triggers indexSelectLargeIndex on the CUDA wte
-            # lookup and kills training. Clamping to vocab_size-1 maps
-            # those ids onto the last embedded token — a per-position
-            # abstain in practice, since the bridge later overwrites
-            # only EXACT-aligned positions.
+            ).unsqueeze(0)  # (1, T_expert <= _expert_cap)
             if self._expert_vocab_size:
                 expert_input_ids = expert_input_ids.clamp_(
                     max=self._expert_vocab_size - 1
@@ -977,56 +989,54 @@ class LMExpert(nn.Module):
             t_count = min(T, len(trunk_offsets))
             n_positions_total += t_count
 
-            if expert_input_ids.shape[1] == 0:
-                # Edge case: empty sample — leave as abstain row.
-                # All t_count positions count as misaligned.
+            if expert_input_ids.shape[1] == 0 or t_count == 0:
                 continue
 
-            # Run expert on its own tokenisation — autocast disabled.
-            with torch.amp.autocast(
-                device_type=device.type, enabled=False,
-            ):
-                with torch.no_grad():
-                    expert_logits = self.lm(
-                        input_ids=expert_input_ids,
-                    ).logits.squeeze(0)  # (T_expert, V_expert)
-
-            if t_count == 0:
-                continue
-
-            # EXACT alignment: idx[t] is the expert position whose
-            # end-offset equals trunk_offsets[t][1] exactly, or -1.
+            # Compute alignment BEFORE the model call so we can:
+            #   (a) skip the model entirely if no positions align, and
+            #   (b) run the lm_head only on the n_valid aligned hidden
+            #       states rather than the full (T_expert, V_expert) matrix.
             idx_map = _align_by_char_offsets_exact(
-                trunk_offsets[:t_count],
-                expert_offsets,
+                trunk_offsets[:t_count], expert_offsets,
             )
             idx_t = torch.tensor(idx_map, dtype=torch.long, device=device)
             valid_mask = idx_t >= 0
             n_aligned_total += int(valid_mask.sum().item())
             if not valid_mask.any():
-                # Whole sample is misaligned — output already uniform.
                 continue
             valid_pos = torch.nonzero(valid_mask, as_tuple=True)[0]
             valid_idx = idx_t.index_select(0, valid_pos)
-            picked = expert_logits.index_select(0, valid_idx)  # (n_valid, V_expert)
-            # Project to trunk vocab via bridge
+
+            # Sparse model call — autocast disabled (frozen expert stability).
+            with torch.amp.autocast(device_type=device.type, enabled=False):
+                with torch.no_grad():
+                    if self._backbone is not None:
+                        # Peak GPU: (1, T_expert, d) hidden states, then
+                        # (n_valid, V_expert) for the head — much smaller
+                        # than the full (T_expert, V_expert) logit matrix.
+                        hidden = self._backbone(
+                            input_ids=expert_input_ids,
+                        ).last_hidden_state.squeeze(0)   # (T_expert, d)
+                        picked_h = hidden.index_select(0, valid_idx)  # (n_valid, d)
+                        picked = self._lm_head(picked_h)              # (n_valid, V_expert)
+                        del hidden, picked_h
+                    else:
+                        full_logits = self.lm(
+                            input_ids=expert_input_ids,
+                        ).logits.squeeze(0)              # (T_expert, V_expert)
+                        picked = full_logits.index_select(0, valid_idx)
+                        del full_logits
+
             bridged = self.vocab_bridge.apply(picked)  # (n_valid, V_trunk)
-            # Scatter only the aligned positions; misaligned stay zero.
-            # Pull to CPU to keep GPU pressure low during the per-sample loop.
             out_cpu[b].index_copy_(
                 0, valid_pos.cpu(), bridged.to(dtype=_out_dtype).cpu()
             )
 
-        # Update telemetry — mean alignment coverage over the batch.
         if n_positions_total > 0:
             self.last_alignment_coverage = (
                 n_aligned_total / float(n_positions_total)
             )
-        else:
-            # Pathological all-empty batch — keep previous value (or None).
-            pass
-        # Move to GPU once, after all per-sample temporaries are freed.
-        return out_cpu.to(device)
+        return out_cpu
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1134,22 +1144,30 @@ class LMExpertEnsemble(nn.Module):
         else:
             _fuse_dtype = torch.float32
 
-        # Pre-cast routing weights once so each w_i slice is already in the
-        # right dtype — avoids an extra per-iteration cast.
-        weights = weights.to(dtype=_fuse_dtype)
+        # Move routing weights to CPU once; accumulation happens on CPU so
+        # no large (B, T, V) GPU buffer exists during the expert loop.
+        weights_cpu = weights.cpu().to(dtype=_fuse_dtype)  # (B, T, N) on CPU
 
-        out: Optional[torch.Tensor] = None
+        out_cpu: Optional[torch.Tensor] = None
         for i, expert in enumerate(self.experts):
-            e_logits = expert(ids)                          # (B, T, V_trunk) fp32
-            e_logits = e_logits.to(dtype=_fuse_dtype)      # fp32 → _fuse_dtype
-            w_i = weights[..., i].unsqueeze(-1)             # (B, T, 1) _fuse_dtype
-            e_logits.mul_(w_i)                              # in-place: avoid 3GB intermediate
-            if out is None:
-                out = e_logits
+            # Prefer forward_cpu() — returns CPU tensor without GPU round-trip.
+            # Fall back to forward().cpu() for expert types that pre-date this API
+            # (e.g. test mocks, legacy multi-cortex experts).
+            _fwd_cpu = getattr(expert, 'forward_cpu', None)
+            if _fwd_cpu is not None:
+                e_cpu = _fwd_cpu(ids)
             else:
-                out.add_(e_logits)                          # in-place accumulate
-        assert out is not None  # guarded by len(experts) >= 1 in __init__
-        return out
+                e_cpu = expert(ids).cpu()
+            e_cpu = e_cpu.to(dtype=_fuse_dtype)
+            w_i = weights_cpu[..., i].unsqueeze(-1)          # (B, T, 1) CPU
+            e_cpu.mul_(w_i)
+            if out_cpu is None:
+                out_cpu = e_cpu
+            else:
+                out_cpu.add_(e_cpu)
+                del e_cpu
+        assert out_cpu is not None  # guarded by len(experts) >= 1 in __init__
+        return out_cpu.to(ids.device)
 
 
 # ──────────────────────────────────────────────────────────────────────

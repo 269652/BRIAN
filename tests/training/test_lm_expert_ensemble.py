@@ -857,6 +857,9 @@ def _make_stub_expert_same_tok(
     expert.vocab_size_expert = vocab
     expert.last_alignment_coverage = None
     expert._expert_max_ctx = n_positions
+    expert._expert_vocab_size = 0
+    expert._backbone = None
+    expert._lm_head = None
     return expert
 
 
@@ -912,6 +915,9 @@ def _make_stub_expert_bridge(
     expert._trunk_tokenizer = trunk_tok
     expert._expert_tokenizer = expert_tok
     expert.vocab_bridge = bridge
+    expert._expert_vocab_size = 0
+    expert._backbone = None
+    expert._lm_head = None
     return expert
 
 
@@ -991,4 +997,172 @@ class TestExpertMaxContext:
             out = expert._forward_bridge(ids)
         assert out.shape == (1, T, _VOCAB_SMALL), (
             f"bridge must return (1, {T}, V), got {out.shape}"
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# TestMemoryEfficientForward — architectural OOM prevention contracts
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestMemoryEfficientForward:
+    """Architectural OOM-prevention contracts for LMExpert + LMExpertEnsemble.
+
+    Root cause of prior CUDA OOMs: _forward_same_tok materialised a full
+    (B=16, T=2048, V=50257) bf16 tensor = 3 GB on GPU, and
+    LMExpertEnsemble kept two simultaneously during accumulation = 6 GB
+    on top of trunk activations → OOM on any ≤12 GB GPU.
+
+    Fix contract
+    ------------
+    * _split_lm: extract (backbone, lm_head) from a CausalLM so we can
+      run them separately.
+    * _forward_same_tok: run backbone → (B, cap, d) ~47 MB, apply lm_head
+      in _LOGIT_CHUNK_T chunks → peak (B, CHUNK, V) = 384 MB, accumulate
+      to CPU buffer, return CPU tensor.
+    * _forward_bridge: compute alignment BEFORE model call (early exit if
+      no aligned positions), apply lm_head only to (n_valid, d) picked
+      hidden states, return CPU buffer directly.
+    * LMExpert.forward_cpu(ids): new public method returning CPU tensor.
+    * LMExpert.forward(ids): forward_cpu().to(ids.device) — unchanged API.
+    * LMExpertEnsemble.forward: calls forward_cpu() per expert, accumulates
+      on CPU, moves to device once.
+    """
+
+    def test_split_lm_returns_backbone_and_head_for_gpt2(self, gpt2_experts):
+        """_split_lm must return (non-None backbone, non-None lm_head) for GPT-2."""
+        from neuroslm.experts import _split_lm
+        lm = gpt2_experts[0].lm
+        backbone, lm_head = _split_lm(lm)
+        assert backbone is not None, "_split_lm must return non-None backbone for GPT-2"
+        assert lm_head is not None, "_split_lm must return non-None lm_head for GPT-2"
+        assert callable(getattr(backbone, 'forward', None)), "backbone must have forward()"
+        assert callable(getattr(lm_head, 'forward', None)), "lm_head must have forward()"
+
+    def test_split_lm_returns_none_when_no_lm_head(self):
+        """_split_lm returns (None, None) if the model has no lm_head attribute."""
+        from neuroslm.experts import _split_lm
+        import types
+        lm = types.SimpleNamespace()  # no lm_head, no backbone
+        backbone, lm_head = _split_lm(lm)
+        assert backbone is None
+        assert lm_head is None
+
+    def test_split_lm_returns_none_when_no_backbone(self):
+        """_split_lm returns (None, None) if lm_head exists but no model/transformer."""
+        from neuroslm.experts import _split_lm
+        import types
+        lm = types.SimpleNamespace(lm_head=nn.Linear(4, 10))
+        backbone, lm_head = _split_lm(lm)
+        assert backbone is None, "no backbone → (None, None), not (None, lm_head)"
+        assert lm_head is None
+
+    def test_init_caches_backbone_and_lm_head(self, gpt2_experts):
+        """LMExpert.__init__ must set _backbone and _lm_head on the instance."""
+        expert = gpt2_experts[0]
+        assert hasattr(expert, '_backbone'), "_backbone missing from LMExpert instance"
+        assert hasattr(expert, '_lm_head'), "_lm_head missing from LMExpert instance"
+        # GPT-2 has transformer + lm_head → both must be non-None.
+        assert expert._backbone is not None, "GPT-2 expert must have non-None _backbone"
+        assert expert._lm_head is not None, "GPT-2 expert must have non-None _lm_head"
+
+    def test_forward_cpu_exists(self, gpt2_experts):
+        """LMExpert.forward_cpu must exist and be callable."""
+        expert = gpt2_experts[0]
+        assert callable(getattr(expert, 'forward_cpu', None)), (
+            "LMExpert must expose a forward_cpu() method"
+        )
+
+    def test_forward_cpu_returns_cpu_tensor_same_tok(self, gpt2_experts):
+        """forward_cpu must return a CPU tensor on the same-tokenizer path."""
+        expert = gpt2_experts[0]
+        assert expert.is_same_tokenizer, "first gpt2_expert must use same tokenizer"
+        ids = torch.randint(0, expert.vocab_size_trunk, (1, 16))
+        with torch.no_grad():
+            out = expert.forward_cpu(ids)
+        assert out.device.type == "cpu", (
+            f"forward_cpu must return CPU tensor; got device={out.device}"
+        )
+        assert out.shape == (1, 16, expert.vocab_size_trunk), (
+            f"shape mismatch: {out.shape}"
+        )
+
+    def test_forward_cpu_returns_cpu_tensor_bridge_path(self, gpt2_experts):
+        """forward_cpu must return a CPU tensor on the bridge path too."""
+        expert = gpt2_experts[0]
+        ids = torch.randint(0, expert.vocab_size_trunk, (1, 8))
+        orig = expert.is_same_tokenizer
+        expert.is_same_tokenizer = False
+        try:
+            with torch.no_grad():
+                out = expert.forward_cpu(ids)
+        finally:
+            expert.is_same_tokenizer = orig
+        assert out.device.type == "cpu", (
+            f"forward_cpu bridge path must return CPU tensor; got {out.device}"
+        )
+
+    def test_forward_cpu_numerically_matches_forward(self, gpt2_experts):
+        """forward_cpu and forward must produce identical logits (same-tok path)."""
+        expert = gpt2_experts[0]
+        ids = torch.randint(0, expert.vocab_size_trunk, (1, 8))
+        with torch.no_grad():
+            out_cpu = expert.forward_cpu(ids)
+            out_gpu = expert.forward(ids)
+        torch.testing.assert_close(
+            out_cpu.float(), out_gpu.cpu().float(),
+            rtol=1e-4, atol=1e-4,
+            msg="forward_cpu and forward must agree numerically",
+        )
+
+    def test_chunked_lm_head_matches_direct_lm_output(self, gpt2_experts):
+        """Chunked backbone+head must match self.lm(ids).logits exactly.
+
+        Regression guard: chunking the lm_head over positions must not
+        introduce numerical drift vs the single-pass reference.
+        """
+        expert = gpt2_experts[0]
+        assert expert._backbone is not None, "test requires backbone-capable expert"
+        ids = torch.randint(0, expert.vocab_size_trunk, (2, 32))
+        with torch.no_grad():
+            ref = expert.lm(input_ids=ids).logits.cpu().float()
+            chunked = expert.forward_cpu(ids).float()
+        torch.testing.assert_close(
+            chunked, ref,
+            rtol=1e-3, atol=1e-3,
+            msg="chunked forward_cpu must match direct lm() forward numerically",
+        )
+
+    def test_ensemble_calls_forward_cpu_not_forward(self, two_expert_ensemble):
+        """LMExpertEnsemble.forward must call forward_cpu on each expert (not forward),
+        so the GPU accumulation buffer is never materialised."""
+        ens = two_expert_ensemble
+        ids = torch.randint(0, ens.experts[0].vocab_size_trunk, (1, 8))
+        call_counts = [0, 0]
+        originals = [e.forward_cpu for e in ens.experts]
+        try:
+            def _make_spy(idx, orig):
+                def spy(x):
+                    call_counts[idx] += 1
+                    return orig(x)
+                return spy
+            for i, e in enumerate(ens.experts):
+                e.forward_cpu = _make_spy(i, originals[i])
+            with torch.no_grad():
+                ens(ids)
+        finally:
+            for i, e in enumerate(ens.experts):
+                e.forward_cpu = originals[i]
+        assert all(c == 1 for c in call_counts), (
+            f"each expert's forward_cpu must be called exactly once; got {call_counts}"
+        )
+
+    def test_ensemble_output_on_same_device_as_ids(self, two_expert_ensemble):
+        """LMExpertEnsemble.forward result must be on the same device as ids."""
+        ens = two_expert_ensemble
+        ids = torch.randint(0, ens.experts[0].vocab_size_trunk, (1, 8))
+        with torch.no_grad():
+            out = ens(ids)
+        assert out.device == ids.device, (
+            f"ensemble output must be on {ids.device}; got {out.device}"
         )
