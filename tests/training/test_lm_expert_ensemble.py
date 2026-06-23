@@ -16,6 +16,7 @@ that's the random-projection chain we're killing.
 from __future__ import annotations
 
 import math
+from unittest import mock
 
 import pytest
 
@@ -219,9 +220,15 @@ class TestExpertDtypeCast:
 
         return _MockExpert()
 
-    def test_output_dtype_matches_router_dtype(self):
-        """Ensemble output must be in the router weight dtype (bf16
-        during training), not fp32 from the frozen experts."""
+    def test_output_dtype_matches_training_compute_dtype(self):
+        """Ensemble output must be in the AMP compute dtype (bf16 during
+        training), not fp32 from the frozen experts.
+
+        Note: the router's *parameter* dtype (fp32) is irrelevant — under
+        autocast, nn.LayerNorm is promoted to fp32 regardless, so
+        weights.dtype is fp32 even during bf16 training.  The ensemble reads
+        the AMP dtype via torch.get_autocast_gpu_dtype() instead.
+        """
         V = 64
         d_model = 32
 
@@ -235,16 +242,20 @@ class TestExpertDtypeCast:
             lexicon=DomainLexicon.empty(domains=["a", "b"]),
             lexical_bias_weight=0.0,
             bema_tau=0.0,
-        ).to(torch.bfloat16)
+        )  # fp32 params — the real training default (NOT .to(bf16))
 
         ens = LMExpertEnsemble(experts=[expert_a, expert_b], router=router)
 
         ids = torch.randint(0, V, (2, 8)).to(torch.long)
-        with torch.no_grad():
+        with mock.patch.multiple(
+            "torch",
+            is_autocast_enabled=mock.Mock(return_value=True),
+            get_autocast_gpu_dtype=mock.Mock(return_value=torch.bfloat16),
+        ), torch.no_grad():
             out = ens(ids)
 
         assert out.dtype == torch.bfloat16, (
-            f"ensemble output should be bf16 (router dtype), got {out.dtype}; "
+            f"ensemble output should be bf16 (AMP compute dtype), got {out.dtype}; "
             f"fp32 expert logits must be cast before accumulation to avoid "
             f"allocating a duplicate fp32 (B,T,V) tensor in the fusion loop"
         )
@@ -280,4 +291,266 @@ class TestExpertDtypeCast:
         torch.testing.assert_close(
             out, torch.ones(1, 4, V, dtype=out.dtype),
             rtol=1e-2, atol=1e-2,
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Root-cause tests: LayerNorm fp32-promotion under bf16 autocast
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestFusionDtypeDetection:
+    """Pin the REAL bug: nn.LayerNorm inside ThalamicRouter is promoted to
+    fp32 by PyTorch's autocast policy (for numerical stability), so
+    ``weights.dtype`` is **fp32** even during bf16 training.
+
+    The original ``cast to weights.dtype`` fix was therefore a no-op:
+    fp32 → fp32.  The correct fix reads the AMP compute dtype via
+    ``torch.get_autocast_gpu_dtype()`` when ``torch.is_autocast_enabled()``.
+
+    We simulate the real training scenario by:
+      - keeping router parameters in *fp32* (the default, no `.to(bf16)`)
+      - patching ``torch.is_autocast_enabled`` / ``torch.get_autocast_gpu_dtype``
+        to mimic an active bf16 autocast context on CPU
+      - asserting the ensemble output is bf16, not fp32
+
+    The existing ``TestExpertDtypeCast`` tests pass a router explicitly moved
+    to bf16 WITHOUT autocast; in that scenario ``weights.dtype`` is bf16 and
+    the cast appears to work — but that scenario does NOT reproduce the
+    actual training failure.
+    """
+
+    # ── shared mock helpers ────────────────────────────────────────────
+
+    def _fp32_router(self, vocab: int, d_model: int, domains: list) -> "ThalamicRouter":
+        """Router with parameters in fp32 — the real default at training time."""
+        return ThalamicRouter(
+            vocab_size=vocab,
+            d_model=d_model,
+            domains=domains,
+            lexicon=DomainLexicon.empty(domains=domains),
+            lexical_bias_weight=0.0,
+            bema_tau=0.0,
+        )  # note: no .to(bf16) — stays fp32
+
+    def _make_fp32_expert(self, vocab: int, domain: str) -> "nn.Module":
+        """Minimal expert stub that always returns fp32 ones."""
+        class _E(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.domain = domain
+
+            def forward(self, ids):
+                B, T = ids.shape
+                return torch.ones(B, T, vocab, dtype=torch.float32)
+
+        return _E()
+
+    def _bf16_autocast_patches(self):
+        """Context manager that patches torch to look like active bf16 autocast."""
+        return mock.patch.multiple(
+            "torch",
+            is_autocast_enabled=mock.Mock(return_value=True),
+            get_autocast_gpu_dtype=mock.Mock(return_value=torch.bfloat16),
+        )
+
+    # ── actual training scenario: fp32 router + mocked bf16 autocast ──
+
+    def test_layernorm_promotes_to_fp32_means_weights_dtype_is_fp32(self):
+        """Verify the premise: a fp32-param router outputs fp32 even when
+        its output is all that is examined (no autocast mock here).
+
+        This is the root cause: in training, the router's LayerNorm is
+        promoted to fp32 by autocast, producing fp32 weights.  The original
+        'cast to weights.dtype' fix then does nothing."""
+        V, d = 64, 32
+        router = self._fp32_router(V, d, ["a", "b"])
+        ids = torch.randint(0, V, (2, 8))
+        with torch.no_grad():
+            weights = router(ids)
+        # In the default fp32 case (and what autocast produces via LN promotion):
+        assert weights.dtype == torch.float32, (
+            "router with fp32 params must return fp32; if this fails the "
+            "premise of this test class is wrong"
+        )
+
+    def test_autocast_dtype_used_over_weights_dtype(self):
+        """Core regression test.
+
+        With a fp32 router (weights.dtype = fp32) AND mocked bf16 autocast,
+        the ensemble output must be bf16.
+
+        Before the fix (using weights.dtype): output was fp32 → OOM.
+        After the fix (using get_autocast_gpu_dtype()): output is bf16.
+        """
+        V, d = 64, 32
+        expert_a = self._make_fp32_expert(V, "a")
+        expert_b = self._make_fp32_expert(V, "b")
+        router = self._fp32_router(V, d, ["a", "b"])
+        ens = LMExpertEnsemble(experts=[expert_a, expert_b], router=router)
+
+        ids = torch.randint(0, V, (2, 8))
+        with self._bf16_autocast_patches(), torch.no_grad():
+            out = ens(ids)
+
+        assert out.dtype == torch.bfloat16, (
+            f"under bf16 autocast + fp32 router, output must be bf16 (not "
+            f"{out.dtype}); 'cast to weights.dtype' is broken because "
+            f"LayerNorm promotes router output to fp32 under autocast"
+        )
+
+    def test_w_i_is_cast_before_multiply(self):
+        """weights[..., i] (fp32 from LN-promoted router) must also be cast
+        to _fuse_dtype before the multiply, not just e_logits.
+
+        If only e_logits is cast (bf16) but w_i stays fp32, then
+        w_i (fp32) × e_logits (bf16) → fp32 product = 6.14 GiB OOM.
+        The fix casts BOTH by pre-casting `weights` before the loop.
+        """
+        V, d = 64, 32
+        expert_a = self._make_fp32_expert(V, "a")
+        expert_b = self._make_fp32_expert(V, "b")
+        router = self._fp32_router(V, d, ["a", "b"])
+        ens = LMExpertEnsemble(experts=[expert_a, expert_b], router=router)
+
+        ids = torch.randint(0, V, (2, 4))
+        with self._bf16_autocast_patches(), torch.no_grad():
+            out = ens(ids)
+
+        # If w_i were fp32 and e_logits bf16, the product would promote to fp32.
+        assert out.dtype == torch.bfloat16, (
+            f"w_i must be cast alongside e_logits; got output dtype {out.dtype}"
+        )
+
+    def test_large_vocab_no_fp32_leak_under_autocast(self):
+        """At V=50257 (GPT-2 vocab), a fp32 (B,T,V) tensor is 6.14 GiB.
+        Under mocked autocast the output must be bf16 to avoid that alloc."""
+        V = 50257
+        expert_a = self._make_fp32_expert(V, "a")
+        router = ThalamicRouter(
+            vocab_size=V, d_model=32, domains=["a", "b"],
+            lexicon=DomainLexicon.empty(domains=["a", "b"]),
+            lexical_bias_weight=0.0, bema_tau=0.0,
+        )
+        # Need 2 experts minimum for LMExpertEnsemble
+        expert_b = self._make_fp32_expert(V, "b")
+        ens = LMExpertEnsemble(experts=[expert_a, expert_b], router=router)
+
+        ids = torch.randint(0, V, (1, 4))
+        with self._bf16_autocast_patches(), torch.no_grad():
+            out = ens(ids)
+
+        assert out.dtype == torch.bfloat16, (
+            f"at V=50257 under bf16 autocast, output must be bf16 to avoid "
+            f"6.14 GiB fp32 alloc, got {out.dtype}"
+        )
+        assert out.shape == (1, 4, V)
+
+    def test_no_autocast_keeps_fp32(self):
+        """Without active autocast, expert fp32 logits stay fp32 — there is
+        no precision change and no risk of unexpected down-casting."""
+        V, d = 64, 32
+        expert_a = self._make_fp32_expert(V, "a")
+        expert_b = self._make_fp32_expert(V, "b")
+        router = self._fp32_router(V, d, ["a", "b"])
+        ens = LMExpertEnsemble(experts=[expert_a, expert_b], router=router)
+
+        ids = torch.randint(0, V, (2, 8))
+        # no autocast context — torch.is_autocast_enabled() is False
+        with torch.no_grad():
+            out = ens(ids)
+
+        assert out.dtype == torch.float32, (
+            f"without autocast, fp32 experts + fp32 router must produce fp32 "
+            f"output (no unexpected down-cast), got {out.dtype}"
+        )
+
+    def test_fp16_autocast_uses_fp16(self):
+        """get_autocast_gpu_dtype() → fp16 must also be handled (not hard-coded
+        to bf16).  The logic must respect whatever AMP dtype is active."""
+        V, d = 64, 32
+        expert_a = self._make_fp32_expert(V, "a")
+        expert_b = self._make_fp32_expert(V, "b")
+        router = self._fp32_router(V, d, ["a", "b"])
+        ens = LMExpertEnsemble(experts=[expert_a, expert_b], router=router)
+
+        ids = torch.randint(0, V, (2, 4))
+        with mock.patch.multiple(
+            "torch",
+            is_autocast_enabled=mock.Mock(return_value=True),
+            get_autocast_gpu_dtype=mock.Mock(return_value=torch.float16),
+        ), torch.no_grad():
+            out = ens(ids)
+
+        assert out.dtype == torch.float16, (
+            f"under fp16 autocast, output must be fp16, got {out.dtype}"
+        )
+
+    def test_weighted_sum_numerically_correct_with_mocked_bf16_autocast(self):
+        """Cast to bf16 must preserve the weighted sum.
+
+        Both experts return ones.  Router with uniform weights → output ≈ ones
+        (up to bf16 rounding)."""
+        V, d = 128, 32
+        expert_a = self._make_fp32_expert(V, "a")
+        expert_b = self._make_fp32_expert(V, "b")
+        router = self._fp32_router(V, d, ["a", "b"])
+        ens = LMExpertEnsemble(experts=[expert_a, expert_b], router=router)
+
+        ids = torch.randint(0, V, (1, 8))
+        with self._bf16_autocast_patches(), torch.no_grad():
+            out = ens(ids)
+
+        assert out.dtype == torch.bfloat16
+        torch.testing.assert_close(
+            out, torch.ones(1, 8, V, dtype=torch.bfloat16),
+            rtol=1e-2, atol=1e-2,
+        )
+
+    def test_inplace_accumulation_correct_multiple_experts(self):
+        """in-place out.add_(w_i * e_logits) must produce the same result
+        as the naive out = out + w_i * e_logits for N > 2 experts.
+
+        We use 3 experts all returning ones with roughly uniform routing
+        and check the output is close to ones (weighted sum property).
+        """
+        V, d = 64, 32
+        domains = ["a", "b", "c"]
+        experts = [self._make_fp32_expert(V, dom) for dom in domains]
+        router = ThalamicRouter(
+            vocab_size=V, d_model=d, domains=domains,
+            lexicon=DomainLexicon.empty(domains=domains),
+            lexical_bias_weight=0.0, bema_tau=0.0,
+        )
+        ens = LMExpertEnsemble(experts=experts, router=router)
+
+        ids = torch.randint(0, V, (2, 6))
+        with self._bf16_autocast_patches(), torch.no_grad():
+            out = ens(ids)
+
+        assert out.dtype == torch.bfloat16
+        assert out.shape == (2, 6, V)
+        # All experts return ones; router weights sum to 1 per token → out ≈ ones
+        torch.testing.assert_close(
+            out, torch.ones(2, 6, V, dtype=torch.bfloat16),
+            rtol=1e-2, atol=1e-2,
+        )
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_real_cuda_bf16_autocast_no_fp32_product(self):
+        """End-to-end on CUDA: under real torch.autocast the ensemble must
+        produce bf16 output, not fp32."""
+        V, d = 128, 32
+        expert_a = self._make_fp32_expert(V, "a").cuda()
+        expert_b = self._make_fp32_expert(V, "b").cuda()
+        router = self._fp32_router(V, d, ["a", "b"]).cuda()
+        ens = LMExpertEnsemble(experts=[expert_a, expert_b], router=router).cuda()
+
+        ids = torch.randint(0, V, (2, 8)).cuda()
+        with torch.autocast("cuda", dtype=torch.bfloat16), torch.no_grad():
+            out = ens(ids)
+
+        assert out.dtype == torch.bfloat16, (
+            f"under real CUDA bf16 autocast + fp32-param router, output must "
+            f"be bf16; got {out.dtype}"
         )

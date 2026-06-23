@@ -1036,18 +1036,32 @@ class LMExpertEnsemble(nn.Module):
             weights = self.lateral_inhibition(weights)
         self._last_routing_weights = weights
 
-        # Compute every expert's logits in trunk-vocab space.
-        # Same-tok experts run with autocast disabled so their logits land in
-        # fp32.  Without a cast, w_i (bf16) * e_logits (fp32) promotes to fp32
-        # and allocates a second (B,T,V) fp32 tensor (~6 GiB on CUDA) → OOM.
-        # Cast to router dtype before the multiply; the old fp32 tensor is freed
-        # when the name is rebound.  In-place accumulation saves one extra
-        # (B,T,V) alloc per subsequent expert.
+        # Determine the dtype to use for the fusion loop.
+        #
+        # We CANNOT use weights.dtype for this.  nn.LayerNorm inside
+        # ThalamicRouter is promoted to fp32 by PyTorch's autocast policy
+        # (for numerical stability), so weights.dtype == torch.float32 even
+        # when the outer training step is running under bf16 autocast.
+        # Using weights.dtype as the cast target is therefore a silent no-op
+        # that leaves both w_i and e_logits as fp32, triggering a 6.14 GiB
+        # allocation for the product (B=16, T=2048, V=50257) → CUDA OOM.
+        #
+        # The correct approach: read the active AMP compute dtype directly.
+        # If no autocast is active (eval, CPU inference), fall back to fp32.
+        if torch.is_autocast_enabled():
+            _fuse_dtype: torch.dtype = torch.get_autocast_gpu_dtype()
+        else:
+            _fuse_dtype = torch.float32
+
+        # Pre-cast routing weights once so each w_i slice is already in the
+        # right dtype — avoids an extra per-iteration cast.
+        weights = weights.to(dtype=_fuse_dtype)
+
         out: Optional[torch.Tensor] = None
         for i, expert in enumerate(self.experts):
-            e_logits = expert(ids)                          # (B, T, V_trunk)
-            e_logits = e_logits.to(dtype=weights.dtype)    # fp32 → router dtype
-            w_i = weights[..., i].unsqueeze(-1)             # (B, T, 1)
+            e_logits = expert(ids)                          # (B, T, V_trunk) fp32
+            e_logits = e_logits.to(dtype=_fuse_dtype)      # fp32 → _fuse_dtype
+            w_i = weights[..., i].unsqueeze(-1)             # (B, T, 1) _fuse_dtype
             if out is None:
                 out = w_i * e_logits
             else:
