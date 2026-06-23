@@ -387,6 +387,64 @@ class TestNfoFormatterAppearsInLog:
 
 
 # ──────────────────────────────────────────────────────────────────
+# Group E0 — trunk-only PPL display
+# ──────────────────────────────────────────────────────────────────
+
+class TestTrunkOnlyPPLDisplay:
+    """When cortex fusion is active, ``ppl`` must reflect the trunk's
+    own cross-entropy (``lm_loss_ema``), not the fused logits CE.
+
+    Rationale: with SmolLM as the cortex, the fused CE is dominated by
+    SmolLM's good logits.  Displaying ``exp(lm_loss_ema)`` shows only
+    what the trunk itself has learned.
+    """
+
+    def test_E0a_ppl_uses_lm_loss_ema_when_present(self):
+        """When ``lm_loss_ema`` is in the metrics dict, ``ppl`` must be
+        ``exp(lm_loss_ema)``, not ``exp(avg_lm)``."""
+        import math
+        avg_lm = 5.0       # fused CE — higher (SmolLM makes it look good)
+        lm_ema = 3.0       # trunk-only EMA — what the trunk actually learned
+        line = _format_metrics_line(
+            step=100, avg_loss=5.5, avg_lm=avg_lm,
+            gnorm=1.2, lr=1e-4, tok_per_s=500.0,
+            metrics={"lm_loss_ema": lm_ema},
+        )
+        expected_ppl = math.exp(lm_ema)   # ≈ 20.1
+        fused_ppl = math.exp(avg_lm)      # ≈ 148.4
+        # Extract the ppl value from the line
+        for token in line.split():
+            if token.replace(".", "", 1).isdigit():
+                pass
+        # Easier: just check that exp(lm_ema) appears, not exp(avg_lm).
+        assert f"ppl {expected_ppl:.1f}" in line, (
+            f"Expected 'ppl {expected_ppl:.1f}' (trunk-only) in log line, "
+            f"got: {line!r}. "
+            f"The fused ppl would be {fused_ppl:.1f} — that must NOT appear."
+        )
+        assert f"ppl {fused_ppl:.1f}" not in line, (
+            f"Log line shows fused ppl {fused_ppl:.1f} when lm_loss_ema is "
+            f"present — must show trunk-only ppl {expected_ppl:.1f} instead."
+        )
+
+    def test_E0b_ppl_falls_back_to_avg_lm_when_no_cortex(self):
+        """Without cortex fusion, ``lm_loss_ema`` is absent and ``ppl``
+        must fall back to ``exp(avg_lm)`` (backward-compatible)."""
+        import math
+        avg_lm = 4.2
+        line = _format_metrics_line(
+            step=50, avg_loss=4.3, avg_lm=avg_lm,
+            gnorm=0.8, lr=1e-4, tok_per_s=600.0,
+            metrics={"phi": 0.9},   # no lm_loss_ema
+        )
+        expected_ppl = math.exp(avg_lm)
+        assert f"ppl {expected_ppl:.1f}" in line, (
+            f"Without lm_loss_ema, ppl must fall back to exp(avg_lm)="
+            f"{expected_ppl:.1f}. Got: {line!r}"
+        )
+
+
+# ──────────────────────────────────────────────────────────────────
 # Group E — checkpoint cadence
 # ──────────────────────────────────────────────────────────────────
 

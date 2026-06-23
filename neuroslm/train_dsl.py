@@ -819,8 +819,13 @@ def _format_metrics_line(step: int, avg_loss: float, avg_lm: float,
     present, else honest placeholders until N7-N8 ports them.
     """
     import math as _m
-    ppl = _m.exp(min(avg_lm, 20.0))   # cap to avoid overflow on early steps
     m = metrics or {}
+    # When cortex fusion is active, lm_loss_ema tracks the trunk's pre-fusion
+    # CE (SmolLM excluded). Use it so the displayed ppl reflects only what the
+    # trunk itself has learned. Falls back to avg_lm when cortex is absent.
+    _trunk_ema = m.get("lm_loss_ema", None)
+    _ppl_nats = _trunk_ema if (_trunk_ema is not None and _trunk_ema > 0) else avg_lm
+    ppl = _m.exp(min(_ppl_nats, 20.0))
     phi = m.get("phi", 0.0)
     fid = m.get("fiedler", 0.0)
     ign = m.get("ignition", 0.0)
@@ -1379,13 +1384,18 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                                         tok_per_s, metrics), flush=True)
             last_log = now
             # Record train PPL for pass-mark checks + mid-OOD gap_ratio.
-            # MUST use avg_lm (LM-only CE), NOT avg (total loss with aux
-            # terms). The aux contribution (VBB + PC-reentry + MSPCC +
-            # distillation) adds 3-5 nats to the total, which would
-            # inflate train_ppl by ~1000× and collapse gap_ratio to ~0.
+            # When cortex fusion is active, use lm_loss_ema (trunk-only CE)
+            # so gap_ratio measures trunk vs OOD, not SmolLM vs OOD.
+            # Without cortex, fall back to avg_lm (LM-only CE, not total).
             # Pinned by tests/test_mid_ood_uses_lm_only_loss.py.
             import math as _m
-            train_ppl_history[step] = _m.exp(min(avg_lm, 20.0))
+            _trunk_ema_hist = (metrics or {}).get("lm_loss_ema", None)
+            _nats_for_hist = (
+                _trunk_ema_hist
+                if (_trunk_ema_hist is not None and _trunk_ema_hist > 0)
+                else avg_lm
+            )
+            train_ppl_history[step] = _m.exp(min(_nats_for_hist, 20.0))
 
         # ── Pass-mark early-exit check ──
         if pass_rules and step % log_every == 0:

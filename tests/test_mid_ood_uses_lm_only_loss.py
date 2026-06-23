@@ -65,12 +65,18 @@ class TestTrainPplHistoryUsesLmOnlyLoss:
             "depends on that pattern. If you refactored the structure, "
             "update this test to match the new shape.")
         var_used = m.group(1)
-        assert var_used == "avg_lm", (
-            f"train_ppl_history must be populated from the LM-only loss "
-            f"(``avg_lm``), but the source uses ``{var_used}``. Using "
-            f"the total loss inflates train_ppl by ~1000× (since aux "
-            f"terms add 3-5 nats to the LM CE), making gap_ratio = "
-            f"ood_ppl / train_ppl meaningless (it pegs at 0).")
+        # Allowed: avg_lm (no-cortex path) or _nats_for_hist (cortex path,
+        # which resolves to lm_loss_ema when present, else avg_lm — both
+        # LM-only). Forbidden: avg (total loss, inflates by ~1000×).
+        assert var_used != "avg", (
+            f"train_ppl_history must NOT use the total loss (``avg``), "
+            f"but the source uses ``{var_used}``. That inflates train_ppl "
+            f"by ~1000× and collapses gap_ratio to 0.")
+        assert var_used in ("avg_lm", "_nats_for_hist"), (
+            f"Expected ``avg_lm`` or ``_nats_for_hist`` (trunk-only CE), "
+            f"got ``{var_used}``. Update this allowlist if the variable "
+            f"was renamed."
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────
