@@ -249,6 +249,40 @@ class CDGAConfig:
     refresh_every: int = 4
 
 
+# ── Intervention H: Pontryagin / Hopfion-lite topological charge ─────
+
+@dataclass
+class PontryaginTopoChargeConfig:
+    """Per-head topological-charge diagnostic + optional soft penalty.
+
+    Math (see neuroslm/mechanisms/topo_charge.py):
+        n_h(t)         = F.normalize(W_proj @ attn_out_h(t))    on S^2
+        Q_h            = sum_l sum_t  Omega(n_t, n_{t+1}, n_{t+2}) / (4*pi)
+        eps_ortho      = sum_l mean(1 - n_{l+1} . n_l)
+        L_topo         = alpha * mean((Q_h - Q_target)^2)
+                         + gamma * eps_ortho
+
+    Default disabled. When enabled with alpha=gamma=0 the mechanism
+    is DIAGNOSTIC-ONLY: Q_h and eps_ortho are computed and logged
+    every step, but zero is added to the loss (no gradient pressure).
+    Setting alpha > 0 or gamma > 0 turns the soft penalty on.
+
+    Per CLAUDE.md sec 14 the diagnostic-only branch is STRUCTURAL
+    (the penalty multiplies by alpha and gamma; both zero -> exact
+    zero contribution), NOT an early-return. The mechanism is not
+    decorative.
+
+    Reference: docs/formal_framework.md (cellular sheaf cohomology);
+    Berg & Lueschner 1981 (Nucl. Phys. B 190); van Oosterom & Strang
+    1983 (IEEE Trans. Biomed. Eng. 30).
+    """
+    enabled: bool = False
+    alpha: float = 0.0            # weight on (Q_h - Q_target)^2 term
+    gamma: float = 0.0            # weight on inter-layer eps_ortho term
+    Q_target: float = 0.0         # target winding (default: irrotational)
+    weight_init_std: float = 0.02 # std of Linear(head_dim, 3) init
+
+
 # ── Top-level container ──────────────────────────────────────────────
 
 @dataclass
@@ -276,6 +310,8 @@ class RegularizationConfig:
     freq_balance: FreqBalanceConfig = field(
         default_factory=FreqBalanceConfig)
     cdga: CDGAConfig = field(default_factory=CDGAConfig)
+    pontryagin_topo_charge: PontryaginTopoChargeConfig = field(
+        default_factory=PontryaginTopoChargeConfig)
     warmup_steps: int = 2000
     activation_step: int = 0
     """First global step at which any aux loss may be non-zero.
@@ -317,6 +353,7 @@ class RegularizationConfig:
             self.adaptive_mixture.enabled,
             self.freq_balance.enabled,
             self.cdga.enabled,
+            self.pontryagin_topo_charge.enabled,
         ])
 
 
@@ -364,6 +401,9 @@ def parse_regularization_block(body: str) -> RegularizationConfig:
         cfg.freq_balance = _parse_freq_balance(props["freq_balance"])
     if "cdga" in props:
         cfg.cdga = _parse_cdga(props["cdga"])
+    if "pontryagin_topo_charge" in props:
+        cfg.pontryagin_topo_charge = _parse_pontryagin_topo_charge(
+            props["pontryagin_topo_charge"])
 
     return cfg
 
@@ -480,10 +520,32 @@ def _parse_cdga(raw: str) -> CDGAConfig:
     if "warmup_steps" in p:  out.warmup_steps = int(p["warmup_steps"])
     if "refresh_every" in p: out.refresh_every = int(p["refresh_every"])
     if out.alpha_max < 0.0:
-        raise ValueError(f"cdga.alpha_max={out.alpha_max} must be ≥ 0")
+        raise ValueError(f"cdga.alpha_max={out.alpha_max} must be >= 0")
     if out.refresh_every < 1:
         raise ValueError(
-            f"cdga.refresh_every={out.refresh_every} must be ≥ 1")
+            f"cdga.refresh_every={out.refresh_every} must be >= 1")
+    return out
+
+
+def _parse_pontryagin_topo_charge(raw: str) -> PontryaginTopoChargeConfig:
+    p = _split_top_level_kv(_strip_braces(raw))
+    out = PontryaginTopoChargeConfig()
+    if "enabled" in p:           out.enabled = _parse_bool(p["enabled"])
+    if "alpha" in p:             out.alpha = float(p["alpha"])
+    if "gamma" in p:             out.gamma = float(p["gamma"])
+    if "Q_target" in p:          out.Q_target = float(p["Q_target"])
+    if "weight_init_std" in p:
+        out.weight_init_std = float(p["weight_init_std"])
+    if out.alpha < 0.0:
+        raise ValueError(
+            f"pontryagin_topo_charge.alpha={out.alpha} must be >= 0")
+    if out.gamma < 0.0:
+        raise ValueError(
+            f"pontryagin_topo_charge.gamma={out.gamma} must be >= 0")
+    if out.weight_init_std <= 0.0:
+        raise ValueError(
+            f"pontryagin_topo_charge.weight_init_std="
+            f"{out.weight_init_std} must be > 0")
     return out
 
 
