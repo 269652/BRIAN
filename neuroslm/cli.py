@@ -4008,6 +4008,34 @@ def cmd_lint(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Studio helpers
+# ---------------------------------------------------------------------------
+
+def _find_npm() -> str:
+    """Return the path to npm that ships with Node 18+ (Next.js requirement).
+
+    Prefers nvm-managed versions (newest first) over the system default.
+    Falls back to plain 'npm' if nothing better is found.
+    """
+    import re
+    nvm_root = Path(os.environ.get("NVM_HOME", "")) or Path.home() / "AppData" / "Roaming" / "nvm"
+    if nvm_root.exists():
+        candidates = []
+        for ver_dir in nvm_root.iterdir():
+            m = re.match(r"v(\d+)\.(\d+)\.(\d+)", ver_dir.name)
+            if m:
+                major = int(m.group(1))
+                if major >= 18:
+                    npm_cmd = ver_dir / "npm.cmd"
+                    if npm_cmd.exists():
+                        candidates.append((major, int(m.group(2)), int(m.group(3)), str(npm_cmd)))
+        if candidates:
+            candidates.sort(reverse=True)
+            return candidates[0][3]
+    return "npm"
+
+
+# ---------------------------------------------------------------------------
 # Studio command
 # ---------------------------------------------------------------------------
 
@@ -4024,12 +4052,12 @@ def cmd_studio_start(args: argparse.Namespace) -> int:
     client_dir = studio_dir / "client"
 
     server_port = 1984
-    client_port = 2049
+    client_port = 3141  # π — port 2049 (NFS) is blocked by Chrome
 
     procs = []
 
     def _shutdown(sig=None, frame=None):
-        print("\n[studio] shutting down…")
+        print("\n[studio] shutting down...")
         for p in procs:
             try:
                 p.terminate()
@@ -4052,7 +4080,7 @@ def cmd_studio_start(args: argparse.Namespace) -> int:
         "--reload-dir", str(studio_dir / "server"),
         "--log-level", "warning",
     ]
-    server_proc = subprocess.Popen(server_cmd, cwd=repo_root)
+    server_proc = subprocess.Popen(server_cmd, cwd=repo_root, shell=False)
     procs.append(server_proc)
 
     print(f"\n  Brian Studio")
@@ -4071,20 +4099,25 @@ def cmd_studio_start(args: argparse.Namespace) -> int:
         return 0
 
     # ── Next.js client ──────────────────────────────────────────────────────
+    npm_exe = _find_npm()
     node_modules = client_dir / "node_modules"
     if not node_modules.exists():
         print(f"\n  Installing npm dependencies (first run)…")
-        result = subprocess.run(
-            ["npm", "install"],
+        subprocess.run(
+            npm_exe + " install",
             cwd=client_dir,
-            capture_output=False,
+            shell=True,
         )
-        if result.returncode != 0:
-            print("[studio] npm install failed — run 'npm install' in studio/client manually")
 
     client_env = {**os.environ, "PORT": str(client_port)}
-    client_cmd = ["npm", "run", "dev", "--", "--port", str(client_port)]
-    client_proc = subprocess.Popen(client_cmd, cwd=client_dir, env=client_env)
+    # Use shell=True so .cmd wrappers resolve correctly on Windows;
+    # pass port via PORT env-var (Next.js reads it) rather than CLI flag.
+    client_proc = subprocess.Popen(
+        npm_exe + " run dev",
+        cwd=client_dir,
+        env=client_env,
+        shell=True,
+    )
     procs.append(client_proc)
 
     print(f"  Studio  (Next.js)  : http://localhost:{client_port}")
@@ -5111,13 +5144,13 @@ def _build_parser() -> argparse.ArgumentParser:
     # ── studio ────────────────────────────────────────────────────────────────
     sstudio = sub.add_parser(
         "studio",
-        help="Brian Studio — visual language model editor (REST+MCP server + Next.js UI)",
+        help="Brian Studio - visual language model editor (REST+MCP server + Next.js UI)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
             "Brian Studio: build, compose, test and deploy language models "
             "using a visual drag-and-drop editor.\n\n"
-            "  Server: http://localhost:1984  (port 1984 — Orwell)\n"
-            "  Studio: http://localhost:2049  (port 2049 — Blade Runner)\n"
+            "  Server: http://localhost:1984  (port 1984 - Orwell)\n"
+            "  Studio: http://localhost:3141  (port 3141 - pi)\n"
             "  MCP:    http://localhost:1984/mcp"
         ),
     )
@@ -5125,13 +5158,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sstudio_start = sstudio_sub.add_parser(
         "start",
-        help="Start the Brian Studio server (port 1984) and client (port 2049)",
+        help="Start the Brian Studio server (port 1984) and client (port 3141)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
             "Launches the Brian Studio REST+MCP server on port 1984 and the\n"
-            "Next.js visual editor on port 2049. Opens a browser automatically.\n\n"
+            "Next.js visual editor on port 3141 (pi). Opens a browser automatically.\n\n"
             "  Server (REST+MCP): http://localhost:1984\n"
-            "  Studio (Next.js):  http://localhost:2049\n"
+            "  Studio (Next.js):  http://localhost:3141\n"
             "  API docs:          http://localhost:1984/docs"
         ),
     )

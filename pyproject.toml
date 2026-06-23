@@ -32,13 +32,19 @@ ml = [
 dev = [
     "pytest-cov>=4.0",
 ]
+# `pip install -e .[studio]` adds the Brian Studio web server deps.
+studio = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "mcp[cli]>=1.0.0",
+]
 
 [project.scripts]
 # `pip install -e .` puts this on your PATH as `brian`.
 brian = "neuroslm.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["neuroslm*"]
+include = ["neuroslm*", "studio*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
