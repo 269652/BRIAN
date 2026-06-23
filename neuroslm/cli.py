@@ -959,6 +959,46 @@ def _run_hook(name: str, repo_root: Optional[Path] = None,
                     env=env)
 
 
+def _require_human_confirmation(platform: str, steps: int) -> None:
+    """Block until a human types 'deploy' at a real TTY.
+
+    Raises SystemExit(1) when:
+    - stdin is not a TTY (piped input, subprocess call, agent-driven shell)
+    - user types anything other than the word 'deploy'
+    - stdin reaches EOF or user hits Ctrl-C
+
+    No flag bypasses this gate. It exists specifically to prevent AI agents
+    from autonomously launching paid cloud instances.
+    """
+    if not sys.stdin.isatty():
+        print(
+            "[deploy] BLOCKED: stdin is not an interactive terminal.\n"
+            "  Deploying requires a human to confirm at a real TTY.\n"
+            "  Piped input, agent-driven calls, and CI contexts are rejected here.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(
+        f"\n[deploy] About to launch a paid cloud instance: {platform}, {steps:,} steps."
+        "\n[deploy] This costs real money and cannot be undone automatically."
+        '\n[deploy] Type "deploy" to confirm, anything else to abort: ',
+        end="", flush=True,
+    )
+    try:
+        answer = input()
+    except (EOFError, KeyboardInterrupt):
+        print("\n[deploy] Aborted.", file=sys.stderr)
+        sys.exit(1)
+
+    if answer.strip() != "deploy":
+        print(
+            f'[deploy] Expected "deploy", got "{answer.strip()}". Aborted.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def cmd_deploy(args: argparse.Namespace) -> int:
     """Launch a DSL or DNA training run on a cloud platform.
 
@@ -1139,6 +1179,9 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         )
     except Exception:
         pass
+
+    # ── Human confirmation gate (cannot be bypassed by any flag) ──
+    _require_human_confirmation(platform, config.steps)
 
     # ── Dispatch to connector ──
     try:
@@ -2176,6 +2219,42 @@ def cmd_destroy(args: argparse.Namespace) -> int:
         return 2
     return _run([_bash(), "scripts/vast.sh",
                  "destroy", "instance", str(args.instance_id), "-y"], env=env)
+
+
+def cmd_nuke(args: argparse.Namespace) -> int:
+    """Destroy ALL running neuroslm-labelled instances immediately.
+
+    Requires an interactive TTY and the user to type 'nuke'. This prevents
+    AI agents from invoking it autonomously.
+    """
+    if not sys.stdin.isatty():
+        print(
+            "[nuke] BLOCKED: stdin is not an interactive terminal.\n"
+            "  Nuke requires a human to confirm at a real TTY.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(
+        "\n[nuke] This will DESTROY ALL running neuroslm-labelled vast.ai instances."
+        "\n[nuke] There is no undo."
+        '\n[nuke] Type "nuke" to confirm, anything else to abort: ',
+        end="", flush=True,
+    )
+    try:
+        answer = input()
+    except (EOFError, KeyboardInterrupt):
+        print("\n[nuke] Aborted.", file=sys.stderr)
+        sys.exit(1)
+
+    if answer.strip() != "nuke":
+        print(
+            f'[nuke] Expected "nuke", got "{answer.strip()}". Aborted.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    return cmd_destroy(argparse.Namespace(all=True, instance_id=None))
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
@@ -4295,6 +4374,13 @@ def _build_parser() -> argparse.ArgumentParser:
     sde.add_argument("--all", action="store_true",
                      help="destroy every neuroslm-* labelled instance")
     sde.set_defaults(func=cmd_destroy)
+
+    # nuke — destroy ALL instances immediately (requires TTY + "nuke" confirmation)
+    snuke = sub.add_parser(
+        "nuke",
+        help="Destroy ALL running neuroslm-labelled instances (requires TTY confirmation)",
+    )
+    snuke.set_defaults(func=cmd_nuke)
 
     # stop (per-job halt — currently Lightning-only; vast uses `destroy`)
     sstop = sub.add_parser(
