@@ -596,12 +596,14 @@ class TestExpertLoaderDtype:
         ) as mock_fp:
             self._call_loader_fresh("__test_model__", fake)
             kwargs = mock_fp.call_args[1]
-            assert kwargs.get("torch_dtype") == torch.bfloat16, (
+            assert kwargs.get("dtype") == torch.bfloat16, (
                 f"_load_lm_cached safetensors path did not pass "
-                f"torch_dtype=bfloat16; got {kwargs}. "
+                f"dtype=bfloat16; got {kwargs}. "
                 f"Without this, expert forward returns fp32 (6.13 GiB at "
                 f"B=16 T=2048 V=50257) and .to(bf16) allocates a second "
-                f"3.07 GiB copy → 9.2 GiB peak → CUDA OOM."
+                f"3.07 GiB copy → 9.2 GiB peak → CUDA OOM. "
+                f"Note: torch_dtype is deprecated in transformers>=4.48, "
+                f"use dtype instead."
             )
 
     def test_legacy_bin_path_requests_bfloat16(self):
@@ -627,8 +629,8 @@ class TestExpertLoaderDtype:
             # Second call is the legacy .bin path
             assert mock_fp.call_count == 2, "expected safetensors attempt + legacy fallback"
             legacy_kwargs = mock_fp.call_args_list[1][1]
-            assert legacy_kwargs.get("torch_dtype") == torch.bfloat16, (
-                f"legacy .bin fallback path did not pass torch_dtype=bfloat16; "
+            assert legacy_kwargs.get("dtype") == torch.bfloat16, (
+                f"legacy .bin fallback path did not pass dtype=bfloat16; "
                 f"got {legacy_kwargs}"
             )
 

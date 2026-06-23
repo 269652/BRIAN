@@ -277,7 +277,7 @@ def _load_lm_cached(model_id: str):
     # Path 1: safetensors-only (works on every torch version)
     try:
         lm = AutoModelForCausalLM.from_pretrained(
-            model_id, use_safetensors=True, torch_dtype=_bf16,
+            model_id, use_safetensors=True, dtype=_bf16,
         )
     except Exception as exc:
         msg = str(exc)
@@ -311,7 +311,7 @@ def _load_lm_cached(model_id: str):
             model_id,
             use_safetensors=False,
             weights_only=False,
-            torch_dtype=_bf16,
+            dtype=_bf16,
         )
 
     lm.eval()
@@ -913,9 +913,13 @@ class LMExpert(nn.Module):
             _out_dtype: torch.dtype = torch.get_autocast_gpu_dtype()
         else:
             _out_dtype = torch.float32
-        out = torch.zeros(
+        # Allocate on CPU to avoid a 3+ GiB GPU pre-allocation while trunk
+        # activations are still in memory.  Per-sample GPU results are pulled
+        # to CPU as they complete; the full tensor is moved to GPU once at the
+        # end, after all per-sample temporaries have been freed.
+        out_cpu = torch.zeros(
             (B, T, self.vocab_size_trunk),
-            device=device,
+            device="cpu",
             dtype=_out_dtype,
         )
         # Track per-batch alignment coverage (sum across samples, then mean)
@@ -1004,7 +1008,10 @@ class LMExpert(nn.Module):
             # Project to trunk vocab via bridge
             bridged = self.vocab_bridge.apply(picked)  # (n_valid, V_trunk)
             # Scatter only the aligned positions; misaligned stay zero.
-            out[b].index_copy_(0, valid_pos, bridged.to(out.dtype))
+            # Pull to CPU to keep GPU pressure low during the per-sample loop.
+            out_cpu[b].index_copy_(
+                0, valid_pos.cpu(), bridged.to(dtype=_out_dtype).cpu()
+            )
 
         # Update telemetry — mean alignment coverage over the batch.
         if n_positions_total > 0:
@@ -1014,7 +1021,8 @@ class LMExpert(nn.Module):
         else:
             # Pathological all-empty batch — keep previous value (or None).
             pass
-        return out
+        # Move to GPU once, after all per-sample temporaries are freed.
+        return out_cpu.to(device)
 
 
 # ──────────────────────────────────────────────────────────────────────
