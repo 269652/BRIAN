@@ -120,6 +120,13 @@ _CITE_RE = re.compile(
     r"\$cite\(([^,]+),\s*(\d+),\s*(\d+)\)"
 )
 
+# ${TEASE:what:arg1[:arg2]} - live ledger/log teasers
+# Examples:
+#   ${TEASE:runs:5}         → markdown table of 5 most recent runs
+#   ${TEASE:log:best:10}    → last 10 lines of best training log
+#   ${TEASE:findings:3}     → 3 most recent findings entries
+_TEASE_RE = re.compile(r"\$\{TEASE:([^}]+)\}")
+
 
 # ── Parsing utilities ─────────────────────────────────────────────────
 
@@ -312,20 +319,72 @@ class TemplateRenderer:
         
         return _METRIC_RE.sub(_sub, template)
     
+    def resolve_tease_macros(self, template: str) -> str:
+        """Replace ${TEASE:what:args...} with live ledger/log content."""
+        from neuroslm.cli_help import (
+            parse_runs_ledger, tease_runs, format_runs_table_md,
+            tease_log_tail, tease_findings, get_best_log_path,
+        )
+
+        def _tease(match: re.Match) -> str:
+            spec = match.group(1)
+            parts = [p.strip() for p in spec.split(":")]
+            what = parts[0] if parts else ""
+
+            if what == "runs":
+                n = int(parts[1]) if len(parts) > 1 else 5
+                runs_path = self.repo_root / "docs" / "runs.md"
+                if not runs_path.exists():
+                    return "_Run ledger not found._"
+                entries = parse_runs_ledger(runs_path.read_text(encoding="utf-8"))
+                recent = tease_runs(entries, n=n)
+                return format_runs_table_md(recent)
+
+            if what == "log":
+                # ${TEASE:log:best:10} or ${TEASE:log:path/to/file:10}
+                src = parts[1] if len(parts) > 1 else "best"
+                n = int(parts[2]) if len(parts) > 2 else 10
+                if src == "best":
+                    log_path = get_best_log_path(self.repo_root)
+                else:
+                    log_path = self.repo_root / src
+                if log_path is None or not log_path.exists():
+                    return "_Log not available._"
+                tail = tease_log_tail(log_path, n=n)
+                if not tail:
+                    return "_Log empty._"
+                rel = log_path.relative_to(self.repo_root) if log_path.is_relative_to(self.repo_root) else log_path
+                return f"_Last {n} lines of `{rel}`:_\n```\n{tail}\n```"
+
+            if what == "findings":
+                n = int(parts[1]) if len(parts) > 1 else 3
+                findings_path = self.repo_root / "docs" / "findings.md"
+                if not findings_path.exists():
+                    return "_findings.md not found._"
+                text = findings_path.read_text(encoding="utf-8")
+                return tease_findings(text, n=n)
+
+            return match.group(0)  # unknown — leave as-is
+
+        return _TEASE_RE.sub(_tease, template)
+
     def render(self, template: str) -> str:
         """Full rendering pipeline."""
         # 1. Parse and remove claim definitions
         template = self.parse_claims(template)
-        
+
         # 2. Resolve citations $cite(...)
         template = self.resolve_citations(template)
-        
+
         # 3. Resolve claim references ${claim.ID.field}
         template = self.resolve_claim_refs(template)
-        
-        # 4. Resolve metrics ${METRIC}
+
+        # 4. Resolve ${TEASE:...} live-ledger macros
+        template = self.resolve_tease_macros(template)
+
+        # 5. Resolve metrics ${METRIC}
         template = self.resolve_metrics(template)
-        
+
         return template
 
 

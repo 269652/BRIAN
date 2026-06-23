@@ -2,7 +2,7 @@
 
 > *146.9M trainable-param bowtie trunk · ~980M frozen cortex experts · exploring integrated information (Φ).*
 
-[![tests](https://img.shields.io/badge/tests-3754%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-4064%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
@@ -304,7 +304,7 @@ modulation dopamine -> pfc {
 }
 ```
 
-The compiler (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) produces modules with **source maps** and **byte-identity round-trip** verification. 966 tests in `tests/dsl/` guard codegen correctness.
+The compiler (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) produces modules with **source maps** and **byte-identity round-trip** verification. 1005 tests in `tests/dsl/` guard codegen correctness.
 
 Full reference: [`docs/dsl.md`](docs/dsl.md).
 
@@ -348,7 +348,7 @@ KL distillation runs in parallel: `L_KL = T² · KL(cortex.detach()/T ‖ trunk/
 
 ### Layer A — Mechanism Verification ✅
 
-3754 unit tests across `tests/` confirm every mechanism computes as specified:
+4064 unit tests across `tests/` confirm every mechanism computes as specified:
 
 | Hypothesis | Result |
 |-----------|--------|
@@ -362,7 +362,7 @@ KL distillation runs in parallel: `L_KL = T² · KL(cortex.detach()/T ‖ trunk/
 | H19 — `ImprovementGate` (Welch's t) | ✅ p-values within 1e-6 of scipy; mutation blocked without significance |
 | H21 — Per-position abstain unblocks fusion | ✅ -93% train-PPL / -94% OOD-PPL vs broken precursor |
 
-Run all: `py -3 -m pytest tests/ -v` (~~469s on CPU).
+Run all: `py -3 -m pytest tests/ -v` (~~508s on CPU).
 
 ### Layer B — OOD Generalization 🟡
 
@@ -393,12 +393,10 @@ B4 is the first variant under 3.0 gap\_ratio — a 53% improvement over the flat
 
 **Most Recent Run (Last Checkpoint):**
 ```
-[`logs/20260617/SmolLM/170512_20_2000.log`](logs/20260617/SmolLM/170512_20_2000.log)
+[`logs/20260623/current/154754_0_0.log`](logs/20260623/current/154754_0_0.log)
 
 ```
-Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
-If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
-[mid-ood] step 1500: wikitext ppl=248.5 gap_ratio=3.58 (train_ppl=69.5) (50 seq, 6430 tok)
+✗ missing architectures/architectures/SmolLM/arch.neuro — is the architecture folder there?
 ```
 ```
 
@@ -522,29 +520,29 @@ model.personality_vector               # tensor(5) — stable across checkpoints
 ## Tests
 
 ```bash
-py -3 -m pytest tests/                                              # full suite (3754 tests, ~~469s)
+py -3 -m pytest tests/                                              # full suite (4064 tests, ~~508s)
 py -3 -m pytest tests/test_phi.py -v                               # H1–H3: integrated information
 py -3 -m pytest tests/test_narrative_memory.py -v                  # H4–H5: memory & causation
 py -3 -m pytest tests/test_cognitive_closure.py -v                 # H6–H6.5: identity & embodiment
 py -3 -m pytest tests/training/test_cortex_pre_head_norm.py -v     # H16: catastrophic-loss fix
 py -3 -m pytest tests/training/test_cortex_distillation_and_gating.py -v  # H17–H18: KL + NT gating
 py -3 -m pytest tests/verification/test_improvement_gate.py -v     # H19: Welch's t admission gate
-py -3 -m pytest tests/dsl/ -v                                       # 966 DSL codegen + byte-equivalence
+py -3 -m pytest tests/dsl/ -v                                       # 1005 DSL codegen + byte-equivalence
 ```
 
 ---
 
 ## Checkpoints
 
-Pushed to `moritzroessler/BRIAN` on HuggingFace Hub every 2500 steps. Configure in `architectures/*/config.neuro`:
+Pushed to `moritzroessler/BRIAN` on HuggingFace Hub every 2000 steps. Configure in `architectures/*/config.neuro`:
 
 ```neuro
 checkpoint {
     push_backend: "hf"
     hf_repo_id: "moritzroessler/BRIAN"
     hf_token_env: "HF_TOKEN"
-    save_every: 500
-    push_every: 2500
+    save_every: 2000
+    push_every: 2000
     push_optimizer: false    # strips Adam state, ~2/3 size saving
 }
 ```
