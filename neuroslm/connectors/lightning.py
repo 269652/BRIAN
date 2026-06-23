@@ -938,7 +938,8 @@ class LightningConnector(BaseConnector):
             if v:
                 env[k] = v
         # checkpoint_push.py reads GH_TOKEN (canonical) for Git log pushes;
-        # also accept legacy names so old .env files still work.
+        # _deploy_via_ssh reads GITHUB_PAT for HTTPS clone tokenisation.
+        # Accept legacy names so old .env files still work.
         gh_token = (
             os.environ.get("GH_TOKEN") or
             os.environ.get("GITHUB") or
@@ -946,6 +947,7 @@ class LightningConnector(BaseConnector):
         ).strip()
         if gh_token:
             env.setdefault("GH_TOKEN", gh_token)
+            env.setdefault("GITHUB_PAT", gh_token)
         # Forward caller-supplied extras (minus Lightning-internal keys
         # that don't belong on the remote side).
         skip = {"LIGHTNING_MACHINE", "LIGHTNING_TEAMSPACE",
