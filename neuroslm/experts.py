@@ -748,6 +748,30 @@ class LMExpert(nn.Module):
         # contributes no real signal at most positions.
         self.last_alignment_coverage: Optional[float] = None
 
+        # Expert model's hard context limit.  GPT-2 has n_positions=1024;
+        # feeding sequences longer than this causes a CUDA device-side
+        # assertion in the position embedding lookup (indexSelectLargeIndex:
+        # srcIndex < srcSelectDimSize).  Both _forward_same_tok and
+        # _forward_bridge clamp their inputs at min(T, _expert_max_ctx).
+        _lm_cfg = getattr(self.lm, 'config', None)
+        if _lm_cfg is not None:
+            _n = (getattr(_lm_cfg, 'n_positions', None)
+                  or getattr(_lm_cfg, 'max_position_embeddings', None))
+            self._expert_max_ctx: int = int(_n) if _n else 2048
+            # Model's own wte size — can be SMALLER than the expert
+            # tokenizer's vocab_size when the tokenizer carries added
+            # special tokens beyond what the loaded checkpoint embeds
+            # (observed on microsoft/CodeGPT-small-py — tokenizer emits
+            # ids up to ~50295 against a 50257-row wte). Feeding an
+            # OOB id triggers the same CUDA device-side assert as a
+            # T-overflow. ``_forward_bridge`` clamps every emitted
+            # expert id to ``[0, _expert_vocab_size)`` defensively.
+            _v = getattr(_lm_cfg, 'vocab_size', None)
+            self._expert_vocab_size: int = int(_v) if _v else 0
+        else:
+            self._expert_max_ctx = 2048
+            self._expert_vocab_size = 0
+
     # ── public ───────────────────────────────────────────────────────
 
     @property
@@ -787,14 +811,25 @@ class LMExpert(nn.Module):
         in the fusion path. Regression-pinned by
         ``tests/training/test_lm_expert_bridge_safety.py``.
         """
+        B, T = ids.shape
+        cap = min(T, self._expert_max_ctx)
         with torch.amp.autocast(
             device_type=ids.device.type, enabled=False,
         ):
-            out = self.lm(input_ids=ids)
-        # Same-tok experts are trivially 100% aligned (no bridge / no
-        # re-tokenisation), so the telemetry reads 1.0.
-        self.last_alignment_coverage = 1.0
-        return out.logits  # (B, T, V_expert == V_trunk)
+            out = self.lm(input_ids=ids[:, :cap])
+        part = out.logits  # (B, cap, V_trunk)
+        self.last_alignment_coverage = cap / T if T > 0 else 1.0
+        if cap == T:
+            return part
+        # Positions cap..T-1 are beyond the expert's context limit.
+        # Fill them with zeros (abstain → uniform softmax, CE = ln V).
+        if torch.is_autocast_enabled():
+            _dtype: torch.dtype = torch.get_autocast_gpu_dtype()
+        else:
+            _dtype = torch.float32
+        full = torch.zeros(B, T, part.shape[-1], dtype=_dtype, device=ids.device)
+        full[:, :cap] = part.to(dtype=_dtype)
+        return full
 
     def _forward_bridge(self, ids: torch.Tensor) -> torch.Tensor:
         """Bridge path: per-sample re-tokenise, run expert, align via
@@ -900,12 +935,28 @@ class LMExpert(nn.Module):
             )
             trunk_offsets = trunk_enc["offset_mapping"]
             expert_offsets = expert_enc["offset_mapping"]
-            # Truncate at trunk T — see docstring "Safety guards".
-            expert_input_ids_list = expert_enc["input_ids"][:T]
-            expert_offsets = expert_offsets[:T]
+            # Truncate at min(T, _expert_max_ctx) — see docstring
+            # "Safety guards".  The T-cap avoids wasted re-tokenisation
+            # work; the _expert_max_ctx-cap prevents position-embedding
+            # out-of-bounds (GPT-2: n_positions=1024, trunk seq_len=2048).
+            _expert_cap = min(T, self._expert_max_ctx)
+            expert_input_ids_list = expert_enc["input_ids"][:_expert_cap]
+            expert_offsets = expert_offsets[:_expert_cap]
             expert_input_ids = torch.tensor(
                 expert_input_ids_list, dtype=torch.long, device=device,
             ).unsqueeze(0)  # (1, T_expert <= T)
+            # Clamp to the model's actual wte size. Tokenizers can carry
+            # added special tokens beyond the loaded checkpoint's
+            # vocab_size (CodeGPT-small-py: tok=50295, model wte=50257);
+            # an OOB id triggers indexSelectLargeIndex on the CUDA wte
+            # lookup and kills training. Clamping to vocab_size-1 maps
+            # those ids onto the last embedded token — a per-position
+            # abstain in practice, since the bridge later overwrites
+            # only EXACT-aligned positions.
+            if self._expert_vocab_size:
+                expert_input_ids = expert_input_ids.clamp_(
+                    max=self._expert_vocab_size - 1
+                )
 
             t_count = min(T, len(trunk_offsets))
             n_positions_total += t_count

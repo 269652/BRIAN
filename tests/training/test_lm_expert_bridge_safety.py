@@ -105,18 +105,39 @@ class _FakeBPETokenizer:
 
 class _CountingFakeLM(nn.Module):
     """Wrapper that records the largest ``input_ids.shape[1]`` it ever
-    sees. Used by the truncation tests."""
-    def __init__(self, vocab: int, d_model: int = 16):
+    sees AND raises IndexError on any id >= ``model_vocab`` (mirroring
+    the CUDA ``indexSelectLargeIndex`` device-side assert)."""
+    def __init__(self, vocab: int, d_model: int = 16,
+                 model_vocab: int | None = None):
         super().__init__()
-        self.embed = nn.Embedding(vocab, d_model)
+        # The embedding ("wte") is sized to model_vocab — the model's
+        # native vocabulary. The "head" projects back to vocab (the
+        # tokenizer's vocab); they CAN differ in real models like
+        # microsoft/CodeGPT-small-py where tokenizer.vocab_size has
+        # added specials beyond the model's config.vocab_size.
+        mv = model_vocab if model_vocab is not None else vocab
+        self.embed = nn.Embedding(mv, d_model)
         self.head = nn.Linear(d_model, vocab)
-        self.config = type("C", (), {"vocab_size": vocab,
+        self.config = type("C", (), {"vocab_size": mv,
                                      "max_position_embeddings": 256})
         self.max_seen_T = 0
+        self.max_seen_id = -1
         self.dtypes_seen = []
 
     def forward(self, input_ids=None, **_):
         self.max_seen_T = max(self.max_seen_T, input_ids.shape[1])
+        if input_ids.numel():
+            self.max_seen_id = max(self.max_seen_id,
+                                   int(input_ids.max().item()))
+        # Simulate the CUDA device-side assert that fires when an id
+        # exceeds the embedding's num_embeddings dimension. PyTorch's
+        # CPU Embedding raises IndexError; the GPU kernel triggers
+        # ``indexSelectLargeIndex: srcIndex < srcSelectDimSize``.
+        if input_ids.numel() and int(input_ids.max().item()) >= self.embed.num_embeddings:
+            raise IndexError(
+                f"id {int(input_ids.max().item())} >= wte size "
+                f"{self.embed.num_embeddings}"
+            )
         h = self.embed(input_ids)
         self.dtypes_seen.append(h.dtype)
         logits = self.head(h)
@@ -158,6 +179,8 @@ class TestExpertTruncation:
         e.is_same_tokenizer = False
         e.vocab_size_trunk = trunk_tokenizer.vocab_size
         e.vocab_size_expert = trunk_tokenizer.vocab_size
+        e._expert_max_ctx = counting_lm.config.max_position_embeddings
+        e._expert_vocab_size = counting_lm.config.vocab_size
 
         # Trunk seq_len = 512, same as the deployed config.
         T = 512
@@ -204,6 +227,8 @@ class TestAutocastIsolation:
         e.is_same_tokenizer = False
         e.vocab_size_trunk = trunk_tokenizer.vocab_size
         e.vocab_size_expert = trunk_tokenizer.vocab_size
+        e._expert_max_ctx = counting_lm.config.max_position_embeddings
+        e._expert_vocab_size = counting_lm.config.vocab_size
 
         ids = torch.randint(0, trunk_tokenizer.vocab_size, (1, 16))
 
@@ -243,6 +268,8 @@ class TestAutocastIsolation:
         e.is_same_tokenizer = True
         e.vocab_size_trunk = trunk_tokenizer.vocab_size
         e.vocab_size_expert = trunk_tokenizer.vocab_size
+        e._expert_max_ctx = counting_lm.config.max_position_embeddings
+        e._expert_vocab_size = counting_lm.config.vocab_size
 
         ids = torch.randint(0, trunk_tokenizer.vocab_size, (1, 16))
         with torch.amp.autocast("cpu", dtype=torch.bfloat16):
@@ -254,4 +281,94 @@ class TestAutocastIsolation:
         assert not non_fp32, (
             f"bf16 autocast leaked into the fast-path expert forward: "
             f"saw dtypes {set(counting_lm.dtypes_seen)}"
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Contract 3 — bridge clamps expert ids to the LM's wte size
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _OverflowTokenizer:
+    """Expert tokenizer that returns one id per character, ALL set to
+    ``model_vocab + 5`` — i.e. every id is guaranteed to overflow the
+    LM's token-embedding (wte) dimension. Mirrors the real-world
+    mismatch where ``tokenizer.vocab_size`` (with added specials) >
+    ``model.config.vocab_size``.
+    """
+    def __init__(self, model_vocab: int, tok_vocab: int | None = None,
+                 name_or_path: str = "fake-overflow-tok"):
+        self.vocab_size = tok_vocab if tok_vocab is not None else model_vocab + 16
+        self.name_or_path = name_or_path
+        self._oob_id = model_vocab + 5
+
+    def __call__(self, text: str, **kwargs):
+        ids = [self._oob_id for _ in range(len(text))]
+        offsets = [(i, i + 1) for i in range(len(text))]
+        return {"input_ids": ids, "offset_mapping": offsets}
+
+    def get_vocab(self):
+        return {str(i): i for i in range(self.vocab_size)}
+
+    def convert_ids_to_tokens(self, ids, **kwargs):
+        return [str(i) for i in ids]
+
+    def convert_tokens_to_ids(self, tokens):
+        return [int(t) if str(t).isdigit() else 0 for t in tokens]
+
+
+class TestExpertVocabClamp:
+    """Root-cause pin for the deploy ``indexSelectLargeIndex:
+    srcIndex < srcSelectDimSize`` crash on CodeGPT-small-py.
+
+    The expert tokenizer can emit ids ≥ the model's wte size
+    (``config.vocab_size``). The bridge must clamp every id to
+    ``[0, lm.config.vocab_size)`` before calling ``self.lm`` — any
+    OOB id triggers a CUDA device-side assert in the wte lookup
+    that takes down the whole training run.
+    """
+
+    def test_bridge_clamps_oob_expert_ids(self, trunk_tokenizer):
+        from neuroslm.experts import LMExpert, VocabBridge
+
+        # Model-side wte sized smaller than the tokenizer's vocab.
+        # The fake LM raises IndexError on any id >= model_vocab, so
+        # if the bridge fails to clamp, the test crashes loudly.
+        model_vocab = trunk_tokenizer.vocab_size  # 50257 for gpt2
+        overflow_tok = _OverflowTokenizer(
+            model_vocab=model_vocab,
+            tok_vocab=model_vocab + 64,  # tokenizer can emit ids up to ~+64
+        )
+        counting_lm = _CountingFakeLM(
+            vocab=model_vocab, model_vocab=model_vocab,
+        )
+
+        e = object.__new__(LMExpert)
+        nn.Module.__init__(e)
+        e.model_id = "fake"
+        e.domain = "general"
+        e.lm = counting_lm
+        e._trunk_tokenizer = trunk_tokenizer
+        e._expert_tokenizer = overflow_tok
+        e.vocab_bridge = VocabBridge.build(
+            trunk_tokenizer=trunk_tokenizer,
+            expert_tokenizer=trunk_tokenizer,
+        )
+        e.is_same_tokenizer = False
+        e.vocab_size_trunk = trunk_tokenizer.vocab_size
+        e.vocab_size_expert = trunk_tokenizer.vocab_size
+        e._expert_max_ctx = 256
+        e._expert_vocab_size = counting_lm.config.vocab_size
+
+        T = 32
+        ids = torch.randint(0, trunk_tokenizer.vocab_size, (1, T))
+
+        with torch.no_grad():
+            _ = e._forward_bridge(ids)
+
+        assert counting_lm.max_seen_id < model_vocab, (
+            f"bridge fed the LM an id of {counting_lm.max_seen_id} "
+            f"but wte size is only {model_vocab}; unclamped ids "
+            f"trigger CUDA `indexSelectLargeIndex: srcIndex < "
+            f"srcSelectDimSize` device-side assert in production"
         )
