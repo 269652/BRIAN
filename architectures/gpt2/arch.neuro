@@ -1,38 +1,40 @@
-# -*- coding: utf-8 -*-
-# GPT-2 124M -- THSD cellular sheaf definition (trivial H1)
+# GPT-2 124M — THSD cellular sheaf (trivial H¹)
 #
-# kind=gpt2: learned positional embeddings, LayerNorm, fused QKV (c_attn),
-# GELU (tanh-approximate), bias everywhere, weight-tied lm_head.
-#
-# THSD framing: trivial H1 sheaf -- no conservation laws, no THSD mechanisms.
-# Every self-attention block is a coboundary operator delta: C0(F) -> C1(F).
-#
-# Load HF weights:
-#   from neuroslm.models.gpt2 import GPT2Model, hf_to_model_state_dict
-#   from neuroslm.dsl.model_spec import parse_model_block
-#   spec = parse_model_block(open("architectures/gpt2/arch.neuro").read())
-#   model = GPT2Model(spec)
+# THSD framing: H¹ = 0 — standard MHA coboundary with no phase structure.
+# Stalk dim = 768; coboundary = fused-QKV MHA; transition = GELU MLP.
 #
 # Reference: Radford et al. 2019 "Language Models are Unsupervised Multitask Learners"
 # HF model ID: openai-community/gpt2
 
+import { multi_head_attention } from "@lib/primitives/attention"
+import { learned_position_encoding } from "@lib/primitives/attention"
+import { gelu_ffn } from "@lib/primitives/feedforward"
+import { layer_norm } from "@lib/primitives/normalization"
+
 model {
-    kind: gpt2
     weights: "hf:openai-community/gpt2"
+
     sheaf {
-        dim: 768
-        depth: 12
-        heads: 12
-        kv_heads: 12
-        context: 1024
-        vocab: 50257
-        pos: learned
-        rope_base: 10000
-        ff_mult: 4.0
-        ff_act: gelu
-        norm: layernorm
-        norm_eps: 1e-5
-        tie_embed: true
-        bias: true
+        dim: 768, depth: 12, heads: 12, context: 1024, vocab: 50257
+
+        embed {
+            tokens:   learned
+            position: learned    # learned_position_encoding in C⁰
+            equation: learned_position_encoding
+        }
+
+        coboundary {
+            equation: multi_head_attention   # fused QKV (Conv1D c_attn), no RoPE
+            bias: true                       # bias in c_attn and c_proj
+        }
+
+        transition {
+            equation: gelu_ffn               # W_2 GELU(W_1 x + b) + b
+            ff_mult: 4.0
+            bias: true
+        }
+
+        norm { equation: layer_norm, placement: pre, eps: 1e-5 }
+        output { tie_embed: true }
     }
 }

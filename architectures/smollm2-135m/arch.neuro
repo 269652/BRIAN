@@ -1,38 +1,38 @@
-# -*- coding: utf-8 -*-
-# SmolLM2-135M -- THSD cellular sheaf definition (trivial H1, LLaMA family)
+# SmolLM2-135M — THSD cellular sheaf (trivial H¹, LLaMA family)
 #
-# kind=llama: RoPE, RMSNorm, separate Q/K/V projections, GQA (9 heads / 3 kv),
-# SwiGLU feed-forward, no bias, weight-tied lm_head.
+# THSD framing: H¹ = 0 — GQA + RoPE gives phase-structured C¹ but no
+# conservation law. SwiGLU gating provides non-linearity with learnable routing.
 #
-# THSD framing: trivial H1 sheaf -- RoPE provides a phase-structured coboundary
-# that encodes positional information into the C1 interaction space.
-#
-# Load HF weights:
-#   from neuroslm.models.llama import LlamaModel, hf_to_model_state_dict
-#   from neuroslm.dsl.model_spec import parse_model_block
-#   spec = parse_model_block(open("architectures/smollm2-135m/arch.neuro").read())
-#   model = LlamaModel(spec)
-#
-# Reference: HuggingFaceTB/SmolLM2-135M (LLaMA architecture variant)
+# Reference: Allal et al. (HuggingFace, 2025) SmolLM2
 # HF model ID: HuggingFaceTB/SmolLM2-135M
 
+import { grouped_query_attention, rope_attention } from "@lib/primitives/attention"
+import { swiglu_ffn } from "@lib/primitives/feedforward"
+import { rms_norm } from "@lib/primitives/normalization"
+
 model {
-    kind: llama
     weights: "hf:HuggingFaceTB/SmolLM2-135M"
+
     sheaf {
-        dim: 576
-        depth: 30
-        heads: 9
-        kv_heads: 3
-        context: 2048
-        vocab: 49152
-        pos: rope
-        rope_base: 10000
-        ff_mult: 3.5
-        ff_act: swiglu
-        norm: rmsnorm
-        norm_eps: 1e-5
-        tie_embed: true
-        bias: false
+        dim: 576, depth: 30, heads: 9, kv_heads: 3, context: 2048, vocab: 49152
+
+        embed {
+            tokens:   learned
+            position: none    # positional encoding is in C¹ via rope_attention
+        }
+
+        coboundary {
+            equation: grouped_query_attention   # GQA: 3 KV heads shared across 9 Q heads
+            equation: rope_attention            # RoPE phase encoding in C¹
+            rope { base: 10000 }
+        }
+
+        transition {
+            equation: swiglu_ffn               # silu(gate·x) ⊙ up(x) → down
+            ff_mult: 3.5
+        }
+
+        norm { equation: rms_norm, placement: pre, eps: 1e-5 }
+        output { tie_embed: true }
     }
 }

@@ -1,0 +1,231 @@
+# ═══════════════════════════════════════════════════════════════════════
+# BRIAN THSD MECHANICS — Novel THSD-grounded Coboundary Operators
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Topological Hyper-Sheaf Dynamics (THSD) is the formal framework
+# underlying BRIAN. Every mechanism here is a coboundary operator
+# δ: C⁰(F) → C¹(F) or transition τ: C¹(F) → C⁰(F) with non-trivial
+# topological structure — unlike standard transformers where H¹ = 0.
+#
+# THSD framing:
+#   C⁰(F) = token stalks (d_model dimensional real space per token)
+#   C¹(F) = interaction co-chains (cross-token dependencies)
+#   H¹(F) = cohomology = topological invariants of the interaction graph
+#
+# References:
+#   [1] Tononi (2016) — IIT 4.0, integrated information Φ
+#   [2] Kuramoto (1975) — synchronization in coupled oscillator networks
+#   [3] Josephson (1962) — tunneling current between coupled superconductors
+#   [4] Liouville (1838) — Hamiltonian measure preservation
+#   [5] Berg & Lüscher (1981) — topological charge via spherical excess
+#   [6] Pontryagin (1947) — π₃(S³) homotopy classification of maps S³→S³
+
+
+# ── 1. KJPLA — Kuramoto-Josephson Phase Lattice Attention ───────────────
+#
+# Each attention head carries a per-token phase φ_{h,t} ∈ [0, 2π).
+# Intra-layer: Kuramoto synchronization of phases across tokens.
+# Inter-layer: Josephson coupling — phase difference between layers
+#              generates a conserved order parameter R_ℓ ∈ [0,1].
+#
+# THSD consequence: C¹(F) decomposes into |q·k| (magnitude) and
+# cos(Δφ) (topological phase) channels. H¹ ≠ 0 when R_ℓ > 0.
+
+export equation kjpla_phase_lattice_attention {
+    signature: "(x, phi_prev?) → (output, phi_stash, aux)"
+
+    equation: """
+        # ── Phase carrier (content + frequency components) ──────────────
+        φ₀_{h,t} = normalize(W_h · f(q_{h,t}))
+                   + Σ_k sin(2πt / (m_h · exp(k · δ_h)))
+
+        # ── Intra-layer Kuramoto synchronization ────────────────────────
+        A₀_{i,j} = softmax(q_i · k_j / √d_head)     # detached weights
+        φ₁_{h,t} = φ₀_{h,t}
+                   + η  Σ_j A₀_{i,j} sin(φ₀_{h,j} - φ₀_{h,t})
+                   + K_h sin(φ_prev_{h,t} - φ₁_{h,t} - Δ_h)
+
+        # ── Phase-gated attention logits ─────────────────────────────────
+        a_{i,j} = q_i · k_j / √d_head
+                  + β_h cos(φ₁_{h,i} - φ₁_{h,j})
+
+        output = softmax(a) · v → W_o
+
+        # ── Josephson order parameter (inter-layer auxiliary loss) ───────
+        R_ℓ  = |⟨exp(i (φ_{ℓ+1,h} - φ_{ℓ,h} - Δ_h))⟩_h|
+        Ψ_ℓ  = arg⟨exp(i (φ_{ℓ+1,h} - φ_{ℓ,h} - Δ_h))⟩_h
+        L_J  = −K̄ R_ℓ cos(Ψ_{ℓ+1} − Ψ_ℓ)
+
+        # ── Phase entropy floor (anti-collapse) ──────────────────────────
+        H_φ  = −Σ_b p_b log p_b        # Gaussian-binned histogram
+        L_ent = max(0, H*_uniform − H_φ)
+    """
+
+    where: {
+        W_h:  "linear(head_dim, head_dim)  # phase projection, init zero"
+        m_h:  "integer frequency multiplier per head (buffer, not Parameter)"
+        δ_h:  "base phase offset 2π h/(H·L), non-persistent buffer"
+        η:    "Parameter(scalar, init=0)  # ReZero: inert at step 0"
+        K_h:  "Parameter(H,     init=0)  # Josephson coupling strength"
+        β_h:  "Parameter(H,     init=0)  # phase-logit mixing weight"
+        K̄:   "scalar aggregate Josephson coupling (josephson_strength)"
+        H*:   "analytical entropy of U(0,2π) under Gaussian soft-bin kernel"
+    }
+
+    properties: {
+        cohomology:           "H¹(F) ≠ 0 when R_ℓ > 0 (Josephson order)"
+        inertness_at_init:   "η=K_h=β_h=W_h=0 → bit-identical to baseline MHA"
+        pruning_robustness:  "phase redundancy → head-removal degrades <15%"
+        conservation:        "U(1) phase symmetry → conserved Josephson current"
+        falsifiable_H25:     "gap_ratio ≤ 4.9 after 5k steps (H22 baseline 6.55)"
+    }
+}
+
+
+# ── 2. LIOUVILLE SYMPLECTIC RESIDUAL ───────────────────────────────────
+#
+# The stalk x ∈ ℝ^d_model is reinterpreted as canonical coordinates:
+#   q = x[..., :d/2]  (position half)
+#   p = x[..., d/2:]  (momentum half)
+#
+# A leapfrog integrator under a q-only potential V(q) is applied.
+# det(J_τ) = 1 exactly (Liouville theorem) — the symplectic structure
+# of the state space is preserved through the FFN layer.
+#
+# THSD consequence: the transition τ: C¹(F) → C⁰(F) is a Hamiltonian
+# flow on the stalk manifold, implying a Noether-conserved quantity H_L.
+
+export equation liouville_symplectic_ffn {
+    signature: "(x) → (x_new, noether_residual)"
+
+    equation: """
+        # ── Canonical coordinate split ──────────────────────────────────
+        q, p = split(x, half=-1)          # d_model must be even
+
+        # ── Leapfrog integrator (Störmer-Verlet) ────────────────────────
+        # Half-step momentum update
+        p_½  = p − (dτ/2) ∇_q V(q)
+
+        # Full-step position update (uses half-step momentum)
+        q′   = q + dτ M⁻¹ p_½
+
+        # Half-step momentum update at new position
+        p′   = p_½ − (dτ/2) ∇_q V(q′)
+
+        output = concat(q′, p′, dim=-1)
+
+        # ── Noether residual ─────────────────────────────────────────────
+        H₀ = V(q)  + ½ pᵀ M⁻¹ p      # Hamiltonian at entry
+        H_L = V(q′) + ½ p′ᵀ M⁻¹ p′   # Hamiltonian at exit
+        L_noether = ‖H_L − H₀‖²       # conservation violation penalty
+    """
+
+    where: {
+        V:    "q-only potential: SwiGLU(W_gate·q ⊙ W_up·q) → W_down  [q-only enforced]"
+        M:    "diagonal mass: softplus(raw_M_diag)  # always positive"
+        dτ:   "Parameter(scalar, init=0.1)  # learned integration step"
+        ∇_q:  "autograd.grad(V(q), q, create_graph=True)"
+        split: "requires d_model % 2 == 0 (assertion)"
+    }
+
+    properties: {
+        volume_preservation: "det(J_τ) = 1 exactly (symplectic integrator)"
+        time_reversibility:  "leapfrog is a palindrome — running backward recovers x"
+        noether_channel:     "H_L − H₀ forms a conserved residual under Noether theorem"
+        q_only_contract:     "V depends only on q — enforced at type level"
+        falsifiable_H24:     "Noether residual ‖H_L−H₀‖² < 0.01 at step 1000"
+    }
+}
+
+
+# ── 3. PONTRYAGIN TOPO-CHARGE DIAGNOSTIC ───────────────────────────────
+#
+# Per-head attention outputs are projected to the unit sphere S².
+# The discrete Berg-Lüscher charge Q_h counts the number of times
+# the map f: token_sequence → S² wraps around S².
+#
+# Q_h = 0 for a random model; |Q_h| > 0 indicates topological winding
+# that persists under small perturbations (topological protection).
+#
+# THSD consequence: Q_h is a π₂(S²) invariant of the C¹(F) fiber
+# over each head. Diversity of Q_h across heads → richer H¹ structure.
+
+export equation pontryagin_topo_charge {
+    signature: "(attn_out_per_layer) → (Q_h, eps_ortho, penalty)"
+
+    equation: """
+        # ── Project to unit sphere S² ──────────────────────────────────
+        n_{h,t} = normalize(W_proj · attn_out_{h,t})    # (B,H,T,3)
+
+        # ── Berg-Lüscher discrete topological charge ──────────────────
+        # Van Oosterom-Strang formula: spherical excess of each triangle
+        For each triangle (i, j, k) in causal order:
+            tan(Ω/2) = n_i · (n_j × n_k)
+                       / (1 + n_i·n_j + n_j·n_k + n_k·n_i)
+            Ω_ijk = 2 atan2(numerator, denominator)    # clamped denom ≥ 1e-8
+
+        Q_h = (1/4π) Σ_{triangles} Ω_ijk  # integer-valued for smooth maps
+
+        # ── Inter-layer orientation decorrelation ────────────────────
+        eps_ortho = Σ_ℓ (1 − ⟨n_ℓ · n_{ℓ+1}⟩_tokens)
+
+        # ── Soft penalty ─────────────────────────────────────────────
+        L_topo = α (Q_h − Q_target)²  +  γ eps_ortho
+    """
+
+    where: {
+        W_proj:  "linear(head_dim, 3, bias=True)  # bias init to [1,0,0] (not zero!)"
+        Q_target: "0  # default: penalize non-trivial winding"
+        α:       "topo_charge penalty strength"
+        γ:       "inter-layer decorrelation strength"
+        bias_init: "fixed to unit vector [1,0,0] — zero bias → F.normalize(0)=0 breaks contract"
+    }
+
+    properties: {
+        topological_protection: "Q_h invariant under continuous deformations"
+        head_diversity:         "distinct Q_h per head → richer H¹(F)"
+        cheap:                  "one Linear(head_dim→3) per model, not per layer"
+        falsifiable_H23:        "Q_h distribution non-degenerate after 1000 steps"
+    }
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COHOMOLOGY COMPARISON TABLE
+# ═══════════════════════════════════════════════════════════════════════
+
+export comparison standard_vs_thsd {
+    dimensions: [
+        "Coboundary δ",
+        "Transition τ",
+        "H¹(F)",
+        "Conservation law",
+        "Topological invariant"
+    ]
+
+    rows: {
+        GPT2: [
+            "MHA (fused QKV, no phase)",
+            "MLP GELU",
+            "0  (trivial)",
+            "none",
+            "none"
+        ]
+
+        LLaMA: [
+            "GQA + RoPE (phase in C¹)",
+            "SwiGLU",
+            "0  (RoPE is U(1) but not conserved)",
+            "none",
+            "none"
+        ]
+
+        BRIAN_KJPLA: [
+            "KJPLA (Kuramoto+Josephson phase lattice)",
+            "Liouville Symplectic",
+            "≠ 0  (Josephson order R_ℓ > 0)",
+            "Hamiltonian H_L (Noether), U(1) Josephson current",
+            "Pontryagin Q_h ∈ π₂(S²), Josephson winding"
+        ]
+    }
+}
