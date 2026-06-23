@@ -143,7 +143,7 @@ push_optimizer = false
 # Cloud training provider. Connector implementations live in
 # neuroslm/connectors/. Override per-run with `brian deploy --platform X`.
 # Values: "vast" | "lightning"
-platform = "lightning"
+platform = "vast"
 # GPU/machine tier for connectors that support it.
 
 # Substring match: "T4", "A10G", "A100", "L4", "H100", etc.

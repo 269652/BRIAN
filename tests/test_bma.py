@@ -118,18 +118,24 @@ def test_bma_positive_loss_when_trunk_collapses():
 
 
 def test_bma_loss_asymmetric_direction():
-    """Collapse in trunk direction (not expert) is the penalised direction."""
-    h = _make_harness_with_bma(weight=1.0, n_proj=64)
-    # Case 1: diverse trunk, collapsed expert  → small W₂
+    """Penalisation is non-trivial regardless of which side has higher variance.
+
+    Uses a fresh harness per case so the frozen _bma_target_hs is independent
+    for each call (the fixture captures the first h_s as the frozen reference).
+    """
     mu_big  = torch.randn(8, 4, 16) * 2.0
     s_small = torch.zeros(8, 4, 16)
-    _stash(h, mu_big.detach(), s_small.detach())
-    loss_big = float(h._compute_bma_loss(base_weight=1.0))
-    # Case 2: collapsed trunk, diverse expert  → large W₂
-    _stash(h, s_small.clone().detach(), mu_big.detach())
-    loss_small = float(h._compute_bma_loss(base_weight=1.0))
-    # Both cases are penalised (W₂ is symmetric by construction), but
-    # the important property is that the penalty is non-trivial in both.
+
+    # Case 1: diverse trunk, collapsed frozen reference → var mismatch → loss > 0
+    h1 = _make_harness_with_bma(weight=1.0, n_proj=64)
+    _stash(h1, mu_big.detach(), s_small.detach())
+    loss_big = float(h1._compute_bma_loss(base_weight=1.0))
+
+    # Case 2: collapsed trunk, diverse frozen reference → var mismatch → loss > 0
+    h2 = _make_harness_with_bma(weight=1.0, n_proj=64)
+    _stash(h2, s_small.clone().detach(), mu_big.detach())
+    loss_small = float(h2._compute_bma_loss(base_weight=1.0))
+
     assert loss_big > 0.0
     assert loss_small > 0.0
 
@@ -400,3 +406,62 @@ def test_bma_silent_at_step_100_with_ramp_start_500():
     loss = h._compute_bma_loss(0.05)
     # alpha = max(0, (100 - 500) / 2500) = 0 → eff_weight = 0 → returns None
     assert loss is None, "BMA with ramp_start=500 must not fire at step 100"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# H. Frozen sensory reference (anti-collapse target lock)
+# ──────────────────────────────────────────────────────────────────────────
+#
+# Root cause of the observed erank collapse (step 300, erank 53→7):
+# Both _last_h_motor and _last_h_sensory come from the SAME trunk, so
+# they collapse together. BMA then compares collapsed-to-collapsed,
+# producing loss≈0 and zero anti-collapse gradient — a self-defeating loop.
+#
+# Fix: freeze h_s at the FIRST successful BMA call into _bma_target_hs.
+# At step 0, the trunk is randomly initialised with high erank, giving a
+# stable, high-variance reference for all subsequent BMA calls.
+
+class TestBMAFrozenSensoryTarget:
+
+    def test_H_a_frozen_target_is_set_after_first_call(self):
+        """_bma_target_hs must be captured (non-None) after a successful call."""
+        h = _make_harness_with_bma(weight=1.0)
+        s  = torch.randn(4, 8, 16) * 3.0
+        mu = torch.randn(4, 8, 16)
+        _stash(h, mu, s)
+        h._compute_bma_loss(base_weight=1.0)
+        assert hasattr(h, "_bma_target_hs"), "_bma_target_hs attribute missing"
+        assert h._bma_target_hs is not None
+        assert torch.allclose(h._bma_target_hs, s.detach(), atol=1e-6)
+
+    def test_H_b_collapsed_hs_does_not_change_expert_variance(self):
+        """When h_s collapses after first call, bma_var_expert must stay high.
+
+        Simulates the step-300 failure: h_s collapses to near-zero on the LM
+        after the first call. Without the frozen reference, bma_var_expert
+        drops to ~0 and the loss goes to ~0, giving zero anti-collapse gradient.
+        """
+        h = _make_harness_with_bma(weight=1.0)
+
+        # Call 1: diverse h_s → frozen as reference
+        s_diverse = torch.randn(4, 8, 16) * 3.0
+        mu = torch.randn(4, 8, 16)
+        _stash(h, mu, s_diverse)
+        h._compute_bma_loss(base_weight=1.0)
+        var_expert_initial = h._metrics["bma_var_expert"]
+        assert var_expert_initial > 0.5, (
+            "precondition: initial expert variance must be >0.5 with randn*3"
+        )
+
+        # Call 2: h_s collapses to near-zero on the LM
+        s_collapsed = torch.zeros(4, 8, 16)
+        _stash(h, mu.clone(), s_collapsed)
+        h._compute_bma_loss(base_weight=1.0)
+        var_expert_after = h._metrics["bma_var_expert"]
+
+        assert var_expert_after > 0.5, (
+            f"bma_var_expert dropped to {var_expert_after:.6f} after h_s "
+            "collapsed — frozen reference is not being used. Without this "
+            "fix, BMA compares collapsed-to-collapsed and provides zero "
+            "anti-collapse gradient during the observed step-300 erank drop."
+        )

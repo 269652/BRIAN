@@ -729,6 +729,11 @@ class BRIANHarness(nn.Module):
         self._ste_sigma_ema: float = 1.0
         self._ste_sigma = None  # stashed per-forward for compute_loss
         self._build_semantic_turbulence()
+        # BMA frozen reference: h_sensory captured at first successful BMA
+        # call (high-erank init). Both trunk layers collapse together, so
+        # comparing live-to-live gives loss≈0 after collapse; the frozen
+        # reference provides a stable anti-collapse target.
+        self._bma_target_hs: Optional[torch.Tensor] = None
 
     @classmethod
     def from_language_model(cls, language_model: nn.Module,
@@ -808,6 +813,7 @@ class BRIANHarness(nn.Module):
         h._ste_sigma_ema = 1.0
         h._ste_sigma = None
         h._build_semantic_turbulence()
+        h._bma_target_hs: Optional[torch.Tensor] = None
         # TRUNK-OPT monitor — optional observability layer (Phase 1).
         h._trunk_opt_monitor = None
         return h
@@ -2543,9 +2549,18 @@ class BRIANHarness(nn.Module):
         if h_m is None or h_s is None:
             return None
 
-        # Flatten to (N, d) — gradient flows through trunk only
+        # Freeze h_sensory at first call: both trunk layers collapse together
+        # (erank 53→7 by step 300), so live-to-live comparison gives loss≈0.
+        # The frozen reference captures high-erank initialization variance as
+        # a stable anti-collapse target for all subsequent steps.
+        if self._bma_target_hs is None:
+            self._bma_target_hs = h_s.detach().clone()
+
+        # Flatten to (N, d) — gradient flows through trunk only; expert is frozen
         hm = h_m.reshape(-1, h_m.shape[-1]).to(dtype=torch.float32)
-        hs = h_s.reshape(-1, h_s.shape[-1]).to(dtype=torch.float32).detach()
+        hs = self._bma_target_hs.reshape(
+            -1, self._bma_target_hs.shape[-1]
+        ).to(dtype=torch.float32, device=hm.device)
 
         d = hm.shape[-1]
         k = int(getattr(self.training_config, "bma_n_projections", 64))
