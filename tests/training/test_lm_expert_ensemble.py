@@ -666,3 +666,188 @@ class TestBridgeBufferDtype:
             out_bf16, out_fp32.to(torch.bfloat16),
             rtol=1e-2, atol=1e-2,
         )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Stubs for TestExpertMaxContext — no real model loading, no network.
+# ──────────────────────────────────────────────────────────────────────
+
+_MAX_CTX_SMALL = 64   # stub expert context limit (simulates GPT-2 n_positions=1024)
+_VOCAB_SMALL = 128
+
+
+def _make_stub_lm(n_positions: int = _MAX_CTX_SMALL, vocab: int = _VOCAB_SMALL):
+    """Minimal nn.Module stub with config.n_positions.
+
+    Raises IndexError for T > n_positions, mirroring the exact failure mode
+    GPT-2 exhibits when position embedding indices exceed n_positions=1024.
+    """
+    import types as _t
+    class _StubLM(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.config = _t.SimpleNamespace(n_positions=n_positions)
+        def forward(self, input_ids, **kwargs):
+            B, T = input_ids.shape
+            if T > n_positions:
+                raise IndexError(
+                    f"position index {T - 1} is out of bounds for "
+                    f"Embedding(num_embeddings={n_positions})"
+                )
+            return _t.SimpleNamespace(
+                logits=torch.zeros(B, T, vocab, dtype=torch.float32)
+            )
+        def parameters(self): return iter([])
+        def eval(self): return self
+    return _StubLM()
+
+
+def _make_stub_expert_same_tok(
+    n_positions: int = _MAX_CTX_SMALL, vocab: int = _VOCAB_SMALL
+) -> "LMExpert":
+    """LMExpert with same-tokenizer path, bypassing __init__ (no model loading)."""
+    expert = object.__new__(LMExpert)
+    nn.Module.__init__(expert)
+    expert.model_id = "stub"
+    expert.domain = "general"
+    expert.lm = _make_stub_lm(n_positions, vocab)
+    expert.is_same_tokenizer = True
+    expert.vocab_size_trunk = vocab
+    expert.vocab_size_expert = vocab
+    expert.last_alignment_coverage = None
+    expert._expert_max_ctx = n_positions
+    return expert
+
+
+def _make_stub_expert_bridge(
+    n_positions: int = _MAX_CTX_SMALL,
+    vocab: int = _VOCAB_SMALL,
+    t_trunk: int | None = None,
+) -> "LMExpert":
+    """LMExpert wired for bridge path, bypassing __init__.
+
+    The expert tokenizer returns n_positions+20 tokens (more than the expert
+    can handle), so without the _expert_max_ctx truncation the stub LM
+    receives > n_positions tokens and raises IndexError.
+    t_trunk is the trunk sequence length passed to _forward_bridge.
+    Defaults to n_positions+5, which is > n_positions and triggers the bug.
+    """
+    if t_trunk is None:
+        t_trunk = n_positions + 5
+    n_expert_toks = n_positions + 20  # always > t_trunk
+
+    expert = object.__new__(LMExpert)
+    nn.Module.__init__(expert)
+    expert.model_id = "stub"
+    expert.domain = "general"
+    expert.lm = _make_stub_lm(n_positions, vocab)
+    expert.is_same_tokenizer = False
+    expert.vocab_size_trunk = vocab
+    expert.vocab_size_expert = vocab
+    expert.last_alignment_coverage = None
+    expert._expert_max_ctx = n_positions
+
+    trunk_tok = mock.MagicMock()
+    trunk_tok.decode.return_value = "word " * t_trunk
+    # Trunk offsets: step-5 windows, width-4 — end-offsets 4, 9, 14, ...
+    trunk_tok.return_value = {
+        "input_ids": list(range(t_trunk)),
+        "offset_mapping": [(i * 5, i * 5 + 4) for i in range(t_trunk)],
+    }
+
+    expert_tok = mock.MagicMock()
+    # Expert offsets: step-4 windows, width-3 — end-offsets 3, 7, 11, ...
+    # Deliberately non-overlapping with trunk end-offsets → all positions
+    # abstain, simplifying the alignment check.
+    expert_tok.return_value = {
+        "input_ids": list(range(n_expert_toks)),
+        "offset_mapping": [(i * 4, i * 4 + 3) for i in range(n_expert_toks)],
+    }
+
+    bridge = mock.MagicMock()
+    bridge.is_identity = False
+    bridge.apply.side_effect = lambda x: x.float()
+
+    expert._trunk_tokenizer = trunk_tok
+    expert._expert_tokenizer = expert_tok
+    expert.vocab_bridge = bridge
+    return expert
+
+
+class TestExpertMaxContext:
+    """LMExpert must clamp inputs at the expert model's context limit.
+
+    All tests use stub models — no weights, no network, no GPU required.
+    The stub LM raises IndexError for T > n_positions to confirm the fix
+    actually prevents the position-embedding OOB crash that afflicted
+    CodeGPT-small-py (GPT-2 arch, n_positions=1024) under trunk seq_len=2048.
+    """
+
+    def test_expert_max_ctx_attribute_set_on_init(self):
+        """_expert_max_ctx must be derived from lm.config.n_positions in __init__."""
+        stub_lm_obj = _make_stub_lm(n_positions=_MAX_CTX_SMALL)
+        stub_tok = mock.MagicMock()
+        stub_tok.name_or_path = "stub"
+        stub_tok.vocab_size = _VOCAB_SMALL
+        stub_bridge = mock.MagicMock()
+        stub_bridge.is_identity = True
+        stub_bridge.vocab_size_trunk = _VOCAB_SMALL
+        stub_bridge.vocab_size_expert = _VOCAB_SMALL
+
+        with (
+            mock.patch("neuroslm.experts._load_lm_cached", return_value=stub_lm_obj),
+            mock.patch("neuroslm.experts._load_tokenizer_cached", return_value=stub_tok),
+            mock.patch("neuroslm.experts.VocabBridge.build", return_value=stub_bridge),
+        ):
+            # "stub/model" contains "/" → resolve_expert_alias returns it as-is
+            # without a network call (rule 2: owner/repo form is always canonical)
+            expert = LMExpert("stub/model", "general", trunk_tokenizer=stub_tok, freeze=True)
+
+        assert hasattr(expert, '_expert_max_ctx'), (
+            "LMExpert.__init__ must set self._expert_max_ctx"
+        )
+        assert expert._expert_max_ctx == _MAX_CTX_SMALL, (
+            f"must derive _expert_max_ctx from config.n_positions; "
+            f"expected {_MAX_CTX_SMALL}, got {expert._expert_max_ctx}"
+        )
+
+    def test_same_tok_doesnt_crash_when_t_exceeds_expert_ctx(self):
+        """_forward_same_tok must not crash when T > _expert_max_ctx.
+
+        The stub LM raises IndexError for T > n_positions; without the fix
+        this test would fail with IndexError.
+        """
+        expert = _make_stub_expert_same_tok()
+        T = _MAX_CTX_SMALL + 10
+        ids = torch.randint(0, _VOCAB_SMALL, (1, T))
+        with torch.no_grad():
+            out = expert._forward_same_tok(ids)
+        assert out.shape == (1, T, _VOCAB_SMALL), (
+            f"must return full-T output, got {out.shape}"
+        )
+
+    def test_same_tok_abstains_beyond_expert_ctx(self):
+        """Positions t >= _expert_max_ctx must have zero logits (abstain)."""
+        expert = _make_stub_expert_same_tok()
+        T = _MAX_CTX_SMALL + 10
+        ids = torch.randint(0, _VOCAB_SMALL, (1, T))
+        with torch.no_grad():
+            out = expert._forward_same_tok(ids)
+        assert out[:, _MAX_CTX_SMALL:, :].abs().sum().item() == 0.0, (
+            "positions beyond _expert_max_ctx must be zero (abstain)"
+        )
+
+    def test_bridge_doesnt_crash_when_expert_retok_exceeds_ctx(self):
+        """_forward_bridge must cap expert tokens at _expert_max_ctx before LM call.
+
+        Stub tokenizer returns n_positions+20 tokens; T=n_positions+5. Without
+        the cap, min(T, n_positions+20)=T tokens reach the stub LM → IndexError.
+        """
+        T = _MAX_CTX_SMALL + 5
+        expert = _make_stub_expert_bridge(t_trunk=T)
+        ids = torch.randint(0, _VOCAB_SMALL, (1, T))
+        with torch.no_grad():
+            out = expert._forward_bridge(ids)
+        assert out.shape == (1, T, _VOCAB_SMALL), (
+            f"bridge must return (1, {T}, V), got {out.shape}"
+        )
