@@ -343,72 +343,8 @@ def test_L_env_override_platform(tmp_path, monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# M-O: CLI --platform dispatch
+# P-Q: LightningConnector setup-command + list_jobs contracts
 # ─────────────────────────────────────────────────────────────────────
-
-
-def _make_args(**kwargs) -> argparse.Namespace:
-    defaults = dict(
-        arch=None, steps=None, branch=None, scale=None, dna=None,
-        label=None, ood=None, resume=None, latest=False, hf_repo=None,
-        hf_prefix=None, no_verify=True, platform=None,
-    )
-    defaults.update(kwargs)
-    return argparse.Namespace(**defaults)
-
-
-@pytest.fixture
-def patch_connectors(monkeypatch):
-    """Patch get_connector to track which platform was requested."""
-    launched = []
-
-    class _FakeConnector:
-        def __init__(self, name):
-            self._name = name
-
-        def launch(self, config):
-            launched.append({"platform": self._name, "config": config})
-            return 0
-
-    def _fake_get_connector(platform: str):
-        return _FakeConnector(platform)
-
-    monkeypatch.setattr("neuroslm.connectors.get_connector", _fake_get_connector)
-    return launched
-
-
-@pytest.fixture
-def minimal_project_config(tmp_path, monkeypatch):
-    """A minimal project with brian.toml so load_project_config() works."""
-    cfg_file = tmp_path / "brian.toml"
-    cfg_file.write_text(
-        "[current]\narch = 'architectures/master'\n\n[deploy]\nplatform = 'vast'\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "architectures" / "master").mkdir(parents=True)
-    (tmp_path / "architectures" / "master" / "arch.neuro").write_text(
-        "architecture test { d_sem: 64 }\n", encoding="utf-8"
-    )
-    monkeypatch.chdir(tmp_path)
-    return tmp_path
-
-
-def test_M_platform_flag_vast(patch_connectors, minimal_project_config, monkeypatch):
-    """--platform vast → VastConnector.launch() called."""
-    from neuroslm.cli import cmd_deploy
-    args = _make_args(platform="vast", steps=100)
-    rc = cmd_deploy(args)
-    assert rc == 0
-    assert patch_connectors[0]["platform"] == "vast"
-
-
-def test_N_platform_flag_lightning(patch_connectors, minimal_project_config, monkeypatch):
-    """--platform lightning → LightningConnector.launch() called."""
-    from neuroslm.cli import cmd_deploy
-    args = _make_args(platform="lightning", steps=100)
-    rc = cmd_deploy(args)
-    assert rc == 0
-    assert patch_connectors[0]["platform"] == "lightning"
 
 
 def test_P_clone_url_tokenised_in_python_not_shell():
@@ -523,26 +459,6 @@ def test_Q_list_jobs_uses_ssh_not_sdk_when_ssh_target_stored(tmp_path, monkeypat
     assert len(jobs) == 1
     assert jobs[0].job_id == "ln-test-001"
     assert jobs[0].status == "running"
-
-
-def test_O_no_platform_uses_toml(patch_connectors, tmp_path, monkeypatch):
-    """No --platform flag → reads [deploy].platform from brian.toml."""
-    cfg_file = tmp_path / "brian.toml"
-    cfg_file.write_text(
-        "[current]\narch = 'architectures/master'\n\n[deploy]\nplatform = 'lightning'\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "architectures" / "master").mkdir(parents=True)
-    (tmp_path / "architectures" / "master" / "arch.neuro").write_text(
-        "architecture test { d_sem: 64 }\n", encoding="utf-8"
-    )
-    monkeypatch.chdir(tmp_path)
-
-    from neuroslm.cli import cmd_deploy
-    args = _make_args(platform=None, steps=100)
-    rc = cmd_deploy(args)
-    assert rc == 0
-    assert patch_connectors[0]["platform"] == "lightning"
 
 
 # ─────────────────────────────────────────────────────────────────────

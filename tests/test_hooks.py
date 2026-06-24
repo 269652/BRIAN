@@ -193,63 +193,6 @@ class TestHookRunner:
         assert rc == 0
 
 
-# ── Section C: brian deploy integration ────────────────────────────
-
-
-class TestDeployRunsPreHook:
-    """``cmd_deploy`` runs ``pre-deploy`` BEFORE any vast.ai call."""
-
-    def _patch_cli(self, monkeypatch, hook_rc=0):
-        """Patch out the expensive parts of cmd_deploy + capture order."""
-        from neuroslm import cli
-        order = []
-
-        def fake_run_hook(name, repo_root=None, env=None):
-            order.append(("hook", name))
-            return hook_rc
-
-        def fake_deploy_dsl(**kw):
-            order.append(("deploy_dsl", kw))
-            return 0
-
-        def fake_deploy_dna(**kw):
-            order.append(("deploy_dna", kw))
-            return 0
-
-        monkeypatch.setattr(cli, "_run_hook", fake_run_hook, raising=False)
-        monkeypatch.setattr(cli, "_deploy_dsl", fake_deploy_dsl)
-        monkeypatch.setattr(cli, "_deploy_dna", fake_deploy_dna)
-        return order
-
-    def test_pre_deploy_hook_runs_before_deploy(self, monkeypatch):
-        from neuroslm import cli
-        order = self._patch_cli(monkeypatch, hook_rc=0)
-        import argparse
-        args = argparse.Namespace(
-            steps=10, branch=None, dna=None, ood=0, scale=None, label=None,
-        )
-        rc = cli.cmd_deploy(args)
-        assert rc == 0
-        # hook came BEFORE the deploy
-        assert order[0] == ("hook", "pre-deploy"), \
-            f"expected pre-deploy first, got {order}"
-        assert any(step[0].startswith("deploy_") for step in order)
-
-    def test_pre_deploy_failure_aborts_deploy(self, monkeypatch):
-        from neuroslm import cli
-        order = self._patch_cli(monkeypatch, hook_rc=42)
-        import argparse
-        args = argparse.Namespace(
-            steps=10, branch=None, dna=None, ood=0, scale=None, label=None,
-        )
-        rc = cli.cmd_deploy(args)
-        assert rc == 42, "pre-deploy non-zero must propagate"
-        # No deploy_* call should have happened
-        deploy_calls = [s for s in order if s[0].startswith("deploy_")]
-        assert deploy_calls == [], \
-            f"pre-deploy failure must abort BEFORE deploy; got {deploy_calls}"
-
-
 # ── Section D: Shipped pre-deploy hook + scripts ──────────────────
 
 

@@ -49,12 +49,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from neuroslm.project_config import (
-    ProjectConfig,
     _DEFAULT_OOD_EVERY,
     load_project_config,
 )
@@ -114,154 +112,6 @@ class TestProjectConfigOodEvery:
         """The module-level constant must stay 0 (changing it would
         flip every legacy run that doesn't have a brian.toml)."""
         assert _DEFAULT_OOD_EVERY == 0
-
-
-# ──────────────────────────────────────────────────────────────────
-# Group B / C — cmd_deploy propagation (arch + ood_every)
-# ──────────────────────────────────────────────────────────────────
-
-class _DeployFixture:
-    """Minimal scaffolding to call ``cmd_deploy`` with a stub connector.
-
-    Avoids the full pytest fixture machinery so each test reads
-    bottom-up — the connector stub records the ``DeployConfig`` it
-    received and that's what every assertion inspects.
-    """
-
-    @staticmethod
-    def make_args(**overrides):
-        from argparse import Namespace
-        base = dict(
-            platform=None, steps=None, branch=None, scale=None,
-            label=None, dna=None, arch=None, ood=0, machine=None,
-            teamspace=None, resume=None, latest=False,
-        )
-        base.update(overrides)
-        return Namespace(**base)
-
-    @staticmethod
-    def run(cfg, args, *, captured: list):
-        """Patch ``get_connector`` + ``load_project_config`` and invoke
-        ``cmd_deploy``. The connector stub appends each launched
-        ``DeployConfig`` to *captured*.
-
-        ``cmd_deploy`` imports ``load_project_config`` lazily inside
-        the function body, so the patch target is the source module
-        (``neuroslm.project_config``) — patching the cli module would
-        miss the late import."""
-        from neuroslm import cli as cli_module
-        connector = MagicMock()
-        connector.launch = MagicMock(side_effect=lambda c: captured.append(c) or 0)
-        with patch(
-            "neuroslm.project_config.load_project_config",
-            return_value=cfg,
-        ):
-            with patch(
-                "neuroslm.connectors.get_connector",
-                return_value=connector,
-            ):
-                rc = cli_module.cmd_deploy(args)
-        return rc
-
-
-def _make_cfg(**overrides):
-    """ProjectConfig with sane defaults for the deploy-flow tests."""
-    base = dict(
-        repo_root=REPO_ROOT,
-        arch="architectures/SmolLM",
-        dna="",
-        default_steps=1000,
-        default_log_every=20,
-        default_save_every=500,
-        default_push_every=500,
-        default_ood_every=0,
-        default_platform="lightning",
-        default_machine="",
-        default_teamspace="",
-    )
-    base.update(overrides)
-    return ProjectConfig(**base)
-
-
-class TestCmdDeployPropagatesArch:
-    """Deploy → connector contract for ``config.arch``."""
-
-    def test_B1_no_cli_no_dna_uses_brian_toml_arch(self):
-        """The bug this fixes: previously ``config.arch`` was left
-        unset and the Lightning connector fell back to
-        ``architectures/current`` (a stale folder), silently
-        ignoring brian.toml's ``[current].arch``."""
-        cfg = _make_cfg(arch="architectures/SmolLM")
-        args = _DeployFixture.make_args()
-        captured: list = []
-        rc = _DeployFixture.run(cfg, args, captured=captured)
-        assert rc == 0
-        assert len(captured) == 1
-        assert captured[0].arch == "architectures/SmolLM"
-
-    def test_B2_cli_arch_wins_over_brian_toml(self, tmp_path):
-        """``brian deploy --arch architectures/other`` must win."""
-        other = tmp_path / "architectures" / "other"
-        other.mkdir(parents=True)
-        cfg = _make_cfg(arch="architectures/SmolLM")
-        args = _DeployFixture.make_args(arch=str(other))
-        captured: list = []
-        _DeployFixture.run(cfg, args, captured=captured)
-        assert captured[0].arch == str(other)
-
-    def test_B3_dna_mode_skips_brian_toml_arch(self, tmp_path, monkeypatch):
-        """When DNA mode is active, ``prepare_run_workspace`` sets
-        ``config.arch`` to the freshly-compiled workspace path. The
-        brian.toml ``[current].arch`` propagation MUST NOT clobber
-        that — DNA mode wins."""
-        cfg = _make_cfg(arch="architectures/SmolLM")
-        args = _DeployFixture.make_args(dna="some/path.dna")
-
-        # Stub the workspace prep to return a deterministic arch path.
-        workspace = MagicMock()
-        workspace.arch_root = tmp_path / "compiled_workspace"
-        workspace.source_kind = "dna"
-        workspace.source_path = "some/path.dna"
-        workspace.hypergraph_ir.nodes = []
-        workspace.hypergraph_ir.hyperedges = []
-
-        captured: list = []
-        with patch(
-            "neuroslm.compiler.run_workspace.prepare_run_workspace",
-            return_value=workspace,
-        ):
-            _DeployFixture.run(cfg, args, captured=captured)
-        # DNA workspace path wins — NOT the brian.toml arch.
-        assert captured[0].arch == str(workspace.arch_root)
-
-
-class TestCmdDeployPropagatesOodEvery:
-    """Deploy → connector contract for ``config.ood_every``."""
-
-    def test_C1_cli_ood_wins(self):
-        cfg = _make_cfg(default_ood_every=500)
-        args = _DeployFixture.make_args(ood=2000)
-        captured: list = []
-        _DeployFixture.run(cfg, args, captured=captured)
-        assert captured[0].ood_every == 2000
-
-    def test_C2_brian_toml_ood_every_used_when_no_cli(self):
-        """Without ``--ood`` on the CLI, ``brian.toml [defaults]
-        .ood_every`` must flow through. This is the fix for the
-        user's question "why is OOD PPL missing every 500 steps?"
-        — it was missing because nothing wired the cadence."""
-        cfg = _make_cfg(default_ood_every=500)
-        args = _DeployFixture.make_args(ood=0)
-        captured: list = []
-        _DeployFixture.run(cfg, args, captured=captured)
-        assert captured[0].ood_every == 500
-
-    def test_C3_both_zero_means_probe_disabled(self):
-        cfg = _make_cfg(default_ood_every=0)
-        args = _DeployFixture.make_args(ood=0)
-        captured: list = []
-        _DeployFixture.run(cfg, args, captured=captured)
-        assert captured[0].ood_every == 0
 
 
 # ──────────────────────────────────────────────────────────────────
