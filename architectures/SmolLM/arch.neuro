@@ -673,7 +673,7 @@ training {
     # the global `hardware` block unless it declares its own override.
     # approx_params is informational (rough trunk-only count).
     scales: {
-        default: "30m_p4"
+        default: "100m"
 
         30m_p4: {
             d_model:       512

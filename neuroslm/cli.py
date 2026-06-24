@@ -1069,7 +1069,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     config = DeployConfig(
         steps=steps,
         branch=branch,
-        scale=args.scale if args.scale else None,
+        scale=args.scale if args.scale else (cfg.default_scale or None),
         label=getattr(args, "label", None),
         ood_every=ood,
         log_every=log_every,
@@ -4482,7 +4482,8 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="git branch to train (default: brian.toml "
                          "[defaults].branch, then current HEAD)")
     sd.add_argument("--scale", help="Scale variant from arch.neuro scales block "
-                    "(e.g. 100m, 300m, 1b). Default: arch's scales.default")
+                    "(e.g. 100m, 300m, 1b). Default: brian.toml [deploy].scale, "
+                    "then the arch's preset: dims.")
     sd.add_argument("--machine", default=None,
                     help="GPU/machine tier for connectors that support it "
                          "(currently Lightning AI). Substring match against "

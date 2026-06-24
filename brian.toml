@@ -148,7 +148,18 @@ platform = "vast"
 
 # Substring match: "T4", "A10G", "A100", "L4", "H100", etc.
 # Override with `brian deploy --machine A10G` or BRIAN_DEFAULT_MACHINE env.
-machine = "T4"
+# 2026-06-24: T4 (16 GiB) → A100 (40 GiB). The DSL-LM + 3 frozen MoE
+# experts hold ~9 GiB of trunk-vocab logit stashes alone, which a 16 GiB
+# T4 cannot fit alongside the experts + activations → the repeated OOMs.
+# The arch's global hardware{} block already targets A100_SXM4 40 GiB.
+machine = "A100"
+
+# ── Default scale variant (2026-06-24) ──
+# The arch's scales{} block variant deployed when --scale is not given.
+# "100m" = DSL-native ~100M trunk (d_model=640, depth=8, ctx=2048, bf16),
+# the A100-tuned variant. Empty = use the arch's `preset:` dims instead.
+# Override with `brian deploy --scale 300m` or BRIAN_DEFAULT_SCALE env.
+scale = "100m"
 # Lightning AI teamspace to launch the Studio under. Empty = use the
 # SDK default (your personal teamspace). Set this if your account has
 # multiple teamspaces and you want a specific one. Override with

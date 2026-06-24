@@ -113,6 +113,42 @@ class TestProjectConfigParsing:
         assert cfg.nfg_format == "svg"
         assert cfg.nfg_engine == "neato"
 
+    def test_deploy_scale_default_from_brian_toml(self, tmp_path):
+        """``[deploy] scale`` deserialises into ``default_scale`` so the
+        scale variant can be SET persistently (mirrors ``[deploy] machine``
+        → ``default_machine``) instead of requiring ``--scale`` every run."""
+        from neuroslm.project_config import load_project_config
+        (tmp_path / "brian.toml").write_text(
+            '[deploy]\n'
+            'machine = "A100"\n'
+            'scale = "100m"\n',
+            encoding="utf-8",
+        )
+        cfg = load_project_config(start=tmp_path)
+        assert cfg.default_scale == "100m"
+        assert cfg.default_machine == "A100"
+
+    def test_deploy_scale_empty_when_absent(self, tmp_path):
+        """No ``[deploy] scale`` → ``default_scale`` is the empty string
+        (connector / arch picks), never a crash."""
+        from neuroslm.project_config import load_project_config
+        (tmp_path / "brian.toml").write_text(
+            '[current]\narch = "architectures/SmolLM"\n',
+            encoding="utf-8",
+        )
+        cfg = load_project_config(start=tmp_path)
+        assert cfg.default_scale == ""
+
+    def test_deploy_scale_env_override(self, tmp_path, monkeypatch):
+        """``BRIAN_DEFAULT_SCALE`` overrides the brian.toml value."""
+        from neuroslm.project_config import load_project_config
+        (tmp_path / "brian.toml").write_text(
+            '[deploy]\nscale = "100m"\n', encoding="utf-8",
+        )
+        monkeypatch.setenv("BRIAN_DEFAULT_SCALE", "300m")
+        cfg = load_project_config(start=tmp_path)
+        assert cfg.default_scale == "300m"
+
     def test_walks_up_to_find_config(self, tmp_path):
         """``load_project_config`` walks parent dirs to find brian.toml."""
         from neuroslm.project_config import load_project_config

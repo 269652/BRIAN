@@ -147,6 +147,13 @@ _DEFAULT_PLATFORM = "vast"
 # ``brian deploy --machine T4``.
 _DEFAULT_MACHINE = ""
 
+# ── deploy scale (2026-06-24) ────────────────────────────────────────
+# Default scale variant (from arch.neuro `scales {}` block, e.g. "100m",
+# "300m", "1b") passed through to the trainer as the SCALE env var. Empty
+# = no scale → the trainer falls back to the `preset:` field's dims.
+# Overridden by the ``--scale`` CLI flag and ``BRIAN_DEFAULT_SCALE`` env.
+_DEFAULT_SCALE = ""
+
 # ── deploy teamspace (2026-06-18) ────────────────────────────────────
 # Lightning AI teamspace to launch the Studio under. Empty = use the
 # SDK default (the user's personal teamspace). Set this when an
@@ -242,6 +249,11 @@ class ProjectConfig:
     # "L4". Empty string means "let the connector pick". Overridden by
     # the ``--machine`` CLI flag and ``BRIAN_DEFAULT_MACHINE`` env.
     default_machine: str = _DEFAULT_MACHINE
+    # ── Deploy scale (2026-06-24) ──
+    # Default ``scales {}`` variant for `brian deploy` (e.g. "100m"). Empty
+    # = let the trainer use the arch's ``preset:`` dims. Overridden by the
+    # ``--scale`` CLI flag and ``BRIAN_DEFAULT_SCALE`` env.
+    default_scale: str = _DEFAULT_SCALE
     # ── Deploy teamspace (2026-06-18) ──
     # Lightning AI teamspace name (empty = SDK default = user's
     # personal teamspace). Threaded through ``extra_env`` so only the
@@ -522,6 +534,9 @@ def load_project_config(
     default_machine = str(
         deploy_section.get("machine", _DEFAULT_MACHINE)
     )
+    default_scale = str(
+        deploy_section.get("scale", _DEFAULT_SCALE)
+    )
     default_teamspace = str(
         deploy_section.get("teamspace", _DEFAULT_TEAMSPACE)
     )
@@ -556,6 +571,7 @@ def load_project_config(
     )
     env_default_platform = os.environ.get("BRIAN_DEFAULT_PLATFORM")
     env_default_machine = os.environ.get("BRIAN_DEFAULT_MACHINE")
+    env_default_scale = os.environ.get("BRIAN_DEFAULT_SCALE")
     env_default_teamspace = os.environ.get("BRIAN_DEFAULT_TEAMSPACE")
 
     if env_arch:
@@ -664,6 +680,9 @@ def load_project_config(
     if env_default_machine is not None:
         # Allow empty string to clear a brian.toml setting.
         default_machine = env_default_machine
+    if env_default_scale is not None:
+        # Allow empty string to clear a brian.toml setting.
+        default_scale = env_default_scale
     if env_default_teamspace is not None:
         default_teamspace = env_default_teamspace
 
@@ -692,6 +711,7 @@ def load_project_config(
         default_push_optimizer=default_push_optimizer,
         default_platform=default_platform,
         default_machine=default_machine,
+        default_scale=default_scale,
         default_teamspace=default_teamspace,
         hardware_presets=hardware_presets,
     )
