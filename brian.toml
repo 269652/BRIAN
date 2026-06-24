@@ -148,16 +148,22 @@ platform = "vast"
 
 # Substring match: "T4", "A10G", "A100", "L4", "H100", etc.
 # Override with `brian deploy --machine A10G` or BRIAN_DEFAULT_MACHINE env.
-# 2026-06-24: T4 (16 GiB) → A100 (40 GiB). The DSL-LM + 3 frozen MoE
-# experts hold ~9 GiB of trunk-vocab logit stashes alone, which a 16 GiB
-# T4 cannot fit alongside the experts + activations → the repeated OOMs.
-# The arch's global hardware{} block already targets A100_SXM4 40 GiB.
+# Target GPU is the A100 (the arch's hardware{} block pins A100_SXM4 40 GiB).
+# NOTE — the OOMs happened ON the A100, while the T4 ran fine. Not because
+# the A100 has less memory, but because the A100 run used a much heavier
+# per-step config (batch=16 × seq=2048): each (B,T,V) trunk-vocab logit
+# tensor is ~3 GiB and three sit resident alongside the 3 frozen MoE
+# experts — that overflows even 40 GiB. The T4 ran a smaller batch/seq that
+# fit 16 GiB. The fix is the lighter config below + the chunked loss/CFD
+# path, NOT a bigger GPU.
 machine = "A100"
 
 # ── Default scale variant (2026-06-24) ──
 # The arch's scales{} block variant deployed when --scale is not given.
-# "100m" = DSL-native ~100M trunk (d_model=640, depth=8, ctx=2048, bf16),
-# the A100-tuned variant. Empty = use the arch's `preset:` dims instead.
+# "100m" = DSL-native ~100M trunk (d_model=640, depth=8, ctx=2048, bf16) at
+# batch=4 — crucially 4× SMALLER batch than the OOMing batch=16 run, so the
+# (B,T,V) logit tensors drop to ~0.77 GiB. Combined with the chunked CFD /
+# loss path this fits the A100 comfortably. Empty = use the `preset:` dims.
 # Override with `brian deploy --scale 300m` or BRIAN_DEFAULT_SCALE env.
 scale = "100m"
 # Lightning AI teamspace to launch the Studio under. Empty = use the
