@@ -1,0 +1,8 @@
+# Node / Next.js build + dependency output — never tracked.
+node_modules/
+.next/
+out/
+build/
+.env*.local
+*.tsbuildinfo
+next-env.d.ts

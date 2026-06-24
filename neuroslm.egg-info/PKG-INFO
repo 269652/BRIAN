@@ -16,3 +16,7 @@ Requires-Dist: tiktoken>=0.5; extra == "ml"
 Requires-Dist: einops>=0.7; extra == "ml"
 Provides-Extra: dev
 Requires-Dist: pytest-cov>=4.0; extra == "dev"
+Provides-Extra: studio
+Requires-Dist: fastapi>=0.100.0; extra == "studio"
+Requires-Dist: uvicorn[standard]>=0.23.0; extra == "studio"
+Requires-Dist: mcp[cli]>=1.0.0; extra == "studio"

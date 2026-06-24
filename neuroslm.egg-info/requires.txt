@@ -13,3 +13,8 @@ transformers>=4.30
 datasets>=2.10
 tiktoken>=0.5
 einops>=0.7
+
+[studio]
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+mcp[cli]>=1.0.0
