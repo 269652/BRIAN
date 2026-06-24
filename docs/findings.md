@@ -943,6 +943,48 @@ Based on your memory, this fits the P4 loss-clipping experiment. Should I check 
 - Subsystem-aware force layout: repulsion between envelope groups so self-model and memory cannot drift into the cortical loop region.
 - Recognizable "compiler-generated neurodiagram" style will require explicit subsystem framing + canonicalised port grammar rather than more force-directed relaxation.
 
+### H27 — Rebalance distillation so the trunk learns standalone (2026-06-24)
+
+**Status:** 🟠 **PENDING** — wired + arch retuned; full run not yet measured.
+
+**Hypothesis.** On the 100m/seq-2048 run (vast 42397874, commit `2e2a5a08`)
+the *fused* model trained well (WikiText OOD ppl ~80–93, < 100) but the
+**standalone trunk did not learn** — trunk-only `ppl = exp(lm_loss_ema)`
+stayed ~9k–12k and even *rose* (7.6 → 9.4 nats). Mechanism: in
+`fusion_mode=additive_correction` the *detached* cortex (full coverage
+after [[h27-bridge-coverage]] / commit `2e2a5a08`) carried the fused
+output alone at `α=0.1`, so the trunk got ~no fused-loss gradient, and
+the CFD teacher at `T=4` was soft enough that matching it left the trunk
+blurry at `T=1`. Net: the trunk free-rode.
+
+Predicted fix (this commit): raising the trunk's fusion weight and
+sharpening the teacher should force the trunk to internalise the cortex's
+knowledge, so **trunk-only ppl falls toward the fused OOD (~80)** rather
+than diverging from it.
+
+**Spec (this change set).**
+- `architectures/SmolLM/arch.neuro` `multi_cortex.fusion_init`: `0.1 → 0.5`
+  (5× the trunk's fused-loss gradient).
+- `multi_cortex.distillation_temperature` + `LanguageCortex.cfd_temperature`:
+  `4.0 → 2.0` (sharper teacher; transfers confident predictions, not just
+  high-entropy mass).
+- `neuroslm/train_dsl.py` `_ood_eval_logits`: the mid-OOD probe now
+  evaluates the **standalone trunk** (`harness.language_model`, cortex
+  dropped) so OOD ppl is consistent with the trunk-only train ppl and
+  `gap_ratio` is meaningful again.
+
+This is a **stack** (α + temperature changed together). Follow-up: single-
+knob ablation (α-only vs T-only) once the stack shows direction.
+
+**Run.** (pending — to be filled with vast id + trajectory after deploy.)
+
+**Watch.** trunk-only `ppl` (should fall, not plateau ~9k); trunk-only
+WikiText OOD (new metric); `gap_ratio` (should land O(1)); `cx_ema`
+(teacher should stay ~4 — if it climbs, the sharper T is hurting the
+target). Trajectory at steps 500/1000/2000/5000.
+
+[EVIDENCE: tests/test_mid_ood_uses_lm_only_loss.py::TestOodEvalLogitsAreTrunkOnly]
+
 ---
 
 ## Run 40952126 — 2026-06-14 18:48 UTC — H22 SmolLM2 expert swap

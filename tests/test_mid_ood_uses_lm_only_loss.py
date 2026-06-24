@@ -117,3 +117,50 @@ class TestGapRatioMathIsSane:
             f"total-loss train_ppl should make gap_ratio collapse to ~0; "
             f"got {bad_gap_ratio:.4f}. If this assertion fails the math "
             f"in this test is wrong, not the implementation.")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Contract C — OOD probe measures the STANDALONE TRUNK (cortex dropped)
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestOodEvalLogitsAreTrunkOnly:
+    """The OOD probe must evaluate the trunk WITHOUT the cortex, so the OOD
+    ppl reflects the standalone trunk (the deploy target) and is consistent
+    with the trunk-only train ppl. Previously it ran the full fused forward,
+    which made gap_ratio (fused OOD / trunk train_ppl) meaningless."""
+
+    def test_uses_language_model_not_fused_forward(self):
+        torch = pytest.importorskip("torch")
+        from neuroslm.train_dsl import _ood_eval_logits
+
+        class _Trunk:
+            def __call__(self, ids):
+                return torch.full((1, ids.shape[1], 4), 7.0)
+
+        class _Harness:
+            language_model = _Trunk()
+
+            def __call__(self, ids):  # the FUSED forward — must NOT be used
+                return torch.full((1, ids.shape[1], 4), -99.0)
+
+        ids = torch.zeros(1, 3, dtype=torch.long)
+        out = _ood_eval_logits(_Harness(), ids)
+        assert (out == 7.0).all(), (
+            "OOD must evaluate the trunk (language_model), not the fused "
+            "cortex+trunk forward")
+
+    def test_falls_back_to_harness_when_no_trunk(self):
+        torch = pytest.importorskip("torch")
+        from neuroslm.train_dsl import _ood_eval_logits
+
+        class _Harness:
+            language_model = None
+
+            def __call__(self, ids):
+                return torch.full((1, ids.shape[1], 4), -1.0)
+
+        ids = torch.zeros(1, 3, dtype=torch.long)
+        out = _ood_eval_logits(_Harness(), ids)
+        assert (out == -1.0).all(), (
+            "with no separable trunk, OOD falls back to the full forward")

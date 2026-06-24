@@ -261,7 +261,12 @@ training {
         # Eliminates trunk-vs-expert competition; trunk starts with Î±=0.1 (small
         # corrections) and gains influence as it learns to improve on expert predictions.
         fusion_mode:         "additive_correction",
-        fusion_init:         0.1,
+        # 2026-06-24: α 0.1 → 0.5 to force the trunk to LEARN rather than
+        # free-ride. At α=0.1 the detached cortex carried the fused output
+        # alone (OOD 80 fused) while the trunk's standalone CE stayed ~9
+        # (trunk-only ppl ~12k) — it got almost no gradient. α=0.5 gives the
+        # trunk 5× the fused-loss gradient. Goal: distill-then-drop-the-cortex.
+        fusion_init:         0.5,
 
         # â"€â"€ P3: Context-dependent fusion gate â"€â"€
         # Î±_i = sigmoid(cortex_mix_logit + WÂ·h_trunk_last_i)
@@ -279,7 +284,11 @@ training {
         # tests/training/test_cortex_distillation_and_gating.py.
         distillation_enabled:      true,
         distillation_lambda_max:   1.0,
-        distillation_temperature:  4.0,
+        # 2026-06-24: T 4.0 → 2.0. A softer teacher (T=4) let the trunk match
+        # the cortex's high-entropy distribution while staying blurry at T=1
+        # (standalone CE ~9). A sharper teacher transfers the cortex's actual
+        # confident predictions, so the trunk learns to stand on its own.
+        distillation_temperature:  2.0,
         distillation_gap_floor:    0.1,
         distillation_gap_ceiling:  2.0,
 
@@ -1911,7 +1920,7 @@ expert ReasoningExpert {
 module brain = LanguageCortex: {
     teacher_warmup_steps: 10000,
     d_bottleneck:         512,
-    cfd_temperature:      4.0,
+    cfd_temperature:      2.0,   # 2026-06-24: 4.0 → 2.0, sharper teacher (see multi_cortex)
     cfd_alpha:            1.0,
     target:               pfc,
     experts:              [GeneralExpert, CodeExpert, ReasoningExpert]

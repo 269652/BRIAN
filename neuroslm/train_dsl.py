@@ -1112,6 +1112,23 @@ def _eval_pass_marks(rules, step: int,
     return False, ""
 
 
+def _ood_eval_logits(harness, ids):
+    """Logits for the mid-training OOD probe — the STANDALONE TRUNK, with
+    the cortex dropped.
+
+    The deploy target is a trunk that stands on its own (distill-then-drop-
+    the-cortex), so the OOD ppl must reflect what the trunk has internalised,
+    NOT the fused cortex+trunk output. This makes the OOD metric consistent
+    with the trunk-only train ppl (both ``exp(lm_loss_ema)``); otherwise
+    gap_ratio compares a fused OOD against a trunk-only train ppl and is
+    meaningless. Falls back to the full fused forward when the harness has
+    no separable ``language_model`` (legacy per-token circuit path)."""
+    lm = getattr(harness, "language_model", None)
+    if lm is not None:
+        return lm(ids)
+    return harness(ids)
+
+
 def _mid_ood_eval(harness: BRIANHarness, step: int,
                    ckpt_dir: Optional[Path],
                    observer,
@@ -1158,7 +1175,7 @@ def _mid_ood_eval(harness: BRIANHarness, step: int,
             ids_t = torch.tensor([ids[:-1]], device=next(harness.parameters()).device)
             tgt_t = torch.tensor([ids[1:]], device=ids_t.device)
             with torch.no_grad():
-                logits = harness(ids_t)
+                logits = _ood_eval_logits(harness, ids_t)  # trunk-only
                 # cross-entropy per-token
                 vocab = logits.shape[-1]
                 loss = torch.nn.functional.cross_entropy(
