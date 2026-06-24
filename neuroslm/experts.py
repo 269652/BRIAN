@@ -969,12 +969,21 @@ class LMExpert(nn.Module):
             expert_offsets = expert_enc["offset_mapping"]
             # Truncate at min(T, _expert_max_ctx, _BRIDGE_T_MAX).
             # _expert_max_ctx: prevents PE out-of-bounds (GPT-2: 1024).
-            # _BRIDGE_T_MAX: memory guard — Qwen2 (V=151936) at T=512 is
-            # ~150 MiB per sample; at T=2048 it's ~594 MiB → OOM.
-            # With sparse head (backbone path), this only matters for the
-            # fallback (no-backbone) path, but we keep it as a belt-and-
-            # suspenders guard against unknown large-vocab architectures.
-            _BRIDGE_T_MAX = 512
+            # _BRIDGE_T_MAX: memory guard for the NO-BACKBONE fallback only.
+            # The backbone+sparse-head path below applies lm_head to just the
+            # ALIGNED hidden states, so its memory is O(n_aligned, V) and does
+            # NOT grow with T — capping T there does nothing for memory and
+            # everything for harm: at ctx=2048 a cap of 512 leaves ~75% of
+            # trunk positions with no aligned expert token, so they abstain to
+            # uniform (CE = ln V ≈ 10.8). That drags the cortex CE up to ≈8.9
+            # nats — a distillation teacher WORSE than the trunk (lm_ema≈7.6),
+            # which silently kills distillation at long context (it worked at
+            # ctx=512 where 512 = full coverage). So: full coverage whenever a
+            # backbone is present; keep the 512 guard only for the fallback
+            # path, which still materialises a full (T_expert, V) logit tensor.
+            _BRIDGE_T_MAX = (
+                self._expert_max_ctx if self._backbone is not None else 512
+            )
             _expert_cap = min(T, self._expert_max_ctx, _BRIDGE_T_MAX)
             expert_input_ids_list = expert_enc["input_ids"][:_expert_cap]
             expert_offsets = expert_offsets[:_expert_cap]

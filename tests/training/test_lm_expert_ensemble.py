@@ -1166,3 +1166,35 @@ class TestMemoryEfficientForward:
         assert out.device == ids.device, (
             f"ensemble output must be on {ids.device}; got {out.device}"
         )
+
+    def test_bridge_covers_full_seq_with_backbone(self, gpt2_experts):
+        """Regression (distillation-killer): the _BRIDGE_T_MAX cap must NOT
+        truncate cortex coverage when a backbone is present.
+
+        The sparse head bounds the bridge's memory by the number of ALIGNED
+        positions, not by T, so capping T at 512 does nothing for memory and
+        only starves the distillation teacher: at ctx>512 the tail positions
+        get no aligned expert token, abstain to a uniform distribution, and
+        push the cortex CE above the trunk's (the cx_ema>lm_ema inversion seen
+        on the seq=2048 deploy — it trained at ppl ~2000 instead of <100).
+        Positions past 512 must receive a real (non-zero) bridged prediction.
+        """
+        expert = gpt2_experts[0]
+        assert expert._backbone is not None, "needs a backbone-capable expert"
+        T = 640  # > 512
+        ids = torch.randint(0, expert.vocab_size_trunk, (1, T))
+        orig = expert.is_same_tokenizer
+        expert.is_same_tokenizer = False  # force the bridge path
+        try:
+            with torch.no_grad():
+                out = expert.forward_cpu(ids)
+        finally:
+            expert.is_same_tokenizer = orig
+        # With the old cap=512 rows 512: are never written → all-zero (abstain).
+        # With full coverage they carry a real bridged prediction.
+        tail_mass = out[0, 512:T].abs().sum().item()
+        assert tail_mass > 0.0, (
+            "positions beyond 512 must be covered by the cortex when a "
+            "backbone is present — the cap was starving the distillation "
+            "teacher at ctx>512 (cx_ema climbed above lm_ema)"
+        )

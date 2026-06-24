@@ -162,6 +162,10 @@ class TestExpertTruncation:
         # Build a minimal LMExpert by-hand to bypass HF download.
         e = object.__new__(LMExpert)
         nn.Module.__init__(e)
+        # Fake LM has no (backbone, lm_head) split → fallback full-lm() path,
+        # which is exactly what these autocast / clamp / cap contracts target.
+        e._backbone = None
+        e._lm_head = None
         fake_expert_tok = _FakeBPETokenizer()
         # Match counting_lm's vocab to the trunk so the bridge.apply
         # is a same-shape pass-through (identity bridge). This isolates
@@ -213,6 +217,10 @@ class TestAutocastIsolation:
 
         e = object.__new__(LMExpert)
         nn.Module.__init__(e)
+        # Fake LM has no (backbone, lm_head) split → fallback full-lm() path,
+        # which is exactly what these autocast / clamp / cap contracts target.
+        e._backbone = None
+        e._lm_head = None
         fake_expert_tok = _FakeBPETokenizer()
         counting_lm = _CountingFakeLM(vocab=trunk_tokenizer.vocab_size)
         e.model_id = "fake"
@@ -255,6 +263,10 @@ class TestAutocastIsolation:
 
         e = object.__new__(LMExpert)
         nn.Module.__init__(e)
+        # Fake LM has no (backbone, lm_head) split → fallback full-lm() path,
+        # which is exactly what these autocast / clamp / cap contracts target.
+        e._backbone = None
+        e._lm_head = None
         counting_lm = _CountingFakeLM(vocab=trunk_tokenizer.vocab_size)
         e.model_id = "fake"
         e.domain = "general"
@@ -345,6 +357,10 @@ class TestExpertVocabClamp:
 
         e = object.__new__(LMExpert)
         nn.Module.__init__(e)
+        # Fake LM has no (backbone, lm_head) split → fallback full-lm() path,
+        # which is exactly what these autocast / clamp / cap contracts target.
+        e._backbone = None
+        e._lm_head = None
         e.model_id = "fake"
         e.domain = "general"
         e.lm = counting_lm
