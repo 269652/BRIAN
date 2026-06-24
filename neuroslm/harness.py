@@ -1600,6 +1600,121 @@ class BRIANHarness(nn.Module):
         self._last_pre_fusion_lm_logits = None
         self._last_pre_fusion_cortex_logits = None
 
+    @staticmethod
+    def _cfd_kl_and_gate(
+        student: torch.Tensor,
+        teacher_for_target: torch.Tensor,
+        targets: torch.Tensor,
+        *,
+        T_eff: float,
+        K_t: int,
+        lam: float,
+        log_prior: Optional[torch.Tensor] = None,
+        use_pointwise_k: bool = False,
+        K_min: int = 1,
+        K_max: int = 1,
+        pmi_scale: float = 2.0,
+        chunk: int = 1024,
+    ):
+        """Chunked CFD KL term + Stage-3 gradient-alignment gate.
+
+        Computes, fully chunked over the flattened token dim so it never
+        materialises a full ``(B, T, V)`` log-softmax / KL / gradient tensor
+        (the 3.07 GiB allocations that OOMed the SmolLM deploy):
+
+          * ``kl_term`` — scalar, gradient-connected to ``student`` via
+            gradient checkpointing so even the BACKWARD recomputes one
+            ``(chunk, V)`` slice at a time instead of retaining all chunks.
+          * ``lam_eff = lam · (1 + cos)/2`` where ``cos`` is the cosine
+            between the per-logit distillation gradient and the LM-CE
+            gradient, accumulated chunk-by-chunk (positions are independent
+            so the global cosine == the chunked accumulation).
+
+        ``teacher_for_target`` is the teacher logits the top-K target is
+        built from: the raw detached teacher (v1) or the prior-residual
+        adjusted teacher (v2). Returns ``(kl_term, lam_eff, g_align,
+        K_telemetry)`` — numerically identical to the unchunked path.
+        """
+        from torch.utils.checkpoint import checkpoint as _checkpoint
+
+        V = student.size(-1)
+        s_flat = student.reshape(-1, V)
+        t_flat = teacher_for_target.reshape(-1, V)
+        tg_flat = targets.reshape(-1).to(s_flat.device)
+        N = s_flat.size(0)
+        T2 = float(T_eff) ** 2
+        if N == 0:
+            zero = student.sum() * 0.0
+            return zero, float(lam) * 0.5, 0.0, float(K_t)
+
+        def _build_target(t_c: torch.Tensor):
+            if use_pointwise_k:
+                K_pp = cfd_pointwise_k_from_pmi(
+                    t_c, log_prior, K_min=int(K_min), K_max=int(K_max),
+                    scale=float(pmi_scale),
+                )
+                return cfd_topk_target_var_k(t_c, K_pp, T=T_eff), K_pp
+            return cfd_topk_target(t_c, K=int(K_t), T=T_eff), None
+
+        # ── Phase 1: gradient-alignment cosine ──
+        # Per chunk, compute the KL- and CE-gradient directions on ISOLATED
+        # detached leaves (so the main graph is untouched) and accumulate the
+        # cosine's dot product + squared norms. Each chunk's grads are freed
+        # before the next — peak is O(chunk, V), not O(B·T, V).
+        dot = 0.0
+        nl2 = 0.0
+        nd2 = 0.0
+        k_sum = 0.0
+        k_cnt = 0
+        for c0 in range(0, N, chunk):
+            c1 = min(c0 + chunk, N)
+            t_c = t_flat[c0:c1]
+            tgt_c, K_pp = _build_target(t_c)
+            if K_pp is not None:
+                k_sum += float(K_pp.float().sum().item())
+                k_cnt += int(K_pp.numel())
+            # distillation-gradient direction
+            s_leaf = s_flat[c0:c1].detach().requires_grad_(True)
+            log_s = F.log_softmax(s_leaf / T_eff, dim=-1)
+            kl_c = F.kl_div(
+                log_s, tgt_c, reduction="none"
+            ).sum(-1).sum() * (T2 / N)
+            g_d = torch.autograd.grad(kl_c, s_leaf)[0]
+            # LM-CE-gradient direction
+            s_leaf2 = s_flat[c0:c1].detach().requires_grad_(True)
+            ce_c = F.cross_entropy(
+                s_leaf2, tg_flat[c0:c1], reduction="sum"
+            ) / N
+            g_l = torch.autograd.grad(ce_c, s_leaf2)[0]
+            dot += float((g_l * g_d).sum().item())
+            nl2 += float((g_l * g_l).sum().item())
+            nd2 += float((g_d * g_d).sum().item())
+            del s_leaf, s_leaf2, log_s, g_d, g_l, tgt_c
+        denom = (nl2 ** 0.5) * (nd2 ** 0.5)
+        cos = (dot / denom) if denom > 1e-12 else 0.0
+        cos = max(-1.0, min(1.0, cos))
+        lam_eff = float(lam) * 0.5 * (1.0 + cos)
+        K_telemetry = (k_sum / k_cnt) if k_cnt else float(K_t)
+
+        # ── Phase 2: kl_term for the training backward ──
+        # Gradient checkpointing: the forward retains only the (cheap) input
+        # slices + the scalar; the backward recomputes each chunk's
+        # log-softmax on demand, so the eventual ``total.backward()`` never
+        # holds a full (B·T, V) activation.
+        def _kl_chunk(s_c: torch.Tensor, t_c: torch.Tensor) -> torch.Tensor:
+            tgt_c, _ = _build_target(t_c)
+            log_s = F.log_softmax(s_c / T_eff, dim=-1)
+            return F.kl_div(log_s, tgt_c, reduction="none").sum(-1).sum()
+
+        kl_sum = s_flat.new_zeros((), dtype=torch.float32)
+        for c0 in range(0, N, chunk):
+            c1 = min(c0 + chunk, N)
+            kl_sum = kl_sum + _checkpoint(
+                _kl_chunk, s_flat[c0:c1], t_flat[c0:c1], use_reentrant=False,
+            ).float()
+        kl_term = (kl_sum / N) * T2
+        return kl_term, lam_eff, cos, K_telemetry
+
     def _cortex_fusion_aux_step(
         self,
         total: torch.Tensor,
@@ -1744,48 +1859,34 @@ class BRIANHarness(nn.Module):
                         )
 
                     # M2 — prior-residual sparsification (γ > 0 only;
-                    # γ = 0 is a noop branch inside the helper).
-                    teacher_v2 = cfd_prior_residual(
+                    # γ = 0 is a noop branch inside the helper). This is the
+                    # teacher the top-K target is built from per chunk.
+                    teacher_for_target = cfd_prior_residual(
                         teacher, log_prior, gamma=gamma
                     )
-                    # M4 — per-position K from teacher PMI.
-                    if use_pointwise_k:
-                        K_per_pos = cfd_pointwise_k_from_pmi(
-                            teacher_v2,
-                            log_prior,
-                            K_min=int(cfg.cfd_pointwise_k_min),
-                            K_max=int(cfg.cfd_pointwise_k_max),
-                            scale=float(
-                                getattr(cfg, "cfd_pmi_scale", 2.0)
-                            ),
-                        )
-                        target_pdf = cfd_topk_target_var_k(
-                            teacher_v2, K_per_pos, T=T_eff
-                        )
-                        K_telemetry = float(K_per_pos.float().mean().item())
-                    else:
-                        target_pdf = cfd_topk_target(
-                            teacher_v2, K=K_t, T=T_eff
-                        )
-                        K_telemetry = float(K_t)
+                    _pwk = use_pointwise_k
+                    _kmin = int(cfg.cfd_pointwise_k_min) if use_pointwise_k else 1
+                    _kmax = int(cfg.cfd_pointwise_k_max) if use_pointwise_k else 1
+                    _pmi = float(getattr(cfg, "cfd_pmi_scale", 2.0))
+                    _lp = log_prior
                 else:
                     # v1 path: raw teacher, global K.
-                    target_pdf = cfd_topk_target(
-                        teacher, K=K_t, T=T_eff
-                    )
-                    K_telemetry = float(K_t)
+                    teacher_for_target = teacher
+                    _pwk = False
+                    _kmin = _kmax = 1
+                    _pmi = 2.0
+                    _lp = None
 
-                # Per-token KL (correct reduction — fixes Followup F1
-                # by construction since we never go through batchmean
-                # for the CFD path).
-                log_student = F.log_softmax(student / T_eff, dim=-1)
-                kl_per_tok = F.kl_div(
-                    log_student, target_pdf, reduction="none"
-                ).sum(-1).mean()
-                kl_term = kl_per_tok * (T_eff ** 2)
-                # Stage 3: gradient-alignment gate
-                lam_eff, g_align = cfd_grad_alignment_gate(
-                    kl_term, student, targets, lam_0=lam
+                # Per-token KL + Stage-3 gradient-alignment gate, fully chunked
+                # over tokens so no full (B,T,V) log-softmax / KL / gradient
+                # tensor is ever materialised (the 3.07 GiB allocations that
+                # OOMed the SmolLM deploy). Numerically identical to the naive
+                # path — see _cfd_kl_and_gate + its equivalence tests.
+                kl_term, lam_eff, g_align, K_telemetry = self._cfd_kl_and_gate(
+                    student, teacher_for_target, targets,
+                    T_eff=T_eff, K_t=K_t, lam=lam,
+                    log_prior=_lp, use_pointwise_k=_pwk,
+                    K_min=_kmin, K_max=_kmax, pmi_scale=_pmi,
                 )
                 total = total + lam_eff * kl_term
                 self._metrics["distill_kl"] = float(kl_term.detach().item())

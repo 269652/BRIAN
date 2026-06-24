@@ -372,6 +372,156 @@ class TestCFDStage3GradAlignGate:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Chunked KL + gate — memory-bounded, numerically identical
+# ──────────────────────────────────────────────────────────────────────
+
+class TestCFDChunkedKLGate:
+    """`BRIANHarness._cfd_kl_and_gate` computes the CFD KL term AND the
+    gradient-alignment gate fully chunked over the token dim, so it never
+    materialises a full ``(B, T, V)`` log-softmax / KL / gradient tensor
+    (the 3.07 GiB allocation that OOMed the SmolLM deploy with <3 GiB free).
+
+    Contract: bit-equivalent (within fp tolerance) to the naive path —
+    the kl_term VALUE, the per-logit GRADIENT (the actual distillation
+    signal), lam_eff, and g_align must all match the unchunked reference.
+    """
+
+    @staticmethod
+    def _ref_v1(student, teacher, targets, T_eff, K, lam):
+        """Unchunked reference — the current inline formula (v1 path)."""
+        target_pdf = cfd_topk_target(teacher, K, T_eff)
+        log_student = F.log_softmax(student / T_eff, dim=-1)
+        kl_per_tok = F.kl_div(
+            log_student, target_pdf, reduction="none").sum(-1).mean()
+        kl_term = kl_per_tok * (T_eff ** 2)
+        lam_eff, g_align = cfd_grad_alignment_gate(
+            kl_term, student, targets, lam_0=lam)
+        return kl_term, lam_eff, g_align
+
+    def _helper(self):
+        from neuroslm.harness import BRIANHarness
+        return BRIANHarness._cfd_kl_and_gate
+
+    def test_helper_exists(self) -> None:
+        from neuroslm.harness import BRIANHarness
+        assert callable(getattr(BRIANHarness, "_cfd_kl_and_gate", None)), (
+            "BRIANHarness must expose a _cfd_kl_and_gate static helper"
+        )
+
+    def test_kl_term_value_matches_reference(self) -> None:
+        student = _make_logits(seed=60, sharpness=1.5).requires_grad_(True)
+        teacher = _make_logits(seed=61, sharpness=3.0)
+        targets = _make_targets(seed=60)
+        T_eff, K, lam = 4.0, 8, 0.7
+        ref_kl, _, _ = self._ref_v1(student, teacher, targets, T_eff, K, lam)
+        kl_term, _, _, _ = self._helper()(
+            student, teacher, targets, T_eff=T_eff, K_t=K, lam=lam, chunk=8)
+        torch.testing.assert_close(
+            kl_term.detach(), ref_kl.detach(), rtol=1e-4, atol=1e-5,
+            msg="chunked kl_term must match the unchunked reference value")
+
+    def test_kl_gradient_matches_reference(self) -> None:
+        """THE critical contract: the distillation GRADIENT w.r.t. the
+        student logits must be identical — this is the training signal."""
+        student = _make_logits(seed=62, sharpness=1.2)
+        teacher = _make_logits(seed=63, sharpness=4.0)
+        targets = _make_targets(seed=62)
+        T_eff, K, lam = 3.0, 6, 1.0
+
+        s_ref = student.clone().requires_grad_(True)
+        ref_kl, _, _ = self._ref_v1(s_ref, teacher, targets, T_eff, K, lam)
+        g_ref = torch.autograd.grad(ref_kl, s_ref)[0]
+
+        s_chk = student.clone().requires_grad_(True)
+        kl_term, _, _, _ = self._helper()(
+            s_chk, teacher, targets, T_eff=T_eff, K_t=K, lam=lam, chunk=8)
+        g_chk = torch.autograd.grad(kl_term, s_chk)[0]
+
+        torch.testing.assert_close(
+            g_chk, g_ref, rtol=1e-4, atol=1e-5,
+            msg="chunked kl_term gradient must match the unchunked reference")
+
+    def test_lam_eff_matches_reference(self) -> None:
+        student = _make_logits(seed=64, sharpness=0.8).requires_grad_(True)
+        teacher = _make_logits(seed=65, sharpness=5.0)
+        targets = _make_targets(seed=64)
+        T_eff, K, lam = 4.0, 8, 0.9
+        _, ref_lam, ref_g = self._ref_v1(
+            student, teacher, targets, T_eff, K, lam)
+        _, lam_eff, g_align, _ = self._helper()(
+            student, teacher, targets, T_eff=T_eff, K_t=K, lam=lam, chunk=8)
+        assert math.isclose(lam_eff, ref_lam, rel_tol=1e-3, abs_tol=1e-3), (
+            f"chunked lam_eff {lam_eff} must match reference {ref_lam}")
+        assert math.isclose(g_align, ref_g, rel_tol=1e-3, abs_tol=1e-3), (
+            f"chunked g_align {g_align} must match reference {ref_g}")
+
+    def test_chunk_size_invariance(self) -> None:
+        student = _make_logits(seed=66, sharpness=1.0).requires_grad_(True)
+        teacher = _make_logits(seed=67, sharpness=2.5)
+        targets = _make_targets(seed=66)
+        kl_a, lam_a, g_a, _ = self._helper()(
+            student, teacher, targets, T_eff=3.5, K_t=8, lam=0.8, chunk=3)
+        kl_b, lam_b, g_b, _ = self._helper()(
+            student, teacher, targets, T_eff=3.5, K_t=8, lam=0.8, chunk=100000)
+        torch.testing.assert_close(
+            kl_a.detach(), kl_b.detach(), rtol=1e-5, atol=1e-6)
+        assert math.isclose(lam_a, lam_b, rel_tol=1e-4, abs_tol=1e-4)
+
+    def test_chunking_bounds_log_softmax_calls(self) -> None:
+        """For N > chunk the KL path must issue multiple log_softmax calls,
+        proof no single full (N, V) tensor is built."""
+        from unittest import mock
+        student = _make_logits(seed=68, sharpness=1.0).requires_grad_(True)
+        teacher = _make_logits(seed=69, sharpness=2.0)
+        targets = _make_targets(seed=68)
+        real = F.log_softmax
+        calls = {"n": 0}
+
+        def _counting(*a, **k):
+            calls["n"] += 1
+            return real(*a, **k)
+
+        with mock.patch.object(F, "log_softmax", _counting):
+            self._helper()(student, teacher, targets,
+                           T_eff=4.0, K_t=8, lam=0.7, chunk=8)
+        # 32 tokens / 8 = 4 chunks, log_softmax in gate (phase 1) + kl (phase 2)
+        assert calls["n"] >= 4, (
+            f"expected multiple chunked log_softmax calls; got {calls['n']}")
+
+    def test_v2_pointwise_k_matches_reference(self) -> None:
+        """The GFD v2 path (prior-residual teacher + per-position K) must
+        also match its unchunked reference."""
+        student = _make_logits(seed=70, sharpness=1.0).requires_grad_(True)
+        teacher = _make_logits(seed=71, sharpness=3.0)
+        targets = _make_targets(seed=70)
+        T_eff, lam = 4.0, 0.8
+        K_min, K_max, scale = 2, 16, 2.0
+        # Build a plausible log_prior over the vocab.
+        g = torch.Generator().manual_seed(72)
+        prior = torch.softmax(torch.randn(VOCAB, generator=g), dim=-1)
+        log_prior = torch.log(prior.clamp_min(1e-12))
+        teacher_v2 = cfd_prior_residual(teacher, log_prior, gamma=0.5)
+
+        # Reference (unchunked v2).
+        K_pp = cfd_pointwise_k_from_pmi(
+            teacher_v2, log_prior, K_min, K_max, scale)
+        target_pdf = cfd_topk_target_var_k(teacher_v2, K_pp, T=T_eff)
+        log_student = F.log_softmax(student / T_eff, dim=-1)
+        ref_kl = F.kl_div(
+            log_student, target_pdf, reduction="none").sum(-1).mean() * (T_eff ** 2)
+
+        kl_term, _, _, K_tel = self._helper()(
+            student, teacher_v2, targets, T_eff=T_eff, K_t=8, lam=lam,
+            log_prior=log_prior, use_pointwise_k=True,
+            K_min=K_min, K_max=K_max, pmi_scale=scale, chunk=8)
+        torch.testing.assert_close(
+            kl_term.detach(), ref_kl.detach(), rtol=1e-4, atol=1e-5,
+            msg="chunked v2 kl_term must match unchunked v2 reference")
+        assert K_min <= K_tel <= K_max, (
+            f"K telemetry {K_tel} must be in [{K_min}, {K_max}]")
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Four-arm ablation — the H006 falsifier
 # ──────────────────────────────────────────────────────────────────────
 
