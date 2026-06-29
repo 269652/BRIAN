@@ -985,6 +985,47 @@ target). Trajectory at steps 500/1000/2000/5000.
 
 [EVIDENCE: tests/test_mid_ood_uses_lm_only_loss.py::TestOodEvalLogitsAreTrunkOnly]
 
+### H28 — logits_mixture (not additive_correction) for a standalone trunk (2026-06-24)
+
+**Status:** 🟠 **PENDING** — wired; full run not yet measured.
+
+**Falsified premise (H27).** H27 raised α (0.1→0.5) under
+`fusion_mode=additive_correction` to make the trunk learn. Run **43125941**
+(commit `ca709250`, A100, α_eff=0.501, T=2.0) showed the rebalance was
+*active and the distillation healthy* (`kl=0.43`, `cx_ema≈4` — a good
+teacher) yet the **trunk-only OOD ppl ROSE 24k→88k** (steps 500→1000) while
+train trunk-ppl sat ~10k. The trunk diverged on held-out data.
+
+**Diagnosis.** additive_correction is `fused = cortex.detach() + α·trunk`,
+so the LM loss drives `α·trunk → target − cortex`, i.e. the trunk learns a
+**residual** `(target−cortex)/α`, not a distribution. Standalone it emits
+`(target−cortex)/α` = garbage (→ OOD 88k). Distillation simultaneously
+pulls `trunk → cortex`; the two objectives **conflict**, and raising α only
+sharpens the residual. additive_correction therefore *cannot* yield a
+droppable trunk, at any α/T.
+
+**Hypothesis.** `fusion_mode=logits_mixture`
+(`fused = (1-α)·trunk + α·cortex`, α = cortex weight) makes the trunk own
+`1-α` of the output → it learns the **full** prediction, and distillation
+**reinforces** the same direction (`trunk → cortex ≈ target`). So the
+trunk-only OOD should **fall** toward the teacher's quality (cx_ema≈4 → ppl
+~50), and `inhibition_enabled` anneals α_eff→0 as the trunk catches up (the
+automatic cortex-drop).
+
+**Spec (this change set).**
+- `architectures/SmolLM/arch.neuro` `multi_cortex.fusion_mode`:
+  `additive_correction → logits_mixture`.
+- `multi_cortex.fusion_init`: `0.5 → 0.3` (now CORTEX weight; trunk owns 0.7).
+- Distillation T stays 2.0 (H27), inhibition stays on (drives the drop).
+
+**Run.** (pending — vast id + trajectory after deploy.)
+
+**Watch.** trunk-only OOD ppl (must FALL, not rise); train trunk-ppl
+(should drop from ~10k); `cortex[inh=…]` should lift off 0 as `lm_ema`
+approaches `cx_ema` (~4); `α_eff` should drift down via inhibition.
+
+[EVIDENCE: tests/training/test_expert_correction_fusion.py::TestSmolLMUsesLogitsMixture]
+
 ---
 
 ## Run 40952126 — 2026-06-14 18:48 UTC — H22 SmolLM2 expert swap

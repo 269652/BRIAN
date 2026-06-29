@@ -20,6 +20,8 @@ P3 — Context-Dependent Fusion Gate:
 from __future__ import annotations
 
 import math
+from pathlib import Path
+
 import pytest
 import torch
 import torch.nn as nn
@@ -499,3 +501,41 @@ class TestContextGate:
             f"Context gate must produce different alpha per context; "
             f"got alpha_a={alpha_a:.6f} alpha_b={alpha_b:.6f} (diff too small)"
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# H28 — the SmolLM arch must use logits_mixture (standalone-trunk objective)
+# ─────────────────────────────────────────────────────────────────────────
+
+class TestSmolLMUsesLogitsMixture:
+    """The live SmolLM arch must train the trunk toward a STANDALONE
+    distribution, so it must use ``fusion_mode=logits_mixture``, not
+    ``additive_correction``.
+
+    additive_correction (``fused = cortex.detach() + α·trunk``) makes the
+    trunk learn a residual ``(target − cortex)/α`` that cannot stand alone —
+    run 43125941 (α=0.5, T=2) had the trunk-only OOD ppl RISE 24k→88k while
+    distillation fought the residual gradient. logits_mixture
+    (``fused = (1-α)·trunk + α·cortex``) makes the trunk own ``1-α`` of the
+    output, so it learns the full prediction and distillation reinforces it.
+    See findings.md H28.
+    """
+
+    _ARCH = Path(__file__).resolve().parents[2] / "architectures" / "SmolLM"
+
+    def test_fusion_mode_is_logits_mixture(self):
+        from neuroslm.dsl.training_config import load_training_config_from_arch
+        mc = load_training_config_from_arch(str(self._ARCH)).multi_cortex
+        assert mc.fusion_mode == "logits_mixture", (
+            f"SmolLM must use logits_mixture for a standalone trunk; got "
+            f"{mc.fusion_mode!r}. additive_correction makes the trunk a "
+            f"residual that can never be dropped from the fused output.")
+
+    def test_cortex_weight_lets_trunk_own_majority(self):
+        from neuroslm.dsl.training_config import load_training_config_from_arch
+        mc = load_training_config_from_arch(str(self._ARCH)).multi_cortex
+        # In logits_mixture α is the CORTEX weight; the trunk owns (1-α).
+        assert mc.fusion_init < 0.5, (
+            f"fusion_init (cortex weight) must be < 0.5 so the trunk owns the "
+            f"majority of the output and gets the dominant learning gradient; "
+            f"got {mc.fusion_init}")

@@ -256,17 +256,23 @@ training {
         bema_tau:            0.5,
         router_d_model:      256,
 
-        # â"€â"€ P1: Additive correction fusion mode â"€â"€
-        # logits = cortex.detach() + Î±Â·trunk  (trunk learns the DELTA over experts)
-        # Eliminates trunk-vs-expert competition; trunk starts with Î±=0.1 (small
-        # corrections) and gains influence as it learns to improve on expert predictions.
-        fusion_mode:         "additive_correction",
-        # 2026-06-24: α 0.1 → 0.5 to force the trunk to LEARN rather than
-        # free-ride. At α=0.1 the detached cortex carried the fused output
-        # alone (OOD 80 fused) while the trunk's standalone CE stayed ~9
-        # (trunk-only ppl ~12k) — it got almost no gradient. α=0.5 gives the
-        # trunk 5× the fused-loss gradient. Goal: distill-then-drop-the-cortex.
-        fusion_init:         0.5,
+        # ── Fusion mode: logits_mixture (standalone-trunk objective) ──
+        # logits = (1-α)·trunk + α·cortex   (α = CORTEX weight).
+        # 2026-06-24: switched additive_correction → logits_mixture.
+        # additive_correction (fused = cortex.detach() + α·trunk) makes the
+        # trunk learn a RESIDUAL (target − cortex)/α, NOT a distribution — so
+        # the trunk can never stand alone, and raising α only sharpens the
+        # residual: run 43125941 (α=0.5, T=2) had trunk-only OOD RISE 24k→88k
+        # while distillation (kl=0.43) fought the residual gradient. In
+        # logits_mixture the trunk owns (1-α) of the output, so it learns the
+        # FULL prediction and distillation REINFORCES the same direction
+        # (both pull trunk → target). Only mode where distill-then-drop works.
+        fusion_mode:         "logits_mixture",
+        # α = CORTEX weight. 0.3 → trunk owns 0.7 (strong learning gradient);
+        # the cortex still helps early and teaches via KL, and
+        # inhibition_enabled (below) anneals α_eff → 0 as the trunk catches the
+        # teacher — the automatic "drop the cortex" once it's internalised.
+        fusion_init:         0.3,
 
         # â"€â"€ P3: Context-dependent fusion gate â"€â"€
         # Î±_i = sigmoid(cortex_mix_logit + WÂ·h_trunk_last_i)
