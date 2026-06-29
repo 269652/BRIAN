@@ -3,12 +3,15 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 const CAT_COLORS: Record<string, string> = {
   attention: "var(--accent)",
   position: "var(--cyan)",
+  embed: "var(--cyan)",
   ffn: "var(--orange)",
   norm: "var(--blue)",
   moe: "var(--red)",
   ssm: "var(--purple)",
   regularizer: "var(--text-muted)",
   routing: "var(--orange)",
+  residual: "var(--text-muted)",
+  output: "var(--orange)",
 };
 
 export default function MechanicNode({ data, selected }: NodeProps) {

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { ArchSummary, ArchDetail, MechanicSpec, StudioNode, StudioEdge } from "./types";
 import type { Node, Edge } from "@xyflow/react";
 import { api } from "./api";
+import { applyLayout, type LayoutMode } from "./layout";
 
 interface StudioState {
   // Architecture list
@@ -20,6 +21,10 @@ interface StudioState {
   edges: Edge[];
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
+
+  // Layout
+  layoutMode: LayoutMode;
+  setLayoutMode: (mode: LayoutMode) => void;
 
   // Mechanic library
   mechanics: MechanicSpec[];
@@ -50,22 +55,40 @@ interface StudioState {
   deployArch: (steps?: number) => Promise<void>;
 }
 
-function studioToFlow(nodes: StudioNode[], edges: StudioEdge[]): { nodes: Node[]; edges: Edge[] } {
-  return {
-    nodes: nodes.map((n) => ({
+function studioToFlow(
+  nodes: StudioNode[],
+  edges: StudioEdge[],
+  mode: LayoutMode = "lr",
+): { nodes: Node[]; edges: Edge[] } {
+  const rfEdges: Edge[] = edges.map((e) => ({
+    id: e.id,
+    source: e.source,
+    target: e.target,
+    animated: e.animated ?? false,
+    ...(e.label ? { label: e.label } : {}),
+    ...(e.style ? { style: e.style } : {}),
+    ...(e.data ? { data: e.data } : {}),
+  }));
+  const rfNodes: Node[] = nodes.map((n) => {
+    const node: Node = {
       id: n.id,
       type: n.type,
       position: n.position,
       data: n.data,
-      style: {},
-    })),
-    edges: edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      animated: e.animated ?? false,
-    })),
-  };
+      ...(n.style ? { style: n.style } : {}),
+    };
+    // Group membership: children render inside (and clip to) their parent panel.
+    if (n.parentId) {
+      node.parentId = n.parentId;
+      node.extent = (n.extent as "parent") ?? "parent";
+    }
+    // Group containers sit behind their children; not selectable, but draggable.
+    if (n.type === "group") {
+      node.selectable = false;
+    }
+    return node;
+  });
+  return { nodes: applyLayout(rfNodes, rfEdges, mode), edges: rfEdges };
 }
 
 export const useStore = create<StudioState>((set, get) => ({
@@ -88,7 +111,8 @@ export const useStore = create<StudioState>((set, get) => ({
     set({ archLoading: true, activeArch: name });
     try {
       const detail = await api.architectures.get(name);
-      const { nodes, edges } = studioToFlow(detail.nodes, detail.edges);
+      const { layoutMode } = get();
+      const { nodes, edges } = studioToFlow(detail.nodes, detail.edges, layoutMode);
       set({ archDetail: detail, nodes, edges, archLoading: false, selectedNode: null });
     } catch (e) {
       set({ archLoading: false, statusMsg: `Failed to load ${name}` });
@@ -99,6 +123,20 @@ export const useStore = create<StudioState>((set, get) => ({
   edges: [],
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
+
+  layoutMode: "lr",
+  setLayoutMode(mode) {
+    // Always re-layout from the pristine server positions (archDetail), never
+    // from already-moved nodes — otherwise switching back to "lr" (hierarchical)
+    // can't restore the original layout because those coords are gone.
+    const { archDetail } = get();
+    if (!archDetail) {
+      set({ layoutMode: mode });
+      return;
+    }
+    const { nodes, edges } = studioToFlow(archDetail.nodes, archDetail.edges, mode);
+    set({ layoutMode: mode, nodes, edges });
+  },
 
   mechanics: [],
   mechanicsLoading: false,

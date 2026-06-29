@@ -4084,7 +4084,7 @@ def cmd_studio_start(args: argparse.Namespace) -> int:
     procs.append(server_proc)
 
     print(f"\n  Brian Studio")
-    print(f"  ─────────────────────────────────────────────")
+    print(f"  {'-' * 45}")
     print(f"  Server  (REST+MCP) : http://localhost:{server_port}")
     print(f"  API docs           : http://localhost:{server_port}/docs")
     print(f"  MCP endpoint       : http://localhost:{server_port}/mcp")
@@ -4102,7 +4102,7 @@ def cmd_studio_start(args: argparse.Namespace) -> int:
     npm_exe = _find_npm()
     node_modules = client_dir / "node_modules"
     if not node_modules.exists():
-        print(f"\n  Installing npm dependencies (first run)…")
+        print(f"\n  Installing npm dependencies (first run)...")
         subprocess.run(
             npm_exe + " install",
             cwd=client_dir,
@@ -4121,7 +4121,7 @@ def cmd_studio_start(args: argparse.Namespace) -> int:
     procs.append(client_proc)
 
     print(f"  Studio  (Next.js)  : http://localhost:{client_port}")
-    print(f"  ─────────────────────────────────────────────")
+    print(f"  {'-' * 45}")
     print(f"  Press Ctrl-C to stop\n")
 
     if not args.no_browser:

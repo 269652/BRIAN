@@ -11,7 +11,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 PORT = 1984
@@ -46,6 +46,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _no_store_api(request: Request, call_next):
+    """Never let the browser cache /api responses — arch graphs change live as
+    the .neuro source / parser evolve, and a stale cached graph looks like a bug.
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 # ---------------------------------------------------------------------------
 # Routers

@@ -2,6 +2,7 @@
 
 import { useStore } from "@/lib/store";
 import { useState } from "react";
+import type { LayoutMode } from "@/lib/layout";
 
 export default function StudioToolbar() {
   const {
@@ -14,6 +15,8 @@ export default function StudioToolbar() {
     statusMsg,
     toggleSource,
     sourceVisible,
+    layoutMode,
+    setLayoutMode,
   } = useStore();
 
   const [deploySteps, setDeploySteps] = useState(10000);
@@ -99,6 +102,30 @@ export default function StudioToolbar() {
         disabled={!activeArch}
         color="var(--text-muted)"
       />
+
+      <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 4px" }} />
+
+      {/* Layout selector */}
+      <select
+        value={layoutMode}
+        onChange={(e) => setLayoutMode(e.target.value as LayoutMode)}
+        disabled={!activeArch}
+        title="Graph layout mode"
+        style={{
+          background: "var(--bg-card)",
+          border: "1px solid var(--border)",
+          borderRadius: 5,
+          color: activeArch ? "var(--text-muted)" : "var(--text-dim)",
+          padding: "4px 8px",
+          fontSize: 12,
+          cursor: activeArch ? "pointer" : "default",
+        }}
+      >
+        <option value="lr">Hierarchical</option>
+        <option value="spring">Spring</option>
+        <option value="radial">Radial</option>
+        <option value="grid">Grid</option>
+      </select>
 
       <div style={{ flex: 1 }} />
 

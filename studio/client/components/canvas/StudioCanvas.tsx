@@ -19,6 +19,8 @@ import SheafNode from "./nodes/SheafNode";
 import MechanicNode from "./nodes/MechanicNode";
 import StructureNode from "./nodes/StructureNode";
 import DynamicNode from "./nodes/DynamicNode";
+import PopulationNode from "./nodes/PopulationNode";
+import GroupNode from "./nodes/GroupNode";
 import { useCallback } from "react";
 
 const NODE_TYPES = {
@@ -27,6 +29,9 @@ const NODE_TYPES = {
   mechanic: MechanicNode,
   structure: StructureNode,
   dynamic: DynamicNode,
+  population: PopulationNode,
+  neurotransmitter: PopulationNode,
+  group: GroupNode,
 };
 
 export default function StudioCanvas() {
@@ -113,10 +118,29 @@ export default function StudioCanvas() {
         <MiniMap
           nodeColor={(n) => {
             const t = n.type;
+            if (t === "group") return "transparent";
             if (t === "model") return "var(--blue)";
             if (t === "sheaf") return "var(--purple)";
             if (t === "structure") return "var(--orange)";
             if (t === "dynamic") return "var(--red)";
+            if (t === "neurotransmitter") return "var(--orange)";
+            if (t === "mechanic") {
+              const d = n.data as Record<string, unknown>;
+              const cat = String(d.category ?? "");
+              if (cat === "attention") return "var(--accent)";
+              if (cat === "ffn") return "var(--orange)";
+              if (cat === "norm") return "var(--blue)";
+              if (cat === "embed") return "var(--cyan)";
+              if (cat === "residual") return "var(--text-muted)";
+              if (cat === "output") return "var(--orange)";
+            }
+            if (t === "population") {
+              const d = n.data as Record<string, unknown>;
+              const dyn = String(d.dynamics ?? "");
+              if (dyn === "oscillatory") return "var(--purple)";
+              if (dyn === "integrate_and_fire") return "var(--cyan)";
+              if (dyn === "gated") return "var(--blue)";
+            }
             return "var(--accent)";
           }}
           maskColor="rgba(0,0,0,0.5)"

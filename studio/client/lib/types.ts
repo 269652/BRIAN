@@ -16,9 +16,12 @@ export interface ArchDetail {
 
 export interface StudioNode {
   id: string;
-  type: "model" | "sheaf" | "mechanic" | "structure" | "dynamic" | string;
+  type: "model" | "sheaf" | "mechanic" | "structure" | "dynamic" | "group" | string;
   data: Record<string, unknown>;
   position: { x: number; y: number };
+  parentId?: string;
+  extent?: string;
+  style?: Record<string, unknown>;
 }
 
 export interface StudioEdge {
@@ -26,6 +29,9 @@ export interface StudioEdge {
   source: string;
   target: string;
   animated?: boolean;
+  label?: string;
+  style?: Record<string, unknown>;
+  data?: Record<string, unknown>;
 }
 
 export interface MechanicSpec {

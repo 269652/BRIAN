@@ -19,22 +19,32 @@ model {
 
         embed {
             tokens:   learned
-            position: learned    # learned_position_encoding in C⁰
+            position: learned
             equation: learned_position_encoding
+            dropout: 0.1
         }
 
         coboundary {
             equation: multi_head_attention   # fused QKV (Conv1D c_attn), no RoPE
             bias: true                       # bias in c_attn and c_proj
+            dropout: 0.1
         }
 
         transition {
-            equation: gelu_ffn               # W_2 GELU(W_1 x + b) + b
+            equation: gelu_ffn
+            gelu_variant: approx             # tanh approximation — matches GPT-2 exactly
             ff_mult: 4.0
             bias: true
+            dropout: 0.1
         }
 
-        norm { equation: layer_norm, placement: pre, eps: 1e-5 }
-        output { tie_embed: true }
+        norm {
+            equation: layer_norm
+            placement: pre                   # pre-norm: x + F(LN(x))
+            final: true                      # extra LN after last block before lm_head
+            eps: 1e-5
+        }
+
+        output { tie_embed: true }           # lm_head.weight = wte.weight, no bias
     }
 }

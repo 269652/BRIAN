@@ -622,6 +622,11 @@ def _slice_named_block(body: str, start: int, keyword: str):
             pos += 1
         while pos < len(body) and body[pos].isspace():
             pos += 1
+    # Allow an optional `:` between name and `{` (e.g. `architecture master: {`)
+    if pos < len(body) and body[pos] == ":":
+        pos += 1
+        while pos < len(body) and body[pos].isspace():
+            pos += 1
     if pos >= len(body) or body[pos] != "{":
         raise ValueError(f"expected `{{` after `{keyword} {name}`")
     inner, end = _slice_braced(body, pos)

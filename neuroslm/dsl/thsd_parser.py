@@ -217,6 +217,11 @@ class THSDParser:
                 name = tokens[i][1]
                 i += 1
 
+                # Tolerate an optional `:` between name and `{`
+                # (e.g. `complex GlobalWorkspace: {`).
+                if i < len(tokens) and tokens[i][0] == 'COLON':
+                    i += 1
+
                 # Parse the block
                 block_dict, i = THSDParser.parse_dict(tokens, i)
                 complexes.append((name, block_dict))
@@ -242,6 +247,11 @@ class THSDParser:
                     raise ValueError("Expected sheaf name")
                 name = tokens[i][1]
                 i += 1
+
+                # Tolerate an optional `:` between name and `{`
+                # (e.g. `sheaf narrative_consistency: {`).
+                if i < len(tokens) and tokens[i][0] == 'COLON':
+                    i += 1
 
                 # Parse the block
                 block_dict, i = THSDParser.parse_dict(tokens, i)
