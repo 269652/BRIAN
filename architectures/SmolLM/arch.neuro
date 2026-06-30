@@ -83,7 +83,13 @@ training {
                                 # extra activations stored).
     grad_clip:     1.0
     label_smoothing: 0.0       # was 0.05 â€" inflates raw PPL, off for pretrain
-    dropout:       0.0         # was 0.12 â€" model is under-fit, no overfit yet
+    dropout:       0.1         # 2026-06-24: 0.0 → 0.1. The "under-fit, no
+                                # overfit yet" note is FALSIFIED: under
+                                # logits_mixture (H28) the trunk fit train to
+                                # ppl ~150 but its held-out WikiText OOD blew
+                                # up to 175k (CE 12 > uniform 10.8 — confidently
+                                # wrong). Classic overfit. Single-knob fix;
+                                # wd/stochastic_depth are the next levers.
     flooding_level: 0.0        # was 4.0 â€" DEATH SENTENCE for pretraining
     stochastic_depth: 0.0      # was 0.1  â€" reduces effective depth
     z_loss: 0.0001             # keep â€" cheap PaLM-style logit stabiliser

@@ -987,7 +987,7 @@ target). Trajectory at steps 500/1000/2000/5000.
 
 ### H28 — logits_mixture (not additive_correction) for a standalone trunk (2026-06-24)
 
-**Status:** 🟠 **PENDING** — wired; full run not yet measured.
+**Status:** 🟡 **PARTIAL** — trunk now LEARNS (✓) but OVERFITS hard (✗). See result below.
 
 **Falsified premise (H27).** H27 raised α (0.1→0.5) under
 `fusion_mode=additive_correction` to make the trunk learn. Run **43125941**
@@ -1018,13 +1018,46 @@ automatic cortex-drop).
 - `multi_cortex.fusion_init`: `0.5 → 0.3` (now CORTEX weight; trunk owns 0.7).
 - Distillation T stays 2.0 (H27), inhibition stays on (drives the drop).
 
-**Run.** (pending — vast id + trajectory after deploy.)
+**Run.** vast 43133274 (A100, commit `887451b6`, α_eff=0.300, T=2.0, dropout=0).
 
-**Watch.** trunk-only OOD ppl (must FALL, not rise); train trunk-ppl
-(should drop from ~10k); `cortex[inh=…]` should lift off 0 as `lm_ema`
-approaches `cx_ema` (~4); `α_eff` should drift down via inhibition.
+**Result (MIXED).** The fusion fix worked: train trunk-ppl collapsed
+4173 → 268 (steps 500→7500), lm_ema ~9 → ~5 (per-step ppl hit 145) — the
+standalone trunk finally learns, which it never did under
+additive_correction. BUT the trunk-only WikiText OOD EXPLODED 10.9k →
+175k (gap_ratio 2.6 → 358); at 175k the OOD CE ≈ 12 nats > uniform 10.8,
+i.e. the trunk is *confidently wrong* off-distribution — catastrophic
+overfitting. Distillation transferred the teacher's training-batch outputs
+(lm_ema → cx_ema≈4) by MEMORISATION, not its generalising function.
+Contributing: dropout=0, wd=0.01, OOD regularisers inert (reg Σ≈0.001),
+inhibition never engaged (inh=0 — lm_ema≈cx_ema ⇒ zero gap), 60% chat vs
+prose OOD. Verdict: logits_mixture ✅ for learning; generalisation is now
+the live blocker → H29.
 
 [EVIDENCE: tests/training/test_expert_correction_fusion.py::TestSmolLMUsesLogitsMixture]
+
+### H29 — Regularise the over-fitting standalone trunk (2026-06-24)
+
+**Status:** 🟠 **PENDING** — first single knob (dropout) wired.
+
+**Hypothesis.** H28's trunk overfits (train ppl 268 / OOD 175k). Standard
+capacity regularisation should close the gap. Single knob first to isolate:
+`dropout 0.0 → 0.1`. If insufficient, escalate wd (0.01→0.05),
+stochastic_depth (0.0→0.1), and engage the PR2 OOD controller
+(DAR/PCC/isotropy, currently Σ≈0.001).
+
+**Spec.** `architectures/SmolLM/arch.neuro` `dropout: 0.0 → 0.1`.
+
+**Watch.** trunk-only OOD ppl must come DOWN below uniform (CE < 10.8 /
+ppl < 50k, ideally toward the teacher's ~30–50) while train ppl stays
+reasonable; gap_ratio should fall from ~300 toward O(1–5).
+
+> **Elegant-fix track (parallel).** dropout is the empirical stop-gap. The
+> principled fix — transferring the teacher's *function* (its
+> generalisation), not its training-point values — is being designed:
+> Jacobian/Sobolev-matched distillation + logit-norm calibration. Will land
+> as H30 once specced.
+
+[EVIDENCE: architectures/SmolLM/arch.neuro (dropout=0.1)]
 
 ---
 
