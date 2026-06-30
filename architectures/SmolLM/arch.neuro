@@ -93,12 +93,13 @@ training {
     flooding_level: 0.0        # was 4.0 â€" DEATH SENTENCE for pretraining
     stochastic_depth: 0.0      # was 0.1  â€" reduces effective depth
     z_loss: 0.0001             # keep â€" cheap PaLM-style logit stabiliser
-    logit_norm_tau: 0.04       # H30: train CE on f/(τ·‖f‖). Scale-invariant →
-                                # confidence is set by logit DIRECTION not
-                                # magnitude, so the model can't drive loss down
-                                # by inflating ‖f‖. Caps the H28 OOD CE (12 >
-                                # uniform) back below uniform. Sharper than
-                                # z_loss; the two compose. 0.0 = off.
+    logit_norm_tau: 0.0        # H30 LogitNorm — DISABLED (run 43247602). As
+                                # wired it normalises the TRAIN CE (f/τ‖f‖) but
+                                # train_ppl/OOD are read off RAW logits, whose
+                                # magnitude LogitNorm frees → raw CE pinned at
+                                # uniform (10.0), gnorm 1/‖f‖ blow-up (→20), Φ
+                                # collapse. Needs eval-side norm + tuned τ +
+                                # inference temp before reuse — its own project.
     llrd: 1.0                  # was 0.85 â€" LLRD is for FINE-TUNING, not pretrain
     # GIF-6: Cosine LM Head -- eliminates magnitude as a DoF in the
     # final projection. Logits = t*cos(h, w_i), bounded in [-t, +t].

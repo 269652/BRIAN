@@ -1063,11 +1063,28 @@ reasonable; gap_ratio should fall from ~300 toward O(1–5).
 
 ### H30 — Transfer the teacher's *function*, not its values (2026-06-30)
 
-**Status:** 🟢 **ARMED (re-fixed)** — enabled in
-`architectures/SmolLM/arch.neuro` (`logit_norm_tau=0.04`,
-`consistency_weight=1.0`, σ=0.1); mechanisms wired + fully unit/integration
-tested. Awaiting the A/B deploy to measure trunk-only OOD — record the vast id
-+ step-{500,1k,2k,5k,full} trajectory here per §10.
+**Status:** 🟠 **SPLIT** — LogitNorm ❌ FALSIFIED-as-wired (run 43247602,
+below), now DISABLED. Consistency-only 🟢 ARMED for the next deploy
+(`logit_norm_tau=0.0`, `consistency_weight=1.0`, σ=0.1, subsample 1×512) —
+the clean single-mechanism test per §10. Record the vast id +
+step-{500,1k,2k,5k,full} trunk-only OOD trajectory here when it runs.
+
+> **Run 43247602 (2026-06-30) — LogitNorm FALSIFIED as wired; disabled.**
+> First deploy that trained (OOM fixes held). But stacking LogitNorm +
+> consistency violated §10 (one mechanism/run) and LogitNorm broke learning:
+> by step 500 the raw trunk CE was *stuck at uniform* (`lm` 10.61→10.05 vs
+> ln 50257 = 10.82; H28 was ~5.6 here), `gnorm` 2.6→20.7, `Φ` 0.94→0.52, OOD
+> ppl 95.9k (gap 16.3). Root cause: `_compute_loss_from_logits` normalises the
+> TRAIN CE to `f/(τ‖f‖)` (magnitude-free), but `lm`/`ppl`/OOD are read off the
+> RAW pre-fusion logits whose magnitude LogitNorm no longer constrains → raw
+> softmax stays ~uniform, and the `1/‖f‖` gradient factor blows up as raw
+> `‖f‖` stays small. So LogitNorm (a) makes the perplexity telemetry
+> meaningless and (b) destabilises training. Not a drop-in guardrail — needs
+> eval-side normalisation + a vocab-tuned τ (0.04→norm 25 is wrong for V=50k)
+> + an inference temperature before it can be reused. Implementation kept
+> (default-off, `logit_norm_tau=0.0`); contracts in
+> `tests/test_logit_norm_calibration.py` still pass. The **consistency** term
+> was untestable through the LogitNorm damage → re-run it ALONE next.
 
 > **Run 43244973 (2026-06-30) — first armed deploy OOM'd; fixed, not yet
 > re-run.** Booted clean on commit `55163b18` but died at step 0 with
