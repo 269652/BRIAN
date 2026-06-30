@@ -23,6 +23,8 @@ To check what's active in a run, grep the training logs for
 | `logit_norm_tau` | 0.0 | 0.02–0.1 | LogitNorm (Wei et al. ICML'22) — trains CE on `f/(τ·‖f‖)`. **Scale-invariant**: confidence set by logit *direction*, never magnitude, so the model can't lower loss by inflating `‖f‖` → caps OOD CE near (not above) uniform. H30 guardrail; sharper than z_loss. **0.0 = off.** | `harness.py` |
 | `multi_cortex.consistency_weight` | 0.0 | 0.5–2.0 | Jacobian-consistency distillation (Srinivas & Fleuret ICML'18) — `T²·KL(teacher(x) ‖ student(x+δ))` with δ embedding noise. Transfers the teacher's *generalising function* (its input-Jacobian), not training-point values → fixes the H28 memorise→OOD-explosion. **0.0 = off.** | `harness.py` |
 | `multi_cortex.consistency_noise_std` | 0.1 | 0.05–0.3 | σ of the Gaussian embedding perturbation for `consistency_weight`. Larger σ probes a wider function neighbourhood. | `nn_lang.py` |
+| `multi_cortex.consistency_batch` | 1 | 1–B, 0=all | Sequences fed to the consistency probe's 2nd forward. The full `(B,T,V)` 2nd forward OOMs in backward (1.54 GiB logit grad); 1 keeps a real full-context probe while bounding memory. | `harness.py` |
+| `multi_cortex.consistency_max_tokens` | 512 | 128–2048, 0=full | Prefix length for the consistency probe. Caps the 2nd forward's logits+grad. Unbiased Jacobian estimate on the subsample. | `harness.py` |
 | `label_smoothing` | 0.0 | 0.0–0.1 | Standard CE smoothing. | `harness.py` |
 | `weight_decay` | 0.01 | 0.01–0.2 | AdamW L2 regularization. | `harness.py` |
 | `loss_clipping.factor` | 3.0 | 2.0–5.0 | Per-sample loss clipping at `factor × batch_median` (p4 fix). | `harness.py` |

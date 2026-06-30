@@ -1732,6 +1732,33 @@ class BRIANHarness(nn.Module):
             lm.__dict__[k] = v
         return out
 
+    @staticmethod
+    def _consistency_subsample(ids, teacher_logits, batch, max_tokens):
+        """Slice the consistency probe to a cheap ``(batch, prefix)`` block.
+
+        The H30 consistency term needs a SECOND trunk forward; over the full
+        ``(B,T,V)`` its logits' gradient is a 1.54 GiB fp32 tensor (B=4 T=2048
+        V=50257) that OOMs on top of the main step (run 43245905). A
+        Jacobian-consistency estimator is unbiased on a subsample, so we probe
+        a contiguous prefix instead — reducing ``batch`` keeps each probe a
+        real full-context sequence; capping ``max_tokens`` bounds the second
+        forward's logits + grad. A prefix (not scattered positions) because the
+        trunk attends over a coherent window and the teacher must align to it.
+
+        ``batch`` ≤ 0 → all sequences; else clamped to ``[1, B]``.
+        ``max_tokens`` ≤ 0 (or ≥ T) → full length; else the first ``max_tokens``.
+        """
+        B = ids.shape[0]
+        cb = B if batch <= 0 else max(1, min(int(batch), B))
+        ids_c = ids[:cb]
+        teach_c = teacher_logits[:cb]
+        T = ids_c.shape[1]
+        cs = T if max_tokens <= 0 else min(int(max_tokens), T)
+        if cs < T:
+            ids_c = ids_c[:, :cs]
+            teach_c = teach_c[:, :cs, :]
+        return ids_c, teach_c
+
     def _cortex_fusion_aux_step(
         self,
         total: torch.Tensor,
@@ -1965,15 +1992,22 @@ class BRIANHarness(nn.Module):
         # *generalising function* rather than its training-point values (the
         # H28 memorisation → OOD-explosion failure). No-op when
         # consistency_weight == 0 (the default until an arch enables it).
+        # Probed on a cheap (batch, prefix) subsample — a full second forward
+        # over (B,T,V) OOMs in backward (1.54 GiB logit grad, run 43245905);
+        # the estimator is unbiased on a subsample.
         _cw = float(getattr(cfg, "consistency_weight", 0.0))
         if _cw > 0.0 and ids is not None and self.language_model is not None:
             from neuroslm.regularizers import consistency_distill_loss
             _sigma = float(getattr(cfg, "consistency_noise_std", 0.1))
             _T = float(getattr(cfg, "distillation_temperature", 2.0))
+            _cb = int(getattr(cfg, "consistency_batch", 1))
+            _cmt = int(getattr(cfg, "consistency_max_tokens", 512))
+            ids_c, teach_c = self._consistency_subsample(
+                ids, cortex_logits, _cb, _cmt)
             student_noised = self._trunk_forward_preserving_stashes(
-                self.language_model, ids, _sigma)
+                self.language_model, ids_c, _sigma)
             consist = consistency_distill_loss(
-                cortex_logits, student_noised, temperature=_T)
+                teach_c, student_noised, temperature=_T)
             total = total + _cw * consist
             self._metrics["consistency_kl"] = float(consist.detach().item())
 

@@ -205,6 +205,70 @@ class TestStashPreservingForward:
         torch.testing.assert_close(lm.last_token_surprise, clean_surprise)
 
 
+class TestConsistencySubsample:
+    """Run 43245905 OOM'd in `scaled.backward()`: the consistency pass ran a
+    second trunk forward over the WHOLE (B=4,T=2048,V=50257) block, whose
+    gradient is a 1.54 GiB fp32 tensor — on top of the main step it doesn't
+    fit. The fix probes a small (batch, prefix) slice instead (an unbiased
+    Jacobian probe is fine on a subsample). `_consistency_subsample` is the
+    pure slice helper; reducing batch keeps each probe a real full-context
+    sequence, capping tokens bounds the second forward's logits+grad.
+    """
+
+    def _h(self):
+        from neuroslm.harness import BRIANHarness
+        return BRIANHarness
+
+    def test_batch_clamped_to_requested(self):
+        H = self._h()
+        ids = torch.randint(0, 50, (4, 32))
+        teach = torch.randn(4, 32, 50)
+        ids_c, teach_c = H._consistency_subsample(ids, teach, batch=1, max_tokens=0)
+        assert ids_c.shape == (1, 32)
+        assert teach_c.shape == (1, 32, 50)
+
+    def test_batch_zero_means_full(self):
+        H = self._h()
+        ids = torch.randint(0, 50, (4, 32))
+        teach = torch.randn(4, 32, 50)
+        ids_c, teach_c = H._consistency_subsample(ids, teach, batch=0, max_tokens=0)
+        assert ids_c.shape == (4, 32) and teach_c.shape == (4, 32, 50)
+
+    def test_batch_overflow_clamps_to_available(self):
+        H = self._h()
+        ids = torch.randint(0, 50, (2, 32))
+        teach = torch.randn(2, 32, 50)
+        ids_c, _ = H._consistency_subsample(ids, teach, batch=99, max_tokens=0)
+        assert ids_c.shape == (2, 32), "batch > B must clamp to B"
+
+    def test_tokens_capped_to_prefix(self):
+        H = self._h()
+        ids = torch.randint(0, 50, (4, 2048))
+        teach = torch.randn(4, 2048, 50)
+        ids_c, teach_c = H._consistency_subsample(ids, teach, batch=1, max_tokens=512)
+        assert ids_c.shape == (1, 512)
+        assert teach_c.shape == (1, 512, 50)
+
+    def test_tokens_zero_or_overflow_means_full(self):
+        H = self._h()
+        ids = torch.randint(0, 50, (4, 100))
+        teach = torch.randn(4, 100, 50)
+        a, _ = H._consistency_subsample(ids, teach, batch=1, max_tokens=0)
+        b, _ = H._consistency_subsample(ids, teach, batch=1, max_tokens=9999)
+        assert a.shape == (1, 100) and b.shape == (1, 100)
+
+    def test_is_a_prefix_slice(self):
+        """The slice must be exactly ids[:cb, :cs] / teacher[:cb, :cs] — a
+        contiguous prefix the trunk can attend over (scattered positions
+        can't be forwarded through attention) and that the teacher aligns to."""
+        H = self._h()
+        ids = torch.arange(4 * 32).reshape(4, 32)
+        teach = torch.randn(4, 32, 8)
+        ids_c, teach_c = H._consistency_subsample(ids, teach, batch=2, max_tokens=10)
+        torch.testing.assert_close(ids_c, ids[:2, :10])
+        torch.testing.assert_close(teach_c, teach[:2, :10, :])
+
+
 class TestConsistencyWiredIntoAuxStep:
     """§14 contract: enabling ``consistency_weight`` must actually add a
     positive term to the loss and publish the ``consistency_kl`` metric —

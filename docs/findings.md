@@ -1081,7 +1081,21 @@ tested. Awaiting the A/B deploy to measure trunk-only OOD — record the vast id
 > diverged even if it fit; fixed to the per-token mean (÷ `B·T`). Now
 > `consistency_weight=1.0` is comparable to `distillation_lambda_max=1.0`.
 > Contracts: `tests/test_consistency_distill.py::TestConsistencyMemorySafety`
-> (per-token-mean, chunk-invariant value + gradient). Safe to redeploy.
+> (per-token-mean, chunk-invariant value + gradient).
+
+> **Run 43245905 (2026-06-30) — second OOM, now in `backward`; fixed.**
+> With the loss chunked, the forward fit but `scaled.backward()` died at the
+> same 1.54 GiB: the consistency pass ran a *second* trunk forward over the
+> whole `(B=4,T=2048,V=50257)`, whose logit GRADIENT is a 1.54 GiB fp32
+> tensor that won't fit on top of the main step. Fix: probe a cheap
+> `(batch, prefix)` subsample (`consistency_batch=1`,
+> `consistency_max_tokens=512` → 1 seq × 512 tok/step) — a Jacobian-
+> consistency estimator is unbiased on a subsample, reducing batch keeps each
+> probe a real full-context sequence, capping tokens bounds the second
+> forward's logits+grad to ~0.1 GiB. New pure helper
+> `BRIANHarness._consistency_subsample`; contracts in
+> `tests/test_consistency_distill.py::TestConsistencySubsample` (batch/token
+> clamping, prefix semantics). Safe to redeploy.
 
 **Hypothesis.** H28's catastrophe (train ppl 268 ✓ but OOD 175k, CE ≈ 12 >
 uniform ln(50257)=10.82 — *confidently wrong* off-distribution) has a

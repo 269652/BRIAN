@@ -643,6 +643,12 @@ class MultiCortexConfig:
     # embedding perturbation. 0.0 = off.
     consistency_weight: float = 0.0
     consistency_noise_std: float = 0.1
+    # Memory bound for the consistency probe's second forward. Reducing the
+    # batch keeps each probe a real full-context sequence; capping the tokens
+    # bounds the (B,T,V) logit gradient (1.54 GiB at full B=4 T=2048 V=50257 —
+    # OOMs in backward, run 43245905). batch ≤ 0 = all; max_tokens ≤ 0 = full.
+    consistency_batch: int = 1
+    consistency_max_tokens: int = 512
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1663,6 +1669,10 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
         m.consistency_weight = float(props["consistency_weight"])
     if "consistency_noise_std" in props:
         m.consistency_noise_std = float(props["consistency_noise_std"])
+    if "consistency_batch" in props:
+        m.consistency_batch = int(props["consistency_batch"])
+    if "consistency_max_tokens" in props:
+        m.consistency_max_tokens = int(props["consistency_max_tokens"])
 
     # ── Per-expert roster (new path, replaces ``weights`` shorthand) ──
     # `experts: [ { id: "gpt2", domain: "general", freeze: true }, ... ]`

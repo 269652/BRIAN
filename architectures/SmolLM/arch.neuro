@@ -320,6 +320,11 @@ training {
         # (the H28 memorise→OOD-explosion). σ probes the function locally.
         consistency_weight:     1.0,   # 0.0 = off
         consistency_noise_std:  0.1,   # σ of the embedding perturbation
+        # The 2nd forward over the full (B,T,V) OOMs in backward (1.54 GiB
+        # logit grad, run 43245905). Probe a cheap (batch, prefix) subsample —
+        # the Jacobian estimator is unbiased on it. 1 seq × 512 tok / step.
+        consistency_batch:      1,
+        consistency_max_tokens: 512,
 
         # â"€â"€ H006: Capacity-Funneled Distillation (CFD) â"€â"€
         # 2026-06-15: New, behind a feature flag. Replaces the naive
