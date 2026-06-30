@@ -62,16 +62,82 @@ class TestConsistencyKL:
 
     def test_temperature_squared_scaling(self):
         """Hinton T² scaling: the loss carries a (T²) factor so its gradient
-        magnitude is temperature-independent."""
+        magnitude is temperature-independent. Reference is the PER-TOKEN-mean
+        KL (flatten (B,T,V)→(B·T,V) first) — NOT batchmean on the 3-D tensor,
+        which would divide by B only and inflate the loss B·T/B = T×."""
         from neuroslm.regularizers import consistency_distill_loss
         torch.manual_seed(3)
         t = torch.randn(2, 4, 16)
         s = torch.randn(2, 4, 16)
         l1 = consistency_distill_loss(t, s, temperature=1.0).item()
-        # Build the same KL by hand at T=1 and compare (T=1 ⇒ factor 1).
-        kl = F.kl_div(F.log_softmax(s, -1), F.softmax(t, -1),
+        # Per-token mean at T=1 (factor 1): flatten so batchmean divides by B·T.
+        kl = F.kl_div(F.log_softmax(s.reshape(-1, 16), -1),
+                      F.softmax(t.reshape(-1, 16), -1),
                       reduction="batchmean").item()
         assert abs(l1 - kl) < 1e-4
+
+
+class TestConsistencyMemorySafety:
+    """Run 43244973 OOM'd inside this loss: it built a full (B,T,V) fp32
+    softmax/log_softmax (1.54 GiB at B=4 T=2048 V=50257) in one shot. The fix
+    mirrors ``BRIANHarness._chunked_flat_ce`` — flatten over tokens and
+    accumulate the KL in ``chunk``-sized pieces so the fp32 spike is bounded
+    to (chunk, V). The result must be IDENTICAL regardless of chunk size, and
+    must be the per-token mean (÷ B·T), not the 3-D batchmean (÷ B)."""
+
+    def test_per_token_mean_not_batchmean(self):
+        """The loss must divide by B·T (every token weighted equally), not by
+        B. With B=3, T=5 the buggy ÷B reduction is 5× too large — this pins
+        the correct magnitude that keeps consistency_weight comparable to CE."""
+        from neuroslm.regularizers import consistency_distill_loss
+        torch.manual_seed(4)
+        B, Tt, V = 3, 5, 30
+        teach = torch.randn(B, Tt, V)
+        stud = torch.randn(B, Tt, V)
+        got = consistency_distill_loss(teach, stud, temperature=2.0).item()
+        per_token = (F.kl_div(
+            F.log_softmax(stud.reshape(-1, V) / 2.0, -1),
+            F.softmax(teach.reshape(-1, V) / 2.0, -1),
+            reduction="batchmean").item() * 4.0)  # ×T²
+        per_batch = (F.kl_div(
+            F.log_softmax(stud / 2.0, -1), F.softmax(teach / 2.0, -1),
+            reduction="batchmean").item() * 4.0)
+        assert abs(got - per_token) < 1e-4, "must be the per-token mean (÷B·T)"
+        assert abs(got - per_batch) > 1e-3, "must NOT be the 3-D batchmean (÷B)"
+
+    def test_chunked_equals_unchunked(self):
+        """Bounding the fp32 spike must not change the value: a tiny chunk and
+        an all-in-one chunk give the same loss."""
+        from neuroslm.regularizers import consistency_distill_loss
+        torch.manual_seed(5)
+        teach = torch.randn(2, 64, 40)   # N = 128 tokens
+        stud = torch.randn(2, 64, 40)
+        small = consistency_distill_loss(
+            teach, stud, temperature=2.0, chunk=7).item()
+        big = consistency_distill_loss(
+            teach, stud, temperature=2.0, chunk=10_000).item()
+        assert abs(small - big) < 1e-4, (
+            f"chunking must be value-preserving: chunk=7→{small}, "
+            f"chunk=big→{big}")
+
+    def test_chunked_gradient_matches(self):
+        """The student gradient must be identical under chunking — the
+        mechanism trains the trunk, so a chunk-dependent grad would silently
+        change what it learns."""
+        from neuroslm.regularizers import consistency_distill_loss
+        torch.manual_seed(6)
+        teach = torch.randn(2, 64, 40)
+        base = torch.randn(2, 64, 40)
+
+        def _grad(chunk):
+            s = base.clone().requires_grad_(True)
+            consistency_distill_loss(
+                teach, s, temperature=2.0, chunk=chunk).backward()
+            return s.grad
+
+        g_small = _grad(7)
+        g_big = _grad(10_000)
+        torch.testing.assert_close(g_small, g_big, rtol=1e-4, atol=1e-5)
 
 
 class TestEmbedNoiseHook:

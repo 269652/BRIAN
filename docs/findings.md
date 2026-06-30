@@ -1063,10 +1063,25 @@ reasonable; gap_ratio should fall from ~300 toward O(1–5).
 
 ### H30 — Transfer the teacher's *function*, not its values (2026-06-30)
 
-**Status:** 🟢 **ARMED** — enabled in `architectures/SmolLM/arch.neuro`
-(`logit_norm_tau=0.04`, `consistency_weight=1.0`, σ=0.1); mechanisms wired +
-fully unit/integration tested. Awaiting the A/B deploy to measure trunk-only
-OOD — record the vast id + step-{500,1k,2k,5k,full} trajectory here per §10.
+**Status:** 🟢 **ARMED (re-fixed)** — enabled in
+`architectures/SmolLM/arch.neuro` (`logit_norm_tau=0.04`,
+`consistency_weight=1.0`, σ=0.1); mechanisms wired + fully unit/integration
+tested. Awaiting the A/B deploy to measure trunk-only OOD — record the vast id
++ step-{500,1k,2k,5k,full} trajectory here per §10.
+
+> **Run 43244973 (2026-06-30) — first armed deploy OOM'd; fixed, not yet
+> re-run.** Booted clean on commit `55163b18` but died at step 0 with
+> `CUDA OutOfMemoryError: Tried to allocate 1.54 GiB` inside
+> `consistency_distill_loss`'s `log_softmax`. Two defects, both now fixed:
+> (1) the loss built `softmax`/`log_softmax` over the whole `(B=4,T=2048,
+> V=50257)` block — a 1.54 GiB fp32 spike, twice (teacher+student); fixed by
+> chunking the token dim to `(chunk,V)`, mirroring
+> `BRIANHarness._chunked_flat_ce`. (2) `kl_div(reduction="batchmean")` on the
+> 3-D tensor divided by `B` only → loss `T`× (2048×) too large, would have
+> diverged even if it fit; fixed to the per-token mean (÷ `B·T`). Now
+> `consistency_weight=1.0` is comparable to `distillation_lambda_max=1.0`.
+> Contracts: `tests/test_consistency_distill.py::TestConsistencyMemorySafety`
+> (per-token-mean, chunk-invariant value + gradient). Safe to redeploy.
 
 **Hypothesis.** H28's catastrophe (train ppl 268 ✓ but OOD 175k, CE ≈ 12 >
 uniform ln(50257)=10.82 — *confidently wrong* off-distribution) has a

@@ -66,10 +66,12 @@ def logit_norm(logits: torch.Tensor, tau: float,
 
 def consistency_distill_loss(teacher_logits: torch.Tensor,
                              student_logits: torch.Tensor,
-                             temperature: float = 1.0) -> torch.Tensor:
-    """Temperature-scaled KL from a DETACHED teacher to the student.
+                             temperature: float = 1.0,
+                             chunk: int = 1024) -> torch.Tensor:
+    """Temperature-scaled PER-TOKEN-mean KL from a DETACHED teacher to the
+    student, computed in token chunks to bound the fp32 spike.
 
-        L = T² · KL( softmax(teacher/T) ‖ softmax(student/T) )
+        L = T² · mean_token KL( softmax(teacher/T) ‖ softmax(student/T) )
 
     The intended use: ``teacher_logits`` is the teacher at the CLEAN input x,
     ``student_logits`` is the student at a NOISE-PERTURBED input embedding
@@ -80,11 +82,31 @@ def consistency_distill_loss(teacher_logits: torch.Tensor,
     (the H28 memorisation failure). The teacher is detached (it is the
     target); the T² factor (Hinton 2015) keeps the gradient magnitude
     temperature-independent.
+
+    Two correctness points the run-43244973 OOM surfaced:
+
+    * **Per-token mean, not 3-D batchmean.** ``F.kl_div(...,
+      reduction="batchmean")`` on a ``(B,T,V)`` tensor divides by ``B`` only,
+      inflating the loss by ``T``× (2048× at our seq len) and dwarfing the CE.
+      We flatten to ``(B·T, V)`` and divide by the token count.
+    * **Chunked.** Building ``softmax`` / ``log_softmax`` over the whole
+      ``(B·T, V)`` block allocates a full fp32 tensor (1.54 GiB at B=4 T=2048
+      V=50257) — and twice (teacher + student). Slicing the token dim into
+      ``chunk``-sized pieces bounds that spike to ``(chunk, V)``, mirroring
+      ``BRIANHarness._chunked_flat_ce``.
     """
     T = float(temperature)
-    t = F.softmax(teacher_logits.detach() / T, dim=-1)
-    log_s = F.log_softmax(student_logits / T, dim=-1)
-    return F.kl_div(log_s, t, reduction="batchmean") * (T * T)
+    V = teacher_logits.shape[-1]
+    flat_t = teacher_logits.detach().reshape(-1, V)
+    flat_s = student_logits.reshape(-1, V)
+    N = flat_s.shape[0]
+    total = flat_s.new_zeros((), dtype=torch.float32)
+    for s in range(0, N, chunk):
+        e = min(s + chunk, N)
+        t = F.softmax(flat_t[s:e] / T, dim=-1)
+        log_s = F.log_softmax(flat_s[s:e] / T, dim=-1)
+        total = total + F.kl_div(log_s, t, reduction="sum").float()
+    return total / N * (T * T)
 
 
 # ══════════════════════════════════════════════════════════════════════
