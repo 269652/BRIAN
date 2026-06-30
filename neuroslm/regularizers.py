@@ -33,6 +33,33 @@ from neuroslm.dsl.regularization import (
 
 
 # ══════════════════════════════════════════════════════════════════════
+# LogitNorm calibration (Wei et al., ICML 2022) — H30 OOD guardrail
+# ══════════════════════════════════════════════════════════════════════
+
+
+def logit_norm(logits: torch.Tensor, tau: float,
+               eps: float = 1e-7) -> torch.Tensor:
+    """Rescale logits to a fixed L2 norm so their magnitude carries no
+    information.
+
+        f̂ = f / (τ · (‖f‖₂ + eps))           (norm taken over the vocab axis)
+
+    Training the cross-entropy on ``f̂`` removes the only way a network can
+    drive the loss down by becoming over-confident — inflating ‖f‖ — because
+    ``logit_norm`` is **scale-invariant**: ``logit_norm(c·f) = logit_norm(f)``
+    for any c>0. Confidence is then fixed by the logit *direction*, never its
+    magnitude, so the model stays calibrated and its OOD cross-entropy is
+    capped near the uniform ceiling instead of exploding past it (run
+    43133274 hit CE 12 > ln(V)=10.82 — confidently wrong off-distribution).
+
+    ``‖f̂‖₂ = 1/τ`` by construction; smaller τ permits sharper softmaxes.
+    The ``eps`` guards the all-zero-logit row against div-by-zero.
+    """
+    norm = logits.norm(p=2, dim=-1, keepdim=True)
+    return logits / (tau * (norm + eps))
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Gradient Reversal Layer (Ganin & Lempitsky 2015)
 # ══════════════════════════════════════════════════════════════════════
 

@@ -3437,6 +3437,14 @@ class BRIANHarness(nn.Module):
         clip = self.training_config.loss_clipping
         z_w = self.training_config.z_loss
         flat_logits = logits.reshape(-1, vocab)
+        # H30: LogitNorm calibration — compute the CE on direction-only logits
+        # f/(τ·‖f‖) so the model can't lower its loss by inflating ‖f‖
+        # (over-confidence). Scale-invariant, so it caps OOD CE near uniform
+        # instead of letting it explode past it. No-op when tau == 0.
+        _ln_tau = getattr(self.training_config, "logit_norm_tau", 0.0)
+        if _ln_tau > 0:
+            from neuroslm.regularizers import logit_norm
+            flat_logits = logit_norm(flat_logits, _ln_tau)
         flat_targets = targets.reshape(-1)
         N = flat_logits.shape[0]
         # Threshold below which to skip chunking (small batches don't OOM).

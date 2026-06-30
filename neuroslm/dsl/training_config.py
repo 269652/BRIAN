@@ -817,6 +817,12 @@ class TrainingConfig:
     # stability + implicit regularization. PaLM showed 3-5% PPL drop AND
     # 10-15% OOD gap drop simultaneously. 1e-4 is the PaLM default.
     z_loss: float = 0.0
+    # H30 LogitNorm calibration (Wei et al. 2022). When > 0, the LM cross-
+    # entropy is computed on direction-only logits f/(τ·‖f‖), removing the
+    # incentive to inflate ‖f‖ (over-confidence). Caps OOD CE near uniform
+    # instead of letting it explode past it (run 43133274: CE 12 > ln(V)).
+    # τ; smaller = sharper softmaxes allowed. 0.0 = off.
+    logit_norm_tau: float = 0.0
     # GIF-6: Cosine LM Head — eliminate magnitude as a degree of freedom
     # in the final projection. Logits become τ · cos(h, w_i) where τ is
     # a learnable temperature (init √d_model). Bounds logits in [-τ, +τ],
@@ -1196,6 +1202,8 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.stochastic_depth = float(props["stochastic_depth"])
     if "z_loss" in props:
         cfg.z_loss = float(props["z_loss"])
+    if "logit_norm_tau" in props:
+        cfg.logit_norm_tau = float(props["logit_norm_tau"])
     if "cosine_head" in props:
         cfg.cosine_head = _parse_bool(props["cosine_head"])
     if "rope_base" in props:
