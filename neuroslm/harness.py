@@ -1715,10 +1715,28 @@ class BRIANHarness(nn.Module):
         kl_term = (kl_sum / N) * T2
         return kl_term, lam_eff, cos, K_telemetry
 
+    @staticmethod
+    def _trunk_forward_preserving_stashes(lm, ids, embed_noise_std):
+        """Run the trunk on noise-perturbed input embeddings WITHOUT clobbering
+        its ``_last*`` / ``last_*`` stashes.
+
+        The H30 consistency term re-runs the trunk a second time (on x+δ); that
+        forward overwrites the stashes (``_last_hidden``, ``last_token_surprise``,
+        …) that LATER aux losses (topo/symplectic/kjpla) still consume this
+        step. Snapshot and restore them around the call.
+        """
+        snap = {k: v for k, v in lm.__dict__.items()
+                if k.startswith(("_last", "last_"))}
+        out = lm(ids, embed_noise_std=embed_noise_std)
+        for k, v in snap.items():
+            lm.__dict__[k] = v
+        return out
+
     def _cortex_fusion_aux_step(
         self,
         total: torch.Tensor,
         targets: torch.Tensor,
+        ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Add KL-distillation (slot A) and advance the inhibition EMA
         (slot C). Returns the new total loss.
@@ -1938,6 +1956,26 @@ class BRIANHarness(nn.Module):
         self._update_cortex_inhibition(
             lm_loss=lm_for_inh, cortex_loss=ce_cx,
         )
+
+        # ── H30: Jacobian-consistency distillation ──
+        # Re-run the trunk on noise-perturbed input embeddings and match (KL)
+        # the resulting distribution to the CLEAN teacher (cortex_logits). By
+        # Srinivas & Fleuret (2018) this is the first-order equivalent of
+        # matching the teacher's input-Jacobian, so it transfers the teacher's
+        # *generalising function* rather than its training-point values (the
+        # H28 memorisation → OOD-explosion failure). No-op when
+        # consistency_weight == 0 (the default until an arch enables it).
+        _cw = float(getattr(cfg, "consistency_weight", 0.0))
+        if _cw > 0.0 and ids is not None and self.language_model is not None:
+            from neuroslm.regularizers import consistency_distill_loss
+            _sigma = float(getattr(cfg, "consistency_noise_std", 0.1))
+            _T = float(getattr(cfg, "distillation_temperature", 2.0))
+            student_noised = self._trunk_forward_preserving_stashes(
+                self.language_model, ids, _sigma)
+            consist = consistency_distill_loss(
+                cortex_logits, student_noised, temperature=_T)
+            total = total + _cw * consist
+            self._metrics["consistency_kl"] = float(consist.detach().item())
 
         # ── Telemetry ──
         self._metrics["lm_loss_ema"] = float(self._lm_loss_ema)
@@ -3160,7 +3198,7 @@ class BRIANHarness(nn.Module):
         #     PPL gap (C — drives the *next* forward's α_eff).
         # All telemetry (kl, lambda, inhibition, alpha_eff) lands in
         # `_metrics` so the training-log line displays it.
-        total = self._cortex_fusion_aux_step(total, targets)
+        total = self._cortex_fusion_aux_step(total, targets, ids=ids)
         total = self._topo_charge_aux_step(total)
         total = self._symplectic_aux_step(total)
         total = self._kjpla_aux_step(total)

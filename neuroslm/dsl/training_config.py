@@ -635,6 +635,15 @@ class MultiCortexConfig:
     # typical LM context entropies. Smaller value ⇒ sharper drop.
     cfd_pmi_scale: float = 2.0
 
+    # H30 Jacobian-consistency distillation. When > 0, a second trunk forward
+    # on noise-perturbed input embeddings is matched (KL) to the clean teacher,
+    # transferring the teacher's generalising FUNCTION (Srinivas & Fleuret
+    # 2018) instead of its training-point values — the fix for the H28
+    # memorisation/OOD-explosion. ``consistency_noise_std`` = σ of the
+    # embedding perturbation. 0.0 = off.
+    consistency_weight: float = 0.0
+    consistency_noise_std: float = 0.1
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Multi-Objective Fitness — Phase A/F1 (central selection-pressure switch)
@@ -1650,6 +1659,10 @@ def _parse_multi_cortex(body: str) -> MultiCortexConfig:
         m.cfd_pointwise_k_max = int(props["cfd_pointwise_k_max"])
     if "cfd_pmi_scale" in props:
         m.cfd_pmi_scale = float(props["cfd_pmi_scale"])
+    if "consistency_weight" in props:
+        m.consistency_weight = float(props["consistency_weight"])
+    if "consistency_noise_std" in props:
+        m.consistency_noise_std = float(props["consistency_noise_std"])
 
     # ── Per-expert roster (new path, replaces ``weights`` shorthand) ──
     # `experts: [ { id: "gpt2", domain: "general", freeze: true }, ... ]`

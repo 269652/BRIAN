@@ -848,9 +848,18 @@ class DSLLanguageCortex(nn.Module):
             self.dropout = nn.Identity()
         self.pct_trunk = float(pct_trunk)
 
-    def forward(self, ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, ids: torch.Tensor,
+                embed_noise_std: float = 0.0) -> torch.Tensor:
         h = nn_ops.embedding(ids, self.embed)
         h = self.dropout(h)
+        # ── H30: Jacobian-consistency input perturbation ──
+        # A second forward with embed_noise_std>0 measures the trunk's LOCAL
+        # FUNCTION (Srinivas & Fleuret 2018), not just its value at x. The
+        # consistency KL against the clean teacher then transfers the
+        # teacher's generalising function instead of memorising points.
+        # σ=0 is an exact no-op (the default everywhere else).
+        if embed_noise_std > 0.0:
+            h = h + torch.randn_like(h) * embed_noise_std
         # ── H16: Grid-cell positional bias (additive on embedding) ──
         # Zero-init proj at construction ⇒ first forward bit-identical
         # to baseline. As proj learns, multi-scale position code shapes

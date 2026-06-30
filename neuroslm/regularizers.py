@@ -60,6 +60,34 @@ def logit_norm(logits: torch.Tensor, tau: float,
 
 
 # ══════════════════════════════════════════════════════════════════════
+# Jacobian-consistency distillation (Srinivas & Fleuret 2018) — H30 core
+# ══════════════════════════════════════════════════════════════════════
+
+
+def consistency_distill_loss(teacher_logits: torch.Tensor,
+                             student_logits: torch.Tensor,
+                             temperature: float = 1.0) -> torch.Tensor:
+    """Temperature-scaled KL from a DETACHED teacher to the student.
+
+        L = T² · KL( softmax(teacher/T) ‖ softmax(student/T) )
+
+    The intended use: ``teacher_logits`` is the teacher at the CLEAN input x,
+    ``student_logits`` is the student at a NOISE-PERTURBED input embedding
+    x+δ. Matching them forces the student to agree with the teacher in a
+    neighbourhood of x — the first-order equivalent of matching the teacher's
+    input-Jacobian (Srinivas & Fleuret, ICML 2018), which transfers the
+    teacher's *generalising function* rather than its training-point values
+    (the H28 memorisation failure). The teacher is detached (it is the
+    target); the T² factor (Hinton 2015) keeps the gradient magnitude
+    temperature-independent.
+    """
+    T = float(temperature)
+    t = F.softmax(teacher_logits.detach() / T, dim=-1)
+    log_s = F.log_softmax(student_logits / T, dim=-1)
+    return F.kl_div(log_s, t, reduction="batchmean") * (T * T)
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Gradient Reversal Layer (Ganin & Lempitsky 2015)
 # ══════════════════════════════════════════════════════════════════════
 

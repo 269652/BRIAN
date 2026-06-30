@@ -1061,6 +1061,58 @@ reasonable; gap_ratio should fall from ~300 toward O(1–5).
 
 ---
 
+### H30 — Transfer the teacher's *function*, not its values (2026-06-30)
+
+**Status:** 🟠 **IMPLEMENTED, default-off** — two mechanisms wired + fully
+unit/integration tested; awaiting an A/B deploy to measure OOD.
+
+**Hypothesis.** H28's catastrophe (train ppl 268 ✓ but OOD 175k, CE ≈ 12 >
+uniform ln(50257)=10.82 — *confidently wrong* off-distribution) has a
+precise mechanical cause: pointwise KL distillation transfers the teacher's
+training-point **values** but not its generalising **function**, and CE on
+raw logits actively *rewards* unbounded confidence. Two orthogonal,
+principled fixes should each independently pull OOD CE back below uniform:
+
+1. **Jacobian-consistency distillation** (Srinivas & Fleuret, ICML 2018).
+   Add `L_consist = T²·KL(softmax(teacher(x)/T) ‖ softmax(student(x+δ)/T))`
+   with δ Gaussian noise on the trunk's input embedding. Matching the
+   teacher under input perturbation is the first-order equivalent of
+   matching its input-Jacobian → it transfers the teacher's *local
+   function*, so the student cannot spike to confidently-wrong values in the
+   neighbourhood of a training point. This directly attacks the
+   memorisation→OOD-explosion failure.
+2. **LogitNorm calibration** (Wei et al., ICML 2022). Train CE on
+   `f/(τ·‖f‖)` instead of `f`. The mechanism is **scale-invariance**:
+   `logit_norm(c·f)=logit_norm(f)`, so the network can no longer lower its
+   loss by inflating `‖f‖`. It stops manufacturing overconfidence → OOD CE
+   is *capped near* (never above) uniform. A guardrail, complementary to (1).
+
+**Spec.**
+- `neuroslm/regularizers.py`: `logit_norm(logits, tau)` (Part 1, committed
+  `69ddd36f`) and `consistency_distill_loss(teacher, student, T)` (Part 2,
+  this commit).
+- `neuroslm/dsl/nn_lang.py`: `DSLLanguageCortex.forward(ids,
+  embed_noise_std=0.0)` — additive Gaussian embedding perturbation (σ=0 is
+  an exact no-op).
+- `neuroslm/harness.py`: `_compute_loss_from_logits` applies LogitNorm when
+  `logit_norm_tau>0`; `_cortex_fusion_aux_step` runs a stash-preserving
+  noised trunk forward and adds `consistency_weight·L_consist` when
+  `consistency_weight>0` (both default-off).
+- `neuroslm/dsl/training_config.py`: `logit_norm_tau: float = 0.0`,
+  `consistency_weight: float = 0.0`, `consistency_noise_std: float = 0.1`.
+
+**Watch (next deploy).** Enable in `architectures/SmolLM/arch.neuro`
+(`logit_norm_tau ≈ 0.04`, `consistency_weight ≈ 1.0`, σ=0.1) and re-run the
+H28 config. Trunk-only OOD ppl must fall below uniform (CE < 10.8) — target
+gap_ratio O(1–5) — while train ppl stays reasonable. Single-mechanism
+ablation backlog: deploy ① and ② separately to attribute the gain (per §10
+stack-finding rule).
+
+[EVIDENCE: tests/test_logit_norm_calibration.py (10 contracts: scale-invariance, norm=1/τ, argmax-preserved, wired-into-loss)]
+[EVIDENCE: tests/test_consistency_distill.py (10 contracts: T²-KL teacher-detached, embed-noise hook, stash-preserving forward, off→noop/on→positive aux-step)]
+
+---
+
 ## Run 40952126 — 2026-06-14 18:48 UTC — H22 SmolLM2 expert swap
 
 **Status:** ❌ **FALSIFIED** — `general` expert swap `gpt2 → smollm2_360m` regressed
