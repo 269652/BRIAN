@@ -1063,8 +1063,10 @@ reasonable; gap_ratio should fall from ~300 toward O(1–5).
 
 ### H30 — Transfer the teacher's *function*, not its values (2026-06-30)
 
-**Status:** 🟠 **IMPLEMENTED, default-off** — two mechanisms wired + fully
-unit/integration tested; awaiting an A/B deploy to measure OOD.
+**Status:** 🟢 **ARMED** — enabled in `architectures/SmolLM/arch.neuro`
+(`logit_norm_tau=0.04`, `consistency_weight=1.0`, σ=0.1); mechanisms wired +
+fully unit/integration tested. Awaiting the A/B deploy to measure trunk-only
+OOD — record the vast id + step-{500,1k,2k,5k,full} trajectory here per §10.
 
 **Hypothesis.** H28's catastrophe (train ppl 268 ✓ but OOD 175k, CE ≈ 12 >
 uniform ln(50257)=10.82 — *confidently wrong* off-distribution) has a

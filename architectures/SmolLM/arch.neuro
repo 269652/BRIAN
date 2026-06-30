@@ -93,6 +93,12 @@ training {
     flooding_level: 0.0        # was 4.0 â€" DEATH SENTENCE for pretraining
     stochastic_depth: 0.0      # was 0.1  â€" reduces effective depth
     z_loss: 0.0001             # keep â€" cheap PaLM-style logit stabiliser
+    logit_norm_tau: 0.04       # H30: train CE on f/(τ·‖f‖). Scale-invariant →
+                                # confidence is set by logit DIRECTION not
+                                # magnitude, so the model can't drive loss down
+                                # by inflating ‖f‖. Caps the H28 OOD CE (12 >
+                                # uniform) back below uniform. Sharper than
+                                # z_loss; the two compose. 0.0 = off.
     llrd: 1.0                  # was 0.85 â€" LLRD is for FINE-TUNING, not pretrain
     # GIF-6: Cosine LM Head -- eliminates magnitude as a DoF in the
     # final projection. Logits = t*cos(h, w_i), bounded in [-t, +t].
@@ -303,6 +309,17 @@ training {
         distillation_temperature:  2.0,
         distillation_gap_floor:    0.1,
         distillation_gap_ceiling:  2.0,
+
+        # â"€â"€ H30: Jacobian-consistency distillation â"€â"€
+        # Standard KL (above) matches the teacher at the training point x.
+        # This matches it under a perturbation x+δ too — the first-order
+        # equivalent of matching the teacher's input-Jacobian (Srinivas &
+        # Fleuret ICML'18). Transfers the teacher's generalising FUNCTION,
+        # not its memorised point values → the trunk can't spike to
+        # confidently-wrong outputs in a training point's neighbourhood
+        # (the H28 memorise→OOD-explosion). σ probes the function locally.
+        consistency_weight:     1.0,   # 0.0 = off
+        consistency_noise_std:  0.1,   # σ of the embedding perturbation
 
         # â"€â"€ H006: Capacity-Funneled Distillation (CFD) â"€â"€
         # 2026-06-15: New, behind a feature flag. Replaces the naive
