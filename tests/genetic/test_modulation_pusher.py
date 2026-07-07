@@ -90,3 +90,32 @@ class TestPushArtifacts:
         res = push_artifacts(work, ["nope", "also_nope"], message="x")
         assert res["pushed"] is False
         assert "no artifacts" in res["reason"]
+
+
+class TestConcurrentPush:
+    def test_rebases_when_remote_moved(self, tmp_path):
+        # simulate a concurrent writer: remote master advances between our commit
+        # and push. The pusher must fetch+rebase and still land our artifact.
+        from neuroslm.genetic.modulation_pusher import push_artifacts
+        bare = tmp_path / "remote.git"
+        work = tmp_path / "work"
+        other = tmp_path / "other"
+        _init_repo(work, bare)
+        # a second clone pushes a new master commit (the "concurrent run")
+        subprocess.run(["git", "clone", str(bare), str(other)], capture_output=True)
+        _git(["checkout", "master"], other)
+        _git(["config", "user.email", "o@o.o"], other)
+        _git(["config", "user.name", "o"], other)
+        (other / "concurrent.txt").write_text("from another run")
+        _git(["add", "concurrent.txt"], other)
+        _git(["commit", "-m", "concurrent log push"], other)
+        _git(["push", "origin", "master"], other)
+
+        # now our side commits an artifact against a STALE master and pushes
+        (work / "modulations").mkdir()
+        (work / "modulations" / "g.neuro").write_text("modulation g { program { t2 = tanh(t0)\nreturn t2 } }")
+        res = push_artifacts(work, ["modulations"], message="ours")
+        assert res["pushed"] is True   # rebased over the concurrent commit and landed
+        log = _git(["log", "--oneline", "--name-only", "master"], bare).stdout
+        assert "modulations/g.neuro" in log      # our artifact is there
+        assert "concurrent.txt" in log           # and so is the concurrent commit

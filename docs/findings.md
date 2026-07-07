@@ -2153,3 +2153,24 @@ measure how perturbing neural flow changes emergent metrics — without a litera
 low-ROI fluid simulation.
 
 [EVIDENCE: tests/genetic/ — test_baselines(6), test_qd(5), test_modulation_pusher(+2)=5 green]
+
+### H38 — Per-arch/preset run heatmaps + rebase-robust artifact push (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — 12 new contracts. Two concrete additions plus a
+live-bug fix.
+
+- **Per-arch/preset heatmap** (`heatmap_store.py`). Every training checkpoint now
+  records where gradient heat concentrated, namespaced to `heatmaps/<arch>/
+  <preset>.json` (latest run wins). `HeatmapStore` + `record_training_run` (reuses
+  `evolution.grad_heat.parameter_grad_norms`), wired into `train_dsl.train()` at
+  the save point behind a guarded try/except (can never break training). The
+  summary ranks the hottest pathways — the map that shows *where* a wild gnorm
+  lives.
+- **Rebase-robust pushers** (`modulation_pusher.push_artifacts`). The Colab
+  log/artifact pusher was failing with `! [rejected] (fetch first)` whenever
+  master advanced under it (concurrent code/log/artifact pushes). `push_artifacts`
+  now fetch+rebase+retries on rejection; the Colab notebook log-pusher got the same
+  fix and also streams `heatmaps/` + `modulations/` + `.neuro/search_ledger.json`
+  alongside logs during a run.
+
+[EVIDENCE: tests/genetic/ — test_heatmap_store(6), test_modulation_pusher(+1 concurrent)=7 green]

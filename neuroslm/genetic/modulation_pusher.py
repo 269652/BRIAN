@@ -50,11 +50,27 @@ def push_artifacts(repo_root, paths, message: Optional[str] = None,
 
     if branch is None:
         branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], root).stdout.strip() or "master"
-    push = _git(["push", remote, branch], root)
-    if push.returncode != 0:
-        return {"pushed": False, "reason": "push failed",
-                "detail": (push.stderr or push.stdout)[-300:], "branch": branch}
-    return {"pushed": True, "branch": branch, "paths": present}
+
+    # push with fetch+rebase retry — a concurrent writer (another run's log/artifact
+    # pusher, or a code push) may advance the remote branch between our commit and
+    # push; rebase over it and retry instead of failing with "fetch first".
+    for attempt in range(4):
+        push = _git(["push", remote, branch], root)
+        if push.returncode == 0:
+            return {"pushed": True, "branch": branch, "paths": present,
+                    "rebased": attempt > 0}
+        err = (push.stderr or push.stdout or "")
+        if "fetch first" not in err and "rejected" not in err and "non-fast-forward" not in err:
+            return {"pushed": False, "reason": "push failed",
+                    "detail": err[-300:], "branch": branch}
+        # integrate remote changes then retry
+        _git(["fetch", remote, branch], root)
+        rebase = _git(["rebase", f"{remote}/{branch}"], root)
+        if rebase.returncode != 0:
+            _git(["rebase", "--abort"], root)
+            return {"pushed": False, "reason": "rebase conflict",
+                    "detail": (rebase.stderr or rebase.stdout)[-300:], "branch": branch}
+    return {"pushed": False, "reason": "push failed after retries", "branch": branch}
 
 
 def push_modulations(repo_root, message: Optional[str] = None,

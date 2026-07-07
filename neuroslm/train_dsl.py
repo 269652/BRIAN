@@ -1231,7 +1231,9 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
           push_every: int = 0,
           push_backend: str = "hf",
           push_optimizer: bool = False,
-          heatmap_every: int = 0) -> None:
+          heatmap_every: int = 0,
+          arch_name: Optional[str] = None,
+          preset_name: Optional[str] = None) -> None:
     """Run train_steps from `start_step+1` to `steps`. Emits the native
     train.py metric format; saves checkpoints.
 
@@ -1452,6 +1454,19 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                 ckpt_dir, _run_dir_name(), step)
             harness.save_checkpoint(str(path), step=step)
             print(f"[train_dsl] saved checkpoint {path}", flush=True)
+            # Per-arch/preset run heatmap: record where gradient heat concentrated
+            # on the latest run of this (arch, preset). Best-effort — must never
+            # break training. Grads are still live here (post-backward, pre-zero).
+            if arch_name is not None:
+                try:
+                    from neuroslm.genetic.heatmap_store import HeatmapStore, record_training_run
+                    _hstore = HeatmapStore(Path(__file__).resolve().parent.parent / "heatmaps")
+                    _rh = record_training_run(_hstore, arch_name, preset_name or "default",
+                                              harness, step=step)
+                    print(f"[train_dsl] heatmap recorded: heatmaps/{_rh.arch}/"
+                          f"{_rh.preset}.json (max={_rh.summary.get('max', 0):.2f})", flush=True)
+                except Exception as _e:
+                    print(f"[train_dsl] heatmap record skipped: {_e!r}", flush=True)
             # Optionally push to the configured backend so an
             # instance crash never strands artefacts. ``push_every``
             # is normally either 0 (off) or equal to ``save_every``
@@ -1961,6 +1976,8 @@ def main():
         push_every=args.push_every,
         push_backend=args.push_backend,
         push_optimizer=args.push_optimizer,
+        arch_name=args.arch,
+        preset_name=args.preset,
     )
 
     print("[train_dsl] done.")
