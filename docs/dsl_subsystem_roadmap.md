@@ -492,3 +492,11 @@ Findings H40:
   program is uncomputable (Kolmogorov), so this is complete only *relative to its
   rewrite theory + probe budget* — sound, practically strong on NGL's bounded
   fragment, not a universal intent-minimizer.
+- `catalog.py` prepopulated 74→96 with web-verified 2024–2026 mechanics (findings
+  H42; every arXiv id confirmed by WebSearch). `softpick_last` (H43) is the first of
+  those promoted from catalog spec to a real evolvable NGL op: exact formula from
+  arXiv:2504.20966, `single_head_attention_softpick` is the one-op mutation of the
+  softmax attention program, and the T4 Colab discover cell defaults to a deep
+  `explore` run (prior-art gate + normalization + novelty + push). Forgetting/
+  Selective attention need a sequence-scan primitive NGL lacks — logged as future
+  work, not stubbed.

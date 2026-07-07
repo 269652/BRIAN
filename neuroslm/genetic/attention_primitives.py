@@ -37,3 +37,29 @@ def single_head_attention_program(scale: float = 0.125) -> Program:
     ]
     return Program(instrs, n_scalar=4, n_tensor=24, out_reg="t16",
                    meta={"name": "single_head_attention", "scale": scale})
+
+
+def single_head_attention_softpick(scale: float = 0.125) -> Program:
+    """The same attention program with ``softpick_last`` in place of the row
+    softmax — the evolvable variant that permits true zeros (no attention sink).
+
+    Because attention is built from primitives, this is a *one-op mutation* of
+    ``single_head_attention_program`` (``softmax_last`` → ``softpick_last``): the
+    exact edit the discovery search can now make on its own.
+    """
+    instrs = [
+        Instruction("linear", "t5", ("t0", "t1")),         # q = x Wq^T
+        Instruction("l2norm_last", "t6", ("t5",)),         # QK-norm
+        Instruction("linear", "t7", ("t0", "t2")),         # k = x Wk^T
+        Instruction("l2norm_last", "t8", ("t7",)),
+        Instruction("linear", "t9", ("t0", "t3")),         # v = x Wv^T
+        Instruction("transpose", "t10", ("t8",)),          # k^T
+        Instruction("matmul", "t11", ("t6", "t10")),       # scores = q k^T
+        Instruction("cscale", "t12", ("t11",), const=scale),  # / sqrt(d)
+        Instruction("causal_mask", "t13", ("t12",)),       # mask future
+        Instruction("softpick_last", "t14", ("t13",)),     # ← the only change
+        Instruction("matmul", "t15", ("t14", "t9")),       # context = attn v
+        Instruction("linear", "t16", ("t15", "t4")),       # out = ctx Wo^T
+    ]
+    return Program(instrs, n_scalar=4, n_tensor=24, out_reg="t16",
+                   meta={"name": "single_head_attention_softpick", "scale": scale})

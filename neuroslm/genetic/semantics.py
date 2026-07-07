@@ -58,13 +58,15 @@ def _input_value() -> AbstractValue:
 # `elementwise` is the negation of "uses any of these".
 _MIXING_OPS = frozenset({
     "matmul", "outer", "linear", "rmsnorm", "layernorm", "swiglu",
-    "softmax", "softmax_last", "l2norm_last", "causal_self_attention",
-    "embedding", "mean", "sum", "norm", "rms", "max_r", "min_r",
+    "softmax", "softmax_last", "softpick_last", "l2norm_last",
+    "causal_self_attention", "embedding", "mean", "sum", "norm", "rms",
+    "max_r", "min_r",
 })
 
 # Ops whose *output* is a normalized (unit-scale) quantity.
 _NORMALIZING_OPS = frozenset({
     "rmsnorm", "layernorm", "l2norm_last", "softmax", "softmax_last",
+    "softpick_last",
 })
 
 _OPT_NAMES = frozenset({"sgd", "momentum", "rmsprop", "adam", "lion"})
@@ -86,6 +88,10 @@ def _transfer(op: str, ins: List[AbstractValue]) -> AbstractValue:
         return AbstractValue(bounded=True, nonneg=True, mixes=any_mix)
     if op in ("softmax", "softmax_last"):
         # rows sum to 1 → bounded, non-negative, normalized; mixes over the axis
+        return AbstractValue(bounded=True, nonneg=True, normalized=True, mixes=True)
+    if op == "softpick_last":
+        # like softmax but rectified/not-sum-to-one: still in [0,1], non-negative,
+        # a normalizer over the axis; permits true zeros
         return AbstractValue(bounded=True, nonneg=True, normalized=True, mixes=True)
     if op == "relu":
         return AbstractValue(nonneg=True, mixes=any_mix)
@@ -253,7 +259,9 @@ def analyze(program: Program) -> SemanticSummary:
 def _has_attention(ops: List[str]) -> bool:
     if "causal_self_attention" in ops:
         return True
-    return "softmax_last" in ops and "matmul" in ops
+    # a row-normalizer (softmax or softpick) over a score matmul = attention
+    has_row_norm = "softmax_last" in ops or "softpick_last" in ops
+    return has_row_norm and "matmul" in ops
 
 
 def _classify_role(prog, ops, out_val, stateful, normalizing, elementwise) -> str:

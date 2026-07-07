@@ -98,6 +98,26 @@ def _causal_mask(x):
     return x.masked_fill(mask, float("-inf"))
 
 
+def _softpick_last(a):
+    """Rectified, not-sum-to-one softmax replacement over the last axis.
+
+        softpick(x)_i = ReLU(e^{x_i} - 1) / (Σ_j |e^{x_j} - 1| + eps)
+
+    Verified against Zuhri et al., 2025 (arXiv:2504.20966). Max-subtraction is a
+    numerically-stable, algebraically-identical rewrite: e^{x-m} - e^{-m} =
+    e^{-m}(e^{x} - 1), so the e^{-m} factor cancels between numerator and
+    denominator (up to eps). Negative logits give a negative numerator → ReLU 0
+    (true zeros / no attention sink); the abs() denominator keeps gradients
+    flowing through negative entries.
+    """
+    x = _t(a)
+    m = x.max(dim=-1, keepdim=True).values
+    z = torch.exp(x - m) - torch.exp(-m)
+    num = torch.relu(z)
+    den = z.abs().sum(dim=-1, keepdim=True) + _EPS
+    return num / den
+
+
 def _select(cond, a, b):
     cond, a, b = _t(cond), _t(a), _t(b)
     try:
@@ -163,6 +183,8 @@ def _make_registry() -> Dict[str, OpSpec]:
     # axis-aware ops — the primitives that make an attention mechanism expressible
     # (and therefore evolvable) rather than an opaque composite op.
     reg("softmax_last", 1, "nonlin", lambda a: torch.softmax(_t(a), dim=-1))
+    # softpick — rectified, not-sum-to-one softmax (permits true zeros / no sink)
+    reg("softpick_last", 1, "nonlin", _softpick_last)
     reg("l2norm_last", 1, "nonlin", lambda a: torch.nn.functional.normalize(_t(a), dim=-1))
     reg("causal_mask", 1, "control", _causal_mask)
 

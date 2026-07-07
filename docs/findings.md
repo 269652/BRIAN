@@ -2326,3 +2326,41 @@ they are not stubbed implementations claiming behaviour they lack). Provenance:
 every arXiv id confirmed by web search this session (WebSearch tool), not recalled.
 
 [EVIDENCE: tests/genetic/test_catalog.py::TestPrepopulated2024_2026 (3 contracts) green; mechanics/ +22 files parse via mechanic_parser]
+
+### H43 — softpick as an evolvable NGL primitive + deeper Colab discover (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — 14 new contracts. One of the prepopulated mechanics
+(softpick) is now a real, evolvable NGL op — not a black box the search can only
+route around, but an atom it can mutate into.
+
+- **`softpick_last` NGL op** (`language.py`). Exact formula, verified against the
+  paper (arXiv:2504.20966) via WebFetch of the HTML source:
+  `softpick(x)_i = ReLU(e^{x_i} − 1) / (Σ_j |e^{x_j} − 1| + eps)` over the last
+  axis, implemented with the paper's max-subtraction (algebraically identical: the
+  e^{−m} factor cancels between numerator and denominator). Real math, CPU,
+  gradient-flowing (§14 — not a stub): tests pin non-negativity, **true zeros** for
+  x≤0 (the no-attention-sink property), sum→1 only when all logits are positive
+  (else <1, i.e. not sum-to-one), finiteness on extreme logits, and gradient flow
+  through negative entries via the abs() denominator.
+- **Evolvable, not opaque.** Because it is a registered `nonlin` op it enters the
+  GA's mutation vocabulary (`evolve._OP_NAMES`) automatically. `attention_
+  primitives.single_head_attention_softpick` is the one-op mutation of the softmax
+  attention program (`softmax_last`→`softpick_last`) — the exact edit the search can
+  now make on its own to discover sink-free attention. `semantics.analyze` labels it
+  a bounded, normalizing, element-mixing **attention** mechanism (the role detector
+  now recognizes a softpick-over-matmul score as attention).
+- **Deeper Colab discover cell.** The T4 discover cell now defaults to the
+  `explore` mode (training loop + persistent ledger), with the prior-art gate ON
+  (seeds the ledger so only novel mechanics are searched), **semantic normalization
+  ON** (syntactic variants collapse — validated: a deep run skipped 13 duds at step
+  1000), novelty pressure, `--macros`, and artifact push. Validated end-to-end on
+  CPU: `discover explore` kept improvements and persisted 35 ledger patterns.
+
+Honest scope note: of the three candidates offered (softpick / forgetting_attention
+/ selective_attention), only softpick is cleanly expressible in NGL's straight-line
+DAG. Forgetting-Transformer and Selective-Attention both need a **sequence-axis
+cumulative scan** (cumulative log-forget-gate / accumulated selection) that NGL has
+no primitive for; adding a `cumsum`-style scan op is the prerequisite and is logged
+as future work rather than faked.
+
+[EVIDENCE: tests/genetic/test_softpick.py (14 contracts) green; deep `discover explore` run persisted a 35-pattern ledger with dud-skipping active]
