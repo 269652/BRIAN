@@ -2202,3 +2202,53 @@ hand-written encodings, behaviour probe-verified. Shared subexpressions:
 and the β₁ interpolation shared by adam/lion — genuine factor-once opportunities.
 
 [EVIDENCE: tests/genetic/ — test_seed_known(5), test_mechanic_optimizer(5) green]
+
+### H40 — Semantic-description language, full mechanic catalog, shared-macro lift (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — 42 new contracts (23 semantics + 11 catalog + 8
+shared-macro). NGL programs now carry a *machine-checked meaning*, the whole
+research-mechanic corpus is enumerable, and a shared computation is factored once
+and reused everywhere.
+
+- **Static semantic analysis** (`semantics.py`). Abstract interpretation over a
+  boolean value lattice (`bounded / nonneg / normalized / sign_only / mixes`):
+  each op has a transfer function, and `analyze()` folds them into a
+  `SemanticSummary` — `role`, `bounded`, `normalizing`, `elementwise`,
+  `sign_based`, `stateful`, plus the inferred `inputs`/`state` registers. Role and
+  state fall out of the analysis rather than being declared: a read-modify-write
+  buffer ⇒ `stateful` ⇒ `optimizer_update`; `softmax_last`+`matmul` ⇒ `attention`;
+  a lone bounded nonlinearity ⇒ `activation`. `describe()` renders the summary as
+  the human-facing "what it does / when to use it" language; `interchangeable(a,b)`
+  is the substitution gate — same role **and** matching abstract output contract
+  (a bounded activation is *not* interchangeable with an unbounded one, even
+  though both are activations). This is the formal layer that guides CSE /
+  mechanic-reuse: only interchangeable mechanics may be swapped. CLI:
+  `discover semantics --known adam` → "Role: optimizer_update … stateful (buffers:
+  t2, t3, s0)".
+- **Full mechanic catalog** (`catalog.py`). `MechanicCatalog` loads **all 74**
+  `mechanics/` + `dynamics/` + `structures/` `*.neuro` specs through the existing
+  `mechanic_parser` — the rich `summary` / `when_to_use` / `not_for` / `properties`
+  blocks already in the repo *are* the semantic-description surface, so "all
+  currently existing research mechanics" is a live enumeration (12 categories:
+  attention, normalization, position, sequence_mixer, routing, feedforward,
+  physics, …), not a hand-kept list of 13. `catalog_names()` feeds the novelty
+  gate. CLI: `discover mechanics [--category attention] [--describe rope]`.
+- **Shared-macro lift** (`shared_macros.py`). `extract_shared_as_macros(mechanics)`
+  finds multi-op subexpressions common to ≥2 mechanics, lifts each into a `Macro`,
+  and rewrites every mechanic to `call` it — CSE promoted from *inside one program*
+  to *across the whole mechanic set*, so an improvement discovered in one algorithm
+  is reused in **all** algorithms that share the subexpression. Every rewrite is
+  probe-verified (expand → `programs_equivalent`); anything unsafe to factor (a
+  register re-written by an optimizer's state buffer, or an intermediate read
+  outside the cone) is left untouched. `promote_modulation(store, name)` stamps a
+  modulation validated through training/ablation as the new reference
+  implementation (`is_reference`). CLI: `discover extract-shared`.
+
+Answers the "13 algorithms is too low — we need **all** research mechanics" ask
+(74 enumerated), the "semantical description language … based on static semantic
+analysis / abstract interpretation" ask (semantics.py + the catalog's when_to_use
+surface), and the "extract improvements into reusable subexpressions reused in all
+algorithms … validated modulations become the reference implementation" ask
+(shared_macros.py).
+
+[EVIDENCE: tests/genetic/ — test_semantics(23), test_catalog(11), test_shared_macros(8) green]

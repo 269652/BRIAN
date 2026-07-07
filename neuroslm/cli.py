@@ -923,6 +923,64 @@ def cmd_discover(args: argparse.Namespace) -> int:
         payload = {"mode": "profile", "layer_file": args.layer_file,
                    "profile": prof.to_dict(), "topology": rep.to_dict(),
                    "edits": edits}
+    elif mode == "mechanics":
+        from neuroslm.genetic.catalog import load_catalog
+        cat = load_catalog()
+        if getattr(args, "describe", None):
+            print(cat.describe(args.describe))
+            payload = {"mode": "mechanics", "describe": args.describe,
+                       "text": cat.describe(args.describe)}
+        else:
+            grouped = cat.by_category()
+            only = getattr(args, "category", None)
+            print(f"[discover:mechanics] {len(cat)} research mechanics in "
+                  f"{len(grouped)} categories")
+            listed = []
+            for category in sorted(grouped):
+                if only and category != only:
+                    continue
+                specs = grouped[category]
+                print(f"  {category} ({len(specs)}):")
+                for s in specs:
+                    print(f"    {s.name:26s} {s.summary[:60]}")
+                    listed.append({"name": s.name, "category": category,
+                                   "summary": s.summary})
+            payload = {"mode": "mechanics", "count": len(cat), "mechanics": listed}
+    elif mode == "semantics":
+        from neuroslm.genetic.semantics import analyze, describe
+        if getattr(args, "layer_file", None):
+            from neuroslm.genetic.compile_arch import compile_layer_to_ngl
+            src = Path(args.layer_file).read_text(encoding="utf-8")
+            prog = compile_layer_to_ngl(src).program
+            label = args.layer_file
+        else:
+            from neuroslm.genetic.known import known_programs
+            name = getattr(args, "known", None) or "adam"
+            progs = known_programs()
+            if name not in progs:
+                print(f"[discover:semantics] unknown program {name!r}; "
+                      f"available: {', '.join(sorted(progs))}", file=sys.stderr)
+                return 1
+            prog, label = progs[name], name
+        summary = analyze(prog)
+        print(f"[discover:semantics] {label}")
+        print("  " + describe(summary).replace(" Traits:", "\n  Traits:")
+              .replace(" Families:", "\n  Families:").replace(" Notes:", "\n  Notes:"))
+        payload = {"mode": "semantics", "target": label, "summary": summary.to_dict()}
+    elif mode == "extract-shared":
+        from neuroslm.genetic.mechanic_optimizer import common_mechanics
+        from neuroslm.genetic.shared_macros import extract_shared_as_macros
+        res = extract_shared_as_macros(common_mechanics())
+        print(f"[discover:extract-shared] {len(res.extracted)} shared subexpression(s) "
+              f"factored into reusable macros")
+        for e in res.extracted:
+            print(f"  {e['macro']}: {e['expr'][:56]}  ({e['ops']} ops) "
+                  f"reused in {', '.join(e['mechanics'])}")
+        if not res.extracted:
+            print("  (no multi-op subexpression is shared across ≥2 mechanics yet)")
+        payload = {"mode": "extract-shared",
+                   "extracted": res.extracted,
+                   "macros": res.library.names()}
     else:
         print("Usage: brian discover {optimizer|flow|simplify} [...]", file=sys.stderr)
         return 1
@@ -4846,6 +4904,31 @@ def _build_parser() -> argparse.ArgumentParser:
         "optimize-mechanics",
         help="CSE + superoptimize commonly-used mechanics; find shared subexprs"
     ).set_defaults(func=cmd_discover)
+
+    sdm = sdiscover_sub.add_parser(
+        "mechanics",
+        help="List every known research mechanic (mechanics/dynamics/structures)")
+    sdm.add_argument("--category", help="filter to one category (e.g. attention)")
+    sdm.add_argument("--describe", metavar="NAME",
+                     help="print the full description of one mechanic")
+    sdm.add_argument("--out", help="write the catalog JSON here")
+    sdm.set_defaults(func=cmd_discover)
+
+    sdsem = sdiscover_sub.add_parser(
+        "semantics",
+        help="Static semantic analysis of a mechanic (abstract interpretation)")
+    sdsem.add_argument("--known", metavar="NAME",
+                       help="analyze a known NGL program (adam/lion/attention/...)")
+    sdsem.add_argument("--layer-file",
+                       help="analyze a compiled nn_lang layer instead")
+    sdsem.add_argument("--out", help="write the summary JSON here")
+    sdsem.set_defaults(func=cmd_discover)
+
+    sdx = sdiscover_sub.add_parser(
+        "extract-shared",
+        help="Factor subexpressions shared across mechanics into reusable macros")
+    sdx.add_argument("--out", help="write the extraction JSON here")
+    sdx.set_defaults(func=cmd_discover)
 
     sdq = sdiscover_sub.add_parser(
         "qd",

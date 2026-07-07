@@ -453,3 +453,26 @@ Findings H39:
 - `mechanic_optimizer.py` — optimize_mechanic (CSE + algebraic + superopt report),
   shared_subexpressions (compute-once targets across mechanics), analyze_common_
   mechanics. `discover optimize-mechanics`. Found adam 27→22, lion 8→4 reducible.
+
+## NGL, part 9 — semantic description language, full mechanic catalog, shared-macro lift
+
+Findings H40:
+- `semantics.py` — abstract interpretation of an NGL program over a boolean value
+  lattice (bounded / nonneg / normalized / sign_only / mixes). `analyze()` runs
+  per-op transfer functions to a `SemanticSummary` (role, bounded, normalizing,
+  elementwise, sign_based, stateful, inputs/state); `describe()` is its
+  human-readable projection ("what it does / when to use"); `interchangeable(a,b)`
+  is the substitution gate the CSE / mechanic-reuse search consults. Role and
+  state fall out of the analysis (read-modify-write buffer ⇒ stateful ⇒ update
+  rule; softmax_last+matmul ⇒ attention). `discover semantics --known NAME`.
+- `catalog.py` — `MechanicCatalog` loads **all 74** `mechanics/`+`dynamics/`+
+  `structures/` `*.neuro` specs through the existing `mechanic_parser` (the rich
+  `summary`/`when_to_use`/`not_for`/`properties` blocks *are* the human-facing
+  semantic-description language). `catalog_names()` is prior art for the novelty
+  gate; `discover mechanics [--category C] [--describe NAME]`.
+- `shared_macros.py` — `extract_shared_as_macros(mechanics)` lifts multi-op
+  subexpressions shared by ≥2 mechanics into `Macro`s and rewrites every mechanic
+  to `call` them (probe-verified; stateful/reused-internal cases left untouched) —
+  CSE across the whole mechanic set, so an improvement is reused everywhere, not
+  just where found. `promote_modulation(store, name)` stamps a validated
+  modulation as the reference implementation. `discover extract-shared`.
