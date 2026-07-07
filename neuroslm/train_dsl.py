@@ -1233,7 +1233,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
           push_optimizer: bool = False,
           heatmap_every: int = 0,
           arch_name: Optional[str] = None,
-          preset_name: Optional[str] = None) -> None:
+          preset_name: Optional[str] = None,
+          collect_heatmap: bool = True) -> None:
     """Run train_steps from `start_step+1` to `steps`. Emits the native
     train.py metric format; saves checkpoints.
 
@@ -1457,7 +1458,7 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
             # Per-arch/preset run heatmap: record where gradient heat concentrated
             # on the latest run of this (arch, preset). Best-effort — must never
             # break training. Grads are still live here (post-backward, pre-zero).
-            if arch_name is not None:
+            if arch_name is not None and collect_heatmap:
                 try:
                     from neuroslm.genetic.heatmap_store import HeatmapStore, record_training_run
                     _hstore = HeatmapStore(Path(__file__).resolve().parent.parent / "heatmaps")
@@ -1689,6 +1690,10 @@ def main():
                         help="mixed-precision dtype (cuda only)")
     parser.add_argument("--resume", action="store_true",
                         help="resume from the latest dsl_arch_step*.pt in ckpt_dir")
+    parser.add_argument(
+        "--heatmap", action=argparse.BooleanOptionalAction, default=True,
+        help="record a per-arch/preset run heatmap (heatmaps/<arch>/<preset>.json) "
+             "at each checkpoint save. Default ON; pass --no-heatmap to disable.")
     parser.add_argument(
         "--resume_from", default=None, metavar="PATH_OR_URI",
         help="Resume from a SPECIFIC checkpoint. Accepts a local path "
@@ -1978,6 +1983,7 @@ def main():
         push_optimizer=args.push_optimizer,
         arch_name=args.arch,
         preset_name=args.preset,
+        collect_heatmap=args.heatmap,
     )
 
     print("[train_dsl] done.")
