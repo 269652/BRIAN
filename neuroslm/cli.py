@@ -658,6 +658,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
             include_sota_seeds=not args.from_scratch,
             novelty_weight=getattr(args, "novelty", 0.0),
             device=getattr(args, "device", "cpu"),
+            progress=True,
         )
         print(f"[discover:optimizer] task={args.task} pop={args.pop} "
               f"gens={args.generations} steps={args.steps}")
@@ -690,6 +691,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         outcome = run_flow_modulation_discovery(
             seed=args.seed, pop_size=args.pop, generations=args.generations,
             steps=args.steps, device=getattr(args, "device", "cpu"),
+            progress=True,
         )
         print(f"[discover:flow] pop={args.pop} gens={args.generations} steps={args.steps}")
         print(f"  discovered final_loss : {outcome.best_final_loss:.6f}")
@@ -712,7 +714,8 @@ def cmd_discover(args: argparse.Namespace) -> int:
         from neuroslm.genetic.neuro_evolve import run_trunk_evolution
         outcome = run_trunk_evolution(
             seed=args.seed, pop_size=args.pop, generations=args.generations,
-            steps=args.steps, device=getattr(args, "device", "cpu"))
+            steps=args.steps, device=getattr(args, "device", "cpu"),
+            progress=True)
         print(f"[discover:trunk] pop={args.pop} gens={args.generations} steps={args.steps}")
         print(f"  unmodulated trunk val PPL : {outcome.baseline_val_ppl:.4f}")
         print(f"  best modulated   val PPL  : {outcome.best_val_ppl:.4f}")

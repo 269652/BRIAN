@@ -38,6 +38,38 @@ from neuroslm import information
 _DIVERGED_LOSS = 1e4
 
 
+def _emit(progress, msg: str) -> None:
+    """Send a progress message: call it if callable, else print (flushed)."""
+    if callable(progress):
+        progress(msg)
+    else:
+        print(msg, flush=True)
+
+
+def _make_progress(progress, tag: str, fmt, baseline=None):
+    """Build an ``on_generation(gen, total, best_obj)`` that streams a timed line.
+
+    ``fmt(best_obj)`` renders the metric; a wall-clock elapsed + ETA is appended
+    so a long GPU run shows it is alive and roughly how long remains.
+    """
+    import time
+    start = [None]
+
+    def on_gen(gen, total, best_obj):
+        if start[0] is None:
+            start[0] = time.time()
+        elapsed = time.time() - start[0]
+        per = elapsed / max(gen, 1)
+        eta = per * (total - gen)
+        line = (f"  [{tag}] gen {gen}/{total}  {fmt(best_obj)}  "
+                f"elapsed={elapsed:.0f}s")
+        if gen > 0 and gen < total:
+            line += f"  eta~{eta:.0f}s"
+        _emit(progress, line)
+
+    return on_gen
+
+
 def _resolve_device(device="cpu") -> torch.device:
     """Resolve a device spec, falling back to CPU when cuda is unavailable.
 
@@ -173,6 +205,7 @@ def run_optimizer_discovery(
     cost_weight: float = 0.02,
     novelty_weight: float = 0.0,
     device: str = "cpu",
+    progress=False,
 ) -> DiscoveryOutcome:
     """Evolve update-rule programs; return the best + the Pareto front.
 
@@ -180,10 +213,15 @@ def run_optimizer_discovery(
     ``novelty_weight > 0`` the GA also rewards distance in the program's semantic
     space, pushing the search toward *novel* update rules rather than variations
     on the seeds. ``device`` scales the tiny-model training onto a T4/cuda.
+    ``progress`` streams a per-generation line (True → stdout, or a callable).
     """
     rng = np.random.default_rng(seed)
+    dev = _resolve_device(device)
     sgd_baseline = benchmark_optimizer(sgd_program(lr=0.02), steps=steps, seed=seed,
                                        task=task, device=device).final_loss
+    if progress:
+        _emit(progress, f"[optimizer] device={dev.type} task={task} pop={pop_size} "
+              f"gens={generations} steps={steps} | SGD baseline loss={sgd_baseline:.4f}")
 
     def evaluate(prog: Program) -> Objective:
         res = benchmark_optimizer(prog, steps=steps, seed=seed, task=task, device=device)
@@ -195,6 +233,9 @@ def run_optimizer_discovery(
     else:
         seeds = [sgd_program(lr=0.02)]
 
+    on_gen = _make_progress(progress, "optimizer",
+                            fmt=lambda o: f"best_loss={-o.values[0]:.4f}",
+                            baseline=sgd_baseline) if progress else None
     result = auto_evolve(
         evaluate,
         rng,
@@ -208,6 +249,7 @@ def run_optimizer_discovery(
         elite_frac=0.25,
         crossover_rate=0.5,
         novelty_weight=novelty_weight,
+        on_generation=on_gen,
     )
 
     front_stats = []
@@ -258,6 +300,7 @@ def run_flow_modulation_discovery(
     steps: int = 25,
     ei_weight: float = 0.5,
     device: str = "cpu",
+    progress=False,
 ) -> DiscoveryOutcome:
     """Evolve a gradient-flow modulation program wrapped around an SGD step.
 
@@ -268,6 +311,9 @@ def run_flow_modulation_discovery(
     rng = np.random.default_rng(seed)
     dev = _resolve_device(device)
     X, y, _ = _build_parity(seed, device=dev)
+    if progress:
+        _emit(progress, f"[flow] device={dev.type} pop={pop_size} "
+              f"gens={generations} steps={steps}")
 
     def evaluate(prog: Program) -> Objective:
         torch.manual_seed(seed + 7)
@@ -312,6 +358,10 @@ def run_flow_modulation_discovery(
                        n_scalar=8, n_tensor=12, out_reg="t5",
                        meta={"name": "identity_mod"})
 
+    on_gen = _make_progress(
+        progress, "flow",
+        fmt=lambda o: f"best_loss={-o.values[0]:.4f} ei={o.values[1] / max(ei_weight, 1e-9):+.3f}",
+    ) if progress else None
     result = auto_evolve(
         evaluate,
         rng,
@@ -323,6 +373,7 @@ def run_flow_modulation_discovery(
         seeds=[identity],
         weights=[1.0, 1.0],
         elite_frac=0.25,
+        on_generation=on_gen,
     )
     best_obj = result.best_objective
     return DiscoveryOutcome(

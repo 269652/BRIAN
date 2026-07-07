@@ -218,12 +218,17 @@ def auto_evolve(
     crossover_rate: float = 0.5,
     weights: Sequence[float] | None = None,
     novelty_weight: float = 0.0,
+    on_generation: Callable[[int, int, "Objective"], None] | None = None,
 ) -> EvolveResult:
     """Evolve a population of NGL programs against ``evaluate``.
 
     ``evaluate`` returns an ``Objective`` (all-maximised). Selection is a scalar
     tournament (weighted sum, optionally + a novelty bonus in semantic space)
     with elitism carrying the current Pareto front forward.
+
+    ``on_generation(gen, total, best_objective)`` — if given, is called once for
+    the initial population (gen 0) and once after each generation, so a caller
+    can stream progress during a long run.
     """
     pop: List[Program] = []
     if seeds:
@@ -244,9 +249,11 @@ def auto_evolve(
     best_i = int(np.argmax([o.scalar(weights) for o in objs]))
     best_prog, best_obj = pop[best_i].copy(), objs[best_i]
     history = [best_obj.scalar(weights)]
+    if on_generation is not None:
+        on_generation(0, generations, best_obj)
 
     n_elite = max(1, int(elite_frac * pop_size))
-    for _ in range(generations):
+    for _gen in range(generations):
         order = np.argsort([-o.scalar(weights) for o in objs])
         new_pop = [pop[i].copy() for i in order[:n_elite]]
         while len(new_pop) < pop_size:
@@ -265,6 +272,8 @@ def auto_evolve(
         if objs[gi].scalar(weights) > best_obj.scalar(weights):
             best_prog, best_obj = pop[gi].copy(), objs[gi]
         history.append(best_obj.scalar(weights))
+        if on_generation is not None:
+            on_generation(_gen + 1, generations, best_obj)
 
     front = pareto_front(list(zip(pop, objs)))
     return EvolveResult(best_prog, best_obj, gen0_best, history, front)

@@ -213,26 +213,36 @@ class TrunkOutcome:
 
 def run_trunk_evolution(*, seed: int = 0, pop_size: int = 16, generations: int = 8,
                         steps: int = 30, plausibility_weight: float = 1.0,
-                        ppl_weight: float = 1.0, device: str = "cpu") -> TrunkOutcome:
+                        ppl_weight: float = 1.0, device: str = "cpu",
+                        progress=False) -> TrunkOutcome:
     """Evolve a residual-stream neuromodulation; Pareto over (−PPL, +plausibility).
 
     The identity modulation is seeded and preserved by elitism, so the best
     candidate is never worse than the unmodulated trunk. The plausibility term
     keeps the search inside the neuroanatomically realistic region. ``device``
-    scales the tiny-LM training onto a T4/cuda.
+    scales the tiny-LM training onto a T4/cuda. ``progress`` streams a
+    per-generation line.
     """
-    from neuroslm.genetic.discovery import _resolve_device
+    from neuroslm.genetic.discovery import _resolve_device, _emit, _make_progress
     rng = np.random.default_rng(seed)
     prior = NeuroanatomicPrior()
     dev = _resolve_device(device)
     baseline_ppl, _ = evaluate_modulation(identity_modulation(), seed=seed, steps=steps, device=dev)
     # normalise PPL into a comparable scale so the weighted scalar is balanced
     scale = max(baseline_ppl, 1.0)
+    if progress:
+        _emit(progress, f"[trunk] device={dev.type} pop={pop_size} gens={generations} "
+              f"steps={steps} | unmodulated trunk ppl={baseline_ppl:.3f}")
 
     def evaluate(prog: Program) -> Objective:
         ppl, plaus = evaluate_modulation(prog, seed=seed, steps=steps, prior=prior, device=dev)
         return Objective((-ppl_weight * ppl / scale, plausibility_weight * plaus))
 
+    on_gen = _make_progress(
+        progress, "trunk",
+        fmt=lambda o: f"best_ppl={-o.values[0] * scale / max(ppl_weight, 1e-9):.3f} "
+                      f"plaus={o.values[1] / max(plausibility_weight, 1e-9):.2f}",
+    ) if progress else None
     result = auto_evolve(
         evaluate, rng,
         pop_size=pop_size, generations=generations,
@@ -241,6 +251,7 @@ def run_trunk_evolution(*, seed: int = 0, pop_size: int = 16, generations: int =
         weights=[1.0, 0.3],   # PPL dominates; plausibility breaks ties / guards realism
         elite_frac=0.3,
         crossover_rate=0.5,
+        on_generation=on_gen,
     )
 
     # recover raw ppl/plausibility for the reported best + front
