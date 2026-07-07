@@ -1,0 +1,66 @@
+# -*- coding: utf-8 -*-
+"""Auto-push discovered modulations during a run (git add/commit/push the store)."""
+import subprocess
+
+from neuroslm.genetic.modulation_store import ModulationStore, ModulationRecord
+from neuroslm.genetic.language import Instruction, Program
+from neuroslm.genetic.modulation_pusher import push_modulations
+
+
+def _git(args, cwd):
+    return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True)
+
+
+def _init_repo(work, bare):
+    subprocess.run(["git", "init", "--bare", str(bare)], capture_output=True)
+    work.mkdir()
+    _git(["init"], work)
+    _git(["checkout", "-b", "master"], work)
+    _git(["config", "user.email", "t@t.t"], work)
+    _git(["config", "user.name", "t"], work)
+    _git(["remote", "add", "origin", str(bare)], work)
+    (work / "README").write_text("x")
+    _git(["add", "README"], work)
+    _git(["commit", "-m", "init"], work)
+    _git(["push", "origin", "master"], work)
+
+
+def _gain():
+    return Program([Instruction("tanh", "t2", ("t0",))], 4, 6, "t2")
+
+
+class TestPush:
+    def test_pushes_new_modulation_to_remote(self, tmp_path):
+        bare = tmp_path / "remote.git"
+        work = tmp_path / "work"
+        _init_repo(work, bare)
+        store = ModulationStore(work / "modulations")
+        store.save(ModulationRecord("gainA", _gain(), {"val_ppl": 7.1}))
+
+        result = push_modulations(work, message="test push")
+        assert result["pushed"] is True
+        # the remote now has a commit touching modulations/gainA.neuro
+        log = _git(["log", "--oneline", "--name-only", "master"], bare).stdout
+        assert "modulations/gainA.neuro" in log
+
+    def test_no_changes_is_a_clean_skip(self, tmp_path):
+        bare = tmp_path / "remote.git"
+        work = tmp_path / "work"
+        _init_repo(work, bare)
+        (work / "modulations").mkdir()
+        result = push_modulations(work, message="nothing")
+        assert result["pushed"] is False
+        assert "no changes" in result["reason"]
+
+    def test_scopes_commit_to_modulations_only(self, tmp_path):
+        bare = tmp_path / "remote.git"
+        work = tmp_path / "work"
+        _init_repo(work, bare)
+        # an unrelated dirty file must NOT be committed by the pusher
+        (work / "other.txt").write_text("dirty")
+        store = ModulationStore(work / "modulations")
+        store.save(ModulationRecord("gainB", _gain(), {}))
+        push_modulations(work, message="scoped")
+        log = _git(["log", "--oneline", "--name-only", "master"], bare).stdout
+        assert "modulations/gainB.neuro" in log
+        assert "other.txt" not in log

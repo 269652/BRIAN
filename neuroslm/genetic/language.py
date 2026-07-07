@@ -281,14 +281,14 @@ class Program:
     meta: dict = field(default_factory=dict)
     library: object = None   # optional MacroLibrary → `call` ops auto-flatten
 
-    def execute(self, memory: Memory) -> Memory:
+    def execute(self, memory: Memory, recorder=None) -> Memory:
         prog = self
         if self.library is not None and any(i.op == "call" for i in self.instructions):
             from neuroslm.genetic.macros import expand_macros
             prog = expand_macros(self, self.library)
-        return prog._execute_flat(memory)
+        return prog._execute_flat(memory, recorder)
 
-    def _execute_flat(self, memory: Memory) -> Memory:
+    def _execute_flat(self, memory: Memory, recorder=None) -> Memory:
         dev = memory.device
         for ins in self.instructions:
             spec = REGISTRY.get(ins.op)
@@ -323,6 +323,8 @@ class Program:
                 out = torch.nan_to_num(out, nan=0.0, posinf=1e6, neginf=-1e6)
             if dev.type != "cpu" and out.device != dev:
                 out = out.to(dev)   # keep every register value on the live device
+            if recorder is not None:
+                recorder(ins, args, out)
             memory.write(ins.out, out)
         return memory
 

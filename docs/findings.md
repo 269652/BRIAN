@@ -2039,3 +2039,42 @@ these raise the ceiling; certifying a discovered algorithm as research-grade sti
 needs a multi-task validation ladder + GPU-scale search (H32/H33 boundary).
 
 [EVIDENCE: tests/genetic/ — test_macros(8), test_attention_primitives(5), test_compiler_passes(8), test_known(6) green]
+
+### H35 — Flow+compute heat, geometric topology analysis, modulation auto-push (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — the "record/measure information flow, find bottlenecks,
+search low-hanging first" spine (15 new contracts). Note: the repo's existing
+`neuroslm/evolution/` subsystem (TrainingHeatmap + grad-norm heat + propose→gate
+keep-if-better loop, wired into `train_dsl.py`/`harness.py`) already does online
+mutation-during-training; these add the *flow/compute* signal + *geometry* it lacked.
+
+- **Flow+compute profiler** (`profile.py`). A `recorder` hook on `Program.execute`
+  captures, per op, **information flow** (output norm) and **compute** (estimated
+  FLOPs). `ExecutionProfile` ranks `heavy_compute`, `hot_flow`, and — the search
+  signal — `low_hanging` (high flow / low compute: cheap edges with big effect).
+  Serialisable (`to_dict`) for visualization.
+- **Geometric topology** (`topology.py`). Projects the profile into a weighted
+  DiGraph and runs graph theory: betweenness (bottleneck routing), articulation
+  points (cut vertices), max-flow/min-cut (tightest info bottleneck), algebraic
+  connectivity (spectral integration). `propose_edits` turns geometry into
+  structural suggestions (bypass/parallelise a bottleneck, prune a
+  high-compute/low-flow edge). This is the high-leverage alternative to a literal
+  fluid-flow simulation (deliberately *not* built — graph theory gives the same
+  bottleneck/flow signal at a fraction of the cost).
+- **Modulation auto-push** (`modulation_pusher.py`). `push_modulations` commits +
+  pushes *only* `modulations/*.neuro` (scoped, best-effort, never raises) so a long
+  Colab/vast run streams discoveries to git. `discover trunk --save --push`; the
+  Colab explore cell exposes `PUSH`.
+- CLI: `brian discover profile --layer-file X --binding D=16 …` prints the
+  compute/flow/low-hanging rankings + bottlenecks + proposed edits (JSON via `--out`).
+
+**Worked example** (`discover profile` on an FFN block): swiglu flagged as the
+betweenness bottleneck → "parallelise"; rmsnorm flagged heavy-compute/low-flow →
+"prune candidate"; low-hanging = the residual add (high flow, cheap).
+
+**Follow-up (unbuilt, by choice).** Wiring NGL modulation discovery in as the
+`EvolutionLoop` proposer (online evolve-during-training with the flow/compute heat
+steering *which* pathway to search) is the natural next step — the gate + heatmap
+already exist; this batch built the flow/geometry signal that would make it smart.
+
+[EVIDENCE: tests/genetic/ — test_profile(6), test_topology(6), test_modulation_pusher(3) green]

@@ -390,3 +390,22 @@ Four extensions toward evolving *complex, novel* algorithms (findings H34):
   invariant semantic space; `discover optimizer --avoid-known` penalizes
   rediscovering them so the budget goes to novelty. `--macros` enables ADF
   grafting.
+
+## NGL, part 5 — flow/compute heat, geometric topology, modulation auto-push
+
+Records where information flows and where computation is heavy, analyses the
+topology geometrically, and streams discoveries back during runs (findings H35).
+The existing `neuroslm/evolution/` loop (heatmap→propose→gate keep-if-better,
+already wired into training) supplies the online-mutation machinery; these add the
+signal + geometry it lacked:
+
+- `profile.py` — per-op information flow (output norm) + compute (est FLOPs) via a
+  `recorder` hook on execute; `ExecutionProfile.{heavy_compute,hot_flow,low_hanging}`
+  ranks bottlenecks and cheap-high-effect edges. `low_hanging` is the "search this
+  first" signal.
+- `topology.py` — weighted DiGraph + betweenness / articulation points / max-flow-
+  min-cut / algebraic connectivity; `propose_edits` → bypass/parallelise/prune from
+  geometry. (Graph theory, not a literal fluid-flow sim — same signal, far cheaper.)
+- `modulation_pusher.py` — scoped git commit+push of `modulations/*.neuro` during a
+  run. `discover trunk --save --push`; Colab explore cell `PUSH`.
+- CLI: `brian discover profile --layer-file X --binding D=16 …`.

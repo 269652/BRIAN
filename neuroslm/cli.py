@@ -752,6 +752,10 @@ def cmd_discover(args: argparse.Namespace) -> int:
                          "plausibility": round(outcome.best_plausibility, 3)})
             path = store.save(rec)
             print(f"  saved modulation -> {path}")
+            if getattr(args, "push", False):
+                from neuroslm.genetic.modulation_pusher import push_modulations
+                res = push_modulations(REPO_ROOT, message=f"modulations: discovered {args.save}")
+                print(f"  push: {'-> ' + res.get('branch','?') if res.get('pushed') else res.get('reason')}")
     elif mode == "simplify":
         from neuroslm.genetic.compile_arch import compile_layer_to_ngl
         from neuroslm.genetic.simplify import simplify, programs_equivalent
@@ -777,6 +781,41 @@ def cmd_discover(args: argparse.Namespace) -> int:
             "equivalent": bool(equiv),
             "program": slim.to_source(),
         }
+    elif mode == "profile":
+        import torch
+        from neuroslm.dsl.nn_lang import compile_layer
+        from neuroslm.genetic.compile_arch import compile_layer_to_ngl, make_probes
+        from neuroslm.genetic.profile import profile_program
+        from neuroslm.genetic.topology import analyze, propose_edits
+        src = Path(args.layer_file).read_text(encoding="utf-8")
+        def _num(v):
+            f = float(v)
+            return int(f) if f.is_integer() else f
+        bindings = {k: _num(v) for k, v in (b.split("=", 1) for b in (args.binding or []))}
+        compiled = compile_layer_to_ngl(src, bindings=bindings)
+        probes = make_probes(compiled, bindings, n=1, seed=args.seed)
+        prof = profile_program(compiled.program, probes[0])
+        rep = analyze(prof)
+        print(f"[discover:profile] {args.layer_file}  ({len(prof.nodes)} ops, "
+              f"total_flops={prof.total_flops():.0f})")
+        print("  heaviest compute:")
+        for n in prof.heavy_compute(top=5):
+            print(f"    #{n.index} {n.op:14s} flops={n.flops:.0f}  flow={n.flow:.2f}")
+        print("  hottest information flow:")
+        for n in prof.hot_flow(top=5):
+            print(f"    #{n.index} {n.op:14s} flow={n.flow:.2f}  flops={n.flops:.0f}")
+        print("  low-hanging fruit (high flow / low compute):")
+        for n in prof.low_hanging(top=5):
+            print(f"    #{n.index} {n.op:14s} flow={n.flow:.2f}  flops={n.flops:.0f}")
+        print(f"  bottleneck nodes: {rep.bottleneck_nodes}  "
+              f"min_cut={rep.min_cut_value:.2f}  connectivity={rep.algebraic_connectivity:.3f}")
+        edits = propose_edits(prof)
+        print(f"  proposed edits ({len(edits)}):")
+        for e in edits[:6]:
+            print(f"    [{e['kind']}] {e['reason']}")
+        payload = {"mode": "profile", "layer_file": args.layer_file,
+                   "profile": prof.to_dict(), "topology": rep.to_dict(),
+                   "edits": edits}
     else:
         print("Usage: brian discover {optimizer|flow|simplify} [...]", file=sys.stderr)
         return 1
@@ -4676,6 +4715,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sdt.add_argument("--out", help="write the run summary JSON here")
     sdt.add_argument("--save", metavar="NAME",
                      help="persist the discovered modulation as modulations/NAME.neuro")
+    sdt.add_argument("--push", action="store_true",
+                     help="git commit+push the saved modulation (during Colab/vast runs)")
     sdt.set_defaults(func=cmd_discover)
 
     sds = sdiscover_sub.add_parser(
@@ -4686,6 +4727,17 @@ def _build_parser() -> argparse.ArgumentParser:
     sds.add_argument("--seed", type=int, default=0)
     sds.add_argument("--out", help="write the run summary JSON here")
     sds.set_defaults(func=cmd_discover)
+
+    sdp = sdiscover_sub.add_parser(
+        "profile",
+        help="Profile an arch's NGL flow+compute heat + graph-topology bottlenecks")
+    sdp.add_argument("--layer-file", required=True,
+                     help="path to an nn_lang `layer {...}` source file")
+    sdp.add_argument("--binding", action="append", metavar="K=V",
+                     help="scalar bindings for the layer (e.g. --binding D=16 --binding H=32)")
+    sdp.add_argument("--seed", type=int, default=0)
+    sdp.add_argument("--out", help="write the profile+topology JSON here")
+    sdp.set_defaults(func=cmd_discover)
 
     # modulation — manage stored NGL neuromodulations (modulations/*.neuro)
     smod = sub.add_parser(
