@@ -77,3 +77,33 @@ class TestCollectorFromModel:
         assert rh.step == 42
         assert store.load("SmolLM", "p4").step == 42
         assert len(rh.entries) > 0   # captured per-parameter grad heat
+
+
+class TestGradHeatCollector:
+    def test_captures_grad_norms_surviving_zero_grad(self):
+        import torch
+        import torch.nn as nn
+        from neuroslm.genetic.heatmap_store import GradHeatCollector
+
+        model = nn.Sequential(nn.Linear(4, 8), nn.Linear(8, 2))
+        coll = GradHeatCollector(model)
+        model(torch.randn(3, 4)).sum().backward()
+        model.zero_grad(set_to_none=True)      # grads gone from params...
+        latest = coll.latest()
+        assert len(latest) > 0                 # ...but the collector retained norms
+        assert all(v >= 0 for v in latest.values())
+        coll.remove()
+
+    def test_updates_to_latest_backward(self):
+        import torch
+        import torch.nn as nn
+        from neuroslm.genetic.heatmap_store import GradHeatCollector
+        model = nn.Linear(4, 4)
+        coll = GradHeatCollector(model)
+        (model(torch.ones(1, 4)).sum() * 0.0).backward()   # ~zero grads
+        near_zero = sum(coll.latest().values())
+        model.zero_grad(set_to_none=True)
+        (model(torch.randn(4, 4)).sum() * 5.0).backward()  # bigger grads
+        bigger = sum(coll.latest().values())
+        assert bigger > near_zero
+        coll.remove()

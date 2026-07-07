@@ -1234,7 +1234,8 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
           heatmap_every: int = 0,
           arch_name: Optional[str] = None,
           preset_name: Optional[str] = None,
-          collect_heatmap: bool = True) -> None:
+          collect_heatmap: bool = True,
+          run_heatmap_every: int = 500) -> None:
     """Run train_steps from `start_step+1` to `steps`. Emits the native
     train.py metric format; saves checkpoints.
 
@@ -1283,6 +1284,21 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
     train_ppl_history: dict = {}    # {step: train ppl}
     ood_ppl_history: dict = {}      # {step: ood ppl}
 
+    # Per-arch/preset run heatmap: a grad hook captures per-parameter grad norms
+    # during backward (train_step zeroes grads before we could read them), so the
+    # heatmap reflects real training. Best-effort — never breaks training.
+    _grad_collector = None
+    _hstore = None
+    if arch_name is not None and collect_heatmap and run_heatmap_every > 0:
+        try:
+            from neuroslm.genetic.heatmap_store import HeatmapStore, GradHeatCollector
+            _grad_collector = GradHeatCollector(harness)
+            _hstore = HeatmapStore(Path(__file__).resolve().parent.parent / "heatmaps")
+            print(f"[train_dsl] run-heatmap armed: every {run_heatmap_every} steps "
+                  f"→ heatmaps/{Path(arch_name).name}/{preset_name or 'default'}.json", flush=True)
+        except Exception as _e:
+            print(f"[train_dsl] run-heatmap disabled: {_e!r}", flush=True)
+
     for step in range(start_step + 1, steps + 1):
         ids, targets = source.next()
         if not tokens_per_step:
@@ -1308,6 +1324,25 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
         _hm_hook = getattr(harness, "_heatmap_hook", None)
         if _hm_hook is not None and heatmap_every > 0:
             _hm_hook.step(step)
+
+        # Per-arch/preset run heatmap: record + push every run_heatmap_every steps.
+        if _grad_collector is not None and step % run_heatmap_every == 0:
+            try:
+                from neuroslm.genetic.heatmap_store import record_training_run
+                from neuroslm.genetic.modulation_pusher import push_artifacts
+                _rh = record_training_run(_hstore, arch_name, preset_name or "default",
+                                          harness, step=step,
+                                          grad_norms=_grad_collector.latest())
+                _hot = _rh.summary.get("hot", [])
+                print(f"[train_dsl] heatmap step {step}: heatmaps/{_rh.arch}/{_rh.preset}.json "
+                      f"(max={_rh.summary.get('max', 0):.2f}, hottest="
+                      f"{_hot[0][0] if _hot else '-'})", flush=True)
+                _pr = push_artifacts(Path(__file__).resolve().parent.parent, ["heatmaps"],
+                                     message=f"heatmap: {_rh.arch}/{_rh.preset} step {step}")
+                if _pr.get("pushed"):
+                    print(f"[train_dsl] heatmap pushed → {_pr.get('branch')}", flush=True)
+            except Exception as _e:
+                print(f"[train_dsl] heatmap step skipped: {_e!r}", flush=True)
 
         # `harness._last_lm_loss_value` is the LM-only CE (set inside
         # compute_loss before aux terms are added). When aux losses are
@@ -1455,19 +1490,6 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                 ckpt_dir, _run_dir_name(), step)
             harness.save_checkpoint(str(path), step=step)
             print(f"[train_dsl] saved checkpoint {path}", flush=True)
-            # Per-arch/preset run heatmap: record where gradient heat concentrated
-            # on the latest run of this (arch, preset). Best-effort — must never
-            # break training. Grads are still live here (post-backward, pre-zero).
-            if arch_name is not None and collect_heatmap:
-                try:
-                    from neuroslm.genetic.heatmap_store import HeatmapStore, record_training_run
-                    _hstore = HeatmapStore(Path(__file__).resolve().parent.parent / "heatmaps")
-                    _rh = record_training_run(_hstore, arch_name, preset_name or "default",
-                                              harness, step=step)
-                    print(f"[train_dsl] heatmap recorded: heatmaps/{_rh.arch}/"
-                          f"{_rh.preset}.json (max={_rh.summary.get('max', 0):.2f})", flush=True)
-                except Exception as _e:
-                    print(f"[train_dsl] heatmap record skipped: {_e!r}", flush=True)
             # Optionally push to the configured backend so an
             # instance crash never strands artefacts. ``push_every``
             # is normally either 0 (off) or equal to ``save_every``
@@ -1692,8 +1714,11 @@ def main():
                         help="resume from the latest dsl_arch_step*.pt in ckpt_dir")
     parser.add_argument(
         "--heatmap", action=argparse.BooleanOptionalAction, default=True,
-        help="record a per-arch/preset run heatmap (heatmaps/<arch>/<preset>.json) "
-             "at each checkpoint save. Default ON; pass --no-heatmap to disable.")
+        help="record a per-arch/preset run heatmap (heatmaps/<arch>/<preset>.json). "
+             "Default ON; pass --no-heatmap to disable.")
+    parser.add_argument(
+        "--heatmap-every", type=int, default=500,
+        help="record + push the run heatmap every N steps (default 500).")
     parser.add_argument(
         "--resume_from", default=None, metavar="PATH_OR_URI",
         help="Resume from a SPECIFIC checkpoint. Accepts a local path "
@@ -1984,6 +2009,7 @@ def main():
         arch_name=args.arch,
         preset_name=args.preset,
         collect_heatmap=args.heatmap,
+        run_heatmap_every=args.heatmap_every,
     )
 
     print("[train_dsl] done.")

@@ -86,11 +86,55 @@ class HeatmapStore:
 
 
 def record_training_run(store: HeatmapStore, arch: str, preset: str, model,
-                        step: int, git_commit: str = "", top_k: int = 15) -> RunHeatmap:
-    """Collect per-parameter grad heat from a model and record it (latest wins)."""
-    from neuroslm.evolution.grad_heat import parameter_grad_norms
-    grad_norms = parameter_grad_norms(model.named_parameters())
+                        step: int, git_commit: str = "", top_k: int = 15,
+                        grad_norms: dict = None) -> RunHeatmap:
+    """Collect per-parameter grad heat and record it (latest wins).
+
+    Pass ``grad_norms`` (e.g. from a ``GradHeatCollector``) when the training loop
+    zeroes grads before this call — reading ``model.named_parameters().grad``
+    directly would then capture nothing.
+    """
+    if grad_norms is None:
+        from neuroslm.evolution.grad_heat import parameter_grad_norms
+        grad_norms = parameter_grad_norms(model.named_parameters())
     rh = heatmap_from_grad_norms(arch, preset, grad_norms, step=step,
                                  git_commit=git_commit, top_k=top_k)
     store.record(rh)
     return rh
+
+
+class GradHeatCollector:
+    """Capture per-parameter gradient norms during backward via param hooks.
+
+    The training loop's ``train_step`` zeroes grads internally, so reading
+    ``param.grad`` afterward finds ``None``. Registering a hook on each parameter
+    records its grad norm *as the gradient is computed*, into a dict that survives
+    ``zero_grad`` — the heatmap then reads the latest norms at any cadence.
+    """
+
+    def __init__(self, model):
+        self.norms: Dict[str, float] = {}
+        self._handles = []
+        for name, p in model.named_parameters():
+            if getattr(p, "requires_grad", False):
+                self._handles.append(p.register_hook(self._make_hook(name)))
+
+    def _make_hook(self, name: str):
+        def _hook(grad):
+            try:
+                self.norms[name] = float(grad.detach().norm(2).item())
+            except Exception:
+                pass
+            return grad
+        return _hook
+
+    def latest(self) -> Dict[str, float]:
+        return dict(self.norms)
+
+    def remove(self) -> None:
+        for h in self._handles:
+            try:
+                h.remove()
+            except Exception:
+                pass
+        self._handles = []
