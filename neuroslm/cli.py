@@ -1160,22 +1160,51 @@ def _run_hook(name: str, repo_root: Optional[Path] = None,
                     env=env)
 
 
+def _deploy_confirm_is_human() -> bool:
+    """True when a confirmation ``input()`` will actually reach a human.
+
+    Two human channels:
+    - a real TTY (interactive terminal), or
+    - an interactive notebook frontend — Colab / Kaggle / Jupyter — where
+      ``input()`` renders a prompt box a person types into (this is the
+      "deploy from your phone via Colab" path).
+
+    Everything else — plain scripts, piped stdin, CI, and agent-driven
+    subprocesses (``detect_environment() == "script"``) — returns False and is
+    blocked. An agent cannot type into a live Colab input box, and a headless
+    ``input()`` raises EOFError (caught below), so this does not weaken the
+    anti-agent guarantee: it only admits a genuinely interactive human.
+    """
+    try:
+        if sys.stdin.isatty():
+            return True
+    except Exception:
+        pass
+    try:
+        from neuroslm.utils.secrets import detect_environment
+        return detect_environment() in ("colab", "kaggle", "jupyter")
+    except Exception:
+        return False
+
+
 def _require_human_confirmation(platform: str, steps: int) -> None:
-    """Block until a human types 'deploy' at a real TTY.
+    """Block until a human types 'deploy' at a real TTY or notebook prompt.
 
     Raises SystemExit(1) when:
-    - stdin is not a TTY (piped input, subprocess call, agent-driven shell)
+    - the confirmation channel is not human (piped input, subprocess, agent, CI)
     - user types anything other than the word 'deploy'
     - stdin reaches EOF or user hits Ctrl-C
 
     No flag bypasses this gate. It exists specifically to prevent AI agents
-    from autonomously launching paid cloud instances.
+    from autonomously launching paid cloud instances; the notebook path still
+    requires a live human to type into the Colab/Jupyter input box.
     """
-    if not sys.stdin.isatty():
+    if not _deploy_confirm_is_human():
         print(
-            "[deploy] BLOCKED: stdin is not an interactive terminal.\n"
-            "  Deploying requires a human to confirm at a real TTY.\n"
-            "  Piped input, agent-driven calls, and CI contexts are rejected here.",
+            "[deploy] BLOCKED: no interactive human confirmation channel.\n"
+            "  Deploying requires a human to confirm at a real TTY or in an\n"
+            "  interactive Colab/Jupyter cell. Piped input, agent-driven calls,\n"
+            "  and CI contexts are rejected here.",
             file=sys.stderr,
         )
         sys.exit(1)
