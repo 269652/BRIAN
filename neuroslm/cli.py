@@ -848,7 +848,8 @@ def cmd_discover(args: argparse.Namespace) -> int:
             total_steps=args.total_steps, explore_every=args.explore_every,
             seed=args.seed, ledger=led, pop_size=args.pop,
             generations=args.generations, inner_steps=args.inner_steps,
-            progress=_progress, store=mod_store)
+            progress=_progress, store=mod_store,
+            wellformed_penalty=args.wellformed_penalty)
         led.save()
         for e in result["explorations"]:
             tag = "KEPT ✓" if e["improved"] else "rejected"
@@ -4993,6 +4994,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sde.add_argument("--generations", type=int, default=4)
     sde.add_argument("--inner-steps", type=int, default=20)
     sde.add_argument("--seed", type=int, default=0)
+    sde.add_argument("--wellformed-penalty", type=float, default=0.05,
+                     help="fitness penalty per undefined-register read (steers the "
+                          "search toward clean mechanics; 0 disables)")
     sde.add_argument("--ledger", help="path to the search ledger JSON "
                      "(default .neuro/search_ledger.json)")
     sde.add_argument("--push", action="store_true",

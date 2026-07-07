@@ -69,6 +69,8 @@ class ExploreConfig:
     tol: float = 1e-4          # metric must improve by more than this to "keep"
     dud_penalty: float = 1e9
     normalize: bool = True     # canonicalize candidates before the ledger sees them
+    wellformed_penalty: float = 0.05    # fitness bump per read of an undefined register
+    inputs: tuple = ("t0",)             # registers pre-bound by the harness (h)
 
 
 @dataclass
@@ -113,6 +115,15 @@ class TrainingExplorer:
     def _canonical_sig(self, prog: Program) -> str:
         return self.ledger.signature(self._canon(prog))
 
+    def _fitness_penalty(self, prog: Program) -> float:
+        """Multiplicative fitness penalty for ill-formed programs (undefined reads).
+
+        Applied to the search *objective* only — the reported ppl stays the true
+        value — so the GA prefers clean mechanics without distorting measurements.
+        """
+        from neuroslm.genetic.evolve import undefined_reads
+        return 1.0 + self.cfg.wellformed_penalty * undefined_reads(prog, self.cfg.inputs)
+
     def explore(self, step: int, score_fn: Callable[[Program], float],
                 progress: Optional[Callable[[str], None]] = None) -> ExploreResult:
         cfg = self.cfg
@@ -154,7 +165,9 @@ class TrainingExplorer:
             else:
                 s = float(score_fn(prog))
                 evaluated[sig] = (prog, s)
-            return Objective((-s,))
+            # penalize ill-formed programs (undefined-register reads) in the
+            # *fitness* only — the cached ppl `s` stays the true reported value
+            return Objective((-(s * self._fitness_penalty(prog)),))
 
         result = auto_evolve(
             evaluate, rng,
@@ -192,7 +205,7 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
                                   pop_size: int = 12, generations: int = 4,
                                   inner_steps: int = 20,
                                   progress: Callable[[str], None] = None,
-                                  store=None) -> dict:
+                                  store=None, wellformed_penalty: float = 0.05) -> dict:
     """Train a tiny CPU LM; every ``explore_every`` steps search + keep-if-better.
 
     This is the miniature of "wire exploration into training": the residual-stream
@@ -226,7 +239,9 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
 
     explorer = TrainingExplorer(
         ledger, ExploreConfig(explore_every=explore_every, pop_size=pop_size,
-                              generations=generations), run_id=f"run-{seed}")
+                              generations=generations,
+                              wellformed_penalty=wellformed_penalty),
+        run_id=f"run-{seed}")
 
     import copy
     import math

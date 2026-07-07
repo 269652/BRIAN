@@ -29,6 +29,25 @@ from neuroslm.genetic.language import (
 _OP_NAMES = sorted(n for n, s in REGISTRY.items() if s.family != "nn")
 
 
+def undefined_reads(program, inputs=("t0", "t1")) -> int:
+    """Count reads of registers that are neither a declared input nor yet written.
+
+    NGL reads of an unwritten register silently return zeros, so the GA emits
+    programs that read undefined registers (implicit-0 noise). Counting those
+    occurrences gives a well-formedness signal the search can penalize, steering
+    discovery toward clean mechanics. ``inputs`` are the registers pre-bound by the
+    caller (``t0`` for a modulation; ``t0``/``t1`` for an update rule).
+    """
+    written = set(inputs)
+    count = 0
+    for ins in program.instructions:
+        for r in ins.ins:
+            if r not in written:
+                count += 1
+        written.add(ins.out)
+    return count
+
+
 # ---------------------------------------------------------------------------
 # Register addressing helpers.
 # ---------------------------------------------------------------------------

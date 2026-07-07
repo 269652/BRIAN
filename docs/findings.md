@@ -2449,3 +2449,20 @@ emits programs that read undefined registers), not a persistence one. Simplifyin
 the artifact doesn't fix a mislabel rooted in the program's own structure.
 
 [EVIDENCE: tests/genetic/test_training_explorer.py::TestPersistence::test_persisted_programs_are_minimal green; run_0_step4000 minimizes 12→3 ops]
+
+**Addendum 2 — penalize undefined-register reads (search quality).** The root of the
+op-salad / stateful-mislabel is that NGL reads of an unwritten register return
+zeros, so the GA freely emits programs reading undefined registers.
+`evolve.undefined_reads(program, inputs)` counts those; `TrainingExplorer._fitness_
+penalty` applies a multiplicative bump (`1 + wellformed_penalty·count`, default 0.05)
+to the search **objective only** — the reported ppl stays true — so the GA prefers
+clean mechanics. CLI: `discover explore --wellformed-penalty`. Honest empirical note:
+across a 4-seed A/B (penalty 0 vs 0.05) the effect on the *persisted* winners'
+cleanliness was marginal (avg undefined reads ~0.5 either way) — because DCE-on-
+persist already strips dead undefined reads, so most survivors were already clean,
+and their roles now label correctly (`generic` / `normalization`, not the spurious
+`optimizer_update`). The penalty's real value is steering eval budget away from
+ill-formed candidates during the search, not the final artifact; it is unit-verified
+and tunable, not claimed to dominate on this toy.
+
+[EVIDENCE: tests/genetic/test_wellformed.py (9 contracts) green; A/B persisted-winner roles = generic/normalization]
