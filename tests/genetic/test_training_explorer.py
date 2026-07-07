@@ -66,6 +66,26 @@ class TestKeepIfBetter:
             assert led.outcome_of(res.best_program) == "kept"
 
 
+class TestProgress:
+    def test_explore_emits_per_generation_progress(self):
+        led = SearchLedger(":memory:")
+
+        def score_fn(prog):
+            import torch
+            mem = Memory(prog.n_scalar, prog.n_tensor)
+            mem.write("t0", torch.ones(4))
+            prog.execute(mem)
+            return float(mem.read(prog.out_reg).reshape(-1)[:1].abs().mean())
+
+        msgs = []
+        exp = TrainingExplorer(led, ExploreConfig(explore_every=500, pop_size=8,
+                                                  generations=4), run_id="t")
+        exp.explore(500, score_fn, progress=msgs.append)
+        assert msgs, "expected progress messages"
+        assert any("gen" in m for m in msgs)          # per-generation lines
+        assert any("500" in m for m in msgs)          # tagged with the step
+
+
 class TestLedgerDedup:
     def test_second_run_skips_known_duds(self, tmp_path):
         path = tmp_path / "ledger.json"

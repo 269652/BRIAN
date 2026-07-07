@@ -840,10 +840,13 @@ def cmd_discover(args: argparse.Namespace) -> int:
         print(f"[discover:explore] tiny-LM training, explore every {args.explore_every} "
               f"steps (ledger: {ledger_path}, {before_stats['total']} prior patterns"
               f"{' incl. seeded prior-art' if getattr(args, 'seed_known', True) else ''})")
+        def _progress(msg: str) -> None:
+            print("  " + msg, flush=True)   # live heartbeat during the long run
         result = run_training_with_exploration(
             total_steps=args.total_steps, explore_every=args.explore_every,
             seed=args.seed, ledger=led, pop_size=args.pop,
-            generations=args.generations, inner_steps=args.inner_steps)
+            generations=args.generations, inner_steps=args.inner_steps,
+            progress=_progress)
         led.save()
         for e in result["explorations"]:
             tag = "KEPT ✓" if e["improved"] else "rejected"
@@ -861,7 +864,11 @@ def cmd_discover(args: argparse.Namespace) -> int:
             except ValueError:
                 pass  # ledger outside the repo — push modulations only
             res = push_artifacts(REPO_ROOT, arts, message="artifacts: explore run")
-            print(f"  push: {'-> ' + res.get('branch','?') if res.get('pushed') else res.get('reason')}")
+            if res.get("pushed"):
+                print(f"  push: -> {res.get('branch','?')}")
+            else:
+                detail = f" ({res['detail']})" if res.get("detail") else ""
+                print(f"  push: {res.get('reason')}{detail}")
         payload = {"mode": "explore", **result, "ledger": str(ledger_path)}
     elif mode == "ledger":
         from neuroslm.genetic.ledger import SearchLedger

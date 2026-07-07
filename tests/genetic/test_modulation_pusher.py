@@ -92,6 +92,30 @@ class TestPushArtifacts:
         assert "no artifacts" in res["reason"]
 
 
+class TestFreshRuntime:
+    def test_commits_even_without_git_identity(self, tmp_path, monkeypatch):
+        # a fresh Colab runtime has no user.name/user.email → `git commit` refuses.
+        # push_artifacts must supply a fallback identity so the run still streams.
+        import os
+        from neuroslm.genetic.modulation_pusher import push_artifacts
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+        monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+        bare = tmp_path / "remote.git"
+        work = tmp_path / "work"
+        subprocess.run(["git", "init", "--bare", str(bare)], capture_output=True)
+        work.mkdir()
+        _git(["init"], work)
+        _git(["checkout", "-b", "master"], work)
+        _git(["remote", "add", "origin", str(bare)], work)
+        # deliberately NO user.email / user.name configured anywhere
+        (work / "modulations").mkdir()
+        (work / "modulations" / "g.neuro").write_text("modulation g { program { t2 = tanh(t0)\nreturn t2 } }")
+        res = push_artifacts(work, ["modulations"], message="fresh runtime")
+        assert res["pushed"] is True, res
+        log = _git(["log", "--oneline", "--name-only", "master"], bare).stdout
+        assert "modulations/g.neuro" in log
+
+
 class TestConcurrentPush:
     def test_rebases_when_remote_moved(self, tmp_path):
         # simulate a concurrent writer: remote master advances between our commit

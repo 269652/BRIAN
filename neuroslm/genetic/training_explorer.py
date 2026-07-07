@@ -58,9 +58,10 @@ class TrainingExplorer:
         self.cfg = config or ExploreConfig()
         self.run_id = run_id
 
-    def maybe_explore(self, step: int, score_fn: Callable[[Program], float]) -> Optional[ExploreResult]:
+    def maybe_explore(self, step: int, score_fn: Callable[[Program], float],
+                      progress: Optional[Callable[[str], None]] = None) -> Optional[ExploreResult]:
         if step > 0 and step % self.cfg.explore_every == 0:
-            return self.explore(step, score_fn)
+            return self.explore(step, score_fn, progress=progress)
         return None
 
     def _canon(self, prog: Program) -> Program:
@@ -81,13 +82,31 @@ class TrainingExplorer:
     def _canonical_sig(self, prog: Program) -> str:
         return self.ledger.signature(self._canon(prog))
 
-    def explore(self, step: int, score_fn: Callable[[Program], float]) -> ExploreResult:
+    def explore(self, step: int, score_fn: Callable[[Program], float],
+                progress: Optional[Callable[[str], None]] = None) -> ExploreResult:
         cfg = self.cfg
         rng = np.random.default_rng(hash((self.run_id, step)) % (2**32))
         baseline = float(score_fn(identity_modulation()))
 
         evaluated: dict = {}     # signature -> (program, score)
         skipped = [0]
+
+        if progress:
+            progress(f"[explore @ step {step}] searching  baseline_ppl={baseline:.2f}  "
+                     f"(pop={cfg.pop_size}, gens={cfg.generations})")
+
+        def _on_gen(g: int, total: int, best_obj) -> None:
+            if not progress:
+                return
+            # throttle: first, last, and ~10 evenly-spaced generations
+            if g != 0 and g != total and g % max(1, total // 10) != 0:
+                return
+            try:
+                best = -float(best_obj.values[0])
+            except Exception:
+                best = float("nan")
+            progress(f"[explore @ step {step}] gen {g}/{total}  best_ppl={best:.2f}  "
+                     f"evaluated={len(evaluated)} skipped_duds={skipped[0]}")
 
         def evaluate(prog: Program) -> Objective:
             # normalize first: every syntactic variant maps to one canonical form,
@@ -112,6 +131,7 @@ class TrainingExplorer:
             length=cfg.length, n_scalar=cfg.n_scalar, n_tensor=cfg.n_tensor,
             seeds=[identity_modulation()],
             elite_frac=0.3, crossover_rate=0.5,
+            on_generation=_on_gen,
         )
         best_prog = result.best_program
         best_score = float(score_fn(best_prog))
@@ -139,7 +159,8 @@ class TrainingExplorer:
 def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int = 500,
                                   seed: int = 0, ledger: SearchLedger = None,
                                   pop_size: int = 12, generations: int = 4,
-                                  inner_steps: int = 20) -> dict:
+                                  inner_steps: int = 20,
+                                  progress: Callable[[str], None] = None) -> dict:
     """Train a tiny CPU LM; every ``explore_every`` steps search + keep-if-better.
 
     This is the miniature of "wire exploration into training": the residual-stream
@@ -170,6 +191,7 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
                               generations=generations), run_id=f"run-{seed}")
 
     explorations: List[dict] = []
+    heartbeat = max(1, explore_every // 5)   # ~5 training pulses between searches
     for step in range(1, total_steps + 1):
         modulate = _make_modulator(current_mod)
         opt.zero_grad()
@@ -180,7 +202,10 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             opt.step()
 
-        res = explorer.maybe_explore(step, val_ppl)
+        if progress and step % heartbeat == 0 and step % explore_every != 0:
+            progress(f"[train] step {step}/{total_steps}  train_loss={float(loss):.4f}")
+
+        res = explorer.maybe_explore(step, val_ppl, progress=progress)
         if res is not None:
             if res.improved:
                 current_mod = res.best_program   # install the winner

@@ -19,6 +19,22 @@ def _git(args, cwd) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True)
 
 
+def _identity_args(root) -> list:
+    """Fallback ``-c user.*`` args when the runtime has no git identity.
+
+    A fresh Colab/vast runtime has no ``user.name``/``user.email`` configured, so
+    ``git commit`` refuses ("Please tell me who you are"). Supply a bot identity
+    just for the artifact commit so a discovery run streams its results anyway.
+    Respects an existing identity when one is set.
+    """
+    email = _git(["config", "user.email"], root).stdout.strip()
+    name = _git(["config", "user.name"], root).stdout.strip()
+    if email and name:
+        return []
+    return ["-c", "user.name=brian-discovery",
+            "-c", "user.email=brian-discovery@users.noreply.github.com"]
+
+
 def push_artifacts(repo_root, paths, message: Optional[str] = None,
                    remote: str = "origin", branch: Optional[str] = None) -> dict:
     """git add → commit → push, scoped to ``paths`` (files or dirs). Status dict.
@@ -43,7 +59,7 @@ def push_artifacts(repo_root, paths, message: Optional[str] = None,
         return {"pushed": False, "reason": "no changes"}
 
     msg = message or "artifacts: auto-push discovery artifacts"
-    commit = _git(["commit", "-m", msg, "--", *present], root)
+    commit = _git([*_identity_args(root), "commit", "-m", msg, "--", *present], root)
     if commit.returncode != 0:
         return {"pushed": False, "reason": "commit failed",
                 "detail": (commit.stderr or commit.stdout)[-300:]}
