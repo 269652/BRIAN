@@ -657,6 +657,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
             steps=args.steps, task=args.task,
             include_sota_seeds=not args.from_scratch,
             novelty_weight=getattr(args, "novelty", 0.0),
+            device=getattr(args, "device", "cpu"),
         )
         print(f"[discover:optimizer] task={args.task} pop={args.pop} "
               f"gens={args.generations} steps={args.steps}")
@@ -688,7 +689,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
     elif mode == "flow":
         outcome = run_flow_modulation_discovery(
             seed=args.seed, pop_size=args.pop, generations=args.generations,
-            steps=args.steps,
+            steps=args.steps, device=getattr(args, "device", "cpu"),
         )
         print(f"[discover:flow] pop={args.pop} gens={args.generations} steps={args.steps}")
         print(f"  discovered final_loss : {outcome.best_final_loss:.6f}")
@@ -711,7 +712,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         from neuroslm.genetic.neuro_evolve import run_trunk_evolution
         outcome = run_trunk_evolution(
             seed=args.seed, pop_size=args.pop, generations=args.generations,
-            steps=args.steps)
+            steps=args.steps, device=getattr(args, "device", "cpu"))
         print(f"[discover:trunk] pop={args.pop} gens={args.generations} steps={args.steps}")
         print(f"  unmodulated trunk val PPL : {outcome.baseline_val_ppl:.4f}")
         print(f"  best modulated   val PPL  : {outcome.best_val_ppl:.4f}")
@@ -4639,6 +4640,8 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="seed only SGD+random (no SOTA seeds) — genuine discovery")
     sdo.add_argument("--novelty", type=float, default=0.0,
                      help="novelty-search weight (semantic-space distance); >0 hunts novel rules")
+    sdo.add_argument("--device", default="cpu",
+                     help="cpu | cuda | auto — scale the tiny-model training onto a T4")
     sdo.add_argument("--out", help="write the run summary JSON here")
     sdo.set_defaults(func=cmd_discover)
 
@@ -4648,6 +4651,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sdf.add_argument("--generations", type=int, default=8)
     sdf.add_argument("--steps", type=int, default=25)
     sdf.add_argument("--seed", type=int, default=0)
+    sdf.add_argument("--device", default="cpu", help="cpu | cuda | auto")
     sdf.add_argument("--out", help="write the run summary JSON here")
     sdf.set_defaults(func=cmd_discover)
 
@@ -4659,6 +4663,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sdt.add_argument("--generations", type=int, default=8)
     sdt.add_argument("--steps", type=int, default=30)
     sdt.add_argument("--seed", type=int, default=0)
+    sdt.add_argument("--device", default="cpu", help="cpu | cuda | auto — use a T4")
     sdt.add_argument("--out", help="write the run summary JSON here")
     sdt.add_argument("--save", metavar="NAME",
                      help="persist the discovered modulation as modulations/NAME.neuro")

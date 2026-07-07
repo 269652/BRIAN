@@ -197,12 +197,13 @@ class Memory:
     execution is total.
     """
 
-    __slots__ = ("n_scalar", "n_tensor", "_regs")
+    __slots__ = ("n_scalar", "n_tensor", "_regs", "device")
 
-    def __init__(self, n_scalar: int, n_tensor: int):
+    def __init__(self, n_scalar: int, n_tensor: int, device=None):
         self.n_scalar = n_scalar
         self.n_tensor = n_tensor
         self._regs: Dict[str, torch.Tensor] = {}
+        self.device = torch.device(device) if device is not None else torch.device("cpu")
 
     def _valid(self, reg: str) -> bool:
         if not reg or reg[0] not in ("s", "t"):
@@ -217,16 +218,21 @@ class Memory:
     def read(self, reg: str) -> torch.Tensor:
         v = self._regs.get(reg)
         if v is None:
-            return torch.zeros(())
+            return torch.zeros((), device=self.device)
         return v
 
     def write(self, reg: str, value) -> None:
         if not self._valid(reg):
             return  # writes to out-of-range registers are silently dropped
-        self._regs[reg] = _t(value)
+        v = _t(value)
+        # track the live device: a real (cuda) tensor sets the memory's device so
+        # constants + unwritten reads follow it (avoids cuda/cpu op mismatches).
+        if isinstance(value, torch.Tensor) and value.device.type != "cpu":
+            self.device = value.device
+        self._regs[reg] = v
 
     def clone(self) -> "Memory":
-        m = Memory(self.n_scalar, self.n_tensor)
+        m = Memory(self.n_scalar, self.n_tensor, device=self.device)
         m._regs = {k: v for k, v in self._regs.items()}
         return m
 
@@ -256,9 +262,16 @@ class Program:
     meta: dict = field(default_factory=dict)
 
     def execute(self, memory: Memory) -> Memory:
+        dev = memory.device
         for ins in self.instructions:
             spec = REGISTRY[ins.op]
             args = [memory.read(r) for r in ins.ins]
+            # align every tensor arg to the memory device so a `const`/eps scalar
+            # (created on cpu) never mismatches a cuda operand — that mismatch
+            # would raise inside the op and silently fall back, corrupting math.
+            if dev.type != "cpu":
+                args = [a.to(dev) if isinstance(a, torch.Tensor) and a.device != dev else a
+                        for a in args]
             kwargs = {}
             if spec.uses_config:
                 kwargs = {k: v for k, v in ins.config}
@@ -278,6 +291,8 @@ class Program:
                 out = out.mean()
             if not torch.isfinite(out).all():
                 out = torch.nan_to_num(out, nan=0.0, posinf=1e6, neginf=-1e6)
+            if dev.type != "cpu" and out.device != dev:
+                out = out.to(dev)   # keep every register value on the live device
             memory.write(ins.out, out)
         return memory
 

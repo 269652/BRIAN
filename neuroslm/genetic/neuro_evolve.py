@@ -151,12 +151,15 @@ def _make_modulator(program: Program):
 
 
 def evaluate_modulation(program: Program, *, seed: int = 0, steps: int = 30,
-                        prior: NeuroanatomicPrior | None = None) -> Tuple[float, float]:
+                        prior: NeuroanatomicPrior | None = None,
+                        device=None) -> Tuple[float, float]:
     """Train the tiny LM with this modulation; return (val_ppl, plausibility)."""
     prior = prior or NeuroanatomicPrior()
+    dev = torch.device(device) if device is not None else torch.device("cpu")
     train, val, vocab = _markov_corpus(seed)
+    train, val = train.to(dev), val.to(dev)
     torch.manual_seed(seed + 3)
-    model = _TinyLM(vocab)
+    model = _TinyLM(vocab).to(dev)
     modulate = _make_modulator(program)
     opt = torch.optim.Adam(model.parameters(), lr=5e-3)
     loss_fn = nn.CrossEntropyLoss()
@@ -210,21 +213,24 @@ class TrunkOutcome:
 
 def run_trunk_evolution(*, seed: int = 0, pop_size: int = 16, generations: int = 8,
                         steps: int = 30, plausibility_weight: float = 1.0,
-                        ppl_weight: float = 1.0) -> TrunkOutcome:
+                        ppl_weight: float = 1.0, device: str = "cpu") -> TrunkOutcome:
     """Evolve a residual-stream neuromodulation; Pareto over (−PPL, +plausibility).
 
     The identity modulation is seeded and preserved by elitism, so the best
     candidate is never worse than the unmodulated trunk. The plausibility term
-    keeps the search inside the neuroanatomically realistic region.
+    keeps the search inside the neuroanatomically realistic region. ``device``
+    scales the tiny-LM training onto a T4/cuda.
     """
+    from neuroslm.genetic.discovery import _resolve_device
     rng = np.random.default_rng(seed)
     prior = NeuroanatomicPrior()
-    baseline_ppl, _ = evaluate_modulation(identity_modulation(), seed=seed, steps=steps)
+    dev = _resolve_device(device)
+    baseline_ppl, _ = evaluate_modulation(identity_modulation(), seed=seed, steps=steps, device=dev)
     # normalise PPL into a comparable scale so the weighted scalar is balanced
     scale = max(baseline_ppl, 1.0)
 
     def evaluate(prog: Program) -> Objective:
-        ppl, plaus = evaluate_modulation(prog, seed=seed, steps=steps, prior=prior)
+        ppl, plaus = evaluate_modulation(prog, seed=seed, steps=steps, prior=prior, device=dev)
         return Objective((-ppl_weight * ppl / scale, plausibility_weight * plaus))
 
     result = auto_evolve(
@@ -238,10 +244,10 @@ def run_trunk_evolution(*, seed: int = 0, pop_size: int = 16, generations: int =
     )
 
     # recover raw ppl/plausibility for the reported best + front
-    best_ppl, best_plaus = evaluate_modulation(result.best_program, seed=seed, steps=steps, prior=prior)
+    best_ppl, best_plaus = evaluate_modulation(result.best_program, seed=seed, steps=steps, prior=prior, device=dev)
     front_stats = []
     for p in result.front:
-        pp, pl = evaluate_modulation(p, seed=seed, steps=steps, prior=prior)
+        pp, pl = evaluate_modulation(p, seed=seed, steps=steps, prior=prior, device=dev)
         front_stats.append({"val_ppl": pp, "plausibility": pl,
                             "name": p.meta.get("name", "evolved")})
     return TrunkOutcome(

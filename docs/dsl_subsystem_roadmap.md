@@ -349,3 +349,20 @@ modulations as managed artifacts:
   proven on tiny models. A param-matched GPT-2 competitor comes **only** from GPU
   exploration + extensive GPU training (`brian deploy`). The CLI prints this;
   `--save` + a future `brian deploy --modulation NAME` are the CPU→GPU bridge.
+
+### NGL device support + Colab exploration
+
+NGL execution is device-aware: `Memory` tracks the live device from written
+tensors and `execute` aligns every op's operands (and constants/eps guards) to
+it, so a program runs correctly on cuda — a `cuda_tensor + cpu_scalar` mismatch
+(which would silently fall back and corrupt the math) can't happen. The discovery
+harness threads `device=` through `benchmark_optimizer` / `run_optimizer_discovery`
+/ `run_trunk_evolution` / `run_flow_modulation_discovery`, with `_resolve_device`
+degrading `cuda`→`cpu` when no GPU is present (so the same cell runs on a free CPU
+runtime). CLI: `brian discover {optimizer,trunk,flow} --device auto`.
+
+`colab_run.ipynb` ships two phone-friendly cells: a **T4 exploration cell**
+(`brian discover … --device auto`, free — runs on the Colab GPU) and a **vast.ai
+deploy cell** (rents a GPU for extensive training). Exploration finds candidate
+mechanics/modulations on tiny models; the param-matched competitor still comes
+from the deploy path.

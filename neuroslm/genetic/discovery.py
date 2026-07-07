@@ -38,8 +38,25 @@ from neuroslm import information
 _DIVERGED_LOSS = 1e4
 
 
+def _resolve_device(device="cpu") -> torch.device:
+    """Resolve a device spec, falling back to CPU when cuda is unavailable.
+
+    ``"auto"`` picks cuda when present. ``"cuda"`` on a CPU-only box degrades to
+    CPU (so a Colab CPU runtime runs the same cell without crashing) — the search
+    is identical, just slower.
+    """
+    if device in (None, "cpu"):
+        return torch.device("cpu")
+    if device == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    d = torch.device(device)
+    if d.type == "cuda" and not torch.cuda.is_available():
+        return torch.device("cpu")
+    return d
+
+
 # ---------------------------------------------------------------------------
-# Tiny CPU benchmark model + task.
+# Tiny benchmark model + task (CPU by default; scales to a T4 via device=).
 # ---------------------------------------------------------------------------
 class _TinyMLP(nn.Module):
     def __init__(self, d_in: int, d_hidden: int, d_out: int):
@@ -55,7 +72,8 @@ class _TinyMLP(nn.Module):
         return y
 
 
-def _build_regression(seed: int, d_in=8, d_hidden=16, n=128):
+def _build_regression(seed: int, d_in=8, d_hidden=16, n=128, device=None):
+    device = device or torch.device("cpu")
     g = torch.Generator().manual_seed(seed)
     X = torch.randn(n, d_in, generator=g)
     teacher = _TinyMLP(d_in, d_hidden, 1)
@@ -64,19 +82,20 @@ def _build_regression(seed: int, d_in=8, d_hidden=16, n=128):
     with torch.no_grad():
         y = teacher(X)
     torch.manual_seed(seed + 1)
-    student = _TinyMLP(d_in, d_hidden, 1)
-    return X, y, student
+    student = _TinyMLP(d_in, d_hidden, 1).to(device)
+    return X.to(device), y.to(device), student
 
 
-def _build_parity(seed: int, n_bits=6, d_hidden=24):
+def _build_parity(seed: int, n_bits=6, d_hidden=24, device=None):
     from neuroslm.synthetic_tasks import parity_task
 
+    device = device or torch.device("cpu")
     X_np, y_np = parity_task(n_bits=n_bits, order=n_bits, n_samples=None)
     X = torch.tensor(X_np, dtype=torch.float32) * 2 - 1  # {0,1} -> {-1,1}
     y = torch.tensor(y_np, dtype=torch.long)
     torch.manual_seed(seed + 7)
-    model = _TinyMLP(n_bits, d_hidden, 2)
-    return X, y, model
+    model = _TinyMLP(n_bits, d_hidden, 2).to(device)
+    return X.to(device), y.to(device), model
 
 
 @dataclass
@@ -88,13 +107,14 @@ class BenchmarkResult:
 
 
 def benchmark_optimizer(program: Program, *, steps: int = 40, seed: int = 0,
-                        task: str = "regression") -> BenchmarkResult:
+                        task: str = "regression", device="cpu") -> BenchmarkResult:
     """Train a tiny model for ``steps`` with the NGL update-rule and score it."""
+    dev = _resolve_device(device)
     if task == "regression":
-        X, y, model = _build_regression(seed)
+        X, y, model = _build_regression(seed, device=dev)
         loss_fn = lambda pred: torch.mean((pred - y) ** 2)
     elif task == "parity":
-        X, y, model = _build_parity(seed)
+        X, y, model = _build_parity(seed, device=dev)
         loss_fn = lambda pred: nn.functional.cross_entropy(pred, y)
     else:
         raise ValueError(f"unknown task {task!r}")
@@ -152,19 +172,21 @@ def run_optimizer_discovery(
     include_sota_seeds: bool = True,
     cost_weight: float = 0.02,
     novelty_weight: float = 0.0,
+    device: str = "cpu",
 ) -> DiscoveryOutcome:
     """Evolve update-rule programs; return the best + the Pareto front.
 
     Objective (maximised): ``(-final_loss, -cost_weight*n_instructions)``. With
     ``novelty_weight > 0`` the GA also rewards distance in the program's semantic
     space, pushing the search toward *novel* update rules rather than variations
-    on the seeds.
+    on the seeds. ``device`` scales the tiny-model training onto a T4/cuda.
     """
     rng = np.random.default_rng(seed)
-    sgd_baseline = benchmark_optimizer(sgd_program(lr=0.02), steps=steps, seed=seed, task=task).final_loss
+    sgd_baseline = benchmark_optimizer(sgd_program(lr=0.02), steps=steps, seed=seed,
+                                       task=task, device=device).final_loss
 
     def evaluate(prog: Program) -> Objective:
-        res = benchmark_optimizer(prog, steps=steps, seed=seed, task=task)
+        res = benchmark_optimizer(prog, steps=steps, seed=seed, task=task, device=device)
         return Objective((-res.final_loss, -cost_weight * res.cost))
 
     seeds: List[Program] = []
@@ -190,7 +212,7 @@ def run_optimizer_discovery(
 
     front_stats = []
     for p in result.front:
-        r = benchmark_optimizer(p, steps=steps, seed=seed, task=task)
+        r = benchmark_optimizer(p, steps=steps, seed=seed, task=task, device=device)
         front_stats.append({"final_loss": r.final_loss, "cost": r.cost,
                             "name": p.meta.get("name", "evolved")})
     return DiscoveryOutcome(
@@ -235,6 +257,7 @@ def run_flow_modulation_discovery(
     generations: int = 6,
     steps: int = 25,
     ei_weight: float = 0.5,
+    device: str = "cpu",
 ) -> DiscoveryOutcome:
     """Evolve a gradient-flow modulation program wrapped around an SGD step.
 
@@ -243,11 +266,12 @@ def run_flow_modulation_discovery(
     is pushed toward modulation that both trains well *and* raises integration.
     """
     rng = np.random.default_rng(seed)
-    X, y, _ = _build_parity(seed)
+    dev = _resolve_device(device)
+    X, y, _ = _build_parity(seed, device=dev)
 
     def evaluate(prog: Program) -> Objective:
         torch.manual_seed(seed + 7)
-        model = _TinyMLP(X.shape[1], 24, 2)
+        model = _TinyMLP(X.shape[1], 24, 2).to(dev)
         # SGD step but with the gradient first passed through the NGL program
         params = list(model.parameters())
         mems = {id(p): Memory(prog.n_scalar, prog.n_tensor) for p in params}
