@@ -1948,3 +1948,61 @@ train/OOD PPL on a `brian deploy` run. Recorded as follow-up.
 [EVIDENCE: tests/genetic/ — 71 contracts green (adds compile_arch/rewrite/neuro_evolve)]
 [ARTIFACT: results/discovery/trunk_modulation_s0.json (bounded-tanh gain, −9.4% val PPL)]
 [ARTIFACT: results/discovery/simplify_bloated_ffn.json (compiled FFN 6→3 instructions)]
+
+### H33 — All mechanics are lowerable/simplifiable/evolvable; modulations persist as .neuro (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — 81 contracts green in `tests/genetic/`. Three
+additions close the loop from "NGL can express optimizers" to "NGL is the
+substrate every model mechanic lives in, and discovered modulations are managed
+artifacts."
+
+1. **Full-mechanic lowering (attention → NGL).** NGL `Instruction`s gained an
+   optional `config` tuple and `OpSpec.uses_config`, so scalar-config ops lower
+   as opaque nodes. `causal_self_attention` is registered (delegating to
+   `nn_ops`), and `compile_layer_to_ngl(source, bindings=…)` splits tensor vs
+   config args. The **entire `TRANSFORMER_BLOCK_DSL`** (attention + residuals +
+   swiglu) now compiles to NGL **byte-equivalent** to the reference module
+   (atol 1e-5). The block is therefore simplifiable and evolvable, not just the
+   FFN. A bug where the DSL's `x = x + a` reassignment made `input_regs` point at
+   an interior temp was fixed (snapshot inputs before lowering); `config` is
+   preserved through `to_source`, the peephole pass, and the algebraic
+   rewriter's `to_expr`/`from_expr` (attention stays intact through simplify).
+
+2. **Shape-correct simplification verification.** `compile_arch.make_probes`
+   instantiates the reference layer to get real param shapes + a valid input, and
+   `simplify(..., probes=…)` verifies every rewrite against those **non-degenerate**
+   values (the generic all-zero probes made any rewrite look equivalent on an arch
+   program). The attention op correctly survives simplification (opaque, not
+   deletable); residual simplification around it is verified real.
+
+3. **Modulation store — `modulations/*.neuro`, managed by `brian`.**
+   `neuroslm/genetic/modulation_store.py`: an NGL `Program` serializes to a
+   `.neuro` `modulation { program { … } }` block (round-trip exact, incl. config
+   ops), and `ModulationStore` gives save / list / show / drop / **merge**
+   (compose gains sequentially, `g₂(g₁(h))`). `brian discover trunk --save NAME`
+   persists the discovered gain law; `brian modulation {list,show,drop,merge}`
+   manages the store. So a discovered neuromodulation is a versionable artifact
+   that can be merged or thrown away, not a log line.
+
+4. **Novelty + efficiency search.** `run_optimizer_discovery(novelty_weight=…)`
+   (CLI `--novelty`) adds semantic-space distance to the objective, hunting
+   *novel* rules rather than seed variations; the cost objective and the trunk
+   prior's metabolic-economy term already reward *more efficient* mechanics, and
+   the simplifier turns any program into its cheapest equivalent. "Search for
+   novel or more efficient algorithms" is thus first-class.
+
+**GPU guardrail (explicit).** The CPU path discovers *candidate* mechanics,
+modulations, and update rules and proves them on tiny models. A **param-matched
+GPT-2 competitor comes ONLY from GPU exploration + extensive GPU training**
+(`brian deploy`). `brian discover trunk` prints this, and `--save` is the bridge:
+persist the gain law on CPU, wire it into the trunk, cash it on GPU. No CPU run
+claims a competitive model.
+
+**Follow-up.**
+1. `brian deploy --modulation NAME` — inject a stored modulation into the SmolLM
+   trunk's residual stream for a real GPU A/B (the CPU→GPU bridge; needs explicit
+   deploy authorization per CLAUDE.md §1e).
+2. Lower a whole stacked `LanguageCortex` (embedding → N blocks → head), not just
+   one block, so end-to-end arch search/simplification runs.
+
+[EVIDENCE: tests/genetic/ — 81 contracts green (adds compile_attention/modulation_store/cli_modulation)]

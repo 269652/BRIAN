@@ -499,6 +499,62 @@ def _discovery_root() -> Path:
     return REPO_ROOT / "discoveries"
 
 
+def _modulations_root() -> Path:
+    """Resolve ``modulations/`` (env ``BRIAN_MODULATIONS_DIR`` overrides)."""
+    env = os.environ.get("BRIAN_MODULATIONS_DIR")
+    return Path(env) if env else REPO_ROOT / "modulations"
+
+
+def cmd_modulation(args: argparse.Namespace) -> int:
+    """Manage NGL neuromodulations stored under ``modulations/*.neuro``.
+
+    Subcommands: list | show <name> | drop <name> | merge <name…> --name <out>
+    """
+    from neuroslm.genetic.modulation_store import ModulationStore, program_to_neuro
+    store = ModulationStore(_modulations_root())
+    sub = args.mod_cmd
+
+    if sub == "list":
+        recs = store.list_all()
+        if not recs:
+            print(f"(no modulations in {_modulations_root()})")
+            return 0
+        print(f"{'NAME':20s}  METRICS")
+        for r in recs:
+            metrics = ", ".join(f"{k}={v}" for k, v in r.metrics.items())
+            print(f"{r.name:20s}  {metrics}")
+        return 0
+
+    if sub == "show":
+        try:
+            rec = store.get(args.name)
+        except KeyError:
+            print(f"Error: no modulation {args.name!r}", file=sys.stderr)
+            return 1
+        print(program_to_neuro(rec))
+        return 0
+
+    if sub == "drop":
+        if store.drop(args.name):
+            print(f"dropped {args.name}")
+            return 0
+        print(f"Error: no modulation {args.name!r}", file=sys.stderr)
+        return 1
+
+    if sub == "merge":
+        try:
+            rec = store.merge(args.names, args.name)
+        except KeyError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        print(f"merged {args.names} -> {rec.name} "
+              f"({len(rec.program.instructions)} instructions)")
+        return 0
+
+    print("Usage: brian modulation {list|show|drop|merge}", file=sys.stderr)
+    return 1
+
+
 def cmd_hypothesis(args: argparse.Namespace) -> int:
     """Manage the formal hypothesis ledger under ``hypothesis/``.
 
@@ -600,6 +656,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
             seed=args.seed, pop_size=args.pop, generations=args.generations,
             steps=args.steps, task=args.task,
             include_sota_seeds=not args.from_scratch,
+            novelty_weight=getattr(args, "novelty", 0.0),
         )
         print(f"[discover:optimizer] task={args.task} pop={args.pop} "
               f"gens={args.generations} steps={args.steps}")
@@ -665,6 +722,9 @@ def cmd_discover(args: argparse.Namespace) -> int:
         print("  best modulation program (NGL):")
         for line in outcome.best_program.to_source().splitlines():
             print(f"    {line}")
+        print("  note: this is a CPU tiny-LM search — a param-matched GPT-2 "
+              "competitor comes ONLY from GPU exploration + extensive GPU "
+              "training (brian deploy). Save the gain law (--save) to carry it over.")
         payload = {
             "mode": "trunk",
             "seed": args.seed, "pop": args.pop,
@@ -676,6 +736,16 @@ def cmd_discover(args: argparse.Namespace) -> int:
             "front_stats": outcome.front_stats,
             "best_program": outcome.best_program.to_source(),
         }
+        if getattr(args, "save", None):
+            from neuroslm.genetic.modulation_store import ModulationStore, ModulationRecord
+            store = ModulationStore(_modulations_root())
+            rec = ModulationRecord(
+                name=args.save, program=outcome.best_program,
+                metrics={"val_ppl": round(outcome.best_val_ppl, 4),
+                         "baseline_ppl": round(outcome.baseline_val_ppl, 4),
+                         "plausibility": round(outcome.best_plausibility, 3)})
+            path = store.save(rec)
+            print(f"  saved modulation -> {path}")
     elif mode == "simplify":
         from neuroslm.genetic.compile_arch import compile_layer_to_ngl
         from neuroslm.genetic.simplify import simplify, programs_equivalent
@@ -4538,6 +4608,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sdo.add_argument("--task", default="regression", choices=["regression", "parity"])
     sdo.add_argument("--from-scratch", action="store_true",
                      help="seed only SGD+random (no SOTA seeds) — genuine discovery")
+    sdo.add_argument("--novelty", type=float, default=0.0,
+                     help="novelty-search weight (semantic-space distance); >0 hunts novel rules")
     sdo.add_argument("--out", help="write the run summary JSON here")
     sdo.set_defaults(func=cmd_discover)
 
@@ -4559,6 +4631,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sdt.add_argument("--steps", type=int, default=30)
     sdt.add_argument("--seed", type=int, default=0)
     sdt.add_argument("--out", help="write the run summary JSON here")
+    sdt.add_argument("--save", metavar="NAME",
+                     help="persist the discovered modulation as modulations/NAME.neuro")
     sdt.set_defaults(func=cmd_discover)
 
     sds = sdiscover_sub.add_parser(
@@ -4569,6 +4643,23 @@ def _build_parser() -> argparse.ArgumentParser:
     sds.add_argument("--seed", type=int, default=0)
     sds.add_argument("--out", help="write the run summary JSON here")
     sds.set_defaults(func=cmd_discover)
+
+    # modulation — manage stored NGL neuromodulations (modulations/*.neuro)
+    smod = sub.add_parser(
+        "modulation",
+        help="Manage NGL neuromodulations (list/show/drop/merge modulations/*.neuro)")
+    smod_sub = smod.add_subparsers(dest="mod_cmd", required=True)
+    smod_sub.add_parser("list", help="list stored modulations").set_defaults(func=cmd_modulation)
+    smod_show = smod_sub.add_parser("show", help="print a modulation's .neuro")
+    smod_show.add_argument("name")
+    smod_show.set_defaults(func=cmd_modulation)
+    smod_drop = smod_sub.add_parser("drop", help="delete a modulation")
+    smod_drop.add_argument("name")
+    smod_drop.set_defaults(func=cmd_modulation)
+    smod_merge = smod_sub.add_parser("merge", help="compose modulations into one")
+    smod_merge.add_argument("names", nargs="+", help="modulations to compose (in order)")
+    smod_merge.add_argument("--name", required=True, help="name for the merged modulation")
+    smod_merge.set_defaults(func=cmd_modulation)
 
     # bundle
     sb = sub.add_parser("bundle",

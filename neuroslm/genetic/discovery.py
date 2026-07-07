@@ -151,10 +151,14 @@ def run_optimizer_discovery(
     task: str = "regression",
     include_sota_seeds: bool = True,
     cost_weight: float = 0.02,
+    novelty_weight: float = 0.0,
 ) -> DiscoveryOutcome:
     """Evolve update-rule programs; return the best + the Pareto front.
 
-    Objective (maximised): ``(-final_loss, -cost_weight*n_instructions)``.
+    Objective (maximised): ``(-final_loss, -cost_weight*n_instructions)``. With
+    ``novelty_weight > 0`` the GA also rewards distance in the program's semantic
+    space, pushing the search toward *novel* update rules rather than variations
+    on the seeds.
     """
     rng = np.random.default_rng(seed)
     sgd_baseline = benchmark_optimizer(sgd_program(lr=0.02), steps=steps, seed=seed, task=task).final_loss
@@ -178,9 +182,10 @@ def run_optimizer_discovery(
         n_scalar=8,
         n_tensor=12,
         seeds=seeds,
-        weights=[1.0, 1.0],
+        weights=[1.0, 1.0, 0.5] if novelty_weight > 0 else [1.0, 1.0],
         elite_frac=0.25,
         crossover_rate=0.5,
+        novelty_weight=novelty_weight,
     )
 
     front_stats = []

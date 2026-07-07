@@ -37,11 +37,20 @@ def _probe_inputs(rng: np.random.Generator, shape=(3, 4)):
 
 
 def programs_equivalent(a: Program, b: Program, n_probes: int = 8,
-                        seed: int = 0, atol: float = 1e-5) -> bool:
-    """True if a and b map the same probe inputs to the same output."""
-    rng = np.random.default_rng(seed)
-    for _ in range(n_probes):
-        inp = _probe_inputs(rng)
+                        seed: int = 0, atol: float = 1e-5, probes=None) -> bool:
+    """True if a and b map the same probe inputs to the same output.
+
+    ``probes`` — an optional list of ``{register: tensor}`` dicts. When given (e.g.
+    shape-correct params+inputs for a compiled architecture, via
+    ``compile_arch.make_probes``), equivalence is checked against those real values
+    instead of the generic scalar probes.
+    """
+    if probes is not None:
+        cases = probes
+    else:
+        rng = np.random.default_rng(seed)
+        cases = [_probe_inputs(rng) for _ in range(n_probes)]
+    for inp in cases:
         ma = Memory(a.n_scalar, a.n_tensor)
         mb = Memory(b.n_scalar, b.n_tensor)
         for reg, val in inp.items():
@@ -146,7 +155,7 @@ def _peephole(program: Program) -> Program:
             # stream. Downstream reads resolve through `alias`.
             continue
 
-        emitted = Instruction(ins.op, ins.out, ins_in, ins.const)
+        emitted = Instruction(ins.op, ins.out, ins_in, ins.const, ins.config)
         new.append(emitted)
         if op == "const" and ins.const is not None:
             const_val[ins.out] = float(ins.const)
@@ -166,14 +175,14 @@ def _last_producer(instrs: List[Instruction], reg: str) -> Optional[Instruction]
 # ---------------------------------------------------------------------------
 # Shrink search — try deleting each instruction, keep if behaviour preserved.
 # ---------------------------------------------------------------------------
-def _try_delete_pass(program: Program, n_probes: int, seed: int) -> Program:
+def _try_delete_pass(program: Program, n_probes: int, seed: int, probes=None) -> Program:
     best = program
     i = 0
     while i < len(best.instructions):
         candidate_instrs = best.instructions[:i] + best.instructions[i + 1:]
         candidate = Program(candidate_instrs, best.n_scalar, best.n_tensor,
                             best.out_reg, dict(best.meta))
-        if programs_equivalent(best, candidate, n_probes=n_probes, seed=seed):
+        if programs_equivalent(best, candidate, n_probes=n_probes, seed=seed, probes=probes):
             best = candidate  # accept the deletion, re-check from same index
         else:
             i += 1
@@ -181,11 +190,12 @@ def _try_delete_pass(program: Program, n_probes: int, seed: int) -> Program:
 
 
 def simplify(program: Program, n_probes: int = 8, seed: int = 0,
-             max_rounds: int = 4, return_stats: bool = False):
+             max_rounds: int = 4, return_stats: bool = False, probes=None):
     """Return a shorter program behaviourally equivalent to ``program``.
 
-    Pipeline: exact DCE → peephole identities → probe-verified try-delete,
-    iterated to a fixpoint (bounded by ``max_rounds``).
+    Pipeline: exact DCE → peephole identities → verified algebra → verified
+    try-delete, iterated to a fixpoint (bounded by ``max_rounds``). ``probes`` (if
+    given) makes every verification use real shape-correct values.
     """
     # lazy import: rewrite.py imports this module, so avoid a top-level cycle
     from neuroslm.genetic.rewrite import algebraic_simplify
@@ -196,8 +206,8 @@ def simplify(program: Program, n_probes: int = 8, seed: int = 0,
         n0 = len(cur.instructions)
         cur = _peephole(cur)
         cur = dead_code_eliminate(cur)
-        cur = algebraic_simplify(cur, n_probes=n_probes, seed=seed)
-        cur = _try_delete_pass(cur, n_probes=n_probes, seed=seed)
+        cur = algebraic_simplify(cur, n_probes=n_probes, seed=seed, probes=probes)
+        cur = _try_delete_pass(cur, n_probes=n_probes, seed=seed, probes=probes)
         cur = dead_code_eliminate(cur)
         if len(cur.instructions) == n0:
             break

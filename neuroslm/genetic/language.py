@@ -46,6 +46,8 @@ class OpSpec:
     family: str
     fn: Callable[..., torch.Tensor]
     uses_const: bool = False
+    uses_config: bool = False       # takes scalar-config kwargs (e.g. attention n_heads)
+    config_names: tuple = ()        # ordered names of the config kwargs
 
 
 def _t(x) -> torch.Tensor:
@@ -109,8 +111,10 @@ def _broadcast_binary(f):
 def _make_registry() -> Dict[str, OpSpec]:
     R: Dict[str, OpSpec] = {}
 
-    def reg(name, n_in, family, fn, uses_const=False):
-        R[name] = OpSpec(name, n_in, family, fn, uses_const)
+    def reg(name, n_in, family, fn, uses_const=False, uses_config=False,
+            config_names=()):
+        R[name] = OpSpec(name, n_in, family, fn, uses_const, uses_config,
+                         tuple(config_names))
 
     # arithmetic
     reg("add", 2, "arith", _broadcast_binary(lambda a, b: a + b))
@@ -164,6 +168,14 @@ def _make_registry() -> Dict[str, OpSpec]:
     reg("swiglu", 4, "nn", lambda x, w1, w2, w3: _nnops.swiglu(x, w1, w2, w3))
     reg("gelu", 1, "nn", lambda x: _nnops.gelu(x))
     reg("embedding", 2, "nn", lambda ids, table: _nnops.embedding(ids.long(), table))
+
+    # config-carrying mechanics: attention mixes tensor args with scalar config.
+    def _attn(x, q, kv, o, n_heads=1, n_kv_heads=1, max_ctx=1, rope_base=10000.0):
+        return _nnops.causal_self_attention(
+            x, q, kv, o, int(n_heads), int(n_kv_heads), int(max_ctx), float(rope_base))
+
+    reg("causal_self_attention", 4, "nn", _attn, uses_config=True,
+        config_names=("n_heads", "n_kv_heads", "max_ctx", "rope_base"))
 
     # constant loader
     reg("const", 0, "const", lambda c: _t(c), True)
@@ -228,6 +240,7 @@ class Instruction:
     out: str
     ins: Tuple[str, ...] = ()
     const: Optional[float] = None
+    config: Tuple[Tuple[str, float], ...] = ()   # scalar-config kwargs (attention …)
 
     def __post_init__(self):
         if self.op not in REGISTRY:
@@ -246,11 +259,14 @@ class Program:
         for ins in self.instructions:
             spec = REGISTRY[ins.op]
             args = [memory.read(r) for r in ins.ins]
-            if spec.uses_const:
+            kwargs = {}
+            if spec.uses_config:
+                kwargs = {k: v for k, v in ins.config}
+            elif spec.uses_const:
                 c = 0.0 if ins.const is None else float(ins.const)
                 args.append(c)
             try:
-                out = spec.fn(*args)
+                out = spec.fn(*args, **kwargs)
             except Exception:
                 # last-resort totality guard: identity of first input or zero
                 out = args[0] if args else torch.zeros(())
@@ -311,6 +327,9 @@ class Program:
             rhs = ins.op + "(" + ", ".join(ins.ins)
             if REGISTRY[ins.op].uses_const:
                 rhs += (", " if ins.ins else "") + f"c={ins.const}"
+            if ins.config:
+                rhs += (", " if ins.ins else "") + ", ".join(
+                    f"{k}={v}" for k, v in ins.config)
             rhs += ")"
             lines.append(f"{ins.out} = {rhs}")
         lines.append(f"return {self.out_reg}")

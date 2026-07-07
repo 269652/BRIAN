@@ -45,6 +45,7 @@ class Node:
     op: str
     args: Tuple["object", ...]
     const: Optional[float] = None
+    config: Tuple[Tuple[str, float], ...] = ()   # scalar-config kwargs (attention …)
 
 
 Expr = object
@@ -58,7 +59,7 @@ def to_expr(program: Program) -> Expr:
             e: Expr = Const(float(ins.const) if ins.const is not None else 0.0)
         else:
             args = tuple(env.get(r, Leaf(r)) for r in ins.ins)
-            e = Node(ins.op, args, ins.const)
+            e = Node(ins.op, args, ins.const, ins.config)
         env[ins.out] = e
     return env.get(program.out_reg, Leaf(program.out_reg))
 
@@ -101,7 +102,7 @@ def from_expr(root: Expr, template: Program) -> Program:
             return r
         arg_regs = tuple(emit(a) for a in e.args)
         r = fresh()
-        instrs.append(Instruction(e.op, r, arg_regs, e.const))
+        instrs.append(Instruction(e.op, r, arg_regs, e.const, e.config))
         memo[e] = r
         return r
 
@@ -251,7 +252,8 @@ def _rewrite_candidates(expr: Expr):
     if isinstance(expr, Node):
         for i, child in enumerate(expr.args):
             for new_child in _rewrite_candidates(child):
-                yield Node(expr.op, expr.args[:i] + (new_child,) + expr.args[i + 1:], expr.const)
+                yield Node(expr.op, expr.args[:i] + (new_child,) + expr.args[i + 1:],
+                           expr.const, expr.config)
 
 
 def _cost(program: Program) -> int:
@@ -259,7 +261,7 @@ def _cost(program: Program) -> int:
 
 
 def algebraic_simplify(program: Program, n_probes: int = 8, seed: int = 0,
-                       max_iters: int = 64) -> Program:
+                       max_iters: int = 64, probes=None) -> Program:
     """Greedily apply verified algebraic rewrites to a fixpoint."""
     cur = dead_code_eliminate(program)
     for _ in range(max_iters):
@@ -267,7 +269,8 @@ def algebraic_simplify(program: Program, n_probes: int = 8, seed: int = 0,
         improved = False
         for cand_expr in _rewrite_candidates(expr):
             cand = dead_code_eliminate(from_expr(cand_expr, cur))
-            if _cost(cand) < _cost(cur) and programs_equivalent(cur, cand, n_probes=n_probes, seed=seed):
+            if _cost(cand) < _cost(cur) and programs_equivalent(
+                    cur, cand, n_probes=n_probes, seed=seed, probes=probes):
                 cur = cand
                 improved = True
                 break

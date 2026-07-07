@@ -314,3 +314,38 @@ architecture-discovery loop (findings H32):
 The honest boundary: competitive **SmolLM** PPL is a GPU claim (`brian deploy`);
 what runs on CPU here is the search engine + a tiny-LM demonstration + the bridge
 that a deploy would use to wire a discovered gain law into the real trunk.
+
+## NGL, part 3 — full-mechanic lowering, modulation store, GPU guardrail
+
+Findings H33. The substrate now covers every model mechanic and treats discovered
+modulations as managed artifacts:
+
+- **Config-carrying instructions.** `Instruction` gained a `config` tuple and
+  `OpSpec.uses_config`, so scalar-config ops (attention's `n_heads`, …) lower as
+  opaque nodes. `causal_self_attention` is a registered NGL op;
+  `compile_layer_to_ngl(source, bindings=…)` splits tensor vs config args. The
+  **entire TransformerBlock** compiles to NGL byte-equivalent and is
+  simplifiable/evolvable — not just the FFN. `config` is preserved through
+  `to_source`, the peephole pass, and the algebraic rewriter.
+
+- **Shape-correct verification.** `compile_arch.make_probes` builds real
+  param+input tensors from the reference layer, and `simplify(..., probes=…)`
+  verifies rewrites against non-degenerate values (generic all-zero probes made
+  any rewrite look equivalent). Attention survives simplification (opaque);
+  residual simplification around it is genuinely verified.
+
+- **`modulation_store.py` — `modulations/*.neuro`.** An NGL program serializes to
+  a `.neuro` `modulation { program { … } }` block (round-trip exact, incl. config
+  ops). `ModulationStore` provides save / list / show / drop / **merge** (compose
+  gains `g₂(g₁(h))`). `brian discover trunk --save NAME` persists the discovered
+  gain law; `brian modulation {list,show,drop,merge}` manages the store — a
+  discovered modulation is versionable, mergeable, throwaway-able.
+
+- **Novelty + efficiency.** `discover optimizer --novelty W` adds semantic-space
+  distance to the objective (hunt novel rules); cost objectives + the trunk
+  prior's metabolic-economy term + the simplifier cover "more efficient".
+
+- **GPU guardrail (enforced by design).** CPU discovery yields *candidates*
+  proven on tiny models. A param-matched GPT-2 competitor comes **only** from GPU
+  exploration + extensive GPU training (`brian deploy`). The CLI prints this;
+  `--save` + a future `brian deploy --modulation NAME` are the CPU→GPU bridge.

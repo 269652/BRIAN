@@ -876,11 +876,25 @@ extend the substrate:
   remains a GPU (`brian deploy`) claim; this is the engine. CLI: `brian discover
   {trunk,simplify}`.
 
-**TDD evidence:** 71 GREEN contracts across `tests/genetic/`
-(language/optimizer/evolve/discovery/compile_arch/rewrite/neuro_evolve/cli).
-Artifacts under `results/discovery/`.
-[✅ CONFIRMED (optimizer discovery, arch bridge, simplifier, trunk engine) /
-🟠 INCONCLUSIVE (flow/EI)]
+**Full-mechanic lowering + modulation store (H33).** NGL instructions gained a
+`config` field, so scalar-config ops lower as opaque nodes: the **entire
+TransformerBlock** (attention + residuals + swiglu) compiles to NGL
+byte-equivalent, and is simplifiable (verified on shape-correct probes via
+`compile_arch.make_probes`) and evolvable — every model mechanic, not just the
+FFN. Discovered residual-stream modulations persist as `modulations/*.neuro`
+(`modulation_store.py`): an NGL program serializes to a `.neuro` block, round-trip
+exact, and `brian modulation {list,show,drop,merge}` manages them (merge composes
+gains `g₂(g₁(h))`). `brian discover trunk --save NAME` writes the gain law.
+Optimizer discovery gained a `--novelty` weight (semantic-space distance) to hunt
+novel rules. **GPU guardrail:** the CPU path yields *candidates*; a param-matched
+GPT-2 competitor comes only from GPU exploration + training (`brian deploy`) — the
+CLI says so and `--save` is the CPU→GPU bridge.
+
+**TDD evidence:** 81 GREEN contracts across `tests/genetic/`
+(language/optimizer/evolve/discovery/compile_arch/rewrite/neuro_evolve/
+compile_attention/modulation_store/cli). Artifacts under `results/discovery/`.
+[✅ CONFIRMED (optimizer discovery, full-block arch bridge, verified simplifier,
+trunk engine, modulation store) / 🟠 INCONCLUSIVE (flow/EI)]
 
 ---
 

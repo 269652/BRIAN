@@ -340,28 +340,39 @@ gradient normalization on a task where plain SGD provably plateaus. This is the
 machinery behind the neuroscience-inspired-SLM goal: search for the topology and
 modulation that beat scaling, cheaply on CPU, before spending a GPU.
 
-NGL also **compiles an architecture into itself**. An `nn_lang` forward graph
-lowers to an NGL program (composite ops like `linear`/`rmsnorm`/`swiglu` delegate
-to the canonical `nn_ops`), byte-equivalent to the compiled module — so discovery
-and simplification run on the *real* architecture:
+NGL also **compiles an architecture into itself** — every mechanic, including
+attention. An `nn_lang` forward graph lowers to an NGL program (composite ops like
+`linear`/`rmsnorm`/`swiglu` delegate to `nn_ops`; scalar-config ops like
+attention carry their `n_heads`/… as instruction config), byte-equivalent to the
+compiled module — so a whole TransformerBlock is discovery-, simplification- and
+evolution-ready:
 
 ```bash
 brian discover simplify --layer-file block.layer   # arch → NGL → shorter equivalent
-brian discover trunk    --generations 12            # evolve a neuromodulation for the trunk
+brian discover trunk    --generations 12 --save my_gain   # evolve + persist a modulation
+brian discover optimizer --novelty 0.3             # hunt NOVEL update rules
+brian modulation list                              # manage modulations/*.neuro
+brian modulation merge my_gain other --name combo  # compose gains g2(g1(h))
 ```
 
 The **simplifier** builds an expression DAG and applies value-preserving algebraic
 rewrites to a fixpoint (dead-code elimination, `(a+b)−b → a`, constant folding,
-like-term combination), every rewrite globally probe-verified. The **trunk
-auto-evolve** searches an NGL neuromodulation on the residual stream, scoring
-candidates by validation perplexity *jointly with a neuroanatomic-realism prior*
-(divisive normalization, multiplicative gain, homeostatic saturation) — so the
-search improves language modelling while staying biologically plausible. Training
-the real SmolLM trunk to competitive perplexity is a GPU deploy; the CPU engine is
-what finds the gain law to wire in.
+like-term combination), every rewrite globally probe-verified against
+shape-correct random params. The **trunk auto-evolve** searches an NGL
+neuromodulation on the residual stream, scoring candidates by validation
+perplexity *jointly with a neuroanatomic-realism prior* (divisive normalization,
+multiplicative gain, homeostatic saturation) — improving language modelling while
+staying biologically plausible. Discovered modulations persist as
+`modulations/*.neuro` and can be listed, merged, or thrown away from `brian`.
+
+**The competitor is a GPU outcome.** The CPU engine discovers *candidate*
+mechanics, update rules and modulations and proves them on tiny models — but a
+param-matched GPT-2 competitor comes only from GPU exploration and extensive GPU
+training (`brian deploy`). `--save` carries a discovered gain law from the CPU
+search to the trunk.
 
 Design: [`docs/dsl_subsystem_roadmap.md`](docs/dsl_subsystem_roadmap.md) §NGL.
-Results: [`docs/findings.md`](docs/findings.md) H31, H32.
+Results: [`docs/findings.md`](docs/findings.md) H31, H32, H33.
 
 ---
 

@@ -45,14 +45,16 @@ class CompiledArch:
     param_regs: Dict[str, str]     # param name → register
     input_regs: Dict[str, str]     # forward-arg name → register
     layerdef: LayerDef
+    source: str = ""               # original DSL source (for make_probes)
 
 
-def compile_layer_to_ngl(source: str) -> CompiledArch:
+def compile_layer_to_ngl(source: str, bindings: Dict[str, float] = None) -> CompiledArch:
     ld = parse_layer(source)
     if ld.sublayers:
         raise UnsupportedLowering(
             f"layer {ld.name!r} has sublayers {list(ld.sublayers)}; "
             "compose them at the nn_lang level before lowering")
+    bindings = dict(bindings or {})
 
     reg_of: Dict[str, str] = {}
     tcount = [0]
@@ -68,9 +70,25 @@ def compile_layer_to_ngl(source: str) -> CompiledArch:
     for p in ld.params:
         reg_of[p.name] = new_t()
 
-    # layer args that are pure scalar config (e.g. n_heads) — remembered so we
-    # can give a precise error if a lowered op needs one as a tensor.
+    # snapshot the ORIGINAL input/param registers now: the forward body may
+    # reassign an input name (e.g. `x = x + a`), which would otherwise leave
+    # input_regs pointing at an interior SSA temp instead of the bound input.
+    input_regs = {a: reg_of[a] for a in ld.fwd_args}
+    param_regs = {p.name: reg_of[p.name] for p in ld.params}
+
+    # layer args that are pure scalar config (e.g. n_heads)
     scalar_args = set(ld.args) - set(reg_of)
+
+    def resolve_scalar(node) -> float:
+        if isinstance(node, Num):
+            return float(node.value)
+        if isinstance(node, Name):
+            if node.id in bindings:
+                return float(bindings[node.id])
+            raise UnsupportedLowering(
+                f"scalar-config value {node.id!r} needs a binding; pass "
+                f"bindings={{'{node.id}': <value>, ...}} to compile_layer_to_ngl")
+        raise UnsupportedLowering(f"cannot resolve scalar config from {type(node).__name__}")
 
     instrs: List[Instruction] = []
     out_reg = None
@@ -103,7 +121,22 @@ def compile_layer_to_ngl(source: str) -> CompiledArch:
                     f"op {node.fn!r} is not an NGL op (add it to the registry "
                     "with a total-semantics impl, or decompose it)")
             spec = REGISTRY[node.fn]
-            # any Num / scalar-config arg means this op takes non-tensor config
+            if spec.uses_config:
+                # first spec.n_in args are tensors, the rest are scalar config
+                if len(node.args) != spec.n_in + len(spec.config_names):
+                    raise UnsupportedLowering(
+                        f"op {node.fn!r} expects {spec.n_in} tensor + "
+                        f"{len(spec.config_names)} config args, got {len(node.args)}")
+                tensor_args = node.args[:spec.n_in]
+                config_args = node.args[spec.n_in:]
+                arg_regs = tuple(lower(a) for a in tensor_args)
+                config = tuple(
+                    (name, resolve_scalar(a))
+                    for name, a in zip(spec.config_names, config_args))
+                out = new_t()
+                instrs.append(Instruction(node.fn, out, arg_regs, config=config))
+                return out
+            # plain op: all args must be tensors
             for a in node.args:
                 if isinstance(a, Name) and a.id in scalar_args:
                     raise UnsupportedLowering(
@@ -137,10 +170,42 @@ def compile_layer_to_ngl(source: str) -> CompiledArch:
     )
     return CompiledArch(
         program=program,
-        param_regs={p.name: reg_of[p.name] for p in ld.params},
-        input_regs={a: reg_of[a] for a in ld.fwd_args},
+        param_regs=param_regs,
+        input_regs=input_regs,
         layerdef=ld,
+        source=source,
     )
+
+
+def make_probes(compiled: CompiledArch, bindings: Dict[str, float] = None,
+                batch: int = 2, seq: int = 8, n: int = 3, seed: int = 0) -> list:
+    """Build shape-correct random {register: tensor} probes for equivalence checks.
+
+    Instantiates the reference layer (via ``compile_layer``) to obtain each
+    parameter's real shape and a valid input, so simplification of a *compiled
+    architecture* is verified against non-degenerate values — not the all-zero
+    generic probes that would make any rewrite look equivalent.
+    """
+    from neuroslm.dsl.nn_lang import compile_layer  # local: avoid import cost
+    bindings = dict(bindings or {})
+    if not compiled.source:
+        raise UnsupportedLowering("make_probes needs the original layer source")
+    Cls = compile_layer(compiled.source)
+    probes = []
+    for i in range(n):
+        torch.manual_seed(seed + i)
+        ref = Cls(**bindings)
+        mapping = {}
+        for name, p in ref.named_parameters():
+            reg = compiled.param_regs.get(name)
+            if reg is not None:
+                mapping[reg] = torch.randn_like(p)
+        # forward inputs: assume a single (B, T, D) activation for the first arg
+        D = int(bindings.get("D", 16))
+        for arg, reg in compiled.input_regs.items():
+            mapping[reg] = torch.randn(batch, seq, D)
+        probes.append(mapping)
+    return probes
 
 
 def run_compiled(compiled: CompiledArch,
