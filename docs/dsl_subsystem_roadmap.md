@@ -442,3 +442,14 @@ Findings H37:
   version of "novel algorithms emerging from the geometry of the semantic space";
   paired with H35's flow/topology it covers the flow-perturbation idea without a
   literal fluid-flow sim.
+
+## NGL, part 8 — prior-art ledger seeding + mechanic optimizer
+
+Findings H39:
+- `known.seed_ledger_with_known(ledger)` — record every known algorithm/mechanic as
+  NGL programs with outcome="known" so the explorer's is_dud gate skips them; only
+  novel mechanics get searched. `discover ledger --seed-known`; `discover explore`
+  auto-seeds (default on).
+- `mechanic_optimizer.py` — optimize_mechanic (CSE + algebraic + superopt report),
+  shared_subexpressions (compute-once targets across mechanics), analyze_common_
+  mechanics. `discover optimize-mechanics`. Found adam 27→22, lion 8→4 reducible.

@@ -804,6 +804,22 @@ def cmd_discover(args: argparse.Namespace) -> int:
             first = prog.to_source().splitlines()[0] if prog.instructions else "(empty)"
             print(f"  {str(cell):16s} {-fit:10.4f}  {first}")
         payload = {"mode": "qd", "task": args.task, **arch.to_dict()}
+    elif mode == "optimize-mechanics":
+        from neuroslm.genetic.mechanic_optimizer import (
+            analyze_common_mechanics, shared_subexpressions, common_mechanics,
+        )
+        print("[discover:optimize-mechanics] CSE + superopt on commonly-used mechanics")
+        reports = analyze_common_mechanics()
+        print(f"  {'MECHANIC':18s} {'BEFORE':>6s} {'AFTER':>6s} {'Δ':>4s}  status")
+        for r in reports:
+            status = "REDUCIBLE" if r["reducible"] else "already minimal"
+            print(f"  {r['name']:18s} {r['before']:>6d} {r['after']:>6d} "
+                  f"{r['removed']:>4d}  {status}")
+        shared = shared_subexpressions(common_mechanics())
+        print(f"  shared subexpressions across mechanics ({len(shared)} — compute once):")
+        for sub in shared[:8]:
+            print(f"    x{sub['count']}  {sub['expr'][:60]}  in {', '.join(sub['mechanics'])}")
+        payload = {"mode": "optimize-mechanics", "reports": reports, "shared": shared}
     elif mode == "baselines":
         from neuroslm.genetic.baselines import tradeoff_table
         print("[discover:baselines] seed the search from these with --seed-from NAME[,NAME]")
@@ -817,9 +833,13 @@ def cmd_discover(args: argparse.Namespace) -> int:
         from neuroslm.genetic.training_explorer import run_training_with_exploration
         ledger_path = args.ledger or (REPO_ROOT / ".neuro" / "search_ledger.json")
         led = SearchLedger(ledger_path)
+        if getattr(args, "seed_known", True):
+            from neuroslm.genetic.known import seed_ledger_with_known
+            seed_ledger_with_known(led)   # skip known algorithms → only novel mechanics
         before_stats = led.stats()
         print(f"[discover:explore] tiny-LM training, explore every {args.explore_every} "
-              f"steps (ledger: {ledger_path}, {before_stats['total']} prior patterns)")
+              f"steps (ledger: {ledger_path}, {before_stats['total']} prior patterns"
+              f"{' incl. seeded prior-art' if getattr(args, 'seed_known', True) else ''})")
         result = run_training_with_exploration(
             total_steps=args.total_steps, explore_every=args.explore_every,
             seed=args.seed, ledger=led, pop_size=args.pop,
@@ -851,6 +871,14 @@ def cmd_discover(args: argparse.Namespace) -> int:
             led._by_sig.clear()
             led.save()
             print(f"[discover:ledger] cleared {ledger_path}")
+            return 0
+        if getattr(args, "seed_known", False):
+            from neuroslm.genetic.known import seed_ledger_with_known
+            n0 = led.stats()["total"]
+            seed_ledger_with_known(led)
+            led.save()
+            print(f"[discover:ledger] seeded prior-art: {led.stats()['total'] - n0} "
+                  f"known algorithms recorded (total {led.stats()['total']}) → {ledger_path}")
             return 0
         s = led.stats()
         print(f"[discover:ledger] {ledger_path}")
@@ -4814,6 +4842,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="List baseline algorithms + tradeoffs (use with --seed-from)"
     ).set_defaults(func=cmd_discover)
 
+    sdiscover_sub.add_parser(
+        "optimize-mechanics",
+        help="CSE + superoptimize commonly-used mechanics; find shared subexprs"
+    ).set_defaults(func=cmd_discover)
+
     sdq = sdiscover_sub.add_parser(
         "qd",
         help="Quality-diversity (MAP-Elites) search: illuminate the semantic "
@@ -4842,6 +4875,8 @@ def _build_parser() -> argparse.ArgumentParser:
                      "(default .neuro/search_ledger.json)")
     sde.add_argument("--push", action="store_true",
                      help="git commit+push ledger + modulations after the run")
+    sde.add_argument("--seed-known", action=argparse.BooleanOptionalAction, default=True,
+                     help="seed the ledger with known algorithms so only novel mechanics are searched (default on)")
     sde.add_argument("--out", help="write the run summary JSON here")
     sde.set_defaults(func=cmd_discover)
 
@@ -4850,6 +4885,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sdl.add_argument("--ledger", help="path (default .neuro/search_ledger.json)")
     sdl.add_argument("--top", type=int, default=20, help="how many records to show")
     sdl.add_argument("--clear", action="store_true", help="wipe the ledger")
+    sdl.add_argument("--seed-known", action="store_true",
+                     help="record every known ML algorithm as prior-art (skipped by the explorer)")
     sdl.set_defaults(func=cmd_discover)
 
     sdp = sdiscover_sub.add_parser(

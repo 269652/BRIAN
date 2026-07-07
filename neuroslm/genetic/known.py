@@ -78,3 +78,49 @@ def default_known_algorithms(threshold: float = 0.75) -> KnownAlgorithms:
 def novelty_vs_known(program: Program, known: KnownAlgorithms) -> float:
     """Distance to the nearest known algorithm — larger means more novel."""
     return known.distance(program)
+
+
+def known_programs() -> Dict[str, Program]:
+    """Every known ML algorithm/mechanic as an NGL program (for prior-art seeding).
+
+    The standard optimizers, the reusable macro building blocks (divisive
+    normalization, rms scaling, sign-momentum, bounded gain), and the identity
+    modulation — the spaces the search should NOT waste budget rediscovering.
+    """
+    from neuroslm.genetic.macros import default_macro_library, expand_macros
+    from neuroslm.genetic.language import Instruction
+
+    out: Dict[str, Program] = dict(default_known_algorithms()._progs)
+
+    # macro building blocks — record their expanded computation
+    lib = default_macro_library()
+    for m in lib.macros():
+        call = Program(
+            [Instruction("call", "t2", tuple(f"t{i}" for i in range(m.n_inputs)),
+                         macro=m.name)],
+            n_scalar=6, n_tensor=16, out_reg="t2")
+        out[f"macro:{m.name}"] = expand_macros(call, lib)
+
+    # canonical modulation motifs the trunk explorer would otherwise rediscover
+    out["identity_gain"] = Program(
+        [Instruction("const", "t5", (), const=1.0)], 4, 8, "t5")
+    out["tanh_gain"] = Program(
+        [Instruction("tanh", "t2", ("t0",))], 4, 8, "t2")
+    out["sigmoid_gain"] = Program(
+        [Instruction("sigmoid", "t2", ("t0",))], 4, 8, "t2")
+    return out
+
+
+def seed_ledger_with_known(ledger, run_id: str = "prior-art") -> int:
+    """Record every known algorithm in the ledger so the explorer skips them.
+
+    Recorded with ``outcome="known"`` (delta 0) → ``SearchLedger.is_dud`` returns
+    True, so the training explorer / discovery search treats these as already-
+    explored dead space and spends its budget only on novel mechanics. Idempotent
+    (the ledger dedups by semantic signature).
+    """
+    n_before = ledger.stats()["total"]
+    for name, prog in known_programs().items():
+        ledger.record(prog, outcome="known", delta=0.0, run_id=run_id,
+                      kind="known", step=0)
+    return ledger.stats()["total"] if n_before == 0 else ledger.stats()["total"]

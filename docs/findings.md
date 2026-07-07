@@ -2174,3 +2174,31 @@ live-bug fix.
   alongside logs during a run.
 
 [EVIDENCE: tests/genetic/ — test_heatmap_store(6), test_modulation_pusher(+1 concurrent)=7 green]
+
+### H39 — Seed the ledger with known algorithms + optimize commonly-used mechanics (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — 10 new contracts. The explorer skips known spaces,
+and the compiler passes are turned on the common mechanics to find reductions.
+
+- **Prior-art seeding** (`known.seed_ledger_with_known`). Records every known
+  algorithm/mechanic as an NGL program in the persistent ledger with
+  `outcome="known"` → `SearchLedger.is_dud` returns True, so the training explorer
+  and discovery search treat them as already-explored dead space and spend budget
+  only on *novel* mechanics. Covers the SOTA optimizers, the macro building blocks
+  (divisive_norm, rms_scale, sign_interp, bounded_gain), and canonical modulation
+  motifs (identity/tanh/sigmoid gain). Idempotent (dedups by signature), persists
+  across runs. CLI: `discover ledger --seed-known`; `discover explore` auto-seeds
+  by default (`--no-seed-known` to disable).
+- **Mechanic optimizer** (`mechanic_optimizer.py`). Runs the full compiler
+  pipeline (DCE → CSE → constant-fold → algebraic → probe-verified try-delete) on
+  commonly-used mechanics and reports whether each can be reduced. Also detects
+  subexpressions **shared across** mechanics (compute-once targets). CLI:
+  `discover optimize-mechanics`.
+
+**Worked run** (`discover optimize-mechanics`): momentum 3→2, rmsprop 9→7,
+**adam 27→22, lion 8→4** — the superoptimizer found real redundancy in the
+hand-written encodings, behaviour probe-verified. Shared subexpressions:
+`cscale(t2,c=0.9)` across adam/lion/momentum, `square(t0)` across adam/rmsprop,
+and the β₁ interpolation shared by adam/lion — genuine factor-once opportunities.
+
+[EVIDENCE: tests/genetic/ — test_seed_known(5), test_mechanic_optimizer(5) green]
