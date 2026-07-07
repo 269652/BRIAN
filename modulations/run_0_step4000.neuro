@@ -1,0 +1,21 @@
+modulation run_0_step4000 {
+    # step: 4000
+    # baseline_ppl: 4425.84
+    # best_ppl: 784.43
+    # delta_ppl: 3641.41
+    program {
+        t6 = sign(t7)
+        t3 = sub(t6, t7)
+        t6 = softmax(s2)
+        t3 = sub(t5, t5)
+        t2 = neg(t6)
+        t5 = select(s1, t3, t0)
+        t6 = matmul(t2, s0)
+        t2 = norm(t1)
+        t3 = abs(t5)
+        t1 = sign(t7)
+        t6 = norm(t0)
+        t6 = select(t3, t3, t0)
+        return t6
+    }
+}
