@@ -177,3 +177,108 @@ def test_<subsystem>_matches_brain_reference():
 ```
 
 No phase merges to master unless its equivalence test is green.
+
+---
+
+# NGL — the Neuro-Genetic Language (algorithm-discovery substrate)
+
+## Why a fourth language
+
+Layers A–D describe *architectures* (what tensors flow where). None of
+them can describe an **ML algorithm** — an optimizer update rule, a
+gradient/flow-modulation policy, a learning rule — because those need
+**persistent state** and **control**, which the straight-line SSA DAG of
+`nn_lang.py` deliberately forbids. NGL fills that gap. It is the
+substrate on which "search the language space to discover a novel ML
+mechanism" is actually tractable, and it is the proven design: AutoML-Zero
+(Real et al., 2020) and the symbolic discovery of **Lion** (Chen et al.,
+2023) both search exactly this kind of linear register-machine program
+space.
+
+## Core model — a typed register machine
+
+An NGL `Program` is an ordered list of `Instruction`s over a typed
+`Memory` of registers:
+
+- **scalar bank** `s0..sK` — Python/0-d float registers (lr, betas, EI gates)
+- **tensor bank** `t0..tK` — shape-polymorphic torch tensors (grad, param,
+  momentum, velocity, activations)
+
+An `Instruction` is `(op, out_reg, *in_regs, const?)`. Each `op` is drawn
+from `OpRegistry`, and **every op has a closed-form semantics** (the
+lowering table *is* the spec), so a program is a composition of known
+differentiable functions — the same formal-semantics guarantee the rest
+of the DSL family upholds.
+
+Calling convention for an **update rule** (optimizer):
+
+```
+setup(shape)                 -> initialises state registers (m, v, step)
+step(g, p) reads {g,p,state} -> writes delta into a designated out reg
+p <- p - delta               (the harness applies the write)
+```
+
+Because state registers persist across `step` calls, momentum/Adam/Lion
+are expressible; because the op set includes `select` (conditional) and a
+bounded `repeat`, the language is **Turing-complete in the linear
+register-machine sense** (equivalent to a bounded-tape register machine;
+resource-bounded in practice for tractable search — we do not claim
+unbounded-tape completeness, and that honesty is the point).
+
+## Grammar space (op registry)
+
+| Family | Ops |
+|---|---|
+| arithmetic | `add sub mul div neg abs sign square sqrt exp log clip` |
+| reduction / norm | `mean sum norm rms max_r min_r` |
+| control / compare | `gt select min max` |
+| nonlinear | `tanh sigmoid relu silu softmax` |
+| linear algebra | `matmul transpose outer` |
+| constants / state | `const scale read write` |
+
+This set spans the update-rule and flow-modulation grammar (it contains
+SGD, Momentum, RMSProp, Adam, AdamW, Lion, Lookahead, sign-SGD, and
+divisive/multiplicative gradient modulation as sub-programs). New ops are
+added to `OpRegistry` with a semantics function + an exact-match test.
+
+## Intrinsic semantic space
+
+Every program embeds to a fixed vector (`Program.semantic_vector()`):
+op-family histogram + structural features (length, state size, register
+reuse, control depth). This is the metric space novelty search and
+diversity preservation operate in — the "inherent ability to form and
+encode novel algorithms by searching the language space."
+
+## Genetic operators
+
+`mutate` (point-change op / operand / const, insert, delete),
+`crossover` (instruction-list splice), each re-validated by execution on
+a probe. `auto_evolve` runs a Pareto GA (reusing `dsl/fitness.pareto_*`)
+over a population of programs.
+
+## CPU discovery harness
+
+`neuroslm/genetic/discovery.py` + `brian discover`:
+
+1. **Optimizer search** — evolve `step` programs; fitness trains a tiny
+   CPU model (`synthetic_tasks.parity/modular_addition`, or a small MLP)
+   for K steps and scores **(final loss ↓, steps-to-threshold ↓,
+   throughput ↑)** as a multi-objective Pareto vector. Reproduces the
+   AutoML-Zero / Lion result category: rediscover-or-beat SGD on CPU.
+2. **Flow-modulation search** — evolve programs that gate activations /
+   gradients; fitness adds an **effective-information / synergy** proxy
+   from `neuroslm.information` (`net_synergy`, `pid_synergy`) so the
+   search rewards topology/modulation that raises integration, not just
+   lowers loss.
+
+Discovered programs are recorded through the existing `DiscoveryStore`
+ledger (`D###` records) so the audit trail matches the rest of the repo.
+
+## What this session ships vs. what it enables
+
+Shipped (tested, on CPU): the NGL core + op registry, exact-match proofs
+that SGD/Momentum/RMSProp/Adam/Lion are NGL programs, the genetic
+operators, and a runnable optimizer/flow-modulation discovery that beats
+the SGD baseline on a tiny CPU benchmark. This is the *machinery* the
+"outperform GPT-2 param-matched" goal requires; the large-scale training
+that would cash that claim runs through `brian deploy`, not on this CPU.

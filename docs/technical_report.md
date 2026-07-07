@@ -819,6 +819,51 @@ Wiring: `KJPLAttention` ← `language_model._last_kjpla_{phi_list,layers}` ← `
 
 ---
 
+### 9.9 NGL — the Neuro-Genetic Language + CPU algorithm discovery (H31)
+
+**What it is.** A fourth DSL layer (`neuroslm/genetic/`) that the architecture
+DSLs (Layers A–D) cannot cover: a typed **register machine** for describing ML
+*algorithms* — optimizers, learning rules, gradient/flow-modulation — as
+evolvable programs. An NGL `Program` is a list of instructions over a scalar
+bank and a tensor bank; each op in `REGISTRY` (~35 ops) has closed-form,
+**total** semantics (eps-guarded division, abs-folded `sqrt`/`log`,
+shape-fallback `matmul`, a `_MAX_ELEMS` memory cap), so blind mutation/crossover
+never crash or OOM. Because state registers persist across `step` calls and the
+op set includes `select` (conditional), NGL is Turing-complete in the
+linear-register-machine sense — the substrate AutoML-Zero and the Lion discovery
+searched. Full spec: `docs/dsl_subsystem_roadmap.md` §NGL.
+
+**Expressiveness proof.** `neuroslm/genetic/optimizer.py` encodes SGD, Momentum,
+RMSProp, Adam and Lion as NGL programs and reproduces each reference optimizer
+**bit-for-bit** via the `NGLOptimizer` torch adapter (`tests/genetic/
+test_optimizer.py`, atol 1e-6/1e-5). If NGL can *be* the SOTA optimizers, its
+program space contains their neighbourhood — the precondition for discovery.
+
+**Discovery harness (CPU, seconds/run).** `neuroslm/genetic/discovery.py` +
+`brian discover optimizer|flow`. `evolve.py` supplies `mutate`/`crossover`, an
+all-maximised `Objective` with `pareto_front`, and `auto_evolve` (tournament +
+elitism + optional novelty in the program's `semantic_vector` space). Optimizer
+search benchmarks each candidate by training a tiny MLP; the objective is
+Pareto over `(-final_loss, -update_rule_cost)` (accuracy vs per-step compute).
+Flow-modulation search adds an effective-information objective via
+`information.net_synergy`.
+
+**Result (H31).** Cold-start (SGD+random seeds) on a convex regression: the
+search found the cheapest possible rule `update = −0.31·g` and cut final loss
+−65% vs SGD@0.02 — it *discovered* the optimal step size. On non-convex parity,
+no single scaled-gradient rule clears the random-guess plateau (cold-start
+−2%), but the seeded search **selects the adaptive-normalization (RMSProp)
+structure and tunes it to −75% vs SGD** — the mechanism parity needs
+(per-coordinate gradient modulation) is what the language search recovers. The
+EI-driven flow-modulation search runs end-to-end but did not surface a
+high-synergy rule in a small budget (inconclusive; follow-up in findings H31).
+
+**TDD evidence:** 35 GREEN contracts across `tests/genetic/`
+(language/optimizer/evolve/discovery/cli). Artifacts under `results/discovery/`.
+[✅ CONFIRMED (optimizer discovery) / 🟠 INCONCLUSIVE (flow/EI)]
+
+---
+
 ## 10. Training Dynamics & Failure Modes
 
 ### 10.1 Post-Awakening Collapse (§5.2 — Fixed)

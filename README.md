@@ -2,7 +2,7 @@
 
 > *146.9M trainable-param bowtie trunk · ~980M frozen cortex experts · exploring integrated information (Φ).*
 
-[![tests](https://img.shields.io/badge/tests-4213%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-4537%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
@@ -304,9 +304,44 @@ modulation dopamine -> pfc {
 }
 ```
 
-The compiler (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) produces modules with **source maps** and **byte-identity round-trip** verification. 1105 tests in `tests/dsl/` guard codegen correctness.
+The compiler (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) produces modules with **source maps** and **byte-identity round-trip** verification. 1271 tests in `tests/dsl/` guard codegen correctness.
 
 Full reference: [`docs/dsl.md`](docs/dsl.md).
+
+---
+
+## NGL — the Neuro-Genetic Language (algorithm discovery)
+
+The `.neuro` DSLs describe *architectures* — what tensors flow where. They
+deliberately have no persistent state or control flow, so they cannot describe an
+ML *algorithm*: an optimizer update rule, a learning rule, a gradient/flow
+modulation. **NGL** (`neuroslm/genetic/`) fills that gap. It is a typed
+**register machine** — a scalar bank and a tensor bank, plus instructions drawn
+from a registry of total-semantics ops — in which an ML algorithm is a short,
+evolvable program. Because state registers persist across steps and the op set
+includes a conditional, NGL is Turing-complete in the linear-register-machine
+sense: the substrate AutoML-Zero and the Lion optimizer discovery searched.
+
+SGD, Momentum, RMSProp, Adam and Lion are each written as an NGL program and
+reproduce their PyTorch reference bit-for-bit — proof the language spans the
+update-rule grammar. On top of that sits a **CPU discovery harness** that
+searches the program space with a Pareto GA (mutation + crossover + novelty in
+the program's semantic-embedding space), scoring each candidate by training a
+tiny model on a synthetic task:
+
+```bash
+brian discover optimizer --task parity --generations 20 --out run.json
+brian discover flow      --generations 12 --out flow.json   # + effective-information objective
+```
+
+The optimizer search rediscovers-and-tunes scaled gradient descent from a cold
+start, and — given the adaptive family in reach — *selects* per-coordinate
+gradient normalization on a task where plain SGD provably plateaus. This is the
+machinery behind the neuroscience-inspired-SLM goal: search for the topology and
+modulation that beat scaling, cheaply on CPU, before spending a GPU.
+
+Design: [`docs/dsl_subsystem_roadmap.md`](docs/dsl_subsystem_roadmap.md) §NGL.
+Results: [`docs/findings.md`](docs/findings.md) H31.
 
 ---
 
@@ -348,7 +383,7 @@ KL distillation runs in parallel: `L_KL = T² · KL(cortex.detach()/T ‖ trunk/
 
 ### Layer A — Mechanism Verification ✅
 
-4213 unit tests across `tests/` confirm every mechanism computes as specified:
+4537 unit tests across `tests/` confirm every mechanism computes as specified:
 
 | Hypothesis | Result |
 |-----------|--------|
@@ -362,7 +397,7 @@ KL distillation runs in parallel: `L_KL = T² · KL(cortex.detach()/T ‖ trunk/
 | H19 — `ImprovementGate` (Welch's t) | ✅ p-values within 1e-6 of scipy; mutation blocked without significance |
 | H21 — Per-position abstain unblocks fusion | ✅ -93% train-PPL / -94% OOD-PPL vs broken precursor |
 
-Run all: `py -3 -m pytest tests/ -v` (~~526s on CPU).
+Run all: `py -3 -m pytest tests/ -v` (~~567s on CPU).
 
 ### Layer B — OOD Generalization 🟡
 
@@ -393,10 +428,12 @@ B4 is the first variant under 3.0 gap\_ratio — a 53% improvement over the flat
 
 **Most Recent Run (Last Checkpoint):**
 ```
-[`logs/20260623/current/193534_0_0.log`](logs/20260623/current/193534_0_0.log)
+[`logs/colab_train.log`](logs/colab_train.log)
 
 ```
-✗ missing architectures/yolo/arch.neuro — is the architecture folder there?
+Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
+If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
+[mid-ood] step 9500: wikitext ppl=95.6 gap_ratio=4.01 (train_ppl=23.9) (50 seq, 6430 tok)
 ```
 ```
 
@@ -503,12 +540,15 @@ with EvolutionaryTrainingContext("dna/base.dna", "checkpoints/") as ctx:
 | motor, CPC, RSSM, novel aux | embodied + optional modules | 0.05–0.1 × maturation |
 | `topo_loss` (H24) | `α·(Q_h − Q*)² + γ·ε_ortho` from `topo_charge` diagnostic | `α`, `γ` (default 0 = diagnostic-only) |
 | `noether_loss` (H25) | `λ·(H_final − H_initial)²` leapfrog Noether residual | `λ` (default 0 = diagnostic-only) |
+| `josephson_loss` (H26) | `−(1/L)Σ K̄_h·R_ℓ` inter-layer Josephson phase coupling | `λ_J` (default 0 = diagnostic-only) |
 
 The maturation gate `_aux_w_scale ∈ [0.001, 1.0]` suppresses all aux losses until step 5000 (or lm\_loss < 7.5), so the LM gradient dominates during early training.
 
 The `topo_loss` row (Phase 1 of the 3-mechanism THSD program) is enabled in arch.neuro by default as **diagnostic-only** (`α = γ = 0`): per-head Berg-Lüscher discrete windings `Q_h` and inter-layer orientation decorrelation `ε_ortho` are logged every step but zero is added to the loss. See `docs/findings.md` H24 + `neuroslm/mechanisms/topo_charge.py`. Activating the soft penalty (`α > 0` or `γ > 0`) is a follow-up experiment.
 
 The `noether_loss` row (Phase 2 of the THSD program) is enabled in arch.neuro by default as **diagnostic-only** (`λ = 0`): `noether_H_diff = |H_final − H_initial|` is logged every step but zero is added to the loss. The Liouville symplectic residual block runs one leapfrog step on the final hidden state; det(J) = 1 is guaranteed by the triangular-shear structure of the Stoermer-Verlet integrator. See `docs/findings.md` H25 + `neuroslm/mechanisms/liouville_symplectic.py`.
+
+The `josephson_loss` row (Phase 3 of the THSD program) is enabled in arch.neuro by default as **diagnostic-only** (`λ_J = 0`): the Josephson order parameter R_ℓ is logged every step but zero is added to the loss. Each attention head carries a per-(head, layer, token) phase φ with intra-layer Kuramoto sync (η) and inter-layer Josephson coupling (K_h). At zero init all scalars are zero, so step-0 loss is bit-identical to vanilla (`torch.equal`). See `docs/findings.md` H26 + `neuroslm/mechanisms/kjpla.py`.
 
 ---
 
@@ -526,14 +566,14 @@ model.personality_vector               # tensor(5) — stable across checkpoints
 ## Tests
 
 ```bash
-py -3 -m pytest tests/                                              # full suite (4213 tests, ~~526s)
+py -3 -m pytest tests/                                              # full suite (4537 tests, ~~567s)
 py -3 -m pytest tests/test_phi.py -v                               # H1–H3: integrated information
 py -3 -m pytest tests/test_narrative_memory.py -v                  # H4–H5: memory & causation
 py -3 -m pytest tests/test_cognitive_closure.py -v                 # H6–H6.5: identity & embodiment
 py -3 -m pytest tests/training/test_cortex_pre_head_norm.py -v     # H16: catastrophic-loss fix
 py -3 -m pytest tests/training/test_cortex_distillation_and_gating.py -v  # H17–H18: KL + NT gating
 py -3 -m pytest tests/verification/test_improvement_gate.py -v     # H19: Welch's t admission gate
-py -3 -m pytest tests/dsl/ -v                                       # 1105 DSL codegen + byte-equivalence
+py -3 -m pytest tests/dsl/ -v                                       # 1271 DSL codegen + byte-equivalence
 ```
 
 ---

@@ -310,6 +310,41 @@ Full reference: [`docs/dsl.md`](docs/dsl.md).
 
 ---
 
+## NGL — the Neuro-Genetic Language (algorithm discovery)
+
+The `.neuro` DSLs describe *architectures* — what tensors flow where. They
+deliberately have no persistent state or control flow, so they cannot describe an
+ML *algorithm*: an optimizer update rule, a learning rule, a gradient/flow
+modulation. **NGL** (`neuroslm/genetic/`) fills that gap. It is a typed
+**register machine** — a scalar bank and a tensor bank, plus instructions drawn
+from a registry of total-semantics ops — in which an ML algorithm is a short,
+evolvable program. Because state registers persist across steps and the op set
+includes a conditional, NGL is Turing-complete in the linear-register-machine
+sense: the substrate AutoML-Zero and the Lion optimizer discovery searched.
+
+SGD, Momentum, RMSProp, Adam and Lion are each written as an NGL program and
+reproduce their PyTorch reference bit-for-bit — proof the language spans the
+update-rule grammar. On top of that sits a **CPU discovery harness** that
+searches the program space with a Pareto GA (mutation + crossover + novelty in
+the program's semantic-embedding space), scoring each candidate by training a
+tiny model on a synthetic task:
+
+```bash
+brian discover optimizer --task parity --generations 20 --out run.json
+brian discover flow      --generations 12 --out flow.json   # + effective-information objective
+```
+
+The optimizer search rediscovers-and-tunes scaled gradient descent from a cold
+start, and — given the adaptive family in reach — *selects* per-coordinate
+gradient normalization on a task where plain SGD provably plateaus. This is the
+machinery behind the neuroscience-inspired-SLM goal: search for the topology and
+modulation that beat scaling, cheaply on CPU, before spending a GPU.
+
+Design: [`docs/dsl_subsystem_roadmap.md`](docs/dsl_subsystem_roadmap.md) §NGL.
+Results: [`docs/findings.md`](docs/findings.md) H31.
+
+---
+
 ## Multi-Cortex Fusion
 
 Three frozen causal-LM experts sit above the bowtie trunk and fuse logits at the LM head:

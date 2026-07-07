@@ -582,6 +582,86 @@ def cmd_hypothesis(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_discover(args: argparse.Namespace) -> int:
+    """Search NGL program space for an ML algorithm on CPU (see genetic/).
+
+    Subcommands:
+        optimizer  — evolve update-rule programs; score by training a tiny MLP
+        flow       — evolve gradient/flow-modulation programs; score loss + EI
+    """
+    import json
+    from neuroslm.genetic.discovery import (
+        run_optimizer_discovery, run_flow_modulation_discovery,
+    )
+
+    mode = args.discover_cmd
+    if mode == "optimizer":
+        outcome = run_optimizer_discovery(
+            seed=args.seed, pop_size=args.pop, generations=args.generations,
+            steps=args.steps, task=args.task,
+            include_sota_seeds=not args.from_scratch,
+        )
+        print(f"[discover:optimizer] task={args.task} pop={args.pop} "
+              f"gens={args.generations} steps={args.steps}")
+        print(f"  SGD baseline final_loss : {outcome.sgd_baseline_loss:.6f}")
+        print(f"  discovered  final_loss  : {outcome.best_final_loss:.6f}")
+        improv = outcome.sgd_baseline_loss - outcome.best_final_loss
+        rel = improv / outcome.sgd_baseline_loss * 100 if outcome.sgd_baseline_loss else 0.0
+        print(f"  improvement over SGD    : {improv:+.6f}  ({rel:+.1f}%)")
+        print(f"  Pareto front (loss,cost):")
+        for s in sorted(outcome.front_stats, key=lambda d: d["final_loss"])[:8]:
+            print(f"    loss={s['final_loss']:.6f}  cost={s['cost']:2d}  {s['name']}")
+        print("  best program (NGL):")
+        for line in outcome.best_program.to_source().splitlines():
+            print(f"    {line}")
+        payload = {
+            "mode": "optimizer",
+            "task": args.task,
+            "seed": args.seed,
+            "pop": args.pop,
+            "generations": args.generations,
+            "steps": args.steps,
+            "from_scratch": bool(args.from_scratch),
+            "sgd_baseline_loss": outcome.sgd_baseline_loss,
+            "best_final_loss": outcome.best_final_loss,
+            "history": outcome.history,
+            "front_stats": outcome.front_stats,
+            "best_program": outcome.best_program.to_source(),
+        }
+    elif mode == "flow":
+        outcome = run_flow_modulation_discovery(
+            seed=args.seed, pop_size=args.pop, generations=args.generations,
+            steps=args.steps,
+        )
+        print(f"[discover:flow] pop={args.pop} gens={args.generations} steps={args.steps}")
+        print(f"  discovered final_loss : {outcome.best_final_loss:.6f}")
+        print(f"  effective-info (synergy, bits): {outcome.best_ei:.4f}")
+        print("  best modulation program (NGL):")
+        for line in outcome.best_program.to_source().splitlines():
+            print(f"    {line}")
+        payload = {
+            "mode": "flow",
+            "seed": args.seed,
+            "pop": args.pop,
+            "generations": args.generations,
+            "steps": args.steps,
+            "best_final_loss": outcome.best_final_loss,
+            "best_ei": outcome.best_ei,
+            "history": outcome.history,
+            "best_program": outcome.best_program.to_source(),
+        }
+    else:
+        print("Usage: brian discover {optimizer|flow} [...]", file=sys.stderr)
+        return 1
+
+    if getattr(args, "out", None):
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(f"  wrote {out_path}")
+    return 0
+
+
 def cmd_discovery(args: argparse.Namespace) -> int:
     """Manage the autodiscovered-mutation ledger under ``discoveries/``.
 
@@ -4391,6 +4471,33 @@ def _build_parser() -> argparse.ArgumentParser:
     sdisc_prom.add_argument("id", help="discovery id (e.g. D001)")
     sdisc_prom.add_argument("arch", help="architecture name (e.g. rcc_bowtie)")
     sdisc_prom.set_defaults(func=cmd_discovery)
+
+    # discover — CPU search over NGL program space for an ML algorithm
+    sdiscover = sub.add_parser(
+        "discover",
+        help="Search NGL program space (optimizers / flow modulation) on CPU")
+    sdiscover_sub = sdiscover.add_subparsers(dest="discover_cmd", required=True)
+
+    sdo = sdiscover_sub.add_parser(
+        "optimizer", help="Evolve update-rule programs; score on a tiny CPU MLP")
+    sdo.add_argument("--pop", type=int, default=24)
+    sdo.add_argument("--generations", type=int, default=12)
+    sdo.add_argument("--steps", type=int, default=30, help="train steps per eval")
+    sdo.add_argument("--seed", type=int, default=0)
+    sdo.add_argument("--task", default="regression", choices=["regression", "parity"])
+    sdo.add_argument("--from-scratch", action="store_true",
+                     help="seed only SGD+random (no SOTA seeds) — genuine discovery")
+    sdo.add_argument("--out", help="write the run summary JSON here")
+    sdo.set_defaults(func=cmd_discover)
+
+    sdf = sdiscover_sub.add_parser(
+        "flow", help="Evolve gradient/flow-modulation programs; score loss + EI")
+    sdf.add_argument("--pop", type=int, default=16)
+    sdf.add_argument("--generations", type=int, default=8)
+    sdf.add_argument("--steps", type=int, default=25)
+    sdf.add_argument("--seed", type=int, default=0)
+    sdf.add_argument("--out", help="write the run summary JSON here")
+    sdf.set_defaults(func=cmd_discover)
 
     # bundle
     sb = sub.add_parser("bundle",

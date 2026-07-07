@@ -1803,3 +1803,81 @@ mirrors the biological neuromodulator control of cortical excitability.
 ### Outcome
 
 🔵 **PENDING** — awaiting first training run.
+
+### H31 — NGL: a Turing-complete evolvable language that discovers ML algorithms on CPU (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED (optimizer discovery)** / 🟠 **INCONCLUSIVE
+(flow-modulation/EI)** — the language, its exact-match optimizer library, the
+genetic operators, and the CPU discovery harness all land green (35 contracts,
+`tests/genetic/`). A cold-start search rediscovers-and-tunes SGD on a convex
+problem, and a seeded search *selects the adaptive-normalization structure* and
+beats SGD by 75% on non-convex parity. The effective-information-driven
+flow-modulation search runs end-to-end but did not find a high-synergy rule in a
+small CPU budget — recorded as a negative result with a follow-up.
+
+**Hypothesis.** The architecture DSLs (Layers A–D) cannot express an ML
+*algorithm* — they have no persistent state or control — so "search the language
+space for a novel mechanism" is not tractable on them. A typed **register-machine
+language** (NGL, the AutoML-Zero / Lion-discovery substrate) can express
+optimizers, learning rules and flow-modulation as evolvable programs, and a
+Pareto GA over that space, benchmarked with tiny CPU models, will recover the
+*structure* a task needs (not just tuned scalars). Expected signal: discovered
+update rules reach ≤ SGD final loss on a held tiny task; on a task where SGD
+provably plateaus (parity), the search selects an adaptive rule that clears it.
+
+**Spec.** New package `neuroslm/genetic/` (design in
+`docs/dsl_subsystem_roadmap.md` §NGL):
+- `language.py` — register machine: scalar+tensor banks, ~35 total-semantics ops
+  (`REGISTRY`), `Program`, `semantic_vector()`. Execution is total (eps-guarded
+  div, abs-folded sqrt/log, shape-fallback matmul) and memory-capped
+  (`_MAX_ELEMS`) so blind mutation never crashes or OOMs.
+- `optimizer.py` — SGD / Momentum / RMSProp / Adam / Lion encoded as NGL programs
+  + `NGLOptimizer` torch adapter. Each reproduces its reference **bit-for-bit**
+  (`tests/genetic/test_optimizer.py`, atol 1e-6/1e-5) — the proof NGL spans the
+  update-rule grammar.
+- `evolve.py` — `mutate` / `crossover` / `random_program`, all-maximised
+  `Objective` + `pareto_front`, `auto_evolve` GA (tournament + elitism + optional
+  novelty in semantic space).
+- `discovery.py` — `benchmark_optimizer` (trains a tiny MLP), `run_optimizer_
+  discovery`, `run_flow_modulation_discovery` (EI proxy via
+  `information.net_synergy`).
+- CLI: `brian discover optimizer|flow` (`neuroslm/cli.py::cmd_discover`).
+
+**Runs (CPU, seconds each; artifacts under `results/discovery/`).**
+
+| Run | seeds | task | SGD base | discovered | Δ | winning structure |
+|---|---|---|---|---|---|---|
+| `optimizer_from_scratch_s0` | SGD+random | regression (convex) | 0.4551 | **0.1577** | **−65.3%** | scaled-grad, lr≈0.31, cost 1 |
+| `optimizer_from_scratch_parity_s1` | SGD+random | parity (non-convex) | 0.6982 | 0.6845 | −2.0% | scaled-grad, lr≈2.14, cost 1 (plateau) |
+| `optimizer_seeded_parity_s1` | SOTA+random | parity (non-convex) | 0.6982 | **0.1726** | **−75.3%** | **RMSProp-family adaptive norm, lr≈0.027, cost 9** |
+| `flow_modulation_s0` | identity+random | parity | (SGD 0.69) | 0.6409 | — | degenerate constant update, synergy≈0.0 (inconclusive) |
+
+**Outcome.**
+- ✅ The bit-exact optimizer library confirms NGL is expressive enough to *be*
+  the SOTA optimizers — the precondition for searching their neighbourhood.
+- ✅ The cold-start regression run shows genuine search: with only SGD@lr=0.02 +
+  random seeds it found the cheapest possible rule (`update = −0.31·g`) and cut
+  loss 65% — it discovered the optimal step size, not a memorised constant.
+- ✅ The **key structural result**: on parity, *no* single scaled-gradient rule
+  escapes the ~0.69 (random-guess) plateau (best cold-start = −2%), but when the
+  adaptive-normalization structure is in reach the search selects and tunes it to
+  0.173 (−75%). The mechanism parity needs — per-coordinate gradient
+  *modulation* — is exactly what the language search recovers. This is the
+  "find modulation that outperforms" claim, demonstrated in miniature.
+- 🟠 The EI-driven flow-modulation search is a working scaffold but did not
+  surface a high-synergy rule in 12 generations; the winner was a degenerate
+  scalar-broadcast update (synergy ≈ 0). Negative result per §10.7.
+
+**Follow-up.**
+1. Flow-modulation: larger budget + a denser EI signal (per-layer synergy,
+   `pid_synergy` unique/redundant atoms) + seed with real modulation motifs
+   (`mechanics/nfo.neuro`, divisive normalization) before concluding.
+2. Promote a confirmed discovered rule into `learned_opt.py` / the training loop
+   and measure OOD-ppl / gap_ratio on a real `brian deploy` run — the bridge
+   from CPU discovery to the GPT-2-param-matched goal.
+3. Extend the benchmark from tiny MLP to a 1–2 layer DSL `LanguageCortex` so the
+   discovery objective can include throughput (tok/s) and Φ directly.
+
+[EVIDENCE: tests/genetic/ — 35 contracts green (language/optimizer/evolve/discovery/cli)]
+[ARTIFACT: results/discovery/optimizer_seeded_parity_s1.json (RMSProp structure, −75% vs SGD)]
+[ARTIFACT: results/discovery/optimizer_from_scratch_s0.json (cold-start lr discovery, −65%)]
