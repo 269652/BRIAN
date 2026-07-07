@@ -781,6 +781,45 @@ def cmd_discover(args: argparse.Namespace) -> int:
             "equivalent": bool(equiv),
             "program": slim.to_source(),
         }
+    elif mode == "explore":
+        from neuroslm.genetic.ledger import SearchLedger
+        from neuroslm.genetic.training_explorer import run_training_with_exploration
+        ledger_path = args.ledger or (REPO_ROOT / ".neuro" / "search_ledger.json")
+        led = SearchLedger(ledger_path)
+        before_stats = led.stats()
+        print(f"[discover:explore] tiny-LM training, explore every {args.explore_every} "
+              f"steps (ledger: {ledger_path}, {before_stats['total']} prior patterns)")
+        result = run_training_with_exploration(
+            total_steps=args.total_steps, explore_every=args.explore_every,
+            seed=args.seed, ledger=led, pop_size=args.pop,
+            generations=args.generations, inner_steps=args.inner_steps)
+        led.save()
+        for e in result["explorations"]:
+            tag = "KEPT ✓" if e["improved"] else "rejected"
+            print(f"  step {e['step']:5d}: {tag}  baseline_ppl={e['baseline_ppl']} "
+                  f"best_ppl={e['best_ppl']}  evaluated={e['evaluated']} "
+                  f"skipped_duds={e['skipped_duds']}")
+        print(f"  final val ppl: {result['final_val_ppl']:.4f}")
+        print(f"  ledger now holds {led.stats()['total']} searched patterns "
+              f"({led.stats()['kept']} kept, {led.stats()['rejected']} rejected)")
+        payload = {"mode": "explore", **result, "ledger": str(ledger_path)}
+    elif mode == "ledger":
+        from neuroslm.genetic.ledger import SearchLedger
+        ledger_path = args.ledger or (REPO_ROOT / ".neuro" / "search_ledger.json")
+        led = SearchLedger(ledger_path)
+        if getattr(args, "clear", False):
+            led._by_sig.clear()
+            led.save()
+            print(f"[discover:ledger] cleared {ledger_path}")
+            return 0
+        s = led.stats()
+        print(f"[discover:ledger] {ledger_path}")
+        print(f"  {s['total']} patterns: {s['kept']} kept, {s['rejected']} rejected, "
+              f"{s.get('searched', 0)} searched")
+        for r in sorted(led.all(), key=lambda r: r.delta)[:args.top]:
+            print(f"    {r.outcome:8s} delta={r.delta:+.4f} step={r.step} "
+                  f"[{r.run_id}]  {r.source.splitlines()[0] if r.source else ''}")
+        payload = {"mode": "ledger", "stats": s}
     elif mode == "profile":
         import torch
         from neuroslm.dsl.nn_lang import compile_layer
@@ -4727,6 +4766,28 @@ def _build_parser() -> argparse.ArgumentParser:
     sds.add_argument("--seed", type=int, default=0)
     sds.add_argument("--out", help="write the run summary JSON here")
     sds.set_defaults(func=cmd_discover)
+
+    sde = sdiscover_sub.add_parser(
+        "explore",
+        help="Wire exploration into (tiny-LM) training: search every N steps, "
+             "keep-if-better, record to the persistent ledger")
+    sde.add_argument("--total-steps", type=int, default=2000)
+    sde.add_argument("--explore-every", type=int, default=500)
+    sde.add_argument("--pop", type=int, default=12)
+    sde.add_argument("--generations", type=int, default=4)
+    sde.add_argument("--inner-steps", type=int, default=20)
+    sde.add_argument("--seed", type=int, default=0)
+    sde.add_argument("--ledger", help="path to the search ledger JSON "
+                     "(default .neuro/search_ledger.json)")
+    sde.add_argument("--out", help="write the run summary JSON here")
+    sde.set_defaults(func=cmd_discover)
+
+    sdl = sdiscover_sub.add_parser(
+        "ledger", help="Inspect / clear the persistent search ledger")
+    sdl.add_argument("--ledger", help="path (default .neuro/search_ledger.json)")
+    sdl.add_argument("--top", type=int, default=20, help="how many records to show")
+    sdl.add_argument("--clear", action="store_true", help="wipe the ledger")
+    sdl.set_defaults(func=cmd_discover)
 
     sdp = sdiscover_sub.add_parser(
         "profile",

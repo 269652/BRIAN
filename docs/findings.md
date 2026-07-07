@@ -2078,3 +2078,42 @@ steering *which* pathway to search) is the natural next step — the gate + heat
 already exist; this batch built the flow/geometry signal that would make it smart.
 
 [EVIDENCE: tests/genetic/ — test_profile(6), test_topology(6), test_modulation_pusher(3) green]
+
+### H36 — Exploration wired into training + a persistent search ledger (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — the online search loop + cross-run dedup (10 new
+contracts). Complements the repo's existing `neuroslm/evolution/` loop by adding
+an NGL-modulation explorer with a keep-if-better A/B gate and a *persistent*
+ledger.
+
+- **Persistent SearchLedger** (`ledger.py`). Each searched program gets a
+  hyperparameter-invariant **semantic signature** (hash of its quantized semantic
+  vector), stored to JSON. `has_searched`/`is_dud`/`record`/`stats`; a fresh run
+  loads the accumulated history and **skips duds** (patterns already tried that
+  didn't help) instead of re-searching them. Records dedup by signature (latest
+  outcome wins, count accumulates).
+- **TrainingExplorer** (`training_explorer.py`). Fires every `explore_every` steps;
+  runs a short NGL modulation search (skipping ledger duds, counting them),
+  A/B-tests the winner against the identity baseline via a caller-supplied
+  `score_fn`, keeps it only if the metric improves, and records every attempt to
+  the ledger. `run_training_with_exploration` is the runnable miniature: a tiny CPU
+  LM whose residual-stream modulation is searched every N steps and installed only
+  if it lowers validation ppl. Model-agnostic — the same explorer attaches to the
+  real trunk by supplying a `score_fn` that applies a modulation to the trunk and
+  returns a val metric.
+- CLI: `brian discover explore --explore-every 500 --ledger PATH` runs the loop and
+  prints per-exploration keep/reject + `skipped_duds`; `brian discover ledger`
+  inspects/clears the ledger.
+
+**Worked run.** Run 1: explorations at steps 500/1000 (one KEPT), ledger grew to 46
+patterns. Run 2 (same ledger): loaded 46 prior patterns and **skipped 2 duds** it
+had already searched, no re-work. Honest caveat: the tiny-LM metric is noisy
+(modulations are A/B'd on the live model without retraining), so the *mechanism* is
+what's demonstrated; the clean improvement signal needs the GPU trunk.
+
+**Follow-up.** The real-trunk integration is one call in the training loop
+(`explorer.maybe_explore(step, trunk_score_fn)`) + a `score_fn` that injects a
+modulation into the SmolLM residual stream and evaluates a val batch — validated on
+a `brian deploy` run.
+
+[EVIDENCE: tests/genetic/ — test_ledger(6), test_training_explorer(4) green]

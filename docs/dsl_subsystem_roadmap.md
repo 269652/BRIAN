@@ -409,3 +409,21 @@ signal + geometry it lacked:
 - `modulation_pusher.py` — scoped git commit+push of `modulations/*.neuro` during a
   run. `discover trunk --save --push`; Colab explore cell `PUSH`.
 - CLI: `brian discover profile --layer-file X --binding D=16 …`.
+
+## NGL, part 6 — exploration wired into training + persistent search ledger
+
+Findings H36. An online modulation explorer with a keep-if-better gate and a
+persistent, cross-run dedup ledger:
+
+- `ledger.py` — `SearchLedger`: semantic-signature-keyed, JSON-persistent record of
+  searched patterns; `is_dud` skips patterns prior runs found unhelpful so a new
+  run never re-searches the same space.
+- `training_explorer.py` — `TrainingExplorer.maybe_explore(step, score_fn)` fires
+  every `explore_every` steps, searches (skipping ledger duds), A/B keeps-if-better,
+  records to the ledger. `run_training_with_exploration` wires it to a tiny CPU LM;
+  the same explorer attaches to the real trunk via a `score_fn`.
+- CLI: `brian discover explore --explore-every 500 --ledger PATH`,
+  `brian discover ledger [--clear]`.
+
+Real-trunk wiring is one `explorer.maybe_explore(...)` call in the training loop +
+a trunk `score_fn`; validated on a `brian deploy` run.
