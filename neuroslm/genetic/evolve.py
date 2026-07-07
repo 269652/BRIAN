@@ -70,20 +70,36 @@ _MUT_KINDS = ("point_op", "point_reg", "point_const", "insert", "delete", "out_r
 
 
 def mutate(program: Program, rng: np.random.Generator,
-           kind: str | None = None) -> Program:
-    """Return a mutated copy. The parent is never modified."""
+           kind: str | None = None, library=None) -> Program:
+    """Return a mutated copy. The parent is never modified.
+
+    When ``library`` (a ``MacroLibrary``) is given, an ``insert_call`` move can
+    graft a whole macro as one instruction — the abstraction lever that lets the
+    search compose higher-order algorithms instead of re-deriving primitives.
+    """
     child = program.copy()
+    if library is not None:
+        child.library = library
     instrs = list(child.instructions)
     ns, nt = child.n_scalar, child.n_tensor
 
     if kind is None:
-        # bias away from delete when the program is already short
         choices = list(_MUT_KINDS)
         if len(instrs) <= 1:
             choices = [k for k in choices if k != "delete"]
+        if library is not None and len(library):
+            choices = choices + ["insert_call"]
         kind = choices[rng.integers(len(choices))]
 
-    if kind == "insert" or not instrs:
+    if kind == "insert_call" and library is not None and len(library):
+        macro = library.macros()[rng.integers(len(library))]
+        ins_regs = tuple(_rand_reg(rng, ns, nt) for _ in range(macro.n_inputs))
+        out = f"t{rng.integers(nt)}"
+        pos = rng.integers(len(instrs) + 1) if instrs else 0
+        instrs.insert(int(pos), Instruction("call", out, ins_regs, macro=macro.name))
+        if child.out_reg not in ("t0", "t1"):
+            child.out_reg = out
+    elif kind == "insert" or not instrs:
         pos = rng.integers(len(instrs) + 1) if instrs else 0
         instrs.insert(int(pos), _rand_instruction(rng, ns, nt))
     elif kind == "delete" and len(instrs) > 1:

@@ -247,8 +247,13 @@ class Instruction:
     ins: Tuple[str, ...] = ()
     const: Optional[float] = None
     config: Tuple[Tuple[str, float], ...] = ()   # scalar-config kwargs (attention …)
+    macro: str = ""                              # macro name when op == "call"
 
     def __post_init__(self):
+        if self.op == "call":
+            if not self.macro:
+                raise ValueError("call instruction requires a macro name")
+            return
         if self.op not in REGISTRY:
             raise ValueError(f"unknown op {self.op!r}")
 
@@ -260,11 +265,22 @@ class Program:
     n_tensor: int
     out_reg: str
     meta: dict = field(default_factory=dict)
+    library: object = None   # optional MacroLibrary → `call` ops auto-flatten
 
     def execute(self, memory: Memory) -> Memory:
+        prog = self
+        if self.library is not None and any(i.op == "call" for i in self.instructions):
+            from neuroslm.genetic.macros import expand_macros
+            prog = expand_macros(self, self.library)
+        return prog._execute_flat(memory)
+
+    def _execute_flat(self, memory: Memory) -> Memory:
         dev = memory.device
         for ins in self.instructions:
-            spec = REGISTRY[ins.op]
+            spec = REGISTRY.get(ins.op)
+            if spec is None:
+                # an unexpanded `call` (no library) — keep execution total
+                continue
             args = [memory.read(r) for r in ins.ins]
             # align every tensor arg to the memory device so a `const`/eps scalar
             # (created on cpu) never mismatches a cuda operand — that mismatch
@@ -304,8 +320,10 @@ class Program:
         outs = set()
         reuse = 0
         for ins in self.instructions:
-            fam_counts[REGISTRY[ins.op].family] += 1.0
-            op_counts[ins.op] = op_counts.get(ins.op, 0.0) + 1.0
+            fam = REGISTRY[ins.op].family if ins.op in REGISTRY else "macro"
+            fam_counts[fam] = fam_counts.get(fam, 0.0) + 1.0
+            key = ins.op if ins.op != "call" else f"call:{ins.macro}"
+            op_counts[key] = op_counts.get(key, 0.0) + 1.0
             for r in ins.ins:
                 if r in outs:
                     reuse += 1
@@ -334,11 +352,15 @@ class Program:
             n_tensor=self.n_tensor,
             out_reg=self.out_reg,
             meta=dict(self.meta),
+            library=self.library,
         )
 
     def to_source(self) -> str:
         lines = []
         for ins in self.instructions:
+            if ins.op == "call":
+                lines.append(f"{ins.out} = call {ins.macro}(" + ", ".join(ins.ins) + ")")
+                continue
             rhs = ins.op + "(" + ", ".join(ins.ins)
             if REGISTRY[ins.op].uses_const:
                 rhs += (", " if ins.ins else "") + f"c={ins.const}"

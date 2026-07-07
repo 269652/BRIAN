@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from neuroslm.genetic.language import Instruction, Program
+from neuroslm.genetic.language import Instruction, Program, REGISTRY
 from neuroslm.genetic.simplify import dead_code_eliminate, programs_equivalent
 
 
@@ -46,6 +46,7 @@ class Node:
     args: Tuple["object", ...]
     const: Optional[float] = None
     config: Tuple[Tuple[str, float], ...] = ()   # scalar-config kwargs (attention …)
+    macro: str = ""                              # macro name for `call` nodes
 
 
 Expr = object
@@ -59,7 +60,7 @@ def to_expr(program: Program) -> Expr:
             e: Expr = Const(float(ins.const) if ins.const is not None else 0.0)
         else:
             args = tuple(env.get(r, Leaf(r)) for r in ins.ins)
-            e = Node(ins.op, args, ins.const, ins.config)
+            e = Node(ins.op, args, ins.const, ins.config, ins.macro)
         env[ins.out] = e
     return env.get(program.out_reg, Leaf(program.out_reg))
 
@@ -102,7 +103,7 @@ def from_expr(root: Expr, template: Program) -> Program:
             return r
         arg_regs = tuple(emit(a) for a in e.args)
         r = fresh()
-        instrs.append(Instruction(e.op, r, arg_regs, e.const, e.config))
+        instrs.append(Instruction(e.op, r, arg_regs, e.const, e.config, e.macro))
         memo[e] = r
         return r
 
@@ -253,11 +254,84 @@ def _rewrite_candidates(expr: Expr):
         for i, child in enumerate(expr.args):
             for new_child in _rewrite_candidates(child):
                 yield Node(expr.op, expr.args[:i] + (new_child,) + expr.args[i + 1:],
-                           expr.const, expr.config)
+                           expr.const, expr.config, expr.macro)
 
 
 def _cost(program: Program) -> int:
     return len(program.instructions)
+
+
+_FOLDABLE = {
+    "add", "sub", "mul", "div", "neg", "abs", "sign", "square", "sqrt",
+    "exp", "log", "cscale", "min", "max", "clip",
+}
+
+
+def _fold_consts(expr: Expr):
+    """Constant-folding rewrite: a node whose args are all Const → one Const."""
+    if not isinstance(expr, Node) or expr.op not in _FOLDABLE:
+        return None
+    if not all(isinstance(a, Const) for a in expr.args):
+        return None
+    spec = REGISTRY.get(expr.op)
+    if spec is None:
+        return None
+    import torch
+    try:
+        args = [torch.tensor(float(a.value)) for a in expr.args]
+        if spec.uses_const:
+            args.append(0.0 if expr.const is None else float(expr.const))
+        out = spec.fn(*args)
+        return Const(float(out))
+    except Exception:
+        return None
+
+
+def constant_fold(program: Program) -> Program:
+    """Evaluate pure-constant subexpressions at compile time."""
+    cur = dead_code_eliminate(program)
+    for _ in range(64):
+        expr = to_expr(cur)
+        folded = _fold_all(expr)
+        if folded == expr:
+            break
+        cur = dead_code_eliminate(from_expr(folded, cur))
+    return cur
+
+
+def _fold_all(expr: Expr) -> Expr:
+    """Bottom-up constant folding of an expression tree."""
+    if isinstance(expr, Node):
+        new_args = tuple(_fold_all(a) for a in expr.args)
+        node = Node(expr.op, new_args, expr.const, expr.config)
+        folded = _fold_consts(node)
+        return folded if folded is not None else node
+    return expr
+
+
+def cse(program: Program) -> Program:
+    """Common-subexpression elimination via hash-consed DAG round-trip.
+
+    ``to_expr`` builds a DAG where structurally-identical subexpressions (same op
+    over the same operand *values*, respecting register overwrites) are equal
+    objects; ``from_expr`` re-emits with a memo so each distinct subexpression
+    becomes exactly one instruction.
+    """
+    return from_expr(to_expr(program), program)
+
+
+def optimize(program: Program, n_probes: int = 8, seed: int = 0, probes=None) -> Program:
+    """Full pass pipeline: DCE → CSE → constant-fold → algebraic → (repeat)."""
+    cur = dead_code_eliminate(program)
+    for _ in range(8):
+        n0 = len(cur.instructions)
+        cur = cse(cur)
+        cur = constant_fold(cur)
+        cur = algebraic_simplify(cur, n_probes=n_probes, seed=seed, probes=probes)
+        cur = dead_code_eliminate(cur)
+        if len(cur.instructions) == n0:
+            break
+    return cur
 
 
 def algebraic_simplify(program: Program, n_probes: int = 8, seed: int = 0,
