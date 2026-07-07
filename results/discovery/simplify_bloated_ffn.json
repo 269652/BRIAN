@@ -1,0 +1,9 @@
+{
+  "mode": "simplify",
+  "layer_file": "/tmp/bloated_ffn.layer",
+  "before": 6,
+  "after": 3,
+  "removed": 3,
+  "equivalent": true,
+  "program": "t15 = rmsnorm(t0, t1)\nt16 = swiglu(t15, t2, t3, t4)\nt17 = add(t0, t16)\nreturn t17"
+}

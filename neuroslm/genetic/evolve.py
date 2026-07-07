@@ -21,7 +21,12 @@ from neuroslm.genetic.language import (
     Memory,
 )
 
-_OP_NAMES = sorted(REGISTRY.keys())
+# Searchable op pool. The composite `nn` family (linear/rmsnorm/swiglu/…) is
+# excluded: those need bound parameter registers and are only meaningful when an
+# architecture is *lowered* into NGL (compile_arch.py), not when a program is
+# grown from scratch. Restricting the pool keeps blind search focused on the
+# primitive grammar (arith/reduce/control/nonlin/linalg/const).
+_OP_NAMES = sorted(n for n, s in REGISTRY.items() if s.family != "nn")
 
 
 # ---------------------------------------------------------------------------

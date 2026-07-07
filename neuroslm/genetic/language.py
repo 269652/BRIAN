@@ -153,6 +153,18 @@ def _make_registry() -> Dict[str, OpSpec]:
     reg("transpose", 1, "linalg", _transpose)
     reg("outer", 2, "linalg", _outer)
 
+    # composite neural-network ops — delegate to the canonical nn_ops atoms so
+    # NGL spans the *architecture* grammar too, not just the update-rule grammar.
+    # (These make `arch → NGL` a near 1:1 lowering; see genetic/compile_arch.py.)
+    from neuroslm.dsl import nn_ops as _nnops
+
+    reg("linear", 2, "nn", lambda x, w: _nnops.linear(x, w))
+    reg("rmsnorm", 2, "nn", lambda x, g: _nnops.rmsnorm(x, g))
+    reg("layernorm", 3, "nn", lambda x, g, b: _nnops.layernorm(x, g, b))
+    reg("swiglu", 4, "nn", lambda x, w1, w2, w3: _nnops.swiglu(x, w1, w2, w3))
+    reg("gelu", 1, "nn", lambda x: _nnops.gelu(x))
+    reg("embedding", 2, "nn", lambda ids, table: _nnops.embedding(ids.long(), table))
+
     # constant loader
     reg("const", 0, "const", lambda c: _t(c), True)
 

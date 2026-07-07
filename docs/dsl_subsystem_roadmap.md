@@ -282,3 +282,35 @@ operators, and a runnable optimizer/flow-modulation discovery that beats
 the SGD baseline on a tiny CPU benchmark. This is the *machinery* the
 "outperform GPT-2 param-matched" goal requires; the large-scale training
 that would cash that claim runs through `brian deploy`, not on this CPU.
+
+## NGL, part 2 — arch bridge, algebraic simplifier, neuroanatomic auto-evolve
+
+Three capabilities turn NGL from an optimizer-search substrate into a full
+architecture-discovery loop (findings H32):
+
+- **`compile_arch.py` — arch → NGL.** Lower an `nn_lang` forward graph into an
+  NGL `Program`: SSA value → register, op/binop → instruction, params → pre-bound
+  tensor registers. The composite NN ops (`linear`, `rmsnorm`, `layernorm`,
+  `swiglu`, `gelu`, `embedding`) were added to `REGISTRY`, delegating to `nn_ops`,
+  so the lowering is near 1:1 and byte-equivalent (verified on an FFN block).
+  Scalar-config ops (attention `n_heads`) raise `UnsupportedLowering`. This is how
+  discovery/simplification run on the real architecture rather than toy programs.
+
+- **`rewrite.py` — verified algebraic simplifier.** Program → expression DAG
+  (forward symbolic eval) → value-preserving rewrite rules applied to a fixpoint
+  (`add-0`, `sub-0`, `mul-1`, `neg-neg`, `transpose²`, `(a+b)-b → a`, `cscale`
+  constant folding, like-term combination `a·x + b·x → (a+b)·x`) → lower back with
+  CSE. **Every accepted rewrite is globally probe-verified**, so unsound
+  shape-dependent rewrites are rejected. Wired into `simplify()`. A bloated
+  compiled FFN simplifies 6 → 3 instructions (dead code + `(h+h)-h → h`).
+
+- **`neuro_evolve.py` — neuroanatomically-constrained trunk auto-evolve.** Evolve
+  an NGL neuromodulation on a tiny CPU LM's residual stream (`h ← h · g(h)`),
+  fitness = Pareto `(−val_PPL, +neuroanatomic_plausibility)`. The realism prior
+  rewards divisive normalization, multiplicative gain, and homeostatic saturation,
+  penalizes runaway amplification, and scores the dead-code-eliminated program.
+  A bounded-`tanh` gain cut tiny-LM val PPL −9.4%. `brian discover trunk`.
+
+The honest boundary: competitive **SmolLM** PPL is a GPU claim (`brian deploy`);
+what runs on CPU here is the search engine + a tiny-LM demonstration + the bridge
+that a deploy would use to wire a discovered gain law into the real trunk.

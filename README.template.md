@@ -340,8 +340,28 @@ gradient normalization on a task where plain SGD provably plateaus. This is the
 machinery behind the neuroscience-inspired-SLM goal: search for the topology and
 modulation that beat scaling, cheaply on CPU, before spending a GPU.
 
+NGL also **compiles an architecture into itself**. An `nn_lang` forward graph
+lowers to an NGL program (composite ops like `linear`/`rmsnorm`/`swiglu` delegate
+to the canonical `nn_ops`), byte-equivalent to the compiled module — so discovery
+and simplification run on the *real* architecture:
+
+```bash
+brian discover simplify --layer-file block.layer   # arch → NGL → shorter equivalent
+brian discover trunk    --generations 12            # evolve a neuromodulation for the trunk
+```
+
+The **simplifier** builds an expression DAG and applies value-preserving algebraic
+rewrites to a fixpoint (dead-code elimination, `(a+b)−b → a`, constant folding,
+like-term combination), every rewrite globally probe-verified. The **trunk
+auto-evolve** searches an NGL neuromodulation on the residual stream, scoring
+candidates by validation perplexity *jointly with a neuroanatomic-realism prior*
+(divisive normalization, multiplicative gain, homeostatic saturation) — so the
+search improves language modelling while staying biologically plausible. Training
+the real SmolLM trunk to competitive perplexity is a GPU deploy; the CPU engine is
+what finds the gain law to wire in.
+
 Design: [`docs/dsl_subsystem_roadmap.md`](docs/dsl_subsystem_roadmap.md) §NGL.
-Results: [`docs/findings.md`](docs/findings.md) H31.
+Results: [`docs/findings.md`](docs/findings.md) H31, H32.
 
 ---
 

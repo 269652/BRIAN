@@ -1881,3 +1881,70 @@ provably plateaus (parity), the search selects an adaptive rule that clears it.
 [EVIDENCE: tests/genetic/ — 35 contracts green (language/optimizer/evolve/discovery/cli)]
 [ARTIFACT: results/discovery/optimizer_seeded_parity_s1.json (RMSProp structure, −75% vs SGD)]
 [ARTIFACT: results/discovery/optimizer_from_scratch_s0.json (cold-start lr discovery, −65%)]
+
+### H32 — NGL grows an arch bridge, a verified algebraic simplifier, and a neuroanatomic auto-evolve (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — three capabilities land on the NGL substrate (H31),
+all TDD, 71 contracts green in `tests/genetic/`:
+
+1. **Arch → NGL compilation.** `neuroslm/genetic/compile_arch.py` lowers an
+   `nn_lang` forward graph (Layer A SSA tensor DAG) into an NGL `Program`: each
+   SSA value → a register, each op/binop → one instruction, params → pre-bound
+   tensor registers. The composite NN ops (`linear`, `rmsnorm`, `layernorm`,
+   `swiglu`, `gelu`, `embedding`) were added to the NGL registry, delegating to
+   the canonical `nn_ops` atoms, so lowering is near 1:1. **Byte-equivalence** is
+   the contract: an FFN block (`rmsnorm → swiglu → residual`) run as an NGL
+   program equals the compiled `nn_lang` module's forward, atol 1e-6. Scalar-config
+   ops (attention's `n_heads`) raise `UnsupportedLowering` rather than
+   miscompile. Now discovery/simplification can run on the *actual architecture*.
+
+2. **Verified algebraic simplifier.** `neuroslm/genetic/rewrite.py` builds an
+   expression DAG from a program (forward symbolic eval, register-reuse-correct),
+   applies value-preserving algebraic identities to a fixpoint (`add-0`, `sub-0`,
+   `mul-1`, `neg-neg`, `transpose²`, `(a+b)-b → a`, `cscale` constant folding,
+   like-term combination `a·x + b·x → (a+b)·x`), and lowers back with CSE.
+   **Every accepted rewrite is globally probe-verified**, so a shape-dependent
+   identity that doesn't hold is rejected, never miscompiled. Integrated into
+   `simplify()` (DCE → peephole → algebra → try-delete). Demonstrated end-to-end:
+   a bloated compiled FFN (`h=rmsnorm; z=h+h; h2=z-h; m=swiglu; dead=gelu(m);
+   return x+m`) simplifies **6 → 3 instructions** — dead code removed AND
+   `(h+h)-h` collapsed to `h` — behaviour preserved on probes
+   (`results/discovery/simplify_bloated_ffn.json`).
+
+3. **Neuroanatomically-constrained trunk auto-evolve.**
+   `neuroslm/genetic/neuro_evolve.py` evolves an NGL neuromodulation injected into
+   a tiny CPU LM's residual stream (`h ← h · g(h)`), fitness = Pareto
+   `(−val_PPL, +neuroanatomic_plausibility)`. The realism prior is grounded in
+   canonical neuromodulation: divisive normalization (Carandini & Heeger 2012),
+   multiplicative gain (Salinas & Thier 2000), saturating/homeostatic
+   dose-response (bounded ops), metabolic economy (program length) — and it scores
+   the *dead-code-eliminated* program so vestigial ops earn no credit. Run
+   (`results/discovery/trunk_modulation_s0.json`): a bounded `tanh` gain reduces
+   validation PPL **8.556 → 7.755 (−9.4%)** at plausibility 0.60, and the Pareto
+   front makes the realism/PPL trade explicit (ppl 7.72 @ plaus 0.55; 7.76 @ 0.60;
+   8.83 @ 0.60). CLI: `brian discover trunk`.
+
+**Hypothesis (trunk).** SmolLM's trunk PPL is too high; the neuroscience lever is
+to reshape the residual stream with a biologically-motivated gain (neuromodulation)
+rather than scale parameters. A Pareto search over NGL modulations, constrained by
+a neuroanatomic-realism prior, will lower a tiny-LM's val PPL without leaving the
+realistic-mechanism region. **Confirmed in miniature** (−9.4% on the tiny CPU LM,
+bounded-gain motif selected).
+
+**Honest scope.** Competitive SmolLM PPL is a **GPU** claim, not a CPU one — the
+tiny-LM result is the *engine* working, not the trunk fixed. The path to cash it:
+promote the discovered gain law into the real trunk's residual stream and measure
+train/OOD PPL on a `brian deploy` run. Recorded as follow-up.
+
+**Follow-up.**
+1. Wire the best trunk modulation into `neuroslm/harness.py` / the SmolLM trunk
+   behind a default-off flag; A/B on a real deploy (§10 loop) — the CPU→GPU bridge.
+2. Lower attention (scalar-config ops) into NGL so a *full* TransformerBlock, not
+   just the FFN, is compilable/simplifiable — needs config-arg support in
+   `compile_arch`.
+3. Extend the algebraic rule set toward an e-graph (equality saturation) for
+   distributivity / factoring that greedy rewriting misses.
+
+[EVIDENCE: tests/genetic/ — 71 contracts green (adds compile_arch/rewrite/neuro_evolve)]
+[ARTIFACT: results/discovery/trunk_modulation_s0.json (bounded-tanh gain, −9.4% val PPL)]
+[ARTIFACT: results/discovery/simplify_bloated_ffn.json (compiled FFN 6→3 instructions)]

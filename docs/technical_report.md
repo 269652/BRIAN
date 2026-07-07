@@ -858,9 +858,29 @@ structure and tunes it to −75% vs SGD** — the mechanism parity needs
 EI-driven flow-modulation search runs end-to-end but did not surface a
 high-synergy rule in a small budget (inconclusive; follow-up in findings H31).
 
-**TDD evidence:** 35 GREEN contracts across `tests/genetic/`
-(language/optimizer/evolve/discovery/cli). Artifacts under `results/discovery/`.
-[✅ CONFIRMED (optimizer discovery) / 🟠 INCONCLUSIVE (flow/EI)]
+**Arch bridge + simplifier + trunk auto-evolve (H32).** Three capabilities
+extend the substrate:
+- **Arch → NGL** (`compile_arch.py`): lower an `nn_lang` forward graph into an
+  NGL program (composite NN ops `linear`/`rmsnorm`/`swiglu`/… added to the
+  registry, delegating to `nn_ops`), byte-equivalent on an FFN block. Discovery
+  and simplification now run on the actual architecture.
+- **Verified algebraic simplifier** (`rewrite.py`): expression-DAG term rewriting
+  to a fixpoint (`add-0`, `neg-neg`, `(a+b)-b → a`, `cscale` folding, like-term
+  combination) with CSE; every rewrite globally probe-verified. A bloated compiled
+  FFN simplifies 6 → 3 instructions (dead code + `(h+h)-h → h`).
+- **Neuroanatomic trunk auto-evolve** (`neuro_evolve.py`): evolve an NGL
+  residual-stream neuromodulation for a tiny CPU LM, Pareto over
+  `(−val_PPL, +plausibility)`, prior grounded in divisive normalization /
+  multiplicative gain / homeostatic saturation. A bounded-`tanh` gain cut tiny-LM
+  val PPL −9.4% (8.556 → 7.755) at plausibility 0.60. Competitive SmolLM PPL
+  remains a GPU (`brian deploy`) claim; this is the engine. CLI: `brian discover
+  {trunk,simplify}`.
+
+**TDD evidence:** 71 GREEN contracts across `tests/genetic/`
+(language/optimizer/evolve/discovery/compile_arch/rewrite/neuro_evolve/cli).
+Artifacts under `results/discovery/`.
+[✅ CONFIRMED (optimizer discovery, arch bridge, simplifier, trunk engine) /
+🟠 INCONCLUSIVE (flow/EI)]
 
 ---
 

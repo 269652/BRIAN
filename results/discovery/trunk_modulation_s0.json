@@ -1,0 +1,98 @@
+{
+  "mode": "trunk",
+  "seed": 0,
+  "pop": 20,
+  "generations": 12,
+  "steps": 40,
+  "baseline_val_ppl": 8.555821504191334,
+  "best_val_ppl": 7.7549825945972914,
+  "best_plausibility": 0.6,
+  "history": [
+    -0.7371565075559809,
+    -0.7371565075559809,
+    -0.7263983617234504,
+    -0.7263983617234504,
+    -0.7263983617234504,
+    -0.7263983617234504,
+    -0.7263983617234504,
+    -0.7263983617234504,
+    -0.7263983617234504,
+    -0.7263983617234504,
+    -0.7263983617234504,
+    -0.7263983617234504,
+    -0.7263983617234504
+  ],
+  "front_stats": [
+    {
+      "val_ppl": 7.7549825945972914,
+      "plausibility": 0.6,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.7549825945972914,
+      "plausibility": 0.6,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.7549825945972914,
+      "plausibility": 0.6,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.7549825945972914,
+      "plausibility": 0.6,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.7549825945972914,
+      "plausibility": 0.6,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.7549825945972914,
+      "plausibility": 0.6,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.718690047493614,
+      "plausibility": 0.55,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.718690047493614,
+      "plausibility": 0.55,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.7549825945972914,
+      "plausibility": 0.6,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.7549825945972914,
+      "plausibility": 0.6,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.7549825945972914,
+      "plausibility": 0.6,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.7549825945972914,
+      "plausibility": 0.6,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.7549825945972914,
+      "plausibility": 0.6,
+      "name": "evolved"
+    },
+    {
+      "val_ppl": 7.718690047493614,
+      "plausibility": 0.55,
+      "name": "evolved"
+    }
+  ],
+  "best_program": "t6 = exp(t6)\nt5 = norm(t1)\nt4 = tanh(s3)\nt3 = min_r(t3)\nt0 = rms(t2)\nreturn t4"
+}

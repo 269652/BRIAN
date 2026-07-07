@@ -650,8 +650,59 @@ def cmd_discover(args: argparse.Namespace) -> int:
             "history": outcome.history,
             "best_program": outcome.best_program.to_source(),
         }
+    elif mode == "trunk":
+        from neuroslm.genetic.neuro_evolve import run_trunk_evolution
+        outcome = run_trunk_evolution(
+            seed=args.seed, pop_size=args.pop, generations=args.generations,
+            steps=args.steps)
+        print(f"[discover:trunk] pop={args.pop} gens={args.generations} steps={args.steps}")
+        print(f"  unmodulated trunk val PPL : {outcome.baseline_val_ppl:.4f}")
+        print(f"  best modulated   val PPL  : {outcome.best_val_ppl:.4f}")
+        print(f"  best neuroanatomic score  : {outcome.best_plausibility:.3f}")
+        print("  Pareto front (val_ppl, plausibility):")
+        for s in sorted(outcome.front_stats, key=lambda d: d["val_ppl"])[:8]:
+            print(f"    ppl={s['val_ppl']:.4f}  plaus={s['plausibility']:.3f}  {s['name']}")
+        print("  best modulation program (NGL):")
+        for line in outcome.best_program.to_source().splitlines():
+            print(f"    {line}")
+        payload = {
+            "mode": "trunk",
+            "seed": args.seed, "pop": args.pop,
+            "generations": args.generations, "steps": args.steps,
+            "baseline_val_ppl": outcome.baseline_val_ppl,
+            "best_val_ppl": outcome.best_val_ppl,
+            "best_plausibility": outcome.best_plausibility,
+            "history": outcome.history,
+            "front_stats": outcome.front_stats,
+            "best_program": outcome.best_program.to_source(),
+        }
+    elif mode == "simplify":
+        from neuroslm.genetic.compile_arch import compile_layer_to_ngl
+        from neuroslm.genetic.simplify import simplify, programs_equivalent
+        src = Path(args.layer_file).read_text(encoding="utf-8")
+        compiled = compile_layer_to_ngl(src)
+        slim, stats = simplify(compiled.program, n_probes=12, seed=args.seed,
+                               return_stats=True)
+        equiv = programs_equivalent(compiled.program, slim, n_probes=16,
+                                    seed=args.seed + 1)
+        print(f"[discover:simplify] {args.layer_file}")
+        print(f"  instructions: {stats['before']} -> {stats['after']} "
+              f"(-{stats['removed']})")
+        print(f"  behaviour preserved on probes: {equiv}")
+        print("  simplified program (NGL):")
+        for line in slim.to_source().splitlines():
+            print(f"    {line}")
+        payload = {
+            "mode": "simplify",
+            "layer_file": args.layer_file,
+            "before": stats["before"],
+            "after": stats["after"],
+            "removed": stats["removed"],
+            "equivalent": bool(equiv),
+            "program": slim.to_source(),
+        }
     else:
-        print("Usage: brian discover {optimizer|flow} [...]", file=sys.stderr)
+        print("Usage: brian discover {optimizer|flow|simplify} [...]", file=sys.stderr)
         return 1
 
     if getattr(args, "out", None):
@@ -4498,6 +4549,26 @@ def _build_parser() -> argparse.ArgumentParser:
     sdf.add_argument("--seed", type=int, default=0)
     sdf.add_argument("--out", help="write the run summary JSON here")
     sdf.set_defaults(func=cmd_discover)
+
+    sdt = sdiscover_sub.add_parser(
+        "trunk",
+        help="Evolve a neuroanatomically-constrained residual-stream modulation "
+             "for a tiny CPU LM (val PPL + realism prior)")
+    sdt.add_argument("--pop", type=int, default=16)
+    sdt.add_argument("--generations", type=int, default=8)
+    sdt.add_argument("--steps", type=int, default=30)
+    sdt.add_argument("--seed", type=int, default=0)
+    sdt.add_argument("--out", help="write the run summary JSON here")
+    sdt.set_defaults(func=cmd_discover)
+
+    sds = sdiscover_sub.add_parser(
+        "simplify",
+        help="Compile an nn_lang layer to NGL and discover a shorter equivalent")
+    sds.add_argument("--layer-file", required=True,
+                     help="path to an nn_lang `layer {...}` source file")
+    sds.add_argument("--seed", type=int, default=0)
+    sds.add_argument("--out", help="write the run summary JSON here")
+    sds.set_defaults(func=cmd_discover)
 
     # bundle
     sb = sub.add_parser("bundle",
