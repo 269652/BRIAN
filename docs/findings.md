@@ -2252,3 +2252,46 @@ algorithms … validated modulations become the reference implementation" ask
 (shared_macros.py).
 
 [EVIDENCE: tests/genetic/ — test_semantics(23), test_catalog(11), test_shared_macros(8) green]
+
+### H41 — Semantic normalization: canonicalize equivalent expressions before search (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — 13 new contracts. Syntactically-different but
+semantically-identical NGL programs are reduced to one canonical form and
+substituted, so exploration never re-searches a rewrite of something already seen.
+
+- **Normalization pass** (`normalize.py`). `canonical_form()` reduces a program to
+  its normal form under the repo's convergent rewrite system (`optimize` +
+  `simplify` to a fixpoint); `semantic_signature()` is that form's structural key
+  (identical key ⇒ rewrite-provably equal — the decidable core). `normalize_
+  semantics(programs, counts, prefer)` clusters by two verified layers — exact
+  canonical-signature (rewrite-equal) then probe-equal merges — and substitutes one
+  canonical representative per class: the most-used (`prefer="frequency"`) or the
+  lowest-complexity (`prefer="simplest"`, where complexity = `(size, branches,
+  distinct_ops)`, a straight-line-DAG proxy for cyclomatic complexity).
+- **Runs after semantic labels, before exploration.** Probe-merges are gated by the
+  `semantics.analyze` role label **and** statefulness. Wired into `TrainingExplorer`
+  (`ExploreConfig.normalize=True`): each candidate is canonicalized before the
+  ledger's dud-skip / signature dedup, so all syntactic variants collapse to one
+  ledger entry. CLI: `discover normalize [--prefer simplest]`.
+- **Soundness fix caught in the loop.** The first run collapsed `sgd ⇐ momentum`:
+  momentum's state buffer reads as zero on a single-shot probe, so it *looks* like
+  sgd on one step though they diverge across steps. Fix: never probe-merge a
+  program `semantics.analyze` labels `stateful` — single-shot observational
+  equivalence is only a sound equality witness for pure programs. Regression test
+  `TestStatefulSoundness` locks it in; the corpus now collapses only the genuinely
+  equal `tanh_gain ⇐ bounded_gain` (both `tanh(x)`).
+
+**Theory (the honest boundary).** A normal form that is topologically identical for
+*all* semantically-equal programs regardless of algorithm is impossible in general:
+program equivalence is undecidable (Rice's theorem; reduction from halting), and
+the minimal program for an intent is uncomputable (Kolmogorov complexity). What is
+possible — and what this pass is — is canonicalization *relative to a fixed theory*:
+a terminating + confluent rewrite system gives unique normal forms (Church–Rosser),
+and e-graph-style extraction picks the lowest-cost member of an equivalence class.
+On NGL's total, side-effect-free, analytic fragment we additionally get behavioural
+equivalence by finite probing (polynomial identity testing / Schwartz–Zippel). So
+the pass is **sound** (never merges what it can't verify) and practically strong,
+but complete only w.r.t. its rewrite theory and probe budget — not a universal
+intent-minimizer. That boundary is the design, not a limitation to paper over.
+
+[EVIDENCE: tests/genetic/test_normalize.py(13) green; explorer integration in test_normalize.py::TestExplorerIntegration]

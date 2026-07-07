@@ -981,6 +981,23 @@ def cmd_discover(args: argparse.Namespace) -> int:
         payload = {"mode": "extract-shared",
                    "extracted": res.extracted,
                    "macros": res.library.names()}
+    elif mode == "normalize":
+        from neuroslm.genetic.mechanic_optimizer import common_mechanics
+        from neuroslm.genetic.known import known_programs
+        from neuroslm.genetic.normalize import normalize_semantics
+        # the corpus to canonicalize: common mechanics + known prior-art programs
+        progs = {**known_programs(), **common_mechanics()}
+        res = normalize_semantics(progs, prefer=args.prefer)
+        collapsed = [c for c in res.classes if len(c.members) > 1]
+        print(f"[discover:normalize] {len(progs)} programs → {len(res.classes)} "
+              f"semantic classes ({len(collapsed)} collapse ≥2 variants; "
+              f"prefer={args.prefer})")
+        for c in collapsed:
+            others = [m for m in c.members if m != c.canonical]
+            print(f"  {c.canonical}  ⇐  {', '.join(others)}   [{c.reason}]")
+        if not collapsed:
+            print("  (every program is already its own canonical form)")
+        payload = {"mode": "normalize", **res.to_dict(), "prefer": args.prefer}
     else:
         print("Usage: brian discover {optimizer|flow|simplify} [...]", file=sys.stderr)
         return 1
@@ -4929,6 +4946,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Factor subexpressions shared across mechanics into reusable macros")
     sdx.add_argument("--out", help="write the extraction JSON here")
     sdx.set_defaults(func=cmd_discover)
+
+    sdn = sdiscover_sub.add_parser(
+        "normalize",
+        help="Semantic normalization: collapse equivalent mechanics to a canonical form")
+    sdn.add_argument("--prefer", default="frequency",
+                     choices=["frequency", "simplest"],
+                     help="canonical = most-used (frequency) or lowest-complexity (simplest)")
+    sdn.add_argument("--out", help="write the normalization JSON here")
+    sdn.set_defaults(func=cmd_discover)
 
     sdq = sdiscover_sub.add_parser(
         "qd",

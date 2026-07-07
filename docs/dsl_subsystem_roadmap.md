@@ -476,3 +476,19 @@ Findings H40:
   CSE across the whole mechanic set, so an improvement is reused everywhere, not
   just where found. `promote_modulation(store, name)` stamps a validated
   modulation as the reference implementation. `discover extract-shared`.
+- `normalize.py` — **semantic normalization** as a compiler step. `canonical_form`
+  reduces a program to its normal form under the convergent rewrite system
+  (`optimize`+`simplify` to a fixpoint); `semantic_signature` is that form's
+  structural key (equal ⇒ rewrite-provably equal). `normalize_semantics(programs,
+  counts, prefer)` clusters equivalent programs (rewrite-equal signatures, then
+  probe-equal merges gated by semantic role **and** statefulness) and substitutes
+  one canonical representative per class — most-used (`prefer="frequency"`) or
+  lowest-complexity (`prefer="simplest"`). Stateful programs are never probe-merged
+  (single-shot probes zero the state, so sgd and momentum would falsely unify).
+  Wired into `TrainingExplorer` (`ExploreConfig.normalize=True`): candidates are
+  canonicalized *before* the ledger's dud-skip/dedup, so exploration never
+  re-searches a syntactic variant. `discover normalize [--prefer simplest]`.
+  **Boundary (honest):** general equivalence is undecidable (Rice) and the minimal
+  program is uncomputable (Kolmogorov), so this is complete only *relative to its
+  rewrite theory + probe budget* — sound, practically strong on NGL's bounded
+  fragment, not a universal intent-minimizer.

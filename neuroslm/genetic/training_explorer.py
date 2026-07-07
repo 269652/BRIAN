@@ -37,6 +37,7 @@ class ExploreConfig:
     n_tensor: int = 8
     tol: float = 1e-4          # metric must improve by more than this to "keep"
     dud_penalty: float = 1e9
+    normalize: bool = True     # canonicalize candidates before the ledger sees them
 
 
 @dataclass
@@ -62,6 +63,24 @@ class TrainingExplorer:
             return self.explore(step, score_fn)
         return None
 
+    def _canon(self, prog: Program) -> Program:
+        """Canonical (normalized) form of a candidate, if normalization is on.
+
+        Collapsing syntactic variants to one normal form here means the ledger's
+        dud-skip and signature dedup operate on *semantics*, not syntax — so the
+        search never re-explores a rewrite of something already seen.
+        """
+        if not self.cfg.normalize:
+            return prog
+        try:
+            from neuroslm.genetic.normalize import canonical_form
+            return canonical_form(prog, n_probes=6, seed=0)
+        except Exception:
+            return prog
+
+    def _canonical_sig(self, prog: Program) -> str:
+        return self.ledger.signature(self._canon(prog))
+
     def explore(self, step: int, score_fn: Callable[[Program], float]) -> ExploreResult:
         cfg = self.cfg
         rng = np.random.default_rng(hash((self.run_id, step)) % (2**32))
@@ -71,6 +90,9 @@ class TrainingExplorer:
         skipped = [0]
 
         def evaluate(prog: Program) -> Objective:
+            # normalize first: every syntactic variant maps to one canonical form,
+            # so the dud-skip and dedup below are semantic, not syntactic
+            prog = self._canon(prog)
             # skip patterns prior runs already found unhelpful (ledger not mutated
             # until after this explore, so this reflects PAST runs only)
             if self.ledger.is_dud(prog):
