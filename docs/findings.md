@@ -2434,3 +2434,18 @@ here (an in-place `h→f(h)` modulation that rewrites `t0` is tagged
 labeling nuance, not a measurement error.
 
 [EVIDENCE: tests/genetic/test_training_explorer.py::TestPersistence (2 contracts) green; determinism via _stable_seed]
+
+**Addendum — persist the *minimal* mechanism.** The GA emits bloated winners (a
+real Colab discovery was 12 instructions, 8 of them dead code). Winners are now run
+through `_minimal_equivalent` (DCE + probe-verified peephole superopt, falling back
+to raw if not probe-equivalent) *before* persisting and installing, so the saved
+`modulations/*.neuro` **is** the mechanism. The pushed `run_0_step4000` (Δ
+4425.84→784.43, durable) reduces 12→3 ops: `g = |h|`, i.e. the modulation
+`h → h·|h|` (a sign-preserving squared gain / contrast-sharpening nonlinearity).
+Honest limit: the semantic-role label is *still* `optimizer_update` even minimized,
+because the discovered program reads an uninitialized register (`t3` read before
+write) which trips the stateful heuristic — a **search-quality** artifact (the GA
+emits programs that read undefined registers), not a persistence one. Simplifying
+the artifact doesn't fix a mislabel rooted in the program's own structure.
+
+[EVIDENCE: tests/genetic/test_training_explorer.py::TestPersistence::test_persisted_programs_are_minimal green; run_0_step4000 minimizes 12→3 ops]

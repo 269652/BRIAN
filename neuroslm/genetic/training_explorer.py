@@ -35,6 +35,24 @@ def _stable_seed(run_id: str, step: int) -> int:
     """
     h = hashlib.blake2b(f"{run_id}:{step}".encode(), digest_size=8)
     return int.from_bytes(h.digest(), "big") % (2**32)
+
+
+def _minimal_equivalent(program: Program, seed: int = 0):
+    """Verified-minimal form of a discovered winner — the mechanism, not the salad.
+
+    The GA emits bloated programs (a real discovery was 12 instructions, 8 dead);
+    DCE + the probe-verified peephole superoptimizer strip that to the essential
+    computation so the persisted ``modulations/*.neuro`` *is* the mechanism. Falls
+    back to the raw program if simplification isn't probe-equivalent.
+    """
+    from neuroslm.genetic.simplify import simplify, programs_equivalent
+    try:
+        minimal = simplify(program, n_probes=12, seed=seed)
+        if programs_equivalent(program, minimal, n_probes=12, seed=seed + 1):
+            return minimal
+    except Exception:
+        pass
+    return program
 from neuroslm.genetic.evolve import Objective, auto_evolve
 from neuroslm.genetic.ledger import SearchLedger
 from neuroslm.genetic.neuro_evolve import identity_modulation
@@ -282,18 +300,22 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
             _guard(step)             # revert first so the search sees a healthy model
             res = explorer.explore(step, val_ppl, progress=progress)
             installed = res.improved and math.isfinite(res.best_score)
+            winner = res.best_program
             if installed:
-                current_mod = res.best_program   # install the winner
+                if store is not None:
+                    winner = _minimal_equivalent(res.best_program, seed=step)
+                current_mod = winner   # install the (minimal) winner
                 mod_is_identity[0] = False
                 if store is not None:
-                    # persist the winner with its healthy-baseline Δ (res.baseline is
-                    # measured after _guard, i.e. on the restored healthy model)
+                    # persist the minimal mechanism with its healthy-baseline Δ
+                    # (res.baseline is measured after _guard, on the restored
+                    # healthy model; the minimal form is verified-equivalent).
                     from neuroslm.genetic.modulation_store import ModulationRecord
                     # name must be a bare identifier (the store parser is \w+) —
                     # run_id is "run-<seed>", so map hyphens to underscores
                     name = f"{explorer.run_id.replace('-', '_')}_step{step}"
                     store.save(ModulationRecord(
-                        name=name, program=res.best_program,
+                        name=name, program=winner,
                         metrics={"step": step,
                                  "baseline_ppl": round(res.baseline, 2),
                                  "best_ppl": round(res.best_score, 2),
@@ -305,7 +327,7 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
                 "baseline_ppl": round(res.baseline, 4),
                 "best_ppl": round(res.best_score, 4),
                 "evaluated": res.n_evaluated, "skipped_duds": res.n_skipped_duds,
-                "program": res.best_program.to_source() if installed else None,
+                "program": winner.to_source() if installed else None,
             })
 
     return {

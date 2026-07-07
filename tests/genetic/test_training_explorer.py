@@ -146,6 +146,21 @@ class TestPersistence:
             assert "baseline_ppl" in rec.metrics and "step" in rec.metrics
             assert len(rec.program.instructions) >= 1   # round-trips to a program
 
+    def test_persisted_programs_are_minimal(self, tmp_path):
+        # the saved .neuro must be the minimal mechanism, not op-salad with dead code
+        from neuroslm.genetic.modulation_store import ModulationStore
+        from neuroslm.genetic.simplify import dead_code_eliminate
+        store = ModulationStore(tmp_path / "mods")
+        run_training_with_exploration(
+            total_steps=500, explore_every=500, seed=0,
+            pop_size=16, generations=6, inner_steps=20, store=store)
+        saved = store.list_all()
+        assert len(saved) >= 1
+        for rec in saved:
+            # already DCE-minimal → a further DCE pass removes nothing
+            assert len(dead_code_eliminate(rec.program).instructions) == \
+                   len(rec.program.instructions), rec.program.to_source()
+
     def test_persisted_count_never_exceeds_installs(self, tmp_path):
         # reverted installs are dropped, so survivors ≤ installs
         from neuroslm.genetic.modulation_store import ModulationStore
