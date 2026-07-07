@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# yarn - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic yarn {
+    category: "position"
+    summary:  "Compute-efficient RoPE context extension via NTK-by-parts frequency interpolation plus an attention-temperature scaling."
+
+    equation: """
+        Scale RoPE wavelengths non-uniformly (interpolate low frequencies, extrapolate high frequencies — 'NTK-by-parts'), and apply a temperature 1/t to the attention logits (softmax(t·qk)) to preserve entropy at the longer length.
+        Needs ~10x fewer tokens / 2.5x fewer steps than prior RoPE-extension methods.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "widely_adopted"
+        novelty_vs_baseline: "Non-uniform RoPE frequency rescaling + attention temperature (vs linear PI or plain NTK scaling)."
+    }
+
+    when_to_use: """
+        Extending a RoPE-pretrained model 8-32x context with light fine-tuning (e.g. Llama 64k/128k).
+    """
+
+    not_for: """
+        Non-RoPE models (NoPE/ALiBi); from-scratch training (it is an extension recipe).
+    """
+
+    empirical_evidence: {
+        source: "Peng et al., 2023 (arXiv:2309.00071)"
+        result: "Extends Llama context with 10x fewer tokens and 2.5x fewer steps than prior methods; SOTA context extension at the time"
+        caveat: "RoPE-specific; extrapolation beyond the fine-tune length is bounded"
+    }
+
+    references: [
+        "Peng, Quesnelle, Fan, Shippole, 2023, YaRN: Efficient Context Window Extension of Large Language Models, arXiv:2309.00071"
+    ]
+}

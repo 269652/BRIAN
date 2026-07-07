@@ -1,0 +1,39 @@
+# -*- coding: utf-8 -*-
+# xlstm - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic xlstm {
+    category: "sequence_mixer"
+    summary:  "Extended LSTM scaled to LLM sizes: exponential gating with stabilization, plus sLSTM (scalar memory, new mixing) and mLSTM (matrix memory, parallelizable)."
+
+    equation: """
+        sLSTM: scalar memory with exponential input/forget gates and a normalizer/stabilizer state for numerical stability and new memory mixing across heads.
+        mLSTM: matrix memory C_t = f_t C_{t-1} + i_t v_t k_t^T with a covariance update, fully parallelizable (no hidden-state recurrence in the mix).
+        Residual xLSTM blocks stack these.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "promising"
+        novelty_vs_baseline: "Modernizes the LSTM cell (exponential gating, matrix memory, parallel training) for LLM scale."
+    }
+
+    when_to_use: """
+        Attention-free recurrent LM at scale; constant-memory inference; a modern RNN alternative to transformers/SSMs.
+    """
+
+    not_for: """
+        When mature transformer tooling/ecosystem is required; tasks dominated by exact long-range retrieval.
+    """
+
+    empirical_evidence: {
+        source: "Beck et al., 2024 (arXiv:2405.04517)"
+        result: "Competitive with SOTA transformers and SSMs in performance and scaling on LM"
+        caveat: "sLSTM's memory mixing is not fully parallelizable (mLSTM is)"
+    }
+
+    references: [
+        "Beck, Poeppel, Spanring et al. (Hochreiter lab), 2024, xLSTM: Extended Long Short-Term Memory, arXiv:2405.04517"
+    ]
+}

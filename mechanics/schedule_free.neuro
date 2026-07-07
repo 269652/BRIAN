@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# schedule_free - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic schedule_free {
+    category: "optimizer"
+    summary:  "Removes the learning-rate schedule entirely via a specific iterate-averaging + interpolated-gradient scheme; no extra hyperparameters over momentum."
+
+    equation: """
+        Keep a running average x of iterates and evaluate the gradient at an interpolated point y = (1−beta)z + beta·x (z is the base sequence), updating z by the gradient at y and x by averaging.
+        Unifies scheduling and iterate averaging so no decay curve or stopping time is needed.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "promising"
+        novelty_vs_baseline: "Replaces the LR schedule with averaging + interpolated-point gradients (vs cosine/WSD decay)."
+    }
+
+    when_to_use: """
+        Training with an unknown/open-ended horizon; when you want to avoid tuning a decay schedule.
+    """
+
+    not_for: """
+        When a well-tuned cosine/WSD schedule already wins and the horizon is known.
+    """
+
+    empirical_evidence: {
+        source: "Defazio et al., 2024 (arXiv:2405.15682)"
+        result: "Matches or beats schedules across convex-to-deep-learning problems; core of the winning MLCommons 2024 AlgoPerf self-tuning entry"
+        caveat: "Averaging state adds memory; benefits largest when horizon is unknown"
+    }
+
+    references: [
+        "Defazio, Yang, Mehta, Mishchenko, Khaled, Cutkosky (Meta), 2024, The Road Less Scheduled, arXiv:2405.15682"
+    ]
+}

@@ -1,0 +1,39 @@
+# -*- coding: utf-8 -*-
+# gated_deltanet - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic gated_deltanet {
+    category: "sequence_mixer"
+    summary:  "DeltaNet augmented with a data-dependent gate/decay on the state, unifying gating (fast erasure) with the delta rule (targeted updates)."
+
+    equation: """
+        Combine a scalar/vector forget gate alpha_t with the delta rule: S_t = alpha_t · S_{t-1}(I − β_t k_t k_t^T) + β_t v_t k_t^T.
+        Gating enables rapid, global memory erasure while the delta rule does precise, targeted edits; a hardware-efficient chunk-parallel algorithm trains it.
+        Strong as the linear layer in hybrids (Gated DeltaNet-H).
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "promising"
+        novelty_vs_baseline: "Adds data-dependent gating/decay to the delta-rule state (improves Mamba2/DeltaNet)."
+    }
+
+    when_to_use: """
+        Long-context linear-time modeling needing both adaptive forgetting and precise recall; the recurrent layer in hybrid stacks.
+    """
+
+    not_for: """
+        Tiny-context tasks where the extra gate is unjustified.
+    """
+
+    empirical_evidence: {
+        source: "Yang et al., 2024 (arXiv:2412.06464, ICLR 2025)"
+        result: "Surpasses Mamba2 and DeltaNet on LM, common-sense reasoning, in-context recall, length extrapolation and long-context; strong hybrids"
+        caveat: "Best results in hybrid (with attention) configurations"
+    }
+
+    references: [
+        "Yang, Kautz, Hatamizadeh (NVIDIA), 2024, Gated Delta Networks: Improving Mamba2 with Delta Rule, arXiv:2412.06464 (ICLR 2025)"
+    ]
+}

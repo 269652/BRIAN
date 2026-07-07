@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# deltanet - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic deltanet {
+    category: "sequence_mixer"
+    summary:  "Linear-attention sequence mixer using the delta (error-correcting) update rule, made parallel over sequence length via a Householder-product representation."
+
+    equation: """
+        State S_t is updated by the delta rule S_t = S_{t-1}(I − β_t k_t k_t^T) + β_t v_t k_t^T (an error-correcting write toward v_t at key k_t), read as o_t = S_t q_t.
+        A WY/Householder-product representation makes training chunk-parallel over sequence length rather than strictly recurrent.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "promising"
+        novelty_vs_baseline: "Replaces the additive outer-product state update of linear attention with the error-correcting delta rule, parallelized over sequence length."
+    }
+
+    when_to_use: """
+        Linear-time O(n) sequence modeling with strong associative recall; recall-heavy tasks where plain linear attention (additive outer-product) underperforms.
+    """
+
+    not_for: """
+        When full softmax-attention accuracy is required; very short sequences.
+    """
+
+    empirical_evidence: {
+        source: "Yang et al., 2024 (arXiv:2406.06484)"
+        result: "1.3B/100B-token DeltaNet beats Mamba and GLA on perplexity and recall; hybrids beat strong transformer baselines"
+        caveat: "Pure linear model still trails full attention on some tasks; hybrids recommended"
+    }
+
+    references: [
+        "Yang, Wang et al. (MIT/MIT-IBM), 2024, Parallelizing Linear Transformers with the Delta Rule over Sequence Length, arXiv:2406.06484"
+    ]
+}

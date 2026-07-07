@@ -1,0 +1,39 @@
+# -*- coding: utf-8 -*-
+# forgetting_attention - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic forgetting_attention {
+    category: "attention"
+    summary:  "Softmax attention with a data-dependent forget gate that down-weights unnormalized attention scores by relative distance; needs no positional embedding."
+
+    equation: """
+        Per head, a data-dependent forget gate f_t in (0,1) yields a cumulative decay; the attention logit between positions i>j is biased by Σ_{j<t<=i} log f_t, i.e.
+        score_{ij} += Σ log f_t.
+        This is a learned, input-dependent generalization of ALiBi's fixed slopes; compatible with FlashAttention and RoPE-free (FoX).
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "promising"
+        novelty_vs_baseline: "Replaces static ALiBi/positional bias with a per-head data-dependent forget gate on softmax logits."
+    }
+
+    when_to_use: """
+        Long-context LMs wanting learned recency/decay without fixed ALiBi slopes or RoPE; keeps transformer-grade long-range recall.
+    """
+
+    not_for: """
+        Tasks where uniform long-range attention (no decay) is required.
+    """
+
+    empirical_evidence: {
+        source: "Lin et al., 2025 (arXiv:2503.02130, ICLR 2025)"
+        result: "Outperforms the standard transformer on long-context LM, length extrapolation and short-context tasks; beats Mamba-2/HGRN2/DeltaNet on long-context recall"
+        caveat: "Single-paper evidence; gate adds a small per-head cost"
+    }
+
+    references: [
+        "Lin, Nikishin, He, Courville, 2025, Forgetting Transformer: Softmax Attention with a Forget Gate, arXiv:2503.02130 (ICLR 2025)"
+    ]
+}

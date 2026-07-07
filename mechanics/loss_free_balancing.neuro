@@ -1,0 +1,39 @@
+# -*- coding: utf-8 -*-
+# loss_free_balancing - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic loss_free_balancing {
+    category: "routing"
+    summary:  "Auxiliary-loss-free MoE load balancing: a per-expert bias added to routing scores before top-k, nudged by recent load — no balance loss, no interference gradients."
+
+    equation: """
+        For each expert e keep a bias b_e; route on score_e + b_e for the top-k decision but combine with the raw gate.
+        After each step, increase b_e for under-loaded experts and decrease it for over-loaded ones (b_e <- b_e + u·sign(target − load_e)).
+        No balancing loss term, so no gradient interference with the LM objective.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "widely_adopted"
+        novelty_vs_baseline: "Replaces the MoE auxiliary balance loss with a load-driven routing bias controller (no extra gradient)."
+    }
+
+    when_to_use: """
+        MoE training where the auxiliary balance loss degrades quality (routing collapse vs interference trade-off); used in DeepSeek-V3.
+    """
+
+    not_for: """
+        Dense models; settings where a small aux loss is already harmless.
+    """
+
+    empirical_evidence: {
+        source: "DeepSeek-AI, 2024 (arXiv:2408.15664); DeepSeek-V3"
+        result: "Better validation loss and load balance than aux-loss methods up to 3B; used at scale in DeepSeek-V3"
+        caveat: "Bias update rate u must be tuned; bias is non-differentiable"
+    }
+
+    references: [
+        "Wang, Gao, Zhao, Sun, Dai (DeepSeek-AI / PKU), 2024, Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts, arXiv:2408.15664"
+    ]
+}

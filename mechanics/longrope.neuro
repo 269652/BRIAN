@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# longrope - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic longrope {
+    category: "position"
+    summary:  "Extends a RoPE LLM context beyond 2M tokens via evolutionary-searched non-uniform per-dimension frequency rescaling and a progressive two-stage extension."
+
+    equation: """
+        Exploit two non-uniformities: per-RoPE-dimension and per-token-position.
+        An evolutionary search finds per-dimension rescale factors for an 8x non-fine-tuned jump; then progressively fine-tune at 256k and re-interpolate to 2048k; finally readjust on 8k to recover short-context quality.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "widely_adopted"
+        novelty_vs_baseline: "Adds searched per-dimension (non-uniform) RoPE scaling and progressive extension on top of PI/YaRN."
+    }
+
+    when_to_use: """
+        Extreme context extension (hundreds of k to millions of tokens) of an existing RoPE model.
+    """
+
+    not_for: """
+        Short-context models (search overhead unjustified); non-RoPE models.
+    """
+
+    empirical_evidence: {
+        source: "Ding et al., 2024 (arXiv:2402.13753)"
+        result: "2048k context with <=1k fine-tuning steps at <=256k lengths while keeping short-context performance"
+        caveat: "Evolutionary search adds a one-off cost; RoPE-specific"
+    }
+
+    references: [
+        "Ding et al. (Microsoft), 2024, LongRoPE: Extending LLM Context Window Beyond 2 Million Tokens, arXiv:2402.13753"
+    ]
+}

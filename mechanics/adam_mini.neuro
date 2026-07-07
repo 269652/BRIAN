@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# adam_mini - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic adam_mini {
+    category: "optimizer"
+    summary:  "Adam with far fewer learning rates: one rate per parameter block (chosen from Hessian structure), cutting the second-moment (v) memory ~45-50%."
+
+    equation: """
+        Partition parameters into blocks aligned with the neural-net Hessian's near-block-diagonal structure and assign a single learning rate per block (replacing Adam's per-parameter 1/sqrt(v)).
+        ~>=99.9% of Adam's individual v-rates are shown removable with negligible loss.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "promising"
+        novelty_vs_baseline: "One learning rate per Hessian-aligned parameter block instead of Adam's per-parameter second moment."
+    }
+
+    when_to_use: """
+        Memory-bound training (large models / limited VRAM) wanting AdamW-level quality at ~half the optimizer-state memory and higher throughput.
+    """
+
+    not_for: """
+        Regimes where genuine per-parameter adaptivity is essential; very small models where memory is a non-issue.
+    """
+
+    empirical_evidence: {
+        source: "Zhang et al., 2024 (arXiv:2406.16793)"
+        result: "On par or better than AdamW at 50% less optimizer memory; ~49.5% higher throughput on Llama2-7B pretraining (125M-7B)"
+        caveat: "Block partition follows a Hessian-structure heuristic"
+    }
+
+    references: [
+        "Zhang, Chen, Li et al., 2024, Adam-mini: Use Fewer Learning Rates To Gain More, arXiv:2406.16793"
+    ]
+}

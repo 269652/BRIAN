@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# rwkv7 - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic rwkv7 {
+    category: "sequence_mixer"
+    summary:  "RWKV-7 'Goose': attention-free RNN with a generalized delta rule using vector-valued gating and in-context learning rates; constant memory/time per token."
+
+    equation: """
+        A generalized delta-rule state evolution with vector-valued (per-channel) gating, in-context learning rates and a relaxed value-replacement rule, giving expressive dynamic state evolution.
+        Parallelizable training; can perform state tracking and recognize all regular languages (beyond TC^0 under standard conjectures).
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "promising"
+        novelty_vs_baseline: "Generalizes the delta rule with vector gating + in-context learning rates (vs RWKV-6 / scalar-gated linear RNNs)."
+    }
+
+    when_to_use: """
+        Constant-memory, constant-time-per-token long-context LM; multilingual settings; state-tracking tasks.
+    """
+
+    not_for: """
+        Heavy in-context retrieval where full attention still wins; ecosystems needing standard transformer tooling.
+    """
+
+    empirical_evidence: {
+        source: "Peng et al., 2025 (arXiv:2503.14456)"
+        result: "3B SOTA on multilingual tasks, matches 3B English SOTA on far fewer training tokens; provable state-tracking / regular-language recognition"
+        caveat: "Recall-heavy tasks may still favor attention"
+    }
+
+    references: [
+        "Peng et al., 2025, RWKV-7 'Goose' with Expressive Dynamic State Evolution, arXiv:2503.14456"
+    ]
+}

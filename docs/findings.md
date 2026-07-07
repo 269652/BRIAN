@@ -2295,3 +2295,34 @@ but complete only w.r.t. its rewrite theory and probe budget — not a universal
 intent-minimizer. That boundary is the design, not a limitation to paper over.
 
 [EVIDENCE: tests/genetic/test_normalize.py(13) green; explorer integration in test_normalize.py::TestExplorerIntegration]
+
+### H42 — Prepopulate the catalog with 22 web-verified 2024–2026 research mechanics (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — catalog grows 74 → **96** mechanics; every entry's
+arXiv id was web-verified before writing (not model-recalled). Since
+`catalog_names()` feeds the novelty gate, the discovery loop now treats all of
+these as prior art automatically.
+
+New `mechanics/*.neuro` specs (name — arXiv):
+- **attention:** native_sparse_attention (2502.11089), moba (2502.13189),
+  selective_attention (2410.02703), forgetting_attention (2503.02130),
+  softpick (2504.20966)
+- **position:** yarn (2309.00071), longrope (2402.13753)
+- **sequence_mixer:** deltanet (2406.06484), gated_deltanet (2412.06464),
+  titans (2501.00663), xlstm (2405.04517), rwkv7 (2503.14456)
+- **normalization:** ngpt (2410.01131)
+- **routing:** loss_free_balancing (2408.15664), fine_grained_experts (2401.06066)
+- **optimizer:** soap (2409.11321), schedule_free (2405.15682),
+  adam_mini (2406.16793), galore (2403.03507)
+- **training_dynamics:** qk_clip / MuonClip (2507.20534), grokfast (2405.20233),
+  mup (2203.03466)
+
+Each spec carries `summary`, `equation` (mechanism), `when_to_use`, `not_for`,
+`empirical_evidence{source,result,caveat}`, `maturity`, `novelty_vs_baseline`,
+and a `references` citation — the same schema the existing 74 use. `impl` is left
+empty: these are **prior-art catalog entries**, not wired Python mechanisms
+(honest per §14 — they document what exists so the search doesn't rediscover it,
+they are not stubbed implementations claiming behaviour they lack). Provenance:
+every arXiv id confirmed by web search this session (WebSearch tool), not recalled.
+
+[EVIDENCE: tests/genetic/test_catalog.py::TestPrepopulated2024_2026 (3 contracts) green; mechanics/ +22 files parse via mechanic_parser]

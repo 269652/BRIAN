@@ -1,0 +1,39 @@
+# -*- coding: utf-8 -*-
+# grokfast - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic grokfast {
+    category: "training_dynamics"
+    summary:  "Accelerates grokking (delayed generalization) by low-pass filtering each parameter's gradient trajectory to amplify the slow, generalization-inducing component."
+
+    equation: """
+        Treat the sequence of a parameter's gradients as a time signal; decompose into fast (overfitting) and slow (generalizing) components and amplify the slow part, e.g.
+        g_hat = g + lambda·EMA_slow(g) (an EMA/low-pass filter).
+        A few lines of code on top of any optimizer.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "experimental"
+        novelty_vs_baseline: "Amplifies the low-frequency (slow) gradient component to speed grokking (vs plain SGD/Adam trajectories)."
+    }
+
+    when_to_use: """
+        Small / algorithmic / arithmetic tasks that grok late, where you want generalization far sooner.
+    """
+
+    not_for: """
+        Large web-scale pretraining (unproven there); tasks that already generalize promptly.
+    """
+
+    empirical_evidence: {
+        source: "Lee et al., 2024 (arXiv:2405.20233)"
+        result: ">50x faster grokking across image/language/graph tasks with a few lines of code"
+        caveat: "Demonstrated on grokking-prone small tasks; unproven at web scale"
+    }
+
+    references: [
+        "Lee, Kang, Kim, Lee (SNU), 2024, Grokfast: Accelerated Grokking by Amplifying Slow Gradients, arXiv:2405.20233"
+    ]
+}

@@ -1,0 +1,37 @@
+# -*- coding: utf-8 -*-
+# softpick - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic softpick {
+    category: "attention"
+    summary:  "Rectified, not-sum-to-one drop-in replacement for the attention softmax that permits exact zeros, eliminating attention sinks and massive activations."
+
+    equation: """
+        Replace softmax normalization with a rectified variant that does not force the weights to sum to 1 (allowing true zeros and a genuine 'attend to nothing' option), producing sparse attention maps and far lower activation kurtosis.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "experimental"
+        novelty_vs_baseline: "Swaps the softmax normalizer for a rectified non-normalized one (vs standard sum-to-one softmax)."
+    }
+
+    when_to_use: """
+        Quantization-friendly / low-precision attention, interpretability, sparsity and pruning studies where sink tokens and outlier activations hurt.
+    """
+
+    not_for: """
+        Drop-in cases where downstream code relies on attention weights summing to 1 or on sink tokens being present.
+    """
+
+    empirical_evidence: {
+        source: "Zuhri et al., 2025 (arXiv:2504.20966)"
+        result: "0% attention-sink rate, ~47% attention sparsity, activation kurtosis 340 vs 33,510, better low-bit quantization at 340M params"
+        caveat: "Evaluated at 340M scale; not sum-to-one changes downstream assumptions"
+    }
+
+    references: [
+        "Zuhri, Fuadi et al., 2025, Softpick: No Attention Sink, No Massive Activations with Rectified Softmax, arXiv:2504.20966"
+    ]
+}

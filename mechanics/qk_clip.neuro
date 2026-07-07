@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# qk_clip - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic qk_clip {
+    category: "training_dynamics"
+    summary:  "MuonClip's stabilizer: rescales the query/key projection weights after each optimizer step so attention logits cannot explode (used to train Kimi K2 at 1T scale spike-free)."
+
+    equation: """
+        After the (Muon) optimizer update, for each head whose max attention logit exceeds a threshold tau, rescale that head's W_q, W_k by sqrt(tau / max_logit) — clamping the source of the logit rather than the logit itself, leaving healthy heads untouched.
+        Paired with Muon it forms MuonClip.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "widely_adopted"
+        novelty_vs_baseline: "Post-optimizer weight-rescaling clamp on Q/K (vs QK-norm's forward-pass normalization or plain logit soft-capping)."
+    }
+
+    when_to_use: """
+        Large / MoE runs with spectral-norm-constrained optimizers (Muon family) prone to attention-logit explosion and loss spikes.
+    """
+
+    not_for: """
+        Adam-family runs without logit blow-up; when qk_norm already bounds logits.
+    """
+
+    empirical_evidence: {
+        source: "Moonshot AI, 2025 (arXiv:2507.20534)"
+        result: "Kimi K2 (1T params) pretrained on 15.5T tokens with zero loss spikes using Muon + QK-Clip"
+        caveat: "Coupled to the Muon optimizer; threshold tau must be tuned"
+    }
+
+    references: [
+        "Kimi Team (Moonshot AI), 2025, Kimi K2: Open Agentic Intelligence, arXiv:2507.20534"
+    ]
+}

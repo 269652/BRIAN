@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# mup - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic mup {
+    category: "training_dynamics"
+    summary:  "Maximal Update Parametrization: width-invariant init/LR scaling so optimal hyperparameters tuned on a small proxy model transfer zero-shot to a much larger one."
+
+    equation: """
+        Scale per-layer initialization variances, learning rates and output multipliers with width (fan-in) so that activations, updates and logits stay O(1) as width grows (the 'maximal update' feature-learning regime).
+        Tune HPs on a narrow model, then transfer them unchanged to the wide target (muTransfer).
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "widely_adopted"
+        novelty_vs_baseline: "Width-correct init/LR/output scaling enabling HP transfer (vs standard/NTK parametrization where optima shift with width)."
+    }
+
+    when_to_use: """
+        Zero-shot hyperparameter transfer across model scale; cheap HP search on a small proxy before a big run.
+    """
+
+    not_for: """
+        Single fixed-width models where transfer is irrelevant; non-standard layers needing bespoke scaling rules.
+    """
+
+    empirical_evidence: {
+        source: "Yang et al., 2022 (arXiv:2203.03466); standard practice by 2024-25"
+        result: "HPs tuned on small models transfer to models orders of magnitude larger; now standard in large-model recipes"
+        caveat: "Predates 2024 but widely used; requires correct per-layer scaling of every component"
+    }
+
+    references: [
+        "Yang, Hu et al. (Microsoft), 2022, Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer, arXiv:2203.03466"
+    ]
+}

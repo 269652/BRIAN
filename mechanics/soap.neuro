@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# soap - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic soap {
+    category: "optimizer"
+    summary:  "Runs Adam in Shampoo's eigenbasis: a second-order-flavored optimizer at close to Adam's cost and simplicity."
+
+    equation: """
+        Maintain Shampoo's preconditioner eigenbasis Q (updated every f steps) and run AdamW on the gradient rotated into that basis: g' = Q^T g, take an Adam step, rotate back.
+        Formally Shampoo (1/2 power) equals Adafactor in Shampoo's eigenbasis; SOAP adds only one hyperparameter (preconditioning frequency) over Adam.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "promising"
+        novelty_vs_baseline: "Rotates Adam into Shampoo's eigenbasis (vs full Shampoo or plain AdamW)."
+    }
+
+    when_to_use: """
+        Large-model pretraining wanting Shampoo-level quality with near-Adam wall-clock and one extra knob; large-batch regimes.
+    """
+
+    not_for: """
+        Memory-tight regimes (stores the eigenbasis); tiny models where Adam already suffices.
+    """
+
+    empirical_evidence: {
+        source: "Vyas et al., 2024 (arXiv:2409.11321)"
+        result: "vs AdamW: >40% fewer iterations, >35% less wall-clock in the large-batch regime (360M/660M LM); ~20% over Shampoo"
+        caveat: "Extra memory for the eigenbasis; gains largest at large batch"
+    }
+
+    references: [
+        "Vyas, Morwani, Zhao et al. (Kakade lab), 2024, SOAP: Improving and Stabilizing Shampoo using Adam, arXiv:2409.11321"
+    ]
+}

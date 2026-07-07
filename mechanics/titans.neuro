@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# titans - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic titans {
+    category: "sequence_mixer"
+    summary:  "A deep neural long-term memory module that learns to memorize at test time via a surprise-gated update, used alongside attention (short-term memory)."
+
+    equation: """
+        A non-linear recurrent memory M with its own parameters is updated during the forward pass by gradient of a surprise (associative) loss, with a momentum-like accumulation and a data-dependent forget gate: M_t <- (1−a_t)M_{t-1} − theta_t ∇ℓ(M_{t-1}; k_t, v_t).
+        Attention serves as short-term memory; three variants (memory as context / gate / layer) integrate the two.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "experimental"
+        novelty_vs_baseline: "Adds a test-time-learned deep memory (weights updated during inference) beside attention, vs fixed-weight recurrence."
+    }
+
+    when_to_use: """
+        Very long context (>2M) and test-time adaptation where a fast-weight memory that keeps learning during inference helps.
+    """
+
+    not_for: """
+        Short static tasks where a plain transformer suffices; latency-critical settings (the inner update adds cost).
+    """
+
+    empirical_evidence: {
+        source: "Behrouz et al., 2025 (arXiv:2501.00663)"
+        result: "Beats transformers and modern linear recurrent models on LM, common-sense reasoning, genomics and time-series; scales past 2M context"
+        caveat: "Early-stage; inner-loop test-time update adds compute"
+    }
+
+    references: [
+        "Behrouz, Zhong, Mirrokni (Google), 2025, Titans: Learning to Memorize at Test Time, arXiv:2501.00663"
+    ]
+}

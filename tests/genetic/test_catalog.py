@@ -64,6 +64,37 @@ class TestCatalogDescribe:
         assert "unknown" in text.lower() or text == ""
 
 
+class TestPrepopulated2024_2026:
+    """The web-verified 2024-2026 mechanics prepopulated into the catalog."""
+
+    NEW = [
+        "native_sparse_attention", "moba", "selective_attention",
+        "forgetting_attention", "softpick", "yarn", "longrope", "deltanet",
+        "gated_deltanet", "titans", "xlstm", "rwkv7", "ngpt", "qk_clip",
+        "soap", "schedule_free", "adam_mini", "galore", "grokfast",
+        "loss_free_balancing", "fine_grained_experts", "mup",
+    ]
+
+    def test_all_present(self):
+        names = set(load_catalog().names())
+        missing = [n for n in self.NEW if n not in names]
+        assert not missing, missing
+
+    def test_each_has_summary_category_and_reference(self):
+        cat = load_catalog()
+        for n in self.NEW:
+            s = cat.get(n)
+            assert s is not None, n
+            assert s.category and s.summary, n
+            assert s.references, n          # every entry cites its source
+
+    def test_catalog_spans_the_new_families(self):
+        cat = load_catalog()
+        assert cat.get("mamba_ssm") is not None      # legacy still there
+        assert cat.get("native_sparse_attention").category == "attention"
+        assert cat.get("galore").category == "optimizer"
+
+
 class TestPriorArtNames:
     def test_catalog_names_are_prior_art(self):
         names = catalog_names()

@@ -1,0 +1,40 @@
+# -*- coding: utf-8 -*-
+# moba - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic moba {
+    category: "attention"
+    summary:  "Mixture-of-Block-Attention: route each query to a top-k subset of KV blocks via an MoE-style gate; switches seamlessly between full and sparse attention."
+
+    equation: """
+        Partition K,V into blocks; a lightweight gate scores each block for a query (e.g.
+        against block mean keys) and selects the top-k blocks; the query attends only within the selected blocks.
+        'Less structure' — the model chooses where to attend rather than a fixed pattern.
+        Setting k = all recovers full attention.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "promising"
+        novelty_vs_baseline: "Applies MoE top-k routing to KV blocks of the attention itself, rather than to FFN experts."
+    }
+
+    when_to_use: """
+        Very long context where you want a cheap, learned toggle between dense and sparse and a drop-in path back to full attention.
+    """
+
+    not_for: """
+        Tasks needing every-token global attention at all layers; very short contexts.
+    """
+
+    empirical_evidence: {
+        source: "Moonshot AI, 2025 (arXiv:2502.13189)"
+        result: "Strong long-context performance while deployed in Kimi; seamless full<->sparse switching"
+        caveat: "Block granularity and k are sensitive hyperparameters"
+    }
+
+    references: [
+        "Lu et al. (Moonshot AI), 2025, MoBA: Mixture of Block Attention for Long-Context LLMs, arXiv:2502.13189"
+    ]
+}

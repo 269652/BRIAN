@@ -1,0 +1,39 @@
+# -*- coding: utf-8 -*-
+# fine_grained_experts - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic fine_grained_experts {
+    category: "routing"
+    summary:  "MoE with finer expert granularity plus isolated shared experts: split each expert into m smaller ones (activate mK) and reserve K_s always-on shared experts for common knowledge."
+
+    equation: """
+        Segment N experts into mN smaller experts, activating mK of them, so the router composes knowledge more finely and each expert specializes more.
+        Isolate K_s shared experts that every token uses (capturing common knowledge and reducing routed-expert redundancy).
+        Combines with loss-free/aux balancing.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "widely_adopted"
+        novelty_vs_baseline: "Finer expert segmentation + dedicated shared experts (vs coarse top-K GShard/Switch routing)."
+    }
+
+    when_to_use: """
+        MoE LMs wanting higher expert specialization and parameter efficiency at fixed active compute (DeepSeekMoE family).
+    """
+
+    not_for: """
+        Small MoE where finer granularity adds routing overhead without gain; dense models.
+    """
+
+    empirical_evidence: {
+        source: "Dai et al., 2024 (arXiv:2401.06066)"
+        result: "DeepSeekMoE-16B matches DeepSeek-7B / Llama2-7B at ~40% of the compute"
+        caveat: "More experts increases router/all-to-all overhead"
+    }
+
+    references: [
+        "Dai et al. (DeepSeek-AI), 2024, DeepSeekMoE: Towards Ultimate Expert Specialization in Mixture-of-Experts Language Models, arXiv:2401.06066"
+    ]
+}

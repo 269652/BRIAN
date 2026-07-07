@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# selective_attention - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic selective_attention {
+    category: "attention"
+    summary:  "Parameter-free change to softmax attention that lets tokens reduce the attention other tokens pay to them, removing no-longer-needed context."
+
+    equation: """
+        Augment the attention logits with a learned per-token 'selection' signal S so that a token can accumulate a subtractive mask over future queries: masked_logit_{ij} = q_i·k_j − F(S)_{ij}, where F accumulates selection over positions.
+        No added parameters; the signal is read from existing activations.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "promising"
+        novelty_vs_baseline: "Adds a parameter-free subtractive selection term to standard softmax attention (vs static ALiBi/window masks)."
+    }
+
+    when_to_use: """
+        Decoder LMs where pruning stale context improves quality and shrinks the KV cache (large inference memory savings at fixed context).
+    """
+
+    not_for: """
+        Bidirectional/encoder models; cases where every token must remain fully attendable.
+    """
+
+    empirical_evidence: {
+        source: "Google Research, 2024 (arXiv:2410.02703)"
+        result: "Matches transformers with ~2x more attention heads/params; up to 47x less attention KV memory at 2048 ctx"
+        caveat: "Gains measured mainly on C4 LM; parameter-free variant"
+    }
+
+    references: [
+        "Leviathan, Kalman, Matias (Google Research), 2024, Selective Attention Improves Transformer, arXiv:2410.02703"
+    ]
+}

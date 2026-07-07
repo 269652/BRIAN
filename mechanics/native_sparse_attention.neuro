@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# native_sparse_attention - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic native_sparse_attention {
+    category: "attention"
+    summary:  "Natively-trainable hierarchical sparse attention: coarse compressed tokens + fine selected blocks + a sliding window, gate-combined, with hardware-aligned kernels."
+
+    equation: """
+        Three parallel branches per query — (1) compress KV into coarse block summaries, (2) top-n block SELECTION on compressed scores, (3) a local sliding window — each producing an attention output, combined by a learned gate g: out = Σ_b g_b · attn_b(q, K_b, V_b).
+        Trained end-to-end (sparsity is learned, not post-hoc); kernels are arithmetic-intensity balanced for Tensor Cores.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "widely_adopted"
+        novelty_vs_baseline: "Replaces dense O(n^2) softmax attention with a learned, natively-trainable sparse mixture (vs post-hoc pruning of a dense map)."
+    }
+
+    when_to_use: """
+        Long-context pretraining where you want the sparsity pattern learned end-to-end and real wall-clock speedups on 64k+ sequences; decode/prefill both accelerated.
+    """
+
+    not_for: """
+        Short sequences where dense attention is already cheap; settings without the custom kernels (the speedup is kernel-dependent).
+    """
+
+    empirical_evidence: {
+        source: "DeepSeek-AI, 2025 (arXiv:2502.11089, ACL 2025)"
+        result: "Matches or exceeds full attention on general/long-context/reasoning benchmarks with large speedups on 64k sequences across decode, forward and backward"
+        caveat: "Speedup depends on the custom hardware-aligned kernels"
+    }
+
+    references: [
+        "Yuan et al. (DeepSeek-AI), 2025, Native Sparse Attention: Hardware-Aligned and Natively Trainable Sparse Attention, arXiv:2502.11089 (ACL 2025)"
+    ]
+}

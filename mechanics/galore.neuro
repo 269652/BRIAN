@@ -1,0 +1,39 @@
+# -*- coding: utf-8 -*-
+# galore - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic galore {
+    category: "optimizer"
+    summary:  "Gradient Low-Rank Projection: project gradients into a periodically-updated low-rank subspace before the optimizer state, enabling full-parameter training in far less memory."
+
+    equation: """
+        Each step, compute a low-rank projection P (e.g.
+        from an SVD of the gradient, refreshed every K steps), keep Adam moments only in the r-dim subspace: project g -> P^T g, Adam-step in R^r, project the update back P·update.
+        Trains all parameters (unlike LoRA) but stores optimizer state at rank r.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "widely_adopted"
+        novelty_vs_baseline: "Low-rank-projects the gradients/optimizer state while keeping full-rank weights (vs LoRA's low-rank weight adapters)."
+    }
+
+    when_to_use: """
+        Pretraining/fine-tuning large models on limited VRAM (e.g. 7B on a 24GB GPU) without model parallelism or offload.
+    """
+
+    not_for: """
+        When the low-rank projection error degrades final quality; tasks needing full-rank optimizer statistics.
+    """
+
+    empirical_evidence: {
+        source: "Zhao et al., 2024 (arXiv:2403.03507, ICML 2024)"
+        result: "Up to 65.5% optimizer-state memory reduction; pretrains a 7B model on a 24GB consumer GPU with no offload"
+        caveat: "Projection rank r trades memory against fidelity; periodic SVD cost"
+    }
+
+    references: [
+        "Zhao, Zhang, Chen, Wang, Anandkumar, Tian, 2024, GaLore: Memory-Efficient LLM Training by Gradient Low-Rank Projection, arXiv:2403.03507"
+    ]
+}

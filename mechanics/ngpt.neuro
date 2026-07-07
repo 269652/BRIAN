@@ -1,0 +1,38 @@
+# -*- coding: utf-8 -*-
+# ngpt - research mechanic (prior-art catalog entry).
+# arXiv id web-verified. Catalog/prior-art spec: no in-repo impl wired yet.
+
+export mechanic ngpt {
+    category: "normalization"
+    summary:  "Normalized transformer: every embedding, weight matrix and hidden state is unit-norm; the residual stream travels on a hypersphere and each block is a learned geodesic step."
+
+    equation: """
+        Constrain all vectors to the unit hypersphere; the hidden state h moves by normalized displacement h <- Norm(h + alpha·(Norm(f(h)) − h)) with learned per-dim eigen learning-rates alpha (attention/MLP outputs also normalized).
+        LayerNorm and the usual residual are replaced by this hypersphere update; weights are renormalized after steps.
+    """
+
+    impl:    ""
+
+    properties: {
+        maturity:            "promising"
+        novelty_vs_baseline: "Replaces LayerNorm + additive residual with unit-hypersphere normalization and geodesic updates."
+    }
+
+    when_to_use: """
+        Faster convergence and training stability; when you want a norm-invariant residual stream from the start.
+    """
+
+    not_for: """
+        Drop-in over stacks that assume an unnormalized residual stream / standard LayerNorm; adds per-step normalization cost.
+    """
+
+    empirical_evidence: {
+        source: "Loshchilov et al., 2024 (arXiv:2410.01131)"
+        result: "4x-20x fewer training steps to a given accuracy depending on sequence length"
+        caveat: "Requires reworking normalization/residual throughout the stack"
+    }
+
+    references: [
+        "Loshchilov, Hsieh, Sun, Ginsburg (NVIDIA), 2024, nGPT: Normalized Transformer with Representation Learning on the Hypersphere, arXiv:2410.01131"
+    ]
+}
