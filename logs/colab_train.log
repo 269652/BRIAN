@@ -2822,3 +2822,11 @@ step  9600 | loss 7.9524 | lm 4.0719 | ppl 58.7 | gnorm 1.120 | lr 5.18e-05 | 50
 [train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
 [train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.1, pct_strength=0.0
 [train_dsl] GQA: n_kv_heads=8/8  RoPE base=500000
+[train_dsl] boot @ 2026-07-07T20:51:29Z
+[train_dsl] git_commit 426c015cc4a2a693277c28cea544fce8263625b8 (master)
+[train_dsl] arch_dsl_sha256 e08cd42a8769404a961dc27fed8fa4f0f54172f792d8a538cddff1e4ee72d351 (/content/brian/architectures/SmolLM)
+[train_dsl] preset rcc_bowtie_30m_p4: d_model=384 depth=4 heads=6 vocab=50257 lr=0.0003 warmup=300 min_ratio=0.1 wd=0.05
+[train_dsl] scale 30m_p4 (~30M): d_model=512 depth=8 heads=8 batch=1 ctx=512 grad_accum=4 dist=single
+[train_dsl] DSL-LM (full N8 cortex): vocab=50257 d_model=512 depth=8 heads=8 ctx=512
+[train_dsl] training config: loss_clip=True(f=3.0), opt=adamw, lr=0.0005, grad_accum=8, label_smooth=0.0, wd=0.01, dropout=0.1, pct_strength=0.0
+[train_dsl] GQA: n_kv_heads=8/8  RoPE base=500000
