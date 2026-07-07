@@ -235,6 +235,7 @@ def auto_evolve(
     weights: Sequence[float] | None = None,
     novelty_weight: float = 0.0,
     on_generation: Callable[[int, int, "Objective"], None] | None = None,
+    macro_library=None,
 ) -> EvolveResult:
     """Evolve a population of NGL programs against ``evaluate``.
 
@@ -246,11 +247,17 @@ def auto_evolve(
     the initial population (gen 0) and once after each generation, so a caller
     can stream progress during a long run.
     """
+    def _attach(p: Program) -> Program:
+        # every program can flatten `call` ops on execute + can be mutated to graft
+        if macro_library is not None:
+            p.library = macro_library
+        return p
+
     pop: List[Program] = []
     if seeds:
-        pop.extend(p.copy() for p in seeds)
+        pop.extend(_attach(p.copy()) for p in seeds)
     while len(pop) < pop_size:
-        pop.append(random_program(rng, length, n_scalar, n_tensor))
+        pop.append(_attach(random_program(rng, length, n_scalar, n_tensor)))
     pop = pop[:pop_size]
 
     def scored(programs):
@@ -277,11 +284,11 @@ def auto_evolve(
                 pa = _tournament(pop, objs, rng, weights=weights)
                 pb = _tournament(pop, objs, rng, weights=weights)
                 child = crossover(pa, pb, rng)
-                child = mutate(child, rng)
+                child = mutate(child, rng, library=macro_library)
             else:
                 pa = _tournament(pop, objs, rng, weights=weights)
-                child = mutate(pa, rng)
-            new_pop.append(child)
+                child = mutate(pa, rng, library=macro_library)
+            new_pop.append(_attach(child))
         pop = new_pop
         objs = scored(pop)
         gi = int(np.argmax([o.scalar(weights) for o in objs]))

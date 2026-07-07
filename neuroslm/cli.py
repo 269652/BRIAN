@@ -658,6 +658,8 @@ def cmd_discover(args: argparse.Namespace) -> int:
             include_sota_seeds=not args.from_scratch,
             novelty_weight=getattr(args, "novelty", 0.0),
             device=getattr(args, "device", "cpu"),
+            avoid_known=getattr(args, "avoid_known", False),
+            macros=getattr(args, "macros", False),
             progress=True,
         )
         print(f"[discover:optimizer] task={args.task} pop={args.pop} "
@@ -4643,6 +4645,10 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="seed only SGD+random (no SOTA seeds) — genuine discovery")
     sdo.add_argument("--novelty", type=float, default=0.0,
                      help="novelty-search weight (semantic-space distance); >0 hunts novel rules")
+    sdo.add_argument("--avoid-known", action="store_true",
+                     help="penalize rediscovering known algorithms (SGD/Adam/Lion/...)")
+    sdo.add_argument("--macros", action="store_true",
+                     help="let the search graft reusable macro building blocks (ADFs)")
     sdo.add_argument("--device", default="cpu",
                      help="cpu | cuda | auto — scale the tiny-model training onto a T4")
     sdo.add_argument("--out", help="write the run summary JSON here")

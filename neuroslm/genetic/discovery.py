@@ -206,6 +206,9 @@ def run_optimizer_discovery(
     novelty_weight: float = 0.0,
     device: str = "cpu",
     progress=False,
+    avoid_known: bool = False,
+    prior_art_penalty: float = 0.5,
+    macros: bool = False,
 ) -> DiscoveryOutcome:
     """Evolve update-rule programs; return the best + the Pareto front.
 
@@ -223,15 +226,30 @@ def run_optimizer_discovery(
         _emit(progress, f"[optimizer] device={dev.type} task={task} pop={pop_size} "
               f"gens={generations} steps={steps} | SGD baseline loss={sgd_baseline:.4f}")
 
+    known = None
+    if avoid_known:
+        from neuroslm.genetic.known import default_known_algorithms
+        known = default_known_algorithms()
+
     def evaluate(prog: Program) -> Objective:
         res = benchmark_optimizer(prog, steps=steps, seed=seed, task=task, device=device)
-        return Objective((-res.final_loss, -cost_weight * res.cost))
+        loss_obj = -res.final_loss
+        if known is not None and known.is_known(prog):
+            # prior art — penalize rediscovering a known algorithm so the search
+            # spends its budget on genuinely novel rules
+            loss_obj -= prior_art_penalty
+        return Objective((loss_obj, -cost_weight * res.cost))
 
     seeds: List[Program] = []
     if include_sota_seeds:
         seeds = [fn() for fn in SEED_OPTIMIZERS.values()]
     else:
         seeds = [sgd_program(lr=0.02)]
+
+    macro_library = None
+    if macros:
+        from neuroslm.genetic.macros import default_macro_library
+        macro_library = default_macro_library()
 
     on_gen = _make_progress(progress, "optimizer",
                             fmt=lambda o: f"best_loss={-o.values[0]:.4f}",
@@ -250,6 +268,7 @@ def run_optimizer_discovery(
         crossover_rate=0.5,
         novelty_weight=novelty_weight,
         on_generation=on_gen,
+        macro_library=macro_library,
     )
 
     front_stats = []

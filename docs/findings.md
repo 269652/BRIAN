@@ -2006,3 +2006,36 @@ claims a competitive model.
    one block, so end-to-end arch search/simplification runs.
 
 [EVIDENCE: tests/genetic/ — 81 contracts green (adds compile_attention/modulation_store/cli_modulation)]
+
+### H34 — Abstraction (macros), searchable attention, compiler passes, prior-art gate (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — 120 contracts green in `tests/genetic/` (chunked;
+the full suite OOMs in one process on a 16 GB box — an env limit, not a defect).
+Four extensions raise the ceiling on *what* the search can discover:
+
+1. **Macros / ADFs** (`neuroslm/genetic/macros.py`). Reusable sub-programs called
+   via a `call` op; `expand_macros` inlines them (fresh temps, copy-in input
+   isolation so a macro writing its input never clobbers the caller, cycle guard).
+   `Program.library` makes execution transparent (auto-flatten). `mutate(library=)`
+   grafts a whole macro as one gene; `auto_evolve(macro_library=)` threads it
+   through the GA. This is the abstraction lever for building complex algorithms
+   from chunks. `discover optimizer --macros`.
+2. **Attention as primitives** (`attention_primitives.py`). New axis-aware ops
+   (`softmax_last`, `l2norm_last`, `causal_mask`) let single-head causal attention
+   be written as an NGL program that matches a torch reference **bit-for-bit** — so
+   the attention *mechanism* becomes mutable/searchable (drop QK-norm, swap the
+   score fn, add a gate), not just rewireable from outside.
+3. **Compiler passes** (`rewrite.py`): explicit `cse`, `constant_fold`, and a
+   unified `optimize` pipeline on top of DCE + the algebraic rewriter.
+4. **Prior-art gate** (`known.py`). Known algorithms (the SOTA optimizers + the
+   trivial gradient/backprop rule) matched in hyperparameter-invariant semantic
+   space; `discover optimizer --avoid-known` penalizes rediscovery so budget goes
+   to genuine novelty. This directly answers "don't rediscover backprop/Adam."
+
+**Outcome.** The engine now has the four things that gate *complexity + novelty*:
+abstraction (macros), mechanism-level search (attention primitives), clean IR
+optimization (compiler passes), and a novelty gate (prior art). Honest limit:
+these raise the ceiling; certifying a discovered algorithm as research-grade still
+needs a multi-task validation ladder + GPU-scale search (H32/H33 boundary).
+
+[EVIDENCE: tests/genetic/ — test_macros(8), test_attention_primitives(5), test_compiler_passes(8), test_known(6) green]

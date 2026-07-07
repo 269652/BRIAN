@@ -89,6 +89,15 @@ def _transpose(a):
     return a.transpose(-1, -2)
 
 
+def _causal_mask(x):
+    x = _t(x)
+    if x.ndim < 2 or x.shape[-1] != x.shape[-2]:
+        return x  # not a square attention matrix → total fallback
+    T = x.shape[-1]
+    mask = torch.triu(torch.ones(T, T, dtype=torch.bool, device=x.device), diagonal=1)
+    return x.masked_fill(mask, float("-inf"))
+
+
 def _select(cond, a, b):
     cond, a, b = _t(cond), _t(a), _t(b)
     try:
@@ -151,6 +160,11 @@ def _make_registry() -> Dict[str, OpSpec]:
     reg("relu", 1, "nonlin", lambda a: _t(a).relu())
     reg("silu", 1, "nonlin", lambda a: torch.nn.functional.silu(_t(a)))
     reg("softmax", 1, "nonlin", lambda a: torch.softmax(_t(a).reshape(-1), dim=0).reshape(_t(a).shape))
+    # axis-aware ops — the primitives that make an attention mechanism expressible
+    # (and therefore evolvable) rather than an opaque composite op.
+    reg("softmax_last", 1, "nonlin", lambda a: torch.softmax(_t(a), dim=-1))
+    reg("l2norm_last", 1, "nonlin", lambda a: torch.nn.functional.normalize(_t(a), dim=-1))
+    reg("causal_mask", 1, "control", _causal_mask)
 
     # linear algebra
     reg("matmul", 2, "linalg", _matmul)

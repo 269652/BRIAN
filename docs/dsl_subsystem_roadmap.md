@@ -366,3 +366,27 @@ runtime). CLI: `brian discover {optimizer,trunk,flow} --device auto`.
 deploy cell** (rents a GPU for extensive training). Exploration finds candidate
 mechanics/modulations on tiny models; the param-matched competitor still comes
 from the deploy path.
+
+## NGL, part 4 — abstraction, mechanism-search, compiler passes, prior-art gate
+
+Four extensions toward evolving *complex, novel* algorithms (findings H34):
+
+- **Macros / ADFs** (`macros.py`): named reusable sub-programs invoked via a
+  `call` instruction; `expand_macros` inlines with fresh temps + copy-in input
+  isolation + cycle guard. `Program.library` auto-flattens on execute. The GA can
+  graft a whole macro as one gene (`mutate(library=…)` → `insert_call`), and
+  `auto_evolve(macro_library=…)` threads it through selection — so the search
+  composes higher-order structure instead of re-deriving primitives. Built-ins:
+  divisive_norm, bounded_gain, sign_interp, rms_scale.
+- **Attention as primitives** (`attention_primitives.py` + axis-aware ops
+  `softmax_last`, `l2norm_last`, `causal_mask`): single-head causal attention
+  expressed as an NGL program, byte-exact vs a torch reference — so the attention
+  *mechanism* is mutable/searchable, not an opaque composite op.
+- **Standard compiler passes** (`rewrite.py`): `cse` (common-subexpression
+  elimination via hash-consed DAG), `constant_fold`, and `optimize` (DCE → CSE →
+  const-fold → algebraic, to a fixpoint).
+- **Prior-art gate** (`known.py`): a registry of known algorithms (SGD/Momentum/
+  RMSProp/Adam/Lion + the trivial gradient rule) compared in hyperparameter-
+  invariant semantic space; `discover optimizer --avoid-known` penalizes
+  rediscovering them so the budget goes to novelty. `--macros` enables ADF
+  grafting.
