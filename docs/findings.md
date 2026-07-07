@@ -2364,3 +2364,35 @@ no primitive for; adding a `cumsum`-style scan op is the prerequisite and is log
 as future work rather than faked.
 
 [EVIDENCE: tests/genetic/test_softpick.py (14 contracts) green; deep `discover explore` run persisted a 35-pattern ledger with dud-skipping active]
+
+### H44 — `discover explore` made sound: live progress + non-diverging baseline (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — 3 new contracts. Two operational defects and one
+*scientific* defect fixed, so the deep-explore run produces interpretable numbers.
+
+- **Live progress** (operational). The run only *looked* frozen — `explore` logged
+  nothing until each 500-step summary. Threaded a progress callback through
+  `run_training_with_exploration → maybe_explore → explore → auto_evolve.on_
+  generation`: explore-step header, throttled per-generation `best_ppl` with
+  evaluated/skipped-dud counts, and a training heartbeat between searches.
+- **Artifact push on fresh runtimes** (operational). `commit failed` was a fresh
+  Colab clone with no `git config user.name/email`. `modulation_pusher` now supplies
+  a fallback bot identity for the commit (respecting a configured one), and the CLI
+  surfaces the failure detail instead of hiding it.
+- **Non-diverging baseline** (scientific — the important one). The A/B gate installs
+  whatever eval'd best on the current model, but a modulation that eval's well can
+  wreck training dynamics (the residual gain `h·g(h)` clamps to ±8; an 8× gain
+  compounds over steps). Left unchecked the reported baseline ran away (127k → 24M
+  over 4k steps) so every "KEPT" was a win over a **collapsing reference** —
+  meaningless. Fix: (1) a fresh modulator `Memory` per forward (the shared one leaked
+  state across every training step — an unbounded-state divergence source); (2) a
+  **checkpoint-and-restore guard** — track the unmodulated ("identity") val ppl as
+  the model's health, snapshot weights at each new best, and when an install pushes
+  ppl past 3× the best seen, **roll the weights back** to the last healthy checkpoint,
+  drop the modulation, and reset the optimizer moments. Swapping the modulation alone
+  wasn't enough — the damage is baked into the weights. Validated: baseline now
+  bounded (127k → 88k, stable), the guard visibly restores on divergence, and the
+  discovered modulation consistently beats the no-mod baseline (34k < 88k). The toy's
+  absolute ppl is still just a tiny-Markov toy — but the *comparison is now sound*.
+
+[EVIDENCE: tests/genetic/test_training_explorer.py::TestStability::test_baseline_does_not_diverge, ::TestProgress; test_modulation_pusher.py::TestFreshRuntime]

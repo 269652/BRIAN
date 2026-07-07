@@ -110,6 +110,24 @@ class TestLedgerDedup:
         assert res2.n_skipped_duds >= 1   # the gate consulted prior history
 
 
+class TestStability:
+    def test_baseline_does_not_diverge(self):
+        # a destabilizing modulation installed into training must not run the
+        # baseline away — the guard reverts it, so the reported ppls stay bounded.
+        import math
+        res = run_training_with_exploration(
+            total_steps=1500, explore_every=500, seed=0,
+            pop_size=10, generations=4, inner_steps=15)
+        expl = res["explorations"]
+        assert len(expl) >= 2
+        base0 = expl[0]["baseline_ppl"]
+        assert math.isfinite(res["final_val_ppl"])
+        for e in expl:                                  # no runaway divergence
+            assert e["baseline_ppl"] <= base0 * 5.0, e
+        assert res["final_val_ppl"] <= base0 * 5.0
+        assert "reverts" in res                          # guard is observable
+
+
 class TestEndToEnd:
     def test_training_with_exploration_runs_and_logs(self, tmp_path):
         led = SearchLedger(tmp_path / "l.json")

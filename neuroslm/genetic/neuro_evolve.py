@@ -131,9 +131,12 @@ def _markov_corpus(seed: int, vocab: int = 8, ctx: int = 12, n_seq: int = 96):
 
 def _make_modulator(program: Program):
     """Turn an NGL program into a residual-stream gain function h -> h * g(h)."""
-    mem = Memory(program.n_scalar, program.n_tensor)
 
     def modulate(h: torch.Tensor) -> torch.Tensor:
+        # fresh memory per call: each forward is independent, so a stateful
+        # program must not accumulate state across training steps (that leak was
+        # a divergence source — state grew unbounded over a run).
+        mem = Memory(program.n_scalar, program.n_tensor)
         mem.write("t0", h.detach())
         program.execute(mem)
         g = mem.read(program.out_reg)

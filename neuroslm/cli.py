@@ -853,7 +853,8 @@ def cmd_discover(args: argparse.Namespace) -> int:
             print(f"  step {e['step']:5d}: {tag}  baseline_ppl={e['baseline_ppl']} "
                   f"best_ppl={e['best_ppl']}  evaluated={e['evaluated']} "
                   f"skipped_duds={e['skipped_duds']}")
-        print(f"  final val ppl: {result['final_val_ppl']:.4f}")
+        print(f"  final val ppl: {result['final_val_ppl']:.4f}"
+              + (f"  (stability reverts: {result['reverts']})" if result.get("reverts") else ""))
         print(f"  ledger now holds {led.stats()['total']} searched patterns "
               f"({led.stats()['kept']} kept, {led.stats()['rejected']} rejected)")
         if getattr(args, "push", False):

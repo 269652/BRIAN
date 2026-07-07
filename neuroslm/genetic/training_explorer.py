@@ -190,6 +190,47 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
         ledger, ExploreConfig(explore_every=explore_every, pop_size=pop_size,
                               generations=generations), run_id=f"run-{seed}")
 
+    import copy
+    import math
+    identity = identity_modulation()
+    DIVERGE_FACTOR = 3.0          # revert an install once the no-mod ppl blows up
+    best_ref = [math.inf]         # best unmodulated val ppl seen (the model's health)
+    mod_is_identity = [True]
+    reverts = [0]
+    good_state = [copy.deepcopy(model.state_dict())]   # last healthy checkpoint
+
+    def _guard(step: int) -> float:
+        """Restore the last healthy model when an install destabilizes training.
+
+        The A/B gate installs whatever eval'd best on the *current* model, but a
+        modulation that eval's well can still wreck training dynamics (an 8x gain
+        compounds over steps). We watch the unmodulated ("identity") val ppl — the
+        model's true health — and if an install pushes it past DIVERGE_FACTOR× the
+        best seen, we **restore the model weights** to the last healthy checkpoint,
+        drop the modulation, and reset the optimizer moments. Swapping the
+        modulation alone isn't enough — the damage is already baked into the
+        weights, so we roll them back too. Without this the baseline diverges and
+        every 'KEPT' is a win over a collapsing reference (meaningless).
+        """
+        nonlocal current_mod
+        ref = val_ppl(identity)
+        if (not mod_is_identity[0] and math.isfinite(best_ref[0])
+                and ref > best_ref[0] * DIVERGE_FACTOR):
+            model.load_state_dict(good_state[0])   # roll the weights back
+            opt.state.clear()                      # drop stale Adam moments
+            current_mod = identity
+            mod_is_identity[0] = True
+            reverts[0] += 1
+            if progress:
+                progress(f"[guard @ step {step}] modulation destabilized training "
+                         f"(ppl {ref:.1f} > {best_ref[0] * DIVERGE_FACTOR:.1f}) → "
+                         f"restored last healthy model")
+            ref = val_ppl(identity)
+        if math.isfinite(ref) and ref <= best_ref[0]:
+            best_ref[0] = ref
+            good_state[0] = copy.deepcopy(model.state_dict())   # checkpoint a new best
+        return ref
+
     explorations: List[dict] = []
     heartbeat = max(1, explore_every // 5)   # ~5 training pulses between searches
     for step in range(1, total_steps + 1):
@@ -202,24 +243,30 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             opt.step()
 
-        if progress and step % heartbeat == 0 and step % explore_every != 0:
-            progress(f"[train] step {step}/{total_steps}  train_loss={float(loss):.4f}")
+        if step % heartbeat == 0 and step % explore_every != 0:
+            if progress:
+                progress(f"[train] step {step}/{total_steps}  train_loss={float(loss):.4f}")
+            _guard(step)             # catch divergence mid-window, not only at search time
 
-        res = explorer.maybe_explore(step, val_ppl, progress=progress)
-        if res is not None:
-            if res.improved:
+        if step % explore_every == 0:
+            _guard(step)             # revert first so the search sees a healthy model
+            res = explorer.explore(step, val_ppl, progress=progress)
+            installed = res.improved and math.isfinite(res.best_score)
+            if installed:
                 current_mod = res.best_program   # install the winner
+                mod_is_identity[0] = False
             explorations.append({
-                "step": step, "improved": res.improved,
+                "step": step, "improved": installed,
                 "baseline_ppl": round(res.baseline, 4),
                 "best_ppl": round(res.best_score, 4),
                 "evaluated": res.n_evaluated, "skipped_duds": res.n_skipped_duds,
-                "program": res.best_program.to_source() if res.improved else None,
+                "program": res.best_program.to_source() if installed else None,
             })
 
     return {
         "explorations": explorations,
         "final_val_ppl": val_ppl(current_mod),
         "installed_modulation": current_mod.to_source(),
+        "reverts": reverts[0],
         "ledger_stats": ledger.stats(),
     }
