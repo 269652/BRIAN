@@ -19,9 +19,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
+import hashlib
+
 import numpy as np
 
 from neuroslm.genetic.language import Program
+
+
+def _stable_seed(run_id: str, step: int) -> int:
+    """Process-independent RNG seed — reproducible across runs.
+
+    Python's builtin ``hash`` is salted per process (``PYTHONHASHSEED``), so
+    seeding the search with it made runs non-reproducible. A blake2b digest of
+    ``(run_id, step)`` is deterministic, which is what a *measurement* needs.
+    """
+    h = hashlib.blake2b(f"{run_id}:{step}".encode(), digest_size=8)
+    return int.from_bytes(h.digest(), "big") % (2**32)
 from neuroslm.genetic.evolve import Objective, auto_evolve
 from neuroslm.genetic.ledger import SearchLedger
 from neuroslm.genetic.neuro_evolve import identity_modulation
@@ -85,7 +98,7 @@ class TrainingExplorer:
     def explore(self, step: int, score_fn: Callable[[Program], float],
                 progress: Optional[Callable[[str], None]] = None) -> ExploreResult:
         cfg = self.cfg
-        rng = np.random.default_rng(hash((self.run_id, step)) % (2**32))
+        rng = np.random.default_rng(_stable_seed(self.run_id, step))
         baseline = float(score_fn(identity_modulation()))
 
         evaluated: dict = {}     # signature -> (program, score)
@@ -160,12 +173,19 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
                                   seed: int = 0, ledger: SearchLedger = None,
                                   pop_size: int = 12, generations: int = 4,
                                   inner_steps: int = 20,
-                                  progress: Callable[[str], None] = None) -> dict:
+                                  progress: Callable[[str], None] = None,
+                                  store=None) -> dict:
     """Train a tiny CPU LM; every ``explore_every`` steps search + keep-if-better.
 
     This is the miniature of "wire exploration into training": the residual-stream
     modulation is A/B-tested on the live model and installed only if it lowers
     validation perplexity. The same loop attaches to the real trunk on GPU.
+
+    ``store`` (a ``ModulationStore``): when given, each *installed* winner is
+    persisted as ``modulations/<run>-step<N>.neuro`` with its measured Δ, and an
+    install that is later reverted (destabilized training) is dropped again — so
+    the store ends with only the durable survivors, each carrying an honest,
+    healthy-baseline Δ.
     """
     import torch
     import torch.nn as nn
@@ -198,6 +218,15 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
     mod_is_identity = [True]
     reverts = [0]
     good_state = [copy.deepcopy(model.state_dict())]   # last healthy checkpoint
+    saved_names: set = set()      # modulations persisted-and-still-alive this run
+    current_record = [None]       # name of the currently-installed modulation's file
+
+    def _drop_current():
+        # a reverted install is proven bad → remove its persisted file
+        if store is not None and current_record[0] is not None:
+            store.drop(current_record[0])
+            saved_names.discard(current_record[0])
+        current_record[0] = None
 
     def _guard(step: int) -> float:
         """Restore the last healthy model when an install destabilizes training.
@@ -221,6 +250,7 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
             current_mod = identity
             mod_is_identity[0] = True
             reverts[0] += 1
+            _drop_current()                        # the reverted install was bad → un-persist it
             if progress:
                 progress(f"[guard @ step {step}] modulation destabilized training "
                          f"(ppl {ref:.1f} > {best_ref[0] * DIVERGE_FACTOR:.1f}) → "
@@ -255,6 +285,21 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
             if installed:
                 current_mod = res.best_program   # install the winner
                 mod_is_identity[0] = False
+                if store is not None:
+                    # persist the winner with its healthy-baseline Δ (res.baseline is
+                    # measured after _guard, i.e. on the restored healthy model)
+                    from neuroslm.genetic.modulation_store import ModulationRecord
+                    # name must be a bare identifier (the store parser is \w+) —
+                    # run_id is "run-<seed>", so map hyphens to underscores
+                    name = f"{explorer.run_id.replace('-', '_')}_step{step}"
+                    store.save(ModulationRecord(
+                        name=name, program=res.best_program,
+                        metrics={"step": step,
+                                 "baseline_ppl": round(res.baseline, 2),
+                                 "best_ppl": round(res.best_score, 2),
+                                 "delta_ppl": round(res.baseline - res.best_score, 2)}))
+                    saved_names.add(name)
+                    current_record[0] = name
             explorations.append({
                 "step": step, "improved": installed,
                 "baseline_ppl": round(res.baseline, 4),
@@ -268,5 +313,7 @@ def run_training_with_exploration(*, total_steps: int = 2000, explore_every: int
         "final_val_ppl": val_ppl(current_mod),
         "installed_modulation": current_mod.to_source(),
         "reverts": reverts[0],
+        "persisted": len(saved_names),
+        "persisted_names": sorted(saved_names),
         "ledger_stats": ledger.stats(),
     }

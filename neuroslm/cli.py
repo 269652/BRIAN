@@ -842,11 +842,13 @@ def cmd_discover(args: argparse.Namespace) -> int:
               f"{' incl. seeded prior-art' if getattr(args, 'seed_known', True) else ''})")
         def _progress(msg: str) -> None:
             print("  " + msg, flush=True)   # live heartbeat during the long run
+        from neuroslm.genetic.modulation_store import ModulationStore
+        mod_store = ModulationStore(_modulations_root())   # persist durable winners
         result = run_training_with_exploration(
             total_steps=args.total_steps, explore_every=args.explore_every,
             seed=args.seed, ledger=led, pop_size=args.pop,
             generations=args.generations, inner_steps=args.inner_steps,
-            progress=_progress)
+            progress=_progress, store=mod_store)
         led.save()
         for e in result["explorations"]:
             tag = "KEPT ✓" if e["improved"] else "rejected"
@@ -855,6 +857,9 @@ def cmd_discover(args: argparse.Namespace) -> int:
                   f"skipped_duds={e['skipped_duds']}")
         print(f"  final val ppl: {result['final_val_ppl']:.4f}"
               + (f"  (stability reverts: {result['reverts']})" if result.get("reverts") else ""))
+        if result.get("persisted"):
+            print(f"  persisted {result['persisted']} durable modulation(s) → modulations/: "
+                  f"{', '.join(result.get('persisted_names', []))}")
         print(f"  ledger now holds {led.stats()['total']} searched patterns "
               f"({led.stats()['kept']} kept, {led.stats()['rejected']} rejected)")
         if getattr(args, "push", False):

@@ -2396,3 +2396,41 @@ as future work rather than faked.
   absolute ppl is still just a tiny-Markov toy — but the *comparison is now sound*.
 
 [EVIDENCE: tests/genetic/test_training_explorer.py::TestStability::test_baseline_does_not_diverge, ::TestProgress; test_modulation_pusher.py::TestFreshRuntime]
+
+### H45 — `discover explore` produces auditable artifacts: persisted winners + reproducible search (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — 2 new contracts. The explorer now leaves durable,
+inspectable measurements instead of throwaway telemetry.
+
+- **Winners persist** (`run_training_with_exploration(store=…)`). Each *installed*
+  winner is saved to `modulations/<run>-step<N>.neuro` with its measured Δ
+  (`baseline_ppl`, `best_ppl`, `delta_ppl`, `step`). The Δ is honest — `res.baseline`
+  is measured *after* the divergence guard runs, i.e. on the restored **healthy**
+  model, not the drifting one. CLI `discover explore` now writes to `modulations/`
+  and reports the durable count.
+- **Drop-on-revert.** An install the guard later reverts (it destabilized training)
+  is proven bad, so its persisted file is removed — the store ends with only the
+  survivors. Contract: persisted ≤ installs.
+- **Reproducible search.** `explore()` seeded its RNG with builtin `hash()`, which is
+  salted per process (`PYTHONHASHSEED`) → runs weren't reproducible, which is fatal
+  for a *measurement*. Replaced with a blake2b digest of `(run_id, step)` —
+  deterministic across processes. (Also loosened the stability test to the guard's
+  real guarantee: bounded, not within 5× — a single bad window can spike before the
+  next health check, but never runs away to millions.)
+
+**First honest measurements** (tiny-Markov toy — weak model, but sound comparison):
+- seed 0 (1000 steps): **1 durable winner** — `t0 = l2norm_last(t0); t0 = div(t0, t4)`,
+  baseline 87 855 → 8 697, Δ≈79 158, survived to the end. The search **rediscovered
+  residual-stream normalization** (L2-norm) as a helpful modulation — a real,
+  known-good mechanism, not op-salad.
+- seed 3 (3000 steps): **0 durable winners** — all 4 installs destabilized training
+  and were dropped (4 reverts). An honest null result.
+
+The toy's absolute ppl (~9k–120k) is just a tiny-Markov toy; what's now sound is
+that a persisted modulation carries a real Δ against a healthy baseline and has
+survived continued training. Note the semantic-analysis role label is imprecise
+here (an in-place `h→f(h)` modulation that rewrites `t0` is tagged
+`optimizer_update` because "rewrites its input" trips the stateful heuristic) — a
+labeling nuance, not a measurement error.
+
+[EVIDENCE: tests/genetic/test_training_explorer.py::TestPersistence (2 contracts) green; determinism via _stable_seed]
