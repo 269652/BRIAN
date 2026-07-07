@@ -2117,3 +2117,39 @@ modulation into the SmolLM residual stream and evaluates a val batch — validat
 a `brian deploy` run.
 
 [EVIDENCE: tests/genetic/ — test_ledger(6), test_training_explorer(4) green]
+
+### H37 — Seed from the arch's baseline, push all artifacts, illuminate the manifold (2026-07-07)
+
+**Status:** 🟢 **CONFIRMED** — 17 new contracts. Three additions: start the search
+from the model's *current* algorithm, stream *all* artifacts during runs, and
+quality-diversity search over the semantic manifold.
+
+- **Baselines + seed-from** (`baselines.py`). The standard optimizers as NGL
+  programs with explicit tradeoffs (per-step cost, optimizer-state memory,
+  stability): sgd(cost 1/mem 0), momentum(3/1), rmsprop(9/1), **adam(27/2, the
+  trunk default)**, lion(8/1). `run_optimizer_discovery(seed_from=["adam", ...])`
+  starts the population from the arch's current algorithm(s) and searches outward.
+  CLI `discover optimizer --seed-from adam,lion`; `discover baselines` prints the
+  tradeoff table.
+- **Artifact auto-push** (`modulation_pusher.push_artifacts`). Generalized from the
+  modulation pusher: commits+pushes an explicit set of paths (modulation store +
+  `.neuro/search_ledger.json` + run JSONs), scoped so it never sweeps unrelated
+  changes. `discover explore --push` streams the ledger + modulations back to git
+  during a Colab/vast run.
+- **Quality-diversity (MAP-Elites)** (`qd_search.py`). The honest, computable core
+  of "let algorithms emerge from the mathematical shapes of the semantic manifold":
+  each program projects to a low-dim structural **descriptor** (length × op-family
+  diversity — the manifold coordinates); MAP-Elites keeps the best performer per
+  cell and iterates, *illuminating* the space into a diverse zoo of high-performing
+  algorithms across shapes (cheap-simple in one region, deep-adaptive in another).
+  `discover qd --task parity --iters N` illuminated 11 shape-cells on a smoke run.
+
+**On the grander framing.** The idea of "discovering undiscovered mathematics at a
+semantical manifold via fluid-flow perturbations" is aspirational; its *computable*
+realization is (a) MAP-Elites illuminating the program manifold (built here) and
+(b) the flow/topology perturbation analysis from H35 (`profile.py`+`topology.py`).
+Together they let novel, efficient algorithms emerge across the geometry and let us
+measure how perturbing neural flow changes emergent metrics — without a literal,
+low-ROI fluid simulation.
+
+[EVIDENCE: tests/genetic/ — test_baselines(6), test_qd(5), test_modulation_pusher(+2)=5 green]

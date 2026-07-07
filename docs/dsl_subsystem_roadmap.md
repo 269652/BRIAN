@@ -427,3 +427,18 @@ persistent, cross-run dedup ledger:
 
 Real-trunk wiring is one `explorer.maybe_explore(...)` call in the training loop +
 a trunk `score_fn`; validated on a `brian deploy` run.
+
+## NGL, part 7 — baselines/seed-from, artifact push, quality-diversity manifold search
+
+Findings H37:
+- `baselines.py` — standard optimizers with tradeoffs (cost/memory/stability);
+  `run_optimizer_discovery(seed_from=["adam"])` starts from the arch's current
+  algorithm. CLI `discover optimizer --seed-from adam,lion`, `discover baselines`.
+- `modulation_pusher.push_artifacts(paths)` — push the modulation store + search
+  ledger + run JSONs during a run. `discover explore --push`.
+- `qd_search.py` — MAP-Elites over a structural descriptor (length × op-family
+  diversity = manifold coordinates); illuminates the space into a diverse zoo of
+  high-performers across shapes. `discover qd --iters N`. This is the computable
+  version of "novel algorithms emerging from the geometry of the semantic space";
+  paired with H35's flow/topology it covers the flow-perturbation idea without a
+  literal fluid-flow sim.

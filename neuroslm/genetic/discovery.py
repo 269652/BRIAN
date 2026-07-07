@@ -209,6 +209,7 @@ def run_optimizer_discovery(
     avoid_known: bool = False,
     prior_art_penalty: float = 0.5,
     macros: bool = False,
+    seed_from: list = None,
 ) -> DiscoveryOutcome:
     """Evolve update-rule programs; return the best + the Pareto front.
 
@@ -241,7 +242,13 @@ def run_optimizer_discovery(
         return Objective((loss_obj, -cost_weight * res.cost))
 
     seeds: List[Program] = []
-    if include_sota_seeds:
+    if seed_from:
+        # start the search from the arch's current algorithm(s) and explore outward
+        from neuroslm.genetic.baselines import seeds_for
+        seeds = seeds_for(seed_from)
+        if progress:
+            _emit(progress, f"[optimizer] seeding search from: {', '.join(seed_from)}")
+    elif include_sota_seeds:
         seeds = [fn() for fn in SEED_OPTIMIZERS.values()]
     else:
         seeds = [sgd_program(lr=0.02)]

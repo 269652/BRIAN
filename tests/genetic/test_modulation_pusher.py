@@ -64,3 +64,29 @@ class TestPush:
         log = _git(["log", "--oneline", "--name-only", "master"], bare).stdout
         assert "modulations/gainB.neuro" in log
         assert "other.txt" not in log
+
+
+class TestPushArtifacts:
+    def test_pushes_multiple_artifact_paths(self, tmp_path):
+        from neuroslm.genetic.modulation_pusher import push_artifacts
+        bare = tmp_path / "remote.git"
+        work = tmp_path / "work"
+        _init_repo(work, bare)
+        (work / "modulations").mkdir()
+        (work / "modulations" / "g.neuro").write_text("modulation g { program { t2 = tanh(t0)\nreturn t2 } }")
+        (work / ".neuro").mkdir()
+        (work / ".neuro" / "search_ledger.json").write_text("[]")
+        res = push_artifacts(work, ["modulations", ".neuro/search_ledger.json"], message="arts")
+        assert res["pushed"] is True
+        log = _git(["log", "--oneline", "--name-only", "master"], bare).stdout
+        assert "modulations/g.neuro" in log
+        assert ".neuro/search_ledger.json" in log
+
+    def test_absent_paths_are_a_clean_skip(self, tmp_path):
+        from neuroslm.genetic.modulation_pusher import push_artifacts
+        bare = tmp_path / "remote.git"
+        work = tmp_path / "work"
+        _init_repo(work, bare)
+        res = push_artifacts(work, ["nope", "also_nope"], message="x")
+        assert res["pushed"] is False
+        assert "no artifacts" in res["reason"]

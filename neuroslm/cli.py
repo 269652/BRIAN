@@ -660,6 +660,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
             device=getattr(args, "device", "cpu"),
             avoid_known=getattr(args, "avoid_known", False),
             macros=getattr(args, "macros", False),
+            seed_from=(args.seed_from.split(",") if getattr(args, "seed_from", None) else None),
             progress=True,
         )
         print(f"[discover:optimizer] task={args.task} pop={args.pop} "
@@ -781,6 +782,36 @@ def cmd_discover(args: argparse.Namespace) -> int:
             "equivalent": bool(equiv),
             "program": slim.to_source(),
         }
+    elif mode == "qd":
+        import numpy as _np
+        from neuroslm.genetic.qd_search import map_elites
+        from neuroslm.genetic.discovery import benchmark_optimizer
+        from neuroslm.genetic.baselines import seeds_for
+        rng = _np.random.default_rng(args.seed)
+        seeds = seeds_for(args.seed_from.split(",")) if getattr(args, "seed_from", None) else None
+
+        def _ev(prog):
+            return -benchmark_optimizer(prog, steps=args.steps, seed=args.seed,
+                                        task=args.task, device=args.device).final_loss
+
+        print(f"[discover:qd] MAP-Elites over the semantic manifold "
+              f"(task={args.task}, iters={args.iters}, init={args.init})")
+        arch = map_elites(_ev, rng, n_iters=args.iters, init_size=args.init,
+                          length=6, n_scalar=8, n_tensor=12, seeds=seeds)
+        print(f"  illuminated {arch.coverage()} shape-cells of the manifold")
+        print(f"  {'CELL(len,fams)':16s} {'loss':>10s}  best program (first op)")
+        for cell, prog, fit in sorted(arch.elites(), key=lambda e: -e[2]):
+            first = prog.to_source().splitlines()[0] if prog.instructions else "(empty)"
+            print(f"  {str(cell):16s} {-fit:10.4f}  {first}")
+        payload = {"mode": "qd", "task": args.task, **arch.to_dict()}
+    elif mode == "baselines":
+        from neuroslm.genetic.baselines import tradeoff_table
+        print("[discover:baselines] seed the search from these with --seed-from NAME[,NAME]")
+        print(f"  {'NAME':10s} {'COST':>4s} {'MEM':>3s}  {'STABILITY':10s} DESCRIPTION")
+        for b in tradeoff_table():
+            print(f"  {b['name']:10s} {b['cost']:>4d} {b['memory']:>3d}  "
+                  f"{b['stability']:10s} {b['description']}")
+        payload = {"mode": "baselines", "baselines": tradeoff_table()}
     elif mode == "explore":
         from neuroslm.genetic.ledger import SearchLedger
         from neuroslm.genetic.training_explorer import run_training_with_exploration
@@ -802,6 +833,15 @@ def cmd_discover(args: argparse.Namespace) -> int:
         print(f"  final val ppl: {result['final_val_ppl']:.4f}")
         print(f"  ledger now holds {led.stats()['total']} searched patterns "
               f"({led.stats()['kept']} kept, {led.stats()['rejected']} rejected)")
+        if getattr(args, "push", False):
+            from neuroslm.genetic.modulation_pusher import push_artifacts
+            arts = ["modulations"]
+            try:
+                arts.append(str(Path(ledger_path).resolve().relative_to(REPO_ROOT.resolve())))
+            except ValueError:
+                pass  # ledger outside the repo — push modulations only
+            res = push_artifacts(REPO_ROOT, arts, message="artifacts: explore run")
+            print(f"  push: {'-> ' + res.get('branch','?') if res.get('pushed') else res.get('reason')}")
         payload = {"mode": "explore", **result, "ledger": str(ledger_path)}
     elif mode == "ledger":
         from neuroslm.genetic.ledger import SearchLedger
@@ -4727,6 +4767,8 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="penalize rediscovering known algorithms (SGD/Adam/Lion/...)")
     sdo.add_argument("--macros", action="store_true",
                      help="let the search graft reusable macro building blocks (ADFs)")
+    sdo.add_argument("--seed-from",
+                     help="start from baseline algorithm(s), comma-sep (e.g. adam or adam,lion)")
     sdo.add_argument("--device", default="cpu",
                      help="cpu | cuda | auto — scale the tiny-model training onto a T4")
     sdo.add_argument("--out", help="write the run summary JSON here")
@@ -4767,6 +4809,25 @@ def _build_parser() -> argparse.ArgumentParser:
     sds.add_argument("--out", help="write the run summary JSON here")
     sds.set_defaults(func=cmd_discover)
 
+    sdiscover_sub.add_parser(
+        "baselines",
+        help="List baseline algorithms + tradeoffs (use with --seed-from)"
+    ).set_defaults(func=cmd_discover)
+
+    sdq = sdiscover_sub.add_parser(
+        "qd",
+        help="Quality-diversity (MAP-Elites) search: illuminate the semantic "
+             "manifold — a diverse zoo of algorithms across shapes")
+    sdq.add_argument("--iters", type=int, default=300)
+    sdq.add_argument("--init", type=int, default=48)
+    sdq.add_argument("--steps", type=int, default=25)
+    sdq.add_argument("--seed", type=int, default=0)
+    sdq.add_argument("--task", default="regression", choices=["regression", "parity"])
+    sdq.add_argument("--seed-from", help="seed from baseline(s), comma-sep")
+    sdq.add_argument("--device", default="cpu", help="cpu | cuda | auto")
+    sdq.add_argument("--out", help="write the archive JSON here")
+    sdq.set_defaults(func=cmd_discover)
+
     sde = sdiscover_sub.add_parser(
         "explore",
         help="Wire exploration into (tiny-LM) training: search every N steps, "
@@ -4779,6 +4840,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sde.add_argument("--seed", type=int, default=0)
     sde.add_argument("--ledger", help="path to the search ledger JSON "
                      "(default .neuro/search_ledger.json)")
+    sde.add_argument("--push", action="store_true",
+                     help="git commit+push ledger + modulations after the run")
     sde.add_argument("--out", help="write the run summary JSON here")
     sde.set_defaults(func=cmd_discover)
 
