@@ -384,6 +384,28 @@ class RealDataSource:
 
 # ── Build the harness ────────────────────────────────────────────────
 
+def _scale_override_note(scale_name: str, cli_seq: int, cli_batch: int,
+                         eff_seq: int, eff_batch: int) -> Optional[str]:
+    """Warn when the arch SCALE block silently discards CLI --seq_len/--batch.
+
+    The scale is the source of truth for trunk dims, so ``args.seq_len`` /
+    ``args.batch`` from the launcher are overwritten by the scale's values unless
+    ``SEQ_LEN`` / ``BATCH_SIZE`` env vars are set. Passing ``--seq_len 2048
+    --batch 16`` and silently training at 512/1 is a real footgun — surface it.
+    """
+    changed = []
+    if cli_seq != eff_seq:
+        changed.append(f"--seq_len {cli_seq}→{eff_seq}")
+    if cli_batch != eff_batch:
+        changed.append(f"--batch {cli_batch}→{eff_batch}")
+    if not changed:
+        return None
+    return (f"[train_dsl] NOTE: scale '{scale_name}' overrode CLI args ("
+            + ", ".join(changed)
+            + "). The arch SCALE block wins on dims — set SEQ_LEN / BATCH_SIZE "
+            "env vars (or edit the scale) to keep your CLI values.")
+
+
 def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
                          depth: int, n_heads: int, max_ctx: int,
                          device: str = "cpu") -> BRIANHarness:
@@ -1831,9 +1853,14 @@ def main():
             # argparse attribute names: --batch → args.batch, --seq_len →
             # args.seq_len, --d_sem → args.d_sem. The SCALE block in
             # arch.neuro overrides whatever the bash launcher passed.
+            _cli_seq, _cli_batch = args.seq_len, args.batch
             args.seq_len = int(os.environ.get("SEQ_LEN",  _v.seq_len))
             args.batch   = int(os.environ.get("BATCH_SIZE", _v.batch_size))
             args.d_sem   = d_model
+            _ovr = _scale_override_note(_scale_env, _cli_seq, _cli_batch,
+                                        args.seq_len, args.batch)
+            if _ovr:
+                print(_ovr)
             print(f"[train_dsl] scale {_scale_env} (~{_v.approx_params}): "
                   f"d_model={d_model} depth={depth} heads={n_heads} "
                   f"batch={args.batch} ctx={args.seq_len} "
