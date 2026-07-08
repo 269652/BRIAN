@@ -30,6 +30,8 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 from typing import Optional, Dict
 
 
@@ -383,6 +385,51 @@ class RealDataSource:
 
 
 # ── Build the harness ────────────────────────────────────────────────
+
+def _run_trunk_probe(harness, ids, targets, *, step: int, arch_name, preset_name,
+                     root=None):
+    """Read-only discovery probe on the real trunk (best-effort; never crashes).
+
+    Every ``explore_every`` steps: run a fresh no-grad forward to get the trunk's
+    final hidden state, then search a residual modulation that lowers next-token CE
+    when re-projected through the LM head. It never touches training weights or the
+    forward — pure measurement — so it cannot perturb the run. Winners persist to
+    ``modulations/`` with their measured Δ, and the ledger accumulates the search.
+    """
+    import torch
+    from neuroslm.dsl import nn_ops
+    from neuroslm.genetic.ledger import SearchLedger
+    from neuroslm.genetic.modulation_store import ModulationStore
+    from neuroslm.genetic.training_explorer import probe_hidden_modulation, ExploreConfig
+
+    lm = getattr(harness, "language_model", None)
+    if lm is None or getattr(lm, "lm_head", None) is None:
+        return None
+    with torch.no_grad():
+        harness(ids)                       # populate _last_hidden without grad
+    h = getattr(lm, "_last_hidden", None)
+    if h is None or h.dim() != 3:
+        return None
+    h = h.detach().float()
+    W = lm.lm_head
+    cosine = bool(getattr(lm, "_cosine_head", False))
+    temp = float(getattr(lm, "head_temperature", 1.0))
+
+    def head_fn(x):
+        if cosine:
+            return nn_ops.cosine_lm_head(x, W, temp)
+        return nn_ops.linear(x, W)
+
+    root = Path(root) if root is not None else _REPO_ROOT
+    led = SearchLedger(root / ".neuro" / "search_ledger.json")
+    store = ModulationStore(root / "modulations")
+    out = probe_hidden_modulation(
+        h, head_fn, targets.to(h.device), ledger=led, store=store,
+        config=ExploreConfig(pop_size=8, generations=3), step=step,
+        run_id=f"trunk-{preset_name or arch_name or 'run'}")
+    led.save()
+    return out
+
 
 def _scale_override_note(scale_name: str, cli_seq: int, cli_batch: int,
                          eff_seq: int, eff_batch: int) -> Optional[str]:
@@ -1254,6 +1301,7 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
           push_backend: str = "hf",
           push_optimizer: bool = False,
           heatmap_every: int = 0,
+          explore_every: int = 0,
           arch_name: Optional[str] = None,
           preset_name: Optional[str] = None,
           collect_heatmap: bool = True,
@@ -1346,6 +1394,22 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
         _hm_hook = getattr(harness, "_heatmap_hook", None)
         if _hm_hook is not None and heatmap_every > 0:
             _hm_hook.step(step)
+
+        # Read-only trunk discovery probe (best-effort — never crashes training).
+        if explore_every > 0 and step % explore_every == 0 and step > 0:
+            try:
+                _pr = _run_trunk_probe(harness, ids, targets, step=step,
+                                       arch_name=arch_name, preset_name=preset_name)
+                if _pr is not None:
+                    _tag = f"saved {_pr['saved']}" if _pr.get("saved") else "no keep"
+                    print(f"[train_dsl] explore step {step}: baseline_ce={_pr['baseline_ce']:.4f} "
+                          f"best_ce={_pr['best_ce']:.4f} Δ={_pr['delta_ce']:.4f} "
+                          f"evaluated={_pr['evaluated']} ({_tag})", flush=True)
+                    from neuroslm.genetic.modulation_pusher import push_artifacts
+                    push_artifacts(_REPO_ROOT, ["modulations", ".neuro/search_ledger.json"],
+                                   message=f"explore: trunk probe step {step}")
+            except Exception as _e:
+                print(f"[train_dsl] explore probe skipped: {_e!r}", flush=True)
 
         # Per-arch/preset run heatmap: record + push every run_heatmap_every steps.
         if _grad_collector is not None and step % run_heatmap_every == 0:
@@ -1725,6 +1789,12 @@ def main():
                              "ppl snapshot every N steps. Writes JSON to "
                              "logs/vast/benchmarks/ood/ for analyze-log "
                              "to pick up alongside the final eval.")
+    parser.add_argument("--explore_every", type=int, default=0,
+                        help="If > 0, every N steps run a read-only discovery probe "
+                             "on the trunk's final hidden state (searches a residual "
+                             "modulation that lowers next-token CE, persists winners "
+                             "to modulations/). Never touches training — pure "
+                             "measurement. 0 = off.")
     parser.add_argument("--ckpt_dir", default="lfs_checkpoints")
     parser.add_argument("--sink", default="motor",
                         help="population whose output feeds the LM head")
@@ -2037,6 +2107,7 @@ def main():
         preset_name=args.preset,
         collect_heatmap=args.heatmap,
         run_heatmap_every=args.heatmap_every,
+        explore_every=args.explore_every,
     )
 
     print("[train_dsl] done.")

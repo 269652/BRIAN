@@ -2466,3 +2466,44 @@ ill-formed candidates during the search, not the final artifact; it is unit-veri
 and tunable, not claimed to dominate on this toy.
 
 [EVIDENCE: tests/genetic/test_wellformed.py (9 contracts) green; A/B persisted-winner roles = generic/normalization]
+
+### H46 — Exploration wired into the *real* trunk: read-only discovery probe (2026-07-08)
+
+**Status:** 🟢 **CONFIRMED** — 6 new contracts. A `--explore_every N` flag makes a
+real training run gather first discovery data on the actual trunk, safely.
+
+- **Why not an installed hook.** `BRIANHarness` has no simple residual-`modulate=`
+  seam like the toy `_TinyLM`; its modulations are architectural (NT/orchestrator
+  fusion in the 1.1B stack). Adding a hook into the training forward is a genuinely
+  risky change to install mid-flight on a live run, so H46 ships the **safe half**
+  first: a *read-only probe* that measures whether a residual modulation of the
+  trunk's final hidden state would lower next-token CE — without ever touching the
+  training forward or weights.
+- **`probe_hidden_modulation(hidden, head_fn, targets, …)`** (`training_explorer.py`).
+  Baseline = CE of the LM head on the (detached) final hidden; then the GA searches a
+  modulation, re-projecting the head on `modulate(hidden)` — all under `torch.no_grad`
+  (never builds a graph, so it can't perturb the run and is cheap). Keep-if-better,
+  persist the minimal winner with its Δ. Floored at identity (best ≤ baseline).
+- **`train_dsl.py`:** `_run_trunk_probe` runs a fresh no-grad forward to fetch
+  `language_model._last_hidden`, probes it, logs `baseline_ce / best_ce / Δ`, and
+  pushes `modulations/` + the ledger. Wired at the `--explore_every` cadence,
+  wrapped in try/except (a probe failure can never crash training). Colab training
+  cell defaults `--explore_every 500`.
+- **Explorer core hardened (bugs found + fixed via TDD).** (1) The winner is now the
+  best *raw* candidate by the *clean* metric, floored at identity — the wellformed
+  penalty had made the GA's penalized-objective genome disagree with the true best,
+  and scoring the *canonical* form was unsound (canonicalization is non-deterministic
+  and can produce a program that throws as a live modulator). (2) A masked
+  `NameError` — `_make_modulator` wasn't imported at module scope — made the probe's
+  try/except silently score *every* candidate as `baseline×10`; the missing import is
+  the whole reason an early probe looked broken. Ledger dedup now keys on the
+  canonical form consistently (record + is_dud agree).
+
+Honest scope: this is a *probe*, not an installed mechanism. It measures whether the
+trunk's final representation has structure a fixed modulation can exploit (a real,
+if narrow, signal) and banks candidate winners — it does **not** train the modulation
+into the model. Installing a searched modulation into the forward (the higher-risk,
+higher-signal step) remains a deliberate opt-in for later, once the probe shows
+something worth installing.
+
+[EVIDENCE: tests/genetic/test_trunk_probe.py (4), tests/training/test_trunk_probe_wiring.py (2) green]

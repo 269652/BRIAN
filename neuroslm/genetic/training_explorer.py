@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
 import hashlib
+import math
 
 import numpy as np
 
@@ -35,6 +36,57 @@ def _stable_seed(run_id: str, step: int) -> int:
     """
     h = hashlib.blake2b(f"{run_id}:{step}".encode(), digest_size=8)
     return int.from_bytes(h.digest(), "big") % (2**32)
+
+
+def probe_hidden_modulation(hidden, head_fn, targets, *, ledger,
+                            store=None, config=None, step: int = 0,
+                            run_id: str = "probe"):
+    """Read-only probe: does a residual modulation of the trunk's final hidden
+    lower next-token CE on this batch? Searches one, records/persists the winner.
+
+    This is the *safe* way to gather first discovery data on a real trunk: it
+    never touches the training forward or weights — it re-projects the LM head on
+    a modulated copy of the (detached) final hidden state, so it cannot perturb
+    the run. ``hidden`` is ``(B, T, D)``; ``head_fn`` maps hidden→logits;
+    ``targets`` is ``(B, T)`` next-token ids. Returns a summary dict with the
+    baseline CE, the best CE found, the Δ, and the persisted winner (if improved).
+    """
+    import torch
+    import torch.nn.functional as F
+    from neuroslm.genetic.neuro_evolve import _make_modulator
+
+    def ce(logits) -> float:
+        return float(F.cross_entropy(
+            logits.reshape(-1, logits.shape[-1]), targets.reshape(-1)))
+
+    cfg = config or ExploreConfig()
+    with torch.no_grad():                 # read-only — never build an autograd graph
+        baseline = ce(head_fn(hidden))
+    explorer = TrainingExplorer(ledger, cfg, run_id=run_id)
+
+    def score_fn(prog: Program) -> float:
+        try:
+            with torch.no_grad():
+                return ce(head_fn(_make_modulator(prog)(hidden)))
+        except Exception:
+            return baseline * 10.0        # ill-typed candidate → strongly dispreferred
+
+    res = explorer.explore(step, score_fn)
+    improved = res.improved and math.isfinite(res.best_score)
+    delta = baseline - res.best_score
+    saved = None
+    if improved and store is not None:
+        from neuroslm.genetic.modulation_store import ModulationRecord
+        winner = _minimal_equivalent(res.best_program, seed=step)
+        saved = f"{run_id.replace('-', '_')}_step{step}"
+        store.save(ModulationRecord(
+            name=saved, program=winner,
+            metrics={"step": step, "baseline_ce": round(baseline, 4),
+                     "best_ce": round(res.best_score, 4),
+                     "delta_ce": round(delta, 4)}))
+    return {"step": step, "baseline_ce": baseline, "best_ce": res.best_score,
+            "delta_ce": delta, "improved": improved, "saved": saved,
+            "evaluated": res.n_evaluated, "skipped_duds": res.n_skipped_duds}
 
 
 def _minimal_equivalent(program: Program, seed: int = 0):
@@ -150,23 +202,27 @@ class TrainingExplorer:
             progress(f"[explore @ step {step}] gen {g}/{total}  best_ppl={best:.2f}  "
                      f"evaluated={len(evaluated)} skipped_duds={skipped[0]}")
 
+        # the true clean-best RAW program, floored at identity/baseline. We score
+        # the *raw* candidate (what would actually install), never the canonical
+        # form — canonicalization is only for dedup and can misbehave as a live
+        # modulator. Identity is a seed, so best_score ≤ baseline always.
+        best_raw = [baseline, identity_modulation()]
+
         def evaluate(prog: Program) -> Objective:
-            # normalize first: every syntactic variant maps to one canonical form,
-            # so the dud-skip and dedup below are semantic, not syntactic
-            prog = self._canon(prog)
-            # skip patterns prior runs already found unhelpful (ledger not mutated
-            # until after this explore, so this reflects PAST runs only)
-            if self.ledger.is_dud(prog):
+            # canon is used only for dedup / ledger — the winner is a raw program
+            canon = self._canon(prog)
+            if self.ledger.is_dud(canon):
                 skipped[0] += 1
                 return Objective((-cfg.dud_penalty,))
-            sig = self.ledger.signature(prog)
+            sig = self.ledger.signature(canon)
             if sig in evaluated:
                 s = evaluated[sig][1]
             else:
-                s = float(score_fn(prog))
-                evaluated[sig] = (prog, s)
-            # penalize ill-formed programs (undefined-register reads) in the
-            # *fitness* only — the cached ppl `s` stays the true reported value
+                s = float(score_fn(prog))          # score the RAW candidate
+                evaluated[sig] = (canon, s)         # store CANON (ledger/dedup key)
+                if math.isfinite(s) and s < best_raw[0]:
+                    best_raw[0], best_raw[1] = s, prog
+            # penalize ill-formed programs (undefined reads) in the *fitness* only
             return Objective((-(s * self._fitness_penalty(prog)),))
 
         result = auto_evolve(
@@ -177,16 +233,17 @@ class TrainingExplorer:
             elite_frac=0.3, crossover_rate=0.5,
             on_generation=_on_gen,
         )
-        best_prog = result.best_program
-        best_score = float(score_fn(best_prog))
+        best_score, best_prog = best_raw[0], best_raw[1]
         improved = best_score < baseline - cfg.tol
 
         # record every distinct pattern we searched (so future runs skip duds)…
         for sig, (prog, s) in evaluated.items():
             self.ledger.record(prog, outcome="searched", delta=s - baseline,
                                step=step, run_id=self.run_id)
-        # …then the verdict on the winner (latest outcome wins on dedup)
-        self.ledger.record(best_prog, outcome="kept" if improved else "rejected",
+        # …then the verdict on the winner (canon key, so next run's dud-gate
+        # recognises it — consistent with the is_dud(canon) check above)
+        self.ledger.record(self._canon(best_prog),
+                           outcome="kept" if improved else "rejected",
                            delta=best_score - baseline, metric_before=baseline,
                            metric_after=best_score, step=step, run_id=self.run_id)
 
