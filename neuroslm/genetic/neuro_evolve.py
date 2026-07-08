@@ -257,15 +257,19 @@ def run_trunk_evolution(*, seed: int = 0, pop_size: int = 16, generations: int =
         on_generation=on_gen,
     )
 
-    # recover raw ppl/plausibility for the reported best + front
-    best_ppl, best_plaus = evaluate_modulation(result.best_program, seed=seed, steps=steps, prior=prior, device=dev)
+    # recover raw ppl/plausibility for the reported best + front — report the
+    # lowest-ppl champion (`primary_program`, monotonic by construction), not
+    # the combined (ppl, plausibility) scalar's champion: a more "plausible"
+    # program can legitimately outrank a lower-ppl one on that scalar, which
+    # would otherwise make `best_val_ppl` look like it regressed.
+    best_ppl, best_plaus = evaluate_modulation(result.primary_program, seed=seed, steps=steps, prior=prior, device=dev)
     front_stats = []
     for p in result.front:
         pp, pl = evaluate_modulation(p, seed=seed, steps=steps, prior=prior, device=dev)
         front_stats.append({"val_ppl": pp, "plausibility": pl,
                             "name": p.meta.get("name", "evolved")})
     return TrunkOutcome(
-        best_program=result.best_program,
+        best_program=result.primary_program,
         best_val_ppl=best_ppl,
         best_plausibility=best_plaus,
         baseline_val_ppl=baseline_ppl,

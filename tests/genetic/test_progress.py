@@ -15,8 +15,8 @@ class TestAutoEvolveCallback:
     def test_on_generation_called_each_generation_plus_gen0(self):
         calls = []
 
-        def on_gen(gen, total, best_obj):
-            calls.append((gen, total, best_obj))
+        def on_gen(gen, total, best_obj, primary_obj):
+            calls.append((gen, total, best_obj, primary_obj))
 
         rng = np.random.default_rng(0)
         auto_evolve(_trivial_eval, rng, pop_size=6, generations=4,
@@ -25,6 +25,7 @@ class TestAutoEvolveCallback:
         assert [c[0] for c in calls] == [0, 1, 2, 3, 4]
         assert all(c[1] == 4 for c in calls)
         assert all(isinstance(c[2], Objective) for c in calls)
+        assert all(isinstance(c[3], Objective) for c in calls)
 
     def test_no_callback_still_runs(self):
         rng = np.random.default_rng(0)

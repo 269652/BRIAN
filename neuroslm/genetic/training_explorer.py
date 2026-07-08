@@ -189,14 +189,14 @@ class TrainingExplorer:
             progress(f"[explore @ step {step}] searching  baseline_ppl={baseline:.2f}  "
                      f"(pop={cfg.pop_size}, gens={cfg.generations})")
 
-        def _on_gen(g: int, total: int, best_obj) -> None:
+        def _on_gen(g: int, total: int, best_obj, primary_obj) -> None:
             if not progress:
                 return
             # throttle: first, last, and ~10 evenly-spaced generations
             if g != 0 and g != total and g % max(1, total // 10) != 0:
                 return
             try:
-                best = -float(best_obj.values[0])
+                best = -float(primary_obj.values[0])
             except Exception:
                 best = float("nan")
             progress(f"[explore @ step {step}] gen {g}/{total}  best_ppl={best:.2f}  "

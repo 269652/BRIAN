@@ -2614,3 +2614,44 @@ run's own progress log.
   the multi-objective Pareto search (see `front_stats`).
 
 [EVIDENCE: tests/genetic/test_discovery.py::TestProgressReporting::test_progress_line_shows_cost_alongside_loss green]
+
+### H50 — `EvolveResult` gains a `primary_*` champion: the headline "best" is now truly monotonic (2026-07-08)
+
+**Status:** 🟢 **FIXED** — 1 new contract at the `auto_evolve` level, plus every
+downstream caller repointed.
+
+- **Symptom.** A live Colab T4 re-run of `discover optimizer --novelty 0.3
+  --macros` *still* showed `best_loss` going backwards after both H48 and H49:
+  `gen0=0.5602 cost=9 → gen1=0.6430 cost=2`. H49's `cost=` annotation made the
+  trade-off legible but didn't fix the actual complaint — the user's (correct)
+  expectation is that "best score" should never get worse, full stop.
+- **Root cause, precisely.** `run_optimizer_discovery`'s declared objective is
+  genuinely 2-D: `(-final_loss, -cost_weight*n_instructions)`. H48 fixed
+  `auto_evolve` to track its champion by this *raw combined scalar* — correctly
+  monotonic *on the scalar* — but the scalar itself blends loss and cost, so a
+  much-cheaper, slightly-worse-loss program can legitimately raise the combined
+  scalar while *lowering* the loss component alone. That's not a bug in the
+  search; it's the declared multi-objective design working as intended. The bug
+  was reporting only the loss component of that blended champion as if it were
+  a standalone, independently-tracked metric.
+- **Fix.** `EvolveResult` gains `primary_program` / `primary_objective`: a
+  *second*, independent champion tracked purely by `values[0]` (the caller's
+  named primary metric — loss, ppl, …), with all other dimensions (cost,
+  novelty, plausibility, EI) completely ignored for this tracker. It's a plain
+  running-argmax over one number, so it is monotonic by construction — no
+  scalar blending, no population-relative bonus, nothing to trade off against.
+  `on_generation` now receives `(gen, total, best_obj, primary_obj)`; every
+  progress line and every `*Outcome.best_program`/`best_*_loss` (`discovery.py`
+  optimizer + flow-modulation, `neuro_evolve.py` trunk) now reports
+  `primary_*`, not the combined-scalar champion. The combined champion
+  (`best_program`/`best_objective`) still exists and still drives
+  elitism/tournament/the Pareto `front` — multi-objective exploration is
+  unchanged, only *what gets reported as "the best"* changed.
+- **Verified live** (not just unit tests): a 10-generation CPU run with
+  `--novelty 0.3 --macros` on the parity task now prints
+  `gen0..5 best_loss=0.6931 → gen6..10 best_loss=0.6507` — strictly
+  non-increasing loss end to end, with `cost` jumping 6→54 at the same
+  generation (the new champion is far more expensive — a genuine trade
+  the search made, now truthfully reported instead of looking like noise).
+
+[EVIDENCE: tests/genetic/test_evolve.py::TestAutoEvolve::test_primary_metric_is_monotonic_even_when_cost_trades_off green; tests/genetic/{test_progress,test_known,test_evolve}.py (23) + {test_discovery,test_cli_discover,test_device,test_training_explorer,test_neuro_evolve,test_cli_trunk,test_trunk_probe}.py (39) all green, 62 total]

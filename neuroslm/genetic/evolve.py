@@ -236,6 +236,13 @@ class EvolveResult:
     gen0_best: float
     history: List[float]
     front: List[Program]
+    # `values[0]` tracked in isolation — the single best primary-metric
+    # (usually loss/ppl) individual ever evaluated, decoupled from any
+    # secondary-axis trade-off (cost, novelty, plausibility, …) folded into
+    # `best_objective`/`best_program`. Guaranteed non-decreasing: a caller's
+    # headline "best so far" should report this, not `best_objective.values[0]`.
+    primary_program: Program = None
+    primary_objective: Objective = None
 
 
 def _tournament(pop, objs, rng, k=3, weights=None):
@@ -269,9 +276,12 @@ def auto_evolve(
     tournament (weighted sum, optionally + a novelty bonus in semantic space)
     with elitism carrying the current Pareto front forward.
 
-    ``on_generation(gen, total, best_objective)`` — if given, is called once for
-    the initial population (gen 0) and once after each generation, so a caller
-    can stream progress during a long run.
+    ``on_generation(gen, total, best_objective, primary_objective)`` — if given,
+    is called once for the initial population (gen 0) and once after each
+    generation, so a caller can stream progress during a long run.
+    ``best_objective`` is the multi-objective (cost/novelty-aware) champion;
+    ``primary_objective`` tracks ``values[0]`` alone and is guaranteed
+    non-decreasing — the number to print as "best so far".
     """
     def _attach(p: Program) -> Program:
         # every program can flatten `call` ops on execute + can be mutated to graft
@@ -306,8 +316,12 @@ def auto_evolve(
     best_i = int(np.argmax([o.scalar(raw_weights) for o in raw_objs]))
     best_prog, best_obj = pop[best_i].copy(), raw_objs[best_i]
     history = [best_obj.scalar(raw_weights)]
+
+    p_i = int(np.argmax([o.values[0] for o in raw_objs]))
+    primary_prog, primary_obj = pop[p_i].copy(), raw_objs[p_i]
+
     if on_generation is not None:
-        on_generation(0, generations, best_obj)
+        on_generation(0, generations, best_obj, primary_obj)
 
     n_elite = max(1, int(elite_frac * pop_size))
     for _gen in range(generations):
@@ -329,11 +343,17 @@ def auto_evolve(
         if raw_objs[gi].scalar(raw_weights) > best_obj.scalar(raw_weights):
             best_prog, best_obj = pop[gi].copy(), raw_objs[gi]
         history.append(best_obj.scalar(raw_weights))
+
+        pi = int(np.argmax([o.values[0] for o in raw_objs]))
+        if raw_objs[pi].values[0] > primary_obj.values[0]:
+            primary_prog, primary_obj = pop[pi].copy(), raw_objs[pi]
+
         if on_generation is not None:
-            on_generation(_gen + 1, generations, best_obj)
+            on_generation(_gen + 1, generations, best_obj, primary_obj)
 
     front = pareto_front(list(zip(pop, objs)))
-    return EvolveResult(best_prog, best_obj, gen0_best, history, front)
+    return EvolveResult(best_prog, best_obj, gen0_best, history, front,
+                        primary_prog, primary_obj)
 
 
 def _add_novelty(programs, objs, embs, w):

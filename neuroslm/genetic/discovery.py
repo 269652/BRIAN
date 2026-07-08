@@ -47,21 +47,26 @@ def _emit(progress, msg: str) -> None:
 
 
 def _make_progress(progress, tag: str, fmt, baseline=None):
-    """Build an ``on_generation(gen, total, best_obj)`` that streams a timed line.
+    """Build an ``on_generation(gen, total, best_obj, primary_obj)`` that streams
+    a timed line.
 
-    ``fmt(best_obj)`` renders the metric; a wall-clock elapsed + ETA is appended
-    so a long GPU run shows it is alive and roughly how long remains.
+    ``fmt(primary_obj)`` renders the metric — ``primary_obj`` tracks ``values[0]``
+    (the caller's primary metric, e.g. loss) in isolation from any secondary-axis
+    trade-off (cost, novelty, plausibility, …) folded into ``best_obj``, so it is
+    guaranteed non-decreasing and never looks like a regression. A wall-clock
+    elapsed + ETA is appended so a long GPU run shows it is alive and roughly how
+    long remains.
     """
     import time
     start = [None]
 
-    def on_gen(gen, total, best_obj):
+    def on_gen(gen, total, best_obj, primary_obj):
         if start[0] is None:
             start[0] = time.time()
         elapsed = time.time() - start[0]
         per = elapsed / max(gen, 1)
         eta = per * (total - gen)
-        line = (f"  [{tag}] gen {gen}/{total}  {fmt(best_obj)}  "
+        line = (f"  [{tag}] gen {gen}/{total}  {fmt(primary_obj)}  "
                 f"elapsed={elapsed:.0f}s")
         if gen > 0 and gen < total:
             line += f"  eta~{eta:.0f}s"
@@ -258,11 +263,15 @@ def run_optimizer_discovery(
         from neuroslm.genetic.macros import default_macro_library
         macro_library = default_macro_library()
 
-    # `best` is the champion of a (loss, cost) trade-off — the tracked objective
-    # per the docstring above — so a program with fewer instructions can outrank
-    # a lower-loss one on the combined scalar. Show both terms; otherwise
-    # "best_loss" alone can look like it regressed generation-to-generation when
-    # what actually happened is a cheaper program took the lead.
+    # The GA's search champion (`result.best_program`) is a (loss, cost)
+    # trade-off — a program with fewer instructions can legitimately outrank a
+    # lower-loss one on the combined scalar, which is exactly what drives
+    # elitism/tournament exploration. But the headline "best rule found" this
+    # function reports must be the lowest loss actually measured, full stop —
+    # so it's `result.primary_program`/`primary_objective` (tracks values[0] in
+    # isolation, monotonic by construction), not the combined champion. The
+    # progress line's `cost=` still shows that (possibly different) tracked
+    # program's own instruction count, for context.
     on_gen = _make_progress(
         progress, "optimizer",
         fmt=lambda o: f"best_loss={-o.values[0]:.4f} cost={-o.values[1] / max(cost_weight, 1e-9):.0f}",
@@ -291,8 +300,8 @@ def run_optimizer_discovery(
         front_stats.append({"final_loss": r.final_loss, "cost": r.cost,
                             "name": p.meta.get("name", "evolved")})
     return DiscoveryOutcome(
-        best_program=result.best_program,
-        best_final_loss=-result.best_objective.values[0],
+        best_program=result.primary_program,
+        best_final_loss=-result.primary_objective.values[0],
         sgd_baseline_loss=sgd_baseline,
         history=result.history,
         front=result.front,
@@ -408,12 +417,15 @@ def run_flow_modulation_discovery(
         elite_frac=0.25,
         on_generation=on_gen,
     )
-    best_obj = result.best_objective
+    # report the lowest-loss champion (`primary_*`, monotonic by construction)
+    # rather than the combined (loss, EI) scalar's champion — see the matching
+    # note in run_optimizer_discovery above.
+    primary_obj = result.primary_objective
     return DiscoveryOutcome(
-        best_program=result.best_program,
-        best_final_loss=-best_obj.values[0],
+        best_program=result.primary_program,
+        best_final_loss=-primary_obj.values[0],
         sgd_baseline_loss=float("nan"),
         history=result.history,
         front=result.front,
-        best_ei=best_obj.values[1] / max(ei_weight, 1e-9),
+        best_ei=primary_obj.values[1] / max(ei_weight, 1e-9),
     )

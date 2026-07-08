@@ -234,3 +234,38 @@ class TestAutoEvolve:
         # the reported best objective must be the *raw* (loss, cost) pair —
         # never a novelty-inflated value that doesn't correspond to real quality.
         assert len(result.best_objective.values) == 2
+
+    def test_primary_metric_is_monotonic_even_when_cost_trades_off(self):
+        # `best_objective` (values[0], values[1]=cost) is a genuine multi-
+        # objective champion: a much cheaper program can legitimately out-score
+        # a lower-loss one on the *combined* scalar, so values[0] alone (the
+        # thing progress logs print as "best_loss") is not guaranteed monotonic
+        # by that tracker (seen live: gen0=0.5602 -> gen1=0.6430, both cuda and
+        # cpu). `primary_objective` must track values[0] in isolation — the
+        # single best "primary metric" (loss) ever evaluated, cost be damned —
+        # so it can never look like it regressed.
+        target = torch.tensor([1.0, -1.0, 0.5, 0.5])
+        seen_values0 = []
+
+        def evaluate(prog: Program):
+            mem = Memory(prog.n_scalar, prog.n_tensor)
+            mem.write("t0", torch.tensor([2.0, -2.0, 1.0, 1.0]))
+            prog.execute(mem)
+            out = mem.read(prog.out_reg)
+            try:
+                out = out.reshape(4)
+            except RuntimeError:
+                out = out.flatten()[:4]
+                if out.numel() < 4:
+                    out = torch.zeros(4)
+            mse = torch.mean((out - target) ** 2).item()
+            v0 = -mse
+            seen_values0.append(v0)
+            return Objective((v0, -0.05 * len(prog.instructions)))
+
+        rng = np.random.default_rng(2)
+        result = auto_evolve(
+            evaluate, rng, pop_size=30, generations=20, length=6,
+            n_scalar=4, n_tensor=6, weights=[1.0, 1.0],
+        )
+        assert result.primary_objective.values[0] == max(seen_values0)
