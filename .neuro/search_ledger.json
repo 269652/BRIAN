@@ -148,12 +148,12 @@
   "source": "t8 = const(c=1.0)\nreturn t8",
   "outcome": "rejected",
   "delta": 0.0,
-  "metric_before": 8.208066940307617,
-  "metric_after": 8.208066940307617,
-  "step": 500,
+  "metric_before": 8.509476661682129,
+  "metric_after": 8.509476661682129,
+  "step": 1000,
   "run_id": "trunk-rcc_bowtie_30m_p4",
   "kind": "modulation",
-  "count": 2
+  "count": 3
  },
  {
   "signature": "d516e2dc843b57d8",
@@ -24667,6 +24667,42 @@
   "metric_before": NaN,
   "metric_after": NaN,
   "step": 500,
+  "run_id": "trunk-rcc_bowtie_30m_p4",
+  "kind": "modulation",
+  "count": 1
+ },
+ {
+  "signature": "ac660f91693deb31",
+  "source": "t15 = l2norm_last(t0)\nt16 = sigmoid(t15)\nt17 = relu(t16)\nreturn t17",
+  "outcome": "searched",
+  "delta": 0.0,
+  "metric_before": NaN,
+  "metric_after": NaN,
+  "step": 1000,
+  "run_id": "trunk-rcc_bowtie_30m_p4",
+  "kind": "modulation",
+  "count": 1
+ },
+ {
+  "signature": "4d9743b1a6602150",
+  "source": "t14 = l2norm_last(t0)\nt15 = sigmoid(t14)\nreturn t15",
+  "outcome": "searched",
+  "delta": 0.0,
+  "metric_before": NaN,
+  "metric_after": NaN,
+  "step": 1000,
+  "run_id": "trunk-rcc_bowtie_30m_p4",
+  "kind": "modulation",
+  "count": 1
+ },
+ {
+  "signature": "ccc00888c7912918",
+  "source": "t8 = l2norm_last(t0)\nt9 = sigmoid(t8)\nreturn t9",
+  "outcome": "searched",
+  "delta": 0.0,
+  "metric_before": NaN,
+  "metric_after": NaN,
+  "step": 1000,
   "run_id": "trunk-rcc_bowtie_30m_p4",
   "kind": "modulation",
   "count": 1
