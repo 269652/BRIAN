@@ -387,7 +387,7 @@ class RealDataSource:
 # ── Build the harness ────────────────────────────────────────────────
 
 def _run_trunk_probe(harness, ids, targets, *, step: int, arch_name, preset_name,
-                     root=None):
+                     root=None, pop: int = 24, gens: int = 10, length: int = 8):
     """Read-only discovery probe on the real trunk (best-effort; never crashes).
 
     Every ``explore_every`` steps: run a fresh no-grad forward to get the trunk's
@@ -431,8 +431,12 @@ def _run_trunk_probe(harness, ids, targets, *, step: int, arch_name, preset_name
     store = ModulationStore(root / "modulations")
     return probe_hidden_modulation(
         h, head_fn, targets.to(h.device), ledger=led, store=store,
-        config=ExploreConfig(pop_size=12, generations=4), step=step,
-        run_id=f"trunk-{preset_name or arch_name or 'run'}")
+        # normalize=False: skip per-candidate canonicalization (only needed for
+        # cross-run dedup, which a fresh ledger doesn't do) so the deep search
+        # spends its budget scoring real candidates, not simplifying them.
+        config=ExploreConfig(pop_size=pop, generations=gens, length=length,
+                             normalize=False),
+        step=step, run_id=f"trunk-{preset_name or arch_name or 'run'}")
 
 
 def _scale_override_note(scale_name: str, cli_seq: int, cli_batch: int,
@@ -1306,6 +1310,9 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
           push_optimizer: bool = False,
           heatmap_every: int = 0,
           explore_every: int = 0,
+          explore_pop: int = 24,
+          explore_gens: int = 10,
+          explore_len: int = 8,
           arch_name: Optional[str] = None,
           preset_name: Optional[str] = None,
           collect_heatmap: bool = True,
@@ -1403,7 +1410,9 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
         if explore_every > 0 and step % explore_every == 0 and step > 0:
             try:
                 _pr = _run_trunk_probe(harness, ids, targets, step=step,
-                                       arch_name=arch_name, preset_name=preset_name)
+                                       arch_name=arch_name, preset_name=preset_name,
+                                       pop=explore_pop, gens=explore_gens,
+                                       length=explore_len)
                 if _pr is not None:
                     _tag = f"saved {_pr['saved']}" if _pr.get("saved") else "no keep"
                     print(f"[train_dsl] explore step {step}: baseline_ce={_pr['baseline_ce']:.4f} "
@@ -1799,6 +1808,12 @@ def main():
                              "modulation that lowers next-token CE, persists winners "
                              "to modulations/). Never touches training — pure "
                              "measurement. 0 = off.")
+    parser.add_argument("--explore_pop", type=int, default=24,
+                        help="probe search population per checkpoint (deeper = more candidates)")
+    parser.add_argument("--explore_gens", type=int, default=10,
+                        help="probe search generations per checkpoint")
+    parser.add_argument("--explore_len", type=int, default=8,
+                        help="probe candidate program length (more expressive modulations)")
     parser.add_argument("--ckpt_dir", default="lfs_checkpoints")
     parser.add_argument("--sink", default="motor",
                         help="population whose output feeds the LM head")
@@ -2112,6 +2127,9 @@ def main():
         collect_heatmap=args.heatmap,
         run_heatmap_every=args.heatmap_every,
         explore_every=args.explore_every,
+        explore_pop=args.explore_pop,
+        explore_gens=args.explore_gens,
+        explore_len=args.explore_len,
     )
 
     print("[train_dsl] done.")
