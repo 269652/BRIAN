@@ -2583,3 +2583,34 @@ run's own progress log.
   regression in the one metric the whole harness exists to report faithfully.
 
 [EVIDENCE: tests/genetic/test_evolve.py::TestAutoEvolve::test_history_is_monotonic_even_with_novelty_pressure green]
+
+### H49 — `best_loss` progress line still looked non-monotonic: it's a (loss, cost) trade-off (2026-07-08)
+
+**Status:** 🟢 **CLARIFIED + FIXED THE DISPLAY** — 1 new contract.
+
+- **Symptom.** Even after H48, a live Colab T4 re-run of `discover optimizer
+  --novelty 0.3 --macros` still showed `best_loss` going the wrong way:
+  `gen0=0.6415 → gen1=0.7035`. Reproduced locally with the H48 fix already
+  applied — so this is *not* a regression of H48, it's a second, distinct
+  source of the same visual symptom.
+- **Root cause.** `run_optimizer_discovery`'s own documented objective is
+  **`(-final_loss, -cost_weight*n_instructions)`** — two dimensions, both
+  real, both tracked by `auto_evolve` post-H48 (correctly, via the raw
+  scalar). A program with meaningfully fewer instructions can out-score a
+  lower-loss one on the *combined* scalar and legitimately become the new
+  champion — the search is doing exactly what it's told (trade quality for
+  efficiency). The bug was never in the tracking; it was that the progress
+  line printed only `best_loss=` (one of the two tracked dimensions), so a
+  genuine efficiency-for-quality trade came across as an impossible
+  regression in an elitist GA.
+- **Fix.** The `optimizer` progress line now prints `cost=` alongside
+  `best_loss=`, reconstructed from `-o.values[1] / cost_weight` (both are the
+  *raw*, H48-tracked dimensions — no novelty ever leaks into this line
+  post-H48). Reading the two together, a "regression" in loss is now legible
+  as "the champion got cheaper."
+- **Honest scope.** This is a display fix, not a search change — `--novelty`
+  still trades pure loss-greediness for efficiency + diversity pressure by
+  design; that trade-off is real and was always the intended behaviour of
+  the multi-objective Pareto search (see `front_stats`).
+
+[EVIDENCE: tests/genetic/test_discovery.py::TestProgressReporting::test_progress_line_shows_cost_alongside_loss green]

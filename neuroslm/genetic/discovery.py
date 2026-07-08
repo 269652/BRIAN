@@ -258,9 +258,16 @@ def run_optimizer_discovery(
         from neuroslm.genetic.macros import default_macro_library
         macro_library = default_macro_library()
 
-    on_gen = _make_progress(progress, "optimizer",
-                            fmt=lambda o: f"best_loss={-o.values[0]:.4f}",
-                            baseline=sgd_baseline) if progress else None
+    # `best` is the champion of a (loss, cost) trade-off — the tracked objective
+    # per the docstring above — so a program with fewer instructions can outrank
+    # a lower-loss one on the combined scalar. Show both terms; otherwise
+    # "best_loss" alone can look like it regressed generation-to-generation when
+    # what actually happened is a cheaper program took the lead.
+    on_gen = _make_progress(
+        progress, "optimizer",
+        fmt=lambda o: f"best_loss={-o.values[0]:.4f} cost={-o.values[1] / max(cost_weight, 1e-9):.0f}",
+        baseline=sgd_baseline,
+    ) if progress else None
     result = auto_evolve(
         evaluate,
         rng,

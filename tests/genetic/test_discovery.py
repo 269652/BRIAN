@@ -62,6 +62,23 @@ class TestOptimizerDiscovery:
         assert a.best_final_loss == b.best_final_loss
 
 
+class TestProgressReporting:
+    def test_progress_line_shows_cost_alongside_loss(self):
+        # The tracked "best" is a (loss, cost) trade-off (per the module's own
+        # documented objective), so a bare "best_loss=" line can look like it
+        # regressed generation-to-generation when a cheaper-but-slightly-worse
+        # program becomes the new combined-objective champion. The progress
+        # line must show the cost term too, so that isn't mistaken for a bug.
+        lines = []
+        run_optimizer_discovery(seed=0, pop_size=12, generations=3, steps=20,
+                                novelty_weight=0.3, progress=lines.append)
+        gen_lines = [l for l in lines if l.strip().startswith("[optimizer] gen")]
+        assert gen_lines
+        for line in gen_lines:
+            assert "best_loss=" in line
+            assert "cost=" in line
+
+
 class TestFlowModulationDiscovery:
     def test_flow_modulation_runs_and_scores_ei(self):
         outcome = run_flow_modulation_discovery(
