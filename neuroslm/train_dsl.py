@@ -413,22 +413,26 @@ def _run_trunk_probe(harness, ids, targets, *, step: int, arch_name, preset_name
     h = h.detach().float()
     W = lm.lm_head
     cosine = bool(getattr(lm, "_cosine_head", False))
-    temp = float(getattr(lm, "head_temperature", 1.0))
+    _t = getattr(lm, "head_temperature", 1.0)
+    temp = float(_t.detach()) if torch.is_tensor(_t) else float(_t)
 
     def head_fn(x):
         if cosine:
             return nn_ops.cosine_lm_head(x, W, temp)
         return nn_ops.linear(x, W)
 
+    # Fresh in-memory ledger per probe: the trunk changes every explore_every
+    # steps, so a modulation that didn't help at one checkpoint may help at the
+    # next — cross-checkpoint dud-skipping (from the shared/toy ledger) would
+    # over-prune the search. Each checkpoint gets a full search; winners still
+    # persist to modulations/.
     root = Path(root) if root is not None else _REPO_ROOT
-    led = SearchLedger(root / ".neuro" / "search_ledger.json")
+    led = SearchLedger(":memory:")
     store = ModulationStore(root / "modulations")
-    out = probe_hidden_modulation(
+    return probe_hidden_modulation(
         h, head_fn, targets.to(h.device), ledger=led, store=store,
-        config=ExploreConfig(pop_size=8, generations=3), step=step,
+        config=ExploreConfig(pop_size=12, generations=4), step=step,
         run_id=f"trunk-{preset_name or arch_name or 'run'}")
-    led.save()
-    return out
 
 
 def _scale_override_note(scale_name: str, cli_seq: int, cli_batch: int,
@@ -1406,7 +1410,7 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                           f"best_ce={_pr['best_ce']:.4f} Δ={_pr['delta_ce']:.4f} "
                           f"evaluated={_pr['evaluated']} ({_tag})", flush=True)
                     from neuroslm.genetic.modulation_pusher import push_artifacts
-                    push_artifacts(_REPO_ROOT, ["modulations", ".neuro/search_ledger.json"],
+                    push_artifacts(_REPO_ROOT, ["modulations"],
                                    message=f"explore: trunk probe step {step}")
             except Exception as _e:
                 print(f"[train_dsl] explore probe skipped: {_e!r}", flush=True)

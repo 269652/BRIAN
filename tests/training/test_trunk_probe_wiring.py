@@ -48,7 +48,6 @@ def test_probe_runs_and_persists_under_given_root(tmp_path):
     mods = list((tmp_path / "modulations").glob("*.neuro")) if (tmp_path / "modulations").exists() else []
     if out["saved"]:
         assert len(mods) == 1
-    assert (tmp_path / ".neuro" / "search_ledger.json").exists()
 
 
 def test_probe_returns_none_without_language_model():
