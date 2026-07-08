@@ -146,14 +146,14 @@
  {
   "signature": "3c4750c76a214ae0",
   "source": "t8 = const(c=1.0)\nreturn t8",
-  "outcome": "searched",
+  "outcome": "rejected",
   "delta": 0.0,
-  "metric_before": NaN,
-  "metric_after": NaN,
+  "metric_before": 8.208066940307617,
+  "metric_after": 8.208066940307617,
   "step": 500,
-  "run_id": "run-0",
+  "run_id": "trunk-rcc_bowtie_30m_p4",
   "kind": "modulation",
-  "count": 1
+  "count": 2
  },
  {
   "signature": "d516e2dc843b57d8",
@@ -24217,15 +24217,15 @@
  },
  {
   "signature": "fa46951b661d83fd",
-  "source": "t14 = matmul(t1, t0)\nt15 = max(t14, t0)\nreturn t15",
+  "source": "t14 = matmul(t5, t0)\nt15 = max(t14, t5)\nreturn t15",
   "outcome": "searched",
-  "delta": -2887.622570515977,
+  "delta": 2.6168384552001953,
   "metric_before": NaN,
   "metric_after": NaN,
-  "step": 4000,
-  "run_id": "run-0",
+  "step": 500,
+  "run_id": "trunk-rcc_bowtie_30m_p4",
   "kind": "modulation",
-  "count": 1
+  "count": 2
  },
  {
   "signature": "4943c8dfe04c8328",
@@ -24644,6 +24644,30 @@
   "metric_after": 784.4346328635703,
   "step": 4000,
   "run_id": "run-0",
+  "kind": "modulation",
+  "count": 1
+ },
+ {
+  "signature": "c21987aee1792dc5",
+  "source": "t14 = rms(t7)\nt15 = l2norm_last(t14)\nreturn t15",
+  "outcome": "searched",
+  "delta": 0.0,
+  "metric_before": NaN,
+  "metric_after": NaN,
+  "step": 500,
+  "run_id": "trunk-rcc_bowtie_30m_p4",
+  "kind": "modulation",
+  "count": 1
+ },
+ {
+  "signature": "0bd723409b6e9b00",
+  "source": "t16 = const(c=1.0)\nt17 = max(t10, t16)\nreturn t17",
+  "outcome": "searched",
+  "delta": 0.0,
+  "metric_before": NaN,
+  "metric_after": NaN,
+  "step": 500,
+  "run_id": "trunk-rcc_bowtie_30m_p4",
   "kind": "modulation",
   "count": 1
  }
