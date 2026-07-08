@@ -138,19 +138,26 @@ def mutate(program: Program, rng: np.random.Generator,
                 const = float(rng.normal(0, 0.5))
             instrs[i] = Instruction(new_op, old.out, ins, const)
         elif kind == "point_reg":
-            spec = REGISTRY[old.op]
-            if spec.n_in and rng.random() < 0.5:
-                j = int(rng.integers(spec.n_in))
+            # `call` (macro invocation) instructions have no REGISTRY entry —
+            # their input arity is the macro's own n_inputs, read off len(old.ins).
+            n_in = len(old.ins) if old.op == "call" else REGISTRY[old.op].n_in
+            if n_in and rng.random() < 0.5:
+                j = int(rng.integers(n_in))
                 ins = list(old.ins)
                 ins[j] = _rand_reg(rng, ns, nt)
-                instrs[i] = Instruction(old.op, old.out, tuple(ins), old.const)
+                instrs[i] = Instruction(old.op, old.out, tuple(ins), old.const, old.config, old.macro)
             else:
-                instrs[i] = Instruction(old.op, _rand_reg(rng, ns, nt), old.ins, old.const)
+                instrs[i] = Instruction(old.op, _rand_reg(rng, ns, nt), old.ins, old.const, old.config, old.macro)
         elif kind == "point_const":
-            spec = REGISTRY[old.op]
-            base = old.const if (old.const is not None) else 0.0
-            new_const = base + float(rng.normal(0, 0.3)) if spec.uses_const else old.const
-            instrs[i] = Instruction(old.op, old.out, old.ins, new_const)
+            # `call` instructions carry no const (resolved via MacroLibrary,
+            # not REGISTRY) — leave them unchanged for this mutation kind.
+            if old.op == "call":
+                instrs[i] = old
+            else:
+                spec = REGISTRY[old.op]
+                base = old.const if (old.const is not None) else 0.0
+                new_const = base + float(rng.normal(0, 0.3)) if spec.uses_const else old.const
+                instrs[i] = Instruction(old.op, old.out, old.ins, new_const)
         elif kind == "out_reg":
             written = [k.out for k in instrs if k.out.startswith("t")]
             child.out_reg = written[rng.integers(len(written))] if written else child.out_reg

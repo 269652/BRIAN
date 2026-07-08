@@ -2507,3 +2507,38 @@ higher-signal step) remains a deliberate opt-in for later, once the probe shows
 something worth installing.
 
 [EVIDENCE: tests/genetic/test_trunk_probe.py (4), tests/training/test_trunk_probe_wiring.py (2) green]
+
+### H47 — `mutate()` crashed on `call` (macro) instructions: `KeyError: 'call'` (2026-07-08)
+
+**Status:** 🟢 **FIXED** — 3 new contracts, found by a real Colab T4 run.
+
+- **Symptom.** `brian discover optimizer --pop 64 --generations 40 --steps 80
+  --seed 0 --task parity --novelty 0.3 --avoid-known --macros` crashed at
+  generation 2/40 with `KeyError: 'call'` inside `evolve.py::mutate()`.
+- **Root cause.** `call` instructions (macro invocations, grafted via
+  `--macros` → `insert_call`) are deliberately absent from `REGISTRY` —
+  `Instruction.__post_init__` special-cases `op == "call"` and skips the
+  registry-membership check, since a macro's arity/behaviour lives in the
+  `MacroLibrary`, not `REGISTRY[op].fn`. `mutate()`'s `point_reg` and
+  `point_const` branches didn't know this: both did an unconditional
+  `spec = REGISTRY[old.op]`, which is fine for every ordinary op but throws
+  the moment a population member (legitimately, once `--macros` is on)
+  contains a `call` instruction and the GA rolls `point_reg`/`point_const`
+  on it.
+- **Fix.** `point_reg` now reads arity as `len(old.ins)` when `old.op ==
+  "call"` (mirroring the macro's own input count) instead of
+  `REGISTRY[old.op].n_in`, and reconstructs the `Instruction` carrying
+  `old.config`/`old.macro` through (previously dropped even for non-call
+  ops — a latent bug that would have silently discarded `config`/`macro`
+  on any `point_reg` mutation). `point_const` is a no-op for `call`
+  instructions (they carry no const — it's resolved via the library, not
+  `REGISTRY[op].uses_const`).
+- **Regression sweep.** `tests/genetic/test_evolve.py` (10, incl. 3 new
+  `TestMutationOfCallInstructions` cases reproducing the exact crash before
+  the fix) and `tests/genetic/test_macros.py` (8) green. Full
+  `tests/genetic/` sweep: 270 passed, 1 pre-existing unrelated failure
+  (`test_baselines.py::TestSeededDiscovery::test_discovery_can_start_from_adam`,
+  confirmed failing identically on the pre-fix commit — a seeded-Adam
+  quality gap, not a `mutate()` regression).
+
+[EVIDENCE: tests/genetic/test_evolve.py::TestMutationOfCallInstructions (3) green; reproduces + fixes live Colab crash]

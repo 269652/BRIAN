@@ -9,7 +9,7 @@ fitness on a toy multi-objective problem.
 import numpy as np
 import torch
 
-from neuroslm.genetic.language import Program, Memory
+from neuroslm.genetic.language import Program, Memory, Instruction
 from neuroslm.genetic.optimizer import sgd_program, lion_program
 from neuroslm.genetic.evolve import (
     random_program,
@@ -65,6 +65,75 @@ class TestMutation:
             if child.to_source() != base.to_source():
                 changed += 1
         assert changed >= 15  # the vast majority of mutations are effective
+
+
+class TestMutationOfCallInstructions:
+    """`call` instructions (macro invocations) have no REGISTRY entry by
+    design — `point_reg`/`point_const` mutations must not blindly do
+    `REGISTRY[old.op]` on them (KeyError: 'call' seen on a live Colab
+    `discover optimizer --macros` run)."""
+
+    def _program_with_call(self):
+        from neuroslm.genetic.language import Instruction
+        return Program(
+            [Instruction("call", "t2", ("t0", "t1"), macro="sqgain")],
+            n_scalar=2, n_tensor=4, out_reg="t2",
+        )
+
+    def test_point_reg_on_call_instruction_does_not_crash(self):
+        rng = np.random.default_rng(6)
+        base = self._program_with_call()
+        for _ in range(50):
+            child = mutate(base, rng, kind="point_reg")
+            assert _executes_with_library(child)
+
+    def test_point_const_on_call_instruction_does_not_crash(self):
+        rng = np.random.default_rng(7)
+        base = self._program_with_call()
+        for _ in range(50):
+            child = mutate(base, rng, kind="point_const")
+            assert _executes_with_library(child)
+
+    def test_auto_evolve_with_macros_and_point_mutations_does_not_crash(self):
+        # reproduces the exact failure mode: a macro_library present so
+        # `call` instructions can be grafted, then enough generations that
+        # point_reg/point_const eventually lands on one.
+        from neuroslm.genetic.macros import Macro, MacroLibrary
+        from neuroslm.genetic.language import Instruction
+
+        body = Program(
+            [Instruction("mul", "i0", ("i0", "i0")), Instruction("sigmoid", "o0", ("i0",))],
+            n_scalar=2, n_tensor=6, out_reg="o0",
+        )
+        lib = MacroLibrary([Macro(name="sqgain", body=body, n_inputs=1)])
+        rng = np.random.default_rng(8)
+        base = sgd_program(lr=0.1)
+
+        def _obj(prog):
+            return Objective((-float(len(prog.instructions)),))
+
+        # library present -> insert_call is reachable; many generations ->
+        # point_reg/point_const will eventually hit a call instruction.
+        result = auto_evolve(_obj, rng, seeds=[base], pop_size=12,
+                             generations=15, macro_library=lib)
+        assert result.best_program is not None
+
+
+def _executes_with_library(prog: Program) -> bool:
+    mem = Memory(prog.n_scalar, prog.n_tensor)
+    mem.write("t0", torch.randn(4))
+    mem.write("t1", torch.randn(4))
+    from neuroslm.genetic.macros import Macro, MacroLibrary
+    body = Program(
+        [Instruction("mul", "i0", ("i0", "i0")), Instruction("sigmoid", "o0", ("i0",))],
+        n_scalar=2, n_tensor=6, out_reg="o0",
+    )
+    lib = MacroLibrary([Macro(name="sqgain", body=body, n_inputs=1)])
+    prog = prog.copy()
+    prog.library = lib
+    prog.execute(mem)
+    out = mem.read(prog.out_reg)
+    return torch.isfinite(out).all().item()
 
 
 class TestCrossover:
