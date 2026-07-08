@@ -287,17 +287,25 @@ def auto_evolve(
     pop = pop[:pop_size]
 
     def scored(programs):
-        objs = [evaluate(p) for p in programs]
+        # `raw` is the caller's own objective (loss/cost, …) — comparable across
+        # generations. `sel` adds a novelty bonus for *selection* (elitism,
+        # tournament) only: novelty is relative to the current, ever-changing
+        # population, so it must never be used to judge "best found so far" —
+        # doing so let a worse-loss-but-more-novel individual overtake a
+        # genuinely better one from an earlier generation as "the best".
+        raw = [evaluate(p) for p in programs]
+        sel = raw
         if novelty_weight > 0.0:
             embs = np.stack([p.semantic_vector() for p in programs])
-            objs = _add_novelty(programs, objs, embs, novelty_weight)
-        return objs
+            sel = _add_novelty(programs, raw, embs, novelty_weight)
+        return raw, sel
 
-    objs = scored(pop)
-    gen0_best = max(o.scalar(weights) for o in objs)
-    best_i = int(np.argmax([o.scalar(weights) for o in objs]))
-    best_prog, best_obj = pop[best_i].copy(), objs[best_i]
-    history = [best_obj.scalar(weights)]
+    raw_objs, objs = scored(pop)
+    raw_weights = weights[:len(raw_objs[0].values)] if weights is not None else None
+    gen0_best = max(o.scalar(raw_weights) for o in raw_objs)
+    best_i = int(np.argmax([o.scalar(raw_weights) for o in raw_objs]))
+    best_prog, best_obj = pop[best_i].copy(), raw_objs[best_i]
+    history = [best_obj.scalar(raw_weights)]
     if on_generation is not None:
         on_generation(0, generations, best_obj)
 
@@ -316,11 +324,11 @@ def auto_evolve(
                 child = mutate(pa, rng, library=macro_library)
             new_pop.append(_attach(child))
         pop = new_pop
-        objs = scored(pop)
-        gi = int(np.argmax([o.scalar(weights) for o in objs]))
-        if objs[gi].scalar(weights) > best_obj.scalar(weights):
-            best_prog, best_obj = pop[gi].copy(), objs[gi]
-        history.append(best_obj.scalar(weights))
+        raw_objs, objs = scored(pop)
+        gi = int(np.argmax([o.scalar(raw_weights) for o in raw_objs]))
+        if raw_objs[gi].scalar(raw_weights) > best_obj.scalar(raw_weights):
+            best_prog, best_obj = pop[gi].copy(), raw_objs[gi]
+        history.append(best_obj.scalar(raw_weights))
         if on_generation is not None:
             on_generation(_gen + 1, generations, best_obj)
 

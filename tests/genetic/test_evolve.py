@@ -199,3 +199,38 @@ class TestAutoEvolve:
         assert result.best_objective.values[0] > -0.1
         # improvement happened (unless gen0 was already essentially optimal)
         assert result.history[-1] > result.history[0] or result.history[0] > -0.02
+
+    def test_history_is_monotonic_even_with_novelty_pressure(self):
+        # With novelty_weight > 0, selection favours semantic distance from the
+        # rest of the (ever-changing) population — a bonus that is population-
+        # relative and NOT comparable across generations. The *tracked best* must
+        # still be judged on the caller's real objective (loss/cost), never on a
+        # stale novelty snapshot, or "best_loss" can appear to regress generation
+        # to generation (seen on a live run: 0.4014 -> 0.7035) even though the
+        # true best-found-so-far never got worse.
+        target = torch.tensor([1.0, -1.0, 0.5, 0.5])
+
+        def evaluate(prog: Program):
+            mem = Memory(prog.n_scalar, prog.n_tensor)
+            mem.write("t0", torch.tensor([2.0, -2.0, 1.0, 1.0]))
+            prog.execute(mem)
+            out = mem.read(prog.out_reg)
+            try:
+                out = out.reshape(4)
+            except RuntimeError:
+                out = out.flatten()[:4]
+                if out.numel() < 4:
+                    out = torch.zeros(4)
+            mse = torch.mean((out - target) ** 2).item()
+            return Objective((-mse, -0.01 * len(prog.instructions)))
+
+        rng = np.random.default_rng(1)
+        result = auto_evolve(
+            evaluate, rng, pop_size=30, generations=25, length=6,
+            n_scalar=4, n_tensor=6, weights=[1.0, 1.0, 0.5],
+            novelty_weight=0.4,
+        )
+        assert all(a <= b + 1e-9 for a, b in zip(result.history, result.history[1:]))
+        # the reported best objective must be the *raw* (loss, cost) pair —
+        # never a novelty-inflated value that doesn't correspond to real quality.
+        assert len(result.best_objective.values) == 2

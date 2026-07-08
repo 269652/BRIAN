@@ -2542,3 +2542,44 @@ something worth installing.
   quality gap, not a `mutate()` regression).
 
 [EVIDENCE: tests/genetic/test_evolve.py::TestMutationOfCallInstructions (3) green; reproduces + fixes live Colab crash]
+
+### H48 — `auto_evolve`'s tracked "best" regressed under novelty pressure (2026-07-08)
+
+**Status:** 🟢 **FIXED** — 1 new contract, found from the H47-fixed live Colab
+run's own progress log.
+
+- **Symptom.** The freshly-unblocked `discover optimizer --novelty 0.3 --macros`
+  run's per-generation `best_loss` was not monotonic:
+  `gen6=0.4014 → gen7=0.4014 → … → gen10=0.7035` — the reported "best so far"
+  got *worse*, which should be structurally impossible in an elitist GA.
+- **Root cause.** `run_optimizer_discovery` passes `weights=[1.0, 1.0, 0.5]`
+  when `novelty_weight > 0`, and `auto_evolve` tracked `best_prog`/`best_obj`
+  (and `history`, and the value hand to `on_generation` for the printed
+  `best_loss`) using that *novelty-inclusive* scalar. Novelty is a distance-
+  to-the-current-population bonus — recomputed fresh every generation, so a
+  program's novelty score is only meaningful *within* the generation it was
+  scored in. Comparing an old `best_obj` (novelty computed against an earlier,
+  more-diverse population) against a new generation's objectives (novelty
+  computed against a now-more-converged population) is comparing two different
+  quantities that happen to share a name. A new individual with a strictly
+  worse loss but a bigger novelty bonus (large relative to a converging
+  population) could out-score the old champion and overwrite it — so the
+  *displayed* "best" (and the actual `result.best_program` returned to the
+  caller!) could regress on the metric that actually matters (loss/cost).
+- **Fix.** `auto_evolve.scored()` now returns `(raw, sel)` — `raw` is exactly
+  `evaluate(p)` per program (comparable across generations), `sel` is `raw`
+  plus the novelty bonus (population-relative, selection-only). Elitism carry-
+  forward and tournament selection still use `sel` (so novelty still drives
+  exploration pressure) — but `best_prog`/`best_obj`/`history`/the
+  `on_generation` callback now track strictly by `raw` scored with
+  `weights[:len(raw_dims)]`. The tracked best is now guaranteed non-decreasing
+  regardless of novelty pressure, and `EvolveResult.best_objective` always has
+  the caller's real objective arity (2-tuple for `run_optimizer_discovery`),
+  never a novelty-inflated 3-tuple.
+- **Why this matters beyond cosmetics.** `run_optimizer_discovery` returns
+  `best_final_loss = -result.best_objective.values[0]` as *the* headline
+  number for a discovery run. Before this fix, that number could be a worse
+  loss than one actually visited earlier in the same search — a silent
+  regression in the one metric the whole harness exists to report faithfully.
+
+[EVIDENCE: tests/genetic/test_evolve.py::TestAutoEvolve::test_history_is_monotonic_even_with_novelty_pressure green]
