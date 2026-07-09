@@ -1,0 +1,11 @@
+modulation expert_codegpt_small_py_step27 {
+    # step: 27
+    # baseline_ce: 6.266
+    # best_ce: 5.9875
+    # delta_ce: 0.2784
+    program {
+        t0 = const(c=-0.5906137206381115)
+        t7 = sqrt(t0)
+        return t7
+    }
+}
