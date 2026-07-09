@@ -6,3 +6,4 @@
 [data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
 [expert:smollm2_360m] round 1: baseline_ce=3.0179 (final: sens=0.04065 improve=-0.002417 (scale_dn) tight)
 [expert-discovery] round 1/30 HuggingFaceTB/SmolLM2-360M: best_ce=3.0177 Δ=0.0002 evaluated=408 (saved expert_smollm2_360m_step1)
+[expert:codegpt_small_py] round 1: baseline_ce=6.5992 (final: sens=0.1451 improve=+0.3349 (damp) ←slack)
