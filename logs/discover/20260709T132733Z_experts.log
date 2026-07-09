@@ -11,3 +11,4 @@
 [expert:qwen2_5_0_5b] round 1: baseline_ce=3.3041 (final: sens=0.03731 improve=-0.001464 (scale_dn) tight)
 [expert-discovery] round 1/30 Qwen/Qwen2.5-0.5B: best_ce=3.3029 Δ=0.0012 evaluated=1009 (saved expert_qwen2_5_0_5b_step1)
 [expert:smollm2_360m] round 2: baseline_ce=2.6459 (final: sens=0.04544 improve=-0.002228 (scale_up) tight)
+[expert-discovery] round 2/30 HuggingFaceTB/SmolLM2-360M: best_ce=2.6455 Δ=0.0004 evaluated=380 (saved expert_smollm2_360m_step2)
