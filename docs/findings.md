@@ -2903,14 +2903,20 @@ user's own second live deploy (instance 44317528, A100 SXM4 @ $0.61/hr).
   actually passed).
 - **Fix.** One line: `discover_args += ["--device", "auto"]` added to the
   `experts` branch, mirroring `trunk`.
-- **Silver lining.** Round 1 still produced a genuine result before the
-  redeploy: `microsoft/CodeGPT-small-py` (pretrained on Python, probed on
+- **Silver lining.** Round 1 still produced a genuine result even while
+  CPU-bound: `microsoft/CodeGPT-small-py` (pretrained on Python, probed on
   FineWeb-Edu general text) showed real domain-shift slack —
   `baseline_ce=6.5992 → best_ce=6.2368`, Δ=0.36 nats — already pushed to
   `origin/master` as `modulations/expert_codegpt_small_py_step1.neuro`
-  before the CPU-bound instance was destroyed and redeployed on the fix.
-  `smollm2_360m`/`qwen2_5_0_5b` measured `tight` (no slack) on round 1 —
-  consistent with H54: general-purpose models on general web text have
-  little room, code/domain-specialized ones on shifted data do.
+  before the code fix landed, so the finding is preserved regardless of what
+  happens to that instance. `smollm2_360m`/`qwen2_5_0_5b` measured `tight`
+  (no slack) on round 1 — consistent with H54: general-purpose models on
+  general web text have little room, code/domain-specialized ones on
+  shifted data do.
+- **Status of the live instance.** `44317528` was still running on CPU (~90
+  min into round 1) at the time this fix landed — the fix does not apply
+  retroactively to an already-running onstart script. Getting the GPU
+  speedup on this run requires destroying and redeploying with the fixed
+  code (user's call — deploy is human-gated, see H55).
 
 [EVIDENCE: tests/test_vast_discover_deploy.py::TestDiscoverArgsUseTheRentedGpu (2) green, RED-confirmed against the pre-fix commit via `git stash`]
