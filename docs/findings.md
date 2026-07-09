@@ -2986,4 +2986,65 @@ out — confirmed pre-existing, not a regression.
   `modulations/`, exactly like a local Colab GPU run already could — no
   behavior change for anyone who doesn't pass the new flags.
 
+### H57 — `brian discover checkpoint`: probe the REAL trunk from a loaded checkpoint, no training (2026-07-09)
+
+**Status:** 🟢 **CONFIRMED** — 17 new contracts in `test_discover_checkpoint.py`
++ 8 new contracts in `test_vast_discover_deploy.py` (checkpoint deployability
++ arg construction) + 4 new contracts pinning `cmd_deploy`'s `--latest`
+resolution before/after a refactor into a shared helper; full
+`test_vast_discover_deploy.py` (28) + `test_discover_checkpoint.py` (17) +
+`test_deploy_safety_gate.py` (19) green.
+
+- **Motivation.** The second half of the user's "Do both" request — Mode A,
+  "Load Checkpoints in Discover". The user's underlying question: why does
+  discovery only ever touch frozen pretrained experts (H54) or a synthetic
+  proxy (`discover trunk`/`discover explore`'s actual implementation is
+  `_TinyLM`, confirmed by reading `neuro_evolve.py` — never the real SmolLM
+  trunk), instead of measuring headroom on the model actually being trained?
+- **Key finding: the real-trunk, checkpoint-loading, probe-only machinery
+  already existed** — `train_dsl.py`'s `--explore_only` + `--resume_from`
+  (H52/H53) builds the exact-match DSL harness, loads a real checkpoint
+  (local path or `hf://...` URI), and runs the multi-site probe with no
+  optimizer/backward. It just had no CLI entry point outside a full
+  training deploy. Rather than re-implementing harness construction in
+  `cli.py` (CLAUDE.md §1b: reuse before reinventing), `discover checkpoint`
+  is a thin wrapper: resolve a checkpoint URI, shell out to
+  `python -m neuroslm.train_dsl --explore_only --resume_from ... <explore
+  knobs>`, propagate its exit code.
+- **`_resolve_checkpoint_uri()`** (new, `cli.py`) — extracted from
+  `cmd_deploy`'s existing `--resume`/`--latest` block (unchanged behavior;
+  pinned by 4 new tests in `test_deploy_safety_gate.py` before the
+  refactor, still green after) so `discover checkpoint --checkpoint/--latest`
+  resolves checkpoints identically to a training deploy — same
+  `find_latest_checkpoint()` HF Hub lookup, same `hf://repo/path` URI
+  shape, same error messages.
+- **`brian discover checkpoint`** (`cli.py::cmd_discover`, new `checkpoint`
+  mode) — flags: `--checkpoint PATH_OR_URI` / `--latest` (+ `--hf-repo` /
+  `--hf-prefix`), `--arch` / `--preset` (default from `brian.toml
+  [current].arch` / `rcc_bowtie_30m_p4`), `--rounds` / `--pop` /
+  `--generations` / `--length` / `--sites` (the same H52/H53 probe knobs),
+  `--device`, `--push` (belt-and-braces final push; the underlying
+  `run_probe_only()` already pushes every round it saves a winner).
+  Rejects with a clear message (no subprocess spawned) when neither
+  `--checkpoint` nor `--latest` is given, or when `--latest` finds nothing.
+- **`deploy-discover checkpoint`** — added to
+  `vast_discover.DEPLOYABLE_MODES` (now `experts`/`trunk`/`explore`/
+  `checkpoint`). No onstart-template change needed: `checkpoint` is a
+  normal `brian discover <mode>` invocation like the other three, so the
+  existing `python3 -m neuroslm.cli discover __MODE__ __DISCOVER_ARGS__
+  --push` command line in `vast_discover.py`'s onstart script works
+  unmodified — `cmd_deploy_discover` just gained a `checkpoint` branch that
+  forwards `--checkpoint`/`--latest`/`--hf-repo`/`--hf-prefix`/`--arch`/
+  `--preset`/`--rounds`/`--pop`/`--generations`/`--length`/`--sites` and
+  (per the H55.1 cost-bug lesson) always adds `--device auto`. Rejects a
+  deploy missing both `--checkpoint` and `--latest` BEFORE the human-
+  confirmation gate, matching the existing "reject invalid mode before
+  confirming" pattern.
+- **Colab**: cell 12/13 (free local-GPU discover) and cell 14/15
+  (vast.ai deploy-discover) both gained `checkpoint` as a selectable mode
+  with its own knobs block (`CKPT_LATEST`/`CKPT_URI`/`CKPT_ARCH`/
+  `CKPT_PRESET`/`CKPT_ROUNDS`/`CKPT_SITES`).
+
+[EVIDENCE: tests/test_discover_checkpoint.py (17) green; tests/test_vast_discover_deploy.py (28, 8 new) green; tests/test_deploy_safety_gate.py (19, 4 new `TestCmdDeployLatestResolution`) green]
+
 [EVIDENCE: tests/test_connectors.py::test_T1_build_env_propagates_explore_fields_when_set / test_T2_build_env_skips_explore_when_off / test_T3_onstart_substitutes_explore_placeholders / test_T4_onstart_defaults_explore_off / test_T5_cmd_deploy_forwards_explore_flags_to_deploy_config (5) green; tests/test_vast_train_dsl_loop_explore.py (4) green; tests/test_connectors.py + test_vast_train_dsl_loop_explore.py + test_deploy_safety_gate.py (72 total) green]

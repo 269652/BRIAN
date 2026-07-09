@@ -759,6 +759,64 @@ def cmd_discover(args: argparse.Namespace) -> int:
                 from neuroslm.genetic.modulation_pusher import push_modulations
                 res = push_modulations(REPO_ROOT, message=f"modulations: discovered {args.save}")
                 print(f"  push: {'-> ' + res.get('branch','?') if res.get('pushed') else res.get('reason')}")
+    elif mode == "checkpoint":
+        # Mode A: probe the REAL trunk from a loaded checkpoint. Deliberately
+        # NOT re-implemented here — `train_dsl.py --explore_only
+        # --resume_from ...` already builds the exact-match harness, loads
+        # the checkpoint, and runs the H52/H53 multi-site probe with no
+        # optimizer/backward. This mode just resolves the checkpoint and
+        # shells out, so the model-construction logic lives in one place.
+        resume_uri, _ = _resolve_checkpoint_uri(
+            explicit=getattr(args, "checkpoint", None),
+            use_latest=getattr(args, "latest", False),
+            hf_repo=getattr(args, "hf_repo", None),
+            hf_prefix=getattr(args, "hf_prefix", None),
+            log_prefix="discover:checkpoint",
+        )
+        if not resume_uri:
+            if not getattr(args, "latest", False):
+                print("[discover:checkpoint] pass --checkpoint PATH_OR_URI "
+                      "or --latest", file=sys.stderr)
+            return 1
+
+        from neuroslm.project_config import load_project_config
+        proj_cfg = load_project_config()
+        arch = getattr(args, "arch", None) or getattr(proj_cfg, "arch", None) \
+            or "architectures/master"
+        preset = getattr(args, "preset", None) or "rcc_bowtie_30m_p4"
+        device = getattr(args, "device", "cpu")
+
+        cmd = [
+            sys.executable, "-u", "-m", "neuroslm.train_dsl",
+            "--arch", arch, "--preset", preset,
+            "--resume_from", resume_uri,
+            "--explore_only",
+            "--explore_rounds", str(args.rounds),
+            "--explore_pop", str(args.pop),
+            "--explore_gens", str(args.generations),
+            "--explore_len", str(args.length),
+            "--explore_sites", str(args.sites),
+            "--device", device,
+        ]
+        print(f"[discover:checkpoint] arch={arch} preset={preset} device={device}")
+        print(f"[discover:checkpoint] resume_from={resume_uri}")
+        print(f"[discover:checkpoint] rounds={args.rounds} pop={args.pop} "
+              f"gens={args.generations} sites={args.sites}")
+        print(f"  $ {' '.join(cmd)}")
+        result = subprocess.run(cmd, cwd=str(REPO_ROOT))
+        rc = result.returncode
+        if rc != 0:
+            print(f"[discover:checkpoint] train_dsl exited rc={rc}", file=sys.stderr)
+            return rc
+        if getattr(args, "push", False):
+            from neuroslm.genetic.modulation_pusher import push_artifacts
+            res = push_artifacts(REPO_ROOT, ["modulations"],
+                                 message="discover(checkpoint): probe run")
+            print(f"  push: {'-> ' + res.get('branch','?') if res.get('pushed') else res.get('reason')}")
+        payload = {"mode": "checkpoint", "arch": arch, "preset": preset,
+                   "resume_from": resume_uri, "rounds": args.rounds,
+                   "pop": args.pop, "generations": args.generations,
+                   "sites": args.sites, "rc": rc}
     elif mode == "simplify":
         from neuroslm.genetic.compile_arch import compile_layer_to_ngl
         from neuroslm.genetic.simplify import simplify, programs_equivalent
@@ -1504,6 +1562,38 @@ def _require_human_confirmation(platform: str, steps: int) -> None:
         sys.exit(1)
 
 
+def _resolve_checkpoint_uri(*, explicit: Optional[str], use_latest: bool,
+                            hf_repo: Optional[str], hf_prefix: Optional[str],
+                            log_prefix: str) -> tuple:
+    """Resolve ``--resume``/``--latest``-style flags into a checkpoint URI.
+
+    Shared by ``cmd_deploy``'s ``--resume``/``--latest`` and ``discover
+    checkpoint``'s ``--checkpoint``/``--latest`` (Mode A: checkpoint-probe
+    discovery resolves checkpoints exactly like a training deploy does).
+    Returns ``(uri_or_none, repo_id_or_none)``; prints its own error and
+    returns ``(None, None)`` on failure so callers don't need duplicate
+    error handling.
+    """
+    target = explicit
+    if use_latest and not target:
+        try:
+            from neuroslm.hf_checkpoints import find_latest_checkpoint
+            latest = find_latest_checkpoint(repo_id=hf_repo, prefix=hf_prefix or "")
+        except Exception as e:
+            print(f"[{log_prefix}] --latest lookup failed: {type(e).__name__}: {e}",
+                  file=sys.stderr)
+            return None, None
+        if latest is None:
+            print(f"[{log_prefix}] --latest: no checkpoints found on HF Hub.",
+                  file=sys.stderr)
+            return None, None
+        repo = hf_repo or os.environ.get("HF_REPO_ID", "") or "moritzroessler/BRIAN"
+        target = f"hf://{repo}/{latest.path_in_repo}"
+        print(f"[{log_prefix}] --latest resolved to step {latest.step}: {target}")
+        return target, repo
+    return target, hf_repo
+
+
 def cmd_deploy(args: argparse.Namespace) -> int:
     """Launch a DSL or DNA training run on a cloud platform.
 
@@ -1627,28 +1717,16 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         print(f"[deploy] arch: {cfg.arch} (from brian.toml [current].arch)")
 
     # ── Resume ──
-    resume_target = getattr(args, "resume", None)
     use_latest = getattr(args, "latest", False)
+    resume_target, _ = _resolve_checkpoint_uri(
+        explicit=getattr(args, "resume", None),
+        use_latest=use_latest,
+        hf_repo=getattr(args, "hf_repo", None),
+        hf_prefix=getattr(args, "hf_prefix", None),
+        log_prefix="deploy",
+    )
     if use_latest and not resume_target:
-        try:
-            from neuroslm.hf_checkpoints import find_latest_checkpoint
-            latest = find_latest_checkpoint(
-                repo_id=getattr(args, "hf_repo", None),
-                prefix=getattr(args, "hf_prefix", "") or "",
-            )
-        except Exception as e:
-            print(f"[deploy] --latest lookup failed: {type(e).__name__}: {e}",
-                  file=sys.stderr)
-            return 1
-        if latest is None:
-            print("[deploy] --latest: no checkpoints found on HF Hub.",
-                  file=sys.stderr)
-            return 1
-        repo = (getattr(args, "hf_repo", None)
-                or os.environ.get("HF_REPO_ID", "")
-                or "moritzroessler/BRIAN")
-        resume_target = f"hf://{repo}/{latest.path_in_repo}"
-        print(f"[deploy] --latest resolved to step {latest.step}: {resume_target}")
+        return 1  # _resolve_checkpoint_uri already printed the reason
     if resume_target:
         config.resume_from = resume_target
         if getattr(args, "hf_repo", None):
@@ -1782,6 +1860,34 @@ def cmd_deploy_discover(args: argparse.Namespace) -> int:
         if args.seed is not None:
             discover_args += ["--seed", str(args.seed)]
         discover_args += ["--seed-known"]
+    elif mode == "checkpoint":
+        if getattr(args, "checkpoint", None):
+            discover_args += ["--checkpoint", args.checkpoint]
+        if getattr(args, "latest", False):
+            discover_args += ["--latest"]
+        if not getattr(args, "checkpoint", None) and not getattr(args, "latest", False):
+            print("[deploy-discover] checkpoint mode needs --checkpoint "
+                  "PATH_OR_URI or --latest", file=sys.stderr)
+            return 1
+        if getattr(args, "hf_repo", None):
+            discover_args += ["--hf-repo", args.hf_repo]
+        if getattr(args, "hf_prefix", None):
+            discover_args += ["--hf-prefix", args.hf_prefix]
+        if getattr(args, "arch", None):
+            discover_args += ["--arch", args.arch]
+        if getattr(args, "preset", None):
+            discover_args += ["--preset", args.preset]
+        if args.rounds is not None:
+            discover_args += ["--rounds", str(args.rounds)]
+        if args.pop is not None:
+            discover_args += ["--pop", str(args.pop)]
+        if args.generations is not None:
+            discover_args += ["--generations", str(args.generations)]
+        if args.length is not None:
+            discover_args += ["--length", str(args.length)]
+        if getattr(args, "sites", None) is not None:
+            discover_args += ["--sites", str(args.sites)]
+        discover_args += ["--device", "auto"]
 
     config = DiscoverDeployConfig(
         mode=mode,
@@ -5034,6 +5140,44 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="git commit+push the saved modulation (during Colab/vast runs)")
     sdt.set_defaults(func=cmd_discover)
 
+    sdc = sdiscover_sub.add_parser(
+        "checkpoint",
+        help="Probe the REAL trunk from a loaded checkpoint (Mode A): no "
+             "training, no _TinyLM proxy — the same H52/H53 multi-site "
+             "probe --explore-every fires during training, run once "
+             "against a resumed checkpoint")
+    sdc.add_argument("--checkpoint", metavar="PATH_OR_URI",
+                     help="local path or hf://repo/path URI to probe")
+    sdc.add_argument("--latest", action="store_true",
+                     help="resolve the newest checkpoint on HF Hub "
+                          "(same resolution --deploy --latest uses)")
+    sdc.add_argument("--hf-repo", dest="hf_repo",
+                     help="HF Hub repo id for --latest (default: "
+                          "moritzroessler/BRIAN)")
+    sdc.add_argument("--hf-prefix", dest="hf_prefix",
+                     help="only consider checkpoints under this prefix "
+                          "for --latest")
+    sdc.add_argument("--arch", help="architecture folder under "
+                     "architectures/ (default: brian.toml [current].arch)")
+    sdc.add_argument("--preset", help="harness preset "
+                     "(default: rcc_bowtie_30m_p4)")
+    sdc.add_argument("--rounds", type=int, default=30,
+                     help="probe rounds (fresh batch per round; recurrence "
+                          "across rounds is the install evidence)")
+    sdc.add_argument("--pop", type=int, default=24)
+    sdc.add_argument("--generations", type=int, default=10)
+    sdc.add_argument("--length", type=int, default=8)
+    sdc.add_argument("--sites", type=int, default=2,
+                     help="layers probed per round, ranked by measured "
+                          "headroom")
+    sdc.add_argument("--device", default="cpu", help="cpu | cuda | auto")
+    sdc.add_argument("--push", action="store_true",
+                     help="git commit+push modulations after the run "
+                          "(the underlying probe already pushes per "
+                          "round; this is a belt-and-braces final push)")
+    sdc.add_argument("--out", help="write the run summary JSON here")
+    sdc.set_defaults(func=cmd_discover)
+
     sde = sdiscover_sub.add_parser(
         "experts",
         help="Probe the frozen pretrained expert cortices (SmolLM2/CodeGPT/"
@@ -5374,14 +5518,17 @@ def _build_parser() -> argparse.ArgumentParser:
     sdb.set_defaults(func=cmd_deploy_brain)
 
     # deploy-discover — rent a vast.ai instance to run `brian discover <mode>`
-    # (not training). Only experts/trunk/explore: the other discover modes
-    # already finish in seconds/minutes on the free local Colab GPU.
+    # (not training). Only experts/trunk/explore/checkpoint: the other
+    # discover modes already finish in seconds/minutes on the free local
+    # Colab GPU.
     sdd = sub.add_parser(
         "deploy-discover",
         help="Launch a `brian discover <mode>` run on vast.ai (experts/trunk/"
-             "explore only) — pushes logs+modulations+ledger while running")
-    sdd.add_argument("deploy_discover_mode", choices=["experts", "trunk", "explore"],
-                     metavar="mode", help="experts | trunk | explore")
+             "explore/checkpoint only) — pushes logs+modulations+ledger "
+             "while running")
+    sdd.add_argument("deploy_discover_mode",
+                     choices=["experts", "trunk", "explore", "checkpoint"],
+                     metavar="mode", help="experts | trunk | explore | checkpoint")
     sdd.add_argument("--branch", help="git branch the vast.ai box checks out "
                      "(default: current branch)")
     sdd.add_argument("--label", help="vast.ai instance label / (trunk) saved-"
@@ -5394,10 +5541,10 @@ def _build_parser() -> argparse.ArgumentParser:
                           "single A100 — see scripts/vast_discover.sh)")
     # experts-only
     sdd.add_argument("--models", help="comma-sep HF ids/aliases (experts)")
-    sdd.add_argument("--rounds", type=int, default=None, help="probe rounds (experts)")
+    sdd.add_argument("--rounds", type=int, default=None, help="probe rounds (experts/checkpoint)")
     sdd.add_argument("--batch", type=int, default=None, help="batch size (experts)")
     sdd.add_argument("--seq_len", type=int, default=None, help="sequence length (experts)")
-    # shared GA knobs (trunk/explore/experts)
+    # shared GA knobs (trunk/explore/experts/checkpoint)
     sdd.add_argument("--pop", type=int, default=None, help="population size")
     sdd.add_argument("--generations", type=int, default=None, help="GA generations")
     sdd.add_argument("--length", type=int, default=None, help="candidate program length")
@@ -5405,6 +5552,21 @@ def _build_parser() -> argparse.ArgumentParser:
     sdd.add_argument("--steps", type=int, default=None,
                      help="train steps per eval (trunk) / total steps (explore)")
     sdd.add_argument("--seed", type=int, default=None)
+    # checkpoint-only (Mode A: probe the REAL trunk from a loaded checkpoint)
+    sdd.add_argument("--checkpoint", metavar="PATH_OR_URI", default=None,
+                     help="local path or hf://repo/path URI to probe (checkpoint)")
+    sdd.add_argument("--latest", action="store_true",
+                     help="resolve the newest checkpoint on HF Hub (checkpoint)")
+    sdd.add_argument("--hf-repo", dest="hf_repo", default=None,
+                     help="HF Hub repo id for --latest (checkpoint)")
+    sdd.add_argument("--hf-prefix", dest="hf_prefix", default=None,
+                     help="only consider checkpoints under this prefix (checkpoint)")
+    sdd.add_argument("--arch", default=None,
+                     help="architecture folder under architectures/ (checkpoint)")
+    sdd.add_argument("--preset", default=None,
+                     help="harness preset (checkpoint; default rcc_bowtie_30m_p4)")
+    sdd.add_argument("--sites", type=int, default=None,
+                     help="layers probed per round (checkpoint)")
     # unused by deploy-discover but accepted for a uniform Namespace shape
     sdd.add_argument("--task", default=None, help=argparse.SUPPRESS)
     sdd.add_argument("--from-scratch", action="store_true", help=argparse.SUPPRESS)

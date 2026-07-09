@@ -12,11 +12,15 @@ the run is in progress — a discover mode's own internal push points (e.g.
 destroyed instance would otherwise lose everything since the last internal
 push.
 
-Only ``experts``/``trunk``/``explore`` are deployable here — the other
-discover modes (``optimizer``/``flow``/``qd``/``simplify``) are cheap,
-fast, synthetic-benchmark searches that already finish on the free
+Only ``experts``/``trunk``/``explore``/``checkpoint`` are deployable here —
+the other discover modes (``optimizer``/``flow``/``qd``/``simplify``) are
+cheap, fast, synthetic-benchmark searches that already finish on the free
 interactive Colab GPU in seconds-to-minutes; renting a paid instance for
-them would spend money for no benefit.
+them would spend money for no benefit. ``checkpoint`` (Mode A) probes the
+REAL trunk from a loaded checkpoint — no training, no ``_TinyLM`` proxy —
+and is the one mode here whose command line isn't self-contained: it needs
+a resolved checkpoint URI, so ``cmd_deploy_discover`` forwards
+``--checkpoint``/``--latest`` through like every other flag.
 
 Modeled directly on :class:`neuroslm.connectors.vast.VastConnector`: Python
 builds the onstart script content and writes it to a temp file (avoids the
@@ -45,7 +49,7 @@ from typing import List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-DEPLOYABLE_MODES = ("experts", "trunk", "explore")
+DEPLOYABLE_MODES = ("experts", "trunk", "explore", "checkpoint")
 
 
 @dataclass

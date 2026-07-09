@@ -58,6 +58,11 @@ class TestDeployableModes:
         for mode in ("experts", "trunk", "explore"):
             DiscoverDeployConfig(mode=mode)   # must not raise
 
+    def test_accepts_checkpoint(self):
+        # Mode A: probe the REAL trunk from a loaded checkpoint.
+        from neuroslm.connectors.vast_discover import DiscoverDeployConfig
+        DiscoverDeployConfig(mode="checkpoint")   # must not raise
+
 
 class TestBuildDiscoverOnstart:
     def _build(self, **overrides):
@@ -203,11 +208,13 @@ class TestDiscoverArgsUseTheRentedGpu:
             from_scratch=False, novelty=None, avoid_known=False,
             macros=False, seed_from=None, branch=None, label=None,
             push_interval=None, gpu_query=None,
+            checkpoint=None, latest=False, hf_repo=None, hf_prefix=None,
+            arch=None, preset=None, sites=None,
         )
         base.update(overrides)
         return argparse.Namespace(**base)
 
-    def _captured_discover_args(self, monkeypatch, mode):
+    def _captured_discover_args(self, monkeypatch, mode, **overrides):
         from neuroslm import cli
         monkeypatch.setattr(cli, "_require_human_confirmation", lambda *a, **kw: None)
         captured = {}
@@ -220,7 +227,7 @@ class TestDiscoverArgsUseTheRentedGpu:
         monkeypatch.setattr(
             "neuroslm.connectors.vast_discover.VastDiscoverConnector",
             lambda: _FakeConnector())
-        cli.cmd_deploy_discover(self._args(mode))
+        cli.cmd_deploy_discover(self._args(mode, **overrides))
         return captured["args"]
 
     def test_experts_requests_auto_device(self, monkeypatch):
@@ -232,6 +239,86 @@ class TestDiscoverArgsUseTheRentedGpu:
     def test_trunk_requests_auto_device(self, monkeypatch):
         args = self._captured_discover_args(monkeypatch, "trunk")
         assert "--device" in args and "auto" in args
+
+    def test_checkpoint_requests_auto_device(self, monkeypatch):
+        args = self._captured_discover_args(monkeypatch, "checkpoint", latest=True)
+        assert "--device" in args and "auto" in args
+
+
+class TestCheckpointModeArgConstruction:
+    """Mode A deploy-discover: --checkpoint/--latest and the shared probe
+    knobs must reach the container-side `brian discover checkpoint` call."""
+
+    def _args(self, **overrides):
+        import argparse
+        base = dict(
+            deploy_discover_mode="checkpoint", models=None, rounds=None,
+            batch=None, seq_len=None, pop=None, generations=None,
+            length=None, steps=None, seed=None, task=None,
+            from_scratch=False, novelty=None, avoid_known=False,
+            macros=False, seed_from=None, branch=None, label=None,
+            push_interval=None, gpu_query=None,
+            checkpoint=None, latest=False, hf_repo=None, hf_prefix=None,
+            arch=None, preset=None, sites=None,
+        )
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    def _captured(self, monkeypatch, **overrides):
+        from neuroslm import cli
+        monkeypatch.setattr(cli, "_require_human_confirmation", lambda *a, **kw: None)
+        captured = {}
+
+        class _FakeConnector:
+            def launch(self, config):
+                captured["config"] = config
+                return 0
+
+        monkeypatch.setattr(
+            "neuroslm.connectors.vast_discover.VastDiscoverConnector",
+            lambda: _FakeConnector())
+        rc = cli.cmd_deploy_discover(self._args(**overrides))
+        return rc, captured.get("config")
+
+    def test_explicit_checkpoint_forwarded(self, monkeypatch):
+        rc, config = self._captured(monkeypatch, checkpoint="lfs_checkpoints/step5000.pt")
+        assert rc == 0
+        assert "--checkpoint" in config.discover_args
+        idx = config.discover_args.index("--checkpoint")
+        assert config.discover_args[idx + 1] == "lfs_checkpoints/step5000.pt"
+
+    def test_latest_flag_forwarded(self, monkeypatch):
+        rc, config = self._captured(monkeypatch, latest=True)
+        assert rc == 0
+        assert "--latest" in config.discover_args
+
+    def test_missing_checkpoint_and_latest_rejected_before_confirmation(self, monkeypatch):
+        from neuroslm import cli
+        confirm_calls = []
+        monkeypatch.setattr(cli, "_require_human_confirmation",
+                            lambda *a, **kw: confirm_calls.append(1))
+        rc = cli.cmd_deploy_discover(self._args())
+        assert rc != 0
+        assert confirm_calls == [], (
+            "must reject missing --checkpoint/--latest BEFORE the human "
+            "confirmation gate — no reason to prompt for an un-runnable deploy")
+
+    def test_probe_knobs_forwarded(self, monkeypatch):
+        rc, config = self._captured(
+            monkeypatch, latest=True, rounds=15, pop=32, generations=6,
+            length=12, sites=3, arch="architectures/SmolLM",
+            preset="rcc_bowtie_100m", hf_repo="myorg/myrepo", hf_prefix="run-x")
+        assert rc == 0
+        args = config.discover_args
+        assert args[args.index("--rounds") + 1] == "15"
+        assert args[args.index("--pop") + 1] == "32"
+        assert args[args.index("--generations") + 1] == "6"
+        assert args[args.index("--length") + 1] == "12"
+        assert args[args.index("--sites") + 1] == "3"
+        assert args[args.index("--arch") + 1] == "architectures/SmolLM"
+        assert args[args.index("--preset") + 1] == "rcc_bowtie_100m"
+        assert args[args.index("--hf-repo") + 1] == "myorg/myrepo"
+        assert args[args.index("--hf-prefix") + 1] == "run-x"
 
 
 class TestCliHumanConfirmationGate:

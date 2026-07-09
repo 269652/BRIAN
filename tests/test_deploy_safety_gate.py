@@ -196,3 +196,59 @@ class TestCmdDeployGate:
         """``brian deploy yolo`` must NOT bypass the safety gate."""
         with pytest.raises(SystemExit):
             self._run_deploy(_deploy_ns(arch="yolo"), tty=False)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# --latest / _resolve_checkpoint_uri — pins cmd_deploy's checkpoint
+# resolution (also shared by `discover checkpoint`'s --latest, see
+# tests/test_discover_checkpoint.py) so the refactor into a shared helper
+# can't silently change behaviour.
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestCmdDeployLatestResolution:
+    def _run(self, ns):
+        from neuroslm import cli as cli_mod
+        captured = {}
+
+        def _launch(config):
+            captured["config"] = config
+            return 0
+
+        with patch.object(cli_mod, "_run_hook", return_value=0), \
+             patch.object(cli_mod, "_require_human_confirmation", return_value=None), \
+             patch("neuroslm.project_config.load_project_config",
+                   return_value=_fake_cfg()), \
+             patch("neuroslm.connectors.get_connector") as mock_gc:
+            mock_gc.return_value.launch.side_effect = _launch
+            rc = cli_mod.cmd_deploy(ns)
+        return rc, captured.get("config")
+
+    def test_latest_resolves_to_hf_uri_and_sets_resume_from(self):
+        from neuroslm import cli as cli_mod
+        from neuroslm.hf_checkpoints import CheckpointEntry
+        entry = CheckpointEntry(path_in_repo="checkpoints/run-x/step7000.pt", step=7000)
+        with patch("neuroslm.hf_checkpoints.find_latest_checkpoint", return_value=entry):
+            rc, config = self._run(_deploy_ns(latest=True))
+        assert rc == 0
+        assert config.resume_from == "hf://moritzroessler/BRIAN/checkpoints/run-x/step7000.pt"
+
+    def test_latest_with_no_checkpoints_found_aborts(self):
+        with patch("neuroslm.hf_checkpoints.find_latest_checkpoint", return_value=None):
+            rc, config = self._run(_deploy_ns(latest=True))
+        assert rc == 1
+        assert config is None, "connector must never launch when --latest finds nothing"
+
+    def test_explicit_resume_takes_precedence_over_latest(self):
+        from neuroslm.hf_checkpoints import CheckpointEntry
+        entry = CheckpointEntry(path_in_repo="checkpoints/run-x/step7000.pt", step=7000)
+        with patch("neuroslm.hf_checkpoints.find_latest_checkpoint", return_value=entry) as m:
+            rc, config = self._run(_deploy_ns(resume="lfs_checkpoints/step500.pt", latest=True))
+        assert rc == 0
+        assert config.resume_from == "lfs_checkpoints/step500.pt"
+        m.assert_not_called()
+
+    def test_no_resume_no_latest_leaves_resume_from_unset(self):
+        rc, config = self._run(_deploy_ns())
+        assert rc == 0
+        assert not config.resume_from
