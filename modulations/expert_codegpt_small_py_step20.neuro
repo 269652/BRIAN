@@ -1,0 +1,11 @@
+modulation expert_codegpt_small_py_step20 {
+    # step: 20
+    # baseline_ce: 6.4535
+    # best_ce: 6.0141
+    # delta_ce: 0.4394
+    program {
+        t5 = const(c=1.0)
+        t2 = sigmoid(t5)
+        return t2
+    }
+}
