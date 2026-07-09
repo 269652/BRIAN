@@ -1,0 +1,10 @@
+modulation expert_codegpt_small_py_step29 {
+    # step: 29
+    # baseline_ce: 6.3824
+    # best_ce: 6.0631
+    # delta_ce: 0.3193
+    program {
+        t5 = const(c=0.7500880701475334)
+        return t5
+    }
+}
