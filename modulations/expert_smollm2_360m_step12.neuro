@@ -1,0 +1,10 @@
+modulation expert_smollm2_360m_step12 {
+    # step: 12
+    # baseline_ce: 2.284
+    # best_ce: 2.2838
+    # delta_ce: 0.0003
+    program {
+        t4 = const(c=1.009468478610103)
+        return t4
+    }
+}
