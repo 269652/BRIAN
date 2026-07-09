@@ -1,0 +1,11 @@
+modulation expert_smollm2_360m_step28 {
+    # step: 28
+    # baseline_ce: 2.3525
+    # best_ce: 2.3512
+    # delta_ce: 0.0012
+    program {
+        s1 = const(c=1.3185674284585067)
+        t2 = silu(s1)
+        return t2
+    }
+}
