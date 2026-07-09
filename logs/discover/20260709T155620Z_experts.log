@@ -175,3 +175,24 @@
 [expert:smollm2_360m] round 29: baseline_ce=2.6723 (final: sens=0.04287 improve=-0.004638 (scale_dn) tight)
 [expert-discovery] round 29/30 HuggingFaceTB/SmolLM2-360M: best_ce=2.6723 Δ=0.0000 evaluated=395 (no keep)
 [expert:codegpt_small_py] round 29: baseline_ce=6.3824 (final: sens=0.1342 improve=+0.3027 (damp) ←slack)
+[expert-discovery] round 29/30 microsoft/CodeGPT-small-py: best_ce=6.0631 Δ=0.3193 evaluated=1073 (saved expert_codegpt_small_py_step29)
+[expert:qwen2_5_0_5b] round 29: baseline_ce=2.8187 (final: sens=0.04166 improve=-0.003948 (scale_up) tight)
+[expert-discovery] round 29/30 Qwen/Qwen2.5-0.5B: best_ce=2.8187 Δ=0.0000 evaluated=364 (no keep)
+[expert:smollm2_360m] round 30: baseline_ce=2.2584 (final: sens=0.04325 improve=-0.003586 (scale_up) tight)
+[expert-discovery] round 30/30 HuggingFaceTB/SmolLM2-360M: best_ce=2.2583 Δ=0.0001 evaluated=768 (saved expert_smollm2_360m_step30)
+[expert:codegpt_small_py] round 30: baseline_ce=5.7964 (final: sens=0.1516 improve=+0.3549 (damp) ←slack)
+[expert-discovery] round 30/30 microsoft/CodeGPT-small-py: best_ce=5.4059 Δ=0.3906 evaluated=969 (saved expert_codegpt_small_py_step30)
+[expert:qwen2_5_0_5b] round 30: baseline_ce=2.4022 (final: sens=0.04048 improve=-0.004323 (scale_up) tight)
+[expert-discovery] round 30/30 Qwen/Qwen2.5-0.5B: best_ce=2.4022 Δ=0.0000 evaluated=650 (no keep)
+[expert-discovery] done: 30 rounds × 3 experts, 60 winners banked → modulations/
+[discover:experts] 90 probes, 60 winners banked
+  HuggingFaceTB/SmolLM2-360M: mean_baseline_ce=2.5737 best_ce=2.1584 (best Δ=0.0004, 13 kept)
+  microsoft/CodeGPT-small-py: mean_baseline_ce=5.9764 best_ce=4.8971 (best Δ=0.1354, 30 kept)
+  Qwen/Qwen2.5-0.5B: mean_baseline_ce=2.7207 best_ce=2.1478 (best Δ=0.0078, 17 kept)
+Fatal Python error: PyGILState_Release: thread state 0x7f83740016d0 must be current when releasing
+Python runtime state: finalizing (tstate=0x00000000253a5590)
+
+Thread 0x00007f84e99f9740 (most recent call first):
+  <no Python frame>
+
+Extension modules: mkl._mklinit, mkl._py_mkl_service, numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, torch._C, torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._nn, torch._C._sparse, torch._C._special, _brotli, zstandard.backend_c, yaml._yaml, regex._regex, markupsafe._speedups, PIL._imaging, PIL._imagingft, gmpy2.gmpy2, pyarrow.lib, pandas._libs.tslibs.ccalendar, pandas._libs.tslibs.np_datetime, pandas._libs.tslibs.dtypes, pandas._libs.tslibs.base, pandas._libs.tslibs.nattype, pandas._libs.tslibs.timezones, pandas._libs.tslibs.fields, pandas._libs.tslibs.timedeltas, pandas._libs.tslibs.tzconversion, pandas._libs.tslibs.timestamps, pandas._libs.properties, pandas._libs.tslibs.offsets, pandas._libs.tslibs.strptime, pandas._libs.tslibs.parsing, pandas._libs.tslibs.conversion, pandas._libs.tslibs.period, pandas._libs.tslibs.vectorized, pandas._libs.ops_dispatch, pandas._libs.missing, pandas._libs.hashtable, pandas._libs.algos, pandas._libs.interval, pandas._libs.lib, pyarrow._compute, pandas._libs.ops, pandas._libs.hashing, pandas._libs.arrays, pandas._libs.tslib, pandas._libs.sparse, pandas._libs.internals, pandas._libs.indexing, pandas._libs.index, pandas._libs.writers, pandas._libs.join, pandas._libs.window.aggregations, pandas._libs.window.indexers, pandas._libs.reshape, pandas._libs.groupby, pandas._libs.json, pandas._libs.parsers, pandas._libs.testing, pyarrow._acero, pyarrow._fs, pyarrow._csv, pyarrow._json, pyarrow._substrait, pyarrow._dataset, pyarrow._dataset_orc, pyarrow._parquet, pyarrow._azurefs, pyarrow._hdfs, pyarrow._gcsfs, pyarrow._s3fs, pyarrow._parquet_encryption, pyarrow._dataset_parquet_encryption, pyarrow._dataset_parquet, multidict._multidict, yarl._quoting_c, propcache._helpers_c, aiohttp._http_writer, aiohttp._http_parser, aiohttp._websocket.mask, aiohttp._websocket.reader_c, frozenlist._frozenlist, xxhash._xxhash (total: 96)
