@@ -1,0 +1,11 @@
+modulation expert_codegpt_small_py_step16 {
+    # step: 16
+    # baseline_ce: 6.3274
+    # best_ce: 5.9768
+    # delta_ce: 0.3506
+    program {
+        t5 = softmax(t6)
+        t2 = silu(t5)
+        return t2
+    }
+}
