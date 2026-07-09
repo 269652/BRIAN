@@ -2885,3 +2885,32 @@ interactive invocation.
   training deploy cell does this: a subprocess has no interactive channel).
 
 [EVIDENCE: tests/test_vast_discover_deploy.py (20) green; tests/test_connectors.py + test_deploy_confirmation.py + test_deploy_safety_gate.py (91 total) unaffected; live CLI: `brian deploy-discover optimizer` rejected before the gate, `echo "" | brian deploy-discover experts --rounds 5` BLOCKED by the human-confirmation gate exactly as `brian deploy` is]
+
+### H55.1 — `deploy-discover experts` ran on CPU on a rented A100 (real cost bug) (2026-07-09)
+
+**Status:** 🔴 **CONFIRMED BUG, FIXED** — 2 new contracts, caught by the
+user's own second live deploy (instance 44317528, A100 SXM4 @ $0.61/hr).
+
+- **Symptom.** Round 1 of `deploy-discover experts` took ~90 minutes on a
+  rented A100 — the log showed `[discover:experts] device=cpu`. At that rate
+  the configured 30 rounds would have run ~45 hours and ~$27 while the GPU
+  sat idle.
+- **Root cause.** `cmd_deploy_discover`'s per-mode arg construction added
+  `--device auto` to the `trunk` branch (H55) but the `experts` branch never
+  got the same line — `discover experts` defaults to `--device cpu` when the
+  flag is absent. A straight omission, not a `_resolve_device` bug (that
+  function was already correct — H54's `--device auto` works fine when
+  actually passed).
+- **Fix.** One line: `discover_args += ["--device", "auto"]` added to the
+  `experts` branch, mirroring `trunk`.
+- **Silver lining.** Round 1 still produced a genuine result before the
+  redeploy: `microsoft/CodeGPT-small-py` (pretrained on Python, probed on
+  FineWeb-Edu general text) showed real domain-shift slack —
+  `baseline_ce=6.5992 → best_ce=6.2368`, Δ=0.36 nats — already pushed to
+  `origin/master` as `modulations/expert_codegpt_small_py_step1.neuro`
+  before the CPU-bound instance was destroyed and redeployed on the fix.
+  `smollm2_360m`/`qwen2_5_0_5b` measured `tight` (no slack) on round 1 —
+  consistent with H54: general-purpose models on general web text have
+  little room, code/domain-specialized ones on shifted data do.
+
+[EVIDENCE: tests/test_vast_discover_deploy.py::TestDiscoverArgsUseTheRentedGpu (2) green, RED-confirmed against the pre-fix commit via `git stash`]

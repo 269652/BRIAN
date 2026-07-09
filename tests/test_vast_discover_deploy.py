@@ -188,6 +188,52 @@ class TestConnectorLaunch:
         assert "--rounds 20" in captured["content"]
 
 
+class TestDiscoverArgsUseTheRentedGpu:
+    """A deployed vast.ai instance is a rented GPU — every mode that supports
+    --device must actually request it, or the run silently falls back to CPU
+    and burns the rental on nothing (seen live: `experts` ran on CPU for 90+
+    minutes on a rented A100 because this branch omitted `--device auto`)."""
+
+    def _args(self, mode, **overrides):
+        import argparse
+        base = dict(
+            deploy_discover_mode=mode, models=None, rounds=None,
+            batch=None, seq_len=None, pop=None, generations=None,
+            length=None, steps=None, seed=None, task=None,
+            from_scratch=False, novelty=None, avoid_known=False,
+            macros=False, seed_from=None, branch=None, label=None,
+            push_interval=None, gpu_query=None,
+        )
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    def _captured_discover_args(self, monkeypatch, mode):
+        from neuroslm import cli
+        monkeypatch.setattr(cli, "_require_human_confirmation", lambda *a, **kw: None)
+        captured = {}
+
+        class _FakeConnector:
+            def launch(self, config):
+                captured["args"] = config.discover_args
+                return 0
+
+        monkeypatch.setattr(
+            "neuroslm.connectors.vast_discover.VastDiscoverConnector",
+            lambda: _FakeConnector())
+        cli.cmd_deploy_discover(self._args(mode))
+        return captured["args"]
+
+    def test_experts_requests_auto_device(self, monkeypatch):
+        args = self._captured_discover_args(monkeypatch, "experts")
+        assert "--device" in args and "auto" in args, (
+            f"discover experts must pass --device auto on a vast.ai deploy "
+            f"(a rented GPU going unused is a straight cost bug); got {args}")
+
+    def test_trunk_requests_auto_device(self, monkeypatch):
+        args = self._captured_discover_args(monkeypatch, "trunk")
+        assert "--device" in args and "auto" in args
+
+
 class TestCliHumanConfirmationGate:
     def test_confirmation_called_before_any_launch(self, monkeypatch):
         from neuroslm import cli

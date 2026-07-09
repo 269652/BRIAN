@@ -1753,6 +1753,7 @@ def cmd_deploy_discover(args: argparse.Namespace) -> int:
             discover_args += ["--pop", str(args.pop)]
         if args.generations is not None:
             discover_args += ["--generations", str(args.generations)]
+        discover_args += ["--device", "auto"]
     elif mode == "trunk":
         if args.pop is not None:
             discover_args += ["--pop", str(args.pop)]
