@@ -1,0 +1,11 @@
+modulation expert_smollm2_360m_step22 {
+    # step: 22
+    # baseline_ce: 2.9035
+    # best_ce: 2.903
+    # delta_ce: 0.0005
+    program {
+        s0 = const(c=0.9949958809927189)
+        t1 = mul(s0, s0)
+        return t1
+    }
+}
