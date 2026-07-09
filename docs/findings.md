@@ -2736,3 +2736,51 @@ at an intermediate layer where the terminal site (H46) gave Δ=0.
   confirmation = recurrence across probes + an install A/B.
 
 [EVIDENCE: tests/dsl/test_forward_from_layer.py (5), tests/genetic/test_layer_headroom.py (5), tests/training/test_trunk_probe_wiring.py (3, incl. multi-site path) green; forward-parity suites (test_loss_parity_n8, test_pct_trunk, test_dsl_language_cortex_equivalence, test_cosine_head, test_novel_topology — 47) green]
+
+### H53 — Close the loop: explore-only discovery + evidence-gated install into training (2026-07-09)
+
+**Status:** 🟢 **CONFIRMED** — 20 new contracts + an end-to-end 3-stage live run.
+
+- **Motivation (user workflow).** On a slow T4, training and discovery compete
+  for the same GPU-hours. H52's probe only fired *inside* training, and its
+  banked winners never took effect. Two additions close the loop:
+  bank winners cheaply WITHOUT training, then have the NEXT training run
+  install the ones that survive an evidence gate.
+- **`--explore_only --explore_rounds N`** (`train_dsl.run_probe_only`) —
+  discovery without training: probe the current model state (combine with
+  `--resume` to probe the latest checkpoint) over N *fresh batches*; no
+  optimizer, no backward, weights pinned untouched by test. Winners bank to
+  `modulations/` site-tagged; a per-site search tally prints at the end.
+  Colab: `EXPLORE_ONLY=True` in cell 4's config runs cell 5 in this mode.
+- **`DSLLanguageCortex._layer_modulations`** (`nn_lang.py`) — install point:
+  block index → callable applied at exactly the probe site (block output,
+  post adapter/gain — what `_last_layer_outputs[k]` stashes). Empty dict is
+  bit-identical to baseline (parity suites green); `forward_from_layer` stays
+  bit-exact with installs active (tail re-applies deeper sites only);
+  gradients flow through installed modulations (`h·g(sg[h])`, the same
+  `_make_modulator` semantics the probe scored); a throwing modulation is
+  bypassed AND auto-uninstalled — a banked winner can never crash a run.
+- **`--use_modulations`** (`genetic/modulation_install.py`) — at training
+  start, load `modulations/`, group winners by (site, program semantics)
+  (recurrence pools Δ evidence), then a **count-aware live gate** on a fresh
+  batch of the CURRENT model: recurring winners (≥2 probes) must not get
+  worse; single-shot winners must STRICTLY improve — probe batch + install
+  batch on the same checkpoint weights = 2-fold cross-batch validation. Every
+  install/reject decision prints with live before→after CE.
+- **End-to-end evidence (real cortex, 60 pretrain steps, then the exact user
+  workflow):** Stage 1 — 6 explore-only rounds banked 12 winners (weights
+  untouched). Stage 2 — the gate installed exactly ONE: `trunk_p_L3_step2`,
+  whose improvement generalized to a fresh batch (ce 5.5978→5.5491,
+  Δ=0.049); the other four were rejected as batch-specific (fresh-batch
+  ce unchanged). Stage 3 — training proceeded with the install active,
+  gradients flowing. The gate discriminates real mechanisms from noise —
+  which is the entire point.
+- **Expert-cortex probing (queued next).** The frozen pretrained expert LMs
+  (PPL≈50) are the *stronger* discovery target: they were optimized for their
+  pretraining distribution, not BRIAN's mixture, so domain-shift slack is
+  well-defined and durable (frozen weights ⇒ winners never go stale). v1 =
+  expert final hidden → own head via the expert-side tokenization path in
+  `experts.py`; H46's null-site argument does not apply to frozen models on
+  shifted data — the headroom scan will measure it.
+
+[EVIDENCE: tests/dsl/test_layer_modulations.py (5), tests/genetic/test_modulation_install.py (11), tests/training/test_trunk_probe_wiring.py::test_probe_only_loop_runs_without_training green; tests/dsl full sweep 1254 passed (2 pre-existing mechanics-index failures unrelated)]

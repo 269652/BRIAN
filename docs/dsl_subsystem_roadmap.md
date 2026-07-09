@@ -523,3 +523,21 @@ Findings H40:
   slack table each probe.
 - Follow-up (not built): install A/B for recurring site-tagged winners; the
   probe banks candidates, it does not modify the training forward.
+
+## NGL, part 11 — explore-only + evidence-gated install (H53)
+
+- `train_dsl.run_probe_only` / `--explore_only --explore_rounds N` — discovery
+  without training on the current (resumed) checkpoint over fresh batches; no
+  optimizer, weights untouched; winners bank site-tagged to `modulations/`.
+- `DSLLanguageCortex._layer_modulations` — install point at the exact probe
+  site; empty ⇒ bit-identical; fail-safe (throwing winner bypassed +
+  auto-uninstalled); `forward_from_layer` exactness holds with installs.
+- `genetic/modulation_install.py` / `--use_modulations` — recurrence-grouped,
+  count-aware live gate on a fresh batch (recurring: not-worse; single-shot:
+  strict improvement = 2-fold cross-batch validation). Colab cell 4 knobs:
+  `EXPLORE_ONLY`, `EXPLORE_ROUNDS`, `USE_MODULATIONS` (default True).
+- Verified 3-stage live: 6 probe-only rounds → 12 banked → gate installed the
+  1 winner whose Δ generalized (L3, ce 5.5978→5.5491), rejected 4 that didn't
+  → training ran with it active, grads flowing.
+- Next: expert-cortex probe (frozen pretrained LMs, domain-shift slack — task
+  #40).

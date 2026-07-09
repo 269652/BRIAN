@@ -811,6 +811,27 @@ class DSLLanguageCortex(nn.Module):
         # Diagnostic: per-token surprise (B, T) from the last forward.
         # Read by the harness for loss reweighting; None when off.
         self.last_token_surprise: Optional[torch.Tensor] = None
+        # H52 install path: block index → callable(h)->h applied at exactly
+        # the probe site (block output, post adapter/gain — what
+        # _last_layer_outputs[k] stashes). Empty dict ⇒ bit-identical to
+        # baseline. Populated by modulation_install from banked, recurring,
+        # gate-validated discovery winners. Plain dict (programs carry no
+        # trainable params, so nothing to register).
+        self._layer_modulations: dict = {}
+
+    def _apply_layer_modulation(self, bi: int, h: torch.Tensor) -> torch.Tensor:
+        """Fail-safe application: a throwing candidate is bypassed AND
+        uninstalled — a banked winner must never crash a live training run."""
+        mod = self._layer_modulations.get(bi)
+        if mod is None:
+            return h
+        try:
+            return mod(h)
+        except Exception as e:
+            del self._layer_modulations[bi]
+            print(f"[nn_lang] layer modulation L{bi} failed ({e!r}) — "
+                  f"uninstalled", flush=True)
+            return h
 
     def set_block_module_map(self, mapping):
         """Tell the cortex which module each block represents.
@@ -930,6 +951,7 @@ class DSLLanguageCortex(nn.Module):
                     # Broadcast (B, 1, d_model) over the (B, T, d_model) hidden
                     gain = block_gain[:, bi, :].unsqueeze(1)
                     h = h * (1.0 + gain)
+            h = self._apply_layer_modulation(bi, h)
             block_outs.append(h)
             dropped_mask.append(is_dropped)
             self._layer_acts.append(h.detach())
@@ -1087,6 +1109,9 @@ class DSLLanguageCortex(nn.Module):
                 h = self.dropout(h)
                 if block_gain is not None:
                     h = h * (1.0 + block_gain[:, bi, :].unsqueeze(1))
+                # installed modulations at DEEPER sites re-apply (the given
+                # `hidden` already carries any modulation at site k itself)
+                h = self._apply_layer_modulation(bi, h)
                 tail_outs.append(h)
             h_final = tail_outs[-1]
             if self.pct_trunk > 0 and self.topdown_w is not None:

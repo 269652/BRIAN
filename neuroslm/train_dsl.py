@@ -456,6 +456,57 @@ def _run_trunk_probe(harness, ids, targets, *, step: int, arch_name, preset_name
         config=cfg, step=step, run_id=run_id)
 
 
+def run_probe_only(harness, source, *, rounds: int, arch_name, preset_name,
+                   root=None, pop: int = 24, gens: int = 10, length: int = 8,
+                   sites: int = 2, push: bool = True) -> list:
+    """Discovery WITHOUT training (``--explore_only``): probe the current model
+    state (fresh init or resumed checkpoint) over ``rounds`` fresh batches.
+
+    No optimizer, no backward — weights are untouched. Each round consumes a
+    new batch, so a winner that RECURS across rounds is batch-robust: exactly
+    the recurrence evidence ``--use_modulations`` requires to install it into
+    the next training run. Much cheaper than training (pure no-grad forwards),
+    so it suits a slow GPU: bank winners first, train with them installed later.
+    """
+    results = []
+    tally: dict = {}
+    for r in range(1, rounds + 1):
+        ids, targets = source.next()
+        pr = None
+        try:
+            pr = _run_trunk_probe(harness, ids, targets, step=r,
+                                  arch_name=arch_name, preset_name=preset_name,
+                                  root=root, pop=pop, gens=gens, length=length,
+                                  sites=sites)
+        except Exception as e:
+            print(f"[probe-only] round {r} failed: {e!r}", flush=True)
+        if pr is None:
+            continue
+        results.append(pr)
+        _tag = f"saved {pr['saved']}" if pr.get("saved") else "no keep"
+        print(f"[probe-only] round {r}/{rounds}: baseline_ce={pr['baseline_ce']:.4f} "
+              f"best_ce={pr['best_ce']:.4f} Δ={pr['delta_ce']:.4f} "
+              f"evaluated={pr.get('evaluated', 0)} ({_tag})", flush=True)
+        for k in pr.get("searched", []):
+            tally[k] = tally.get(k, 0) + 1
+        if push and pr.get("saved"):
+            try:
+                from neuroslm.genetic.modulation_pusher import push_artifacts
+                push_artifacts(_REPO_ROOT, ["modulations"],
+                               message=f"explore-only: round {r}")
+            except Exception as e:
+                print(f"[probe-only] push skipped: {e!r}", flush=True)
+    if tally:
+        print("[probe-only] searched-site tally: "
+              + ", ".join(f"L{k}×{v}" for k, v in sorted(tally.items())),
+              flush=True)
+    kept = sum(1 for p in results if p.get("saved"))
+    print(f"[probe-only] done: {len(results)} rounds, {kept} winners banked "
+          f"→ modulations/ (install next run with --use_modulations)",
+          flush=True)
+    return results
+
+
 def _scale_override_note(scale_name: str, cli_seq: int, cli_batch: int,
                          eff_seq: int, eff_batch: int) -> Optional[str]:
     """Warn when the arch SCALE block silently discards CLI --seq_len/--batch.
@@ -1836,6 +1887,21 @@ def main():
                         help="how many layers (ranked by measured headroom under "
                              "the true loss) the multi-site probe searches per "
                              "checkpoint; insensitive/converged layers are skipped")
+    parser.add_argument("--explore_only", action="store_true",
+                        help="discovery WITHOUT training: probe the current model "
+                             "state (combine with --resume to probe the latest "
+                             "checkpoint) over --explore_rounds fresh batches, "
+                             "bank winners to modulations/, then exit. No "
+                             "optimizer, no backward — cheap on a slow GPU.")
+    parser.add_argument("--explore_rounds", type=int, default=30,
+                        help="probe rounds in --explore_only mode (one fresh "
+                             "batch per round; recurrence across rounds is the "
+                             "install evidence)")
+    parser.add_argument("--use_modulations", action="store_true",
+                        help="at startup, install banked discovery winners from "
+                             "modulations/ that recur (≥2 probes agreeing per "
+                             "site) AND pass a live CE gate on this model — "
+                             "how explore-only winners take effect in training")
     parser.add_argument("--ckpt_dir", default="lfs_checkpoints")
     parser.add_argument("--sink", default="motor",
                         help="population whose output feeds the LM head")
@@ -2135,6 +2201,46 @@ def main():
             vocab_size=vocab_size, batch=args.batch, seq_len=args.seq_len,
             device=args.device, seed=args.seed,
         )
+
+    # ── Install banked discovery winners (H52 close-the-loop) ────────────
+    # Recurrence-gated + live-validated on a real batch of THIS model before
+    # anything sticks; a stale winner from an older checkpoint cannot hurt.
+    if args.use_modulations:
+        try:
+            from neuroslm.genetic.modulation_install import install_from_store
+            _lm = getattr(harness, "language_model", None)
+            if _lm is not None and hasattr(_lm, "_layer_modulations"):
+                _ids, _tgts = source.next()
+                _rep = install_from_store(_lm, _REPO_ROOT / "modulations",
+                                          _ids, _tgts)
+                for _e in _rep["installed"]:
+                    print(f"[train_dsl] modulation installed: {_e['name']} @ "
+                          f"L{_e['layer']} (recurs ×{_e['count']}, "
+                          f"mean_Δ={_e['mean_delta']:.4f}, live "
+                          f"ce {_e.get('ce_before', float('nan')):.4f}→"
+                          f"{_e.get('ce_after', float('nan')):.4f})", flush=True)
+                for _e in _rep["rejected"]:
+                    print(f"[train_dsl] modulation REJECTED by live gate: "
+                          f"{_e['name']} @ L{_e['layer']} (ce "
+                          f"{_e.get('ce_before', float('nan')):.4f}→"
+                          f"{_e.get('ce_after', float('nan')):.4f})", flush=True)
+                if not _rep["installed"] and not _rep["rejected"]:
+                    print("[train_dsl] no recurring modulation winners to "
+                          "install yet (need ≥2 probes agreeing per site)",
+                          flush=True)
+        except Exception as _e:
+            print(f"[train_dsl] modulation install skipped: {_e!r}", flush=True)
+
+    # ── Discovery without training (`--explore_only`) ────────────────────
+    # Probe the current model state (resumed checkpoint) over fresh batches,
+    # bank winners, exit. No optimizer, no backward — cheap on a slow GPU.
+    if args.explore_only:
+        run_probe_only(harness, source, rounds=args.explore_rounds,
+                       arch_name=args.arch, preset_name=args.preset,
+                       pop=args.explore_pop, gens=args.explore_gens,
+                       length=args.explore_len, sites=args.explore_sites)
+        print("[train_dsl] done (explore-only).")
+        return
 
     train(
         harness=harness, source=source,
