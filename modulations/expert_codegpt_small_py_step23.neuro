@@ -1,0 +1,11 @@
+modulation expert_codegpt_small_py_step23 {
+    # step: 23
+    # baseline_ce: 5.5871
+    # best_ce: 5.24
+    # delta_ce: 0.3471
+    program {
+        t0 = softmax(s3)
+        t3 = sigmoid(t0)
+        return t3
+    }
+}
