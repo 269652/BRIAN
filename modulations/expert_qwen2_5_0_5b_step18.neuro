@@ -1,0 +1,10 @@
+modulation expert_qwen2_5_0_5b_step18 {
+    # step: 18
+    # baseline_ce: 2.1556
+    # best_ce: 2.1478
+    # delta_ce: 0.0078
+    program {
+        t5 = const(c=1.0865773517455224)
+        return t5
+    }
+}
