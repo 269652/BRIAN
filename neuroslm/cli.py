@@ -5370,8 +5370,7 @@ def _build_parser() -> argparse.ArgumentParser:
                           "running (default 90)")
     sdd.add_argument("--gpu-query", default=None,
                      help="override the vast.ai offer filter (default: a "
-                          "cheap single-GPU tier — discover jobs are lighter "
-                          "than full training)")
+                          "single A100 — see scripts/vast_discover.sh)")
     # experts-only
     sdd.add_argument("--models", help="comma-sep HF ids/aliases (experts)")
     sdd.add_argument("--rounds", type=int, default=None, help="probe rounds (experts)")

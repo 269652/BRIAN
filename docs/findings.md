@@ -2863,12 +2863,16 @@ interactive invocation.
   block, keyed to a distinct `neuroslm-discover` label so it never touches a
   concurrent training instance).
 - **`scripts/vast_discover.sh`** (new, sibling to `vast_train.sh`) — offer
-  search + instance create, adapted with a cheaper default GPU tier
-  (discover workloads — a few hundred-M-param HF models, or a tiny CPU-scale
-  trunk/explore search — don't need the A100 class full training rents) and
-  no ARCH/hardware-block lookup (discover has no arch scale).
-  Bash-syntax-verified (`bash -n`) both for the launcher and for a fully
-  Python-substituted onstart script.
+  search + instance create, no ARCH/hardware-block lookup (discover has no
+  arch scale). Bash-syntax-verified (`bash -n`) both for the launcher and for
+  a fully Python-substituted onstart script. **Default GPU tier revised to
+  A100** (`--gpu-query`/`GPU_QUERY` overridable) after the first live run
+  (instance 44315230, `phone-discover`) landed on a cheaper RTX_3090 host
+  whose image pull alone ate several minutes — a discover job's total wall
+  time is dominated by rental-host luck at that tier, not GPU compute, so the
+  "cheap tier is fine, discover workloads are light" reasoning this section
+  originally gave was true for compute but not for time-to-first-log. The
+  Colab cell's `GPU_QUERY` knob defaults to A100 too.
 - **`brian deploy-discover <mode> [...]`** (`cli.py::cmd_deploy_discover`) —
   routes through the SAME `_require_human_confirmation` gate `brian deploy`
   uses (no separate, weaker path); verified live that a piped/non-interactive

@@ -18,9 +18,7 @@
 #   HF_TOKEN            - optional, for HuggingFace downloads
 #
 # Optional env overrides:
-#   GPU_QUERY   - vast offer filter; default is a cheap single-GPU tier
-#                 (discover jobs — expert/trunk/explore probing — are much
-#                 lighter than full arch training)
+#   GPU_QUERY   - vast offer filter; default is a single A100 (see below)
 #   VAST_LABEL  - instance label (default neuroslm-discover)
 #   VAST_DISK   - disk size GB (default 30 — no checkpoint corpus needed)
 # ─────────────────────────────────────────────────────────────────────────
@@ -38,10 +36,10 @@ GH_TOKEN="${GH_TOKEN:-${GITHUB:-${GITHUB_PAT:-}}}"
 VAST_LABEL="${VAST_LABEL:-neuroslm-discover}"
 VAST_IMAGE="pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime"
 VAST_DISK="${VAST_DISK:-30}"
-# Cheap single-GPU tier by default: discover probes (SmolLM2-360M / CodeGPT /
-# Qwen2.5-0.5B, or a tiny CPU-scale trunk/explore search) fit comfortably on
-# a mid-tier card — no need for the A100 class full training rents.
-GPU_QUERY="${GPU_QUERY:-gpu_name=RTX_3090 num_gpus=1 rentable=true verified=true reliability>0.98}"
+# A100 by default — a lower tier (e.g. RTX_3090) can land on a slow/congested
+# host and spend most of the rental on image pull + bootstrap rather than the
+# actual discover run. Override with GPU_QUERY for a cheaper card if desired.
+GPU_QUERY="${GPU_QUERY:-gpu_name=A100_SXM4 num_gpus=1 rentable=true verified=true reliability>0.98}"
 
 # ─── Resolve a python that has vastai installed ──────────────────────────
 _pick_python() {
