@@ -1,0 +1,17 @@
+modulation expert_codegpt_small_py_step25 {
+    # step: 25
+    # baseline_ce: 5.6768
+    # best_ce: 5.4651
+    # delta_ce: 0.2117
+    program {
+        t3 = gt(t5, t0)
+        t5 = norm(t3)
+        t3 = gt(t5, t0)
+        t5 = norm(t3)
+        t3 = gt(t5, t0)
+        t5 = norm(t3)
+        t3 = sub(t5, t0)
+        t2 = sqrt(t3)
+        return t2
+    }
+}
