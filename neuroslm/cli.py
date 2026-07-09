@@ -25,6 +25,8 @@ Commands (run `brian <cmd> -h` for per-command help):
     deploy [arch] [--steps N] Launch DSL training run on vast (default 10k)
     deploy-100k               Long DSL run (100k steps)
     deploy-brain [...]        Launch a Brain (non-DSL) training run
+    deploy-discover <mode>    Run `discover` (experts/trunk/explore) on vast —
+                              pushes logs+modulations+ledger while running
     logs <id>                 Tail container logs
     status                    List active vast instances
     destroy <id> | --all      Tear down instance(s)
@@ -1712,6 +1714,82 @@ def cmd_deploy_100k(args: argparse.Namespace) -> int:
         hf_repo_id=cfg.default_hf_repo_id,
     )
     return get_connector(platform).launch(config)
+
+
+def cmd_deploy_discover(args: argparse.Namespace) -> int:
+    """Launch a `brian discover <mode>` run on vast.ai (not training).
+
+    Same anti-agent human-confirmation gate as `brian deploy` — no separate,
+    weaker path. Only experts/trunk/explore are deployable (see
+    ``neuroslm.connectors.vast_discover.DEPLOYABLE_MODES``); the run pushes
+    its log + modulations + search ledger to git on a background timer WHILE
+    it runs, so an interrupted instance never loses more than one interval
+    of progress.
+    """
+    from neuroslm.connectors.vast_discover import (
+        DEPLOYABLE_MODES, DiscoverDeployConfig, VastDiscoverConnector,
+    )
+
+    mode = args.deploy_discover_mode
+    if mode not in DEPLOYABLE_MODES:
+        print(f"[deploy-discover] mode {mode!r} not deployable to vast.ai — "
+              f"choose one of {DEPLOYABLE_MODES}. The other discover modes "
+              f"finish in seconds/minutes on the free local Colab GPU "
+              f"(see `brian discover {mode} --help`); no paid rental needed.",
+              file=sys.stderr)
+        return 1
+
+    discover_args: List[str] = []
+    if mode == "experts":
+        if args.models:
+            discover_args += ["--models", args.models]
+        if args.rounds is not None:
+            discover_args += ["--rounds", str(args.rounds)]
+        if args.batch is not None:
+            discover_args += ["--batch", str(args.batch)]
+        if args.seq_len is not None:
+            discover_args += ["--seq_len", str(args.seq_len)]
+        if args.pop is not None:
+            discover_args += ["--pop", str(args.pop)]
+        if args.generations is not None:
+            discover_args += ["--generations", str(args.generations)]
+    elif mode == "trunk":
+        if args.pop is not None:
+            discover_args += ["--pop", str(args.pop)]
+        if args.generations is not None:
+            discover_args += ["--generations", str(args.generations)]
+        if args.steps is not None:
+            discover_args += ["--steps", str(args.steps)]
+        if args.seed is not None:
+            discover_args += ["--seed", str(args.seed)]
+        discover_args += ["--device", "auto"]
+        if args.label:
+            discover_args += ["--save", args.label]
+    elif mode == "explore":
+        if args.steps is not None:
+            discover_args += ["--total-steps", str(args.steps)]
+        if args.pop is not None:
+            discover_args += ["--pop", str(args.pop)]
+        if args.generations is not None:
+            discover_args += ["--generations", str(args.generations)]
+        if args.seed is not None:
+            discover_args += ["--seed", str(args.seed)]
+        discover_args += ["--seed-known"]
+
+    config = DiscoverDeployConfig(
+        mode=mode,
+        discover_args=discover_args,
+        branch=args.branch,
+        label=args.label or "neuroslm-discover",
+        push_interval=args.push_interval or 90,
+        gpu_query=args.gpu_query or "",
+    )
+
+    # Same gate `brian deploy` uses — a human must type "deploy" at a real
+    # TTY or in a live Colab/Jupyter cell. No flag bypasses this.
+    _require_human_confirmation(f"vast (discover:{mode})", args.rounds or args.generations or 0)
+
+    return VastDiscoverConnector().launch(config)
 
 
 def cmd_deploy_brain(args: argparse.Namespace) -> int:
@@ -5273,6 +5351,48 @@ def _build_parser() -> argparse.ArgumentParser:
     sdb.add_argument("--preset", default="rcc_bowtie_30m_p4")
     sdb.add_argument("--branch")
     sdb.set_defaults(func=cmd_deploy_brain)
+
+    # deploy-discover — rent a vast.ai instance to run `brian discover <mode>`
+    # (not training). Only experts/trunk/explore: the other discover modes
+    # already finish in seconds/minutes on the free local Colab GPU.
+    sdd = sub.add_parser(
+        "deploy-discover",
+        help="Launch a `brian discover <mode>` run on vast.ai (experts/trunk/"
+             "explore only) — pushes logs+modulations+ledger while running")
+    sdd.add_argument("deploy_discover_mode", choices=["experts", "trunk", "explore"],
+                     metavar="mode", help="experts | trunk | explore")
+    sdd.add_argument("--branch", help="git branch the vast.ai box checks out "
+                     "(default: current branch)")
+    sdd.add_argument("--label", help="vast.ai instance label / (trunk) saved-"
+                     "modulation name")
+    sdd.add_argument("--push-interval", type=int, default=None,
+                     help="seconds between background artifact pushes while "
+                          "running (default 90)")
+    sdd.add_argument("--gpu-query", default=None,
+                     help="override the vast.ai offer filter (default: a "
+                          "cheap single-GPU tier — discover jobs are lighter "
+                          "than full training)")
+    # experts-only
+    sdd.add_argument("--models", help="comma-sep HF ids/aliases (experts)")
+    sdd.add_argument("--rounds", type=int, default=None, help="probe rounds (experts)")
+    sdd.add_argument("--batch", type=int, default=None, help="batch size (experts)")
+    sdd.add_argument("--seq_len", type=int, default=None, help="sequence length (experts)")
+    # shared GA knobs (trunk/explore/experts)
+    sdd.add_argument("--pop", type=int, default=None, help="population size")
+    sdd.add_argument("--generations", type=int, default=None, help="GA generations")
+    sdd.add_argument("--length", type=int, default=None, help="candidate program length")
+    # trunk/explore
+    sdd.add_argument("--steps", type=int, default=None,
+                     help="train steps per eval (trunk) / total steps (explore)")
+    sdd.add_argument("--seed", type=int, default=None)
+    # unused by deploy-discover but accepted for a uniform Namespace shape
+    sdd.add_argument("--task", default=None, help=argparse.SUPPRESS)
+    sdd.add_argument("--from-scratch", action="store_true", help=argparse.SUPPRESS)
+    sdd.add_argument("--novelty", type=float, default=None, help=argparse.SUPPRESS)
+    sdd.add_argument("--avoid-known", action="store_true", help=argparse.SUPPRESS)
+    sdd.add_argument("--macros", action="store_true", help=argparse.SUPPRESS)
+    sdd.add_argument("--seed-from", default=None, help=argparse.SUPPRESS)
+    sdd.set_defaults(func=cmd_deploy_discover)
 
     # logs
     sl = sub.add_parser(

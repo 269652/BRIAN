@@ -2830,3 +2830,54 @@ user's Colab run.
   would let the search refine rather than rediscover it).
 
 [EVIDENCE: tests/genetic/test_expert_probe.py (10) green; live `brian discover experts --models distilgpt2` runs pre/post-fix logs above]
+
+### H55 — `brian deploy-discover`: run discovery (not just training) on vast.ai (2026-07-10)
+
+**Status:** 🟢 **CONFIRMED** — 20 new contracts + a bash-syntax-verified live
+onstart script; human-confirmation gate verified live to block a non-
+interactive invocation.
+
+- **Motivation.** `brian deploy` only ever launches training. Discovery runs
+  (H52-H54: multi-site trunk probe, expert-cortex probe) previously had no
+  path off a live Colab session — a long `experts`/`trunk`/`explore` search
+  either ran on the free (but session-tied, and on a free-tier T4 sometimes
+  slow) local GPU, or not at all. The ask: rent a vast.ai instance for a
+  discover run, unattended, with its log + modulations + search ledger
+  reaching git WHILE it runs (not just at the end, since an interrupted
+  instance would otherwise lose everything since the last internal push).
+- **`neuroslm/connectors/vast_discover.py`** (new, sibling to `vast.py` —
+  not a modification of it, same reasoning `vast_train.sh`'s own docstring
+  gives for not touching `vast_deploy.sh`: a discover job has a genuinely
+  different shape than arch/scale/steps training). `DiscoverDeployConfig`
+  restricts to `DEPLOYABLE_MODES = ("experts", "trunk", "explore")` — the
+  only modes that can run long and produce artifacts worth streaming back;
+  `optimizer`/`flow`/`qd`/`simplify` already finish in seconds-to-minutes on
+  the free local Colab GPU, so renting a paid instance for them would spend
+  money for no benefit. `build_discover_onstart()` builds the container-side
+  script (clone, `vast_bootstrap.sh` reused verbatim for pip deps, then a
+  **mode-agnostic background pusher** — independent of whatever a discover
+  mode pushes internally — that calls the existing `push_artifacts()` every
+  `push_interval` seconds, scoped to the run's log + `modulations/` + the
+  search ledger + `heatmaps/`), runs `brian discover <mode> ... --push`,
+  final push, then self-destroys (mirrors the training onstart's self-destroy
+  block, keyed to a distinct `neuroslm-discover` label so it never touches a
+  concurrent training instance).
+- **`scripts/vast_discover.sh`** (new, sibling to `vast_train.sh`) — offer
+  search + instance create, adapted with a cheaper default GPU tier
+  (discover workloads — a few hundred-M-param HF models, or a tiny CPU-scale
+  trunk/explore search — don't need the A100 class full training rents) and
+  no ARCH/hardware-block lookup (discover has no arch scale).
+  Bash-syntax-verified (`bash -n`) both for the launcher and for a fully
+  Python-substituted onstart script.
+- **`brian deploy-discover <mode> [...]`** (`cli.py::cmd_deploy_discover`) —
+  routes through the SAME `_require_human_confirmation` gate `brian deploy`
+  uses (no separate, weaker path); verified live that a piped/non-interactive
+  invocation is blocked exactly like `brian deploy` is. Mode validated (both
+  by argparse `choices` and the connector's own check) before the gate is
+  ever reached, so an invalid mode never prompts.
+- **Colab**: two new cells (14 markdown, 15 code) mirroring the existing
+  phone-deploy pattern — `cli.main(["deploy-discover", ...])` run IN-PROCESS
+  so the confirmation prompt renders in the live cell (same reason the
+  training deploy cell does this: a subprocess has no interactive channel).
+
+[EVIDENCE: tests/test_vast_discover_deploy.py (20) green; tests/test_connectors.py + test_deploy_confirmation.py + test_deploy_safety_gate.py (91 total) unaffected; live CLI: `brian deploy-discover optimizer` rejected before the gate, `echo "" | brian deploy-discover experts --rounds 5` BLOCKED by the human-confirmation gate exactly as `brian deploy` is]
