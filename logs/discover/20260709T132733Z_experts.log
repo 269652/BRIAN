@@ -9,3 +9,4 @@
 [expert:codegpt_small_py] round 1: baseline_ce=6.5992 (final: sens=0.1451 improve=+0.3349 (damp) ←slack)
 [expert-discovery] round 1/30 microsoft/CodeGPT-small-py: best_ce=6.2368 Δ=0.3624 evaluated=1001 (saved expert_codegpt_small_py_step1)
 [expert:qwen2_5_0_5b] round 1: baseline_ce=3.3041 (final: sens=0.03731 improve=-0.001464 (scale_dn) tight)
+[expert-discovery] round 1/30 Qwen/Qwen2.5-0.5B: best_ce=3.3029 Δ=0.0012 evaluated=1009 (saved expert_qwen2_5_0_5b_step1)
