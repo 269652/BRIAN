@@ -113,11 +113,14 @@ echo "    log_pusher pid=$LOG_PUSHER_PID"
 
 echo "── starting training ──"
 if [ "__USE_DSL__" = "1" ]; then
-    echo "    DSL mode: arch=__ARCH__ scale=__SCALE__ steps=__STEPS__ batch=__BATCH__ seq_len=__SEQ_LEN__ d_sem=__D_SEM__ ood_every=__OOD_EVERY__"
+    echo "    DSL mode: arch=__ARCH__ scale=__SCALE__ steps=__STEPS__ batch=__BATCH__ seq_len=__SEQ_LEN__ d_sem=__D_SEM__ ood_every=__OOD_EVERY__ explore_every=__EXPLORE_EVERY__"
     ARCH='__ARCH__' SCALE='__SCALE__' STEPS='__STEPS__' BATCH='__BATCH__' \\
         SEQ_LEN='__SEQ_LEN__' D_SEM='__D_SEM__' \\
         SAVE_EVERY='__SAVE_EVERY__' LOG_EVERY='__LOG_EVERY__' \\
         OOD_EVERY='__OOD_EVERY__' \\
+        EXPLORE_EVERY='__EXPLORE_EVERY__' EXPLORE_POP='__EXPLORE_POP__' \\
+        EXPLORE_GENS='__EXPLORE_GENS__' EXPLORE_LEN='__EXPLORE_LEN__' \\
+        EXPLORE_SITES='__EXPLORE_SITES__' USE_MODULATIONS='__USE_MODULATIONS__' \\
         bash scripts/vast_train_dsl_loop.sh 2>&1 | tee /workspace/train.log
 else
     echo "    Brain mode: preset=__PRESET__ steps=__STEPS__ batch=__BATCH__ grad_accum=__GRAD_ACCUM__"
@@ -304,6 +307,12 @@ class VastConnector(BaseConnector):
             "__PRESET__":       env.get("PRESET", ""),
             "__USE_DSL__":      env.get("USE_DSL", "1"),
             "__LOG_PUSH__":     env.get("LOG_PUSH_INTERVAL", "300"),
+            "__EXPLORE_EVERY__":     env.get("EXPLORE_EVERY", "0"),
+            "__EXPLORE_POP__":       env.get("EXPLORE_POP", "24"),
+            "__EXPLORE_GENS__":      env.get("EXPLORE_GENS", "10"),
+            "__EXPLORE_LEN__":       env.get("EXPLORE_LEN", "8"),
+            "__EXPLORE_SITES__":     env.get("EXPLORE_SITES", "2"),
+            "__USE_MODULATIONS__":   env.get("USE_MODULATIONS", "0"),
         }
         result = _ONSTART_TEMPLATE
         for placeholder, value in subs.items():
@@ -347,6 +356,15 @@ class VastConnector(BaseConnector):
             env["CHECKPOINT_PUSH_BACKEND"] = config.push_backend
         if config.hf_repo_id:
             env["HF_REPO_ID"] = config.hf_repo_id
+
+        if config.explore_every > 0:
+            env["EXPLORE_EVERY"] = str(config.explore_every)
+            env["EXPLORE_POP"] = str(config.explore_pop)
+            env["EXPLORE_GENS"] = str(config.explore_gens)
+            env["EXPLORE_LEN"] = str(config.explore_len)
+            env["EXPLORE_SITES"] = str(config.explore_sites)
+            if config.use_modulations:
+                env["USE_MODULATIONS"] = "1"
 
         env.update(config.extra_env)
         return env

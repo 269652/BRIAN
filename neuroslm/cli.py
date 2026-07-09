@@ -1583,6 +1583,12 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         push_backend=cfg.default_push_backend,
         hf_repo_id=cfg.default_hf_repo_id,
         push_optimizer=cfg.default_push_optimizer,
+        explore_every=getattr(args, "explore_every", 0) or 0,
+        explore_pop=getattr(args, "explore_pop", 24) or 24,
+        explore_gens=getattr(args, "explore_gens", 10) or 10,
+        explore_len=getattr(args, "explore_len", 8) or 8,
+        explore_sites=getattr(args, "explore_sites", 2) or 2,
+        use_modulations=bool(getattr(args, "use_modulations", False)),
     )
 
     # ── Machine: CLI --machine > brian.toml [deploy].machine > "" ──
@@ -5287,6 +5293,20 @@ def _build_parser() -> argparse.ArgumentParser:
     sd.add_argument("--ood", type=int, nargs="?", const=3000,
                     help="Run mid-training OOD eval every N steps "
                          "(default 3000 if flag passed without value)")
+    # ── H52/H53 multi-site trunk probe, exercised during REAL training ──
+    sd.add_argument("--explore-every", type=int, default=0, dest="explore_every",
+                    help="Fire the real-trunk discovery probe every N steps "
+                         "during training (forward_from_layer + headroom_scan "
+                         "+ NGL modulation search, pushed live). 0 = off "
+                         "(default) — bare `brian deploy` is unaffected.")
+    sd.add_argument("--explore-pop", type=int, default=24, dest="explore_pop")
+    sd.add_argument("--explore-gens", type=int, default=10, dest="explore_gens")
+    sd.add_argument("--explore-len", type=int, default=8, dest="explore_len")
+    sd.add_argument("--explore-sites", type=int, default=2, dest="explore_sites",
+                    help="Layers (ranked by measured headroom) searched per probe")
+    sd.add_argument("--use-modulations", action="store_true", dest="use_modulations",
+                    help="Install banked, evidence-gated discovery winners "
+                         "from modulations/ at training startup")
     # ── Resume training from a checkpoint ──
     # Three flag shapes work together:
     #   --resume PATH          local path or hf://repo/path URI

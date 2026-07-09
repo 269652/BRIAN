@@ -211,6 +211,129 @@ def test_H_build_env_skips_zero_cadence():
     assert "PUSH_EVERY" not in env
 
 
+# ─────────────────────────────────────────────────────────────────────
+# T: explore-during-training (H52/H53 multi-site trunk probe) wired into
+# the real vast.ai training deploy — previously ONLY the local Colab GPU
+# training cell exercised the probe; a real `brian deploy` never did.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_T1_build_env_propagates_explore_fields_when_set():
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.vast import VastConnector
+
+    cfg = DeployConfig(steps=7000, explore_every=500, explore_pop=32,
+                       explore_gens=12, explore_len=6, explore_sites=3,
+                       use_modulations=True)
+    env = VastConnector()._build_env(cfg)
+
+    assert env["EXPLORE_EVERY"] == "500"
+    assert env["EXPLORE_POP"] == "32"
+    assert env["EXPLORE_GENS"] == "12"
+    assert env["EXPLORE_LEN"] == "6"
+    assert env["EXPLORE_SITES"] == "3"
+    assert env["USE_MODULATIONS"] == "1"
+
+
+def test_T2_build_env_skips_explore_when_off():
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.vast import VastConnector
+
+    cfg = DeployConfig(steps=1000)  # explore_every defaults to 0 (off)
+    env = VastConnector()._build_env(cfg)
+
+    assert "EXPLORE_EVERY" not in env
+    assert "EXPLORE_POP" not in env
+    assert "EXPLORE_GENS" not in env
+    assert "EXPLORE_LEN" not in env
+    assert "EXPLORE_SITES" not in env
+    assert "USE_MODULATIONS" not in env
+
+
+def test_T3_onstart_substitutes_explore_placeholders():
+    from neuroslm.connectors.vast import VastConnector
+    env = {
+        "GH_TOKEN": "t", "HF_TOKEN": "h", "BRANCH": "master",
+        "EXPLORE_EVERY": "500", "EXPLORE_POP": "32", "EXPLORE_GENS": "12",
+        "EXPLORE_LEN": "6", "EXPLORE_SITES": "3", "USE_MODULATIONS": "1",
+    }
+    script = VastConnector._build_onstart(env)
+    import re
+    remaining = re.findall(r"__[A-Z_]+__", script)
+    assert not remaining, f"unsubstituted placeholders: {remaining}"
+    assert "EXPLORE_EVERY='500'" in script
+    assert "EXPLORE_POP='32'" in script
+    assert "EXPLORE_GENS='12'" in script
+    assert "EXPLORE_LEN='6'" in script
+    assert "EXPLORE_SITES='3'" in script
+    assert "USE_MODULATIONS='1'" in script
+
+
+def test_T5_cmd_deploy_forwards_explore_flags_to_deploy_config():
+    import argparse
+    from unittest.mock import MagicMock, patch
+    from neuroslm import cli as cli_mod
+
+    cfg = MagicMock()
+    cfg.default_platform = "vast"
+    cfg.default_steps = 0
+    cfg.default_branch = None
+    cfg.is_dna_mode = False
+    cfg.dna = None
+    cfg.arch = None
+    cfg.default_ood_every = 0
+    cfg.default_log_every = 100
+    cfg.default_save_every = 1000
+    cfg.default_push_every = 1000
+    cfg.default_push_backend = "hf"
+    cfg.default_hf_repo_id = "moritzroessler/BRIAN"
+    cfg.default_push_optimizer = False
+    cfg.default_machine = None
+    cfg.default_teamspace = None
+    cfg.default_scale = None
+
+    ns = argparse.Namespace(
+        arch=None, steps=None, branch=None, scale=None,
+        dna=None, label=None, ood=None, no_verify=False,
+        resume=None, latest=False, hf_repo=None, hf_prefix=None,
+        platform=None, machine=None, teamspace=None,
+        explore_every=500, explore_pop=32, explore_gens=12,
+        explore_len=6, explore_sites=3, use_modulations=True,
+    )
+
+    captured = {}
+    with patch.object(cli_mod, "_run_hook", return_value=0), \
+         patch.object(cli_mod, "_require_human_confirmation", return_value=None), \
+         patch("neuroslm.project_config.load_project_config", return_value=cfg), \
+         patch("neuroslm.connectors.get_connector") as mock_gc:
+        def _launch(config):
+            captured["config"] = config
+            return 0
+        mock_gc.return_value.launch.side_effect = _launch
+        cli_mod.cmd_deploy(ns)
+
+    dc = captured["config"]
+    assert dc.explore_every == 500
+    assert dc.explore_pop == 32
+    assert dc.explore_gens == 12
+    assert dc.explore_len == 6
+    assert dc.explore_sites == 3
+    assert dc.use_modulations is True
+
+
+def test_T4_onstart_defaults_explore_off():
+    # no explore fields in env at all -> the onstart script must still be
+    # fully substituted (defaults), not crash on a missing key
+    from neuroslm.connectors.vast import VastConnector
+    env = {"GH_TOKEN": "t", "HF_TOKEN": "h", "BRANCH": "master"}
+    script = VastConnector._build_onstart(env)
+    import re
+    remaining = re.findall(r"__[A-Z_]+__", script)
+    assert not remaining
+    assert "EXPLORE_EVERY='0'" in script
+    assert "USE_MODULATIONS='0'" in script
+
+
 def test_H_build_env_skips_none_fields():
     from neuroslm.connectors.base import DeployConfig
     from neuroslm.connectors.vast import VastConnector

@@ -95,6 +95,19 @@ PUSH_BACKEND="${CHECKPOINT_PUSH_BACKEND:-hf}"
 # during training. Each snapshot writes a JSON to logs/vast/benchmarks/ood/
 # that brian analyze-log picks up. Defaults to 0 (off).
 OOD_EVERY="${OOD_EVERY:-0}"
+# EXPLORE_EVERY > 0 → the H52/H53 multi-site trunk probe fires every N
+# steps on the REAL trunk being trained (forward_from_layer + headroom_scan
+# + NGL modulation search), pushing its own log + modulations + ledger.
+# Defaults to 0 (off) — matches neuroslm.train_dsl's own --explore_every
+# default, so a bare `brian deploy` without explore flags is unaffected.
+EXPLORE_EVERY="${EXPLORE_EVERY:-0}"
+EXPLORE_POP="${EXPLORE_POP:-24}"
+EXPLORE_GENS="${EXPLORE_GENS:-10}"
+EXPLORE_LEN="${EXPLORE_LEN:-8}"
+EXPLORE_SITES="${EXPLORE_SITES:-2}"
+# USE_MODULATIONS=1 → install banked, evidence-gated discovery winners
+# (H53) from modulations/ at startup, before training begins.
+USE_MODULATIONS="${USE_MODULATIONS:-0}"
 CKPT_DIR="${CKPT_DIR:-$REPO_DIR/lfs_checkpoints}"
 MAX_RESTARTS="${MAX_RESTARTS:-1000}"
 
@@ -111,6 +124,14 @@ RESUME_ARGS=("--resume")
 if [ -n "$RESUME_FROM" ]; then
     echo "▶ resuming from RESUME_FROM=$RESUME_FROM"
     RESUME_ARGS=("--resume_from" "$RESUME_FROM")
+fi
+
+# --use_modulations is a boolean flag (no value) — only include it when on.
+EXPLORE_ARGS=("--explore_every" "$EXPLORE_EVERY" "--explore_pop" "$EXPLORE_POP" \
+              "--explore_gens" "$EXPLORE_GENS" "--explore_len" "$EXPLORE_LEN" \
+              "--explore_sites" "$EXPLORE_SITES")
+if [ "$USE_MODULATIONS" = "1" ]; then
+    EXPLORE_ARGS+=("--use_modulations")
 fi
 
 mkdir -p "$CKPT_DIR"
@@ -151,6 +172,7 @@ while [ "$restart" -lt "$MAX_RESTARTS" ]; do
         --push_backend "$PUSH_BACKEND" \
         --ood_every "$OOD_EVERY" \
         --ckpt_dir "$CKPT_DIR" \
+        "${EXPLORE_ARGS[@]}" \
         "${RESUME_ARGS[@]}"
     rc=$?
 

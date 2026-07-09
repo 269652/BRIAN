@@ -2920,3 +2920,70 @@ user's own second live deploy (instance 44317528, A100 SXM4 @ $0.61/hr).
   code (user's call — deploy is human-gated, see H55).
 
 [EVIDENCE: tests/test_vast_discover_deploy.py::TestDiscoverArgsUseTheRentedGpu (2) green, RED-confirmed against the pre-fix commit via `git stash`]
+
+### H56 — Explore-during-training: wire the H52/H53 multi-site probe into `brian deploy` itself (2026-07-09)
+
+**Status:** 🟢 **CONFIRMED** — 9 new contracts (5 in `test_connectors.py`, 4 in
+`test_vast_train_dsl_loop_explore.py`); full `test_connectors.py` +
+`test_deploy_safety_gate.py` (72 total) green; the one unrelated failure
+surfaced by `brian test quick` (`test_baselines.py::TestSeededDiscovery::
+test_discovery_can_start_from_adam`, a pre-existing seed-variance flake in
+the optimizer-discovery GA) reproduces identically with this diff stashed
+out — confirmed pre-existing, not a regression.
+
+- **Motivation.** The user asked: why does discovery only touch the frozen
+  pretrained experts (H54) or a synthetic `_TinyLM` proxy (`discover trunk`'s
+  actual implementation, not the real SmolLM trunk), when the goal is to
+  optimize *our own* trunk's topology and how fast/well it learns from the
+  teachers? Two concrete asks followed: (1) probe the REAL trunk from a
+  loaded checkpoint (Mode A — `deploy-discover` checkpoint mode, not yet
+  built), and (2) run the existing H52/H53 real-trunk multi-site probe
+  *during* a live `brian deploy` training run, not just as a separate
+  Colab/vast discover job. This entry covers (2).
+- **The gap.** `train_dsl.py` already has `--explore_every`/`--explore_pop`/
+  `--explore_gens`/`--explore_len`/`--explore_sites`/`--use_modulations`
+  (H52/H53) and the Colab **local-GPU** training cell (cell 4/5) already
+  wires them through. But `grep`ing `neuroslm/connectors/vast.py`,
+  `scripts/vast_train_dsl_loop.sh`, and `neuroslm/connectors/base.py` for
+  those flag names returned nothing — the actual `brian deploy` → vast.ai
+  path (the one that survives a Colab disconnect) silently never exercised
+  the real-trunk probe at all.
+- **Fix — same env-var-substitution pipeline OOD_EVERY already uses:**
+  - `DeployConfig` (`connectors/base.py`) gains `explore_every: int = 0`
+    (off by default, matching `train_dsl.py`'s own default) plus
+    `explore_pop`/`explore_gens`/`explore_len`/`explore_sites`/
+    `use_modulations`.
+  - `cli.py::cmd_deploy` gains `--explore-every`/`--explore-pop`/
+    `--explore-gens`/`--explore-len`/`--explore-sites`/`--use-modulations`
+    flags, forwarded into `DeployConfig` via `getattr(args, ..., default)`
+    (defensive against the existing `_deploy_ns()` test fixture that
+    predates these fields).
+  - `VastConnector._build_env` (`connectors/vast.py`) only sets the
+    `EXPLORE_*`/`USE_MODULATIONS` env vars when `config.explore_every > 0` —
+    a bare `brian deploy` stays byte-for-byte unaffected.
+  - `_build_onstart`'s substitution dict + `_ONSTART_TEMPLATE`'s `USE_DSL=1`
+    branch thread `EXPLORE_EVERY`/`EXPLORE_POP`/`EXPLORE_GENS`/
+    `EXPLORE_LEN`/`EXPLORE_SITES`/`USE_MODULATIONS` through to
+    `vast_train_dsl_loop.sh`'s environment, same `__PLACEHOLDER__`
+    `str.replace()` mechanism every other onstart var uses (avoids the bash
+    heredoc pipe-buffer deadlock the template's own comments warn about).
+  - `scripts/vast_train_dsl_loop.sh` reads the six `EXPLORE_*`/
+    `USE_MODULATIONS` env vars with the same `${VAR:-default}` pattern as
+    every other tunable, builds an `EXPLORE_ARGS` bash array
+    (`--use_modulations` appended conditionally — it's a boolean flag, never
+    unconditional, since that would force-install banked winners on every
+    deploy including ones that never asked for it), and forwards
+    `"${EXPLORE_ARGS[@]}"` into the `python -u -m neuroslm.train_dsl`
+    invocation.
+  - Colab cell 10 (phone-deploy) gains the same `EXPLORE_*`/
+    `USE_MODULATIONS` knobs as cell 4's local-GPU block, defaulted off,
+    forwarded as `--explore-every`/etc. only when `EXPLORE_EVERY` is
+    nonzero.
+- **Net effect.** A live vast.ai training run launched via `brian deploy
+  --explore-every 2000 --explore-sites 3` (or the equivalent Colab
+  phone-deploy cell knobs) now periodically runs the real multi-site probe
+  against the actual model being trained, banking winners to
+  `modulations/`, exactly like a local Colab GPU run already could — no
+  behavior change for anyone who doesn't pass the new flags.
+
+[EVIDENCE: tests/test_connectors.py::test_T1_build_env_propagates_explore_fields_when_set / test_T2_build_env_skips_explore_when_off / test_T3_onstart_substitutes_explore_placeholders / test_T4_onstart_defaults_explore_off / test_T5_cmd_deploy_forwards_explore_flags_to_deploy_config (5) green; tests/test_vast_train_dsl_loop_explore.py (4) green; tests/test_connectors.py + test_vast_train_dsl_loop_explore.py + test_deploy_safety_gate.py (72 total) green]

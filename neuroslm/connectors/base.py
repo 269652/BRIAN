@@ -211,6 +211,15 @@ class DeployConfig:
     push_optimizer: bool = False
     seq_len: int = 0       # 0 = use trainer default (128); set e.g. 256 for P2
     batch_size: int = 0    # 0 = use trainer default; forwarded as --batch N
+    # H52/H53 multi-site trunk probe, wired into a REAL training deploy (not
+    # just the local Colab GPU cell): explore_every=0 (default) means off,
+    # matching train_dsl.py's own --explore_every semantics.
+    explore_every: int = 0
+    explore_pop: int = 24
+    explore_gens: int = 10
+    explore_len: int = 8
+    explore_sites: int = 2
+    use_modulations: bool = False
     extra_env: dict = field(default_factory=dict)
 
 
