@@ -1,0 +1,10 @@
+modulation expert_codegpt_small_py_step19 {
+    # step: 19
+    # baseline_ce: 5.9207
+    # best_ce: 5.5979
+    # delta_ce: 0.3228
+    program {
+        t5 = relu(t0)
+        return t5
+    }
+}
