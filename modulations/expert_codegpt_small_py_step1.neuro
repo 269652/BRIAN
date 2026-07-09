@@ -1,8 +1,8 @@
 modulation expert_codegpt_small_py_step1 {
     # step: 1
-    # baseline_ce: 6.5992
-    # best_ce: 6.2368
-    # delta_ce: 0.3624
+    # baseline_ce: 6.5976
+    # best_ce: 6.2361
+    # delta_ce: 0.3615
     program {
         t6 = const(c=0.7781600915735377)
         t5 = sign(t6)
