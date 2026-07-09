@@ -2687,3 +2687,52 @@ downstream caller repointed.
   live discovery/training run over a cosmetic feature.
 
 [EVIDENCE: tests/genetic/test_progress.py::TestAutoEvolveCallback::test_on_generation_called_each_generation_plus_gen0, TestDiscoveryProgress::test_optimizer_progress_describes_the_champion_algorithm green]
+
+### H52 — Multi-site probe: discovery on *optimizable regions* of the real trunk (2026-07-09)
+
+**Status:** 🟢 **CONFIRMED** — 13 new contracts + a live smoke run showing Δ>0
+at an intermediate layer where the terminal site (H46) gave Δ=0.
+
+- **Hypothesis.** H46's Δ=0 was a *site* problem, not a search problem: the
+  terminal hidden is the single most end-to-end-optimized point in the network.
+  Intermediate block outputs are shaped only by indirect pressure, so real
+  slack should survive there — and a probe that measures per-layer headroom
+  under the TRUE loss should find nonzero Δ exactly at the layers a headroom
+  scan flags, while skipping converged ones.
+- **`DSLLanguageCortex.forward_from_layer(k, hidden)`** (`nn_lang.py`) — re-run
+  the real tail (remaining blocks + adapters + NT gain + PCT + NFO + final norm
+  + LM head) from a possibly-modulated block-k output. Bit-exact against
+  `forward()` in eval mode for every k (incl. `pct_trunk>0` via the stashed
+  lower-layer outputs, and cosine head); strictly read-only (weights, buffers,
+  stashes pinned by test). The NT-gain block was extracted into
+  `_compute_block_gain` so both paths share one code path (no drift).
+- **`neuroslm/genetic/layer_probe.py`** — the three-stage probe:
+  `headroom_scan` (deterministic perturbation battery per layer → sensitivity
+  = loss leverage, improvement = measured slack, i.e. a trivial perturbation
+  already beating the trained forward), `select_sites` (slack first, never
+  insensitive sites, speculative fallback to the most-promising sensitive
+  site), `probe_optimizable_regions` (NGL modulation search at the chosen
+  sites, every candidate scored by TRUE next-token CE through the real tail;
+  eval-mode + no_grad + mode-restore; winners persist with Δ and site in the
+  name: `<run>_L<k>_step<n>`).
+- **`train_dsl._run_trunk_probe`** now takes the multi-site path whenever the
+  trunk exposes `forward_from_layer` (i.e. always, for real `--model dsl_lm`
+  training); the legacy terminal-hidden re-projection remains as fallback for
+  models without the layer stash. New `--explore_sites` flag (default 2).
+  Colab cells 5+6: `EXPLORE_EVERY=500` default ON for GPU training — every 500
+  steps the log shows the per-layer slack table
+  (`L0: sens=… improve=+… ←slack | L1: … tight | …`) followed by the search
+  result, answering "which parts of my model are still optimizable" inline.
+- **Smoke evidence (real cortex, 60 real train steps, uneven optimization):**
+  headroom table flagged L1 `tight` (skipped) and L0/L2–L5 `←slack`; the probe
+  searched L4+L0 and found a genuine winner at L4 — `Δ_ce=0.0029` **through
+  the real tail** — persisted as `smoke_L4_step500`. Same machinery, right
+  site, nonzero result where H46's terminal probe measured exactly zero.
+- **Honest scope.** The probe *finds and banks* mechanisms that measurably
+  lower the true loss of the live model at a specific site and step; it does
+  not install them into the training forward (that remains the deliberate
+  opt-in follow-up, now with site-tagged candidates worth installing). A Δ
+  measured at step N on one batch is a candidate, not a confirmed mechanism —
+  confirmation = recurrence across probes + an install A/B.
+
+[EVIDENCE: tests/dsl/test_forward_from_layer.py (5), tests/genetic/test_layer_headroom.py (5), tests/training/test_trunk_probe_wiring.py (3, incl. multi-site path) green; forward-parity suites (test_loss_parity_n8, test_pct_trunk, test_dsl_language_cortex_equivalence, test_cosine_head, test_novel_topology — 47) green]

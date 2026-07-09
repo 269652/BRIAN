@@ -387,14 +387,21 @@ class RealDataSource:
 # ── Build the harness ────────────────────────────────────────────────
 
 def _run_trunk_probe(harness, ids, targets, *, step: int, arch_name, preset_name,
-                     root=None, pop: int = 24, gens: int = 10, length: int = 8):
+                     root=None, pop: int = 24, gens: int = 10, length: int = 8,
+                     sites: int = 2):
     """Read-only discovery probe on the real trunk (best-effort; never crashes).
 
-    Every ``explore_every`` steps: run a fresh no-grad forward to get the trunk's
-    final hidden state, then search a residual modulation that lowers next-token CE
-    when re-projected through the LM head. It never touches training weights or the
-    forward — pure measurement — so it cannot perturb the run. Winners persist to
-    ``modulations/`` with their measured Δ, and the ledger accumulates the search.
+    Every ``explore_every`` steps: when the trunk exposes ``forward_from_layer``
+    (DSLLanguageCortex — the class real training builds), run the multi-site
+    probe: measure per-layer headroom under the TRUE loss (each perturbation
+    re-run through the real remaining blocks + PCT + norm + head), then search
+    NGL modulations only at layers that still have slack. H46 proved the
+    terminal hidden is a null site — the budget goes where the model is
+    demonstrably under-optimized. Falls back to the legacy terminal-hidden
+    re-projection for models without the layer stash. Never touches training
+    weights or the forward — pure measurement — so it cannot perturb the run.
+    Winners persist to ``modulations/`` with their measured Δ + site (run_id
+    encodes the layer: ``trunk-<preset>-L<k>``).
     """
     import torch
     from neuroslm.dsl import nn_ops
@@ -405,6 +412,23 @@ def _run_trunk_probe(harness, ids, targets, *, step: int, arch_name, preset_name
     lm = getattr(harness, "language_model", None)
     if lm is None or getattr(lm, "lm_head", None) is None:
         return None
+
+    root = Path(root) if root is not None else _REPO_ROOT
+    store = ModulationStore(root / "modulations")
+    # normalize=False: skip per-candidate canonicalization (only needed for
+    # cross-run dedup, which a fresh per-probe ledger doesn't do) so the deep
+    # search spends its budget scoring real candidates, not simplifying them.
+    cfg = ExploreConfig(pop_size=pop, generations=gens, length=length,
+                        normalize=False)
+    run_id = f"trunk-{preset_name or arch_name or 'run'}"
+
+    if hasattr(lm, "forward_from_layer"):
+        from neuroslm.genetic.layer_probe import probe_optimizable_regions
+        return probe_optimizable_regions(
+            lm, ids, targets, store=store, config=cfg, step=step,
+            run_id=run_id, top_k=sites, seed=step)
+
+    # ── legacy fallback: terminal-hidden re-projection through the head ──
     with torch.no_grad():
         harness(ids)                       # populate _last_hidden without grad
     h = getattr(lm, "_last_hidden", None)
@@ -426,17 +450,10 @@ def _run_trunk_probe(harness, ids, targets, *, step: int, arch_name, preset_name
     # next — cross-checkpoint dud-skipping (from the shared/toy ledger) would
     # over-prune the search. Each checkpoint gets a full search; winners still
     # persist to modulations/.
-    root = Path(root) if root is not None else _REPO_ROOT
     led = SearchLedger(":memory:")
-    store = ModulationStore(root / "modulations")
     return probe_hidden_modulation(
         h, head_fn, targets.to(h.device), ledger=led, store=store,
-        # normalize=False: skip per-candidate canonicalization (only needed for
-        # cross-run dedup, which a fresh ledger doesn't do) so the deep search
-        # spends its budget scoring real candidates, not simplifying them.
-        config=ExploreConfig(pop_size=pop, generations=gens, length=length,
-                             normalize=False),
-        step=step, run_id=f"trunk-{preset_name or arch_name or 'run'}")
+        config=cfg, step=step, run_id=run_id)
 
 
 def _scale_override_note(scale_name: str, cli_seq: int, cli_batch: int,
@@ -1313,6 +1330,7 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
           explore_pop: int = 24,
           explore_gens: int = 10,
           explore_len: int = 8,
+          explore_sites: int = 2,
           arch_name: Optional[str] = None,
           preset_name: Optional[str] = None,
           collect_heatmap: bool = True,
@@ -1412,7 +1430,7 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
                 _pr = _run_trunk_probe(harness, ids, targets, step=step,
                                        arch_name=arch_name, preset_name=preset_name,
                                        pop=explore_pop, gens=explore_gens,
-                                       length=explore_len)
+                                       length=explore_len, sites=explore_sites)
                 if _pr is not None:
                     _tag = f"saved {_pr['saved']}" if _pr.get("saved") else "no keep"
                     print(f"[train_dsl] explore step {step}: baseline_ce={_pr['baseline_ce']:.4f} "
@@ -1814,6 +1832,10 @@ def main():
                         help="probe search generations per checkpoint")
     parser.add_argument("--explore_len", type=int, default=8,
                         help="probe candidate program length (more expressive modulations)")
+    parser.add_argument("--explore_sites", type=int, default=2,
+                        help="how many layers (ranked by measured headroom under "
+                             "the true loss) the multi-site probe searches per "
+                             "checkpoint; insensitive/converged layers are skipped")
     parser.add_argument("--ckpt_dir", default="lfs_checkpoints")
     parser.add_argument("--sink", default="motor",
                         help="population whose output feeds the LM head")
@@ -2130,6 +2152,7 @@ def main():
         explore_pop=args.explore_pop,
         explore_gens=args.explore_gens,
         explore_len=args.explore_len,
+        explore_sites=args.explore_sites,
     )
 
     print("[train_dsl] done.")

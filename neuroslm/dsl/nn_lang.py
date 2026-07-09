@@ -848,6 +848,37 @@ class DSLLanguageCortex(nn.Module):
             self.dropout = nn.Identity()
         self.pct_trunk = float(pct_trunk)
 
+    def _compute_block_gain(self, B_in: int):
+        """Per-block NT gain (B, depth, d_model), or None when no orchestrator
+        offset is cached. Shared by forward() and forward_from_layer() so the
+        tail re-run sees exactly the gains the original forward applied.
+
+        Batch alignment: the orchestrator caches its outputs from the train
+        step (B_orch = train batch size). When eval/OOD passes a different
+        batch (often B=1), broadcasting `(B_orch, T, D)` against `(B_in, T, D)`
+        produces (max(B_in, B_orch), T, D) — silently turning a B=1 OOD batch
+        into B=4, then the LM head produces too many logit rows and CE shape
+        mismatches. Fix: collapse offs to the input's batch size.
+        """
+        if self._nt_module_offset is None:
+            return None
+        offs = self._nt_module_offset            # (B_orch, M, N_NT)
+        if offs.shape[0] != B_in:
+            if B_in == 1:
+                offs = offs.mean(dim=0, keepdim=True)
+            else:
+                # Repeat or slice to match — last resort for unusual
+                # batch sizes. Mean-then-repeat keeps semantics intact.
+                offs = offs.mean(dim=0, keepdim=True).expand(B_in, -1, -1)
+        n_blocks = len(self.blocks)
+        if self._block_module_idx is None or \
+                self._block_module_idx.numel() != n_blocks:
+            bm = torch.arange(n_blocks, device=offs.device) % offs.shape[1]
+        else:
+            bm = self._block_module_idx.to(offs.device)
+        per_block = offs.index_select(dim=1, index=bm)  # (B_in, depth, N_NT)
+        return self.alpha_nt * self.nt_proj(per_block)
+
     def forward(self, ids: torch.Tensor,
                 embed_noise_std: float = 0.0) -> torch.Tensor:
         h = nn_ops.embedding(ids, self.embed)
@@ -876,32 +907,7 @@ class DSLLanguageCortex(nn.Module):
         block_outs: List[torch.Tensor] = []
         # Precompute the per-block NT gain (B, depth, d_model) if the
         # GeneticOrchestrator has handed us a per-module offset.
-        block_gain = None
-        if self._nt_module_offset is not None:
-            offs = self._nt_module_offset            # (B_orch, M, N_NT)
-            # Batch alignment: the orchestrator caches its outputs from
-            # the train step (B_orch = train batch size). When eval/OOD
-            # passes a different batch (often B=1), broadcasting `(B_orch,
-            # T, D)` against `(B_in, T, D)` produces (max(B_in, B_orch),
-            # T, D) — silently turning a B=1 OOD batch into B=4, then
-            # the LM head produces too many logit rows and CE shape
-            # mismatches. Fix: collapse offs to the input's batch size.
-            B_in = h.shape[0]
-            if offs.shape[0] != B_in:
-                if B_in == 1:
-                    offs = offs.mean(dim=0, keepdim=True)
-                else:
-                    # Repeat or slice to match — last resort for unusual
-                    # batch sizes. Mean-then-repeat keeps semantics intact.
-                    offs = offs.mean(dim=0, keepdim=True).expand(B_in, -1, -1)
-            n_blocks = len(self.blocks)
-            if self._block_module_idx is None or \
-                    self._block_module_idx.numel() != n_blocks:
-                bm = torch.arange(n_blocks, device=offs.device) % offs.shape[1]
-            else:
-                bm = self._block_module_idx.to(offs.device)
-            per_block = offs.index_select(dim=1, index=bm)  # (B_in, depth, N_NT)
-            block_gain = self.alpha_nt * self.nt_proj(per_block)
+        block_gain = self._compute_block_gain(h.shape[0])
         # Track which blocks were dropped so PCT can skip them (skip-aware
         # pairing). Without this, dropped blocks pollute PCT pairs with
         # zero residuals → silent regularizer-disable when stochastic_depth
@@ -1044,6 +1050,72 @@ class DSLLanguageCortex(nn.Module):
         # the LM head sees, layer by layer.
         self._last_layer_outputs = list(block_outs) if block_outs else None
         return logits
+
+    def forward_from_layer(self, layer_index: int,
+                           hidden: torch.Tensor) -> torch.Tensor:
+        """Re-run the trunk tail from a (possibly modulated) block output.
+
+        Discovery enabler: scores a modulation applied at block ``layer_index``'s
+        output by the TRUE next-token logits — the real remaining blocks +
+        adapters + NT gain + PCT + NFO + final norm + LM head — not a proxy
+        re-projection. Deterministic (eval-semantics: no dropout, no stochastic
+        depth) and strictly read-only: no weight, buffer, or stash is written.
+
+        ``hidden`` is block ``layer_index``'s output; for the LAST block it is
+        the post-PCT final residual (matching ``_last_layer_outputs[-1]``), so
+        PCT is not re-applied there. For earlier blocks with ``pct_trunk > 0``
+        the stashed lower-layer outputs from the most recent ``forward()`` are
+        consumed to form the PCT pairs — call ``forward()`` first.
+
+        Train-only side paths (surprise head) and stateful ones (episodic
+        memory write/blend) are bypassed: both are no-ops at zero-init and a
+        probe must not mutate memory state mid-run.
+        """
+        n_blocks = len(self.blocks)
+        if not (0 <= layer_index < n_blocks):
+            raise IndexError(f"layer_index {layer_index} out of range "
+                             f"[0, {n_blocks})")
+        if layer_index == n_blocks - 1:
+            h_final = hidden           # already post-PCT (see docstring)
+        else:
+            h = hidden
+            block_gain = self._compute_block_gain(h.shape[0])
+            tail_outs: List[torch.Tensor] = []
+            for bi in range(layer_index + 1, n_blocks):
+                h = self.blocks[bi](h)
+                h = self.adapters[bi](h)
+                h = self.dropout(h)
+                if block_gain is not None:
+                    h = h * (1.0 + block_gain[:, bi, :].unsqueeze(1))
+                tail_outs.append(h)
+            h_final = tail_outs[-1]
+            if self.pct_trunk > 0 and self.topdown_w is not None:
+                lower = self._last_layer_outputs
+                if lower is None or len(lower) < layer_index:
+                    raise RuntimeError(
+                        "forward_from_layer with pct_trunk>0 needs the stashed "
+                        "layer outputs of a prior forward() for the PCT pairs")
+                block_outs = list(lower[:layer_index]) + [hidden] + tail_outs
+                alpha = 0.5      # same safety damping as forward()
+                depth_t = len(block_outs)
+                pct_correction = torch.zeros_like(block_outs[-1])
+                for i_lo in range(depth_t - 1):
+                    if i_lo >= len(self.topdown_w):
+                        break
+                    residual_diff = block_outs[i_lo] - block_outs[i_lo + 1]
+                    err = nn_ops.linear(residual_diff, self.topdown_w[i_lo])
+                    pct_correction = (
+                        pct_correction
+                        - alpha * self.pct_trunk * err / (depth_t - i_lo)
+                    )
+                h_final = h_final + pct_correction
+        if self._nfo is not None:
+            h_final = self._nfo(h_final)
+        h_final = nn_ops.rmsnorm(h_final, self.gamma_f)
+        if self._cosine_head:
+            return nn_ops.cosine_lm_head(h_final, self.lm_head,
+                                         self.head_temperature)
+        return nn_ops.linear(h_final, self.lm_head)
 
 
 def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,

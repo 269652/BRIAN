@@ -57,3 +57,39 @@ def test_probe_returns_none_without_language_model():
                            torch.zeros(1, 4, dtype=torch.long),
                            step=1, arch_name="x", preset_name="y", root="/tmp")
     assert out is None
+
+
+def test_real_cortex_gets_the_multi_site_probe(tmp_path):
+    # The class real training builds (DSLLanguageCortex) exposes
+    # forward_from_layer → the probe must take the multi-site path:
+    # per-layer headroom reports + searching only sites with slack.
+    from neuroslm.dsl.nn_lang import build_dsl_language_cortex
+
+    class _Harness(nn.Module):
+        def __init__(self):
+            super().__init__()
+            torch.manual_seed(0)
+            self.language_model = build_dsl_language_cortex(
+                vocab=61, d_model=24, depth=3, n_heads=4, max_ctx=16,
+                dropout=0.0)
+
+        def forward(self, ids):
+            return self.language_model(ids)
+
+    harn = _Harness()
+    harn.train()
+    g = torch.Generator().manual_seed(3)
+    ids = torch.randint(0, 61, (2, 12), generator=g)
+    targets = torch.randint(0, 61, (2, 12), generator=g)
+    state = {k: v.clone() for k, v in harn.state_dict().items()}
+
+    out = _run_trunk_probe(harn, ids, targets, step=500, arch_name="cortex",
+                           preset_name="p", root=tmp_path,
+                           pop=8, gens=2, sites=1)
+    assert out is not None
+    assert "reports" in out and len(out["reports"]) == 3   # multi-site path
+    assert out["searched"] and len(out["searched"]) == 1
+    assert out["best_ce"] <= out["baseline_ce"] + 1e-4
+    for k, v in harn.state_dict().items():
+        assert torch.equal(v, state[k]), f"probe mutated {k}"
+    assert harn.language_model.training, "probe did not restore training mode"

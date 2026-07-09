@@ -500,3 +500,26 @@ Findings H40:
   `explore` run (prior-art gate + normalization + novelty + push). Forgetting/
   Selective attention need a sequence-scan primitive NGL lacks — logged as future
   work, not stubbed.
+
+## NGL, part 10 — multi-site probe: discovery on optimizable regions (H52)
+
+- `DSLLanguageCortex.forward_from_layer(k, hidden)` (`nn_lang.py`) — re-run the
+  real tail (blocks k+1…, adapters, NT gain, PCT, NFO, final norm, LM head) from
+  a possibly-modulated block-k output. Bit-exact vs `forward()` in eval mode for
+  every k; strictly read-only. This is the enabler for scoring a candidate
+  mechanism by the TRUE next-token loss at any depth, not a head-only proxy.
+- `genetic/layer_probe.py` — `headroom_scan` (deterministic perturbation battery
+  per layer → sensitivity + measured slack), `select_sites` (slack first, never
+  insensitive sites, speculative fallback), `probe_optimizable_regions` (NGL
+  search at the chosen sites; winners persist site-tagged `<run>_L<k>_step<n>`).
+  Rationale: H46 proved the terminal hidden is a null site (Δ=0 — fully
+  end-to-end optimized); intermediate layers carry only indirect pressure, so
+  slack survives there. Smoke run: L1 flagged `tight` and skipped, winner at L4
+  with Δ_ce=0.0029 through the real tail.
+- `train_dsl._run_trunk_probe` auto-selects the multi-site path for real
+  training (`--model dsl_lm` builds DSLLanguageCortex); `--explore_sites` picks
+  how many headroom-ranked layers to search. Colab cells 5+6 default
+  `EXPLORE_EVERY=500` ON for GPU runs — the training log prints the per-layer
+  slack table each probe.
+- Follow-up (not built): install A/B for recurring site-tagged winners; the
+  probe banks candidates, it does not modify the training forward.
