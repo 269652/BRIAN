@@ -276,12 +276,13 @@ def auto_evolve(
     tournament (weighted sum, optionally + a novelty bonus in semantic space)
     with elitism carrying the current Pareto front forward.
 
-    ``on_generation(gen, total, best_objective, primary_objective)`` — if given,
-    is called once for the initial population (gen 0) and once after each
-    generation, so a caller can stream progress during a long run.
-    ``best_objective`` is the multi-objective (cost/novelty-aware) champion;
-    ``primary_objective`` tracks ``values[0]`` alone and is guaranteed
-    non-decreasing — the number to print as "best so far".
+    ``on_generation(gen, total, best_objective, primary_objective,
+    primary_program)`` — if given, is called once for the initial population
+    (gen 0) and once after each generation, so a caller can stream progress
+    during a long run. ``best_objective`` is the multi-objective (cost/
+    novelty-aware) champion; ``primary_objective``/``primary_program`` track
+    ``values[0]`` alone and are guaranteed non-decreasing — the number (and
+    the actual program) to report as "best so far".
     """
     def _attach(p: Program) -> Program:
         # every program can flatten `call` ops on execute + can be mutated to graft
@@ -321,7 +322,7 @@ def auto_evolve(
     primary_prog, primary_obj = pop[p_i].copy(), raw_objs[p_i]
 
     if on_generation is not None:
-        on_generation(0, generations, best_obj, primary_obj)
+        on_generation(0, generations, best_obj, primary_obj, primary_prog)
 
     n_elite = max(1, int(elite_frac * pop_size))
     for _gen in range(generations):
@@ -349,7 +350,7 @@ def auto_evolve(
             primary_prog, primary_obj = pop[pi].copy(), raw_objs[pi]
 
         if on_generation is not None:
-            on_generation(_gen + 1, generations, best_obj, primary_obj)
+            on_generation(_gen + 1, generations, best_obj, primary_obj, primary_prog)
 
     front = pareto_front(list(zip(pop, objs)))
     return EvolveResult(best_prog, best_obj, gen0_best, history, front,

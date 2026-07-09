@@ -33,6 +33,7 @@ from neuroslm.genetic.optimizer import (
     sgd_program,
 )
 from neuroslm.genetic.evolve import Objective, auto_evolve, pareto_front
+from neuroslm.genetic import semantics
 from neuroslm import information
 
 _DIVERGED_LOSS = 1e4
@@ -46,9 +47,17 @@ def _emit(progress, msg: str) -> None:
         print(msg, flush=True)
 
 
-def _make_progress(progress, tag: str, fmt, baseline=None):
-    """Build an ``on_generation(gen, total, best_obj, primary_obj)`` that streams
-    a timed line.
+def _describe_champion(prog: Program) -> str:
+    """One-line "which algorithm is this?" summary for a progress stream."""
+    try:
+        return semantics.describe(prog)
+    except Exception as e:
+        return f"<undescribable: {e!r}>"
+
+
+def _make_progress(progress, tag: str, fmt, baseline=None, describe=None):
+    """Build an ``on_generation(gen, total, best_obj, primary_obj, primary_prog)``
+    that streams a timed line.
 
     ``fmt(primary_obj)`` renders the metric — ``primary_obj`` tracks ``values[0]``
     (the caller's primary metric, e.g. loss) in isolation from any secondary-axis
@@ -56,11 +65,17 @@ def _make_progress(progress, tag: str, fmt, baseline=None):
     guaranteed non-decreasing and never looks like a regression. A wall-clock
     elapsed + ETA is appended so a long GPU run shows it is alive and roughly how
     long remains.
+
+    ``describe(primary_prog)`` (optional) renders a human-readable summary of
+    *what algorithm the champion actually is* — a number alone can't answer
+    "which algorithm is it exploring?". Only emitted when the champion program
+    changes, so a long run isn't flooded with a repeated description.
     """
     import time
     start = [None]
+    last_desc = [None]
 
-    def on_gen(gen, total, best_obj, primary_obj):
+    def on_gen(gen, total, best_obj, primary_obj, primary_prog):
         if start[0] is None:
             start[0] = time.time()
         elapsed = time.time() - start[0]
@@ -70,6 +85,11 @@ def _make_progress(progress, tag: str, fmt, baseline=None):
                 f"elapsed={elapsed:.0f}s")
         if gen > 0 and gen < total:
             line += f"  eta~{eta:.0f}s"
+        if describe is not None:
+            desc = describe(primary_prog)
+            if desc != last_desc[0]:
+                last_desc[0] = desc
+                line += f"\n    champion: {desc}"
         _emit(progress, line)
 
     return on_gen
@@ -276,6 +296,7 @@ def run_optimizer_discovery(
         progress, "optimizer",
         fmt=lambda o: f"best_loss={-o.values[0]:.4f} cost={-o.values[1] / max(cost_weight, 1e-9):.0f}",
         baseline=sgd_baseline,
+        describe=_describe_champion,
     ) if progress else None
     result = auto_evolve(
         evaluate,
@@ -403,6 +424,7 @@ def run_flow_modulation_discovery(
     on_gen = _make_progress(
         progress, "flow",
         fmt=lambda o: f"best_loss={-o.values[0]:.4f} ei={o.values[1] / max(ei_weight, 1e-9):+.3f}",
+        describe=_describe_champion,
     ) if progress else None
     result = auto_evolve(
         evaluate,

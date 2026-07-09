@@ -226,7 +226,7 @@ def run_trunk_evolution(*, seed: int = 0, pop_size: int = 16, generations: int =
     scales the tiny-LM training onto a T4/cuda. ``progress`` streams a
     per-generation line.
     """
-    from neuroslm.genetic.discovery import _resolve_device, _emit, _make_progress
+    from neuroslm.genetic.discovery import _resolve_device, _emit, _make_progress, _describe_champion
     rng = np.random.default_rng(seed)
     prior = NeuroanatomicPrior()
     dev = _resolve_device(device)
@@ -245,6 +245,7 @@ def run_trunk_evolution(*, seed: int = 0, pop_size: int = 16, generations: int =
         progress, "trunk",
         fmt=lambda o: f"best_ppl={-o.values[0] * scale / max(ppl_weight, 1e-9):.3f} "
                       f"plaus={o.values[1] / max(plausibility_weight, 1e-9):.2f}",
+        describe=_describe_champion,
     ) if progress else None
     result = auto_evolve(
         evaluate, rng,

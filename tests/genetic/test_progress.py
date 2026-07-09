@@ -15,8 +15,8 @@ class TestAutoEvolveCallback:
     def test_on_generation_called_each_generation_plus_gen0(self):
         calls = []
 
-        def on_gen(gen, total, best_obj, primary_obj):
-            calls.append((gen, total, best_obj, primary_obj))
+        def on_gen(gen, total, best_obj, primary_obj, primary_prog):
+            calls.append((gen, total, best_obj, primary_obj, primary_prog))
 
         rng = np.random.default_rng(0)
         auto_evolve(_trivial_eval, rng, pop_size=6, generations=4,
@@ -26,6 +26,7 @@ class TestAutoEvolveCallback:
         assert all(c[1] == 4 for c in calls)
         assert all(isinstance(c[2], Objective) for c in calls)
         assert all(isinstance(c[3], Objective) for c in calls)
+        assert all(isinstance(c[4], Program) for c in calls)
 
     def test_no_callback_still_runs(self):
         rng = np.random.default_rng(0)
@@ -43,6 +44,17 @@ class TestDiscoveryProgress:
         # one progress line per generation, mentioning gen index and a metric
         assert out.count("gen ") >= 3
         assert "loss" in out.lower()
+
+    def test_optimizer_progress_describes_the_champion_algorithm(self, capsys):
+        # "best_loss=0.64" alone doesn't answer "which algorithm is this?" — the
+        # progress stream must name/describe the champion program whenever it
+        # changes (gen0 at minimum), not just report numbers.
+        from neuroslm.genetic.discovery import run_optimizer_discovery
+        run_optimizer_discovery(seed=0, pop_size=8, generations=3, steps=15,
+                                progress=True)
+        out = capsys.readouterr().out
+        assert "champion:" in out
+        assert "role=" in out or "Role:" in out
 
     def test_trunk_progress_prints_lines(self, capsys):
         from neuroslm.genetic.neuro_evolve import run_trunk_evolution

@@ -189,7 +189,7 @@ class TrainingExplorer:
             progress(f"[explore @ step {step}] searching  baseline_ppl={baseline:.2f}  "
                      f"(pop={cfg.pop_size}, gens={cfg.generations})")
 
-        def _on_gen(g: int, total: int, best_obj, primary_obj) -> None:
+        def _on_gen(g: int, total: int, best_obj, primary_obj, primary_prog) -> None:
             if not progress:
                 return
             # throttle: first, last, and ~10 evenly-spaced generations

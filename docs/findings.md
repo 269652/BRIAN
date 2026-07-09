@@ -2655,3 +2655,35 @@ downstream caller repointed.
   the search made, now truthfully reported instead of looking like noise).
 
 [EVIDENCE: tests/genetic/test_evolve.py::TestAutoEvolve::test_primary_metric_is_monotonic_even_when_cost_trades_off green; tests/genetic/{test_progress,test_known,test_evolve}.py (23) + {test_discovery,test_cli_discover,test_device,test_training_explorer,test_neuro_evolve,test_cli_trunk,test_trunk_probe}.py (39) all green, 62 total]
+
+### H51 — progress line names the algorithm, not just a number (2026-07-08)
+
+**Status:** 🟢 **FIXED** — 2 new contracts.
+
+- **Complaint (verbatim).** "Still doesn't output much useful progress info,
+  and I have no idea which algorithms it actually explores atm" — on a live
+  Colab T4 run where H50 had already made `best_loss` correctly monotonic
+  (`0.5602 → 0.0311`, held for 13+ generations). The numbers were now honest,
+  but a bare `best_loss=0.0311 cost=54` still doesn't say *what* was found.
+- **Fix.** `auto_evolve`'s `on_generation` callback gains a 5th argument,
+  `primary_prog` — the actual `Program` behind `primary_objective`, not just
+  its score. `discovery.py::_make_progress` gains a `describe` hook: whenever
+  the champion program's rendered description changes, it prints one extra
+  line — `    champion: <neuroslm.genetic.semantics.describe(prog)>` — reusing the
+  abstract-interpretation machinery from H33/H40 (role, boundedness,
+  normalization, statefulness, op families) that already existed for exactly
+  this purpose but had never been wired into a progress stream. Wired into
+  optimizer discovery, flow-modulation discovery, and trunk evolution
+  (`neuro_evolve.py`) — all three `_make_progress` call sites.
+- **Verified live**, gen 0 of a `--novelty 0.3 --macros` run now prints:
+  `champion: Role: gating. Use to modulate a signal by a learned gate. Traits:
+  bounded output, elementwise, sign-based. Families: arith, nonlin; 6
+  instruction(s). Notes: output is magnitude-bounded …; sign-based update
+  (scale-free, Lion-like); pointwise — no cross-element mixing.` — directly
+  answers "which algorithm", not just "how good".
+- **Fails safe.** `_describe_champion` catches any exception from
+  `semantics.describe` (e.g. an unexpanded `call` op semantics can't yet
+  reason about) and renders `<undescribable: ...>` rather than crashing a
+  live discovery/training run over a cosmetic feature.
+
+[EVIDENCE: tests/genetic/test_progress.py::TestAutoEvolveCallback::test_on_generation_called_each_generation_plus_gen0, TestDiscoveryProgress::test_optimizer_progress_describes_the_champion_algorithm green]
