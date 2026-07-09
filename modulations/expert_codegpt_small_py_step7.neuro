@@ -1,0 +1,12 @@
+modulation expert_codegpt_small_py_step7 {
+    # step: 7
+    # baseline_ce: 6.608
+    # best_ce: 6.0915
+    # delta_ce: 0.5164
+    program {
+        t0 = abs(t0)
+        t0 = sigmoid(t0)
+        t2 = sigmoid(t0)
+        return t2
+    }
+}
