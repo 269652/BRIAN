@@ -1,0 +1,23 @@
+[discover:experts] device=cuda rounds=30 batch=2 seq_len=512 pop=64 gens=40
+[discover:experts] roster: smollm2_360m, microsoft/CodeGPT-small-py, Qwen/Qwen2.5-0.5B
+[expert-discovery] loading smollm2_360m …
+[expert-discovery] loading microsoft/CodeGPT-small-py …
+[expert-discovery] loading Qwen/Qwen2.5-0.5B …
+[data:text] using FineWeb-Edu-10BT (HuggingFaceFW/fineweb-edu:sample-10BT)
+[expert:smollm2_360m] round 1: baseline_ce=3.0184 (final: sens=0.04064 improve=-0.002338 (scale_dn) tight)
+[expert-discovery] round 1/30 HuggingFaceTB/SmolLM2-360M: best_ce=3.0183 Δ=0.0002 evaluated=447 (saved expert_smollm2_360m_step1)
+[expert:codegpt_small_py] round 1: baseline_ce=6.5976 (final: sens=0.1449 improve=+0.3342 (damp) ←slack)
+[expert-discovery] round 1/30 microsoft/CodeGPT-small-py: best_ce=6.2361 Δ=0.3615 evaluated=1002 (saved expert_codegpt_small_py_step1)
+[expert:qwen2_5_0_5b] round 1: baseline_ce=3.3023 (final: sens=0.03741 improve=-0.001556 (scale_dn) tight)
+[expert-discovery] round 1/30 Qwen/Qwen2.5-0.5B: best_ce=3.3023 Δ=0.0000 evaluated=400 (no keep)
+[expert:smollm2_360m] round 2: baseline_ce=2.6459 (final: sens=0.04544 improve=-0.002233 (scale_up) tight)
+[expert-discovery] round 2/30 HuggingFaceTB/SmolLM2-360M: best_ce=2.6459 Δ=0.0000 evaluated=384 (no keep)
+[expert:codegpt_small_py] round 2: baseline_ce=5.9440 (final: sens=0.1059 improve=+0.2335 (damp) ←slack)
+[expert-discovery] round 2/30 microsoft/CodeGPT-small-py: best_ce=5.7066 Δ=0.2374 evaluated=1141 (saved expert_codegpt_small_py_step2)
+[expert:qwen2_5_0_5b] round 2: baseline_ce=2.7244 (final: sens=0.04605 improve=-2.36e-05 (scale_up) tight)
+[expert-discovery] round 2/30 Qwen/Qwen2.5-0.5B: best_ce=2.7230 Δ=0.0014 evaluated=383 (saved expert_qwen2_5_0_5b_step2)
+[expert:smollm2_360m] round 3: baseline_ce=2.5766 (final: sens=0.03698 improve=-0.001992 (scale_dn) tight)
+[expert-discovery] round 3/30 HuggingFaceTB/SmolLM2-360M: best_ce=2.5765 Δ=0.0000 evaluated=612 (no keep)
+[expert:codegpt_small_py] round 3: baseline_ce=6.5940 (final: sens=0.165 improve=+0.3905 (damp) ←slack)
+[expert-discovery] round 3/30 microsoft/CodeGPT-small-py: best_ce=6.1563 Δ=0.4377 evaluated=920 (saved expert_codegpt_small_py_step3)
+[expert:qwen2_5_0_5b] round 3: baseline_ce=2.5302 (final: sens=0.03445 improve=-0.002672 (scale_dn) tight)
