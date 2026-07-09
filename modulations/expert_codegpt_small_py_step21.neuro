@@ -1,0 +1,11 @@
+modulation expert_codegpt_small_py_step21 {
+    # step: 21
+    # baseline_ce: 6.1502
+    # best_ce: 5.7838
+    # delta_ce: 0.3664
+    program {
+        t6 = softmax_last(t3)
+        t3 = sigmoid(t6)
+        return t3
+    }
+}
