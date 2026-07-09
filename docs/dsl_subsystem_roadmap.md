@@ -541,3 +541,17 @@ Findings H40:
   → training ran with it active, grads flowing.
 - Next: expert-cortex probe (frozen pretrained LMs, domain-shift slack — task
   #40).
+
+## NGL, part 12 — expert-cortex probe (H54)
+
+- `genetic/expert_probe.py` + `brian discover experts` — discovery on the
+  frozen pretrained cortices (arch roster: smollm2_360m / CodeGPT-small-py /
+  Qwen2.5-0.5B): NGL modulation of each expert's final hidden, scored by ITS
+  own next-token CE (own token space, fp32 measurement over the bf16 model)
+  on fresh streamed text per round. Winners bank `expert_<alias>_step<r>`;
+  durable (frozen weights). Colab cell 13 `MODE="experts"` default.
+- Fixed via TDD from live smoke: bf16 CE quantization (fp32 head view) and
+  repeated-texts-per-round (stateful stream provider).
+- Follow-ups: seed the GA from the battery's best perturbation; multi-site
+  inside HF experts (per-architecture tail plumbing); expert-side install
+  hook (mirror of `_layer_modulations`) once winners recur.

@@ -828,6 +828,38 @@ def cmd_discover(args: argparse.Namespace) -> int:
             print(f"  {b['name']:10s} {b['cost']:>4d} {b['memory']:>3d}  "
                   f"{b['stability']:10s} {b['description']}")
         payload = {"mode": "baselines", "baselines": tradeoff_table()}
+    elif mode == "experts":
+        from neuroslm.genetic.discovery import _resolve_device
+        from neuroslm.genetic.expert_probe import run_expert_discovery
+        dev = _resolve_device(getattr(args, "device", "cpu"))
+        models = [m.strip() for m in args.models.split(",") if m.strip()]
+        print(f"[discover:experts] device={dev.type} rounds={args.rounds} "
+              f"batch={args.batch} seq_len={args.seq_len} pop={args.pop} "
+              f"gens={args.generations}")
+        print(f"[discover:experts] roster: {', '.join(models)}")
+        results = run_expert_discovery(
+            models=models, rounds=args.rounds, batch=args.batch,
+            seq_len=args.seq_len, pop=args.pop, gens=args.generations,
+            length=args.length, device=str(dev), push=args.push)
+        kept = [r for r in results if r.get("saved")]
+        print(f"[discover:experts] {len(results)} probes, {len(kept)} winners banked")
+        by_model: dict = {}
+        for r in results:
+            by_model.setdefault(r["model_id"], []).append(r)
+        for mid, rs in by_model.items():
+            best = min(rs, key=lambda r: r["best_ce"])
+            base = sum(r["baseline_ce"] for r in rs) / len(rs)
+            print(f"  {mid}: mean_baseline_ce={base:.4f} best_ce={best['best_ce']:.4f} "
+                  f"(best Δ={best['delta_ce']:.4f}, "
+                  f"{sum(1 for r in rs if r.get('saved'))} kept)")
+        payload = {"mode": "experts", "rounds": args.rounds,
+                   "models": models,
+                   "kept": [r["saved"] for r in kept],
+                   "results": [{k: v for k, v in r.items()
+                                if k in ("model_id", "baseline_ce", "best_ce",
+                                         "delta_ce", "improved", "saved",
+                                         "evaluated", "headroom")}
+                               for r in results]}
     elif mode == "explore":
         from neuroslm.genetic.ledger import SearchLedger
         from neuroslm.genetic.training_explorer import run_training_with_exploration
@@ -4916,6 +4948,30 @@ def _build_parser() -> argparse.ArgumentParser:
     sdt.add_argument("--push", action="store_true",
                      help="git commit+push the saved modulation (during Colab/vast runs)")
     sdt.set_defaults(func=cmd_discover)
+
+    sde = sdiscover_sub.add_parser(
+        "experts",
+        help="Probe the frozen pretrained expert cortices (SmolLM2/CodeGPT/"
+             "Qwen) for domain-shift slack: search NGL modulations of each "
+             "expert's final hidden, scored by ITS own next-token CE on "
+             "real text; winners bank to modulations/")
+    sde.add_argument("--models",
+                     default="smollm2_360m,microsoft/CodeGPT-small-py,Qwen/Qwen2.5-0.5B",
+                     help="comma-sep HF ids / aliases (default: the arch roster)")
+    sde.add_argument("--rounds", type=int, default=10,
+                     help="probe rounds (fresh text per round; recurrence "
+                          "across rounds = install-grade evidence, since "
+                          "frozen weights never move)")
+    sde.add_argument("--batch", type=int, default=2)
+    sde.add_argument("--seq_len", type=int, default=256)
+    sde.add_argument("--pop", type=int, default=24)
+    sde.add_argument("--generations", type=int, default=10)
+    sde.add_argument("--length", type=int, default=8)
+    sde.add_argument("--device", default="cpu", help="cpu | cuda | auto")
+    sde.add_argument("--push", action="store_true",
+                     help="git commit+push banked winners each round")
+    sde.add_argument("--out", help="write the run summary JSON here")
+    sde.set_defaults(func=cmd_discover)
 
     sds = sdiscover_sub.add_parser(
         "simplify",

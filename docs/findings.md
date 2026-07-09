@@ -2784,3 +2784,49 @@ at an intermediate layer where the terminal site (H46) gave Δ=0.
   shifted data — the headroom scan will measure it.
 
 [EVIDENCE: tests/dsl/test_layer_modulations.py (5), tests/genetic/test_modulation_install.py (11), tests/training/test_trunk_probe_wiring.py::test_probe_only_loop_runs_without_training green; tests/dsl full sweep 1254 passed (2 pre-existing mechanics-index failures unrelated)]
+
+### H54 — Expert-cortex probe: `brian discover experts` on the frozen pretrained LMs (2026-07-09)
+
+**Status:** 🟢 **CONFIRMED (machinery)** — 10 new contracts + live runs on a real
+pretrained model with real streamed data. First roster-scale measurement is the
+user's Colab run.
+
+- **Why experts (task #40, follow-up to H52/H53).** The frozen expert cortices
+  (SmolLM2-360M, CodeGPT-small-py, Qwen2.5-0.5B — PPL≈50 territory) were
+  optimized for THEIR pretraining distributions, not BRIAN's data mixture, so
+  domain-shift slack is well-defined; frozen weights make every banked winner
+  durable (no per-checkpoint staleness); and a modulation that lowers an
+  expert's CE sharpens the KL-distillation teacher signal the whole arch
+  consumes. Scoring is the expert's OWN next-token CE in its OWN token space —
+  the vocab bridge is a distillation concern, not a discovery one.
+- **`neuroslm/genetic/expert_probe.py`** — `ProbedExpert.load` (reuses
+  `experts.py`'s `_load_lm_cached`/`_split_lm`/alias resolution; no VocabBridge
+  built — probing needs no trunk), `expert_batch` (expert-tokenizer windows,
+  capped at the model's hard ctx), `probe_expert` (headroom line + NGL search
+  on the final hidden through the expert's own head), `run_expert_discovery`
+  (multi-round × multi-expert, winners bank site-tagged `expert_<alias>_step<r>`),
+  `make_texts_provider` (stateful stream). CLI: `brian discover experts
+  --models … --rounds …`; Colab cell 13 `MODE="experts"` is the new default.
+- **Two real bugs caught by the live smoke, fixed via TDD:**
+  1. *bf16 quantization*: experts load in bf16; CE computed through the bf16
+     head was quantized to 1/32-nat steps (live: `baseline_ce=4.1875,
+     improve=+0.03125` — all n/32), coarser than the Δs the probe hunts.
+     Fixed: fp32 hidden + fp32 functional head view (`_fp32_head`, no
+     mutation of the process-wide bf16 cache). Post-fix the same probe reads
+     `baseline_ce=4.1698, improve=+0.001912` — smooth, honest.
+  2. *repeated texts*: re-opening the HF stream every round returned the same
+     first-N texts (two rounds with bit-identical baselines), voiding the
+     fresh-batch recurrence evidence. Fixed: one stateful provider iterator
+     across rounds — live baselines now advance (4.17 → 3.98 → 3.63).
+- **First honest measurements (distilgpt2 on FineWeb-Edu, CPU smoke):**
+  headroom at the final hidden is real but small (+0.0019 to +0.0022 nats in
+  2 of 3 rounds; third measured tight) — expected, since FineWeb-Edu is close
+  to that model's pretraining data. The GA (≤57 evals) didn't bank a winner:
+  honest nulls at smoke budget. The roster experts on BRIAN's chat/mix data
+  are where the domain shift — and the expected slack — is larger.
+- **Known follow-up:** seed the probe GA with const-gain programs at the
+  battery's best perturbation (the battery twice found trivial slack the
+  57-eval GA missed — starting FROM the measured slack instead of identity
+  would let the search refine rather than rediscover it).
+
+[EVIDENCE: tests/genetic/test_expert_probe.py (10) green; live `brian discover experts --models distilgpt2` runs pre/post-fix logs above]
