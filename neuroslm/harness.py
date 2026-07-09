@@ -1492,6 +1492,26 @@ class BRIANHarness(nn.Module):
 
     # ── Cortex fusion helpers (slot A + slot C) ──────────────────────
 
+    def install_distillation_schedule(self, lambda_fn) -> None:
+        """Install (or clear) an NGL-evolved gap_nats -> λ schedule.
+
+        ``lambda_fn`` is a plain ``Callable[[float], float]`` — see
+        ``neuroslm.genetic.distill_evolve._make_lambda_fn`` for how one is
+        built from an evolved NGL ``Program``. Once installed,
+        ``_distillation_lambda`` consults it instead of the piecewise-
+        linear ramp (still gated by ``distillation_enabled`` and clamped
+        to ``[0, lambda_max]`` — a schedule shapes the ramp, it doesn't
+        bypass the kill-switch or the ceiling). Pass ``None`` to revert to
+        the default piecewise-linear formula.
+
+        Deliberately takes a callable, not a ``Program`` object: this
+        keeps ``harness.py`` free of any import dependency on the
+        ``neuroslm.genetic`` GA/discovery subsystem, mirroring how
+        ``_layer_modulations`` are installed as plain closures (see
+        ``genetic/modulation_install.py``), not raw NGL programs.
+        """
+        self._distillation_schedule_fn = lambda_fn
+
     def _distillation_lambda(self, gap_nats: float) -> float:
         """λ_t for the KL-distillation aux loss.
 
@@ -1520,7 +1540,16 @@ class BRIANHarness(nn.Module):
         floor = float(cfg.distillation_gap_floor)
         ceiling = float(cfg.distillation_gap_ceiling)
         lam_max = float(cfg.distillation_lambda_max)
-        if gap_nats <= floor:
+
+        schedule_fn = getattr(self, "_distillation_schedule_fn", None)
+        if schedule_fn is not None:
+            # H58: an NGL-evolved gap->λ schedule (neuroslm.genetic.distill_evolve)
+            # replaces the piecewise-linear ramp below. The enabled-gate above and
+            # the lambda_max guard here are NOT overridable by the schedule — a
+            # schedule shapes the ramp, it doesn't get to bypass the kill-switch
+            # or blow past the configured ceiling.
+            base = max(0.0, min(lam_max, float(schedule_fn(gap_nats))))
+        elif gap_nats <= floor:
             base = 0.0
         elif gap_nats >= ceiling:
             base = lam_max

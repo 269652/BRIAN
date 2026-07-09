@@ -2986,6 +2986,8 @@ out — confirmed pre-existing, not a regression.
   `modulations/`, exactly like a local Colab GPU run already could — no
   behavior change for anyone who doesn't pass the new flags.
 
+[EVIDENCE: tests/test_connectors.py::test_T1_build_env_propagates_explore_fields_when_set / test_T2_build_env_skips_explore_when_off / test_T3_onstart_substitutes_explore_placeholders / test_T4_onstart_defaults_explore_off / test_T5_cmd_deploy_forwards_explore_flags_to_deploy_config (5) green; tests/test_vast_train_dsl_loop_explore.py (4) green; tests/test_connectors.py + test_vast_train_dsl_loop_explore.py + test_deploy_safety_gate.py (72 total) green]
+
 ### H57 — `brian discover checkpoint`: probe the REAL trunk from a loaded checkpoint, no training (2026-07-09)
 
 **Status:** 🟢 **CONFIRMED** — 17 new contracts in `test_discover_checkpoint.py`
@@ -3047,4 +3049,102 @@ resolution before/after a refactor into a shared helper; full
 
 [EVIDENCE: tests/test_discover_checkpoint.py (17) green; tests/test_vast_discover_deploy.py (28, 8 new) green; tests/test_deploy_safety_gate.py (19, 4 new `TestCmdDeployLatestResolution`) green]
 
-[EVIDENCE: tests/test_connectors.py::test_T1_build_env_propagates_explore_fields_when_set / test_T2_build_env_skips_explore_when_off / test_T3_onstart_substitutes_explore_placeholders / test_T4_onstart_defaults_explore_off / test_T5_cmd_deploy_forwards_explore_flags_to_deploy_config (5) green; tests/test_vast_train_dsl_loop_explore.py (4) green; tests/test_connectors.py + test_vast_train_dsl_loop_explore.py + test_deploy_safety_gate.py (72 total) green]
+### H58 — `brian discover distill`: evolve the KL-distillation λ-schedule as an NGL program (2026-07-09)
+
+**Status:** 🟢 **CONFIRMED** — 13 new contracts in `test_distill_evolve.py`,
+2 new in `test_cli_distill.py`, 5 new in
+`test_cortex_distillation_and_gating.py` (real numeric round-trip through
+`BRIANHarness.install_distillation_schedule`); full
+`test_cortex_distillation_and_gating.py` (27) + `test_distill_evolve.py`
+(13) + `test_cli_distill.py` (2) + `test_neuro_evolve.py` +
+`test_cli_trunk.py` + `test_known.py` + `test_evolve.py` +
+`test_language.py` (83 total) green.
+
+- **Motivation.** The third discovery target proposed alongside H56/H57:
+  the user asked why discovery couldn't also target the fusion/
+  distillation mechanism itself — `BRIANHarness._distillation_lambda`'s
+  piecewise-linear ramp and `_effective_alpha`'s fusion formula — rather
+  than only the pretrained experts (H54) or the trunk (H52/H53/H57). This
+  entry covers the λ-schedule (the mechanism controlling HOW FAST/HARD the
+  trunk distils from the cortex); `_effective_alpha`'s inhibition-gated
+  mixing weight is a natural follow-up in the same shape.
+- **Why a proxy simulation, not a tensor-shaped task.** Every other
+  discovery mode (`trunk`, `experts`, `explore`) scores candidates by
+  training/probing an actual model, because their programs modulate a
+  hidden-state tensor. A λ-schedule is a scalar function of a scalar gap —
+  there's no analogous tensor task to reuse. Instead
+  `neuroslm/genetic/distill_evolve.py::simulate_distillation` models the
+  actual physical tension the ramp exists to resolve: each step, the
+  trunk's own gradient descent pulls its loss toward a floor, AND the
+  distillation term pulls it toward the (frozen) cortex's loss scaled by
+  `λ · gap`. When `gap > 0` (trunk behind) this genuinely helps; when
+  `gap < 0` (trunk has already surpassed the cortex) the SAME pull now
+  drags the trunk's loss back up toward a now-worse teacher — genuinely
+  harmful. A schedule that fails to collapse λ toward 0 once gap turns
+  negative pays for it in the simulated final loss — confirmed by two
+  adversarial tests: a constant-λ=1 schedule that never decays reaches a
+  strictly WORSE final loss than the gap-gated ramp
+  (`test_always_full_distillation_is_worse_than_gap_gated_ramp`), and a
+  constant-λ=0 schedule (never distils) forfeits real catch-up benefit and
+  also loses (`test_never_distilling_leaves_catchup_help_on_the_table`).
+- **`distill_linear_program()`** — an EXACT NGL reconstruction of the
+  current piecewise-linear ramp, not an approximation. Uses the identity
+  `relu(gap-floor) - relu(gap-ceiling)` which is 0 below floor, the linear
+  ramp between floor/ceiling, and `ceiling-floor` (a constant) above
+  ceiling — scaled by `k = lambda_max/(ceiling-floor)` this reproduces
+  `_distillation_lambda`'s three regimes exactly.
+  `test_matches_harness_lambda_across_gaps` cross-checks the NGL program's
+  output against the ACTUAL `BRIANHarness._distillation_lambda` (not a
+  re-derivation of the formula) at 8 gap values, so the two can't drift
+  independently. Used as both the GA's protected elite seed and the
+  baseline every evolved schedule must beat.
+- **`run_distill_evolution()`** reuses the SAME `auto_evolve`/`Objective`
+  GA engine `neuro_evolve.py`'s trunk search uses (no GA internals
+  reimplemented) and the SAME `NeuroanatomicPrior` plausibility scorer
+  (bounded ops rewarded, runaway ops penalized) — Pareto over
+  (−final_loss, +plausibility), elitism guarantees the reported best is
+  never worse than `distill_linear_program()`.
+- **Real wiring, not decorative (CLAUDE.md §14).**
+  `BRIANHarness.install_distillation_schedule(lambda_fn)` (new method) and
+  `_distillation_lambda` consulting it (`getattr(self,
+  "_distillation_schedule_fn", None)`) is a genuine execution path: NGL
+  `Program` → `Memory` → `execute` → read output → used as `λ` in the
+  real KL-distillation loss. Verified by `TestInstalledDistillationSchedule`
+  installing a hand-built program that returns a FIXED, known value
+  (0.42) regardless of gap and confirming `_distillation_lambda` returns
+  exactly that value at gaps where the piecewise ramp would return
+  something else entirely (e.g. gap=-1.0, where the default returns 0.0)
+  — not a shape-only "doesn't crash" test. Also verified: the installed
+  schedule still respects `distillation_enabled=False` (can't bypass the
+  kill-switch) and is still clamped to `[0, lambda_max]` (can't blow past
+  the ceiling); `None` reverts to the piecewise-linear formula exactly.
+  Takes a plain `Callable[[float], float]`, not a raw `Program` object —
+  keeps `harness.py` free of any import dependency on the
+  `neuroslm.genetic` GA subsystem, mirroring how `_layer_modulations` are
+  installed as closures (`modulation_install.py`), not raw NGL programs.
+- **`install_distillation_schedule_from_store(harness, name, store_dir=)`**
+  — loads a saved schedule from `modulations/<name>.neuro` (same
+  `ModulationStore` every other discover mode uses) and wires it in.
+  Deliberately simpler than the layer-modulation install path
+  (`modulation_install.install_from_store`'s live re-validation gate): a
+  scalar gap→λ function has no "forward pass on a real batch" analogue to
+  gate on, so this trusts the discovery run's own baseline-beats-current
+  elitism guarantee instead.
+- **`brian discover distill`** (`cli.py`, new mode) — flags: `--pop` /
+  `--generations` / `--steps` / `--seed` (GA knobs), `--save NAME` /
+  `--push` (persist + push, same as `trunk`). No `--device`: the proxy
+  simulation is a trivial scalar recurrence with no GPU benefit, unlike
+  `trunk`'s tiny-LM training loop. Not added to `deploy-discover`'s
+  `DEPLOYABLE_MODES` — like `optimizer`/`flow`/`qd`, it finishes in
+  milliseconds on the free local Colab GPU; renting a paid vast.ai
+  instance for it would spend money for no benefit.
+- **Scope boundary (deliberate).** This entry does NOT wire a
+  `--use-distillation-schedule` flag into `train_dsl.py`/`brian deploy`
+  (the equivalent of H53's "close the loop" for the trunk probe) — that's
+  a natural follow-up, mirroring how H52 (the probe) and H53 (closing the
+  loop into training) were split across two entries. The mechanism built
+  here (`install_distillation_schedule` + the store loader) is already
+  complete and real on its own; the CLI/deploy convenience flag is
+  additional plumbing, not additional mechanism.
+
+[EVIDENCE: tests/genetic/test_distill_evolve.py (13) green; tests/genetic/test_cli_distill.py (2) green; tests/training/test_cortex_distillation_and_gating.py::TestInstalledDistillationSchedule (5 new, 27 total) green]

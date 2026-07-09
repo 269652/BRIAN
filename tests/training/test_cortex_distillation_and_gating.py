@@ -210,6 +210,112 @@ class TestDistillationLambdaSchedule:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# H58 — an NGL-evolved λ-schedule (neuroslm.genetic.distill_evolve) can
+# replace the piecewise-linear ramp above, real numeric round-trip.
+# ──────────────────────────────────────────────────────────────────────
+
+class TestInstalledDistillationSchedule:
+    def test_default_is_unaffected_when_nothing_installed(self, fake_lm):
+        from neuroslm.harness import BRIANHarness
+        cfg = _cfg_distill_on()
+        h = BRIANHarness.from_language_model(
+            language_model=fake_lm, vocab_size=VOCAB, d_sem=D_SEM,
+            training_config=cfg,
+        )
+        # No install call at all — must be bit-identical to the piecewise ramp.
+        mc = cfg.multi_cortex
+        midpoint = (mc.distillation_gap_floor + mc.distillation_gap_ceiling) / 2
+        assert abs(h._distillation_lambda(gap_nats=midpoint)
+                   - mc.distillation_lambda_max / 2) < 1e-9
+
+    def test_installed_program_overrides_piecewise_ramp(self, fake_lm):
+        """Install a hand-built NGL program that returns a FIXED, known
+        value regardless of gap — if `_distillation_lambda` is genuinely
+        consulting the installed schedule (not just accepting the call
+        and ignoring it), every gap must return exactly that value,
+        including gaps where the piecewise ramp would return something
+        else (e.g. gap=-1.0, where the default formula returns 0.0)."""
+        from neuroslm.genetic.language import Instruction, Program
+        from neuroslm.harness import BRIANHarness
+
+        cfg = _cfg_distill_on()
+        h = BRIANHarness.from_language_model(
+            language_model=fake_lm, vocab_size=VOCAB, d_sem=D_SEM,
+            training_config=cfg,
+        )
+        fixed = Program(
+            [Instruction("const", "t1", (), const=0.42)],
+            n_scalar=4, n_tensor=10, out_reg="t1", meta={"name": "fixed_042"})
+        from neuroslm.genetic.distill_evolve import _make_lambda_fn
+        h.install_distillation_schedule(_make_lambda_fn(fixed))
+
+        for gap in (-1.0, 0.0, 0.5, 1.0, 5.0):
+            lam = h._distillation_lambda(gap_nats=gap)
+            assert abs(lam - 0.42) < 1e-6, (
+                f"installed schedule must override the piecewise ramp at "
+                f"gap={gap}; expected 0.42, got {lam}"
+            )
+
+    def test_installed_schedule_still_respects_distillation_enabled_gate(self, fake_lm):
+        """An installed schedule must NOT bypass `distillation_enabled=False`
+        — the gate is a global kill-switch, not something a schedule can
+        override."""
+        from neuroslm.genetic.language import Instruction, Program
+        from neuroslm.harness import BRIANHarness
+
+        cfg = _cfg_baseline_fusion()  # distillation_enabled=False
+        h = BRIANHarness.from_language_model(
+            language_model=fake_lm, vocab_size=VOCAB, d_sem=D_SEM,
+            training_config=cfg,
+        )
+        fixed = Program(
+            [Instruction("const", "t1", (), const=0.9)],
+            n_scalar=4, n_tensor=10, out_reg="t1")
+        from neuroslm.genetic.distill_evolve import _make_lambda_fn
+        h.install_distillation_schedule(_make_lambda_fn(fixed))
+        assert h._distillation_lambda(gap_nats=5.0) == 0.0
+
+    def test_installed_schedule_is_clamped_to_lambda_max(self, fake_lm):
+        """A runaway installed program (output far above lambda_max) must
+        be clamped, same physical guard the piecewise ramp enforces by
+        construction."""
+        from neuroslm.genetic.language import Instruction, Program
+        from neuroslm.harness import BRIANHarness
+
+        cfg = _cfg_distill_on()  # lambda_max=1.0
+        h = BRIANHarness.from_language_model(
+            language_model=fake_lm, vocab_size=VOCAB, d_sem=D_SEM,
+            training_config=cfg,
+        )
+        blow_up = Program(
+            [Instruction("const", "t1", (), const=50.0)],
+            n_scalar=4, n_tensor=10, out_reg="t1")
+        from neuroslm.genetic.distill_evolve import _make_lambda_fn
+        h.install_distillation_schedule(_make_lambda_fn(blow_up))
+        lam = h._distillation_lambda(gap_nats=5.0)
+        assert lam == cfg.multi_cortex.distillation_lambda_max
+
+    def test_uninstall_reverts_to_piecewise_ramp(self, fake_lm):
+        from neuroslm.genetic.language import Instruction, Program
+        from neuroslm.harness import BRIANHarness
+
+        cfg = _cfg_distill_on()
+        h = BRIANHarness.from_language_model(
+            language_model=fake_lm, vocab_size=VOCAB, d_sem=D_SEM,
+            training_config=cfg,
+        )
+        fixed = Program(
+            [Instruction("const", "t1", (), const=0.42)],
+            n_scalar=4, n_tensor=10, out_reg="t1")
+        from neuroslm.genetic.distill_evolve import _make_lambda_fn
+        h.install_distillation_schedule(_make_lambda_fn(fixed))
+        assert abs(h._distillation_lambda(gap_nats=-1.0) - 0.42) < 1e-6
+
+        h.install_distillation_schedule(None)
+        assert h._distillation_lambda(gap_nats=-1.0) == 0.0
+
+
+# ──────────────────────────────────────────────────────────────────────
 # F1.3 — Distillation loss is ADDED to total when enabled
 # ──────────────────────────────────────────────────────────────────────
 

@@ -759,6 +759,51 @@ def cmd_discover(args: argparse.Namespace) -> int:
                 from neuroslm.genetic.modulation_pusher import push_modulations
                 res = push_modulations(REPO_ROOT, message=f"modulations: discovered {args.save}")
                 print(f"  push: {'-> ' + res.get('branch','?') if res.get('pushed') else res.get('reason')}")
+    elif mode == "distill":
+        from neuroslm.genetic.distill_evolve import run_distill_evolution
+        outcome = run_distill_evolution(
+            seed=args.seed, pop_size=args.pop, generations=args.generations,
+            steps=args.steps, progress=True)
+        print(f"[discover:distill] pop={args.pop} gens={args.generations} steps={args.steps}")
+        print(f"  piecewise-linear ramp final_loss : {outcome.baseline_final_loss:.4f}")
+        print(f"  best evolved schedule final_loss : {outcome.best_final_loss:.4f}")
+        print(f"  best neuroanatomic score          : {outcome.best_plausibility:.3f}")
+        print("  Pareto front (final_loss, plausibility):")
+        for s in sorted(outcome.front_stats, key=lambda d: d["final_loss"])[:8]:
+            print(f"    loss={s['final_loss']:.4f}  plaus={s['plausibility']:.3f}  {s['name']}")
+        print("  best schedule program (NGL):")
+        for line in outcome.best_program.to_source().splitlines():
+            print(f"    {line}")
+        print("  note: this is a proxy simulation of the gap-dynamics tension the "
+              "λ-schedule resolves, not a real training run — wire a saved schedule "
+              "into a live harness via install_distillation_schedule_from_store() "
+              "(--save NAME here, then load NAME at deploy time) before trusting it "
+              "on a real trunk.")
+        payload = {
+            "mode": "distill",
+            "seed": args.seed, "pop": args.pop,
+            "generations": args.generations, "steps": args.steps,
+            "baseline_final_loss": outcome.baseline_final_loss,
+            "best_final_loss": outcome.best_final_loss,
+            "best_plausibility": outcome.best_plausibility,
+            "history": outcome.history,
+            "front_stats": outcome.front_stats,
+            "best_program": outcome.best_program.to_source(),
+        }
+        if getattr(args, "save", None):
+            from neuroslm.genetic.modulation_store import ModulationStore, ModulationRecord
+            store = ModulationStore(_modulations_root())
+            rec = ModulationRecord(
+                name=args.save, program=outcome.best_program,
+                metrics={"final_loss": round(outcome.best_final_loss, 4),
+                         "baseline_final_loss": round(outcome.baseline_final_loss, 4),
+                         "plausibility": round(outcome.best_plausibility, 3)})
+            path = store.save(rec)
+            print(f"  saved schedule -> {path}")
+            if getattr(args, "push", False):
+                from neuroslm.genetic.modulation_pusher import push_modulations
+                res = push_modulations(REPO_ROOT, message=f"modulations: discovered {args.save}")
+                print(f"  push: {'-> ' + res.get('branch','?') if res.get('pushed') else res.get('reason')}")
     elif mode == "checkpoint":
         # Mode A: probe the REAL trunk from a loaded checkpoint. Deliberately
         # NOT re-implemented here — `train_dsl.py --explore_only
@@ -5139,6 +5184,25 @@ def _build_parser() -> argparse.ArgumentParser:
     sdt.add_argument("--push", action="store_true",
                      help="git commit+push the saved modulation (during Colab/vast runs)")
     sdt.set_defaults(func=cmd_discover)
+
+    sddi = sdiscover_sub.add_parser(
+        "distill",
+        help="Evolve the KL-distillation λ-schedule (gap_nats -> λ) as an NGL "
+             "program, replacing the piecewise-linear ramp in "
+             "BRIANHarness._distillation_lambda; scored by a proxy simulation "
+             "of the catch-up-helps/over-distill-hurts tension the ramp exists "
+             "to resolve")
+    sddi.add_argument("--pop", type=int, default=16)
+    sddi.add_argument("--generations", type=int, default=8)
+    sddi.add_argument("--steps", type=int, default=60,
+                      help="simulated training steps per candidate schedule")
+    sddi.add_argument("--seed", type=int, default=0)
+    sddi.add_argument("--out", help="write the run summary JSON here")
+    sddi.add_argument("--save", metavar="NAME",
+                      help="persist the discovered schedule as modulations/NAME.neuro")
+    sddi.add_argument("--push", action="store_true",
+                      help="git commit+push the saved schedule (during Colab/vast runs)")
+    sddi.set_defaults(func=cmd_discover)
 
     sdc = sdiscover_sub.add_parser(
         "checkpoint",
