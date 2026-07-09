@@ -1,0 +1,14 @@
+modulation expert_codegpt_small_py_step4 {
+    # step: 4
+    # baseline_ce: 6.2008
+    # best_ce: 5.8315
+    # delta_ce: 0.3693
+    program {
+        t6 = min(t1, t2)
+        t4 = softmax(t6)
+        t2 = softmax_last(t4)
+        s0 = sigmoid(t2)
+        t6 = abs(s0)
+        return t6
+    }
+}
