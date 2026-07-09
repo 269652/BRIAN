@@ -1,11 +1,11 @@
 modulation expert_codegpt_small_py_step2 {
     # step: 2
-    # baseline_ce: 5.9424
-    # best_ce: 5.7052
-    # delta_ce: 0.2372
+    # baseline_ce: 5.944
+    # best_ce: 5.7066
+    # delta_ce: 0.2374
     program {
-        t1 = const(c=1.0)
-        t3 = tanh(t1)
-        return t3
+        t0 = const(c=0.7817894818835043)
+        t2 = relu(t0)
+        return t2
     }
 }
