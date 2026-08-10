@@ -1295,13 +1295,6 @@ def _eval_pass_marks(rules, step: int,
 _CORPUS_TEXT_LIMIT = 400          # enough for the final cap=200 + skips
 _CORPUS_CACHE: Dict[str, List[str]] = {}
 
-# Training streams FineWeb-Edu sample-10BT from the start; the deepest
-# horizon in the repo is deploy-100k ≈ 65k tok/step × 100k ≈ 6.5B tokens
-# ≈ 5.9M docs. Offset 8M docs (≈ 8.8B tokens) stays disjoint from any
-# run shorter than ~135k steps.
-_TRAINDIST_DOC_OFFSET = 8_000_000
-
-
 def _cached_corpus(name: str, gen_fn) -> "List[str]":
     if name not in _CORPUS_CACHE:
         out: List[str] = []
@@ -1337,12 +1330,24 @@ def _load_pg19_texts():
 
 
 def _load_traindist_texts():
+    # 2026-08-10 incident: this used to be `sample-10BT` (the training
+    # split) with `.skip(8_000_000)` to reach an "untrained" offset.
+    # `.skip()` on a STREAMING IterableDataset is O(n) network+parse
+    # work, not a seek — skipping 8M records hung a live, billing A100
+    # indefinitely with zero progress and no error. Fixed by reading
+    # from `sample-100BT`, a DIFFERENT, independently-drawn FineWeb-Edu
+    # sample (per the dataset card, not a superset/prefix of
+    # sample-10BT) — no skip needed, so this is O(_CORPUS_TEXT_LIMIT)
+    # instead of O(8_000_000). Trade-off: disjointness from the training
+    # stream is now probabilistic (independent sampling), not guaranteed
+    # by construction — acceptable for a fast gap-ratio denominator, not
+    # a substitute for a held-out split if the distinction ever matters.
     from datasets import load_dataset
 
     def _gen():
-        ds = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT",
+        ds = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-100BT",
                           split="train", streaming=True)
-        for ex in ds.skip(_TRAINDIST_DOC_OFFSET):
+        for ex in ds:
             yield ex.get("text", "")
     return iter(_cached_corpus("traindist", _gen))
 

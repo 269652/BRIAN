@@ -148,6 +148,74 @@ class TestEvalCorporaRegistry:
             assert callable(loader), f"{name} loader must be a callable"
 
 
+class TestTraindistLoaderNeverSkips:
+    """2026-08-10 incident: `_load_traindist_texts` used to call
+    `.skip(8_000_000)` on a STREAMING HF dataset to reach an "untrained"
+    offset into the training split. `.skip()` on an IterableDataset is
+    O(n) network+parse work, not an O(1) seek — this hung a live,
+    billing A100 indefinitely at the very first mid-training eval, with
+    no error, no progress, nothing after "corpus 'pg19' failed
+    (skipping)" in the log. Fixed by reading a DIFFERENT, independently-
+    sampled FineWeb-Edu subset from its start (no skip needed). These
+    contracts pin the fix at the `datasets.load_dataset` call boundary
+    so a future edit can't silently reintroduce a `.skip()` on a
+    streaming dataset in this loader.
+    """
+
+    def test_no_skip_call_on_the_streaming_dataset(self, monkeypatch):
+        import neuroslm.train_dsl as td
+
+        calls = {"skip": 0}
+
+        class _FakeStreamingDataset:
+            def __iter__(self):
+                for i in range(5):
+                    yield {"text": f"doc {i} " * 20}
+
+            def skip(self, n):
+                calls["skip"] += 1
+                raise AssertionError(
+                    ".skip() must never be called on the traindist "
+                    "streaming dataset — it hung a live A100 for the "
+                    "price of the rental (2026-08-10)")
+
+        def _fake_load_dataset(*args, **kwargs):
+            return _FakeStreamingDataset()
+
+        monkeypatch.setattr("datasets.load_dataset", _fake_load_dataset)
+        td._CORPUS_CACHE.pop("traindist", None)
+
+        texts = list(td._load_traindist_texts())
+        assert calls["skip"] == 0
+        assert len(texts) == 5
+
+    def test_uses_a_different_subset_than_training(self, monkeypatch):
+        """The training loader (neuroslm/data.py) reads sample-10BT —
+        traindist must read a DIFFERENT sample config, not the same
+        split with an in-stream offset."""
+        import neuroslm.train_dsl as td
+
+        captured = {}
+
+        class _FakeStreamingDataset:
+            def __iter__(self):
+                return iter(())
+
+        def _fake_load_dataset(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return _FakeStreamingDataset()
+
+        monkeypatch.setattr("datasets.load_dataset", _fake_load_dataset)
+        td._CORPUS_CACHE.pop("traindist", None)
+        list(td._load_traindist_texts())
+
+        assert captured["kwargs"].get("name") != "sample-10BT", (
+            "traindist must not read the exact training split/config — "
+            "use a different independently-sampled subset instead of "
+            "trying to offset into the same stream")
+
+
 # ══════════════════════════════════════════════════════════════════════
 # C/D. _mid_ood_eval protocol v2
 # ══════════════════════════════════════════════════════════════════════
