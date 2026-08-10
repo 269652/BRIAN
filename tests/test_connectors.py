@@ -269,6 +269,21 @@ def test_T3_onstart_substitutes_explore_placeholders():
     assert "USE_MODULATIONS='1'" in script
 
 
+def test_T4b_onstart_pushes_ood_benchmark_jsons():
+    """H59: the eval-v2 JSONs under logs/vast/benchmarks/ood/ carry the
+    per-sequence NLLs `brian ood compare` needs — the log pusher only
+    handles the train log, so the onstart must push the benchmark dir
+    explicitly BEFORE the instance self-destroys, or the comparison
+    inputs die with the box."""
+    from neuroslm.connectors.vast import VastConnector
+    env = {"GH_TOKEN": "t", "HF_TOKEN": "h", "BRANCH": "master"}
+    script = VastConnector._build_onstart(env)
+    assert "logs/vast/benchmarks/ood" in script
+    assert (script.index("logs/vast/benchmarks/ood")
+            < script.index("self-destroying instance")), (
+        "benchmark push must run before self-destroy")
+
+
 def test_T5_cmd_deploy_forwards_explore_flags_to_deploy_config():
     import argparse
     from unittest.mock import MagicMock, patch

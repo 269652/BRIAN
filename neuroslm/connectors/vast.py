@@ -174,6 +174,27 @@ else
     echo "[onstart] no new checkpoints to commit"
 fi
 
+# ── Final OOD-benchmark push (eval protocol v2, H59) ──────────────
+# logs/vast/benchmarks/ood/*.json carry the per-sequence NLLs that
+# `brian ood compare` feeds the Welch's-t ImprovementGate. The log
+# pusher only handles the train log, so without this block the
+# comparison inputs die with the instance.
+echo "── pushing OOD benchmark JSONs ──"
+for bj in logs/vast/benchmarks/ood/*.json; do
+    [ -e "$bj" ] || continue
+    git add "$bj" 2>/dev/null || true
+done
+if ! git diff --cached --quiet 2>/dev/null; then
+    git commit -m "ood: eval-v2 benchmark JSONs @ $(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
+        >/dev/null 2>&1 || echo "[onstart] benchmark commit failed"
+    PUSH_URL="https://x-access-token:${GH_TOKEN}@github.com/__REPO_SLUG__.git"
+    timeout 300 git push "$PUSH_URL" "HEAD:__BRANCH__" 2>&1 \\
+        | sed "s#${GH_TOKEN}#***#g" \\
+        || echo "[onstart] benchmark push failed (will not block destroy)"
+else
+    echo "[onstart] no benchmark JSONs to commit"
+fi
+
 # ── Self-destroy the vast instance ────────────────────────────────
 # Without this the container stays "running" after onstart exits and
 # bills you indefinitely. Verified 2026-05-30 on 38469631 (8 hours
