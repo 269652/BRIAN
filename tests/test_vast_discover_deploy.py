@@ -76,6 +76,7 @@ class TestBuildDiscoverOnstart:
             "DISCOVER_ARGS": "--models smollm2_360m --rounds 20",
             "PUSH_INTERVAL": "90",
             "LABEL": "neuroslm-discover",
+            "AUTO_DESTROY": "1",
         }
         env.update(overrides)
         return build_discover_onstart(env)
@@ -137,6 +138,28 @@ class TestBuildDiscoverOnstart:
         script = build_discover_onstart(env)
         assert "269652/BRIAN" in script
 
+    def test_auto_destroy_defaults_to_enabled_when_key_missing(self):
+        """Callers that never pass AUTO_DESTROY (e.g. older code, or a test
+        that predates this flag) must keep today's behaviour: self-destroy
+        on exit. Silently defaulting to "leave it running" would bill
+        every existing caller indefinitely."""
+        from neuroslm.connectors.vast_discover import build_discover_onstart
+        env = {"GH_TOKEN": "t", "HF_TOKEN": "h", "BRANCH": "master",
+               "MODE": "trunk", "DISCOVER_ARGS": "", "PUSH_INTERVAL": "60",
+               "LABEL": "neuroslm-discover"}
+        script = build_discover_onstart(env)
+        assert "vastai destroy instance" in script
+
+    def test_auto_destroy_disabled_skips_the_destroy_command(self):
+        script = self._build(AUTO_DESTROY="0")
+        assert "vastai destroy instance" not in script
+        assert "leaving instance running" in script.lower()
+
+    def test_auto_destroy_enabled_keeps_the_destroy_command(self):
+        script = self._build(AUTO_DESTROY="1")
+        assert "vastai destroy instance" in script
+        assert "leaving instance running" not in script.lower()
+
 
 class TestConnectorLaunch:
     def test_launch_calls_vast_discover_sh(self, capture_subprocess):
@@ -191,6 +214,38 @@ class TestConnectorLaunch:
         VastDiscoverConnector().launch(cfg)
         assert "smollm2_360m,microsoft/CodeGPT-small-py" in captured["content"]
         assert "--rounds 20" in captured["content"]
+
+    def test_auto_destroy_defaults_true(self, monkeypatch):
+        """DiscoverDeployConfig() with no explicit auto_destroy must still
+        self-destroy — the flag is opt-out, not opt-in, so nobody's
+        existing deploy call silently starts leaving billable boxes alive."""
+        from neuroslm.connectors.vast_discover import (
+            DiscoverDeployConfig, VastDiscoverConnector,
+        )
+        captured = {}
+
+        def _fake_call(args, *, cwd=None, env=None, **kwargs):
+            captured["content"] = Path(env["ONSTART_FILE"]).read_text(encoding="utf-8")
+            return 0
+
+        monkeypatch.setattr("subprocess.call", _fake_call)
+        VastDiscoverConnector().launch(DiscoverDeployConfig(mode="experts"))
+        assert "vastai destroy instance" in captured["content"]
+
+    def test_auto_destroy_false_reaches_onstart_script(self, monkeypatch):
+        from neuroslm.connectors.vast_discover import (
+            DiscoverDeployConfig, VastDiscoverConnector,
+        )
+        captured = {}
+
+        def _fake_call(args, *, cwd=None, env=None, **kwargs):
+            captured["content"] = Path(env["ONSTART_FILE"]).read_text(encoding="utf-8")
+            return 0
+
+        monkeypatch.setattr("subprocess.call", _fake_call)
+        cfg = DiscoverDeployConfig(mode="experts", auto_destroy=False)
+        VastDiscoverConnector().launch(cfg)
+        assert "vastai destroy instance" not in captured["content"]
 
 
 class TestDiscoverArgsUseTheRentedGpu:
@@ -371,3 +426,140 @@ class TestCliHumanConfirmationGate:
         assert confirm_calls == [], (
             "must reject an undeployable mode BEFORE the human-confirmation "
             "gate, not after — no reason to prompt for a mode that can't run")
+
+
+def _discover_args(**overrides):
+    import argparse
+    base = dict(
+        deploy_discover_mode="experts", models=None, rounds=None,
+        batch=None, seq_len=None, pop=None, generations=None,
+        length=None, steps=None, seed=None, task=None,
+        from_scratch=False, novelty=None, avoid_known=False,
+        macros=False, seed_from=None, branch=None, label=None,
+        push_interval=None, gpu_query=None,
+    )
+    base.update(overrides)
+    return argparse.Namespace(**base)
+
+
+class TestSecretsBootstrappedBeforeLaunch:
+    """cmd_deploy_discover must resolve GH_TOKEN/HF_TOKEN/VAST_API_KEY from
+    .env into os.environ before VastDiscoverConnector.launch() reads
+    os.environ — exactly like cmd_deploy already does (see cli.py's "Load
+    secrets from .env before the connector reads os.environ" comment).
+    Without this, a token that only lives in .env (never exported to the
+    shell) is baked into the onstart script as an empty string, and the
+    box fails at `git clone` with "GH_TOKEN token not set."
+    """
+
+    def test_bootstrap_secrets_called_before_launch(self, monkeypatch):
+        from neuroslm import cli
+        monkeypatch.setattr(cli, "_require_human_confirmation", lambda *a, **kw: None)
+
+        calls = []
+        monkeypatch.setattr(
+            "neuroslm.utils.secrets.bootstrap_secrets",
+            lambda *a, **kw: calls.append((a, kw)) or {})
+
+        launched = []
+
+        class _FakeConnector:
+            def launch(self, config):
+                launched.append(config)
+                return 0
+
+        monkeypatch.setattr(
+            "neuroslm.connectors.vast_discover.VastDiscoverConnector",
+            lambda: _FakeConnector())
+
+        cli.cmd_deploy_discover(_discover_args())
+        assert len(calls) == 1, (
+            "bootstrap_secrets must run before the connector launches, "
+            "otherwise GH_TOKEN/HF_TOKEN/VAST_API_KEY set only in .env "
+            "never reach os.environ")
+        assert len(launched) == 1
+
+    def test_dotenv_only_gh_token_reaches_onstart_script(self, monkeypatch, tmp_path):
+        """End-to-end: GH_TOKEN present ONLY in .env (never exported to the
+        shell) must still land in the onstart script sent to the box."""
+        from neuroslm import cli
+        import subprocess as subprocess_mod
+
+        monkeypatch.setattr(cli, "_require_human_confirmation", lambda *a, **kw: None)
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".env").write_text("GH_TOKEN=ghp_from_dotenv_only\n")
+
+        captured = {}
+
+        def _fake_call(args, *, cwd=None, env=None, **kwargs):
+            onstart_path = (env or {}).get("ONSTART_FILE")
+            if onstart_path:
+                captured["script"] = Path(onstart_path).read_text(encoding="utf-8")
+            return 0
+
+        monkeypatch.setattr(subprocess_mod, "call", _fake_call)
+
+        cli.cmd_deploy_discover(_discover_args())
+        assert "script" in captured, "connector never reached subprocess.call"
+        assert "ghp_from_dotenv_only" in captured["script"], (
+            ".env-only GH_TOKEN did not reach the onstart script — "
+            "bootstrap_secrets() was not called before the connector "
+            "read os.environ")
+
+
+class TestNoAutoDestroyFlag:
+    """`--no-auto-destroy` lets you inspect a failed/finished discover box
+    instead of it self-destroying before you can read the logs (the exact
+    problem hit live: two checkpoint runs died on a missing HF_TOKEN and
+    were gone before anyone could see why)."""
+
+    def test_flag_absent_means_auto_destroy_true(self, monkeypatch):
+        from neuroslm import cli
+        monkeypatch.setattr(cli, "_require_human_confirmation", lambda *a, **kw: None)
+        monkeypatch.setattr("neuroslm.utils.secrets.bootstrap_secrets", lambda *a, **kw: {})
+
+        captured = {}
+
+        class _FakeConnector:
+            def launch(self, config):
+                captured["config"] = config
+                return 0
+
+        monkeypatch.setattr(
+            "neuroslm.connectors.vast_discover.VastDiscoverConnector",
+            lambda: _FakeConnector())
+
+        cli.cmd_deploy_discover(_discover_args())
+        assert captured["config"].auto_destroy is True
+
+    def test_flag_sets_auto_destroy_false(self, monkeypatch):
+        from neuroslm import cli
+        monkeypatch.setattr(cli, "_require_human_confirmation", lambda *a, **kw: None)
+        monkeypatch.setattr("neuroslm.utils.secrets.bootstrap_secrets", lambda *a, **kw: {})
+
+        captured = {}
+
+        class _FakeConnector:
+            def launch(self, config):
+                captured["config"] = config
+                return 0
+
+        monkeypatch.setattr(
+            "neuroslm.connectors.vast_discover.VastDiscoverConnector",
+            lambda: _FakeConnector())
+
+        cli.cmd_deploy_discover(_discover_args(no_auto_destroy=True))
+        assert captured["config"].auto_destroy is False
+
+    def test_cli_parses_no_auto_destroy_flag(self):
+        from neuroslm.cli import _build_parser
+        args = _build_parser().parse_args(
+            ["deploy-discover", "checkpoint", "--latest", "--no-auto-destroy"])
+        assert args.no_auto_destroy is True
+
+    def test_cli_defaults_no_auto_destroy_to_false(self):
+        from neuroslm.cli import _build_parser
+        args = _build_parser().parse_args(
+            ["deploy-discover", "checkpoint", "--latest"])
+        assert args.no_auto_destroy is False

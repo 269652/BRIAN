@@ -1941,7 +1941,28 @@ def cmd_deploy_discover(args: argparse.Namespace) -> int:
         label=args.label or "neuroslm-discover",
         push_interval=args.push_interval or 90,
         gpu_query=args.gpu_query or "",
+        auto_destroy=not getattr(args, "no_auto_destroy", False),
     )
+
+    # ── Load secrets from .env before the connector reads os.environ ──
+    # VastDiscoverConnector.launch() does os.environ.get("GH_TOKEN", ""),
+    # so GH_TOKEN / HF_TOKEN / VAST_API_KEY must be in os.environ at call
+    # time. Same fix as cmd_deploy's identical comment above — without it,
+    # a token that only lives in .env (never exported to the shell) is
+    # baked into the onstart script as an empty string, and the box fails
+    # at `git clone` with "GH_TOKEN token not set."
+    try:
+        from neuroslm.utils.secrets import bootstrap_secrets
+        bootstrap_secrets(
+            ["GH_TOKEN", "HF_TOKEN", "VAST_API_KEY"],
+            aliases={
+                "GH_TOKEN":     ["GITHUB_TOKEN", "GITHUB", "GITHUB_PAT"],
+                "VAST_API_KEY": ["VAST_AI", "VASTAI_API_KEY"],
+            },
+            verbose=False,
+        )
+    except Exception:
+        pass
 
     # Same gate `brian deploy` uses — a human must type "deploy" at a real
     # TTY or in a live Colab/Jupyter cell. No flag bypasses this.
@@ -5603,6 +5624,14 @@ def _build_parser() -> argparse.ArgumentParser:
     sdd.add_argument("--gpu-query", default=None,
                      help="override the vast.ai offer filter (default: a "
                           "single A100 — see scripts/vast_discover.sh)")
+    sdd.add_argument("--no-auto-destroy", action="store_true",
+                     dest="no_auto_destroy",
+                     help="leave the instance running after the discover "
+                          "run exits (success OR failure) instead of "
+                          "self-destroying, so you can inspect the boot/"
+                          "run log on the box. You must destroy it "
+                          "yourself afterward (brian destroy <id>) — it "
+                          "keeps billing until you do.")
     # experts-only
     sdd.add_argument("--models", help="comma-sep HF ids/aliases (experts)")
     sdd.add_argument("--rounds", type=int, default=None, help="probe rounds (experts/checkpoint)")

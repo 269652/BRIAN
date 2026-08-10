@@ -60,6 +60,7 @@ class DiscoverDeployConfig:
     label: str = "neuroslm-discover"
     push_interval: int = 90
     gpu_query: str = ""
+    auto_destroy: bool = True
 
     def __post_init__(self) -> None:
         if self.mode not in DEPLOYABLE_MODES:
@@ -133,10 +134,14 @@ r = push_artifacts('.', ['$LOGFILE', 'modulations', '.neuro/search_ledger.json',
 print('[pusher] final:', r)
 "
 
-# ── Self-destroy the vast instance ────────────────────────────────
+__SELF_DESTROY_BLOCK__
+"""
+
 # Without this the container stays "running" after the discover run
 # completes and bills you indefinitely (see neuroslm/connectors/vast.py's
 # training onstart for the incident this pattern was written to prevent).
+_SELF_DESTROY_BLOCK = """\
+# ── Self-destroy the vast instance ──────────────────────────────────
 echo "── self-destroying instance ──"
 if ! command -v vastai >/dev/null 2>&1; then
     pip install -q vastai 2>&1 | tail -3 || true
@@ -163,8 +168,16 @@ else
     echo "[onstart] VAST_API_KEY not in env or vastai CLI missing -- cannot self-destroy"
 fi
 
-echo "── discover run exited; FAILED to self-destroy. Run: vastai destroy instance <contract_id> ──"
-"""
+echo "── discover run exited; FAILED to self-destroy. Run: vastai destroy instance <contract_id> ──\""""
+
+# --no-auto-destroy trades the self-destroy safety net for the ability to
+# inspect the box after a failure — otherwise a crash-and-self-destroy
+# (e.g. a missing HF_TOKEN) wipes the only copy of the boot log before
+# anyone can read it. You must destroy the instance yourself afterward.
+_LEAVE_RUNNING_BLOCK = """\
+# ── --no-auto-destroy set; NOT self-destroying ──────────────────────
+echo "── --no-auto-destroy set; leaving instance running ──"
+echo "── remember to destroy it yourself when done: brian destroy <id> ──\""""
 
 
 def build_discover_onstart(env: dict) -> str:
@@ -177,7 +190,10 @@ def build_discover_onstart(env: dict) -> str:
     """
     repo_url = env.get("REPO_URL") or "https://github.com/269652/BRIAN.git"
     repo_slug = repo_url.removeprefix("https://github.com/").removesuffix(".git")
+    auto_destroy = str(env.get("AUTO_DESTROY", "1")) != "0"
+    destroy_block = _SELF_DESTROY_BLOCK if auto_destroy else _LEAVE_RUNNING_BLOCK
     result = _ONSTART_TEMPLATE
+    result = result.replace("__SELF_DESTROY_BLOCK__", destroy_block)
     result = result.replace("__GH_TOKEN__", env.get("GH_TOKEN", ""))
     result = result.replace("__HF_TOKEN__", env.get("HF_TOKEN", ""))
     result = result.replace("__BRANCH__", env.get("BRANCH", "master"))
@@ -209,6 +225,7 @@ class VastDiscoverConnector:
             "DISCOVER_ARGS": discover_args_str,
             "PUSH_INTERVAL": config.push_interval,
             "LABEL": config.label,
+            "AUTO_DESTROY": "1" if config.auto_destroy else "0",
         }
         onstart_content = build_discover_onstart(onstart_env)
 
