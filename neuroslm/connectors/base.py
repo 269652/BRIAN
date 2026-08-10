@@ -211,6 +211,13 @@ class DeployConfig:
     push_optimizer: bool = False
     seq_len: int = 0       # 0 = use trainer default (128); set e.g. 256 for P2
     batch_size: int = 0    # 0 = use trainer default; forwarded as --batch N
+    # `brian deploy --keepalive`: skip the onstart self-destroy so the box
+    # stays inspectable after the run exits (user destroys it manually —
+    # it bills until then).
+    keepalive: bool = False
+    # `brian deploy --machine-id N`: pin the vast.ai offer search to one
+    # known-good host instead of the arch's hardware{} filter. 0 = off.
+    machine_id: int = 0
     # H52/H53 multi-site trunk probe, wired into a REAL training deploy (not
     # just the local Colab GPU cell): explore_every=0 (default) means off,
     # matching train_dsl.py's own --explore_every semantics.

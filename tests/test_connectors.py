@@ -359,6 +359,184 @@ def test_H_build_env_skips_none_fields():
     assert "BRANCH" not in env
     assert "ARCH" not in env
     assert "SCALE" not in env
+
+
+# ── H59 incident 2026-08-10: arch-path mangling killed two paid boxes ──
+# Both instances died on `missing architectures/architectures\control-100m/
+# arch.neuro`: a PowerShell-style backslash path defeated the
+# startswith("architectures/") prefix-strip, so the box double-prefixed a
+# raw Windows path. These contracts pin the normalization at the
+# connector AND a fail-fast in cmd_deploy so a bad path can never reach a
+# paid box again.
+
+def _arch_env(arch):
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.vast import VastConnector
+    return VastConnector()._build_env(DeployConfig(steps=100, arch=arch))
+
+
+def test_I1_build_env_normalizes_backslash_arch_path():
+    assert _arch_env("architectures\\control-100m")["ARCH"] == "control-100m"
+
+
+def test_I2_build_env_strips_forward_prefix():
+    assert _arch_env("architectures/control-100m")["ARCH"] == "control-100m"
+
+
+def test_I3_build_env_strips_arch_neuro_file_suffix():
+    assert _arch_env("architectures/control-100m/arch.neuro")["ARCH"] == "control-100m"
+    assert _arch_env("architectures\\control-100m\\arch.neuro")["ARCH"] == "control-100m"
+
+
+def test_I4_build_env_bare_arch_name_passes_through():
+    assert _arch_env("control-100m")["ARCH"] == "control-100m"
+
+
+def test_I5_cmd_deploy_rejects_missing_arch_before_confirmation():
+    """A nonexistent arch path must fail locally (FREE) — never after
+    the human confirmation, never on the box (a rental)."""
+    import argparse
+    from unittest.mock import MagicMock, patch
+    from neuroslm import cli as cli_mod
+
+    cfg = MagicMock()
+    cfg.default_platform = "vast"
+    cfg.default_steps = 0
+    cfg.default_branch = None
+    cfg.is_dna_mode = False
+    cfg.dna = None
+    cfg.arch = None
+    cfg.default_ood_every = 0
+    cfg.default_log_every = 100
+    cfg.default_save_every = 1000
+    cfg.default_push_every = 1000
+    cfg.default_push_backend = "hf"
+    cfg.default_hf_repo_id = "moritzroessler/BRIAN"
+    cfg.default_push_optimizer = False
+    cfg.default_machine = None
+    cfg.default_teamspace = None
+    cfg.default_scale = None
+
+    ns = argparse.Namespace(
+        arch="architectures\\DOES-NOT-EXIST", steps=None, branch=None,
+        scale=None, dna=None, label=None, ood=None, no_verify=False,
+        resume=None, latest=False, hf_repo=None, hf_prefix=None,
+        platform=None, machine=None, teamspace=None,
+        explore_every=0, explore_pop=24, explore_gens=10,
+        explore_len=8, explore_sites=2, use_modulations=False,
+        keepalive=False, machine_id=0,
+    )
+
+    confirm = MagicMock()
+    with patch.object(cli_mod, "_run_hook", return_value=0), \
+         patch.object(cli_mod, "_require_human_confirmation", confirm), \
+         patch("neuroslm.project_config.load_project_config",
+               return_value=cfg):
+        rc = cli_mod.cmd_deploy(ns)
+    assert rc != 0
+    confirm.assert_not_called()
+
+
+def test_I6_cmd_deploy_normalizes_backslash_arch_to_posix(tmp_path=None):
+    """`brian deploy architectures\\control-100m` (the exact command that
+    killed both boxes) must reach the connector as a forward-slash path."""
+    import argparse
+    from unittest.mock import MagicMock, patch
+    from neuroslm import cli as cli_mod
+
+    cfg = MagicMock()
+    cfg.default_platform = "vast"
+    cfg.default_steps = 0
+    cfg.default_branch = None
+    cfg.is_dna_mode = False
+    cfg.dna = None
+    cfg.arch = None
+    cfg.default_ood_every = 0
+    cfg.default_log_every = 100
+    cfg.default_save_every = 1000
+    cfg.default_push_every = 1000
+    cfg.default_push_backend = "hf"
+    cfg.default_hf_repo_id = "moritzroessler/BRIAN"
+    cfg.default_push_optimizer = False
+    cfg.default_machine = None
+    cfg.default_teamspace = None
+    cfg.default_scale = None
+
+    ns = argparse.Namespace(
+        arch="architectures\\control-100m", steps=None, branch=None,
+        scale=None, dna=None, label=None, ood=None, no_verify=False,
+        resume=None, latest=False, hf_repo=None, hf_prefix=None,
+        platform=None, machine=None, teamspace=None,
+        explore_every=0, explore_pop=24, explore_gens=10,
+        explore_len=8, explore_sites=2, use_modulations=False,
+        keepalive=False, machine_id=0,
+    )
+
+    captured = {}
+    with patch.object(cli_mod, "_run_hook", return_value=0), \
+         patch.object(cli_mod, "_require_human_confirmation",
+                      return_value=None), \
+         patch("neuroslm.project_config.load_project_config",
+               return_value=cfg), \
+         patch("neuroslm.connectors.get_connector") as mock_gc:
+        mock_gc.return_value.launch.side_effect = \
+            lambda config: captured.update(config=config) or 0
+        cli_mod.cmd_deploy(ns)
+    assert captured["config"].arch == "architectures/control-100m"
+
+
+# ── `brian deploy --keepalive` — box stays up for inspection ──────────
+
+def test_K1_onstart_default_self_destroys():
+    from neuroslm.connectors.vast import VastConnector
+    env = {"GH_TOKEN": "t", "HF_TOKEN": "h", "BRANCH": "master"}
+    script = VastConnector._build_onstart(env)
+    assert "vastai destroy instance" in script
+
+
+def test_K2_onstart_keepalive_skips_destroy():
+    from neuroslm.connectors.vast import VastConnector
+    env = {"GH_TOKEN": "t", "HF_TOKEN": "h", "BRANCH": "master",
+           "KEEPALIVE": "1"}
+    script = VastConnector._build_onstart(env)
+    assert "vastai destroy instance" not in script
+    assert "keepalive" in script.lower()
+    # no unsubstituted placeholders in the keepalive variant either
+    import re
+    assert not re.findall(r"__[A-Z_]+__", script)
+
+
+def test_K3_build_env_sets_keepalive():
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.vast import VastConnector
+    env = VastConnector()._build_env(DeployConfig(steps=100, keepalive=True))
+    assert env.get("KEEPALIVE") == "1"
+    env2 = VastConnector()._build_env(DeployConfig(steps=100))
+    assert env2.get("KEEPALIVE") != "1"
+
+
+def test_K4_cli_parses_keepalive_and_machine_id():
+    from neuroslm.cli import _build_parser
+    args = _build_parser().parse_args(
+        ["deploy", "architectures/control-100m", "--keepalive",
+         "--machine-id", "112383"])
+    assert args.keepalive is True
+    assert args.machine_id == 112383
+    args2 = _build_parser().parse_args(["deploy"])
+    assert args2.keepalive is False
+    assert args2.machine_id == 0
+
+
+# ── `brian deploy --machine-id N` — pin a known-good host ─────────────
+
+def test_M1_build_env_machine_id_pins_gpu_query():
+    from neuroslm.connectors.base import DeployConfig
+    from neuroslm.connectors.vast import VastConnector
+    env = VastConnector()._build_env(
+        DeployConfig(steps=100, machine_id=112383))
+    assert "machine_id=112383" in env.get("GPU_QUERY", "")
+    env2 = VastConnector()._build_env(DeployConfig(steps=100))
+    assert "GPU_QUERY" not in env2
     assert "LABEL_SUFFIX" not in env
     assert "RESUME_FROM" not in env
     assert "BRIAN_SOURCE_DNA" not in env

@@ -195,12 +195,16 @@ else
     echo "[onstart] no benchmark JSONs to commit"
 fi
 
+__SELF_DESTROY_BLOCK__
+"""
+
+# Without the self-destroy the container stays "running" after onstart
+# exits and bills you indefinitely. Verified 2026-05-30 on 38469631
+# (8 hours idle after training completed, ~$10 wasted). Uses the
+# INSTANCE_ID env var that vast.ai injects into every container,
+# fallback to looking ourselves up by container label.
+_SELF_DESTROY_BLOCK = """\
 # ── Self-destroy the vast instance ────────────────────────────────
-# Without this the container stays "running" after onstart exits and
-# bills you indefinitely. Verified 2026-05-30 on 38469631 (8 hours
-# idle after training completed, ~$10 wasted). Uses the INSTANCE_ID
-# env var that vast.ai injects into every container, fallback to
-# looking ourselves up by container label.
 echo "── self-destroying instance ──"
 if ! command -v vastai >/dev/null 2>&1; then
     pip install -q vastai 2>&1 | tail -3 || true
@@ -235,7 +239,16 @@ else
     echo "[onstart] VAST_API_KEY not in env or vastai CLI missing -- cannot self-destroy"
 fi
 
-echo "── training exited; FAILED to self-destroy. Run: vastai destroy instance <contract_id> ──"
+echo "── training exited; FAILED to self-destroy. Run: vastai destroy instance <contract_id> ──\""""
+
+# `brian deploy --keepalive`: trade the billing safety net for a box you
+# can SSH into after the run exits (success OR failure) — the 2026-08-10
+# incident self-destroyed two boxes whose only useful evidence was a
+# 102-byte log line. The user must destroy the instance manually.
+_KEEPALIVE_BLOCK = """\
+# ── --keepalive set; NOT self-destroying ──────────────────────────
+echo "── keepalive: instance stays up for inspection ──"
+echo "── it BILLS until you destroy it: brian destroy <id> ──"\
 """
 
 
@@ -336,6 +349,11 @@ class VastConnector(BaseConnector):
             "__USE_MODULATIONS__":   env.get("USE_MODULATIONS", "0"),
         }
         result = _ONSTART_TEMPLATE
+        # Choose the tail block FIRST so any placeholders inside it are
+        # substituted by the loop below.
+        tail = (_KEEPALIVE_BLOCK if str(env.get("KEEPALIVE", "")) == "1"
+                else _SELF_DESTROY_BLOCK)
+        result = result.replace("__SELF_DESTROY_BLOCK__", tail)
         for placeholder, value in subs.items():
             result = result.replace(placeholder, value)
         return result
@@ -350,11 +368,24 @@ class VastConnector(BaseConnector):
             env["BRANCH"] = config.branch
         if config.arch:
             # vast_train_dsl_loop.sh prepends "architectures/" to ARCH itself,
-            # so strip the prefix here to avoid "architectures/architectures/…".
-            arch_name = config.arch
-            if arch_name.startswith("architectures/"):
-                arch_name = arch_name[len("architectures/"):]
+            # so reduce whatever we got to the bare folder name. Must handle
+            # Windows backslashes: on 2026-08-10 a PowerShell-style
+            # `architectures\control-100m` sailed past the old
+            # startswith("architectures/") strip and killed two paid boxes
+            # with "missing architectures/architectures\control-100m".
+            arch_name = config.arch.replace("\\", "/").rstrip("/")
+            if arch_name.endswith("/arch.neuro"):
+                arch_name = arch_name[: -len("/arch.neuro")]
+            if "architectures/" in arch_name:
+                arch_name = arch_name.rsplit("architectures/", 1)[-1]
             env["ARCH"] = arch_name
+        if config.keepalive:
+            env["KEEPALIVE"] = "1"
+        if config.machine_id:
+            # Pin the offer search to one known-good host. vast_train.sh
+            # honours a pre-set GPU_QUERY verbatim (it only composes one
+            # from the arch hardware{} block when the env is empty).
+            env["GPU_QUERY"] = f"machine_id={config.machine_id} rentable=true"
         if config.scale:
             env["SCALE"] = config.scale
         if config.label:

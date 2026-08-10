@@ -1724,7 +1724,15 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         explore_len=getattr(args, "explore_len", 8) or 8,
         explore_sites=getattr(args, "explore_sites", 2) or 2,
         use_modulations=bool(getattr(args, "use_modulations", False)),
+        keepalive=bool(getattr(args, "keepalive", False)),
+        machine_id=int(getattr(args, "machine_id", 0) or 0),
     )
+    if config.keepalive:
+        print("[deploy] --keepalive: box will NOT self-destroy — it bills "
+              "until you run `brian destroy <id>`")
+    if config.machine_id:
+        print(f"[deploy] --machine-id {config.machine_id}: offer search "
+              f"pinned to this host")
 
     # ── Machine: CLI --machine > brian.toml [deploy].machine > "" ──
     # Threaded through extra_env so any connector that understands
@@ -1755,7 +1763,18 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         arch_path = Path(_arch_arg)
         if arch_path.is_file():
             arch_path = arch_path.parent
-        config.arch = str(arch_path)
+        # Fail fast on a bad path — locally this costs nothing; on the
+        # box it costs a rental (2026-08-10: two instances died on
+        # "missing architectures/architectures\\control-100m/arch.neuro"
+        # from an unvalidated PowerShell-backslash path).
+        if not (arch_path / "arch.neuro").is_file():
+            print(f"✗ no arch.neuro under {arch_path} — check the "
+                  f"positional arch path (failing here is free; on the "
+                  f"box it costs a rental)", file=sys.stderr)
+            return 1
+        # as_posix(): the connector and the on-box scripts only speak
+        # forward slashes.
+        config.arch = arch_path.as_posix()
     elif not dna_path and cfg.arch:
         # No CLI override and no DNA workspace: honour brian.toml.
         config.arch = cfg.arch
@@ -5546,6 +5565,16 @@ def _build_parser() -> argparse.ArgumentParser:
                          "the connector's enum, e.g. T4, A10G, A100, L4. "
                          "Default: brian.toml [deploy].machine, then "
                          "connector's own default.")
+    sd.add_argument("--machine-id", dest="machine_id", type=int, default=0,
+                    help="vast.ai: pin the offer search to one known-good "
+                         "host id (from a prior successful run's launch "
+                         "line) instead of the arch's hardware{} filter. "
+                         "0 = off.")
+    sd.add_argument("--keepalive", action="store_true",
+                    help="skip the on-box self-destroy so the instance "
+                         "stays inspectable after the run exits (success "
+                         "OR failure). It keeps billing until you run "
+                         "`brian destroy <id>` yourself.")
     sd.add_argument("--teamspace", default=None,
                     help="Lightning AI teamspace to host the Studio under. "
                          "Default: brian.toml [deploy].teamspace, then the "
