@@ -3299,3 +3299,44 @@ H## entry once a run produces mid-ood snapshots past the point where
 the collapse was previously observed.
 
 [EVIDENCE: tests/dsl/test_mod_router_aux_loss.py (9) green; tests/test_mod_router_aux_harness.py (7) green; tests/dsl/test_dsl_blocks_equivalence.py (3) green — bit-identical forward output unaffected]
+
+### arm-2 landed — vbb-100m (H59/H60 ladder, 2026-08-10)
+
+**Motivating evidence** (from the topology-100m deploy, H60 fix
+applied, through step 4500): trunk representational health fully
+recovered (PR 1.5→8-10, R² 0.47→0.93) but the OOD gap widened
+monotonically regardless — `gap_v2` 1.30 → 1.76 → 2.29 → 2.51 → 2.77 —
+while `traindist` ppl kept dropping (8105→1332) and `wikitext` ppl
+plateaued (~3600–4900 since step 1000). H60 fixed representation
+collapse; it did not and could not have been expected to fix
+generalization — that needs a capacity-vs-regularization lever, not a
+richness one.
+
+**`architectures/vbb-100m`** — topology-100m + the VBB bowtie waist,
+and nothing else. Config values copied from `architectures/SmolLM`'s
+already-deployed VBB block (`vbb_beta_init`, `pc_reentry_weight`,
+`pc_reentry_nt_gate`, `vbb_free_bits`, `vbb_log_beta_max`,
+`vbb_entropy_eta`, `vbb_curvature`, `motor_curvature` — all identical
+to SmolLM, pinned by `test_matches_smollm_proven_values_except_alpha`),
+not invented. The one deliberate deviation: `vbb_alpha` is a fixed
+`0.01` rather than SmolLM's GIF-ramped schedule (0.001→0.05 over steps
+500–3000) — GIF also touches the isotropy schedule, label smoothing,
+and head-diversity loss, which would reintroduce the confounded-stack
+problem this ladder exists to avoid. 0.01 sits inside SmolLM's own ramp
+range (reached ~step 950 under that schedule), so it's a realistic
+mid-strength value applied as a constant from step 0.
+
+**Discipline check**: `TestVBBArmIsolatesOneVariable` pins that every
+recipe field and every block-topology field (block_pattern,
+geometry_adapters, cosine_head, pred_coding_weight) is byte-identical
+to topology-100m — the VBB/pc_reentry block is the only delta. A
+harness-construction test confirms the sigma_head/log_beta modules are
+actually built and gradient reaches them, not just that the config
+parses. Param parity: the underlying trunk cortex is identical param-
+count to topology-100m (VBB lives on the harness, not the trunk).
+
+**Not yet run.** This is the apparatus for the next experiment, not a
+result — deploying and comparing `gap_v2` trajectories against the
+already-running topology-100m arm is the natural next step.
+
+[EVIDENCE: tests/dsl/test_vbb_arm.py (12) green]

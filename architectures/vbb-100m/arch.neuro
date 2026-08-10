@@ -1,0 +1,143 @@
+# -*- coding: utf-8 -*-
+# =============================================================================
+# vbb-100m — arm-2 of the H59 falsification ladder: TOPOLOGY + VBB WAIST
+#
+# Motivated by live evidence, not a guess. The topology-100m run (H60 fix
+# applied) shows the trunk's representational geometry is healthy (PR
+# recovered 1.5->8-10, R^2 recovered 0.47->0.93) but the OOD gap is
+# WIDENING regardless: gap_v2 1.30 -> 1.76 -> 2.29 -> 2.51 -> 2.77
+# monotonically through step 4500, while traindist ppl keeps dropping
+# (8105 -> 1332) and wikitext ppl has been flat since step 1000
+# (~3600-4900). That's a capacity-vs-regularization problem, not a
+# representation-richness problem — the trunk has plenty of capacity and
+# is spending it on training-distribution-specific memorization.
+#
+# The Variational Bowtie Bottleneck is purpose-built for exactly this:
+# an explicit information bottleneck at the trunk's narrowest cross-
+# section (the "motor" pole), L_VBB = gamma_NT * (beta*r - log(beta) +
+# alpha*KL[q(h_m|x) || N(0,I)]) — the alpha*KL term directly caps
+# I(X; h_m), forcing the waist to keep only statistics that generalize
+# and penalising exactly the kind of memorization the traindist/wikitext
+# divergence is showing. See harness.py::_compute_pc_reentry_loss for
+# the full derivation.
+#
+# Differs from architectures/topology-100m in EXACTLY the VBB/pc_reentry
+# block below — recipe, block_pattern, geometry_adapters, cosine_head,
+# pred_coding_weight, data, and everything else stays byte-identical, so
+# a gap_v2 delta between this arm and topology-100m is attributable to
+# the bottleneck alone, not a confound.
+#
+# Config values are NOT invented — copied from architectures/SmolLM's
+# already-deployed, already-tested VBB block (vbb_beta_init,
+# pc_reentry_weight, pc_reentry_nt_gate, vbb_free_bits,
+# vbb_log_beta_max, vbb_entropy_eta, vbb_curvature, motor_curvature all
+# match SmolLM exactly). The ONE deliberate deviation: vbb_alpha is a
+# FIXED 0.01 here instead of SmolLM's GIF-ramped schedule
+# (0.001 -> 0.05 over steps 500-3000) — GIF also touches the isotropy
+# schedule, label smoothing, and head-diversity loss, which would
+# reintroduce the "confounded stack" problem this ladder exists to
+# avoid. 0.01 sits inside SmolLM's own ramp range (reached ~step 950
+# under its schedule), so it's a realistic mid-strength value, not a
+# guess, applied as a constant from step 0 for a clean single-variable
+# test.
+#
+# Contract pinned by tests/dsl/test_vbb_arm.py:
+#   * vbb_alpha > 0, pc_reentry_weight > 0 (both required — the harness
+#     gates the whole PC-reentry call site on pc_reentry_weight, and
+#     the VBB-vs-legacy branch inside it on vbb_alpha).
+#   * Every other training-recipe field identical to topology-100m.
+#   * Trainable params within a few percent of topology-100m's (VBB
+#     adds only sigma_head + log_beta + motor_R_raw — a few hundred K
+#     params on a 135M trunk, negligible).
+#
+# Ladder position: arm-0 control-100m -> arm-1 topology-100m ->
+#   arm-2 vbb-100m (this file) -> arm-3 full SmolLM stack. See
+#   docs/findings.md H59/H60 for the pre-registered comparison plan.
+#
+# Deploy:  brian deploy architectures/vbb-100m --steps N
+# Compare: brian ood compare <topology_result.json> <vbb_result.json>
+# =============================================================================
+
+architecture vbb: {
+    d_sem: 256,
+    dt: 0.01
+}
+
+training {
+    preset:        "rcc_bowtie_30m_p4"
+
+    # ── Identical to topology-100m ──
+    block_pattern:     "interleave"
+    geometry_adapters: true
+    cosine_head:       false
+    pred_coding_weight: 0.0
+
+    # ── The ONE addition this arm makes vs topology-100m: the VBB
+    #    waist. Values copied from architectures/SmolLM (proven,
+    #    deployed config) except vbb_alpha (fixed, not GIF-ramped —
+    #    see header comment). ──
+    pc_reentry_weight:  0.1
+    pc_reentry_nt_gate: true
+    vbb_alpha:        0.01
+    vbb_beta_init:    1.0
+    vbb_free_bits:    0.1
+    vbb_log_beta_max: 4.0
+    vbb_entropy_eta:  0.001
+    vbb_curvature:    0.001
+    motor_curvature:  1.0
+
+    # ── Everything else identical to topology-100m ──
+    loss_clipping: { enabled: true, method: "per_sample", factor: 3.0 }
+    quantization:  { enabled: false, bits: 8 }
+    optimizer:     "adamw"
+    learning_rate: 0.0005
+    warmup_steps:  2400
+    min_lr_ratio:  0.1
+    weight_decay:  0.01
+    grad_accum:    8
+    grad_clip:     1.0
+    label_smoothing: 0.0
+    dropout:       0.1
+    flooding_level: 0.0
+    stochastic_depth: 0.0
+    z_loss: 0.0001
+    logit_norm_tau: 0.0
+    llrd: 1.0
+    rope_base:             500000
+    divisive_grad_c: 5.0
+    grad_clip_after_divisive: true
+    loss_var_window: 64
+    loss_var_min_mult: 0.1
+    vbb_kl_floor: 0.0
+    vbb_kl_floor_gamma: 0.0
+    pct_trunk:     0.0
+    pct_strength:  0.0
+
+    hardware: {
+        gpu_name:        "A100_SXM4"
+        num_gpus:        1
+        min_gpu_mem_gib: 40
+        min_reliability: 0.995
+        min_inet_mbps:   200
+        dist_strategy:   "single"
+        precision:       "bf16"
+    }
+
+    # Same dims as topology-100m — VBB's added params (sigma_head
+    # Linear(640,640) + log_beta + motor_R_raw scalars) are negligible
+    # (<0.5M) against the 135M trunk.
+    scales: {
+        default: "100m"
+
+        100m: {
+            d_model:       640
+            depth:         8
+            n_heads:       10
+            max_ctx:       2048
+            batch_size:    4
+            seq_len:       2048
+            grad_accum:    4
+            approx_params: "~135M (param-matched to topology-100m; VBB adds <0.5M)"
+        }
+    }
+}
