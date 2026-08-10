@@ -11,7 +11,7 @@
 
 BRIAN is a research prototype that bets on **topology, Φ-coupled plasticity, and closed-loop embodiment** instead of raw parameter count. The core question: does a strategically-wired ${TRUNK_TRAINABLE_PARAMS}-param trunk outgeneralize a flat 100M transformer on OOD tasks?
 
-**Current verdict:** 🟡 inconclusive — best variant ${LAYER_B_BEST_ROW} achieves **${LAYER_B_BEST_GAP_RATIO} gap\_ratio** (${LAYER_B_IMPROVEMENT_PCT}% better than flat-transformer baseline at ${LAYER_B_BASELINE_GAP_RATIO}), but matched-compute comparison is still pending.
+**Current verdict:** 🟡 inconclusive — best variant ${LAYER_B_BEST_ROW} achieves **${LAYER_B_BEST_GAP_RATIO} gap\_ratio** (${LAYER_B_IMPROVEMENT_PCT}% better than flat-transformer baseline at ${LAYER_B_BASELINE_GAP_RATIO}), but matched-compute comparison is still pending. The apparatus to run it landed as H59: `architectures/control-100m` (a param-matched vanilla control arm trained by the same pipeline, data, and recipe) plus eval protocol v2 — trunk-only evaluation on every surface, a held-out train-distribution gap denominator (`gap_v2`), a PG-19 second OOD axis, and per-sequence NLLs gated by `brian ood compare`'s Welch's-t test.
 
 ---
 
@@ -433,6 +433,8 @@ Run all: `py -3 -m pytest tests/ -v` (~${TEST_RUNTIME_SECONDS}s on CPU).
 ### Layer B — OOD Generalization 🟡
 
 Evaluated on WikiText-103-v1 held-out set. **gap\_ratio = OOD\_ppl / train\_ppl** (lower is better):
+
+> **Protocol note (H59, eval v2):** rows below predate protocol v2. New runs additionally report **gap\_v2 = wikitext\_ppl / traindist\_ppl** — both sides produced by the same trunk-only eval code on a held-out slice of the training distribution, so training-side regularisation (flooding, label smoothing) can no longer distort the denominator — plus a PG-19 second OOD axis, and per-sequence NLLs so arm-vs-arm comparisons run through `brian ood compare` (Welch's t) instead of eyeballed ppl deltas.
 
 | Variant | Params | Steps | train\_ppl | OOD\_ppl | gap\_ratio | Log |
 |---------|--------|-------|-----------|---------|-----------|-----|

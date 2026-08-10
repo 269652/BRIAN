@@ -23,6 +23,7 @@ Usage (DNA):
 from __future__ import annotations
 import argparse
 import hashlib
+import math
 import os
 import re
 import subprocess
@@ -32,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-from typing import Optional, Dict
+from typing import List, Optional, Dict
 
 
 # Per-run id stamped into checkpoint filenames so concurrent / successive
@@ -529,6 +530,22 @@ def _scale_override_note(scale_name: str, cli_seq: int, cli_batch: int,
             "env vars (or edit the scale) to keep your CLI values.")
 
 
+def _apply_pred_coding_override(harness, cfg) -> None:
+    """H59: `training { pred_coding_weight: W }` overrides the
+    AuxWeights.pred_coding weight. -1 (the default) keeps maturity.py's
+    0.10; 0.0 turns the PCH aux term off so a control run trains on
+    pure CE + the shared stabilisers."""
+    w_override = float(getattr(cfg, "pred_coding_weight", -1.0))
+    if w_override < 0:
+        return
+    try:
+        _, c, width = harness.total_loss_config.aux.pred_coding
+        harness.total_loss_config.aux.pred_coding = (w_override, c, width)
+        print(f"[train_dsl] pred_coding aux weight override -> {w_override}")
+    except Exception:
+        pass
+
+
 def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
                          depth: int, n_heads: int, max_ctx: int,
                          device: str = "cpu") -> BRIANHarness:
@@ -583,10 +600,13 @@ def build_dsl_lm_harness(arch_root: Path, vocab_size: int, d_model: int,
         surprise_head=cfg.surprise_head,
         nfo=cfg.nfo,
         cosine_head=cfg.cosine_head,
-        rope_base=_rope_base).to(device)
+        rope_base=_rope_base,
+        block_pattern=getattr(cfg, "block_pattern", "interleave"),
+        geometry_adapters=getattr(cfg, "geometry_adapters", True)).to(device)
     harness = BRIANHarness.from_language_model(
         lm, vocab_size=vocab_size, d_sem=d_model, training_config=cfg,
     ).to(device)
+    _apply_pred_coding_override(harness, cfg)
     # PCT trunk-strength override: bump the PCH aux weight in the trunk
     # path. AuxWeights.pred_coding tuple = (weight, center, width).
     # Setting pct_strength > 0 multiplies the weight so PCH gradient
@@ -1257,6 +1277,153 @@ def _eval_pass_marks(rules, step: int,
     return False, ""
 
 
+# ── Eval protocol v2 (H59) ───────────────────────────────────────────
+# One shared evaluator + a lazy corpus registry. Three axes:
+#   wikitext  — OOD axis 1 (the historical WikiText-103 test split)
+#   pg19      — OOD axis 2 (pre-1919 books; genuinely distant from the
+#               FineWeb-Edu web-text training mix, unlike WikiText which
+#               is domain-adjacent to it)
+#   traindist — held-out slice of the TRAINING distribution. This is the
+#               clean gap denominator: gap_ratio_v2 = wikitext/traindist
+#               compares two numbers produced by the SAME eval code on
+#               the SAME surface, so flooding / label smoothing / EMA
+#               phase can no longer contaminate the ratio the way the
+#               running train loss did (findings.md H12 sidebar).
+# All loaders are lazy callables returning iterables of raw text, so
+# tests can swap the registry without touching the network.
+
+_CORPUS_TEXT_LIMIT = 400          # enough for the final cap=200 + skips
+_CORPUS_CACHE: Dict[str, List[str]] = {}
+
+# Training streams FineWeb-Edu sample-10BT from the start; the deepest
+# horizon in the repo is deploy-100k ≈ 65k tok/step × 100k ≈ 6.5B tokens
+# ≈ 5.9M docs. Offset 8M docs (≈ 8.8B tokens) stays disjoint from any
+# run shorter than ~135k steps.
+_TRAINDIST_DOC_OFFSET = 8_000_000
+
+
+def _cached_corpus(name: str, gen_fn) -> "List[str]":
+    if name not in _CORPUS_CACHE:
+        out: List[str] = []
+        for t in gen_fn():
+            if t and len(t) >= 50:
+                out.append(t)
+            if len(out) >= _CORPUS_TEXT_LIMIT:
+                break
+        _CORPUS_CACHE[name] = out
+    return _CORPUS_CACHE[name]
+
+
+def _load_wikitext_texts():
+    from datasets import load_dataset
+
+    def _gen():
+        ds = load_dataset("Salesforce/wikitext", "wikitext-103-v1",
+                          split="test", streaming=True)
+        for ex in ds:
+            yield ex.get("text", "")
+    return iter(_cached_corpus("wikitext", _gen))
+
+
+def _load_pg19_texts():
+    from datasets import load_dataset
+
+    def _gen():
+        ds = load_dataset("deepmind/pg19", split="test", streaming=True)
+        for ex in ds:
+            # whole novels — truncate before tokenization cost explodes
+            yield (ex.get("text", "") or "")[:20000]
+    return iter(_cached_corpus("pg19", _gen))
+
+
+def _load_traindist_texts():
+    from datasets import load_dataset
+
+    def _gen():
+        ds = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT",
+                          split="train", streaming=True)
+        for ex in ds.skip(_TRAINDIST_DOC_OFFSET):
+            yield ex.get("text", "")
+    return iter(_cached_corpus("traindist", _gen))
+
+
+_EVAL_CORPORA = {
+    "wikitext": _load_wikitext_texts,
+    "pg19": _load_pg19_texts,
+    "traindist": _load_traindist_texts,
+}
+
+
+def _default_eval_tokenizer():
+    from neuroslm.tokenizer import Tokenizer
+    return Tokenizer()
+
+
+_EVAL_TOKENIZER_FACTORY = _default_eval_tokenizer
+
+
+def _eval_ppl_on_texts(harness, texts, tok, ctx: int, cap: int) -> dict:
+    """Shared evaluator for every corpus/arm: trunk-only logits, sliding
+    truncation to ctx, token-weighted aggregate ppl + per-sequence mean
+    NLLs (the statistics `brian ood compare` feeds ImprovementGate)."""
+    import torch
+
+    device = next(harness.parameters()).device
+    n_seq, total_nll, total_tok = 0, 0.0, 0
+    per_seq_nll: List[float] = []
+    for text in texts:
+        if not text or len(text) < 50:
+            continue
+        ids = tok.encode(text)[: ctx + 1]
+        if len(ids) < 16:
+            continue
+        ids_t = torch.tensor([ids[:-1]], device=device)
+        tgt_t = torch.tensor([ids[1:]], device=device)
+        with torch.no_grad():
+            logits = _ood_eval_logits(harness, ids_t)   # trunk-only
+            loss = torch.nn.functional.cross_entropy(
+                logits.reshape(-1, logits.shape[-1]), tgt_t.reshape(-1),
+                reduction="sum")
+        seq_tok = tgt_t.numel()
+        total_nll += float(loss)
+        total_tok += seq_tok
+        per_seq_nll.append(float(loss) / seq_tok)
+        n_seq += 1
+        if n_seq >= cap:
+            break
+    avg_nll = total_nll / max(1, total_tok)
+    return {
+        "ppl": math.exp(min(avg_nll, 20.0)),
+        "n_sequences": n_seq,
+        "n_tokens": total_tok,
+        "total_nll": total_nll,
+        "per_seq_nll": per_seq_nll,
+    }
+
+
+def _eval_all_corpora(harness, cap: int) -> dict:
+    """Evaluate every registered corpus; fail-open per corpus so one
+    unreachable dataset never kills the eval (or the training run)."""
+    was_training = harness.training
+    harness.eval()
+    results: dict = {}
+    try:
+        tok = _EVAL_TOKENIZER_FACTORY()
+        ctx = getattr(harness.language_model, "max_ctx", 1024) or 1024
+        for name, loader in _EVAL_CORPORA.items():
+            try:
+                res = _eval_ppl_on_texts(harness, loader(), tok, ctx, cap)
+                if res["n_sequences"] > 0:
+                    results[name] = res
+            except Exception as e:
+                print(f"[eval-v2] corpus {name!r} failed (skipping): "
+                      f"{type(e).__name__}: {e}", flush=True)
+    finally:
+        if was_training:
+            harness.train()
+    return results
+
+
 def _ood_eval_logits(harness, ids):
     """Logits for the mid-training OOD probe — the STANDALONE TRUNK, with
     the cortex dropped.
@@ -1292,80 +1459,74 @@ def _mid_ood_eval(harness: BRIANHarness, step: int,
 
     Returns the OOD ppl as a float (or None on error). The caller
     feeds it into the pass-marks history for early-exit checks.
+
+    Protocol v2 (H59): evaluates every corpus in `_EVAL_CORPORA`
+    (wikitext / pg19 / traindist) with the ONE shared trunk-only
+    evaluator and persists per-sequence NLLs so `brian ood compare`
+    can run the Welch's-t ImprovementGate between arms.
+    gap_ratio_v2 = wikitext_ppl / traindist_ppl — both sides produced
+    by identical eval code, unlike v1's running-train-loss denominator.
     """
     import json
-    import math
-    import torch
-    from datasets import load_dataset
 
-    print(f"[mid-ood] step {step}: WikiText-103 snapshot...", flush=True)
-    was_training = harness.training
-    harness.eval()
-    try:
-        ds = load_dataset("Salesforce/wikitext", "wikitext-103-v1", split="test",
-                          streaming=True)
-        n_seq, total_loss, total_tok = 0, 0.0, 0
-        # Use the same tokenizer the harness was built with — derived
-        # from neuroslm.tokenizer.Tokenizer to keep BPE alignment exact.
-        from neuroslm.tokenizer import Tokenizer
-        tok = Tokenizer()
-        ctx = getattr(harness.language_model, "max_ctx", 1024) or 1024
-        for ex in ds:
-            text = ex.get("text", "")
-            if not text or len(text) < 50:
-                continue
-            ids = tok.encode(text)[: ctx + 1]
-            if len(ids) < 16:
-                continue
-            ids_t = torch.tensor([ids[:-1]], device=next(harness.parameters()).device)
-            tgt_t = torch.tensor([ids[1:]], device=ids_t.device)
-            with torch.no_grad():
-                logits = _ood_eval_logits(harness, ids_t)  # trunk-only
-                # cross-entropy per-token
-                vocab = logits.shape[-1]
-                loss = torch.nn.functional.cross_entropy(
-                    logits.reshape(-1, vocab), tgt_t.reshape(-1),
-                    reduction="sum")
-            total_loss += float(loss)
-            total_tok += tgt_t.numel()
-            n_seq += 1
-            if n_seq >= 50:
-                break
-        avg_nll = total_loss / max(1, total_tok)
-        ppl = math.exp(min(avg_nll, 20.0))
-        # gap_ratio = ood_ppl / latest in-distribution train_ppl. >1 ⇒
-        # generalization gap; <1.5 is excellent, >3 strong overfit.
-        gap_ratio = None
-        train_ppl = None
-        if train_ppl_history:
-            # use the most recent train_ppl at or before this step
-            recent = [v for s, v in train_ppl_history.items() if s <= step]
-            if recent:
-                train_ppl = recent[-1]
-                gap_ratio = ppl / train_ppl if train_ppl > 0 else None
-        gap_str = (f" gap_ratio={gap_ratio:.2f} (train_ppl={train_ppl:.1f})"
-                   if gap_ratio is not None else "")
-        print(f"[mid-ood] step {step}: wikitext ppl={ppl:.1f}{gap_str} "
-              f"({n_seq} seq, {total_tok} tok)", flush=True)
-        # Persist to logs/vast/benchmarks/ood/ so analyze-log picks it up
-        out_dir = Path("logs/vast/benchmarks/ood")
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"ood_mid_{_RUN_ID}_step{step}.json"
-        out_path.write_text(json.dumps({
-            "step": step,
-            "run_id": _RUN_ID,
-            "ood_dataset": "wikitext-103-v1",
-            "ood_ppl": ppl,
-            "train_ppl": train_ppl,
-            "gap_ratio": gap_ratio,
-            "n_sequences": n_seq,
-            "n_tokens": total_tok,
-            "kind": "mid-training",
-        }, indent=2), encoding="utf-8")
-        return ppl
-    finally:
-        if was_training:
-            harness.train()
+    print(f"[mid-ood] step {step}: eval-v2 snapshot...", flush=True)
+    corpora = _eval_all_corpora(harness, cap=50)
+    wik = corpora.get("wikitext")
+    if wik is None:
+        print(f"[mid-ood] step {step}: wikitext corpus unavailable — "
+              f"skipping snapshot", flush=True)
+        return None
+    ppl = wik["ppl"]
+
+    # v1 gap_ratio (vs running train loss) kept for trend continuity.
+    gap_ratio = None
+    train_ppl = None
+    if train_ppl_history:
+        recent = [v for s, v in train_ppl_history.items() if s <= step]
+        if recent:
+            train_ppl = recent[-1]
+            gap_ratio = ppl / train_ppl if train_ppl > 0 else None
+
+    tr = corpora.get("traindist")
+    pg = corpora.get("pg19")
+    gap_v2 = (ppl / tr["ppl"]) if tr and tr["ppl"] > 0 else None
+
+    # NOTE: the line MUST start `[mid-ood] step N: wikitext ppl=<float>`
+    # — the `brian ps` task-manager regex (cli.py) parses that prefix.
+    parts = [f"[mid-ood] step {step}: wikitext ppl={ppl:.1f}"]
+    if gap_ratio is not None:
+        parts.append(f"gap_ratio={gap_ratio:.2f} (train_ppl={train_ppl:.1f})")
+    if tr:
+        parts.append(f"traindist ppl={tr['ppl']:.1f}")
+    if gap_v2 is not None:
+        parts.append(f"gap_v2={gap_v2:.2f}")
+    if pg:
+        parts.append(f"pg19 ppl={pg['ppl']:.1f}")
+    parts.append(f"({wik['n_sequences']} seq, {wik['n_tokens']} tok)")
+    print(" ".join(parts), flush=True)
+
+    out_dir = Path("logs/vast/benchmarks/ood")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"ood_mid_{_RUN_ID}_step{step}.json"
+    out_path.write_text(json.dumps({
+        "step": step,
+        "run_id": _RUN_ID,
+        "ood_dataset": "wikitext-103-v1",
+        "ood_ppl": ppl,
+        "train_ppl": train_ppl,
+        "gap_ratio": gap_ratio,
+        "n_sequences": wik["n_sequences"],
+        "n_tokens": wik["n_tokens"],
+        "kind": "mid-training",
+        # ── protocol v2 ──
+        "protocol": "v2",
+        "eval_surface": "trunk_only",
+        "corpora": corpora,
+        "traindist_ppl": tr["ppl"] if tr else None,
+        "pg19_ppl": pg["ppl"] if pg else None,
+        "gap_ratio_v2": gap_v2,
+    }, indent=2), encoding="utf-8")
+    return ppl
 
 
 def train(harness: BRIANHarness, source: SyntheticBatchSource,
@@ -1754,51 +1915,45 @@ def train(harness: BRIANHarness, source: SyntheticBatchSource,
 def _final_ood_eval(harness, step: int, ckpt_dir: Optional[Path],
                      observer, train_ppl_history: dict,
                      ood_ppl_history: dict) -> None:
-    """End-of-training OOD eval: longer WikiText pass + gap_ratio.
+    """End-of-training OOD eval: longer pass (cap=200) + gap_ratio.
 
     Writes `ood_final_{run_id}.json` to logs/vast/benchmarks/ood/ so the
-    metrics ledger picks it up. Uses cap=200 sequences (4x the mid-OOD
-    snapshot) for a less-noisy final estimate.
-    """
-    import json, math, torch
-    from datasets import load_dataset
-    from neuroslm.tokenizer import Tokenizer
+    metrics ledger picks it up.
 
-    print(f"[train_dsl] final OOD eval @ step {step} (WikiText-103, cap=200)...",
+    Protocol v2 (H59): routed through the SAME `_eval_all_corpora`
+    machinery as the mid-training snapshot — which also fixes a v1
+    inconsistency where the final eval ran the FUSED forward
+    (`harness(ids)`) while the mid eval ran the standalone trunk;
+    the two numbers were not the same quantity. Both are trunk-only now
+    (`eval_surface` records this in the JSON).
+    """
+    import json
+
+    print(f"[train_dsl] final OOD eval @ step {step} (eval-v2, cap=200)...",
           flush=True)
-    was_training = harness.training
-    harness.eval()
-    tok = Tokenizer()
-    ctx = getattr(harness.language_model, "max_ctx", 1024) or 1024
-    ds = load_dataset("Salesforce/wikitext", "wikitext-103-v1", split="test",
-                      streaming=True)
-    n_seq, total_loss, total_tok = 0, 0.0, 0
-    for ex in ds:
-        text = ex.get("text", "")
-        if not text or len(text) < 50:
-            continue
-        ids = tok.encode(text)[: ctx + 1]
-        if len(ids) < 16:
-            continue
-        ids_t = torch.tensor([ids[:-1]], device=next(harness.parameters()).device)
-        tgt_t = torch.tensor([ids[1:]], device=ids_t.device)
-        with torch.no_grad():
-            logits = harness(ids_t)
-            loss = torch.nn.functional.cross_entropy(
-                logits.reshape(-1, logits.shape[-1]), tgt_t.reshape(-1),
-                reduction="sum")
-        total_loss += float(loss); total_tok += tgt_t.numel(); n_seq += 1
-        if n_seq >= 200:
-            break
-    ood_ppl = math.exp(min(total_loss / max(1, total_tok), 20.0))
-    # Train PPL = the latest in-distribution training perplexity (already
-    # logged). gap_ratio = ood_ppl / train_ppl.
+    corpora = _eval_all_corpora(harness, cap=200)
+    wik = corpora.get("wikitext")
+    if wik is None:
+        print("[train_dsl] final OOD: wikitext corpus unavailable — skipped",
+              flush=True)
+        return
+    ood_ppl = wik["ppl"]
     last_train_step = max(train_ppl_history) if train_ppl_history else 0
     train_ppl = train_ppl_history.get(last_train_step, float("nan"))
     gap_ratio = ood_ppl / train_ppl if train_ppl and train_ppl > 0 else float("nan")
-    print(f"[train_dsl] final OOD: wikitext ppl={ood_ppl:.1f}  "
-          f"train_ppl={train_ppl:.1f}  gap_ratio={gap_ratio:.2f}  "
-          f"({n_seq} seq, {total_tok} tok)", flush=True)
+    tr = corpora.get("traindist")
+    pg = corpora.get("pg19")
+    gap_v2 = (ood_ppl / tr["ppl"]) if tr and tr["ppl"] > 0 else None
+    parts = [f"[train_dsl] final OOD: wikitext ppl={ood_ppl:.1f}",
+             f"train_ppl={train_ppl:.1f}", f"gap_ratio={gap_ratio:.2f}"]
+    if tr:
+        parts.append(f"traindist ppl={tr['ppl']:.1f}")
+    if gap_v2 is not None:
+        parts.append(f"gap_v2={gap_v2:.2f}")
+    if pg:
+        parts.append(f"pg19 ppl={pg['ppl']:.1f}")
+    parts.append(f"({wik['n_sequences']} seq, {wik['n_tokens']} tok)")
+    print("  ".join(parts), flush=True)
     out_dir = Path("logs/vast/benchmarks/ood")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"ood_final_{_RUN_ID}.json"
@@ -1808,13 +1963,18 @@ def _final_ood_eval(harness, step: int, ckpt_dir: Optional[Path],
         "ood_ppl": ood_ppl,
         "train_ppl": train_ppl,
         "gap_ratio": gap_ratio,
-        "n_seq": n_seq,
-        "n_tok": total_tok,
+        "n_seq": wik["n_sequences"],
+        "n_tok": wik["n_tokens"],
         "run_id": _RUN_ID,
+        # ── protocol v2 ──
+        "protocol": "v2",
+        "eval_surface": "trunk_only",
+        "corpora": corpora,
+        "traindist_ppl": tr["ppl"] if tr else None,
+        "pg19_ppl": pg["ppl"] if pg else None,
+        "gap_ratio_v2": gap_v2,
     }, indent=2), encoding="utf-8")
     print(f"[train_dsl] wrote final OOD result → {out_path}", flush=True)
-    if was_training:
-        harness.train()
 
 
 # ── CLI ──────────────────────────────────────────────────────────────

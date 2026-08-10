@@ -3049,17 +3049,52 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 # ── ood ────────────────────────────────────────────────────────────────
 
-def cmd_ood(args: argparse.Namespace) -> int:
-    env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["CKPT"] = args.ckpt
-    if args.branch:
-        env["BRANCH"] = args.branch
-    if args.tag:
-        env["ROLE_TAG"] = args.tag
-    if args.windows:
-        env["MAX_OOD_WINDOWS"] = str(args.windows)
-    return _run([_bash(), "scripts/vast_ood_eval.sh"], env=env)
+def cmd_ood_compare(args: argparse.Namespace) -> int:
+    """`brian ood compare BEFORE.json AFTER.json` — Welch's-t gate
+    between two eval-protocol-v2 result JSONs (H59).
+
+    Feeds the stored per-sequence NLLs of one corpus through
+    `neuroslm.verification.improvement_gate.ImprovementGate`
+    (direction="decrease": lower NLL is better), so an arm-vs-arm claim
+    in findings.md requires statistics, not eyeballed ppl deltas.
+    Result JSONs are written by train_dsl's mid/final evals
+    (logs/vast/benchmarks/ood/*.json with `"protocol": "v2"`).
+    """
+    import json as _json
+    from neuroslm.verification.improvement_gate import ImprovementGate
+
+    corpus = getattr(args, "corpus", "wikitext") or "wikitext"
+    nlls = {}
+    for role, path_s in (("before", args.before), ("after", args.after)):
+        p = Path(path_s)
+        if not p.is_file():
+            print(f"ood compare: {role} file not found: {p}", file=sys.stderr)
+            return 2
+        try:
+            data = _json.loads(p.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"ood compare: cannot parse {p}: {e}", file=sys.stderr)
+            return 2
+        seq = (data.get("corpora") or {}).get(corpus, {}).get("per_seq_nll")
+        if not seq or len(seq) < 2:
+            print(f"ood compare: {role} JSON has no per_seq_nll for corpus "
+                  f"{corpus!r} — re-run the eval with protocol v2 "
+                  f"(train_dsl mid/final eval)", file=sys.stderr)
+            return 2
+        nlls[role] = [float(x) for x in seq]
+
+    gate = ImprovementGate(alpha=float(getattr(args, "alpha", 0.05)),
+                           min_effect=float(getattr(args, "min_effect", 0.01)))
+    v = gate.admit(nlls["before"], nlls["after"], direction="decrease")
+    print(f"[ood-compare] corpus={corpus}  n_before={v.n_before}  "
+          f"n_after={v.n_after}")
+    print(f"[ood-compare] mean nll {v.metric_before:.4f} -> "
+          f"{v.metric_after:.4f}  (effect={v.effect:+.4f})")
+    print(f"[ood-compare] admitted={v.admitted}  p={v.p_value:.4g}  "
+          f"alpha={v.alpha}  min_effect={v.min_effect}")
+    for r in v.reasons:
+        print(f"[ood-compare]   reason: {r}")
+    return 0
 
 
 # ── best ───────────────────────────────────────────────────────────────
@@ -5769,12 +5804,42 @@ def _build_parser() -> argparse.ArgumentParser:
     sstop.set_defaults(func=cmd_stop)
 
     # ood (legacy — explicit ckpt path)
-    so = sub.add_parser("ood", help="Run OOD eval on a checkpoint")
-    so.add_argument("ckpt", help="ckpt path (e.g. lfs_checkpoints/dsl_arch_step10000.pt)")
-    so.add_argument("--branch")
-    so.add_argument("--tag", default="eval", help="role tag for the eval JSON")
-    so.add_argument("--windows", type=int)
-    so.set_defaults(func=cmd_ood)
+    # ood (group: `brian ood eval <ckpt>` / `brian ood compare A B`)
+    # The old flat form `brian ood <ckpt>` shelled to
+    # scripts/vast_ood_eval.sh, which invokes the long-deleted
+    # brian_ood_test.py — it could only fail after renting a box.
+    so = sub.add_parser("ood",
+                        help="OOD evaluation: eval a checkpoint, or "
+                             "compare two eval-v2 result JSONs")
+    eso = so.add_subparsers(dest="ood_kind", required=True)
+    eso_eval = eso.add_parser(
+        "ood_eval", aliases=["eval"],
+        help="OOD eval on a DSL checkpoint (same as `brian eval ood`)")
+    eso_eval.add_argument("ckpt_pos", nargs="?",
+                          help="checkpoint path or '--latest'")
+    eso_eval.add_argument("--checkpoint",
+                          help="alias for the positional checkpoint")
+    eso_eval.add_argument("--latest", action="store_true",
+                          help="pick the highest-step dsl_arch_*.pt")
+    eso_eval.add_argument("--branch")
+    eso_eval.add_argument("--tag", help="role tag (defaults to step number)")
+    eso_eval.add_argument("--windows", type=int)
+    eso_eval.set_defaults(func=_eval_ood)
+    eso_cmp = eso.add_parser(
+        "compare",
+        help="Welch's-t ImprovementGate between two eval-v2 result "
+             "JSONs (H59): brian ood compare BEFORE.json AFTER.json")
+    eso_cmp.add_argument("before", help="baseline-arm result JSON")
+    eso_cmp.add_argument("after", help="candidate-arm result JSON")
+    eso_cmp.add_argument("--corpus", default="wikitext",
+                         choices=["wikitext", "pg19", "traindist"],
+                         help="which corpus's per-sequence NLLs to test")
+    eso_cmp.add_argument("--alpha", type=float, default=0.05,
+                         help="one-sided significance threshold")
+    eso_cmp.add_argument("--min-effect", dest="min_effect", type=float,
+                         default=0.01,
+                         help="minimum relative effect size")
+    eso_cmp.set_defaults(func=cmd_ood_compare)
 
     # ai (group: `brian ai <skill>` — every dir under agents/skills/
     # with an INSTRUCTIONS.md becomes a subcommand automatically.)

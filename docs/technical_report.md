@@ -20,6 +20,7 @@ NeuroSLM (a.k.a. BRIAN) is a research project exploring whether **biologically-i
 - README states "measurably better at matched FLOPs than a flat 230M dense transformer" (H12).
 - Actual snapshot: flat baseline at 80k steps beats BRIAN variants by ~3-4× on absolute PPL, but BRIAN wins **gap_ratio** by 15% (5.22 vs 6.12). Baseline got 11× more training steps — **compute asymmetry breaks the comparison.**
 - Resolution: Pending step-7000 baseline eval (~$3-5).
+- **Apparatus landed 2026-07-12 (H59):** `architectures/control-100m` — a param-matched (136.1M vs 134.8M trainable) vanilla control arm trained by the SAME `train_dsl.py` pipeline, data, and recipe (`brian deploy architectures/control-100m`) — plus **eval protocol v2**: trunk-only surface on both mid and final evals (v1's final eval ran the fused forward — fixed), a held-out `traindist` gap denominator (`gap_ratio_v2 = wikitext/traindist`, both from identical eval code), a PG-19 second OOD axis, and per-sequence NLLs feeding the previously-unwired `ImprovementGate` via `brian ood compare`. The decisive matched-compute comparison now only needs the two deploys.
 
 **Recently shipped (commits `a133343` → `0b65c00`, June 2026):**
 1. `a133343` — `ImprovementGate` (Welch's t-test admission) + `TheoryOfMindIR` + `formal_framework.md` v0.2 §§7–11
@@ -223,7 +224,7 @@ $$\text{inh}_t = (1-\beta) \cdot \text{inh}_{t-1} + \beta \cdot \sigma\!\left(\f
 - `tests/training/test_cortex_pre_head_norm.py` (8) — 5 contracts: structure, registration, anisotropy suppression, initial CE bounded, back-compat when fusion off.
 - `tests/training/test_cortex_distillation_and_gating.py` (22) — 8 classes: distillation config defaults, λ schedule, loss-added, gradient flow (trunk gets KL gradient, cortex doesn't), inhibition config + state + unit-interval + monotonicity, α_eff scaling, forward-respects-inhibition, telemetry exposure.
 
-**Pending (Layer B):** long-run multi-cortex stability past step 30k; matched-compute OOD comparison against `--baseline` (vanilla transformer at same param count); ablation isolating Slot A vs Slot C contributions.
+**Pending (Layer B):** long-run multi-cortex stability past step 30k; matched-compute OOD comparison against `architectures/control-100m` (the param-matched vanilla control arm, H59 — replaces the unreachable legacy `train.py --baseline`); ablation isolating Slot A vs Slot C contributions.
 
 **Evidence link:** `neuroslm/harness.py::BRIANHarness` (`cortex_pre_head_norm`, `_distillation_lambda`, `_update_cortex_inhibition`, `_effective_alpha`, `_cortex_fusion_aux_step`), `neuroslm/dsl/training_config.py::MultiCortexConfig` (8 new fields with cross-validation), `architectures/rcc_bowtie/arch.neuro` (multi_cortex block with both slots enabled), `scripts/diagnose_catastrophic_loss.py` (diagnostic + fix validator). [✅ CONFIRMED]
 

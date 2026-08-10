@@ -843,6 +843,17 @@ class TrainingConfig:
     # a learnable temperature (init √d_model). Bounds logits in [-τ, +τ],
     # preventing norm-mediated overfitting. False = standard linear head.
     cosine_head: bool = False
+    # H59 control arm: trunk block layout. "interleave" = the historical
+    # Standard/Diff/MoD i%3 cycle; "standard" = StandardBlock only (the
+    # vanilla-transformer control for the topology-over-scale A/B).
+    block_pattern: str = "interleave"
+    # H59 control arm: NeuralGeometryAdapter after every block. False
+    # replaces each adapter with nn.Identity (vanilla control).
+    geometry_adapters: bool = True
+    # H59 control arm: override the AuxWeights.pred_coding weight.
+    # -1.0 = keep the maturity.py default (0.10); 0.0 kills the PCH aux
+    # term so a control run trains on pure CE (+ shared stabilisers).
+    pred_coding_weight: float = -1.0
     # TRUNK-OPT Phase 2: RoPE base frequency.
     # Default 10000 is the original LLaMA-1 value.  At ctx=2048 this gives
     # adequate coverage but limits OOD length generalisation.  500000 is
@@ -1221,6 +1232,17 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.logit_norm_tau = float(props["logit_norm_tau"])
     if "cosine_head" in props:
         cfg.cosine_head = _parse_bool(props["cosine_head"])
+    if "block_pattern" in props:
+        pattern = str(props["block_pattern"]).strip().strip('"\'')
+        if pattern not in ("interleave", "standard"):
+            raise ValueError(
+                f"block_pattern must be 'interleave' or 'standard', "
+                f"got {pattern!r}")
+        cfg.block_pattern = pattern
+    if "geometry_adapters" in props:
+        cfg.geometry_adapters = _parse_bool(props["geometry_adapters"])
+    if "pred_coding_weight" in props:
+        cfg.pred_coding_weight = float(props["pred_coding_weight"])
     if "rope_base" in props:
         cfg.rope_base = float(props["rope_base"])
     # ── GIF-7: Homeostatic Gradient Equilibrium ──

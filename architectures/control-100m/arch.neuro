@@ -1,0 +1,102 @@
+# -*- coding: utf-8 -*-
+# =============================================================================
+# control-100m — the VANILLA CONTROL ARM for the topology-over-scale A/B (H59)
+#
+# This architecture exists to make the project's core thesis falsifiable:
+#   "a strategically-wired trunk out-generalizes a flat transformer at
+#    matched params / data / steps" (README line 12, findings.md Layer B).
+#
+# It is the SmolLM arch with every topology mechanism removed and NOTHING
+# else changed:
+#
+#   SAME   optimizer, lr, wd, grad_accum, grad_clip, z_loss, dropout,
+#          rope_base, loss clipping, divisive grad norm, schedule, data
+#          (config.neuro), tokenizer, scales dims (640/8/10, ctx 2048).
+#   OFF    block interleave (all StandardBlock: pre-norm attn + SwiGLU),
+#          NeuralGeometryAdapters, cosine head, PCH aux, grid positions,
+#          surprise head, episodic memory, NFO, VBB/MSPCC/BMA/STE/GIF,
+#          multi-cortex experts, KL distillation.
+#
+# Contract pinned by tests/dsl/test_control_arm.py:
+#   * block_pattern "standard", geometry_adapters false, cosine_head false,
+#     pred_coding_weight 0.0, no experts, no novel-topology modules.
+#   * Training-recipe fields identical to architectures/SmolLM (drift on
+#     any shared hyperparameter fails TestRecipeParity).
+#   * Trainable params within 5% of the SmolLM trunk at 100m dims.
+#
+# Deploy:  brian deploy architectures/control-100m --steps N
+# Compare: brian ood compare <control_result.json> <brian_result.json>
+# =============================================================================
+
+architecture control: {
+    d_sem: 256,
+    dt: 0.01
+}
+
+training {
+    preset:        "rcc_bowtie_30m_p4"
+
+    # ── H59 control knobs: vanilla transformer ──
+    block_pattern:     "standard"
+    geometry_adapters: false
+    cosine_head:       false
+    pred_coding_weight: 0.0
+
+    # ── Shared recipe — MUST stay identical to architectures/SmolLM ──
+    # (tests/dsl/test_control_arm.py::TestRecipeParity pins every field)
+    loss_clipping: { enabled: true, method: "per_sample", factor: 3.0 }
+    quantization:  { enabled: false, bits: 8 }
+    optimizer:     "adamw"
+    learning_rate: 0.0005
+    weight_decay:  0.01
+    grad_accum:    8
+    grad_clip:     1.0
+    label_smoothing: 0.0
+    dropout:       0.1
+    flooding_level: 0.0
+    stochastic_depth: 0.0
+    z_loss: 0.0001
+    logit_norm_tau: 0.0
+    llrd: 1.0
+    rope_base:             500000
+    divisive_grad_c: 5.0
+    grad_clip_after_divisive: true
+    loss_var_window: 64
+    loss_var_min_mult: 0.1
+    vbb_kl_floor: 0.0
+    vbb_kl_floor_gamma: 0.0
+    pct_trunk:     0.0
+    pct_strength:  0.0
+
+    hardware: {
+        gpu_name:        "A100_SXM4"
+        num_gpus:        1
+        min_gpu_mem_gib: 40
+        min_reliability: 0.995
+        min_inet_mbps:   200
+        dist_strategy:   "single"
+        precision:       "bf16"
+    }
+
+    # Param-matched to SmolLM's 100m trunk. Measured 2026-07-12: the
+    # BRIAN trunk at 640/8 is 134.8M trainable (adapters + diff-attn +
+    # MoD routers + PCH on top of the "~100M" headline); a standard-only
+    # stack at 640 costs 5.15M/layer, so depth 14 ≈ 136.1M (Δ ≈ 1%).
+    # Same d_model keeps the embedding + head (64.3M) bit-comparable;
+    # depth is the standard axis for param-matching a flat transformer.
+    # Pinned by TestParamParity (within 5% of the BRIAN trunk).
+    scales: {
+        default: "100m"
+
+        100m: {
+            d_model:       640
+            depth:         14
+            n_heads:       10
+            max_ctx:       2048
+            batch_size:    4
+            seq_len:       2048
+            grad_accum:    4
+            approx_params: "~136M (param-matched to SmolLM 100m trunk)"
+        }
+    }
+}

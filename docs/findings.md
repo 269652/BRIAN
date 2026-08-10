@@ -3148,3 +3148,62 @@ resolution before/after a refactor into a shared helper; full
   additional plumbing, not additional mechanism.
 
 [EVIDENCE: tests/genetic/test_distill_evolve.py (13) green; tests/genetic/test_cli_distill.py (2) green; tests/training/test_cortex_distillation_and_gating.py::TestInstalledDistillationSchedule (5 new, 27 total) green]
+
+### H59 — Falsification apparatus: param-matched vanilla control arm + eval protocol v2 (2026-07-12)
+
+**Hypothesis (apparatus, not a result).** The Layer-B thesis ("topology
+beats a flat transformer at matched params/data/steps") has been
+untestable in the live pipeline: the legacy `train.py --baseline` control
+is unreachable from `train_dsl.py`, the only baseline datapoint (B0,
+2026-05, 80k steps) predates three eval-harness generations and its eval
+script (`brian_ood_test.py`) was deleted in `aa1d89c`, and gap_ratio's
+denominator (the running train loss) is contaminated by flooding/label-
+smoothing/EMA phase. This entry lands the apparatus that makes H12
+decidable; the deploys themselves are the follow-up.
+
+- **`architectures/control-100m`** — vanilla control arm, deployable via
+  `brian deploy architectures/control-100m`. StandardBlock-only stack
+  (pre-norm attn + SwiGLU), no NeuralGeometryAdapters, no cosine head,
+  zero PCH aux, no experts/distillation, no novel-topology modules.
+  Same optimizer/lr/wd/grad_accum/grad_clip/z_loss/dropout/rope_base/
+  loss-clipping as `architectures/SmolLM` (pinned by
+  `TestRecipeParity`); same data + tokenizer (`config.neuro` mirrored).
+  **Param-matched by measurement, not by headline**: the SmolLM 100m
+  trunk is actually 134.8M trainable (adapters + diff-attn + MoD + PCH
+  on top of the "~100M" comment); a standard-only 640-wide stack costs
+  5.15M/layer → control depth 14 ≈ 136.1M (Δ≈1%, gate at 5%).
+- **New DSL fields** (`neuroslm/dsl/training_config.py`):
+  `block_pattern: "interleave"|"standard"` (default preserves today's
+  i%3 cycle), `geometry_adapters: true|false`, `pred_coding_weight`
+  (−1 = keep maturity.py default; 0 = pure-CE control). Threaded through
+  `build_dsl_lm_harness` → `build_dsl_language_cortex`.
+- **Eval protocol v2** (`neuroslm/train_dsl.py`): one shared evaluator
+  (`_eval_ppl_on_texts`) + lazy corpus registry (`_EVAL_CORPORA`) with
+  three axes — `wikitext` (OOD-1), `pg19` (OOD-2, genuinely distant
+  from the FineWeb-Edu mix), `traindist` (held-out FineWeb-Edu slice at
+  doc offset 8M, disjoint from any run < ~135k steps).
+  `gap_ratio_v2 = wikitext/traindist` — both sides from identical
+  trunk-only eval code. Per-corpus per-sequence NLLs persisted in the
+  mid/final JSONs (`"protocol": "v2"`). Fail-open per corpus. The
+  `[mid-ood] step N: wikitext ppl=…` line prefix is preserved for the
+  `brian ps` parser (pinned by test).
+- **Fused/trunk-only inconsistency FIXED**: v1's `_final_ood_eval` ran
+  the FUSED forward (`harness(ids)`) while `_mid_ood_eval` ran the
+  standalone trunk (post-H27) — the final and mid numbers were not the
+  same quantity. Both now go through `_ood_eval_logits` (trunk-only);
+  the JSON records `"eval_surface": "trunk_only"`.
+- **`brian ood compare BEFORE.json AFTER.json [--corpus] [--alpha]
+  [--min-effect]`** — feeds stored per-sequence NLLs through the
+  previously-unwired `ImprovementGate` (Welch one-sided,
+  direction="decrease"): arm-vs-arm claims now require statistics. The
+  legacy flat `brian ood <ckpt>` (which shelled to the dead
+  `scripts/vast_ood_eval.sh`) is replaced by the `ood eval`/`ood compare`
+  group; repairing the remote on-box eval path is tracked separately.
+- **Pre-registered ladder (backlog, needs deploy authorization):**
+  arm-0 `control-100m` → arm-1 topology-only (interleave+adapters, no
+  experts) → arm-2 +VBB waist → arm-3 full stack; identical steps/data;
+  verdicts via `brian ood compare` on the final JSONs, trunk-only,
+  gap_v2 + absolute wikitext/pg19 ppl at matched steps AND tokens.
+  ~$3–5/arm on the default A100 offer.
+
+[EVIDENCE: tests/dsl/test_control_arm.py (24) green; tests/test_eval_protocol_v2.py (16) green]

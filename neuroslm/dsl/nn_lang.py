@@ -673,8 +673,14 @@ class DSLLanguageCortex(nn.Module):
                  surprise_head=None,
                  nfo=None,
                  cosine_head: bool = False,
-                 rope_base: float = 10000.0):
+                 rope_base: float = 10000.0,
+                 block_pattern: str = "interleave",
+                 geometry_adapters: bool = True):
         super().__init__()
+        if block_pattern not in ("interleave", "standard"):
+            raise ValueError(
+                f"block_pattern must be 'interleave' or 'standard', "
+                f"got {block_pattern!r}")
         n_kv_heads = n_kv_heads or n_heads
         head_dim = d_model // n_heads
         H = nn_ops.swiglu_hidden_dim(d_model)
@@ -711,7 +717,9 @@ class DSLLanguageCortex(nn.Module):
         self.blocks = nn.ModuleList()
         self.adapters = nn.ModuleList()
         for i in range(depth):
-            pattern = i % 3
+            # H59 control arm: "standard" builds a vanilla pre-norm
+            # attn+SwiGLU stack (position 0 of the cycle) at every depth.
+            pattern = 0 if block_pattern == "standard" else i % 3
             if pattern == 0:
                 std_kwargs = dict(D=d_model, n_heads=n_heads,
                                   n_kv_heads=n_kv_heads, max_ctx=max_ctx,
@@ -728,7 +736,9 @@ class DSLLanguageCortex(nn.Module):
                                        n_kv_heads=n_kv_heads, max_ctx=max_ctx,
                                        H=H, Dkv=Dkv, head_dim=head_dim,
                                        R_hidden=R_hidden, capacity=mod_capacity))
-            self.adapters.append(Adp(D=d_model, Dhyper=Dhyper, R=R))
+            self.adapters.append(
+                Adp(D=d_model, Dhyper=Dhyper, R=R) if geometry_adapters
+                else nn.Identity())
 
         self.gamma_f = nn.Parameter(torch.ones(d_model))
         self.lm_head = nn.Parameter(_alloc("xavier", (vocab, d_model)))
@@ -1156,7 +1166,9 @@ def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
                                surprise_head=None,
                                nfo=None,
                                cosine_head: bool = False,
-                               rope_base: float = 10000.0) -> DSLLanguageCortex:
+                               rope_base: float = 10000.0,
+                               block_pattern: str = "interleave",
+                               geometry_adapters: bool = True) -> DSLLanguageCortex:
     """Assemble Brain's full LanguageCortex from pure-DSL blocks.
 
     `pct_trunk > 0` enables forward-path predictive coding: each layer
@@ -1182,4 +1194,6 @@ def build_dsl_language_cortex(vocab: int, d_model: int, depth: int,
                               surprise_head=surprise_head,
                               nfo=nfo,
                               cosine_head=cosine_head,
-                              rope_base=rope_base)
+                              rope_base=rope_base,
+                              block_pattern=block_pattern,
+                              geometry_adapters=geometry_adapters)

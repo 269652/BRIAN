@@ -2,7 +2,7 @@
 
 > *146.9M trainable-param bowtie trunk · ~980M frozen cortex experts · exploring integrated information (Φ).*
 
-[![tests](https://img.shields.io/badge/tests-4581%20passing-brightgreen)](#tests)
+[![tests](https://img.shields.io/badge/tests-4955%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
@@ -11,7 +11,7 @@
 
 BRIAN is a research prototype that bets on **topology, Φ-coupled plasticity, and closed-loop embodiment** instead of raw parameter count. The core question: does a strategically-wired 146.9M-param trunk outgeneralize a flat 100M transformer on OOD tasks?
 
-**Current verdict:** 🟡 inconclusive — best variant B4 achieves **2.87 gap\_ratio** (53% better than flat-transformer baseline at 6.12), but matched-compute comparison is still pending.
+**Current verdict:** 🟡 inconclusive — best variant B4 achieves **2.87 gap\_ratio** (53% better than flat-transformer baseline at 6.12), but matched-compute comparison is still pending. The apparatus to run it landed as H59: `architectures/control-100m` (a param-matched vanilla control arm trained by the same pipeline, data, and recipe) plus eval protocol v2 — trunk-only evaluation on every surface, a held-out train-distribution gap denominator (`gap_v2`), a PG-19 second OOD axis, and per-sequence NLLs gated by `brian ood compare`'s Welch's-t test.
 
 ---
 
@@ -304,7 +304,7 @@ modulation dopamine -> pfc {
 }
 ```
 
-The compiler (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) produces modules with **source maps** and **byte-identity round-trip** verification. 1271 tests in `tests/dsl/` guard codegen correctness.
+The compiler (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) produces modules with **source maps** and **byte-identity round-trip** verification. 1305 tests in `tests/dsl/` guard codegen correctness.
 
 Full reference: [`docs/dsl.md`](docs/dsl.md).
 
@@ -414,7 +414,7 @@ KL distillation runs in parallel: `L_KL = T² · KL(cortex.detach()/T ‖ trunk/
 
 ### Layer A — Mechanism Verification ✅
 
-4581 unit tests across `tests/` confirm every mechanism computes as specified:
+4955 unit tests across `tests/` confirm every mechanism computes as specified:
 
 | Hypothesis | Result |
 |-----------|--------|
@@ -428,11 +428,13 @@ KL distillation runs in parallel: `L_KL = T² · KL(cortex.detach()/T ‖ trunk/
 | H19 — `ImprovementGate` (Welch's t) | ✅ p-values within 1e-6 of scipy; mutation blocked without significance |
 | H21 — Per-position abstain unblocks fusion | ✅ -93% train-PPL / -94% OOD-PPL vs broken precursor |
 
-Run all: `py -3 -m pytest tests/ -v` (~~572s on CPU).
+Run all: `py -3 -m pytest tests/ -v` (~~10 mins on CPU).
 
 ### Layer B — OOD Generalization 🟡
 
 Evaluated on WikiText-103-v1 held-out set. **gap\_ratio = OOD\_ppl / train\_ppl** (lower is better):
+
+> **Protocol note (H59, eval v2):** rows below predate protocol v2. New runs additionally report **gap\_v2 = wikitext\_ppl / traindist\_ppl** — both sides produced by the same trunk-only eval code on a held-out slice of the training distribution, so training-side regularisation (flooding, label smoothing) can no longer distort the denominator — plus a PG-19 second OOD axis, and per-sequence NLLs so arm-vs-arm comparisons run through `brian ood compare` (Welch's t) instead of eyeballed ppl deltas.
 
 | Variant | Params | Steps | train\_ppl | OOD\_ppl | gap\_ratio | Log |
 |---------|--------|-------|-----------|---------|-----------|-----|
@@ -459,12 +461,12 @@ B4 is the first variant under 3.0 gap\_ratio — a 53% improvement over the flat
 
 **Most Recent Run (Last Checkpoint):**
 ```
-[`logs/colab_train.log`](logs/colab_train.log)
+[`logs/discover/20260709T132733Z_experts.log`](logs/discover/20260709T132733Z_experts.log)
 
 ```
-Please check that the Hugging Face dataset 'Salesforce/wikitext' isn't based on a loading script and remove `trust_remote_code`.
-If the dataset is based on a loading script, please ask the dataset author to remove it and convert it to a standard format like Parquet.
-[mid-ood] step 9500: wikitext ppl=95.6 gap_ratio=4.01 (train_ppl=23.9) (50 seq, 6430 tok)
+[expert-discovery] round 1/30 Qwen/Qwen2.5-0.5B: best_ce=3.3029 Δ=0.0012 evaluated=1009 (saved expert_qwen2_5_0_5b_step1)
+[expert:smollm2_360m] round 2: baseline_ce=2.6459 (final: sens=0.04544 improve=-0.002228 (scale_up) tight)
+[expert-discovery] round 2/30 HuggingFaceTB/SmolLM2-360M: best_ce=2.6455 Δ=0.0004 evaluated=380 (saved expert_smollm2_360m_step2)
 ```
 ```
 
@@ -597,14 +599,14 @@ model.personality_vector               # tensor(5) — stable across checkpoints
 ## Tests
 
 ```bash
-py -3 -m pytest tests/                                              # full suite (4581 tests, ~~572s)
+py -3 -m pytest tests/                                              # full suite (4955 tests, ~~10 mins)
 py -3 -m pytest tests/test_phi.py -v                               # H1–H3: integrated information
 py -3 -m pytest tests/test_narrative_memory.py -v                  # H4–H5: memory & causation
 py -3 -m pytest tests/test_cognitive_closure.py -v                 # H6–H6.5: identity & embodiment
 py -3 -m pytest tests/training/test_cortex_pre_head_norm.py -v     # H16: catastrophic-loss fix
 py -3 -m pytest tests/training/test_cortex_distillation_and_gating.py -v  # H17–H18: KL + NT gating
 py -3 -m pytest tests/verification/test_improvement_gate.py -v     # H19: Welch's t admission gate
-py -3 -m pytest tests/dsl/ -v                                       # 1271 DSL codegen + byte-equivalence
+py -3 -m pytest tests/dsl/ -v                                       # 1305 DSL codegen + byte-equivalence
 ```
 
 ---
