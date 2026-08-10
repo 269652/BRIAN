@@ -48,6 +48,14 @@ training {
     quantization:  { enabled: false, bits: 8 }
     optimizer:     "adamw"
     learning_rate: 0.0005
+    # H59 bug found live 2026-08-10: this arch never declared warmup_steps
+    # / min_lr_ratio, so it silently fell back to training_config.py's
+    # defaults (300 / unset) instead of matching SmolLM's explicit 2400 /
+    # 0.1 — the control arm hit target LR ~8x faster than BRIAN for
+    # reasons having nothing to do with topology. TestRecipeParity now
+    # pins both fields so this drift can't recur silently.
+    warmup_steps:  2400
+    min_lr_ratio:  0.1
     weight_decay:  0.01
     grad_accum:    8
     grad_clip:     1.0

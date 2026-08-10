@@ -201,7 +201,8 @@ class TestRecipeParity:
     SHARED_FIELDS = ("learning_rate", "weight_decay", "grad_accum",
                      "grad_clip", "z_loss", "dropout", "label_smoothing",
                      "flooding_level", "stochastic_depth", "llrd",
-                     "rope_base", "optimizer")
+                     "rope_base", "optimizer", "warmup_steps",
+                     "min_lr_ratio")
 
     def test_recipe_identical(self):
         from neuroslm.dsl.training_config import load_training_config_from_arch
