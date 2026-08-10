@@ -40,6 +40,7 @@ import torch.nn as nn
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_ARCH = REPO_ROOT / "architectures" / "control-100m"
 SMOLLM_ARCH = REPO_ROOT / "architectures" / "SmolLM"
+TOPOLOGY_ARCH = REPO_ROOT / "architectures" / "topology-100m"
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -259,6 +260,148 @@ class TestParamParity:
             f"param mismatch {rel:.1%}: control={n_control/1e6:.1f}M "
             f"vs BRIAN trunk={n_brian/1e6:.1f}M — adjust control depth "
             f"or document the delta in the findings row")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# H59 arm-1: topology-only (interleave + adapters, no experts)
+#
+# Isolates ONE variable vs control-100m: block_pattern + geometry_adapters.
+# Everything else — recipe, no experts, no VBB/MSPCC/BMA/STE/GIF, no
+# cosine head, no PCH aux — must be byte-identical to control-100m, or
+# this arm stops answering "does topology alone help" and starts
+# answering some confounded question again.
+# ══════════════════════════════════════════════════════════════════════
+
+class TestTopologyOnlyArch:
+    @pytest.fixture(scope="class")
+    def cfg(self):
+        from neuroslm.dsl.training_config import load_training_config_from_arch
+        if not (TOPOLOGY_ARCH / "arch.neuro").is_file():
+            pytest.fail(f"topology arch missing: {TOPOLOGY_ARCH}/arch.neuro")
+        return load_training_config_from_arch(TOPOLOGY_ARCH)
+
+    def test_interleave_blocks(self, cfg):
+        assert cfg.block_pattern == "interleave"
+
+    def test_geometry_adapters_on(self, cfg):
+        assert cfg.geometry_adapters is True
+
+    def test_no_cosine_head(self, cfg):
+        """Cosine head is a separate mechanism from block topology —
+        kept OFF so this arm changes exactly one thing vs control."""
+        assert cfg.cosine_head is False
+
+    def test_pch_aux_zeroed(self, cfg):
+        assert cfg.pred_coding_weight == pytest.approx(0.0)
+
+    def test_no_multi_cortex_experts(self, cfg):
+        mc = getattr(cfg, "multi_cortex", None)
+        assert mc is None or not getattr(mc, "enabled", False)
+
+    def test_no_novel_topology_modules(self, cfg):
+        for field in ("grid_positions", "episodic_memory",
+                      "surprise_head", "nfo"):
+            v = getattr(cfg, field, None)
+            enabled = bool(v.get("enabled", bool(v))) if isinstance(v, dict) \
+                else bool(v)
+            assert not enabled, f"{field} must be OFF in the topology-only arm"
+
+    def test_no_pct_trunk(self, cfg):
+        assert cfg.pct_trunk == pytest.approx(0.0)
+        assert cfg.tonnetz_period == 0
+
+
+class TestTopologyBlocksActuallyBuild:
+    """The DSL construction itself, not just config parsing — matches
+    TestStandardBlockPattern's rigor for the vanilla side."""
+
+    def test_builds_interleave_pattern(self):
+        from neuroslm.dsl.nn_lang import build_dsl_language_cortex
+        lm = build_dsl_language_cortex(
+            vocab=100, d_model=64, depth=6, n_heads=4, max_ctx=32,
+            block_pattern="interleave", geometry_adapters=True)
+        names = [type(b).__name__ for b in lm.blocks]
+        assert names == ["StandardBlock", "DiffBlock", "ModBlock"] * 2, names
+
+    def test_adapters_are_real_not_identity(self):
+        from neuroslm.dsl.nn_lang import build_dsl_language_cortex
+        lm = build_dsl_language_cortex(
+            vocab=100, d_model=64, depth=6, n_heads=4, max_ctx=32,
+            block_pattern="interleave", geometry_adapters=True)
+        assert all(type(a).__name__ == "NeuralGeometryAdapter"
+                  for a in lm.adapters)
+
+    def test_forward_and_backward_smoke(self):
+        import torch
+        torch.manual_seed(0)
+        from neuroslm.dsl.nn_lang import build_dsl_language_cortex
+        lm = build_dsl_language_cortex(
+            vocab=100, d_model=64, depth=6, n_heads=4, max_ctx=32,
+            block_pattern="interleave", geometry_adapters=True)
+        ids = torch.randint(0, 100, (2, 16))
+        logits = lm(ids)
+        assert logits.shape == (2, 16, 100)
+        assert torch.isfinite(logits).all()
+        logits.sum().backward()
+        grads = [p.grad for p in lm.parameters() if p.grad is not None]
+        assert grads and any(g.abs().sum() > 0 for g in grads)
+
+
+class TestTopologyRecipeParity:
+    """topology-100m and control-100m must differ ONLY in block_pattern
+    and geometry_adapters — every other training-recipe field identical,
+    same discipline as TestRecipeParity (control vs SmolLM)."""
+
+    SHARED_FIELDS = TestRecipeParity.SHARED_FIELDS
+
+    def test_recipe_identical_to_control(self):
+        from neuroslm.dsl.training_config import load_training_config_from_arch
+        if not (TOPOLOGY_ARCH / "arch.neuro").is_file():
+            pytest.fail(f"topology arch missing: {TOPOLOGY_ARCH}/arch.neuro")
+        topo = load_training_config_from_arch(TOPOLOGY_ARCH)
+        ctrl = load_training_config_from_arch(CONTROL_ARCH)
+        for f in self.SHARED_FIELDS:
+            assert getattr(topo, f) == getattr(ctrl, f), (
+                f"training-recipe drift on {f!r}: topology-100m="
+                f"{getattr(topo, f)!r} vs control-100m={getattr(ctrl, f)!r}")
+
+    def test_only_topology_fields_differ(self):
+        from neuroslm.dsl.training_config import load_training_config_from_arch
+        topo = load_training_config_from_arch(TOPOLOGY_ARCH)
+        ctrl = load_training_config_from_arch(CONTROL_ARCH)
+        assert topo.block_pattern != ctrl.block_pattern
+        assert topo.geometry_adapters != ctrl.geometry_adapters
+        assert topo.cosine_head == ctrl.cosine_head
+        assert topo.pred_coding_weight == pytest.approx(ctrl.pred_coding_weight)
+
+
+class TestTopologyParamParity:
+    def test_trainable_params_within_5_percent_of_control(self):
+        from neuroslm.dsl.nn_lang import build_dsl_language_cortex
+        _, ctrl_dims = TestParamParity._dims_of(CONTROL_ARCH)
+        _, topo_dims = TestParamParity._dims_of(TOPOLOGY_ARCH)
+        from neuroslm.dsl.training_config import load_training_config_from_arch
+        ctrl_cfg = load_training_config_from_arch(CONTROL_ARCH)
+        topo_cfg = load_training_config_from_arch(TOPOLOGY_ARCH)
+
+        control = build_dsl_language_cortex(
+            block_pattern=ctrl_cfg.block_pattern,
+            geometry_adapters=ctrl_cfg.geometry_adapters,
+            cosine_head=ctrl_cfg.cosine_head, **ctrl_dims)
+        n_control = sum(p.numel() for p in control.parameters()
+                        if p.requires_grad)
+        del control
+        topology = build_dsl_language_cortex(
+            block_pattern=topo_cfg.block_pattern,
+            geometry_adapters=topo_cfg.geometry_adapters,
+            cosine_head=topo_cfg.cosine_head, **topo_dims)
+        n_topology = sum(p.numel() for p in topology.parameters()
+                         if p.requires_grad)
+        del topology
+        rel = abs(n_control - n_topology) / max(n_control, n_topology)
+        assert rel < 0.05, (
+            f"param mismatch {rel:.1%}: control={n_control/1e6:.1f}M "
+            f"vs topology-100m={n_topology/1e6:.1f}M")
 
 
 if __name__ == "__main__":
