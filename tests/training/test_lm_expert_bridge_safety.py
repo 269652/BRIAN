@@ -83,7 +83,16 @@ class _FakeBPETokenizer:
         self.vocab_size = vocab_size
         self.name_or_path = name_or_path
 
-    def __call__(self, text: str, **kwargs):
+    def __call__(self, text, **kwargs):
+        # H59: _forward_bridge batches all B samples into one tokenizer
+        # call. Mirror real HF batch semantics — list[str] in, one
+        # nesting level of list-per-item out.
+        if isinstance(text, (list, tuple)):
+            results = [self.__call__(t, **kwargs) for t in text]
+            return {
+                "input_ids": [r["input_ids"] for r in results],
+                "offset_mapping": [r["offset_mapping"] for r in results],
+            }
         # Produce one token per character (extreme blow-up: 936 from
         # 512). Each "token" is just its char index for simplicity.
         ids = [i % self.vocab_size for i in range(len(text))]
@@ -314,7 +323,13 @@ class _OverflowTokenizer:
         self.name_or_path = name_or_path
         self._oob_id = model_vocab + 5
 
-    def __call__(self, text: str, **kwargs):
+    def __call__(self, text, **kwargs):
+        if isinstance(text, (list, tuple)):
+            results = [self.__call__(t, **kwargs) for t in text]
+            return {
+                "input_ids": [r["input_ids"] for r in results],
+                "offset_mapping": [r["offset_mapping"] for r in results],
+            }
         ids = [self._oob_id for _ in range(len(text))]
         offsets = [(i, i + 1) for i in range(len(text))]
         return {"input_ids": ids, "offset_mapping": offsets}

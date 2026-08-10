@@ -948,25 +948,35 @@ class LMExpert(nn.Module):
         n_aligned_total = 0
         n_positions_total = 0
 
+        # H59 (2026-08-10 incident): batch the tokenizer round-trips
+        # across the WHOLE batch dimension instead of looping per-sample.
+        # A rented A100 sat at ~0% GPU utilization because this loop
+        # made 2*B separate Python-level HF-tokenizer calls per expert
+        # per step (each with its own FFI/GIL overhead) before the GPU
+        # ever saw work — the CPU-bound tokenizer serialization was the
+        # actual bottleneck, not a device-placement bug. HF fast
+        # tokenizers process a list[str] in one Rust-side call; this is
+        # a pure perf change — same per-sample alignment, same output,
+        # just ONE call instead of B (see
+        # test_lm_expert_bridge_exact_alignment.py::
+        # TestForwardBridgeBatchesTokenizerCalls).
+        texts = [
+            self._trunk_tokenizer.decode(ids[b].tolist(), skip_special_tokens=False)
+            for b in range(B)
+        ]
+        trunk_batch = self._trunk_tokenizer(
+            texts, add_special_tokens=False, return_offsets_mapping=True,
+            return_tensors=None,
+        )
+        expert_batch = self._expert_tokenizer(
+            texts, add_special_tokens=False, return_offsets_mapping=True,
+            return_tensors=None,
+        )
+
         for b in range(B):
-            sample_ids = ids[b].tolist()
-            text = self._trunk_tokenizer.decode(
-                sample_ids, skip_special_tokens=False
-            )
-            trunk_enc = self._trunk_tokenizer(
-                text,
-                add_special_tokens=False,
-                return_offsets_mapping=True,
-                return_tensors=None,
-            )
-            expert_enc = self._expert_tokenizer(
-                text,
-                add_special_tokens=False,
-                return_offsets_mapping=True,
-                return_tensors=None,
-            )
-            trunk_offsets = trunk_enc["offset_mapping"]
-            expert_offsets = expert_enc["offset_mapping"]
+            trunk_offsets = trunk_batch["offset_mapping"][b]
+            expert_offsets = expert_batch["offset_mapping"][b]
+            expert_input_ids_all = expert_batch["input_ids"][b]
             # Truncate at min(T, _expert_max_ctx, _BRIDGE_T_MAX).
             # _expert_max_ctx: prevents PE out-of-bounds (GPT-2: 1024).
             # _BRIDGE_T_MAX: memory guard for the NO-BACKBONE fallback only.
@@ -985,7 +995,7 @@ class LMExpert(nn.Module):
                 self._expert_max_ctx if self._backbone is not None else 512
             )
             _expert_cap = min(T, self._expert_max_ctx, _BRIDGE_T_MAX)
-            expert_input_ids_list = expert_enc["input_ids"][:_expert_cap]
+            expert_input_ids_list = expert_input_ids_all[:_expert_cap]
             expert_offsets = expert_offsets[:_expert_cap]
             expert_input_ids = torch.tensor(
                 expert_input_ids_list, dtype=torch.long, device=device,

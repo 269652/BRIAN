@@ -306,11 +306,27 @@ class _FakeTokenizer:
     """Wraps a callable into something that looks tokenizer-like for the
     bridge path. Only the ``__call__`` + ``.decode`` surface used by
     ``_forward_bridge`` is supported.
+
+    Mirrors real HF tokenizer batch semantics: ``__call__`` accepts
+    EITHER a single string (delegates straight to ``call_fn``) OR a
+    ``list[str]`` (calls ``call_fn`` once per item and nests the results
+    one level, matching ``BatchEncoding``'s ``list[list[...]]`` shape).
+    _forward_bridge batches all B samples into one tokenizer call (H59
+    perf fix) — the individual ``call_fn`` closures never need to know
+    about batching.
     """
     def __init__(self, call_fn):
         self._call_fn = call_fn
+        self.call_count = 0
 
     def __call__(self, text, **kw):
+        self.call_count += 1
+        if isinstance(text, (list, tuple)):
+            results = [self._call_fn(t, **kw) for t in text]
+            return {
+                "input_ids": [r["input_ids"] for r in results],
+                "offset_mapping": [r["offset_mapping"] for r in results],
+            }
         return self._call_fn(text, **kw)
 
     def decode(self, ids, **kw):
@@ -388,6 +404,101 @@ class TestAlignmentCoverageTelemetry:
         ids = torch.tensor([[0, 1, 2, 3]], dtype=torch.long)
         with torch.no_grad():
             _ = lm_expert(ids)
+        assert lm_expert.last_alignment_coverage == pytest.approx(0.5, abs=1e-6)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# H59 perf fix (2026-08-10 incident): _forward_bridge must batch its
+# tokenizer calls across B instead of looping — B separate Python-level
+# HF tokenizer round-trips per expert per step was the actual cause of
+# a rented A100 sitting near 0% GPU utilization (CPU-bound on the
+# tokenizer loop, GPU starved of work). Batching must be a pure perf
+# change: same alignment, same output, same coverage — just ONE call.
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestForwardBridgeBatchesTokenizerCalls:
+    def test_tokenizers_called_exactly_once_per_forward(
+        self, fake_cross_tok_bridge_setup, monkeypatch
+    ):
+        tok = fake_cross_tok_bridge_setup
+        lm_expert = _make_synthetic_lm_expert(tok, monkeypatch)
+        lm_expert.is_same_tokenizer = False
+        from neuroslm.experts import VocabBridge
+        V = tok.vocab_size
+        lm_expert.vocab_bridge = VocabBridge(
+            trunk_to_expert=torch.arange(V, dtype=torch.long),
+            is_identity=False, coverage=1.0,
+            vocab_size_trunk=V, vocab_size_expert=V,
+        )
+        offsets = [(0, 3), (3, 5), (5, 8), (8, 10)]
+        trunk_tok = _FakeTokenizer(lambda text, **kw: {
+            "input_ids": [0, 1, 2, 3], "offset_mapping": offsets,
+        })
+        expert_tok = _FakeTokenizer(lambda text, **kw: {
+            "input_ids": [0, 1, 2, 3], "offset_mapping": offsets,
+        })
+        monkeypatch.setattr(lm_expert, "_trunk_tokenizer", trunk_tok)
+        monkeypatch.setattr(lm_expert, "_expert_tokenizer", expert_tok)
+
+        # B=5 — if the old per-sample loop were still in place, each
+        # tokenizer would be called 5 times, not 1.
+        ids = torch.tensor([[0, 1, 2, 3]] * 5, dtype=torch.long)
+        with torch.no_grad():
+            out = lm_expert(ids)
+
+        assert trunk_tok.call_count == 1, (
+            "trunk tokenizer must be called ONCE for the whole batch, "
+            f"was called {trunk_tok.call_count} times")
+        assert expert_tok.call_count == 1, (
+            "expert tokenizer must be called ONCE for the whole batch, "
+            f"was called {expert_tok.call_count} times")
+        assert out.shape == (5, 4, V)
+
+    def test_batched_output_matches_per_sample_semantics(
+        self, fake_cross_tok_bridge_setup, monkeypatch
+    ):
+        """Every sample in the batch gets the SAME correct alignment as
+        the single-sample case (test_misaligned_positions_are_uniform) —
+        batching must not change WHICH positions align."""
+        tok = fake_cross_tok_bridge_setup
+        lm_expert = _make_synthetic_lm_expert(tok, monkeypatch)
+        lm_expert.is_same_tokenizer = False
+        from neuroslm.experts import VocabBridge
+        V = tok.vocab_size
+        lm_expert.vocab_bridge = VocabBridge(
+            trunk_to_expert=torch.arange(V, dtype=torch.long),
+            is_identity=False, coverage=1.0,
+            vocab_size_trunk=V, vocab_size_expert=V,
+        )
+        trunk_offsets_fake = [(0, 3), (3, 5), (5, 8), (8, 10)]
+        expert_offsets_fake = [(0, 3), (3, 7), (7, 10)]
+        monkeypatch.setattr(
+            lm_expert, "_trunk_tokenizer",
+            _FakeTokenizer(lambda text, **kw: {
+                "input_ids": [0, 1, 2, 3],
+                "offset_mapping": trunk_offsets_fake,
+            }),
+        )
+        monkeypatch.setattr(
+            lm_expert, "_expert_tokenizer",
+            _FakeTokenizer(lambda text, **kw: {
+                "input_ids": [100, 200, 300],
+                "offset_mapping": expert_offsets_fake,
+            }),
+        )
+        B = 3
+        ids = torch.tensor([[0, 1, 2, 3]] * B, dtype=torch.long)
+        with torch.no_grad():
+            out = lm_expert(ids)
+        for b in range(B):
+            per_position_max = out[b].abs().amax(dim=-1)
+            assert per_position_max[0] > 0.0, f"sample {b} pos 0 must align"
+            assert per_position_max[3] > 0.0, f"sample {b} pos 3 must align"
+            assert per_position_max[1] == 0.0, f"sample {b} pos 1 must be uniform"
+            assert per_position_max[2] == 0.0, f"sample {b} pos 2 must be uniform"
+        # coverage is averaged across the whole batch, same 2/4 ratio as
+        # the single-sample case
         assert lm_expert.last_alignment_coverage == pytest.approx(0.5, abs=1e-6)
 
 
