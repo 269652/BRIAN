@@ -327,6 +327,24 @@ class TestCMDLoss:
         for p in m.head.parameters():
             assert p.grad is not None
 
+    def test_disabled_does_not_allocate_the_vocab_head(self):
+        """2026-08-10 incident: `head = nn.Linear(d_model, vocab_size)`
+        was built UNCONDITIONALLY regardless of cfg.enabled — at
+        vocab_size=50257 that's 32.16M dead trainable params (never in
+        the forward graph when disabled, since forward() returns before
+        touching self.head) silently inflating every reported trainable-
+        param count and costing ~375MB of GPU + optimizer-state memory
+        for nothing. Mirrors the pattern BRIANHarness._build_vbb_modules
+        already uses: build_module = None when the feature is off."""
+        m, _ = self._make(enabled=False, vocab=50257, d=640)
+        assert m.head is None
+        assert sum(p.numel() for p in m.parameters()) == 0
+
+    def test_enabled_still_allocates_the_head(self):
+        m, _ = self._make(enabled=True, vocab=50257, d=640)
+        assert m.head is not None
+        assert sum(p.numel() for p in m.parameters()) == 640 * 50257
+
 
 # ══════════════════════════════════════════════════════════════════════
 # Intervention E — AdaptiveMixtureController

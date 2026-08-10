@@ -407,6 +407,14 @@ class CMDLoss(nn.Module):
     def __init__(self, cfg: CMDConfig, d_model: int, vocab_size: int):
         super().__init__()
         self.cfg = cfg
+        # Lazy allocation, mirroring BRIANHarness._build_vbb_modules:
+        # when disabled, forward() returns before ever touching `head`,
+        # so building the vocab-sized head anyway is 32M+ dead trainable
+        # params (2026-08-10 incident — silently inflated every reported
+        # trainable-param count and wasted real GPU + optimizer memory).
+        if not cfg.enabled:
+            self.head = None
+            return
         self.head = nn.Linear(d_model, vocab_size, bias=False)
         nn.init.normal_(self.head.weight, mean=0.0, std=0.02)
 
