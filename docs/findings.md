@@ -3207,3 +3207,95 @@ decidable; the deploys themselves are the follow-up.
   ~$3–5/arm on the default A100 offer.
 
 [EVIDENCE: tests/dsl/test_control_arm.py (24) green; tests/test_eval_protocol_v2.py (16) green]
+
+### H60 — MoD router was structurally dead: zero gradient from init, forever (2026-08-10)
+
+**Discovery context.** Live log analysis of the topology-100m arm (H59)
+showed two correlated signals starting around step 400–500: the
+TrunkOptMonitor's participation ratio (PR) crashed from 15.4 to ~1.3
+and stayed flatlined there, R² dropped from 0.88 to ~0.35–0.45, and a
+separate telemetry-only metric (`C3:pc`, `MetricObserver`'s PC-reentry
+probe — confirmed harmless, gated by `pc_reentry_weight` defaulting to
+0 and never reaching the loss for either arch) exploded to `inf`/`nan`.
+Tracing the PR/R² collapse led to a real, load-bearing bug in the
+Mixture-of-Depths block, present in every arch using
+`block_pattern="interleave"` (the pre-existing default — this predates
+H59 and affects the full BRIAN/SmolLM stack too, not just the new arm).
+
+**Root cause.** `neuroslm/dsl/nn_ops.py::mod_block` routes tokens via
+`scores.topk(C, dim=-1, sorted=False)`, keeping only the
+non-differentiable `indices` and discarding the differentiable `values`
+(`_, topk_idx = scores.topk(...)`). No other code path in the DSL /
+`train_dsl.py` pipeline ever touches `router_logits`. With
+`router_w1`/`router_w2`/biases all zero-initialised (`init=zeros`),
+`router_logits` is mathematically forced to exactly `0` for every
+token regardless of input — the router weights receive **zero
+gradient, from any source, for the entire training run**. Every step,
+`.topk()`'s tie-breaking on an all-zero score tensor selects the same
+fixed, content-blind subset of positions. One-third of an interleaved
+trunk's blocks were doing static routing, not the content-adaptive
+routing Mixture-of-Depths (Raposo et al. 2024) is supposed to do.
+
+The reference module (`neuroslm/modules/mixture_of_depths.py::
+MoDBlock`) has a fix already built — `router_aux_loss`, a
+mean-matching + entropy load-balancing loss over the differentiable
+router logits — but grep confirmed it was **never referenced anywhere**
+in `harness.py`/`train_dsl.py`/`nn_lang.py`/`nn_ops.py`: it never got
+ported from the Brain-legacy reference to the DSL training path.
+
+**A second, deeper problem.** Porting `router_aux_loss` alone is not
+sufficient. With `router_w2=0`, `router_logits=0` for every token,
+which sits EXACTLY at both loss terms' own optimum simultaneously
+(`mean_prob=0.5=target`, entropy at its global maximum) — a true
+zero-gradient fixed point that persists at every subsequent step,
+since nothing ever perturbs the router away from it. This is not
+specific to the DSL port: the reference `MoDRouter.__init__` also
+zero-inits `router[0].weight`/`router[2].weight`/`router[2].bias`
+(comment: "Zero-init so routing starts uniform") and has no soft-gate
+anywhere in its forward pass, so the same derivation applies there —
+`router_aux_loss` alone cannot bootstrap a router that starts exactly
+symmetric. Confirmed by writing the failing gradient test first
+(`test_gradient_reaches_mod_block_router_via_the_aux_loss`) against the
+zero-init DSL block: RED with all-zero gradients, exactly as derived.
+
+**Fix (two parts, both required):**
+1. `nn_ops.mod_router_aux_loss(x, router_w1, router_b1, router_w2,
+   router_b2, capacity_ratio)` — new op, bit-identical formula to the
+   reference's `router_aux_loss` property. Deliberately does NOT touch
+   `mod_block`'s return signature (keeps the existing
+   bit-identical-to-reference forward-output equivalence test
+   untouched) — recomputed from the block's own router params on the
+   block's input, wired in from `DSLLanguageCortex.forward()`'s
+   existing hand-written block loop (which already has full access to
+   each block instance and its pre-block hidden state), summed and
+   exposed as `_last_mod_router_aux_loss` (None when
+   `block_pattern="standard"` — no ModBlocks to route).
+2. `_MOD_BLOCK_DSL`'s `router_w1`/`router_w2` init changed from `zeros`
+   to `normal(0.02)` (biases stay zero). Unlike a residual/adapter path
+   where zero-init correctly means "start as identity, earn capacity
+   via gradient," a discrete router needs asymmetric variation to have
+   any gradient signal to bootstrap from — the standard, principled
+   fix for this class of pathology. With this, the aux-loss gradient
+   test above goes GREEN.
+3. `training_config.py`: new `mod_router_aux_weight: float = 0.01`
+   (default small-positive — a bugfix restoring an already-active
+   mechanism, not a new opt-in feature; 0.0 restores the broken
+   pre-fix behaviour). `harness.py::BRIANHarness._mod_router_aux_step`
+   composes `weight * aux` into the total loss, mirroring the
+   `_compute_pc_reentry_loss` call-site pattern exactly.
+
+**Scope.** This is a repo-wide correctness fix, not specific to H59's
+new arms — every existing architecture using the default
+`block_pattern="interleave"` (the full BRIAN/SmolLM stack included)
+had a dead MoD router until this commit. `control-100m` is unaffected
+(`block_pattern="standard"`, no ModBlocks).
+
+**Not yet measured**: whether restoring real content-adaptive MoD
+routing actually improves gap_ratio_v2 or reverses the observed PR/R²
+collapse — that requires a fresh deploy past step 500+ with this fix,
+which hasn't run yet. Recording the mechanism fix now per the
+evidence-ledger discipline; the empirical follow-up is the natural next
+H## entry once a run produces mid-ood snapshots past the point where
+the collapse was previously observed.
+
+[EVIDENCE: tests/dsl/test_mod_router_aux_loss.py (9) green; tests/test_mod_router_aux_harness.py (7) green; tests/dsl/test_dsl_blocks_equivalence.py (3) green — bit-identical forward output unaffected]

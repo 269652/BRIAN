@@ -2785,6 +2785,32 @@ class BRIANHarness(nn.Module):
             return None
         return eff_w * free_energy
 
+    def _mod_router_aux_step(self, total: torch.Tensor) -> torch.Tensor:
+        """H60: compose the MoD router load-balancing aux loss into the
+        LM loss budget.
+
+        DSLLanguageCortex.forward() stashes the SUM of every ModBlock's
+        router aux loss (nn_ops.mod_router_aux_loss) as
+        `_last_mod_router_aux_loss` — None when block_pattern="standard"
+        (no ModBlocks exist to route). No-op when
+        mod_router_aux_weight <= 0 or the stash is missing/None; the
+        default weight is small-positive (bugfix, not a new feature —
+        see training_config.py's mod_router_aux_weight docstring).
+        """
+        w = float(getattr(self.training_config, "mod_router_aux_weight", 0.0))
+        if w <= 0.0:
+            return total
+        lm = self.language_model
+        if lm is None:
+            return total
+        aux = getattr(lm, "_last_mod_router_aux_loss", None)
+        if aux is None:
+            return total
+        total = total + w * aux
+        with torch.no_grad():
+            self._metrics["mod_router_aux_loss"] = float(aux.detach())
+        return total
+
     def _compute_mspcc_loss(self, base_weight: float):
         """HPB Phase 3 — Multi-Scale Predictive Coding Cascade loss.
 
@@ -3204,6 +3230,8 @@ class BRIANHarness(nn.Module):
                 pc_diff = self._compute_pc_reentry_loss(pc_w)
                 if pc_diff is not None:
                     total = total + pc_diff
+
+            total = self._mod_router_aux_step(total)
 
             # ── HPB Phase 3 — MSPCC trunk cascade (additive) ──
             # When training_config.mspcc is enabled, run a per-layer

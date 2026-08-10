@@ -601,9 +601,21 @@ layer DiffBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv, head_dim) {
 
 _MOD_BLOCK_DSL = '''
 layer ModBlock(D, n_heads, n_kv_heads, max_ctx, H, Dkv, head_dim, R_hidden, capacity) {
-    param router_w1:   (R_hidden, D)   init=zeros
+    # H60: small-random (not zero) init on BOTH router layers. With
+    # router_w2=0 the router's OUTPUT is mathematically forced to 0 for
+    # every token regardless of input (router_w1's value is irrelevant —
+    # a zero final layer kills any upstream dependency), which sits
+    # EXACTLY at the optimum of the mod_router_aux_loss load-balancing
+    # objective (mean_prob=0.5=target, entropy at its own maximum) — a
+    # true zero-gradient fixed point the aux loss can never escape from,
+    # not just at init but at every subsequent step too, since nothing
+    # ever perturbs it. Unlike a residual/adapter path (where zero-init
+    # correctly means "start as identity, earn capacity via gradient"),
+    # a discrete router needs asymmetric variation to have any gradient
+    # signal to bootstrap from at all.
+    param router_w1:   (R_hidden, D)   init=normal(0.02)
     param router_b1:   (R_hidden,)     init=zeros
-    param router_w2:   (1, R_hidden)   init=zeros
+    param router_w2:   (1, R_hidden)   init=normal(0.02)
     param router_b2:   (1,)            init=zeros
     param gamma1:      (D,)            init=ones
     param Wq:          (D, D)          init=xavier
@@ -693,6 +705,11 @@ class DSLLanguageCortex(nn.Module):
         # stochastic_depth * (i+1) / depth. At eval time, always active.
         self.stochastic_depth = stochastic_depth
         self._depth = depth
+        # H60: capacity_ratio for the MoD router load-balancing aux loss.
+        # Stored directly rather than read off a ModBlock instance's
+        # compiled-in constant, since the DSL layer's `capacity` ctor
+        # arg isn't a `param` (no stable attribute to read it back from).
+        self._mod_capacity = float(mod_capacity)
         # Embed + residual dropout for OOD regularization. Applied post-
         # embed and after each block's output so it touches every layer's
         # output without changing the bit-identical-to-Brain DSL block
@@ -945,6 +962,11 @@ class DSLLanguageCortex(nn.Module):
         # is active. With it, PCT forms pairs over only the surviving
         # subsequence, so dropout and predictive coding compose cleanly.
         dropped_mask: List[bool] = []
+        # H60: MoD router load-balancing aux loss, recomputed per ModBlock
+        # from its OWN router_w1/w2 on the block's input — see nn_ops.
+        # mod_router_aux_loss's docstring for why this lives here instead
+        # of inside mod_block()'s return value.
+        mod_router_aux_terms: List[torch.Tensor] = []
         for bi, (blk, adapter) in enumerate(zip(self.blocks, self.adapters)):
             # ── Stochastic depth: skip block with linearly increasing prob ──
             is_dropped = False
@@ -954,6 +976,10 @@ class DSLLanguageCortex(nn.Module):
                     is_dropped = True
 
             if not is_dropped:
+                if type(blk).__name__ == "ModBlock":
+                    mod_router_aux_terms.append(nn_ops.mod_router_aux_loss(
+                        h, blk.router_w1, blk.router_b1,
+                        blk.router_w2, blk.router_b2, self._mod_capacity))
                 h = blk(h)
                 h = adapter(h)
                 h = self.dropout(h)
@@ -1062,6 +1088,13 @@ class DSLLanguageCortex(nn.Module):
         # PR2: expose the exact hidden state used by the LM head projection
         # so the harness regularization controller can consume it.
         self._last_hidden = h_for_head
+        # H60: sum of every ModBlock's router load-balancing aux loss
+        # this forward. None when block_pattern="standard" (no ModBlocks
+        # exist to route). The harness adds
+        # `mod_router_aux_weight * this` to the total loss.
+        self._last_mod_router_aux_loss = (
+            torch.stack(mod_router_aux_terms).sum()
+            if mod_router_aux_terms else None)
         # C3 trunk-loss: stash first/last block outputs so the harness
         # can compute the NT-gated PC-reentry residual inline (gradient
         # flows back through both populations into the trunk). These

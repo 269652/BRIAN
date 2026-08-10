@@ -910,6 +910,16 @@ class TrainingConfig:
     # and weakens under cortical inhibition (GABA up). Other NTs are
     # left agnostic to avoid double-counting with the homeostat.
     pc_reentry_nt_gate: bool = False
+    # H60: MoD router load-balancing aux loss weight. Not a new optional
+    # feature — a bugfix. mod_block's token selection goes through
+    # .topk(), which discards the differentiable score values, so with
+    # this at 0 the router (zero-init) never receives ANY gradient and
+    # stays frozen, silently doing static content-blind routing for the
+    # entire run (confirmed live 2026-08-10 on topology-100m). Default
+    # is small-positive so the mechanism works out of the box whenever
+    # ModBlocks exist (block_pattern="interleave"); 0.0 restores the
+    # broken pre-fix behaviour. No-op when no ModBlocks are present.
+    mod_router_aux_weight: float = 0.01
     # ── Item 6: trainable NT coupling matrix W ────────────────────────
     # When True, the DrivenNTSystem exposes its 7×5 driver→channel
     # coupling matrix as an ``nn.Parameter`` of shape (7, 5). The
@@ -1265,6 +1275,8 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.pc_reentry_weight = float(props["pc_reentry_weight"])
     if "pc_reentry_nt_gate" in props:
         cfg.pc_reentry_nt_gate = _parse_bool(props["pc_reentry_nt_gate"])
+    if "mod_router_aux_weight" in props:
+        cfg.mod_router_aux_weight = float(props["mod_router_aux_weight"])
     # ── Item 6: trainable NT coupling matrix W ──
     if "nt_w_trainable" in props:
         cfg.nt_w_trainable = _parse_bool(props["nt_w_trainable"])

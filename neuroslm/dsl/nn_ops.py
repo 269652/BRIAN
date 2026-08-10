@@ -390,6 +390,38 @@ def predictive_coding_head(h_current: torch.Tensor, h_next: torch.Tensor,
     return cosine_err + 0.1 * l2_err
 
 
+def mod_router_aux_loss(x: torch.Tensor,
+                        router_w1: torch.Tensor, router_b1: torch.Tensor,
+                        router_w2: torch.Tensor, router_b2: torch.Tensor,
+                        capacity_ratio: float = 0.5) -> torch.Tensor:
+    """MoD router load-balancing + entropy loss (H60).
+
+    `mod_block`'s token selection goes through `.topk()`, which keeps
+    only the non-differentiable `indices` and discards the
+    differentiable score `values` — the router gets no gradient from
+    the primary task loss at all. This is the aux loss that actually
+    trains it, computed on the SAME router logits `mod_block` computes
+    (recomputed here from the block's own router_w1/w2, deliberately
+    NOT touching `mod_block`'s return signature so the DSL forward path
+    and its bit-identical-to-reference equivalence test stay untouched).
+
+    Bit-identical formula to modules.mixture_of_depths.MoDBlock.
+    router_aux_loss: mean-matches the average routing probability to
+    `capacity_ratio` (keeps the router's overall gating rate on target)
+    plus an entropy bonus (penalises the router collapsing every
+    token's gate toward a hard 0 or 1, which would make its own
+    training signal vanish).
+    """
+    h = F.silu(F.linear(x, router_w1, router_b1))
+    router_logits = F.linear(h, router_w2, router_b2)         # (B, T, 1)
+    probs = torch.sigmoid(router_logits.squeeze(-1))           # (B, T)
+    mean_prob = probs.mean(dim=-1)                              # (B,)
+    mean_loss = ((mean_prob - capacity_ratio) ** 2).mean()
+    entropy = -(probs * (probs + 1e-8).log()
+                + (1 - probs) * (1 - probs + 1e-8).log()).mean()
+    return mean_loss - 0.01 * entropy
+
+
 def mod_block(x: torch.Tensor,
               # router MLP (2-layer with SiLU)
               router_w1: torch.Tensor, router_b1: torch.Tensor,
