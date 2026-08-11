@@ -3339,6 +3339,9 @@ count to topology-100m (VBB lives on the harness, not the trunk).
 result — deploying and comparing `gap_v2` trajectories against the
 already-running topology-100m arm is the natural next step.
 
+**Update 2026-08-11:** deployed and terminated early — see "arm-2
+result — vbb-100m gap_v2 trajectory, terminated early" below.
+
 [EVIDENCE: tests/dsl/test_vbb_arm.py (12) green]
 
 ### H61 — scales{} seq_len/batch_size silently discarded, every scaled run trained at ctx=256 not the declared value (2026-08-11)
@@ -3399,3 +3402,62 @@ reusing `VastConnector._find_bash()` — the SAME git-bash resolution
 real deploys already use — instead of bare `"bash"`.
 
 [EVIDENCE: tests/test_vast_train_dsl_loop_explore.py (8, incl. new test_scale_variant_value_wins_when_scale_is_set + test_falls_back_to_top_level_default_when_scale_unset) green]
+
+### arm-2 result — vbb-100m gap_v2 trajectory, terminated early (H59 ladder, 2026-08-11)
+
+**Status:** 🟠 Inconclusive but trending bad — terminated by hand before
+reaching a decision-grade checkpoint, not a completed falsification.
+
+**Run.** vast.ai instance `47487812`, A100 SXM4, $0.57/hr. Two boots on
+this instance: the first at `18:38:05Z` (commit `5562c5f`) didn't survive
+to a synced log; the run that actually produced data rebooted at
+`18:53:59Z` (commit `d92d85a`, same `arch_dsl_sha256
+9e391efd9bc0db8ab2f72f2d926b6f348026f62eca6b51dc4ccdfa89874b324e` — identical
+`vbb-100m` content, so nothing about the arch changed between boots). This
+is the first `vbb-100m` run at the corrected `ctx=2048` (post-H61); the
+`topology-100m` comparison trajectory cited below predates H61 and was
+almost certainly run at the buggy `ctx=256`, so the two are not strictly
+apples-to-apples yet.
+
+**Trajectory:**
+
+| step | wikitext ppl | traindist ppl | gap_ratio (v1, wikitext/train_ppl) | gap_v2 (wikitext/traindist) |
+|---|---|---|---|---|
+| 500  | 8639.7 | 6672.9 | 1.54 | 1.29 |
+| 1500 | 4211.3 | 1859.9 | 4.71 | 2.26 |
+
+`gap_ratio` more than tripled and `gap_v2` nearly doubled in 1000 steps.
+`pg19` failed both evals (`RuntimeError: Dataset scripts are no longer
+supported`, a `datasets`-library breaking change unrelated to BRIAN) and
+was skipped per the fail-open eval-v2 design — wikitext/traindist are
+unaffected.
+
+**Cut short, not completed.** Killed by hand at ~step 2500 (last heatmap
+push, `b53d77f`) after the step-1500 read, to stop paying for a
+trajectory that was visibly getting worse. The final log tail-sync before
+termination landed as an empty commit (`014bc1c`) — no mid-ood line
+exists between step 1500 and wherever the run actually stopped, so the
+true final gap is unrecorded. Per the H59 motivating-evidence pattern
+(topology-100m's PR/R² didn't stabilize until ~step 4000-4500), this run
+never reached the point where its numbers would be trustworthy — cutting
+it was reasonable cost discipline, not a completed result.
+
+**Comparison context.** `topology-100m`'s own H60-fix trajectory
+(recorded above, likely at the buggy ctx=256): `gap_v2` 1.30 → 1.76 →
+2.29 → 2.51 → 2.77 through step 4500. VBB's 2.26 at step 1500 sits in the
+same band as topology's ~2.29 at a comparable checkpoint — consistent
+with, not obviously worse than, the already-known pattern that this
+stack's OOD gap widens through training regardless of arm. Whether the
+VBB waist specifically adds anything on top of that baseline pattern is
+still unanswered.
+
+**Follow-up.** `architectures/SmolLM` (arm-3, full stack incl.
+experts+KL-distillation) deployed in parallel, instance `47488818`, to
+see whether the full mechanism stack does better than either
+topology-100m or vbb-100m on the same `gap_v2` metric. No new `vbb-100m`
+deploy planned until arm-3's result is in.
+
+[EVIDENCE: git commit `cbdfead` (logs/20260811/vbb-100m/185359_20_1780.log,
+rotated out of the working tree by a later tail-sync but recoverable via
+`git show cbdfead:logs/20260811/vbb-100m/185359_20_1780.log`); heatmap
+heatmaps/vbb-100m/rcc_bowtie_30m_p4.json step 2500, commit `b53d77f`]
