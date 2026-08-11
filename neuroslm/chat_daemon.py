@@ -735,6 +735,11 @@ def _run_repl(
             elif line == "/render":
                 pass
             else:
+                # Visible liveness: CPU generation can take tens of
+                # seconds — without this line a slow reply reads as a
+                # hang (reported live 2026-08-11).
+                out_stream.write("[generating…]\n")
+                out_stream.flush()
                 reply = daemon.respond(line)
                 # Printed inside the chat pane on next render
                 _ = reply

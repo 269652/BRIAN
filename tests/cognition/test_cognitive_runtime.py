@@ -426,3 +426,62 @@ class TestExpertBackend:
         assert args.expert == "Qwen/Qwen2.5-0.5B"
         args = _build_parser().parse_args(["chat"])
         assert args.expert is None
+
+
+class _FakeHFModelWithGenerate(_FakeHFModel):
+    """HF-shaped model exposing .generate — the KV-cache fast path.
+
+    2026-08-11 incident: the expert backend reused the daemon's naive
+    per-token loop, which re-runs a FULL forward over the growing
+    sequence for every generated token (no KV cache). Tolerable for
+    the small DSL trunk it was written for; on a 360M HF model on CPU
+    a single 96-token reply takes minutes — the user-visible symptom
+    is `brian chat --expert` "hanging" on the first message.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.generate_calls = []
+
+    def generate(self, input_ids=None, **kw):
+        import torch
+        self.generate_calls.append(kw)
+        B, T = input_ids.shape
+        n_new = int(kw.get("max_new_tokens", 4))
+        new = torch.full((B, n_new), 7, dtype=torch.long)
+        return torch.cat([input_ids, new], dim=-1)
+
+
+class TestExpertGenerateUsesKVCache:
+    def _rt(self):
+        from neuroslm.cognition.runtime import build_runtime_from_hf_lm
+        model = _FakeHFModelWithGenerate()
+        rt = build_runtime_from_hf_lm(
+            "fake/expert",
+            model_factory=lambda: model,
+            tokenizer_factory=_FakeHFTokenizer,
+        )
+        return rt, model
+
+    def test_gen_fn_routes_through_model_generate(self):
+        rt, model = self._rt()
+        out = rt._gen("hello world", 4)
+        assert model.generate_calls, (
+            "an HF model exposing .generate must be sampled through it "
+            "(KV cache) — the naive per-token full-forward loop is "
+            "O(T²) full forwards and reads as a hang on CPU")
+        assert model.generate_calls[0].get("use_cache") is True
+        assert model.generate_calls[0].get("max_new_tokens") == 4
+
+    def test_gen_fn_decodes_only_new_tokens(self):
+        rt, model = self._rt()
+        out = rt._gen("hello", 3)
+        # fake generate appends token id 7 three times → decode of [7,7,7]
+        assert out == _FakeHFTokenizer().decode([7, 7, 7])
+
+    def test_model_without_generate_falls_back_to_naive_loop(self):
+        rt = TestExpertBackend()._rt()
+        out = rt._gen("hello", 2)
+        assert isinstance(out, str) and out, (
+            "models without .generate (e.g. bare DSL wrappers) must "
+            "keep working through the daemon's naive seam")

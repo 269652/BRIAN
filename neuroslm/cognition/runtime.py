@@ -426,11 +426,37 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
     wrapper = _HFLMWrapper(model)
     embed_table = model.get_input_embeddings().weight
 
-    from neuroslm.chat_daemon import _build_generate_fn_from_harness
-    from types import SimpleNamespace
-    generate_fn = _build_generate_fn_from_harness(
-        SimpleNamespace(language_model=wrapper), tokenizer,
-        device=device, temperature=temperature, top_k=top_k)
+    if hasattr(model, "generate"):
+        # KV-cache fast path. The daemon's naive seam re-runs a FULL
+        # forward over the growing sequence per generated token —
+        # written for the small DSL trunk, it turns a 360M HF expert
+        # on CPU into minutes-per-reply (user-visible "hang", found
+        # live 2026-08-11). HF's generate() with use_cache=True is the
+        # correct sampler for HF models.
+        eos_id = getattr(tokenizer, "eos_token_id", None)
+
+        @torch.no_grad()
+        def generate_fn(prompt: str, max_new_tokens: int) -> str:
+            ids = tokenizer.encode(prompt) or [0]
+            ids = ids[-(max_ctx - max(1, int(max_new_tokens))):]
+            x = torch.tensor([ids], dtype=torch.long, device=device)
+            out = model.generate(
+                input_ids=x,
+                max_new_tokens=int(max_new_tokens),
+                do_sample=True,
+                temperature=float(max(temperature, 1e-6)),
+                top_k=int(top_k) if top_k else 0,
+                use_cache=True,
+                pad_token_id=eos_id,
+            )
+            new_ids = out[0, x.shape[1]:].tolist()
+            return tokenizer.decode(new_ids)
+    else:
+        from neuroslm.chat_daemon import _build_generate_fn_from_harness
+        from types import SimpleNamespace
+        generate_fn = _build_generate_fn_from_harness(
+            SimpleNamespace(language_model=wrapper), tokenizer,
+            device=device, temperature=temperature, top_k=top_k)
 
     @torch.no_grad()
     def score_fn(text: str) -> ThoughtScore:
