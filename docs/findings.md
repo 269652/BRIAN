@@ -3340,3 +3340,62 @@ result — deploying and comparing `gap_v2` trajectories against the
 already-running topology-100m arm is the natural next step.
 
 [EVIDENCE: tests/dsl/test_vbb_arm.py (12) green]
+
+### H61 — scales{} seq_len/batch_size silently discarded, every scaled run trained at ctx=256 not the declared value (2026-08-11)
+
+**Discovery context.** User asked "what other mechanisms are not
+wired" after the H60 finding; re-checking the vbb-100m boot log while
+answering surfaced `ctx=256` printed at boot, not the `2048` all three
+100m-scale arches (`control-100m`, `topology-100m`, `vbb-100m`)
+declare in their `scales.100m.seq_len` field.
+
+**Root cause.** Two DIFFERENT `seq_len`/`batch_size` fields exist:
+`TrainingConfig.seq_len`/`batch_size` (top-level, defaults 256/4) and
+`ScaleVariant.seq_len`/`batch_size` (nested under `scales.<name>`,
+what every arch's `scales{}` block actually declares — the documented,
+intended way to set per-scale dims). `scripts/vast_train_dsl_loop.sh`'s
+`_arch_default seq_len 1024` / `_arch_default batch_size 4` read the
+TOP-LEVEL field via `getattr(cfg, attr, fallback)` — never the
+scale-variant one. The resolved (wrong) value then gets exported as
+the `SEQ_LEN`/`BATCH` environment variable, which `train_dsl.py`'s own
+scale-override logic treats as an explicit manual override that wins
+over the correct `scales.<SCALE>.seq_len` by design (see
+`_warn_scale_overrides_cli`) — so the bash script's own "resolve a
+sane default" logic was unknowingly using the exact escape hatch meant
+for deliberate human overrides, defeating the scale block every time.
+`batch_size`'s identical bug was invisible because the top-level
+default (4) happened to coincidentally match what every arch declared
+in its scale block — pure luck, not correctness.
+
+**Scope.** Every run logged this session under `control-100m`,
+`topology-100m`, and `vbb-100m` trained at `ctx=256`, not the `2048`
+documented in each arch's own file and comments. Param counts,
+`block_pattern`/topology comparisons, and the H59/H60 findings' cross-
+arm relative comparisons are unaffected (same bug applied uniformly to
+all three arms, at matched steps). Absolute ppl numbers and any
+comparison to a model trained at real ctx=2048 (e.g. GPT-2 at
+ctx=1024) are NOT directly comparable — a 256-token context is a
+meaningfully easier and different task, especially for a
+domain-adjacent long-context benchmark like WikiText-103.
+
+**Fix.** New `_scale_default` helper in `vast_train_dsl_loop.sh`:
+checks `${SCALE:-}` against `cfg.scales.variants` first, preferring
+that variant's own `seq_len`/`batch_size` when present, falling back
+to the old top-level-then-hardcoded resolution otherwise (backward
+compatible with legacy arches that have no `scales{}` block, or when
+no `SCALE` is active — e.g. local/CPU runs). `BATCH`/`SEQ_LEN`
+resolution lines switched from `_arch_default` to `_scale_default`;
+`STEPS` untouched (not a `ScaleVariant` field, no bug there).
+
+Also fixed a pre-existing, unrelated broken test discovered while
+building this fix's behavioral tests: `test_script_has_valid_bash_syntax`
+had been silently red all session in this dev environment — bare
+`"bash"` on Windows PATH resolves to the WSL launcher shim, not
+git-bash, and WSL mangles Windows-style paths passed as arguments
+(confirmed live: a path came through as `C:UsersmorrosslDocuments...`
+with every separator stripped) and reports a `/mnt/c/...` cwd
+incompatible with executing a Windows venv `python.exe`. Fixed by
+reusing `VastConnector._find_bash()` — the SAME git-bash resolution
+real deploys already use — instead of bare `"bash"`.
+
+[EVIDENCE: tests/test_vast_train_dsl_loop_explore.py (8, incl. new test_scale_variant_value_wins_when_scale_is_set + test_falls_back_to_top_level_default_when_scale_unset) green]

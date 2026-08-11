@@ -63,9 +63,40 @@ except Exception:
     print(fallback)
 PY
 }
+# Scale-variant-aware default: prefer scales.<SCALE>.<attr> over the
+# top-level training{} default when a scales{} block is active. Fixes a
+# real bug (2026-08-11): _arch_default alone reads training_config.py's
+# TOP-LEVEL seq_len/batch_size fields (defaults 256/4) — DIFFERENT
+# fields from scales.<SCALE>.seq_len/batch_size, which is where every
+# arch with a scales{} block (the documented, intended way — see
+# architectures/*/arch.neuro) actually declares its real per-scale
+# dims. The wrong top-level value was silently used instead, and the
+# resulting SEQ_LEN/BATCH env vars then overrode train_dsl.py's OWN
+# correct scale-variant fallback too (SEQ_LEN/BATCH env vars win by
+# design — see train_dsl.py::_warn_scale_overrides_cli) — so every
+# scaled arch trained at whatever the top-level default happened to
+# be, silently, regardless of what its scales{} block declared.
+_scale_default() {
+    # Usage: _scale_default <attr> <fallback>
+    python3 - "$_arch_root" "${SCALE:-}" "$1" "$2" <<'PY' 2>/dev/null || echo "$2"
+import sys
+arch_root, scale, attr, fallback = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+try:
+    from neuroslm.dsl.training_config import load_training_config_from_arch
+    cfg = load_training_config_from_arch(arch_root)
+    if scale and scale in cfg.scales.variants:
+        val = getattr(cfg.scales.variants[scale], attr, None)
+        if val:
+            print(val)
+            sys.exit(0)
+    print(getattr(cfg, attr, fallback))
+except Exception:
+    print(fallback)
+PY
+}
 STEPS="${STEPS:-$(_arch_default steps 10000)}"
-BATCH="${BATCH:-$(_arch_default batch_size 4)}"
-SEQ_LEN="${SEQ_LEN:-$(_arch_default seq_len 1024)}"
+BATCH="${BATCH:-$(_scale_default batch_size 4)}"
+SEQ_LEN="${SEQ_LEN:-$(_scale_default seq_len 1024)}"
 D_SEM="${D_SEM:-384}"                   # P4 d_hidden (overridden by PRESET)
 DATA="${DATA:-real}"
 MODE="${MODE:-mix}"
