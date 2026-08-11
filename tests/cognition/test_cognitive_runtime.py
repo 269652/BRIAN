@@ -292,6 +292,55 @@ class TestRealNTIntegration:
         assert 0.0 <= res.phi_proxy <= 1.0
 
 
+# ── Introspection: seeing the inner processes (§14.5) ─────────────────
+# "I want to see the inner processes when talking to it — the action
+# the basal ganglia produces; a line about how many memories recalled
+# by the hippocampus" — one formatted line per tick summarising the
+# whole cognitive cycle's decision, not just its text output.
+
+class TestFormatIntrospection:
+    def _result(self, **kw):
+        from neuroslm.cognition.runtime import TickResult
+        base = dict(
+            thought="a thought", candidates=["a thought", "other"],
+            scores=[], recalled=[{"content": "x"}, {"content": "y"}],
+            stored=True, inhibited=False,
+            nt_levels={"DA": 0.15, "NE": 0.20, "5HT": 0.50, "ACh": 0.30,
+                      "eCB": 0.10, "Glu": 0.45, "GABA": 0.15},
+            phi_proxy=0.42)
+        base.update(kw)
+        return TickResult(**base)
+
+    def test_normal_tick_reports_bg_hc_nt_phi(self):
+        from neuroslm.cognition.runtime import format_introspection
+        s = format_introspection(self._result())
+        assert "Φ=0.42" in s
+        assert "DA=0.15" in s and "GABA=0.15" in s
+        assert "recall=2" in s, "hippocampal recall count must be visible"
+        assert "n=2" in s, "basal-ganglia candidate count must be visible"
+        assert "write=yes" in s
+
+    def test_selected_candidate_index_shown(self):
+        from neuroslm.cognition.runtime import format_introspection
+        s = format_introspection(self._result(
+            thought="other", candidates=["a thought", "other"]))
+        assert "pick=1" in s
+
+    def test_unstored_thought_shows_write_no(self):
+        from neuroslm.cognition.runtime import format_introspection
+        s = format_introspection(self._result(stored=False))
+        assert "write=no" in s
+
+    def test_inhibited_tick_reports_silence_not_bg_hc(self):
+        from neuroslm.cognition.runtime import format_introspection
+        s = format_introspection(self._result(
+            inhibited=True, thought=None, candidates=[], recalled=[],
+            stored=False))
+        assert "inhibit" in s.lower()
+        assert "GABA=0.15" in s, "NT snapshot still shown on silence"
+        assert "recall=" not in s and "n=" not in s
+
+
 # ── Hosting: ChatDaemon runs the mind ────────────────────────────────
 
 class TestChatDaemonHostsTheMind:
@@ -319,6 +368,51 @@ class TestChatDaemonHostsTheMind:
         assert any("BLUE-7" in c for c in contents), (
             "user turns are sensory input — they must reach the "
             "mind's episodic memory")
+
+    def test_think_once_records_last_tick_and_introspect_entry(self):
+        gen = _ScriptedGen(["mind thought"])
+        rt = _mk_runtime(gen)
+        d = self._daemon(rt)
+        d.think_once()
+        assert d.last_tick is not None and d.last_tick.thought == "mind thought"
+        kinds = [e.kind for e in d.memory.recent(8)]
+        assert "introspect" in kinds, (
+            "the inner-state summary (BG/HC/NT/Φ) must land in memory "
+            "alongside the thought, not just the thought text")
+
+    def test_inhibited_tick_still_records_introspection(self):
+        gen = _ScriptedGen(["mind thought"])
+        rt = _mk_runtime(gen, nt=_FakeNT(GABA=0.9))
+        d = self._daemon(rt)
+        out = d.think_once()
+        assert out is None
+        assert d.last_tick is not None and d.last_tick.inhibited is True
+        entries = d.memory.recent(8)
+        assert any(e.kind == "introspect" for e in entries), (
+            "silence is a decision — it must be visible too, not just "
+            "spoken thoughts")
+        assert not any(e.kind == "thought" for e in entries)
+
+    def test_log_stream_receives_introspection_and_thought(self):
+        import io
+        gen = _ScriptedGen(["mind thought"])
+        rt = _mk_runtime(gen)
+        from neuroslm.chat_daemon import ChatDaemon, ChatDaemonConfig
+        buf = io.StringIO()
+        d = ChatDaemon(_ScriptedGen(["reply"]), ChatDaemonConfig(),
+                       use_color=False, mind=rt, log_stream=buf)
+        d.think_once()
+        out = buf.getvalue()
+        assert "mind thought" in out
+        assert "GABA=" in out, (
+            "server-side (no client attached) DMN visibility: the box "
+            "log must show inner state, not just the spoken thought")
+
+    def test_no_log_stream_is_a_silent_no_op(self):
+        gen = _ScriptedGen(["mind thought"])
+        rt = _mk_runtime(gen)
+        d = self._daemon(rt)  # log_stream defaults to None
+        d.think_once()  # must not raise
 
     def test_daemon_without_mind_keeps_legacy_path(self):
         from neuroslm.chat_daemon import ChatDaemon, ChatDaemonConfig
@@ -377,7 +471,7 @@ class _FakeHFTokenizer:
     def encode(self, text):
         return [(ord(c) % 30) + 1 for c in (text or " ")[:16]]
 
-    def decode(self, ids):
+    def decode(self, ids, **kw):
         return "decoded-" + "".join(chr(97 + (i % 26)) for i in ids)
 
 
@@ -485,3 +579,73 @@ class TestExpertGenerateUsesKVCache:
         assert isinstance(out, str) and out, (
             "models without .generate (e.g. bare DSL wrappers) must "
             "keep working through the daemon's naive seam")
+
+
+class _FakeChatTokenizer(_FakeHFTokenizer):
+    """Tokenizer exposing a chat template (instruct-model shape)."""
+    chat_template = "{{ messages }}"  # any truthy value — content unused
+
+    def apply_chat_template(self, messages, add_generation_prompt=True,
+                            tokenize=True):
+        text = messages[-1]["content"]
+        return self.encode(f"<user>{text}<assistant>")
+
+
+class TestGenerationQuality:
+    """2026-08-11 live incident: `brian chat connect` produced a
+    degenerate loop —
+
+        USER: I have the answer.
+        BRIAN: Well, I do.
+        USER: I have the answer.
+        BRIAN: Well, I do.  (repeat)
+
+    Root cause: the base (non-instruct) expert has no learned turn-end
+    token, so unconstrained generation hallucinates the next USER turn
+    and then falls into n-gram repetition. Fix: repetition controls
+    always on, a stop-string safety net for base models specifically,
+    and proper chat-template formatting when the tokenizer has one
+    (instruct models know their own turn-end token and don't need the
+    stop-string hack).
+    """
+
+    def _rt(self, tok_factory):
+        from neuroslm.cognition.runtime import build_runtime_from_hf_lm
+        model = _FakeHFModelWithGenerate()
+        rt = build_runtime_from_hf_lm(
+            "fake/expert", model_factory=lambda: model,
+            tokenizer_factory=tok_factory)
+        return rt, model
+
+    def test_repetition_controls_always_applied(self):
+        rt, model = self._rt(_FakeHFTokenizer)
+        rt._gen("hello", 8)
+        kw = model.generate_calls[-1]
+        assert kw.get("repetition_penalty", 1.0) > 1.0
+        assert kw.get("no_repeat_ngram_size", 0) >= 2
+
+    def test_stop_strings_for_base_models(self):
+        rt, model = self._rt(_FakeHFTokenizer)
+        rt._gen("hello", 8)
+        kw = model.generate_calls[-1]
+        assert "stop_strings" in kw
+        assert any("USER" in s for s in kw["stop_strings"]), (
+            "a base model has no learned turn-end token — without a "
+            "stop string it hallucinates the next USER turn, exactly "
+            "the live degenerate loop reported")
+        assert kw.get("tokenizer") is not None, (
+            "HF stop_strings requires the tokenizer= kwarg on generate()")
+
+    def test_chat_template_used_when_available(self):
+        rt, model = self._rt(_FakeChatTokenizer)
+        rt._gen("hello", 8)
+        kw = model.generate_calls[-1]
+        assert "stop_strings" not in kw, (
+            "instruct models know their own turn-end token via the "
+            "chat template — the crude stop-string safety net is only "
+            "needed for base models")
+
+    def test_chat_template_path_still_decodes_new_tokens_only(self):
+        rt, model = self._rt(_FakeChatTokenizer)
+        out = rt._gen("hello", 3)
+        assert out == _FakeChatTokenizer().decode([7, 7, 7])

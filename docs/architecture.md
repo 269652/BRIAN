@@ -3237,4 +3237,29 @@ bills until `brian destroy <id>`). From the laptop:
 `/quit`). The laptop closing does not stop the mind — the thought
 thread keeps ticking, remembering, and NT-drifting between visits.
 Protocol + localhost-only binding + no-self-destroy are pinned by
-tests/cognition/test_mind_server.py (14 contracts).
+tests/cognition/test_mind_server.py.
+
+**Generation quality** (2026-08-11 live incident): the default
+`--expert` backend is a BASE model with no learned turn-end token —
+unconstrained sampling hallucinated the next `USER:` turn and then
+degenerated into n-gram repetition. Fixed in `build_runtime_from_hf_lm`:
+`repetition_penalty`/`no_repeat_ngram_size` always on; a `stop_strings`
+safety net for base models specifically; `tokenizer.apply_chat_template`
+used when the tokenizer has one (instruct models supply their own
+turn-end token and skip the stop-string hack). New registry aliases —
+`smollm2_360m_instruct`, `qwen2_5_1_5b_instruct`, `qwen2_5_3b_instruct`
+— are the actual fix for coherence; decoding controls alone are a
+partial mitigation on a base model.
+
+**Introspection** (`format_introspection`, §14.5): every tick — spoken
+or silenced — produces one summary line: `Φ=.. NT[DA=.. GABA=..]
+BG[n=<candidates> pick=<index>] HC[recall=<n> write=yes|no]`, or
+`BG[inhibited — silence]` when GABA gated the act. `ChatDaemon` stores
+the full `TickResult` as `.last_tick`, posts the summary as a new
+`"introspect"` memory kind alongside the thought (both visible in the
+`render()` dashboard's "inner state" pane), and — when a `log_stream`
+is attached (always true under `--serve`) — writes both lines
+immediately so the DMN loop is visible in `brian logs <box>` with zero
+clients connected. `MindServer`'s `think`/`status` ops carry the same
+telemetry over the wire (`status` peeks the last tick without forcing
+a new one); `chat connect`'s `/think` and `/status` print it.

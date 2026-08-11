@@ -115,6 +115,34 @@ class TickResult:
     phi_proxy: float = 0.0
 
 
+_NT_ORDER = ("DA", "NE", "5HT", "ACh", "eCB", "Glu", "GABA")
+
+
+def format_introspection(result: TickResult) -> str:
+    """One-line inner-state summary of a tick — the basal-ganglia
+    action, the hippocampal recall/write decision, the NT snapshot,
+    and Φ. Same bracket style (``NT[...]``) the training harness's own
+    log line uses, so the vocabulary is consistent across layers.
+
+    This is the answer to "let me see the inner processes when
+    talking to it": every tick, spoken or silent, gets one of these.
+    """
+    nt = result.nt_levels or {}
+    nt_str = "NT[" + " ".join(
+        f"{k}={float(nt.get(k, 0.0)):.2f}" for k in _NT_ORDER) + "]"
+
+    if result.inhibited:
+        return f"{nt_str} BG[inhibited — silence]"
+
+    n_cand = len(result.candidates)
+    pick = None
+    if result.thought is not None and result.thought in result.candidates:
+        pick = result.candidates.index(result.thought)
+    bg = f"BG[n={n_cand}" + (f" pick={pick}" if pick is not None else "") + "]"
+    hc = f"HC[recall={len(result.recalled)} write={'yes' if result.stored else 'no'}]"
+    return f"Φ={result.phi_proxy:.2f} {nt_str} {bg} {hc}"
+
+
 def selection_temperature(da_level: float, da_baseline: float,
                           cfg: MindConfig) -> float:
     """Basal-ganglia exploration knob: T = T₀ · (1 + g·max(0, DA−DA₀)).
@@ -434,13 +462,24 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
         # live 2026-08-11). HF's generate() with use_cache=True is the
         # correct sampler for HF models.
         eos_id = getattr(tokenizer, "eos_token_id", None)
+        # 2026-08-11 live incident: unconstrained sampling on a BASE
+        # (non-instruct) model hallucinated the next "USER:" turn and
+        # then fell into n-gram repetition ("Well, I do." x5). A base
+        # model has no learned turn-end token, so it never stops on
+        # its own — an instruct model's chat template supplies one.
+        has_chat_template = bool(getattr(tokenizer, "chat_template", None))
 
         @torch.no_grad()
         def generate_fn(prompt: str, max_new_tokens: int) -> str:
-            ids = tokenizer.encode(prompt) or [0]
+            if has_chat_template:
+                ids = list(tokenizer.apply_chat_template(
+                    [{"role": "user", "content": prompt}],
+                    add_generation_prompt=True, tokenize=True))
+            else:
+                ids = list(tokenizer.encode(prompt) or [0])
             ids = ids[-(max_ctx - max(1, int(max_new_tokens))):]
             x = torch.tensor([ids], dtype=torch.long, device=device)
-            out = model.generate(
+            gen_kwargs = dict(
                 input_ids=x,
                 max_new_tokens=int(max_new_tokens),
                 do_sample=True,
@@ -448,9 +487,22 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
                 top_k=int(top_k) if top_k else 0,
                 use_cache=True,
                 pad_token_id=eos_id,
+                # Repetition controls: always on. Cheap, model-agnostic,
+                # and the second half of the fix for the observed loop.
+                repetition_penalty=1.3,
+                no_repeat_ngram_size=3,
             )
+            if not has_chat_template:
+                # Base-model safety net: stop before it hallucinates
+                # the next USER turn instead of burning the whole
+                # token budget on a degenerate continuation. Instruct
+                # models don't need this — their chat template's own
+                # turn-end token already stops generation cleanly.
+                gen_kwargs["stop_strings"] = ["\nUSER:", "\nUser:", "\n\n"]
+                gen_kwargs["tokenizer"] = tokenizer
+            out = model.generate(**gen_kwargs)
             new_ids = out[0, x.shape[1]:].tolist()
-            return tokenizer.decode(new_ids)
+            return tokenizer.decode(new_ids, skip_special_tokens=True)
     else:
         from neuroslm.chat_daemon import _build_generate_fn_from_harness
         from types import SimpleNamespace

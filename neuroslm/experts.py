@@ -128,6 +128,16 @@ _EXPERT_ALIAS_REGISTRY: "dict[str, str]" = {
     "qwen2_5_1_5b": "Qwen/Qwen2.5-1.5B",
     # Microsoft code SLM — the current `code` expert in arch.neuro.
     "codegpt_py":   "microsoft/CodeGPT-small-py",
+    # Instruct-tuned variants — the actual fix for coherent multi-turn
+    # chat (§14.5). A BASE model has no learned turn-end token and
+    # degenerates into hallucinating both conversation sides under
+    # unconstrained sampling (confirmed live 2026-08-11); an instruct
+    # model's chat template supplies one. Prefer these for
+    # `brian chat --expert` over the bare (base) aliases above.
+    "smollm2_360m_instruct":  "HuggingFaceTB/SmolLM2-360M-Instruct",
+    "smollm2_1_7b_instruct":  "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+    "qwen2_5_1_5b_instruct":  "Qwen/Qwen2.5-1.5B-Instruct",
+    "qwen2_5_3b_instruct":    "Qwen/Qwen2.5-3B-Instruct",
 }
 
 

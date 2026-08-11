@@ -107,6 +107,122 @@ class TestMindServer:
             s.stop()
 
 
+class _FakeMind:
+    """Duck-typed mind: canned TickResults, no real CognitiveRuntime
+    machinery needed to test the server/client telemetry plumbing."""
+
+    def __init__(self, results):
+        self._results = list(results)
+        self._i = 0
+
+    def tick(self):
+        r = self._results[min(self._i, len(self._results) - 1)]
+        self._i += 1
+        return r
+
+
+def _tick_result(**kw):
+    from neuroslm.cognition.runtime import TickResult
+    base = dict(
+        thought="a thought", candidates=["a thought"], scores=[],
+        recalled=[{"content": "x"}], stored=True, inhibited=False,
+        nt_levels={"DA": 0.15, "NE": 0.20, "5HT": 0.50, "ACh": 0.30,
+                  "eCB": 0.10, "Glu": 0.45, "GABA": 0.15},
+        phi_proxy=0.40)
+    base.update(kw)
+    return TickResult(**base)
+
+
+def _mk_daemon_with_mind(results):
+    from neuroslm.chat_daemon import ChatDaemon, ChatDaemonConfig
+    mind = _FakeMind(results)
+    return (ChatDaemon(_EchoGen(), ChatDaemonConfig(), use_color=False,
+                       mind=mind),
+            mind)
+
+
+class TestServerTelemetry:
+    """§14.5: a connected client — laptop or `brian logs` — must be
+    able to see WHY a tick did what it did, not just its text."""
+
+    def test_think_response_includes_telemetry_summary(self):
+        from neuroslm.cognition.server import MindServer
+        daemon, _ = _mk_daemon_with_mind([_tick_result()])
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "think"})
+            assert res["ok"] is True
+            tel = res.get("telemetry")
+            assert tel is not None
+            assert "Φ=" in tel["summary"] and "GABA=" in tel["summary"]
+            assert tel["recalled"] == 1
+            assert tel["stored"] is True
+            assert tel["inhibited"] is False
+        finally:
+            s.stop()
+
+    def test_status_peeks_without_forcing_a_new_tick(self):
+        from neuroslm.cognition.server import MindServer
+        daemon, mind = _mk_daemon_with_mind([_tick_result()])
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            before = _rpc(port, {"op": "status"})
+            assert before["ok"] is True and before["telemetry"] is None, (
+                "no tick has happened yet")
+            _rpc(port, {"op": "think"})
+            after = _rpc(port, {"op": "status"})
+            assert after["telemetry"] is not None
+            assert mind._i == 1, "status must not itself trigger a tick"
+        finally:
+            s.stop()
+
+    def test_daemon_without_mind_has_null_telemetry(self, server):
+        _, port = server
+        res = _rpc(port, {"op": "think"})
+        assert res["ok"] is True and res.get("telemetry") is None
+
+
+class TestConnectClientTelemetry:
+    def test_think_command_prints_inner_state(self):
+        import io
+        from neuroslm.cognition.server import MindServer, connect_repl
+        daemon, _ = _mk_daemon_with_mind([_tick_result()])
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            out_stream = io.StringIO()
+            connect_repl("127.0.0.1", port,
+                         in_stream=io.StringIO("/think\n/quit\n"),
+                         out_stream=out_stream)
+            out = out_stream.getvalue()
+            assert "a thought" in out
+            assert "GABA=" in out, (
+                "basal-ganglia/hippocampus/NT telemetry must reach the "
+                "laptop, not just the thought text")
+        finally:
+            s.stop()
+
+    def test_status_command_peeks_last_tick(self):
+        import io
+        from neuroslm.cognition.server import MindServer, connect_repl
+        daemon, _ = _mk_daemon_with_mind([_tick_result()])
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            out_stream = io.StringIO()
+            connect_repl(
+                "127.0.0.1", port,
+                in_stream=io.StringIO("/status\n/think\n/status\n/quit\n"),
+                out_stream=out_stream)
+            out = out_stream.getvalue()
+            assert "no ticks yet" in out.lower() or "none" in out.lower()
+            assert out.count("GABA=") >= 1
+        finally:
+            s.stop()
+
+
 class TestConnectClient:
     def test_client_repl_talks_to_a_live_server(self, server):
         import io

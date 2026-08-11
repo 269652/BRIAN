@@ -30,6 +30,12 @@ The shipped registry must include at minimum:
   * smollm2_135m, smollm2_360m, smollm2_1_7b   (new SmolLM2 family)
   * qwen2_5_0_5b, qwen2_5_1_5b                 (Qwen recommended set)
   * codegpt_py                                 (current code expert)
+  * smollm2_360m_instruct, qwen2_5_1_5b_instruct, qwen2_5_3b_instruct
+    (2026-08-11: --expert defaulted to a BASE model, which has no
+    learned turn-end token and degenerates into hallucinating both
+    sides of the USER:/BRIAN: conversation — reported live. Instruct
+    variants are the actual fix for coherence, decoding tweaks alone
+    are a partial mitigation.)
 
 Integration
 ===========
@@ -101,6 +107,15 @@ class TestResolveExpertAlias:
         from neuroslm.experts import resolve_expert_alias
         assert resolve_expert_alias("codegpt_py") \
             == "microsoft/CodeGPT-small-py"
+
+    def test_instruct_aliases(self):
+        from neuroslm.experts import resolve_expert_alias
+        assert resolve_expert_alias("smollm2_360m_instruct") \
+            == "HuggingFaceTB/SmolLM2-360M-Instruct"
+        assert resolve_expert_alias("qwen2_5_1_5b_instruct") \
+            == "Qwen/Qwen2.5-1.5B-Instruct"
+        assert resolve_expert_alias("qwen2_5_3b_instruct") \
+            == "Qwen/Qwen2.5-3B-Instruct"
 
     def test_unknown_bare_alias_raises_with_hint(self):
         from neuroslm.experts import resolve_expert_alias

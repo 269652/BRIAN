@@ -232,6 +232,10 @@ class ChatDaemonConfig:
     """How many recent chat turns the dashboard shows."""
 
     thoughts_visible: int = 6
+
+    introspect_visible: int = 6
+    """§14.5: how many recent inner-state summary lines (basal-ganglia
+    pick / hippocampal recall / NT / Φ) the dashboard shows."""
     """How many recent thoughts the dashboard shows."""
 
     memory_visible: int = 6
@@ -282,6 +286,7 @@ class ChatDaemon:
             label: str = "BRIAN",
             use_color: bool = True,
             mind: Optional[Any] = None,
+            log_stream: Optional[Any] = None,
     ) -> None:
         self._gen = generate_fn
         self.cfg = cfg or ChatDaemonConfig()
@@ -293,6 +298,14 @@ class ChatDaemon:
         # (recall → NT-gated selection → surprise-gated memory) instead
         # of the legacy seed-continuation thoughts.
         self._mind = mind
+        # §14.5: the full TickResult from the last cognitive cycle
+        # (telemetry — basal-ganglia pick, hippocampal recall/write,
+        # NT snapshot, Φ), and an optional stream that gets a live line
+        # per tick regardless of whether a client is connected — this
+        # is what makes the DMN loop visible in `brian logs <box>` on
+        # an always-on server with nobody watching.
+        self.last_tick: Optional[Any] = None
+        self._log_stream = log_stream
         self.memory = _MemoryRing(maxlen=self.cfg.memory_size)
         self._inference_lock = threading.Lock()
         self._stop = threading.Event()
@@ -324,6 +337,14 @@ class ChatDaemon:
         """Append an idle thought."""
         if text:
             self.memory.add("thought", text.strip())
+
+    def post_introspect(self, text: str) -> None:
+        """Append an inner-state summary line (§14.5: basal-ganglia
+        action, hippocampal recall/write, NT snapshot, Φ) — the
+        machine-readable trace of WHY a tick did what it did, distinct
+        from the thought text itself."""
+        if text:
+            self.memory.add("introspect", text.strip())
 
     def post_system(self, text: str) -> None:
         """Append a system message (boot stamp, ckpt resume, etc)."""
@@ -358,9 +379,20 @@ class ChatDaemon:
                 # §14 cognitive cycle: recall → think → NT-gate → store.
                 # An inhibited tick (high GABA) legitimately returns no
                 # thought — silence is a decision, not an error.
+                from neuroslm.cognition.runtime import format_introspection
                 result = self._mind.tick()
+                self.last_tick = result
+                intro = format_introspection(result)
+                self.post_introspect(intro)
                 if result.thought:
                     self.post_thought(result.thought)
+                if self._log_stream is not None:
+                    ts = time.strftime("%H:%M:%S")
+                    self._log_stream.write(f"[{ts}] {intro}\n")
+                    if result.thought:
+                        self._log_stream.write(
+                            f"[{ts}] \U0001f4ad {result.thought}\n")
+                    self._log_stream.flush()
                 return result.thought
             seed = self._next_thought_seed()
             recent = self.memory.recent(8)
@@ -447,6 +479,9 @@ class ChatDaemon:
         thoughts = self.memory.recent(
             self.cfg.thoughts_visible * 2, kinds=("thought",)
         )[-self.cfg.thoughts_visible:]
+        introspection = self.memory.recent(
+            self.cfg.introspect_visible * 2, kinds=("introspect",)
+        )[-self.cfg.introspect_visible:]
         chat = self.memory.recent(
             self.cfg.chat_visible * 2, kinds=("user", "reply")
         )[-self.cfg.chat_visible:]
@@ -461,16 +496,18 @@ class ChatDaemon:
             if len(content) > max_len:
                 content = content[:max_len - 1] + "…"
             tag = {
-                "user":    "USER  ",
-                "reply":   "BRIAN ",
-                "thought": "💭    ",
-                "system":  "SYS   ",
+                "user":       "USER  ",
+                "reply":      "BRIAN ",
+                "thought":    "💭    ",
+                "system":     "SYS   ",
+                "introspect": "🧠    ",
             }.get(e.kind, "?     ")
             colour = {
-                "user":    ANSI_CYAN,
-                "reply":   ANSI_GREEN,
-                "thought": ANSI_YELLOW,
-                "system":  ANSI_DIM,
+                "user":       ANSI_CYAN,
+                "reply":      ANSI_GREEN,
+                "thought":    ANSI_YELLOW,
+                "system":     ANSI_DIM,
+                "introspect": ANSI_MAGENTA,
             }.get(e.kind, "")
             line = f"  [{ts}] {tag} {content}"
             return _ansi(line, colour) if col and colour else line
@@ -491,6 +528,13 @@ class ChatDaemon:
         if not thoughts:
             out.append("  (waiting for idle window …)")
         for e in thoughts:
+            out.append(episode_line(e))
+        out.append("")
+        out.append(header("inner state", ANSI_MAGENTA))
+        if not introspection:
+            out.append("  (no ticks yet — basal-ganglia/hippocampus "
+                       "telemetry appears here per tick)")
+        for e in introspection:
             out.append(episode_line(e))
         out.append("")
         out.append(header("chat", ANSI_CYAN))
@@ -679,6 +723,11 @@ def _run_server(daemon: ChatDaemon, port: int, *,
     interrupted. The thought thread (if started) keeps the mind
     thinking between client turns — the always-on part."""
     from neuroslm.cognition.server import MindServer
+    # §14.5: with nobody connected, the DMN loop is otherwise invisible
+    # — route every tick's introspection + thought onto the server's
+    # own stdout so `brian logs <box>` shows the continuous inner
+    # monologue even with zero clients attached.
+    daemon._log_stream = out_stream
     server = MindServer(daemon, host="127.0.0.1", port=port)
     bound = server.start()
     out_stream.write(

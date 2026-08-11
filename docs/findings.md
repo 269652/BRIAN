@@ -3615,3 +3615,31 @@ onstart contains a restart loop and no destroy call; the server never
 binds a public interface.
 
 [EVIDENCE: tests/cognition/test_mind_server.py (14) green; tests/cognition/test_cognitive_runtime.py (27) green]
+
+**Same-day addendum 3 — generation coherence + full introspection.**
+Live report against the deployed A100 mind box: replies degenerated
+into a `USER:/BRIAN:` hallucination loop ("Well, I do." x5). Root
+cause: the default `--expert` backend (`smollm2_360m`) is a BASE
+model with no learned turn-end token, so unconstrained sampling
+never stops on its own. Fix in `build_runtime_from_hf_lm`:
+`repetition_penalty`/`no_repeat_ngram_size` always applied;
+`stop_strings=["\nUSER:", ...]` safety net for base models only;
+`tokenizer.apply_chat_template` used when available (instruct models
+supply their own turn-end token, skipping the stop-string hack).
+Registered `smollm2_360m_instruct`/`qwen2_5_1_5b_instruct`/
+`qwen2_5_3b_instruct` aliases — the actual fix for coherence is
+switching models, decoding controls are a partial mitigation.
+
+Separately: "I want to see the inner processes — the basal ganglia
+action, how many memories hippocampus recalled" — `format_introspection`
+turns every `TickResult` into one line (`Φ=.. NT[..] BG[n=.. pick=..]
+HC[recall=.. write=..]`, or `BG[inhibited — silence]`). Wired end to
+end: `ChatDaemon.last_tick` + a new `"introspect"` memory kind + an
+"inner state" dashboard pane; an optional `log_stream` (always set
+under `--serve`) prints every tick to the box's own log so the DMN
+loop is visible via `brian logs <box>` with zero clients connected;
+`MindServer`'s `think`/`status` ops carry the same telemetry over the
+wire (`status` peeks without forcing a tick); `chat connect`'s
+`/think`/`/status` print it.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py (39) green; tests/cognition/test_mind_server.py (23) green; tests/training/test_expert_alias_registry.py green]

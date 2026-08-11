@@ -90,6 +90,26 @@ class MindServer:
             self._thread = None
 
 
+def _tick_telemetry(daemon: Any) -> Optional[dict]:
+    """§14.5: the inner-state summary of the daemon's last cognitive
+    tick — basal-ganglia pick, hippocampal recall/write, NT snapshot,
+    Φ. ``None`` when no mind is attached or no tick has happened yet
+    (peekable via the ``status`` op without forcing a new tick)."""
+    t = getattr(daemon, "last_tick", None)
+    if t is None:
+        return None
+    from neuroslm.cognition.runtime import format_introspection
+    return {
+        "summary": format_introspection(t),
+        "nt_levels": t.nt_levels,
+        "phi_proxy": t.phi_proxy,
+        "recalled": len(t.recalled),
+        "candidates": len(t.candidates),
+        "stored": t.stored,
+        "inhibited": t.inhibited,
+    }
+
+
 def _dispatch(daemon: Any, msg: dict) -> dict:
     op = msg.get("op")
     if op == "ping":
@@ -97,7 +117,13 @@ def _dispatch(daemon: Any, msg: dict) -> dict:
     if op == "say":
         return {"ok": True, "reply": daemon.respond(str(msg.get("text", "")))}
     if op == "think":
-        return {"ok": True, "thought": daemon.think_once()}
+        thought = daemon.think_once()
+        return {"ok": True, "thought": thought,
+                "telemetry": _tick_telemetry(daemon)}
+    if op == "status":
+        # Peek only — must NOT trigger a tick (a client checking in
+        # should never itself cause the mind to think or go silent).
+        return {"ok": True, "telemetry": _tick_telemetry(daemon)}
     if op == "render":
         return {"ok": True, "render": daemon.render()}
     return {"ok": False, "error": f"unknown op {op!r}"}
@@ -141,7 +167,7 @@ def connect_repl(host: str = "127.0.0.1", port: int = DEFAULT_PORT,
             out_stream.write(f"[connect] ✗ bad handshake: {hello}\n")
             return 1
         out_stream.write(f"[connect] mind online @ {host}:{port} — "
-                         f"/think /render /quit\n> ")
+                         f"/think /status /render /quit\n> ")
         out_stream.flush()
         while True:
             line = in_stream.readline()
@@ -157,6 +183,15 @@ def connect_repl(host: str = "127.0.0.1", port: int = DEFAULT_PORT,
             if line == "/think":
                 res = _rpc({"op": "think"})
                 out_stream.write(f"[thought] {res.get('thought')}\n")
+                tel = res.get("telemetry")
+                if tel:
+                    out_stream.write(f"  {tel['summary']}\n")
+            elif line == "/status":
+                res = _rpc({"op": "status"})
+                tel = res.get("telemetry")
+                out_stream.write(
+                    f"  {tel['summary']}\n" if tel
+                    else "  (no ticks yet)\n")
             elif line == "/render":
                 res = _rpc({"op": "render"})
                 out_stream.write(str(res.get("render", "")) + "\n")
