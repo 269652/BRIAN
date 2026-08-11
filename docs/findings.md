@@ -3504,3 +3504,47 @@ assist, cognition gated) as the doctrine's first A/B against
 control-100m; (3) Layer-A eval battery for the cognition layer.
 
 [EVIDENCE: tests/test_trunk_pretrain_doctrine.py (10) green; run 47492217 (control-100m, ctx=2048) logs/20260811/control-100m/201032_20_600.log; run 47488818 (SmolLM) logs/20260811/SmolLM/191415_20_500.log + brian ps step-1000 OOD readout]
+
+### GPT-2 baseline measured — gap_v2 ≈ 2.26 is the HEALTHY asymptote, not a failure signal (2026-08-11)
+
+Follow-ups (1) and (2) above landed same-day (`brian ood baseline` +
+`architectures/trunk-100m`, commit `fb4c21e`). The measurement:
+
+**GPT-2 (124M, HF `gpt2`) through the identical eval-v2 machinery**
+(same gpt2 tokenizer, same wikitext/pg19/traindist corpora, same
+sliding truncation + NLL aggregation, cap=50 seq/corpus, at its native
+ctx=1024):
+
+| corpus | ppl |
+|---|---|
+| wikitext | **56.7** |
+| pg19 | **28.1** |
+| traindist (FineWeb-Edu held-out) | **25.1** |
+| **gap_v2 (wikitext/traindist)** | **2.26** |
+
+**The calibration insight.** A fully-converged, well-generalizing
+reference model scores gap_v2 = 2.26 under our protocol — wikitext is
+simply ~2.3× harder than FineWeb-Edu-style text per token at this
+scale. The 2.2–2.8 band our arms "degrade toward" (topology-100m
+1.30→2.77 in H59; vbb-100m 1.29→2.26) is therefore substantially a
+DOMAIN-DIFFICULTY RATIO, not runaway memorization: early readings near
+1.3 look good only because both numerator and denominator are
+near-random. Retroactive reinterpretations: (a) vbb-100m's 2.26 at step
+1500 sat exactly ON the healthy asymptote when it was killed; (b) the
+monotone gap_v2 rise H59 flagged is expected as traindist (in-domain)
+improves faster than wikitext; (c) what remains genuinely pathological
+is ABSOLUTE OOD divergence — SmolLM's wikitext 11508→25320 — and v1
+gap_ratio blowups, not gap_v2 → 2.3. `gap_v2 >> 2.3` at converged train
+ppl remains a real memorization signal.
+
+**Parity targets for the §14 trunk criterion** (what a trunk must reach
+under OUR evaluator): wikitext ≤ 56.7, pg19 ≤ 28.1, traindist ≤ 25.1.
+Best current trunk (control-100m, step 1000, ~0.07B tokens seen):
+wikitext 4564 — the ~80× distance is the token-budget gap (GPT-2 saw
+~3 orders of magnitude more data), consistent with the ~5-10B-token
+(~75-150k step) estimate for parity. Caveats recorded in the JSON:
+baseline ran at its native ctx=1024 vs our trunks' 2048, and traindist
+is in-distribution for our trunks but off-domain (easy web text) for
+GPT-2 — the gap_v2 comparison is indicative, not exact.
+
+[EVIDENCE: logs/vast/benchmarks/ood/baseline_gpt2.json (protocol v2, eval_surface=baseline_hf); tests/test_ood_baseline.py (6) green]
