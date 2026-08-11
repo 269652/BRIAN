@@ -281,11 +281,18 @@ class ChatDaemon:
             *,
             label: str = "BRIAN",
             use_color: bool = True,
+            mind: Optional[Any] = None,
     ) -> None:
         self._gen = generate_fn
         self.cfg = cfg or ChatDaemonConfig()
         self.label = label
         self._use_color = use_color
+        # Two-layer doctrine (§14): when a CognitiveRuntime is attached,
+        # the daemon becomes its always-on host — user turns feed the
+        # mind's sensory queue and idle ticks run full cognitive cycles
+        # (recall → NT-gated selection → surprise-gated memory) instead
+        # of the legacy seed-continuation thoughts.
+        self._mind = mind
         self.memory = _MemoryRing(maxlen=self.cfg.memory_size)
         self._inference_lock = threading.Lock()
         self._stop = threading.Event()
@@ -298,12 +305,15 @@ class ChatDaemon:
     # ── State updates ───────────────────────────────────────────────
 
     def post_user(self, text: str) -> None:
-        """Append a user turn to memory + tick the idle clock."""
+        """Append a user turn to memory + tick the idle clock. With a
+        mind attached, the turn is also sensory input (§14)."""
         text = text.strip()
         if not text:
             return
         self.memory.add("user", text)
         self._last_user_input_ts = time.time()
+        if self._mind is not None:
+            self._mind.observe(text, source="user")
 
     def post_reply(self, text: str) -> None:
         """Append the model's user-turn reply."""
@@ -344,6 +354,14 @@ class ChatDaemon:
             return None
         try:
             self._is_thinking = True
+            if self._mind is not None:
+                # §14 cognitive cycle: recall → think → NT-gate → store.
+                # An inhibited tick (high GABA) legitimately returns no
+                # thought — silence is a decision, not an error.
+                result = self._mind.tick()
+                if result.thought:
+                    self.post_thought(result.thought)
+                return result.thought
             seed = self._next_thought_seed()
             recent = self.memory.recent(8)
             anchor = recent[-1].content if recent else ""
@@ -500,6 +518,7 @@ def run_chat_daemon(
         idle_threshold: float = 6.0,
         no_color: bool = False,
         no_thoughts: bool = False,
+        mind: bool = False,
         out_stream=sys.stdout,
         in_stream=sys.stdin,
 ) -> int:
@@ -570,6 +589,14 @@ def run_chat_daemon(
 
     gen_fn = _build_generate_fn_from_harness(
         harness, tok, device=device, temperature=temperature, top_k=top_k)
+    runtime = None
+    if mind:
+        # §14: attach the cognition layer — episodic recall, NT-gated
+        # selection, surprise-gated memory — around the same trunk.
+        from neuroslm.cognition.runtime import build_runtime_from_harness
+        runtime = build_runtime_from_harness(harness, tok, device=device,
+                                             temperature=temperature,
+                                             top_k=top_k)
     daemon = ChatDaemon(
         gen_fn,
         ChatDaemonConfig(
@@ -579,6 +606,7 @@ def run_chat_daemon(
             idle_threshold=idle_threshold,
         ),
         use_color=(not no_color) and out_stream.isatty(),
+        mind=runtime,
     )
     daemon.post_system(
         f"booted from {os.path.basename(ckpt_path)} @ step {step}"

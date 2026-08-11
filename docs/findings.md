@@ -3548,3 +3548,40 @@ is in-distribution for our trunks but off-domain (easy web text) for
 GPT-2 — the gap_v2 comparison is indicative, not exact.
 
 [EVIDENCE: logs/vast/benchmarks/ood/baseline_gpt2.json (protocol v2, eval_surface=baseline_hf); tests/test_ood_baseline.py (6) green]
+
+### Cognition runtime landed — the doctrine's Layer-A half now exists (2026-08-11)
+
+Follow-up (3) of the doctrine entry delivered: `neuroslm/cognition/`
+(`CognitiveRuntime` + `MindConfig` + `build_runtime_from_harness`),
+hosted by `ChatDaemon` via **`brian chat --mind`**. One tick =
+SENSE (sensory queue; percepts always stored, drive NT activation) →
+RECALL (`EpisodicMemory.retrieve`, new cosine-similarity read over
+stored content vectors) → THINK (trunk generates K candidates from
+persona + recall + context) → GATE (basal ganglia: softmax(−NLL/T)
+with T = T₀·(1+g·max(0, DA−DA₀)); GABA ≥ threshold inhibits the act
+outright — silence, zero generation compute) → STORE (surprise gate on
+trunk-NLL vs running EMA) → DRIVE (`DrivenNTSystem.step_full` carries
+NT state across ticks). Reuse per §1b: the daemon's generate seam, the
+real `DrivenNTSystem`, and the existing `EpisodicMemory` (extended
+in-place with `retrieve`) — no parallel reimplementations. The Φ proxy
+reported per tick uses the harness's exact runtime formula
+(softmax-entropy / ln V), so training and cognition publish one
+quantity.
+
+**Layer-A battery** (first slice, 20 contracts, all green, CPU-only
+with deterministic fakes + the real NT/memory classes): episodic
+recall (a fact observed at tick t enters the thinking prompt when
+related input arrives later); DA-manipulation measurably shifts
+selection off greedy while baseline DA stays greedy; high GABA yields
+silence with `generate` never called; repetitive thoughts stop being
+written to memory while novel (high-|z| NLL) ones resume; daemon
+hosting preserves the legacy no-mind path bit-for-bit.
+
+**Not yet done** (honest boundary): no non-text sensory channels, no
+consolidation/sleep pass over the episodic store, no long-session
+coherence metric, and no run of the runtime against a REAL trained
+checkpoint yet (`build_runtime_from_harness` is wired and typed but
+its first live session awaits a trunk worth thinking with — the
+trunk-100m run currently training). These are the next Layer-A rungs.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py (20) green; tests/test_chat_daemon.py (34) green unregressed]

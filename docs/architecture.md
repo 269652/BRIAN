@@ -3180,3 +3180,35 @@ not a "mechanisms falsified" verdict — it is a layer-separation bug the
 flag closes: the cognition layer was never supposed to be judged by
 next-token ppl, and the trunk was never supposed to carry cognition
 gradients while learning language.
+
+### 14.5 The cognition runtime (`neuroslm/cognition/`, 2026-08-11)
+
+The runtime half of the doctrine. ``CognitiveRuntime`` (hosted by
+``ChatDaemon`` via ``brian chat --mind``) runs the always-on cognitive
+cycle around a trained trunk — one ``tick()`` per idle period:
+
+| Stage | Analog | Mechanism |
+|---|---|---|
+| SENSE | sensory cortex | drain the sensory queue (user turns via `observe()`); percepts always stored + drive the NT activation channel |
+| RECALL | hippocampus (read) | `EpisodicMemory.retrieve` — cosine similarity over stored `content_vec`s; recalled episodes enter the thinking prompt |
+| THINK | language cortex | the trunk generates K candidate thoughts from persona (PFC goal header) + recall + recent context |
+| GATE | basal ganglia | softmax(−NLL/T) selection over candidates; `T = T₀·(1+g·max(0, DA−DA₀))` — dopaminergic exploration; GABA ≥ threshold inhibits the whole act (silence, zero generation compute) |
+| STORE | hippocampus (write) | surprise gate: store when the thought's trunk-NLL sits ≥ z from the running EMA — repetitive thoughts stop being written, novel ones resume |
+| DRIVE | neuromodulation | `DrivenNTSystem.step_full(loss=NLL, activation=1−H̄)` — the tick's signals integrate into NT state that carries across ticks |
+
+Production wiring (`build_runtime_from_harness`): THINK reuses the
+daemon's generate seam; scoring is one trunk forward per candidate
+(mean shifted CE + mean softmax-entropy/ln V — the SAME formula the
+training harness publishes as its runtime Φ proxy, so both layers
+report one quantity); embeddings are means of the trunk's own
+token-embedding rows. Everything is dependency-injected — the Layer-A
+battery runs the full loop with deterministic fakes on CPU.
+
+**Layer-A battery** (`tests/cognition/test_cognitive_runtime.py`, 20
+contracts): episodic recall shapes future thinking; DA measurably
+shifts selection off greedy (and temperature is monotone in DA); high
+GABA produces silence with zero generation compute; repetitive
+thoughts stop being stored while novel ones are; the real
+`DrivenNTSystem` integrates tick signals; the daemon hosts the mind
+without breaking its legacy path. This battery — not perplexity — is
+how the cognition layer is judged, per §14.1.

@@ -29,3 +29,29 @@ class EpisodicMemory:
     def all(self):
         with self.lock:
             return list(self.buffer)
+
+    def retrieve(self, query_vec, k=4):
+        """Similarity read (hippocampal recall): top-k episodes by
+        cosine similarity between ``query_vec`` and each stored
+        ``content_vec``. Episodes without a vector are skipped —
+        they were stored before the embedding path existed and cannot
+        participate in similarity recall. Pure-python math so the
+        memory stays importable without numpy/torch.
+        """
+        def _cos(a, b):
+            if len(a) != len(b):
+                return -1.0
+            dot = sum(x * y for x, y in zip(a, b))
+            na = sum(x * x for x in a) ** 0.5
+            nb = sum(x * x for x in b) ** 0.5
+            if na == 0.0 or nb == 0.0:
+                return -1.0
+            return dot / (na * nb)
+
+        q = list(query_vec)
+        with self.lock:
+            episodes = [e for e in self.buffer
+                        if e.get("content_vec") is not None]
+        scored = [(_cos(q, list(e["content_vec"])), e) for e in episodes]
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [e for _, e in scored[:max(0, int(k))]]

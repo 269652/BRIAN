@@ -519,6 +519,16 @@ step 1000 the entangled full stack's wikitext ppl diverged 11508→25320
 (steps 500→1000) while the vanilla control's fell 8607→4564. Pinned by
 `tests/test_trunk_pretrain_doctrine.py` (10 contracts).
 
+The runtime half landed the same day: `neuroslm/cognition/`
+(`CognitiveRuntime`, hosted by `brian chat --mind`) runs the always-on
+SENSE→RECALL→THINK→GATE→STORE→DRIVE cycle around a trained trunk —
+hippocampal cosine retrieval over `EpisodicMemory`, DA-tempered
+basal-ganglia selection over K candidate thoughts, GABA inhibition
+(silence), surprise-gated episodic writes, and `DrivenNTSystem`
+integration across ticks. Judged by the Layer-A battery
+(`tests/cognition/`, 20 contracts), never by perplexity
+(architecture.md §14.5).
+
 ---
 
 ## 5. Current Model State: 30M P4 Preset

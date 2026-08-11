@@ -4164,6 +4164,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
         idle_threshold=args.idle_threshold,
         no_color=bool(args.no_color),
         no_thoughts=bool(args.no_thoughts),
+        mind=bool(getattr(args, "mind", False)),
     )
 
 
@@ -6172,6 +6173,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to the architecture folder (containing arch.neuro). "
              "Default: auto-detect from checkpoint dir, then "
              "architectures/SmolLM.")
+    sc_chat.add_argument(
+        "--mind", action="store_true",
+        help="Attach the §14 cognition layer: idle ticks become full "
+             "cognitive cycles (episodic recall, NT-gated selection, "
+             "surprise-gated memory) instead of seed-continuations.")
     sc_chat.add_argument(
         "--device", default="cpu", choices=["cpu", "cuda"],
         help="Inference device (default cpu — the daemon is built for "
