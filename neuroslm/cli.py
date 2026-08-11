@@ -3068,6 +3068,41 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 # ── ood ────────────────────────────────────────────────────────────────
 
+def cmd_ood_baseline(args: argparse.Namespace) -> int:
+    """`brian ood baseline [--model gpt2]` — evaluate a HF causal LM
+    through the SAME eval-v2 machinery the trunks are measured with
+    (architecture.md §14: the trunk's target is "≥ GPT-2-124M under the
+    SAME protocol", so the target must be a number produced by OUR
+    evaluator, not quoted from papers). Writes a protocol-v2 JSON that
+    `brian ood compare` can gate trunk-vs-baseline claims against.
+    """
+    import json as _json
+    from neuroslm.train_dsl import run_baseline_eval
+
+    model_id = args.model
+    print(f"[ood-baseline] evaluating {model_id!r} through eval-v2 "
+          f"(cap={args.cap} seq/corpus)...", flush=True)
+    result = run_baseline_eval(model_id=model_id, cap=args.cap)
+
+    parts = [f"[ood-baseline] {model_id}:"]
+    for name in ("wikitext", "pg19", "traindist"):
+        res = result["corpora"].get(name)
+        if res:
+            parts.append(f"{name} ppl={res['ppl']:.1f}")
+    if result["gap_ratio_v2"] is not None:
+        parts.append(f"gap_v2={result['gap_ratio_v2']:.2f}")
+    parts.append(f"(ctx={result['ctx']})")
+    print(" ".join(parts), flush=True)
+
+    out_path = Path(args.output) if args.output else (
+        Path("logs/vast/benchmarks/ood")
+        / f"baseline_{model_id.replace('/', '_')}.json")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(_json.dumps(result, indent=2), encoding="utf-8")
+    print(f"[ood-baseline] wrote {out_path}", flush=True)
+    return 0
+
+
 def cmd_ood_compare(args: argparse.Namespace) -> int:
     """`brian ood compare BEFORE.json AFTER.json` — Welch's-t gate
     between two eval-protocol-v2 result JSONs (H59).
@@ -5869,6 +5904,19 @@ def _build_parser() -> argparse.ArgumentParser:
                          default=0.01,
                          help="minimum relative effect size")
     eso_cmp.set_defaults(func=cmd_ood_compare)
+    eso_base = eso.add_parser(
+        "baseline",
+        help="Evaluate a HF causal LM (default gpt2) through the SAME "
+             "eval-v2 protocol — the trunk's parity target (§14)")
+    eso_base.add_argument("--model", default="gpt2",
+                          help="HF model id (default: gpt2, 124M)")
+    eso_base.add_argument("--cap", type=int, default=50,
+                          help="max sequences per corpus (default 50, "
+                               "matches the mid-ood cadence)")
+    eso_base.add_argument("--output",
+                          help="output JSON path (default: logs/vast/"
+                               "benchmarks/ood/baseline_<model>.json)")
+    eso_base.set_defaults(func=cmd_ood_baseline)
 
     # ai (group: `brian ai <skill>` — every dir under agents/skills/
     # with an INSTRUCTIONS.md becomes a subcommand automatically.)

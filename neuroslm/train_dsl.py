@@ -1450,6 +1450,71 @@ def _ood_eval_logits(harness, ids):
     return harness(ids)
 
 
+def run_baseline_eval(model_id: str = "gpt2", cap: int = 50,
+                      model_factory=None) -> dict:
+    """Run a HF causal-LM baseline through the SAME eval-v2 machinery.
+
+    The two-layer doctrine (architecture.md §14) sets the trunk's success
+    criterion at "≥ GPT-2-124M under the SAME eval-v2 protocol". Published
+    GPT-2 numbers use different tokenization/eval conventions and cannot
+    anchor that claim — this runs the baseline model through the identical
+    `_eval_all_corpora` path (same tokenizer, corpora, sliding truncation,
+    NLL aggregation) our trunks are measured with, so `brian ood compare`
+    can gate trunk-vs-baseline claims statistically.
+
+    `model_factory` (tests): zero-arg callable returning an ids→logits
+    ``nn.Module`` — bypasses the HF Hub entirely. The default path loads
+    ``AutoModelForCausalLM.from_pretrained(model_id)`` and evaluates at
+    the model's OWN native context limit (honest per-model capability;
+    recorded in the result as ``ctx``).
+    """
+    import torch.nn as nn
+
+    class _BaselineHarness(nn.Module):
+        def __init__(self, lm):
+            super().__init__()
+            self.language_model = lm
+
+    if model_factory is not None:
+        lm = model_factory()
+    else:
+        from transformers import AutoModelForCausalLM
+
+        class _HFWrapper(nn.Module):
+            def __init__(self, mid: str):
+                super().__init__()
+                self.model = AutoModelForCausalLM.from_pretrained(mid)
+                self.model.eval()
+                cfg = self.model.config
+                self.max_ctx = int(
+                    getattr(cfg, "n_positions", None)
+                    or getattr(cfg, "max_position_embeddings", 1024))
+
+            def forward(self, ids):
+                return self.model(input_ids=ids).logits
+
+        lm = _HFWrapper(model_id)
+
+    harness = _BaselineHarness(lm)
+    corpora = _eval_all_corpora(harness, cap=cap)
+    wik = corpora.get("wikitext")
+    tr = corpora.get("traindist")
+    pg = corpora.get("pg19")
+    gap_v2 = (wik["ppl"] / tr["ppl"]) if (wik and tr and tr["ppl"] > 0) \
+        else None
+    return {
+        "model_id": model_id,
+        "protocol": "v2",
+        "eval_surface": "baseline_hf",
+        "ctx": int(getattr(lm, "max_ctx", 1024) or 1024),
+        "corpora": corpora,
+        "wikitext_ppl": wik["ppl"] if wik else None,
+        "traindist_ppl": tr["ppl"] if tr else None,
+        "pg19_ppl": pg["ppl"] if pg else None,
+        "gap_ratio_v2": gap_v2,
+    }
+
+
 def _mid_ood_eval(harness: BRIANHarness, step: int,
                    ckpt_dir: Optional[Path],
                    observer,

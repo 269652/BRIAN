@@ -1,0 +1,36 @@
+# -*- coding: utf-8 -*-
+# config.neuro — deployment manifest for the trunk-100m arch (§14).
+#
+# IDENTICAL to architectures/control-100m/config.neuro (which mirrors
+# SmolLM's) on data + tokenizer + checkpoint backend: the distill-assist
+# arm must see the same token stream as its control comparator and push
+# artifacts the same way, or the A/B stops being an A/B.
+
+checkpoint {
+    push_backend: "hf"
+    hf_repo_id: "moritzroessler/BRIAN"
+    hf_token_env: "HF_TOKEN"
+    save_every: 500
+    push_every: 2500
+    push_optimizer: false
+    path_template: "checkpoints/{date}_{git_sha}_{arch_name}/step{step}.pt"
+}
+
+logging {
+    push_backend: "git"
+    log_every: 500
+    path_template: "logs/{date}/{arch_name}/{instance_id}"
+}
+
+data {
+    # Same corpus + tokenizer as architectures/SmolLM — pinned so the
+    # control arm trains on the identical token stream.
+    text_dataset: "HuggingFaceFW/fineweb-edu:sample-10BT"
+    tokenizer: "gpt2"
+}
+
+hardware {
+    A100  { preset: "large", batch_size: 4 }
+    T4    { preset: "large", batch_size: 2 }
+    CPU   { preset: "tiny",  batch_size: 2 }
+}

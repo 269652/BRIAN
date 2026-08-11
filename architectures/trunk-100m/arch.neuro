@@ -1,0 +1,143 @@
+# -*- coding: utf-8 -*-
+# =============================================================================
+# trunk-100m — the two-layer doctrine's first A/B arm (architecture.md §14)
+#
+# control-100m topology + the SmolLM expert roster + KL-distill assist +
+# `trunk_pretrain: true`, and NOTHING else. The single question this arm
+# asks: does detached-teacher distillation accelerate a vanilla trunk
+# when no cognition-layer loss interferes?
+#
+#   SAME   optimizer, lr, wd, grad_accum, grad_clip, z_loss, dropout,
+#          rope_base, loss clipping, divisive grad norm, schedule, data
+#          (config.neuro), tokenizer, scale dims (640/14/10, ctx 2048)
+#          as architectures/control-100m — byte-parity pinned by
+#          tests/dsl/test_trunk_arm.py::TestTrunkRecipeParity.
+#   PLUS   multi_cortex experts (SmolLM's proven roster + CFD funnel,
+#          copied verbatim, not invented) providing the detached-teacher
+#          KL assist.
+#   PLUS   trunk_pretrain: true — cognition-bucket losses gated out of
+#          the trunk gradient; fusion mixing bypassed so training CE
+#          flows through the ISOLATED trunk logits (the same trunk_only
+#          surface eval/inference use). See harness._maybe_fuse.
+#
+# Comparator: control-100m at matched steps/ctx/params via
+#   brian ood compare <control.json> <trunk.json>
+#
+# Deploy:  brian deploy architectures/trunk-100m --steps N
+# =============================================================================
+
+architecture trunk: {
+    d_sem: 256,
+    dt: 0.01
+}
+
+training {
+    preset:        "rcc_bowtie_30m_p4"
+
+    # ── Vanilla trunk — IDENTICAL to control-100m ──
+    block_pattern:     "standard"
+    geometry_adapters: false
+    cosine_head:       false
+    pred_coding_weight: 0.0
+
+    # ── The doctrine flag (the ONE variable beyond the assist) ──
+    trunk_pretrain: true
+
+    # ── Shared recipe — MUST stay identical to control-100m ──
+    # (tests/dsl/test_trunk_arm.py::TestTrunkRecipeParity pins every field)
+    loss_clipping: { enabled: true, method: "per_sample", factor: 3.0 }
+    quantization:  { enabled: false, bits: 8 }
+    optimizer:     "adamw"
+    learning_rate: 0.0005
+    warmup_steps:  2400
+    min_lr_ratio:  0.1
+    weight_decay:  0.01
+    grad_accum:    8
+    grad_clip:     1.0
+    label_smoothing: 0.0
+    dropout:       0.1
+    flooding_level: 0.0
+    stochastic_depth: 0.0
+    z_loss: 0.0001
+    logit_norm_tau: 0.0
+    llrd: 1.0
+    rope_base:             500000
+    divisive_grad_c: 5.0
+    grad_clip_after_divisive: true
+    loss_var_window: 64
+    loss_var_min_mult: 0.1
+    vbb_kl_floor: 0.0
+    vbb_kl_floor_gamma: 0.0
+    pct_trunk:     0.0
+    pct_strength:  0.0
+
+    # ── The distill assist — SmolLM's proven stack, copied verbatim ──
+    # Teachers are frozen + detached (gradient reaches the trunk only);
+    # the CFD funnel (top-K + entropy-matched T) is what made the
+    # SmolLM2 teacher safe (H23 post-mortem / H006). Under
+    # trunk_pretrain the fusion mixture is bypassed, so fusion_mode /
+    # fusion_init only govern which stashes exist, never the CE path.
+    multi_cortex: {
+        enabled:             true,
+        n_cortices:          3,
+        domains:             ["general", "code", "reasoning"],
+        experts: [
+            { id: "smollm2_360m",               domain: "general",   freeze: true },
+            { id: "microsoft/CodeGPT-small-py", domain: "code",      freeze: true },
+            { id: "Qwen/Qwen2.5-0.5B",          domain: "reasoning", freeze: true }
+        ],
+        trunk_tokenizer:     "gpt2",
+        freeze_weights:      true,
+        lexical_bias_weight: 2.0,
+        bema_tau:            0.5,
+        router_d_model:      256,
+        fusion_mode:         "logits_mixture",
+        fusion_init:         0.3,
+
+        distillation_enabled:      true,
+        distillation_lambda_max:   1.0,
+        distillation_temperature:  2.0,
+        distillation_gap_floor:    0.1,
+        distillation_gap_ceiling:  2.0,
+
+        cfd_enabled:            true,
+        cfd_topk_start:         4,
+        cfd_topk_end:           32,
+        cfd_topk_anneal_steps:  1500,
+        cfd_temperature_floor:  1.0,
+
+        # H30 Jacobian-consistency distillation (anti-memorization) —
+        # distill-adjacent trunk-training aid, same values as SmolLM.
+        consistency_weight:     1.0,
+        consistency_noise_std:  0.1,
+        consistency_batch:      1,
+        consistency_max_tokens: 512
+    }
+
+    hardware: {
+        gpu_name:        "A100_SXM4"
+        num_gpus:        1
+        min_gpu_mem_gib: 40
+        min_reliability: 0.995
+        min_inet_mbps:   200
+        dist_strategy:   "single"
+        precision:       "bf16"
+    }
+
+    # Param-matched to control-100m (same trunk = same 136.1M trainable;
+    # the ~980M expert mass is frozen and excluded from checkpoints).
+    scales: {
+        default: "100m"
+
+        100m: {
+            d_model:       640
+            depth:         14
+            n_heads:       10
+            max_ctx:       2048
+            batch_size:    4
+            seq_len:       2048
+            grad_accum:    4
+            approx_params: "~136M trainable (param-matched to control-100m)"
+        }
+    }
+}
