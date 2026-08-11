@@ -216,6 +216,65 @@ class TestTraindistLoaderNeverSkips:
             "trying to offset into the same stream")
 
 
+class TestPg19LoaderUsesParquetMirror:
+    """2026-08-11 incident: `_load_pg19_texts` pointed at `deepmind/pg19`,
+    a script-based HF dataset. `datasets>=3.0` removed loading-script
+    support, so every eval-v2 snapshot this session printed
+    "corpus 'pg19' failed (skipping): RuntimeError: Dataset scripts are
+    no longer supported" — the fail-open design kept runs alive but the
+    project's only genuinely-distant OOD axis was silently dead in every
+    mid/final eval. Fixed by switching to `emozilla/pg19`, a parquet
+    mirror of the same corpus (verified live 2026-08-11: identical
+    schema — text / short_book_title / publication_date / url). These
+    contracts pin the repo id at the `datasets.load_dataset` call
+    boundary so the dead script repo can't silently come back.
+    """
+
+    def _capture_load(self, monkeypatch, texts=("a book",)):
+        import neuroslm.train_dsl as td
+
+        captured = {}
+
+        class _FakeStreamingDataset:
+            def __iter__(self):
+                return iter({"text": t} for t in texts)
+
+        def _fake_load_dataset(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return _FakeStreamingDataset()
+
+        monkeypatch.setattr("datasets.load_dataset", _fake_load_dataset)
+        td._CORPUS_CACHE.pop("pg19", None)
+        return td, captured
+
+    def test_does_not_use_the_dead_script_repo(self, monkeypatch):
+        td, captured = self._capture_load(monkeypatch)
+        list(td._load_pg19_texts())
+        repo = captured["args"][0] if captured["args"] else captured["kwargs"].get("path")
+        assert repo != "deepmind/pg19", (
+            "deepmind/pg19 is a script-based dataset; datasets>=3.0 "
+            "refuses it (RuntimeError: Dataset scripts are no longer "
+            "supported) — every eval this session silently lost the "
+            "pg19 OOD axis to this")
+
+    def test_uses_the_parquet_mirror(self, monkeypatch):
+        td, captured = self._capture_load(monkeypatch)
+        list(td._load_pg19_texts())
+        repo = captured["args"][0] if captured["args"] else captured["kwargs"].get("path")
+        assert repo == "emozilla/pg19"
+        assert captured["kwargs"].get("split") == "test"
+        assert captured["kwargs"].get("streaming") is True
+
+    def test_still_truncates_whole_novels(self, monkeypatch):
+        td, _ = self._capture_load(monkeypatch, texts=("x" * 100_000,))
+        texts = list(td._load_pg19_texts())
+        assert len(texts) == 1
+        assert len(texts[0]) == 20_000, (
+            "pg19 yields whole novels — the 20k-char truncation guards "
+            "tokenization cost and must survive the mirror swap")
+
+
 # ══════════════════════════════════════════════════════════════════════
 # C/D. _mid_ood_eval protocol v2
 # ══════════════════════════════════════════════════════════════════════

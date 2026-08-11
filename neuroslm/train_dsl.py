@@ -1322,7 +1322,11 @@ def _load_pg19_texts():
     from datasets import load_dataset
 
     def _gen():
-        ds = load_dataset("deepmind/pg19", split="test", streaming=True)
+        # emozilla/pg19 = parquet mirror of deepmind/pg19 (same schema).
+        # The original is script-based and datasets>=3.0 refuses it —
+        # every eval-v2 snapshot before 2026-08-11 silently lost this
+        # corpus to "Dataset scripts are no longer supported".
+        ds = load_dataset("emozilla/pg19", split="test", streaming=True)
         for ex in ds:
             # whole novels — truncate before tokenization cost explodes
             yield (ex.get("text", "") or "")[:20000]
