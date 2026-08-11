@@ -3597,3 +3597,21 @@ property on the real class while `levels()` is a method — the selection
 path called the property's dict); the battery now pins both shapes.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py (24) green; tests/test_chat_daemon.py (34) green unregressed]
+
+**Same-day addendum 2 — KV-cache fix + remote always-on deployment.**
+(1) Live bug: the expert backend reused the daemon's naive per-token
+sampler (full forward over the growing sequence per token — written
+for the small DSL trunk); on smollm2_360m/CPU a 96-token reply takes
+minutes with no output ("system hangs on Hello"). Fixed: HF models
+sample via `generate(use_cache=True)`; measured on gpt2/CPU 30.1s →
+13.1s per 96-token reply (gap grows quadratically with model size /
+context); `[generating…]` liveness line added to the REPL. (2) Remote
+mind: `MindServer` (newline-JSON TCP, 127.0.0.1-only — SSH tunnel is
+transport+auth), `brian chat --serve`, `brian chat connect
+[--tunnel <ID>]` client, and `brian deploy-mind` (vast.ai box on the
+reused env-driven `vast_discover.sh`, crash-restart loop, deliberately
+NO self-destroy — always-on bills until `brian destroy`). Pinned: the
+onstart contains a restart loop and no destroy call; the server never
+binds a public interface.
+
+[EVIDENCE: tests/cognition/test_mind_server.py (14) green; tests/cognition/test_cognitive_runtime.py (27) green]

@@ -1990,6 +1990,35 @@ def cmd_deploy_discover(args: argparse.Namespace) -> int:
     return VastDiscoverConnector().launch(config)
 
 
+def cmd_deploy_mind(args: argparse.Namespace) -> int:
+    """``brian deploy-mind`` — rent a vast.ai box running the always-on
+    mind server (§14.5): ``brian chat --expert <MODEL> --mind --serve``
+    in a crash-restart loop, 127.0.0.1-bound, reachable via
+    ``brian chat connect --tunnel <ID>``.
+
+    ⚠ ALWAYS-ON = BILLS UNTIL DESTROYED. There is deliberately no
+    self-destroy; the box runs (and charges) until you run
+    ``brian destroy <id>``.
+    """
+    from neuroslm.connectors.vast_mind import (
+        MindDeployConfig, VastMindConnector,
+    )
+    cfg = MindDeployConfig(
+        expert=args.expert,
+        mind=not args.no_mind,
+        port=args.port,
+        branch=args.branch,
+        label=args.label or "neuroslm-mind",
+    )
+    if args.gpu_query:
+        cfg.gpu_query = args.gpu_query
+    print("[deploy-mind] ⚠ always-on box: bills until "
+          "`brian destroy <id>` — no self-destroy by design")
+    print(f"[deploy-mind] expert={cfg.expert} mind={cfg.mind} "
+          f"port={cfg.port} label={cfg.label}")
+    return VastMindConnector().launch(cfg)
+
+
 def cmd_deploy_brain(args: argparse.Namespace) -> int:
     """Launch a Brain (non-DSL) training run on vast.ai."""
     env = os.environ.copy()
@@ -4073,6 +4102,28 @@ def cmd_chat(args: argparse.Namespace) -> int:
     # Hop 1 + 2: explicit overrides — ``--pt`` wins over positional, both
     # wins over every implicit lookup below. Accept hf:// URIs too so the
     # user can paste anything ``brian hf latest`` printed.
+    # `brian chat connect` — client mode: talk to a remote MindServer
+    # (through an SSH tunnel). No model, no checkpoint, no torch.
+    if args.ckpt == "connect":
+        from neuroslm.cognition.server import connect_repl, open_vast_tunnel
+        port = getattr(args, "connect_port", None) or args.port
+        tunnel_proc = None
+        if getattr(args, "tunnel", None):
+            print(f"[connect] opening SSH tunnel to instance "
+                  f"{args.tunnel} (port {port})…")
+            try:
+                tunnel_proc = open_vast_tunnel(args.tunnel, port)
+                import time as _time
+                _time.sleep(2.0)   # give ssh a beat to establish
+            except Exception as e:
+                print(f"[connect] ✗ tunnel failed: {e}", file=sys.stderr)
+                return 1
+        try:
+            return connect_repl(args.connect_host, port)
+        finally:
+            if tunnel_proc is not None:
+                tunnel_proc.terminate()
+
     # --expert bypass: run on a frozen pretrained LM — no checkpoint
     # resolution at all. This is the zero-training entry point (§14.5):
     # the daemon (and --mind, if given) think with the expert directly.
@@ -4091,6 +4142,8 @@ def cmd_chat(args: argparse.Namespace) -> int:
             no_color=bool(args.no_color),
             no_thoughts=bool(args.no_thoughts),
             mind=bool(getattr(args, "mind", False)),
+            serve=bool(getattr(args, "serve", False)),
+            serve_port=int(getattr(args, "port", 7861)),
         )
 
     ckpt: Optional[str] = getattr(args, "pt", None) or args.ckpt
@@ -4185,6 +4238,8 @@ def cmd_chat(args: argparse.Namespace) -> int:
         no_color=bool(args.no_color),
         no_thoughts=bool(args.no_thoughts),
         mind=bool(getattr(args, "mind", False)),
+        serve=bool(getattr(args, "serve", False)),
+        serve_port=int(getattr(args, "port", 7861)),
     )
 
 
@@ -5714,6 +5769,28 @@ def _build_parser() -> argparse.ArgumentParser:
     sd2.add_argument("--branch")
     sd2.set_defaults(func=cmd_deploy_100k)
 
+    # deploy-mind — always-on §14.5 mind box (bills until destroyed!)
+    sdm = sub.add_parser(
+        "deploy-mind",
+        help="Rent a vast.ai box running the always-on mind server "
+             "(chat --expert --mind --serve). ⚠ bills until "
+             "`brian destroy <id>` — no self-destroy.")
+    sdm.add_argument("--expert", default="smollm2_360m",
+                     help="Expert model (roster alias or HF id; "
+                          "default smollm2_360m)")
+    sdm.add_argument("--no-mind", action="store_true",
+                     help="Plain chat server without the cognition "
+                          "layer (no recall/NT-gating/memory)")
+    sdm.add_argument("--port", type=int, default=7861)
+    sdm.add_argument("--branch",
+                     help="git branch the box clones (default: current)")
+    sdm.add_argument("--label", default=None,
+                     help="vast.ai instance label (default neuroslm-mind)")
+    sdm.add_argument("--gpu-query", dest="gpu_query", default=None,
+                     help="vast offer filter override (default: cheap "
+                          "8GiB+ card under $0.15/hr)")
+    sdm.set_defaults(func=cmd_deploy_mind)
+
     # deploy-brain
     sdb = sub.add_parser("deploy-brain",
                          help="Launch a Brain (non-DSL) training run")
@@ -6205,6 +6282,28 @@ def _build_parser() -> argparse.ArgumentParser:
              "checkpoint — usable with zero training. Bare flag = the "
              "general roster slot (smollm2_360m); accepts any roster "
              "alias or HF owner/repo id. Composes with --mind.")
+    sc_chat.add_argument(
+        "--serve", action="store_true",
+        help="Headless server mode: expose the daemon on a localhost "
+             "TCP port (newline-JSON protocol) instead of the local "
+             "REPL. Reach it from a laptop via an SSH tunnel + "
+             "`brian chat connect`. Never binds a public interface.")
+    sc_chat.add_argument(
+        "--port", type=int, default=7861,
+        help="Port for --serve (server) and `chat connect` default "
+             "(client). Default 7861.")
+    sc_chat.add_argument(
+        "--host", dest="connect_host", default="127.0.0.1",
+        help="(chat connect) host to connect to — default 127.0.0.1, "
+             "i.e. the local end of an SSH tunnel.")
+    sc_chat.add_argument(
+        "--connect-port", dest="connect_port", type=int, default=None,
+        help="(chat connect) port override; defaults to --port.")
+    sc_chat.add_argument(
+        "--tunnel", metavar="INSTANCE_ID", default=None,
+        help="(chat connect) open the SSH tunnel to this vast.ai "
+             "instance automatically (via `vastai ssh-url`) before "
+             "connecting.")
     sc_chat.add_argument(
         "--device", default="cpu", choices=["cpu", "cuda"],
         help="Inference device (default cpu — the daemon is built for "

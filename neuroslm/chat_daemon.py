@@ -520,6 +520,8 @@ def run_chat_daemon(
         no_thoughts: bool = False,
         mind: bool = False,
         expert: Optional[str] = None,
+        serve: bool = False,
+        serve_port: int = 7861,
         out_stream=sys.stdout,
         in_stream=sys.stdin,
 ) -> int:
@@ -584,6 +586,8 @@ def run_chat_daemon(
                            f"zero-training mode")
         if not no_thoughts:
             daemon.start_thought_thread()
+        if serve:
+            return _run_server(daemon, serve_port, out_stream=out_stream)
         return _run_repl(daemon, out_stream=out_stream,
                          in_stream=in_stream)
 
@@ -664,7 +668,34 @@ def run_chat_daemon(
     if not no_thoughts:
         daemon.start_thought_thread()
 
+    if serve:
+        return _run_server(daemon, serve_port, out_stream=out_stream)
     return _run_repl(daemon, out_stream=out_stream, in_stream=in_stream)
+
+
+def _run_server(daemon: ChatDaemon, port: int, *,
+                out_stream=sys.stdout) -> int:
+    """Headless server mode: block on a localhost MindServer until
+    interrupted. The thought thread (if started) keeps the mind
+    thinking between client turns — the always-on part."""
+    from neuroslm.cognition.server import MindServer
+    server = MindServer(daemon, host="127.0.0.1", port=port)
+    bound = server.start()
+    out_stream.write(
+        f"[chat] mind server listening on 127.0.0.1:{bound}\n"
+        f"[chat] from your laptop:  "
+        f"ssh -N -L {bound}:127.0.0.1:{bound} root@<box>  "
+        f"then  brian chat connect --port {bound}\n")
+    out_stream.flush()
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        out_stream.write("\n[chat] ^C — shutting down\n")
+    finally:
+        server.stop()
+        daemon.stop()
+    return 0
 
 
 def _resolve_chat_arch(arch_root: Optional[str], ckpt_path: str

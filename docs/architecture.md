@@ -3223,3 +3223,18 @@ mind's thoughts share one loaded model. This is the usable-today entry
 point while the trunk trains toward its §14.1 parity criterion — the
 cognition layer is trunk-agnostic by construction (the same
 dependency-injected seams the test battery uses).
+
+**Remote always-on deployment** (`neuroslm/cognition/server.py` +
+`neuroslm/connectors/vast_mind.py`): `--serve` wraps the daemon in a
+newline-JSON TCP `MindServer` bound to **127.0.0.1 only** — vast boxes
+are internet-exposed, so SSH key auth + local port forward IS the
+transport and auth layer; no public listener exists.
+`brian deploy-mind` rents a cheap-GPU box running the server in a
+crash-restart loop with **no self-destroy** (always-on by design;
+bills until `brian destroy <id>`). From the laptop:
+`brian chat connect --tunnel <INSTANCE_ID>` opens the SSH tunnel (via
+`vastai ssh-url`) and drops into the remote REPL (`/think`, `/render`,
+`/quit`). The laptop closing does not stop the mind — the thought
+thread keeps ticking, remembering, and NT-drifting between visits.
+Protocol + localhost-only binding + no-self-destroy are pinned by
+tests/cognition/test_mind_server.py (14 contracts).
