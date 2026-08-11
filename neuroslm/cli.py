@@ -4073,6 +4073,26 @@ def cmd_chat(args: argparse.Namespace) -> int:
     # Hop 1 + 2: explicit overrides — ``--pt`` wins over positional, both
     # wins over every implicit lookup below. Accept hf:// URIs too so the
     # user can paste anything ``brian hf latest`` printed.
+    # --expert bypass: run on a frozen pretrained LM — no checkpoint
+    # resolution at all. This is the zero-training entry point (§14.5):
+    # the daemon (and --mind, if given) think with the expert directly.
+    if getattr(args, "expert", None):
+        from neuroslm.chat_daemon import run_chat_daemon
+        return run_chat_daemon(
+            ckpt_path="",
+            expert=args.expert,
+            device=args.device,
+            temperature=args.temperature,
+            top_k=args.top_k,
+            max_new_tokens=args.max_new_tokens,
+            thought_n_tok=args.thought_tokens,
+            thought_period=args.thought_period,
+            idle_threshold=args.idle_threshold,
+            no_color=bool(args.no_color),
+            no_thoughts=bool(args.no_thoughts),
+            mind=bool(getattr(args, "mind", False)),
+        )
+
     ckpt: Optional[str] = getattr(args, "pt", None) or args.ckpt
     if ckpt and ckpt.startswith("hf://"):
         from neuroslm.hf_checkpoints import (
@@ -6178,6 +6198,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Attach the §14 cognition layer: idle ticks become full "
              "cognitive cycles (episodic recall, NT-gated selection, "
              "surprise-gated memory) instead of seed-continuations.")
+    sc_chat.add_argument(
+        "--expert", nargs="?", const="smollm2_360m", default=None,
+        metavar="MODEL_ID",
+        help="Run on a frozen pretrained LM expert instead of a trunk "
+             "checkpoint — usable with zero training. Bare flag = the "
+             "general roster slot (smollm2_360m); accepts any roster "
+             "alias or HF owner/repo id. Composes with --mind.")
     sc_chat.add_argument(
         "--device", default="cpu", choices=["cpu", "cuda"],
         help="Inference device (default cpu — the daemon is built for "

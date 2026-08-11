@@ -3204,7 +3204,7 @@ report one quantity); embeddings are means of the trunk's own
 token-embedding rows. Everything is dependency-injected — the Layer-A
 battery runs the full loop with deterministic fakes on CPU.
 
-**Layer-A battery** (`tests/cognition/test_cognitive_runtime.py`, 20
+**Layer-A battery** (`tests/cognition/test_cognitive_runtime.py`, 24
 contracts): episodic recall shapes future thinking; DA measurably
 shifts selection off greedy (and temperature is monotone in DA); high
 GABA produces silence with zero generation compute; repetitive
@@ -3212,3 +3212,14 @@ thoughts stop being stored while novel ones are; the real
 `DrivenNTSystem` integrates tick signals; the daemon hosts the mind
 without breaking its legacy path. This battery — not perplexity — is
 how the cognition layer is judged, per §14.1.
+
+**Zero-training mode** (`brian chat --expert [MODEL_ID]`): the mind can
+think with a frozen pretrained LM expert instead of a trunk checkpoint
+— `build_runtime_from_hf_lm` wires THINK/score/embed from one roster
+expert (default the `general` slot, `smollm2_360m`; any roster alias
+or HF `owner/repo` id accepted via `resolve_expert_alias`). No arch,
+no checkpoint, no training required; the daemon's replies and the
+mind's thoughts share one loaded model. This is the usable-today entry
+point while the trunk trains toward its §14.1 parity criterion — the
+cognition layer is trunk-agnostic by construction (the same
+dependency-injected seams the test battery uses).

@@ -270,7 +270,12 @@ class CognitiveRuntime:
                 levels: Dict[str, float]) -> int:
         if len(scores) == 1:
             return 0
-        baselines = self.nt.baselines()
+        # DrivenNTSystem exposes `baselines` as a property while
+        # `levels()` is a method — accept both shapes so duck-typed
+        # NT systems keep working.
+        baselines = self.nt.baselines
+        if callable(baselines):
+            baselines = baselines()
         T = selection_temperature(levels.get("DA", 0.0),
                                   baselines.get("DA", 0.15), self.cfg)
         # softmax(−NLL / T), computed stably.
@@ -345,6 +350,98 @@ def build_runtime_from_harness(harness: Any, tokenizer: Any,
             logits = logits[0]
         V = logits.shape[-1]
         lp = F.log_softmax(logits[0, :-1].float(), dim=-1)
+        tgt = x[0, 1:]
+        nll = float(-lp.gather(-1, tgt.unsqueeze(-1)).mean())
+        ent = float(-(lp.exp() * lp).sum(-1).mean()) / math.log(V)
+        return ThoughtScore(mean_nll=nll, entropy_norm=ent)
+
+    @torch.no_grad()
+    def embed_fn(text: str) -> Sequence[float]:
+        ids = tokenizer.encode(text or " ") or [0]
+        rows = embed_table[torch.tensor(ids, dtype=torch.long,
+                                        device=device)]
+        return rows.float().mean(dim=0).cpu().tolist()
+
+    return CognitiveRuntime(generate_fn=generate_fn, score_fn=score_fn,
+                            embed_fn=embed_fn, cfg=cfg)
+
+
+def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
+                             device: str = "cpu",
+                             cfg: Optional[MindConfig] = None,
+                             temperature: float = 0.8,
+                             top_k: int = 40,
+                             model_factory: Optional[Callable[[], Any]] = None,
+                             tokenizer_factory: Optional[Callable[[], Any]] = None,
+                             ) -> CognitiveRuntime:
+    """Wire the mind to a frozen pretrained HF expert — no trunk needed.
+
+    The doctrine's escape hatch for using BRIAN before full trunk
+    training: THINK/score/embed all come from one of the LM experts
+    (default the `general` roster slot, ``smollm2_360m``) instead of a
+    checkpointed trunk. ``model_id`` accepts a roster alias, a full
+    ``owner/repo`` id, or an ``hf://`` URL (resolved via
+    :func:`neuroslm.experts.resolve_expert_alias` — pure, typo-safe).
+
+    ``model_factory`` / ``tokenizer_factory`` are injection points: the
+    test battery passes fakes; ``run_chat_daemon`` passes closures over
+    an already-loaded model so the daemon and the mind share one copy.
+    """
+    import torch
+    import torch.nn as nn
+
+    from neuroslm.experts import resolve_expert_alias
+
+    resolved = resolve_expert_alias(model_id)
+
+    if model_factory is not None:
+        model = model_factory()
+    else:
+        from transformers import AutoModelForCausalLM
+        model = AutoModelForCausalLM.from_pretrained(resolved)
+    model.eval()
+    if tokenizer_factory is not None:
+        tokenizer = tokenizer_factory()
+    else:
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained(resolved)
+
+    mcfg = getattr(model, "config", None)
+    max_ctx = int(getattr(mcfg, "n_positions", None)
+                  or getattr(mcfg, "max_position_embeddings", 1024) or 1024)
+
+    class _HFLMWrapper(nn.Module):
+        """ids → logits; unwraps the HF output object so the daemon's
+        generate seam and the scorer see a plain tensor."""
+
+        def __init__(self, m):
+            super().__init__()
+            self.model = m
+            self.max_ctx = max_ctx
+
+        def forward(self, ids):
+            out = self.model(input_ids=ids)
+            return getattr(out, "logits", out)
+
+    wrapper = _HFLMWrapper(model)
+    embed_table = model.get_input_embeddings().weight
+
+    from neuroslm.chat_daemon import _build_generate_fn_from_harness
+    from types import SimpleNamespace
+    generate_fn = _build_generate_fn_from_harness(
+        SimpleNamespace(language_model=wrapper), tokenizer,
+        device=device, temperature=temperature, top_k=top_k)
+
+    @torch.no_grad()
+    def score_fn(text: str) -> ThoughtScore:
+        ids = tokenizer.encode(text or " ")
+        if len(ids) < 2:
+            ids = list(ids) + [0]
+        ids = ids[-max_ctx:]
+        x = torch.tensor([ids], dtype=torch.long, device=device)
+        logits = wrapper(x)
+        V = logits.shape[-1]
+        lp = torch.log_softmax(logits[0, :-1].float(), dim=-1)
         tgt = x[0, 1:]
         nll = float(-lp.gather(-1, tgt.unsqueeze(-1)).mean())
         ent = float(-(lp.exp() * lp).sum(-1).mean()) / math.log(V)

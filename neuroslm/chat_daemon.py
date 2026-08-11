@@ -519,6 +519,7 @@ def run_chat_daemon(
         no_color: bool = False,
         no_thoughts: bool = False,
         mind: bool = False,
+        expert: Optional[str] = None,
         out_stream=sys.stdout,
         in_stream=sys.stdin,
 ) -> int:
@@ -537,6 +538,55 @@ def run_chat_daemon(
     3. Call ``harness.load_checkpoint(ckpt_path)``.
     4. Wrap into a :data:`GenerateFn` and start the daemon.
     """
+    # ── --expert: frozen pretrained LM backend, no checkpoint ────────
+    # §14.5 zero-training entry point: the daemon's replies AND the
+    # mind's thinking both run on one shared copy of the expert model.
+    if expert:
+        from neuroslm.cognition.runtime import build_runtime_from_hf_lm
+        from neuroslm.experts import resolve_expert_alias
+        resolved = resolve_expert_alias(expert)
+        out_stream.write(f"[chat] expert backend: {resolved} "
+                         f"(no checkpoint)\n")
+        out_stream.flush()
+        try:
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            model = AutoModelForCausalLM.from_pretrained(resolved)
+            hf_tok = AutoTokenizer.from_pretrained(resolved)
+        except Exception as e:
+            print(f"[chat] ✗ expert load failed: {type(e).__name__}: {e}",
+                  file=sys.stderr)
+            return 1
+        runtime = build_runtime_from_hf_lm(
+            resolved, device=device, temperature=temperature, top_k=top_k,
+            model_factory=lambda: model,
+            tokenizer_factory=lambda: hf_tok,
+        ) if mind else None
+        # The daemon's reply path shares the SAME loaded model via the
+        # same wrapper class the runtime builder uses.
+        _rt_for_gen = runtime or build_runtime_from_hf_lm(
+            resolved, device=device, temperature=temperature, top_k=top_k,
+            model_factory=lambda: model,
+            tokenizer_factory=lambda: hf_tok,
+        )
+        gen_fn = _rt_for_gen._gen
+        daemon = ChatDaemon(
+            gen_fn,
+            ChatDaemonConfig(
+                max_new_tokens=max_new_tokens,
+                thought_n_tok=thought_n_tok,
+                thought_period=thought_period,
+                idle_threshold=idle_threshold,
+            ),
+            use_color=(not no_color) and out_stream.isatty(),
+            mind=runtime,
+        )
+        daemon.post_system(f"expert backend {resolved} — no trunk, "
+                           f"zero-training mode")
+        if not no_thoughts:
+            daemon.start_thought_thread()
+        return _run_repl(daemon, out_stream=out_stream,
+                         in_stream=in_stream)
+
     # Resolve arch root
     arch_path = _resolve_chat_arch(arch_root, ckpt_path)
     if arch_path is None:

@@ -3584,4 +3584,16 @@ checkpoint yet (`build_runtime_from_harness` is wired and typed but
 its first live session awaits a trunk worth thinking with — the
 trunk-100m run currently training). These are the next Layer-A rungs.
 
-[EVIDENCE: tests/cognition/test_cognitive_runtime.py (20) green; tests/test_chat_daemon.py (34) green unregressed]
+**Same-day addendum — zero-training mode (`--expert`).** The runtime
+is trunk-agnostic by construction, so `brian chat --expert [MODEL_ID]`
+(bare flag = `smollm2_360m`, any roster alias / HF id via the pure
+`resolve_expert_alias`) now boots the daemon AND the mind on a frozen
+pretrained expert with no checkpoint, no arch, no training — the
+usable-today entry point while trunk-100m trains. One loaded model is
+shared between the reply path and the thinking loop. Bonus: writing
+the expert-backend contract against the REAL `DrivenNTSystem` caught a
+live integration bug the fake-NT contracts couldn't (`baselines` is a
+property on the real class while `levels()` is a method — the selection
+path called the property's dict); the battery now pins both shapes.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py (24) green; tests/test_chat_daemon.py (34) green unregressed]

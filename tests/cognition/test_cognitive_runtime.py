@@ -337,3 +337,92 @@ class TestCliWiring:
         from neuroslm.cli import _build_parser
         args = _build_parser().parse_args(["chat"])
         assert args.mind is False
+
+
+# ── Expert backend: think with a frozen pretrained LM, no trunk ──────
+
+class _FakeHFModel:
+    """Duck-typed HF causal LM: __call__(input_ids=..) → .logits, plus
+    an embedding surface. Vocab 32, d 4; logits peak on token 1 so the
+    scorer sees a deterministic distribution."""
+
+    class _Out:
+        def __init__(self, logits):
+            self.logits = logits
+
+    def __init__(self):
+        import torch
+        self.config = type("C", (), {"n_positions": 64})()
+        self._emb = torch.arange(32 * 4, dtype=torch.float32).reshape(32, 4)
+
+    def eval(self):
+        return self
+
+    def get_input_embeddings(self):
+        emb = self._emb
+
+        class _E:
+            weight = emb
+        return _E()
+
+    def __call__(self, input_ids=None):
+        import torch
+        B, T = input_ids.shape
+        logits = torch.zeros(B, T, 32)
+        logits[..., 1] = 4.0
+        return self._Out(logits)
+
+
+class _FakeHFTokenizer:
+    def encode(self, text):
+        return [(ord(c) % 30) + 1 for c in (text or " ")[:16]]
+
+    def decode(self, ids):
+        return "decoded-" + "".join(chr(97 + (i % 26)) for i in ids)
+
+
+class TestExpertBackend:
+    def _rt(self, cfg=None):
+        from neuroslm.cognition.runtime import build_runtime_from_hf_lm
+        return build_runtime_from_hf_lm(
+            "fake/expert",
+            model_factory=_FakeHFModel,
+            tokenizer_factory=_FakeHFTokenizer,
+            cfg=cfg,
+        )
+
+    def test_builder_exists_with_injection_points(self):
+        import inspect
+        from neuroslm.cognition.runtime import build_runtime_from_hf_lm
+        sig = inspect.signature(build_runtime_from_hf_lm)
+        assert "model_factory" in sig.parameters
+        assert "tokenizer_factory" in sig.parameters
+
+    def test_expert_mind_thinks_without_any_trunk(self):
+        rt = self._rt()
+        rt.observe("hello there")
+        res = rt.tick()
+        assert res.thought, (
+            "the mind must run on a frozen pretrained expert alone — "
+            "usable before any trunk training")
+        assert res.scores and res.scores[0].mean_nll > 0.0
+        assert 0.0 <= res.phi_proxy <= 1.0
+
+    def test_expert_embeddings_power_recall(self):
+        rt = self._rt()
+        rt.observe("alpha beta")
+        eps = rt.memory.all()
+        assert eps and eps[-1]["content_vec"] is not None
+        assert len(eps[-1]["content_vec"]) == 4, (
+            "episodic vectors must come from the expert's own "
+            "embedding rows (d=4 in the fake)")
+
+    def test_chat_expert_flag_parses(self):
+        from neuroslm.cli import _build_parser
+        args = _build_parser().parse_args(["chat", "--expert"])
+        assert args.expert == "smollm2_360m"
+        args = _build_parser().parse_args(
+            ["chat", "--expert", "Qwen/Qwen2.5-0.5B"])
+        assert args.expert == "Qwen/Qwen2.5-0.5B"
+        args = _build_parser().parse_args(["chat"])
+        assert args.expert is None
