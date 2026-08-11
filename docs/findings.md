@@ -3461,3 +3461,46 @@ deploy planned until arm-3's result is in.
 rotated out of the working tree by a later tail-sync but recoverable via
 `git show cbdfead:logs/20260811/vbb-100m/185359_20_1780.log`); heatmap
 heatmaps/vbb-100m/rcc_bowtie_30m_p4.json step 2500, commit `b53d77f`]
+
+### Two-layer doctrine adopted; `trunk_pretrain` flag landed (2026-08-11)
+
+**Design decision** (maintainer, in-session): the LM trunk is the
+language cortex — LM-dataset training teaches IT, with detached expert
+KL-distillation as the only assist. The neuroanatomical layer (NT
+system, episodic memory, oscillators, VBB/MSPCC/STE, Φ machinery, …)
+is **runtime cognition**: it thinks in natural language on a trained
+trunk in the always-on loop, and is evaluated by Layer-A tasks, never
+by next-token ppl. Full normative spec + mechanism triage table:
+`docs/architecture.md` §14; summary: `docs/technical_report.md` §4.2.
+
+**Implementation.** `training { trunk_pretrain: true }` (default false,
+bit-identical back-compat, pinned by 10 contracts in
+`tests/test_trunk_pretrain_doctrine.py`): cognition-bucket losses
+(stash-map aux, PC-reentry, MSPCC, STE criticality,
+topo/symplectic/KJPLA, genetic Φ) are excluded from the trunk gradient;
+the KL-distill assist and trunk aids (PR2 reg, GIF, MoD router aux,
+BMA) survive; forward fusion mixing becomes identity (`_maybe_fuse`) so
+training CE flows through the isolated trunk logits — the same
+`trunk_only` surface eval and inference use.
+
+**Motivating evidence** (H59 ladder, live, ctx=2048, post-H61; first
+runs with the pg19 axis working after the same-day eval fix):
+
+| step | control-100m wikitext | SmolLM full-stack wikitext | control gap_v2 | SmolLM gap_v2 |
+|---|---|---|---|---|
+| 500  | 8607 | 11508 | 1.30 | 1.60 |
+| 1000 | **4564** ↓ | **25320** ↑ | (log pending sync) | (log pending sync) |
+
+The entangled stack's OOD *diverged* while vanilla control's halved at
+matched step/ctx/params. Under the doctrine this is a layer-separation
+bug (cognition gradients + fused-forward CE leaking into the trunk),
+not a falsification of the cognition mechanisms — those are now to be
+judged on Layer-A tasks in the always-on host (`brian chat`).
+
+**Follow-ups:** (1) GPT-2-124M baseline through the SAME eval-v2
+evaluator — the trunk's parity target under our protocol, not quoted
+from papers; (2) a `trunk_pretrain: true` arch (SmolLM roster + distill
+assist, cognition gated) as the doctrine's first A/B against
+control-100m; (3) Layer-A eval battery for the cognition layer.
+
+[EVIDENCE: tests/test_trunk_pretrain_doctrine.py (10) green; run 47492217 (control-100m, ctx=2048) logs/20260811/control-100m/201032_20_600.log; run 47488818 (SmolLM) logs/20260811/SmolLM/191415_20_500.log + brian ps step-1000 OOD readout]

@@ -492,6 +492,33 @@ kl_world/Φ     | 0.60         | Heaviest objectives; last to engage
 
 **Implementation:** `Brain._phase_gate(mat, center, width=0.10)` in forward pass, multiplies each aux-loss term.
 
+### 4.2 Two-Layer Doctrine — `trunk_pretrain` (2026-08-11)
+
+The project adopted a layer separation (architecture.md §14): **the LM
+trunk is the language cortex; the neuroanatomical machinery is runtime
+cognition that thinks in natural language on top of it.** LM-dataset
+training teaches ONLY the trunk — CE plus the detached expert
+KL-distillation assist — and the cognition layer is evaluated by
+Layer-A tasks (episodic recall, NT-manipulation behavior change,
+long-session coherence), never by next-token perplexity.
+
+`training { trunk_pretrain: true }` (default `false`, bit-identical
+back-compat) enforces this in `BRIANHarness`:
+
+- **Gated out of the trunk gradient:** pred_coding/world/forward/motor/
+  kl_world/novel/cpc/phi stashes, PC-reentry, MSPCC, STE criticality,
+  topo-charge/symplectic/KJPLA, genetic Φ.
+- **Kept:** LM CE (+freq_balance/flooding), PR2 regularizers, GIF, MoD
+  router aux, BMA, and the KL-distillation assist.
+- **Fusion mixing bypassed** (`_maybe_fuse`): training CE flows through
+  the isolated trunk logits — the same `trunk_only` surface eval and
+  inference use.
+
+Motivating evidence (H59 ladder, live 2026-08-11, ctx=2048): at matched
+step 1000 the entangled full stack's wikitext ppl diverged 11508→25320
+(steps 500→1000) while the vanilla control's fell 8607→4564. Pinned by
+`tests/test_trunk_pretrain_doctrine.py` (10 contracts).
+
 ---
 
 ## 5. Current Model State: 30M P4 Preset

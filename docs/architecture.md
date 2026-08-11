@@ -3111,3 +3111,72 @@ Three planned ablations in order of increasing parameter overhead:
 
 Baseline: H21 B5 row (gap_ratio=2.89 at step 3000).
 All ablations must be logged in `docs/findings.md` as H-STE-A/B/C.
+
+## §14 — Two-Layer Doctrine: Trunk Pretraining vs Runtime Cognition
+
+*Adopted 2026-08-11 (design decision, conversation w/ maintainer).*
+
+**The trunk is the language cortex; everything else is the mind that
+uses it.** LM-dataset training exists to give the trunk language
+competence — cross-entropy plus the detached expert KL-distillation
+assist, and nothing else in the gradient. The neuroanatomical machinery
+(NT gating, episodic memory, oscillators, basal-ganglia-style selection,
+PFC-style goal state, Φ/IIT machinery) is **runtime cognition**: it runs
+*on top of* a trained trunk in an always-on loop where "thoughts" are
+token sequences the trunk generates, sensory input enters continuously,
+and NT state gates what gets thought, stored, and acted on.
+
+### 14.1 The two layers
+
+| | Trunk layer | Cognition layer |
+|---|---|---|
+| **Role** | Language competence (the substrate) | Thinking in natural language (the process) |
+| **Trains on** | LM datasets (FineWeb-Edu + chat mix) | Not LM pretraining — always-on runtime; evolved/tuned separately |
+| **Gradient sources** | CE + detached KL-distill + trunk aids | None during LM pretraining (`trunk_pretrain: true`) |
+| **Evaluated by** | trunk-only eval-v2 (wikitext/pg19/traindist ppl, gap_v2) | Layer-A tasks: episodic recall, NT-manipulation behavior change, long-session coherence |
+| **Success criterion** | ≥ GPT-2-124M under the SAME eval-v2 protocol at matched params | Measurable cognitive function the bare trunk lacks |
+| **Inference surface** | `eval_surface: "trunk_only"` (already enforced) | The `brian chat` always-on daemon host |
+
+### 14.2 Normative mechanism triage
+
+Every existing mechanism belongs to exactly one bucket. A mechanism
+that wants to be in two buckets is re-entangling the layers and needs a
+design review first.
+
+| Bucket | Mechanisms | LM-pretraining status |
+|---|---|---|
+| **Trunk-internal** | interleave/MoD blocks (+router aux), NeuralGeometryAdapters, RoPE/GQA, cosine head | In the gradient; judged by LM metrics |
+| **Trunk-training aids** | expert KL-distillation (detached teacher), PR2 regularizers (DAR/PCC/isotropy/CMD), GIF lr/isotropy control, BMA, freq-balance/flooding | In the gradient during pretraining only; absent at runtime |
+| **Runtime cognition** | NT system, oscillators, episodic memory, surprise head, trophic, Φ/IIT metrics, pred-coding/world/motor/kl_world/novel/cpc/phi stashes, PC-reentry, MSPCC, STE criticality, topo-charge/symplectic/KJPLA, genetic Φ | **Excluded** from the trunk gradient under `trunk_pretrain: true`; live at inference |
+| **Needs decision** | VBB waist, pred-coding reentry as *runtime* bottleneck | Currently gated out with the rest; re-admission requires its own H## experiment |
+
+### 14.3 The `trunk_pretrain` flag
+
+`training { trunk_pretrain: true }` (default `false` — every existing
+arch keeps bit-identical behaviour) enforces the doctrine mechanically:
+
+1. **Cognition losses gated out** of `BRIANHarness.compute_loss`: the
+   stash-map aux (pred_coding/world/forward/motor/kl_world/novel/cpc/
+   phi), PC-reentry, MSPCC cascade, STE criticality, topo-charge /
+   symplectic / KJPLA, and the genetic Φ term.
+2. **Distillation assist survives** — `_cortex_fusion_aux_step`'s
+   detached-teacher KL is a trunk-training aid, not cognition.
+3. **Fusion mixing bypassed** (`_maybe_fuse`) — the training CE flows
+   through the ISOLATED trunk logits, matching the trunk-only
+   inference surface, while the pre-fusion stashes the KL needs are
+   still set.
+
+Pinned by `tests/test_trunk_pretrain_doctrine.py` (10 contracts).
+
+### 14.4 Why (evidence)
+
+The H59 falsification ladder run live 2026-08-10/11: at matched step
+1000 (ctx=2048, post-H61), the entangled full stack (SmolLM arch)
+diverged on OOD — wikitext ppl 11508 → 25320 between steps 500 and 1000
+— while the vanilla control's fell 8607 → 4564 with gap_v2 1.30 vs 1.60.
+The full-stack trunk trains *worse* when cognition-layer losses and
+fused-forward CE leak into its gradient. Under this doctrine that is
+not a "mechanisms falsified" verdict — it is a layer-separation bug the
+flag closes: the cognition layer was never supposed to be judged by
+next-token ppl, and the trunk was never supposed to carry cognition
+gradients while learning language.

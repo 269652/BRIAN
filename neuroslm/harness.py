@@ -2166,6 +2166,27 @@ class BRIANHarness(nn.Module):
         # Default logits_mixture: (1-α)·trunk + α·cortex.
         return (1.0 - a) * lm_logits + a * cortex_logits
 
+    def _maybe_fuse(
+        self,
+        lm_logits: torch.Tensor,
+        cortex_logits: torch.Tensor,
+        alpha_eff: torch.Tensor,
+        mode: str,
+    ) -> torch.Tensor:
+        """Fusion mixing, gated by the two-layer doctrine.
+
+        Under ``trunk_pretrain`` the training CE must see the ISOLATED
+        trunk logits — mixing cortex logits into the training forward
+        trains a surface that trunk-only inference/eval never runs (the
+        exact train/eval mismatch eval protocol v2 fixed on the eval
+        side). The pre-fusion stashes the KL-distillation assist needs
+        are set by the caller BEFORE this branch either way, so distill
+        still teaches the trunk while the mixture is bypassed.
+        """
+        if bool(getattr(self.training_config, "trunk_pretrain", False)):
+            return lm_logits
+        return self._fuse_logits(lm_logits, cortex_logits, alpha_eff, mode)
+
     def forward(self, ids: torch.Tensor,
                 nt_levels: Optional[Dict[str, float]] = None) -> torch.Tensor:
         """`ids` is `(batch, seq_len)`; returns logits `(batch, seq_len, vocab)`.
@@ -2368,7 +2389,7 @@ class BRIANHarness(nn.Module):
                 # the logit dtype FIRST so the (B,T,V) tensor never promotes
                 # to fp32 (the 6.14 GiB OOM at the fusion add).
                 _fusion_mode = getattr(cfg_mc, "fusion_mode", "logits_mixture")
-                logits = self._fuse_logits(
+                logits = self._maybe_fuse(
                     logits, cortex_logits, alpha_eff, _fusion_mode,
                 )
             else:
@@ -3197,6 +3218,17 @@ class BRIANHarness(nn.Module):
                 )
                 self._warned_missing_last_hidden = True
 
+        # ── Two-layer doctrine gate (trunk_pretrain) ──────────────────
+        # When True, every COGNITION-layer loss below is excluded from
+        # the trunk gradient: the stash-map aux (pred_coding/world/…/phi),
+        # PC-reentry, MSPCC cascade, STE criticality, the topo-charge/
+        # symplectic/KJPLA physics losses, and the genetic Φ term.
+        # Trunk-training aids stay active: LM CE (+freq_balance/flooding),
+        # GIF head-diversity, PR2 regularizers, MoD router aux, BMA, and
+        # the KL-distillation assist (_cortex_fusion_aux_step).
+        _cognition_on = not bool(
+            getattr(self.training_config, "trunk_pretrain", False))
+
         if self.language_model is not None:
             stash_map = {
                 "_last_pred_coding_loss": "pred_coding",
@@ -3209,6 +3241,8 @@ class BRIANHarness(nn.Module):
                 "_last_phi_loss":         "phi",
             }
             for stash_key, aux_key in stash_map.items():
+                if not _cognition_on:
+                    break
                 aux = getattr(self.language_model, stash_key, None)
                 if aux is None or aux.numel() == 0:
                     continue
@@ -3226,7 +3260,7 @@ class BRIANHarness(nn.Module):
             # agnostic — the homeostat already touches them.
             pc_w = float(getattr(self.training_config,
                                  "pc_reentry_weight", 0.0))
-            if pc_w > 0.0:
+            if pc_w > 0.0 and _cognition_on:
                 pc_diff = self._compute_pc_reentry_loss(pc_w)
                 if pc_diff is not None:
                     total = total + pc_diff
@@ -3244,7 +3278,8 @@ class BRIANHarness(nn.Module):
             # because each layer pair lives at a different depth in
             # the cortical hierarchy and the NT gate is calibrated
             # for the bowtie waist specifically.
-            mspcc_loss = self._compute_mspcc_loss(base_weight=0.0)
+            mspcc_loss = (self._compute_mspcc_loss(base_weight=0.0)
+                          if _cognition_on else None)
             if mspcc_loss is not None:
                 total = total + mspcc_loss
 
@@ -3261,7 +3296,8 @@ class BRIANHarness(nn.Module):
             # ── STE Module 3: Criticality loss (σ − σ*)² ──
             # Added to the total loss so the optimizer pushes the
             # branching ratio toward the critical point σ*=1.
-            if (self._ste_criticality is not None
+            if (_cognition_on
+                    and self._ste_criticality is not None
                     and hasattr(self, "_ste_sigma")
                     and self._ste_sigma is not None):
                 crit_loss = self._ste_criticality.criticality_loss(self._ste_sigma)
@@ -3290,9 +3326,10 @@ class BRIANHarness(nn.Module):
         # All telemetry (kl, lambda, inhibition, alpha_eff) lands in
         # `_metrics` so the training-log line displays it.
         total = self._cortex_fusion_aux_step(total, targets, ids=ids)
-        total = self._topo_charge_aux_step(total)
-        total = self._symplectic_aux_step(total)
-        total = self._kjpla_aux_step(total)
+        if _cognition_on:
+            total = self._topo_charge_aux_step(total)
+            total = self._symplectic_aux_step(total)
+            total = self._kjpla_aux_step(total)
 
         # ── Runtime metric registry update ──
         # Cheap runtime Phi proxy: per-token softmax entropy normalised
@@ -3327,7 +3364,7 @@ class BRIANHarness(nn.Module):
         # _step_genetics_pre call earlier) to the total. The orchestrator
         # outputs are already in the forward graph this step so
         # `total.backward()` will accumulate gene-parameter gradients.
-        if gcfg.enabled and pre_phi_loss is not None:
+        if gcfg.enabled and pre_phi_loss is not None and _cognition_on:
             total = total + gcfg.phi_weight * pre_phi_loss
             self._metrics["phi_loss"] = float(pre_phi_loss.detach())
         return total

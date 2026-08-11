@@ -920,6 +920,19 @@ class TrainingConfig:
     # ModBlocks exist (block_pattern="interleave"); 0.0 restores the
     # broken pre-fix behaviour. No-op when no ModBlocks are present.
     mod_router_aux_weight: float = 0.01
+    # ── Two-layer doctrine (2026-08-11): trunk-only LM pretraining ────
+    # When True, LM training teaches ONLY the language trunk: CE + the
+    # detached expert KL-distillation assist (+ trunk-internal aids:
+    # PR2 regularizers, GIF, MoD router aux, BMA). Every cognition-layer
+    # loss is excluded from the trunk gradient (pred_coding/world/motor/
+    # kl_world/novel/cpc/phi stashes, PC-reentry, MSPCC cascade, STE
+    # criticality, topo-charge/symplectic/KJPLA, genetic Φ), and forward
+    # fusion mixing is bypassed so CE flows through the ISOLATED trunk
+    # logits — the same surface inference/eval runs (`trunk_only`).
+    # The neuroanatomical layer is runtime cognition, evaluated by
+    # Layer-A tasks, not by next-token ppl. Default False: existing
+    # arches keep bit-identical behaviour.
+    trunk_pretrain: bool = False
     # ── Item 6: trainable NT coupling matrix W ────────────────────────
     # When True, the DrivenNTSystem exposes its 7×5 driver→channel
     # coupling matrix as an ``nn.Parameter`` of shape (7, 5). The
@@ -1277,6 +1290,8 @@ def parse_training_config(body: str) -> TrainingConfig:
         cfg.pc_reentry_nt_gate = _parse_bool(props["pc_reentry_nt_gate"])
     if "mod_router_aux_weight" in props:
         cfg.mod_router_aux_weight = float(props["mod_router_aux_weight"])
+    if "trunk_pretrain" in props:
+        cfg.trunk_pretrain = _parse_bool(props["trunk_pretrain"])
     # ── Item 6: trainable NT coupling matrix W ──
     if "nt_w_trainable" in props:
         cfg.nt_w_trainable = _parse_bool(props["nt_w_trainable"])
