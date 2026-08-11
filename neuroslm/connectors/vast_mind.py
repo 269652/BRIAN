@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,8 +39,14 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_DEFAULT_GPU_QUERY = ("gpu_ram>=8 num_gpus=1 rentable=true verified=true "
-                      "reliability>0.95 dph<0.15")
+# 2026-08-11: switched from the cheap-card default (gpu_ram>=8, <$0.15/hr)
+# to A100 per explicit user preference — inference deploys should match
+# the same card class as training, not the "expert inference is cheap"
+# assumption the connector shipped with. Still overridable via
+# --gpu-query / MindDeployConfig.gpu_query for anyone who wants the
+# original cheap-card behaviour back.
+_DEFAULT_GPU_QUERY = ("gpu_name=A100_SXM4 num_gpus=1 rentable=true "
+                      "verified=true reliability>0.95")
 
 
 @dataclass
@@ -120,6 +127,33 @@ class VastMindConnector:
 
     def launch(self, config: MindDeployConfig) -> int:
         from neuroslm.connectors.vast_discover import _current_branch
+
+        # ── §8.1: walk .env into os.environ BEFORE reading tokens ──
+        # 2026-08-11 incident: `brian deploy-mind` run from a shell with
+        # no GH_TOKEN exported produced a box whose onstart printed
+        # "GH_TOKEN token not set" and never started the server — the
+        # token was sitting in .env the whole time. Same walker
+        # lightning.py already uses for this exact reason (bootstrap
+        # secrets are process-env-only for the SDK; a .env-only value
+        # is otherwise invisible). Never crashes the deploy chain — a
+        # genuinely-missing token still reaches the box (fails there,
+        # loudly) after we've warned locally, below.
+        try:
+            from neuroslm.utils.secrets import bootstrap_secrets
+            bootstrap_secrets(
+                ["GH_TOKEN", "HF_TOKEN", "VAST_API_KEY"],
+                aliases={"GH_TOKEN": ("GITHUB_TOKEN", "GITHUB_PAT")},
+                verbose=False)
+        except Exception as exc:
+            print(f"[deploy-mind] (note) secrets bootstrap skipped: "
+                  f"{type(exc).__name__}: {exc}", file=sys.stderr)
+
+        if not os.environ.get("GH_TOKEN"):
+            print("[deploy-mind] ⚠ GH_TOKEN missing (checked process env "
+                  "and .env) — the box will fail to clone the repo. "
+                  "Set it before deploying: export GH_TOKEN=ghp_... or "
+                  "add it to .env.", file=sys.stderr)
+
         branch = config.branch or _current_branch()
         onstart_content = build_mind_onstart({
             "GH_TOKEN": os.environ.get("GH_TOKEN", ""),

@@ -179,12 +179,17 @@ def connect_repl(host: str = "127.0.0.1", port: int = DEFAULT_PORT,
 
 
 def open_vast_tunnel(instance_id: str, port: int = DEFAULT_PORT,
-                     *, resolver=None, spawner=None):
+                     *, resolver=None, spawner=None,
+                     identity: Optional[str] = None):
     """Open ``ssh -N -L port:127.0.0.1:port`` to a vast instance.
 
     ``resolver(instance_id) -> "ssh://root@host:sshport"`` defaults to
     ``vastai ssh-url``; ``spawner(argv) -> Popen`` defaults to
     ``subprocess.Popen``. Returns the tunnel process (caller owns it).
+
+    ``identity``: path to the private key to offer (``ssh -i``).
+    Needed whenever the key filename is nonstandard (e.g. ``~/.ssh/id``)
+    — ssh only auto-offers id_rsa/id_ecdsa/id_ed25519-style names.
     """
     if resolver is None:
         def resolver(iid):
@@ -202,8 +207,10 @@ def open_vast_tunnel(instance_id: str, port: int = DEFAULT_PORT,
     argv = ["ssh", "-N",
             "-o", "StrictHostKeyChecking=accept-new",
             "-p", sshport,
-            "-L", f"{port}:127.0.0.1:{port}",
-            userhost]
+            "-L", f"{port}:127.0.0.1:{port}"]
+    if identity:
+        argv += ["-i", str(identity)]
+    argv.append(userhost)
     if spawner is None:
         spawner = subprocess.Popen
     return spawner(argv)

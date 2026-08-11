@@ -153,11 +153,91 @@ class TestCliWiring:
             ["chat", "connect", "--connect-port", "8001"])
         assert args.connect_port == 8001
 
+    def test_tunnel_passes_identity_file(self):
+        from neuroslm.cognition.server import open_vast_tunnel
+        seen = {}
+
+        def spawner(argv):
+            seen["argv"] = argv
+            return object()
+
+        open_vast_tunnel("123", 7861,
+                         resolver=lambda iid: "ssh://root@h.vast.ai:2222",
+                         spawner=spawner,
+                         identity="C:/Users/x/.ssh/id")
+        argv = seen["argv"]
+        assert "-i" in argv
+        assert argv[argv.index("-i") + 1] == "C:/Users/x/.ssh/id", (
+            "nonstandard key filenames (e.g. ~/.ssh/id) are never "
+            "auto-offered by ssh — the tunnel must pass -i explicitly")
+        # sanity on the rest of the argv shape
+        assert argv[argv.index("-p") + 1] == "2222"
+        assert "root@h.vast.ai" in argv
+
     def test_deploy_mind_parses(self):
         from neuroslm.cli import _build_parser
         args = _build_parser().parse_args(["deploy-mind"])
         assert args.expert == "smollm2_360m"
         assert args.no_mind is False and args.port == 7861
+
+    def test_deploy_mind_defaults_to_a100(self):
+        """2026-08-11: user preference — inference deploys should also
+        target A100, not the cheap-card default."""
+        from neuroslm.connectors.vast_mind import MindDeployConfig
+        assert "A100" in MindDeployConfig().gpu_query
+
+    def test_launch_falls_back_to_env_file_when_shell_env_is_empty(
+            self, monkeypatch, tmp_path):
+        """2026-08-11 incident: `brian deploy-mind` run from a shell
+        session with no GH_TOKEN exported produced a box whose onstart
+        printed '✗ GH_TOKEN token not set' and never started the
+        server — the token was sitting in .env the whole time but
+        vast_mind.py only read raw os.environ. Fix: bootstrap_secrets
+        (the same .env walker lightning.py already uses) runs before
+        the onstart is built."""
+        import neuroslm.connectors.vast_mind as vm
+
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        env_file = tmp_path / ".env"
+        env_file.write_text("GH_TOKEN=ghp_fromdotenv\nHF_TOKEN=hf_fromdotenv\n")
+        monkeypatch.chdir(tmp_path)
+
+        captured = {}
+
+        def fake_find_bash():
+            return "bash"
+
+        def fake_call(argv, cwd, env, stdin):
+            onstart_path = env["ONSTART_FILE"]
+            captured["onstart"] = open(onstart_path, encoding="utf-8").read()
+            return 0
+
+        monkeypatch.setattr(vm.VastMindConnector, "_find_bash",
+                            staticmethod(fake_find_bash))
+        monkeypatch.setattr(vm.subprocess, "call", fake_call)
+
+        rc = vm.VastMindConnector().launch(vm.MindDeployConfig())
+        assert rc == 0
+        assert "ghp_fromdotenv" in captured["onstart"], (
+            ".env must be walked into the onstart when the shell env "
+            "is empty — the token must not silently ship as ''")
+
+    def test_missing_token_warns_before_spending_money(
+            self, monkeypatch, tmp_path, capsys):
+        """§8.1: a missing token must surface at deploy-time, not
+        silently produce a broken box that bills anyway."""
+        import neuroslm.connectors.vast_mind as vm
+
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        monkeypatch.chdir(tmp_path)  # no .env here either
+        monkeypatch.setattr(vm.VastMindConnector, "_find_bash",
+                            staticmethod(lambda: "bash"))
+        monkeypatch.setattr(vm.subprocess, "call", lambda *a, **k: 0)
+
+        vm.VastMindConnector().launch(vm.MindDeployConfig())
+        err = capsys.readouterr().err
+        assert "GH_TOKEN" in err and "missing" in err.lower()
 
     def test_mind_onstart_has_no_self_destroy_and_a_restart_loop(self):
         from neuroslm.connectors.vast_mind import build_mind_onstart

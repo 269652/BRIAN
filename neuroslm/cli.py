@@ -4112,7 +4112,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
             print(f"[connect] opening SSH tunnel to instance "
                   f"{args.tunnel} (port {port})…")
             try:
-                tunnel_proc = open_vast_tunnel(args.tunnel, port)
+                tunnel_proc = open_vast_tunnel(
+                    args.tunnel, port,
+                    identity=getattr(args, "identity", None))
                 import time as _time
                 _time.sleep(2.0)   # give ssh a beat to establish
             except Exception as e:
@@ -6304,6 +6306,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="(chat connect) open the SSH tunnel to this vast.ai "
              "instance automatically (via `vastai ssh-url`) before "
              "connecting.")
+    sc_chat.add_argument(
+        "--identity", metavar="KEYFILE", default=None,
+        help="(chat connect --tunnel) private key for the tunnel "
+             "(ssh -i). Needed for nonstandard key filenames like "
+             "~/.ssh/id, which ssh never auto-offers.")
     sc_chat.add_argument(
         "--device", default="cpu", choices=["cpu", "cuda"],
         help="Inference device (default cpu — the daemon is built for "
