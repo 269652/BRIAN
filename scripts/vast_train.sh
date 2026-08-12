@@ -58,9 +58,20 @@ GH_TOKEN="${GH_TOKEN:-${GITHUB:-${GITHUB_PAT:-}}}"
 # string back in its JSON response, so every deploy was printing the
 # RAW VAST_API_KEY (and HF_TOKEN) to stdout — only GH_TOKEN was ever
 # redacted. Applied at every site that prints $CREATE_OUT.
-REDACT_SED=(-E "s#${GH_TOKEN}#***#g; s#${VAST_API_KEY}#***#g")
+#
+# 2026-08-12 (later, same day): a SECOND leak in the same response —
+# `instance_api_key`, a credential vast.ai GENERATES per instance and
+# returns in the create call, not one of our own tokens. Unlike
+# GH_TOKEN/VAST_API_KEY/HF_TOKEN it can't be redacted by literal value
+# (we don't know it until the API returns it) — redacted by PATTERN
+# instead, matching the create-response's Python-repr shape
+# (`'instance_api_key': '...'`). Found live: a deploy printed one to
+# the terminal (and this conversation) minutes after this file's
+# first redaction fix landed — the fix covered our secrets, not
+# vast.ai's own per-instance one.
+REDACT_SED=(-E "s#${GH_TOKEN}#***#g; s#${VAST_API_KEY}#***#g; s#'instance_api_key': '[^']*'#'instance_api_key': '***'#g")
 if [ -n "${HF_TOKEN:-}" ]; then
-    REDACT_SED=(-E "s#${GH_TOKEN}#***#g; s#${VAST_API_KEY}#***#g; s#${HF_TOKEN}#***#g")
+    REDACT_SED=(-E "s#${GH_TOKEN}#***#g; s#${VAST_API_KEY}#***#g; s#${HF_TOKEN}#***#g; s#'instance_api_key': '[^']*'#'instance_api_key': '***'#g")
 fi
 
 # ─── Configuration (positional args > env > default) ─────────────────────
