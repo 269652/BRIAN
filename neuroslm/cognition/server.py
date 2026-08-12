@@ -150,12 +150,105 @@ def _dispatch(daemon: Any, msg: dict) -> dict:
             for r in rules]}
     if op == "render":
         return {"ok": True, "render": daemon.render()}
+    if op == "embed_dim":
+        # RemoteMindProxy's other half: a remote sensory bridge sizes
+        # its cortices' projection heads by asking the server what
+        # dimension the mind's text embed_fn uses.
+        mind = getattr(daemon, "_mind", None)
+        if mind is None or not hasattr(mind, "embed_dim"):
+            return {"ok": False,
+                    "error": "no mind attached — embed_dim needs the "
+                            "cognitive runtime"}
+        return {"ok": True, "dim": mind.embed_dim()}
+    if op == "observe_sensory":
+        # §15 remote bridge: a sensory source running wherever it
+        # actually needs to (e.g. Isaac Sim on an RTX-capable box,
+        # separate from wherever this mind server is deployed) pushes
+        # an already-embedded percept over the SAME SSH-tunnelled
+        # connection every other op uses — RemoteMindProxy is the
+        # client-side counterpart that makes this look, to
+        # SensoryBridge, exactly like calling
+        # CognitiveRuntime.observe_sensory() in-process.
+        mind = getattr(daemon, "_mind", None)
+        if mind is None or not hasattr(mind, "observe_sensory"):
+            return {"ok": False,
+                    "error": "no mind attached — sensory input needs "
+                            "the cognitive runtime, not the legacy "
+                            "chat-only daemon"}
+        modality = msg.get("modality")
+        vec = msg.get("vec")
+        if not modality or not isinstance(vec, list):
+            return {"ok": False,
+                    "error": "observe_sensory requires 'modality' "
+                            "(str) and 'vec' (list of floats)"}
+        source = str(msg.get("source") or "remote_sensor")
+        attended = mind.observe_sensory(str(modality), vec, source=source)
+        return {"ok": True, "attended": attended,
+                "novelty": getattr(mind, "last_sensory_novelty", None)}
     return {"ok": False, "error": f"unknown op {op!r}"}
 
 
 # ── Client ───────────────────────────────────────────────────────────
 
 DEFAULT_POLL_INTERVAL = 4.0
+
+
+class RemoteMindProxy:
+    """§15 remote sensory bridge — makes a mind running on a
+    DIFFERENT box/process (reached over the SAME SSH-tunnelled
+    connection every other op uses) look, to
+    :class:`~neuroslm.connectors.isaac_sim.SensoryBridge`, exactly
+    like an in-process :class:`~neuroslm.cognition.runtime.
+    CognitiveRuntime`. Implements only the three touch points
+    ``SensoryBridge`` actually calls — ``embed_dim()``,
+    ``observe_sensory()``, and the ``last_sensory_novelty`` readback —
+    nothing else of ``CognitiveRuntime`` is proxied, and nothing about
+    ``SensoryBridge`` needs to change to use one.
+
+    This is what makes "run Isaac Sim on an RTX-capable box and the
+    mind on a vast.ai A100" possible: construct a ``SensoryBridge``
+    on the Isaac Sim side with a ``RemoteMindProxy`` in the
+    ``runtime`` slot, tunnelled to the deployed mind server exactly
+    like ``connect_repl``/``brian chat connect`` already are.
+    """
+
+    def __init__(self, host: str = "127.0.0.1", port: int = DEFAULT_PORT,
+                *, timeout: float = 10.0):
+        self._conn = socket.create_connection((host, port), timeout=timeout)
+        self._f = self._conn.makefile("rw", encoding="utf-8", newline="\n")
+        self.last_sensory_novelty: Optional[float] = None
+        self._dim: Optional[int] = None
+
+    def _rpc(self, msg: dict) -> dict:
+        self._f.write(json.dumps(msg) + "\n")
+        self._f.flush()
+        line = self._f.readline()
+        if not line:
+            raise ConnectionError(
+                "RemoteMindProxy: connection closed by the mind server")
+        return json.loads(line)
+
+    def embed_dim(self) -> int:
+        if self._dim is None:
+            res = self._rpc({"op": "embed_dim"})
+            if not res.get("ok"):
+                raise RuntimeError(
+                    f"RemoteMindProxy.embed_dim: {res.get('error')}")
+            self._dim = int(res["dim"])
+        return self._dim
+
+    def observe_sensory(self, modality: str, content_vec, *,
+                        source: str = "sensor") -> bool:
+        res = self._rpc({"op": "observe_sensory", "modality": modality,
+                         "vec": list(content_vec), "source": source})
+        if not res.get("ok"):
+            raise RuntimeError(
+                f"RemoteMindProxy.observe_sensory: {res.get('error')}")
+        self.last_sensory_novelty = res.get("novelty")
+        return bool(res["attended"])
+
+    def close(self) -> None:
+        self._conn.close()
 
 
 def _poll_new_ticks(host: str, port: int, out_stream, write_lock,

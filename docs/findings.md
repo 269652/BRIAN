@@ -4131,3 +4131,42 @@ during the pass — not a runtime bug. GREEN:
 chat_daemon/memory, 207+22+11+34+14) unregressed.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestFormatDebugTrace, TestFormatIntrospection, TestObserveSensory; tests/test_isaac_sim.py::TestSensoryBridge]
+
+### Remote sensory bridge — closing the "deploy with Isaac Sim" gap (2026-08-12)
+
+Asked to "deploy this branch with Isaac Sim to vast.ai": no honest
+command existed. `SensoryBridge` (§15) calls
+`runtime.observe_sensory`/`runtime.embed_dim` directly — same-process
+only. A real deployment puts Isaac Sim (needs an RTX-capable GPU for
+its renderer) and the mind (this project's A100 default) on DIFFERENT
+boxes, so the bridge needed a network path before any deploy command
+could be honest.
+
+Two additions to `neuroslm/cognition/server.py`'s wire protocol,
+riding the SAME SSH-tunnelled socket every other op already uses —
+`{"op": "embed_dim"}` and `{"op": "observe_sensory", ...}` — plus
+`RemoteMindProxy`, a client implementing ONLY the three touch points
+`SensoryBridge` calls (`embed_dim()`, `observe_sensory()`,
+`last_sensory_novelty`). `SensoryBridge` itself needed zero changes —
+`test_sensory_bridge_works_transparently_against_the_proxy` swaps a
+`RemoteMindProxy` in for a local `CognitiveRuntime` and it just works,
+confirming the original DI seam was already the right cut.
+
+**Stated plainly: this does not make "deploy with Isaac Sim" a real
+one-command action yet.** No onstart script provisions Isaac Sim
+itself — `brian deploy-mind` is unchanged, still just the mind server.
+Automating "install and launch a multi-GB Omniverse container" isn't
+verifiable inside this session without real Isaac-Sim-capable hardware
+to test against, so it wasn't written — a script that looks like a
+deploy path but was never run against the real thing is worse than
+admitting the gap. The recipe today is manual: deploy the mind
+normally, run Isaac Sim wherever it has an RTX-capable GPU (separate
+box or the operator's workstation — the A100 the mind runs on lacks RT
+cores), tunnel to the mind the same way `brian chat connect` does, and
+construct `SensoryBridge(RemoteMindProxy(host="127.0.0.1", port=...),
+isaac_client)` on the Isaac Sim side.
+
+RED-confirmed (9 contracts: `TestObserveSensoryOp`, `TestEmbedDimOp`,
+`TestRemoteMindProxy`). GREEN: `test_mind_server.py` 41 (was 32).
+
+[EVIDENCE: tests/cognition/test_mind_server.py::TestObserveSensoryOp, TestEmbedDimOp, TestRemoteMindProxy]

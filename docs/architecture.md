@@ -3715,3 +3715,50 @@ bug (a missing local import in two new test methods — copy-paste
 against the file's per-method import convention) caught and fixed
 during the pass. GREEN: `test_cognitive_runtime.py` 138 (was 127),
 `test_isaac_sim.py` 11 (was 9).
+
+**Remote bridge — closing the deploy gap (same day).** Asked to
+"deploy this branch with Isaac Sim to vast.ai": no honest command
+existed. `SensoryBridge` (built above) calls `runtime.observe_sensory`
+/ `runtime.embed_dim` directly — same-process only. A real deployment
+puts Isaac Sim (needs an RTX-capable GPU for its renderer) and the
+mind (this project's A100 default) on DIFFERENT boxes, so the bridge
+needs a network path. Two wire-protocol additions
+(`neuroslm/cognition/server.py`), riding the SAME SSH-tunnelled
+newline-JSON socket every other op uses — no new transport, no new
+auth model:
+
+- `{"op": "embed_dim"}` → `{"ok": true, "dim": N}` — lets a remote
+  bridge size its cortices' projection heads without a side channel.
+- `{"op": "observe_sensory", "modality": ..., "vec": [...], "source":
+  ...}` → `{"ok": true, "attended": bool, "novelty": float}` — the
+  network-native form of `CognitiveRuntime.observe_sensory`.
+
+`RemoteMindProxy` (`server.py`, alongside `connect_repl`/
+`open_vast_tunnel`) is the client-side counterpart: implements ONLY
+the three touch points `SensoryBridge` actually calls
+(`embed_dim()`, `observe_sensory()`, `last_sensory_novelty`) over that
+socket. `SensoryBridge` itself needed ZERO changes —
+`test_sensory_bridge_works_transparently_against_the_proxy` constructs
+one against a `RemoteMindProxy` instead of a local `CognitiveRuntime`
+and it just works, confirming the DI seam (any object with those three
+members) was already the right cut.
+
+**What this does NOT close — stated plainly, not glossed over.** No
+onstart/deploy script provisions Isaac Sim itself. `brian deploy-mind`
+still only deploys the mind server (unchanged by this branch); it has
+no knowledge of Isaac Sim. Automating "install and launch a multi-GB
+Omniverse container on a GPU box" isn't something buildable-and-
+verified inside this session without real Isaac-Sim-capable hardware
+to test against — writing that script now would produce code that
+LOOKS like a deploy path without any way to confirm it works, which is
+worse than not having it. The honest recipe today: deploy the mind
+normally (`brian deploy-mind`), run Isaac Sim wherever it actually has
+an RTX-capable GPU (a separate box, or the operator's own workstation),
+tunnel to the mind exactly as `brian chat connect` already does
+(`ssh -N -L <port>:127.0.0.1:<port> root@<box>` or
+`open_vast_tunnel`), and construct `SensoryBridge(RemoteMindProxy(host=
+"127.0.0.1", port=<port>), isaac_client)` on the Isaac Sim side.
+
+RED-confirmed (9 contracts: `TestObserveSensoryOp`, `TestEmbedDimOp`,
+`TestRemoteMindProxy`, `tests/cognition/test_mind_server.py`). GREEN:
+`test_mind_server.py` 41 (was 32).

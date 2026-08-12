@@ -12,6 +12,10 @@ Protocol (one JSON object per line, both directions):
   → {"op": "say", "text": "..."}        ← {"ok": true, "reply": "..."}
   → {"op": "think"}                     ← {"ok": true, "thought": ...}
   → {"op": "render"}                    ← {"ok": true, "render": "..."}
+  → {"op": "observe_sensory",
+     "modality": "visual", "vec": [...],
+     "source": "isaac_sim"}             ← {"ok": true, "attended": bool,
+                                            "novelty": float}
   → anything else                       ← {"ok": false, "error": "..."}
 """
 from __future__ import annotations
@@ -189,6 +193,219 @@ class TestPatternsOp:
         try:
             res = _rpc(port, {"op": "patterns"})
             assert res["ok"] is False
+        finally:
+            s.stop()
+
+
+class TestObserveSensoryOp:
+    """§15 remote bridge: a sensory source (e.g. a SensoryBridge
+    running wherever Isaac Sim actually runs — a different box than
+    the mind server) pushes an already-embedded percept over the SAME
+    SSH-tunnelled wire protocol every other op uses, instead of
+    calling CognitiveRuntime.observe_sensory() in-process. This is
+    what makes a REMOTE bridge possible without changing
+    SensoryBridge itself (see RemoteMindProxy)."""
+
+    def _daemon_with_mind(self):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        from neuroslm.memory.episodic import EpisodicMemory
+
+        def score_fn(text):
+            from neuroslm.cognition.runtime import ThoughtScore
+            return ThoughtScore(mean_nll=2.0, entropy_norm=0.5)
+
+        rt = CognitiveRuntime(
+            generate_fn=_EchoGen(), score_fn=score_fn,
+            embed_fn=lambda t: [1.0, 0.0],
+            memory=EpisodicMemory(maxlen=64),
+            cfg=MindConfig(n_candidates=1))
+        return ChatDaemon(_EchoGen(), ChatDaemonConfig(), use_color=False,
+                          mind=rt), rt
+
+    def test_novel_percept_is_attended_and_stored(self):
+        from neuroslm.cognition.server import MindServer
+        daemon, rt = self._daemon_with_mind()
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "observe_sensory", "modality": "visual",
+                              "vec": [1.0, 0.0], "source": "isaac_sim"})
+            assert res["ok"] is True
+            assert res["attended"] is True
+            assert 0.0 <= res["novelty"] <= 1.0
+            assert any((e.get("context") or {}).get("modality") == "visual"
+                      for e in rt.memory.all())
+        finally:
+            s.stop()
+
+    def test_habituated_repeat_percept_reports_not_attended(self):
+        from neuroslm.cognition.server import MindServer
+        daemon, rt = self._daemon_with_mind()
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            msg = {"op": "observe_sensory", "modality": "visual",
+                  "vec": [1.0, 0.0]}
+            first = _rpc(port, msg)
+            second = _rpc(port, msg)
+            assert first["attended"] is True
+            assert second["attended"] is False
+        finally:
+            s.stop()
+
+    def test_missing_mind_is_a_clean_error(self):
+        from neuroslm.cognition.server import MindServer
+        daemon = ChatDaemon(_EchoGen(), ChatDaemonConfig(), use_color=False)
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "observe_sensory", "modality": "visual",
+                              "vec": [1.0, 0.0]})
+            assert res["ok"] is False
+        finally:
+            s.stop()
+
+    def test_missing_modality_or_vec_is_a_clean_error(self):
+        from neuroslm.cognition.server import MindServer
+        daemon, rt = self._daemon_with_mind()
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "observe_sensory", "vec": [1.0, 0.0]})
+            assert res["ok"] is False
+            res2 = _rpc(port, {"op": "observe_sensory", "modality": "visual"})
+            assert res2["ok"] is False
+        finally:
+            s.stop()
+
+
+class TestEmbedDimOp:
+    """RemoteMindProxy's other half: a remote sensory bridge sizes its
+    cortices' projection heads by asking the SERVER what dimension the
+    mind's own text embed_fn uses — the same probe embed_dim() does
+    for an in-process SensoryBridge."""
+
+    def _daemon_with_mind(self):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        from neuroslm.memory.episodic import EpisodicMemory
+
+        def score_fn(text):
+            from neuroslm.cognition.runtime import ThoughtScore
+            return ThoughtScore(mean_nll=2.0, entropy_norm=0.5)
+
+        rt = CognitiveRuntime(
+            generate_fn=_EchoGen(), score_fn=score_fn,
+            embed_fn=lambda t: [0.0] * 6,
+            memory=EpisodicMemory(maxlen=64),
+            cfg=MindConfig(n_candidates=1))
+        return ChatDaemon(_EchoGen(), ChatDaemonConfig(), use_color=False,
+                          mind=rt)
+
+    def test_returns_the_minds_embed_dim(self):
+        from neuroslm.cognition.server import MindServer
+        daemon = self._daemon_with_mind()
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "embed_dim"})
+            assert res["ok"] is True
+            assert res["dim"] == 6
+        finally:
+            s.stop()
+
+    def test_missing_mind_is_a_clean_error(self):
+        from neuroslm.cognition.server import MindServer
+        daemon = ChatDaemon(_EchoGen(), ChatDaemonConfig(), use_color=False)
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "embed_dim"})
+            assert res["ok"] is False
+        finally:
+            s.stop()
+
+
+class TestRemoteMindProxy:
+    """The client-side counterpart: makes a mind running on a
+    DIFFERENT box/process look, to SensoryBridge, exactly like a
+    local CognitiveRuntime — same three touch points
+    (embed_dim/observe_sensory/last_sensory_novelty), nothing else of
+    CognitiveRuntime is proxied. This is what lets a SensoryBridge
+    running wherever Isaac Sim actually is (an RTX-capable box) drive
+    a mind deployed on a different (e.g. vast.ai A100) box."""
+
+    def _daemon_with_mind(self, embed_fn=None):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        from neuroslm.memory.episodic import EpisodicMemory
+
+        def score_fn(text):
+            from neuroslm.cognition.runtime import ThoughtScore
+            return ThoughtScore(mean_nll=2.0, entropy_norm=0.5)
+
+        rt = CognitiveRuntime(
+            generate_fn=_EchoGen(), score_fn=score_fn,
+            embed_fn=embed_fn or (lambda t: [1.0, 0.0]),
+            memory=EpisodicMemory(maxlen=64),
+            cfg=MindConfig(n_candidates=1))
+        return ChatDaemon(_EchoGen(), ChatDaemonConfig(), use_color=False,
+                          mind=rt), rt
+
+    def test_embed_dim_matches_the_remote_minds_embedding(self):
+        from neuroslm.cognition.server import MindServer, RemoteMindProxy
+        daemon, rt = self._daemon_with_mind(embed_fn=lambda t: [0.0] * 4)
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            proxy = RemoteMindProxy(host="127.0.0.1", port=port)
+            assert proxy.embed_dim() == 4
+        finally:
+            s.stop()
+
+    def test_observe_sensory_round_trips_to_the_remote_mind(self):
+        from neuroslm.cognition.server import MindServer, RemoteMindProxy
+        daemon, rt = self._daemon_with_mind()
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            proxy = RemoteMindProxy(host="127.0.0.1", port=port)
+            attended = proxy.observe_sensory("visual", [1.0, 0.0],
+                                             source="isaac_sim")
+            assert attended is True
+            assert proxy.last_sensory_novelty is not None
+            assert any((e.get("context") or {}).get("modality") == "visual"
+                      for e in rt.memory.all())
+        finally:
+            s.stop()
+
+    def test_sensory_bridge_works_transparently_against_the_proxy(self):
+        """The actual point: SensoryBridge is unmodified — a
+        RemoteMindProxy just fills the 'runtime' slot."""
+        import numpy as np
+        from neuroslm.cognition.server import MindServer, RemoteMindProxy
+        from neuroslm.connectors.isaac_sim import SensoryBridge
+
+        daemon, rt = self._daemon_with_mind(embed_fn=lambda t: [0.0] * 8)
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            proxy = RemoteMindProxy(host="127.0.0.1", port=port)
+
+            class _FakeClient:
+                def get_frame(self):
+                    return np.ones((8, 8, 3), dtype="uint8") * 150
+
+                def get_joint_state(self):
+                    return None
+
+            def fake_visual_cortex(frame):
+                return [1.0] + [0.0] * 7
+
+            bridge = SensoryBridge(proxy, _FakeClient(),
+                                   visual_cortex=fake_visual_cortex)
+            attended = bridge.pump()
+            assert attended["visual"] is True
+            assert any((e.get("context") or {}).get("modality") == "visual"
+                      for e in rt.memory.all())
         finally:
             s.stop()
 
