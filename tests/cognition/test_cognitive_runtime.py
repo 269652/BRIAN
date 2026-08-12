@@ -625,6 +625,86 @@ class TestEpisodicRepresentation:
         assert "[observed]" in s and "[inferred]" in s
 
 
+class TestClassifyFnInjection:
+    """The mind classifies with its OWN trunk/expert when one is
+    wired in (classify_fn=...); the regex lexicon is the fallback
+    used only when nothing is injected — never the other way round."""
+
+    def test_default_runtime_uses_lexicon_classifier(self):
+        rt = _mk_runtime(_ScriptedGen(["t"]))
+        rt.observe("You suck")
+        assert rt.memory.all()[-1]["context"]["action_class"] == "insult"
+
+    def test_injected_classify_fn_is_used_instead(self):
+        from neuroslm.cognition.runtime import CognitiveRuntime, ActionClassification
+        calls = []
+
+        def custom_classify(text):
+            calls.append(text)
+            return ActionClassification(primary="request", candidates=["request"])
+
+        rt = CognitiveRuntime(
+            generate_fn=_ScriptedGen(["t"]), score_fn=_score_map({}),
+            embed_fn=_vec_for, nt=_FakeNT(),
+            memory=EpisodicMemory(maxlen=64), rng=random.Random(0),
+            classify_fn=custom_classify)
+        rt.observe("You suck")
+        assert calls == ["You suck"]
+        assert rt.memory.all()[-1]["context"]["action_class"] == "request", (
+            "an injected classifier must override the lexicon default")
+
+
+class TestActionClassStoredOnEpisodes:
+    """Every stored episode carries its generalized action class
+    alongside the literal text — "You suck" stores BOTH the literal
+    utterance and action_class="insult"."""
+
+    def test_observed_percept_carries_action_class(self):
+        rt = _mk_runtime(_ScriptedGen(["t"]))
+        rt.observe("You suck")
+        ep = rt.memory.all()[-1]
+        assert ep["context"]["action_class"] == "insult"
+
+    def test_inferred_thought_carries_action_class(self):
+        from neuroslm.cognition.runtime import MindConfig
+        cfg = MindConfig(n_candidates=1, surprise_write_z=0.01)
+        rt = _mk_runtime(_ScriptedGen(["Thanks for that"]), cfg=cfg)
+        rt.tick()
+        ep = [e for e in rt.memory.all()
+             if e["content"] == "Thanks for that"][0]
+        assert ep["context"]["action_class"] == "gratitude"
+
+
+class TestDetectPatterns:
+    """'It should learn causal and temporal relations... when it
+    observes enough times that insulting causes a negative response
+    it should learn that.' Real implementation: Apriori-derived
+    association mining over the OBSERVED+INFERRED action-class
+    sequence already stored — see neuroslm/cognition/patterns.py for
+    why this is honestly 'association', not 'causation'."""
+
+    def test_detect_patterns_mines_the_stored_episode_sequence(self):
+        rt = _mk_runtime(_ScriptedGen(["t"]))
+        for _ in range(4):
+            rt.observe("You suck")
+            rt.observe("No, that's wrong")
+        rules = rt.detect_patterns(min_confidence=0.0)
+        assert any(r.antecedent == "insult" and r.consequent == "disagreement"
+                  for r in rules)
+
+    def test_detect_patterns_returns_association_rule_objects(self):
+        from neuroslm.cognition.patterns import AssociationRule
+        rt = _mk_runtime(_ScriptedGen(["t"]))
+        rt.observe("Hello")
+        rt.observe("Hi there")
+        rules = rt.detect_patterns(min_confidence=0.0)
+        assert all(isinstance(r, AssociationRule) for r in rules)
+
+    def test_empty_memory_returns_no_rules(self):
+        rt = _mk_runtime(_ScriptedGen(["t"]))
+        assert rt.detect_patterns() == []
+
+
 class TestFormatIntrospection:
     def _result(self, **kw):
         from neuroslm.cognition.runtime import TickResult
@@ -898,6 +978,20 @@ class TestExpertBackend:
         sig = inspect.signature(build_runtime_from_hf_lm)
         assert "model_factory" in sig.parameters
         assert "tokenizer_factory" in sig.parameters
+
+    def test_wires_a_generation_based_classifier_not_the_bare_lexicon(self):
+        """The mind classifies with its OWN trunk/expert — production
+        wiring must NOT fall back to the bare regex lexicon by
+        default; that's the test-only default, not what a real
+        deployed mind uses."""
+        from neuroslm.cognition.patterns import classify_action
+        rt = self._rt()
+        assert rt._classify is not classify_action
+        # still returns a sane, well-typed result even against the
+        # gibberish the fake model generates (safety-net fallback).
+        from neuroslm.cognition.patterns import ACTION_TAXONOMY
+        result = rt._classify("You suck")
+        assert result.primary in set(ACTION_TAXONOMY) | {"statement"}
 
     def test_expert_mind_thinks_without_any_trunk(self):
         rt = self._rt()

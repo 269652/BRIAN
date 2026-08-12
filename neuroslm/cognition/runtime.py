@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Tuple
 
 from neuroslm.memory.episodic import EpisodicMemory
+from neuroslm.cognition.patterns import ActionClassification  # noqa: F401 (re-export)
 
 GenerateFn = Callable[[str, int], str]
 EmbedFn = Callable[[str], Sequence[float]]
@@ -287,6 +288,14 @@ class CognitiveRuntime:
     memory : EpisodicMemory, optional
     cfg : MindConfig, optional
     rng : random.Random, optional — selection sampling (seedable).
+    classify_fn : ``text -> ActionClassification``, optional
+        Generalized-action classifier (§14.8). Defaults to the
+        deterministic regex lexicon (:func:`patterns.classify_action`)
+        — cheap, dependency-free, what the test suite uses. Real
+        deployments (:func:`build_runtime_from_hf_lm`) inject a
+        generation-based classifier built from the mind's OWN
+        trunk/expert instead — the lexicon is a fallback, not the
+        production path.
     """
 
     def __init__(self,
@@ -296,13 +305,19 @@ class CognitiveRuntime:
                  nt: Optional[Any] = None,
                  memory: Optional[EpisodicMemory] = None,
                  cfg: Optional[MindConfig] = None,
-                 rng: Optional[_random.Random] = None) -> None:
+                 rng: Optional[_random.Random] = None,
+                 classify_fn: Optional[Callable[[str], "ActionClassification"]] = None,
+                 ) -> None:
         if nt is None:
             from neuroslm.emergent.driven_nt import DrivenNTSystem
             nt = DrivenNTSystem()
         self._gen = generate_fn
         self._score = score_fn
         self._embed = embed_fn
+        if classify_fn is None:
+            from neuroslm.cognition.patterns import classify_action
+            classify_fn = classify_action
+        self._classify = classify_fn
         self.nt = nt
         self.memory = memory if memory is not None else EpisodicMemory(512)
         self.cfg = cfg or MindConfig()
@@ -333,11 +348,18 @@ class CognitiveRuntime:
         text = (text or "").strip()
         if not text:
             return
+        # Generalized action class alongside the literal text — "You
+        # suck" stores BOTH the literal utterance AND action_class=
+        # "insult" — classified by self._classify (the mind's own
+        # trunk/expert in production; the regex lexicon by default).
+        action_class = self._classify(text).primary
         self.memory.add(text,
                         content_vec=list(self._embed(text)),
                         nt_state=self.nt.levels(),
-                        tags=[source, "percept", "kind=observed"],
-                        context={"kind": "observed", "source": source})
+                        tags=[source, "percept", "kind=observed",
+                             f"action_class={action_class}"],
+                        context={"kind": "observed", "source": source,
+                                "action_class": action_class})
         self._sensory.append(text)
         self.nt.step_full(activation=1.0)
 
@@ -420,15 +442,18 @@ class CognitiveRuntime:
         # RECALL — real IIT-flavored state (confidence/phi/selection
         # entropy/differentiation), never a fabricated mood label.
         if stored:
+            action_class = self._classify(thought).primary
             self.memory.add(
                 thought,
                 content_vec=list(self._embed(thought)),
                 nt_state=levels,
                 tags=["thought", f"action={action}",
-                     "wandering" if wandering else "responding"],
+                     "wandering" if wandering else "responding",
+                     f"action_class={action_class}"],
                 context={
                     "kind": "inferred",
                     "action": action,
+                    "action_class": action_class,
                     "wandering": wandering,
                     "trigger": trigger_text,
                     "tick_n": tick_n,
@@ -541,6 +566,33 @@ class CognitiveRuntime:
         self._nll_ema = (1.0 - a) * self._nll_ema + a * float(nll)
         return z >= self.cfg.surprise_write_z
 
+    # ── Knowledge extraction: cross-episode pattern mining ────────────
+
+    def detect_patterns(self, window: int = 1, min_support: float = 0.0,
+                        min_confidence: float = 0.3) -> List["AssociationRule"]:
+        """Mine temporal association rules over the whole episode
+        history (see ``neuroslm/cognition/patterns.py`` — Apriori-
+        derived, statistical association, NOT causation; every rule
+        reports whether its evidence is externally grounded or pure
+        self-talk). On-demand, not run automatically per tick — the
+        buffer needs enough history for the statistics to mean
+        anything, and this is an explicit analysis step, not part of
+        the SENSE→RECALL→THINK→GATE→STORE→DRIVE cycle itself.
+        """
+        from neuroslm.cognition.patterns import mine_temporal_associations
+        # EpisodicMemory stores action_class/kind nested under
+        # `context` (§14.7); mine_temporal_associations wants the flat
+        # {"action_class", "kind"} shape it's independently tested
+        # against — adapt here rather than coupling the storage shape
+        # into the storage-agnostic mining function.
+        flat = [{"action_class":
+                (e.get("context") or {}).get("action_class") or "statement",
+                "kind": (e.get("context") or {}).get("kind", "inferred")}
+               for e in self.memory.all()]
+        return mine_temporal_associations(
+            flat, window=window, min_support=min_support,
+            min_confidence=min_confidence)
+
 
 # ── Production wiring ────────────────────────────────────────────────
 
@@ -600,8 +652,17 @@ def build_runtime_from_harness(harness: Any, tokenizer: Any,
                                         device=device)]
         return rows.float().mean(dim=0).cpu().tolist()
 
+    # The mind classifies with its OWN trunk — reuses the SAME
+    # generate_fn closure THINK uses (one model, two jobs), never the
+    # bare regex lexicon by default (§14.8).
+    from neuroslm.cognition.patterns import classify_action_via_generation
+
+    def classify_fn(text: str) -> "ActionClassification":
+        return classify_action_via_generation(text, generate_fn)
+
     return CognitiveRuntime(generate_fn=generate_fn, score_fn=score_fn,
-                            embed_fn=embed_fn, cfg=cfg)
+                            embed_fn=embed_fn, cfg=cfg,
+                            classify_fn=classify_fn)
 
 
 def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
@@ -750,5 +811,14 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
                                         device=device)]
         return rows.float().mean(dim=0).cpu().tolist()
 
+    # The mind classifies with its OWN trunk/expert — reuses the SAME
+    # generate_fn closure THINK uses (one model, two jobs), never the
+    # bare regex lexicon by default (§14.8).
+    from neuroslm.cognition.patterns import classify_action_via_generation
+
+    def classify_fn(text: str) -> "ActionClassification":
+        return classify_action_via_generation(text, generate_fn)
+
     return CognitiveRuntime(generate_fn=generate_fn, score_fn=score_fn,
-                            embed_fn=embed_fn, cfg=cfg)
+                            embed_fn=embed_fn, cfg=cfg,
+                            classify_fn=classify_fn)

@@ -131,6 +131,23 @@ def _dispatch(daemon: Any, msg: dict) -> dict:
         # Peek only — must NOT trigger a tick (a client checking in
         # should never itself cause the mind to think or go silent).
         return {"ok": True, "telemetry": _tick_telemetry(daemon)}
+    if op == "patterns":
+        mind = getattr(daemon, "_mind", None)
+        if mind is None or not hasattr(mind, "detect_patterns"):
+            return {"ok": False,
+                    "error": "no mind attached — patterns need episodic "
+                            "history to mine"}
+        rules = mind.detect_patterns(
+            window=int(msg.get("window", 1)),
+            min_support=float(msg.get("min_support", 0.0)),
+            min_confidence=float(msg.get("min_confidence", 0.3)))
+        return {"ok": True, "rules": [
+            {"antecedent": r.antecedent, "consequent": r.consequent,
+             "support": r.support, "confidence": r.confidence,
+             "lift": r.lift, "evidence_count": r.evidence_count,
+             "grounded": r.grounded,
+             "self_referential_only": r.self_referential_only}
+            for r in rules]}
     if op == "render":
         return {"ok": True, "render": daemon.render()}
     return {"ok": False, "error": f"unknown op {op!r}"}
@@ -269,6 +286,26 @@ def connect_repl(host: str = "127.0.0.1", port: int = DEFAULT_PORT,
                             out_stream.write(tel["debug"] + "\n")
                     else:
                         out_stream.write("  (no ticks yet)\n")
+            elif line == "/patterns":
+                res = _rpc({"op": "patterns", "min_confidence": 0.3})
+                with write_lock:
+                    if not res.get("ok"):
+                        out_stream.write(f"  {res.get('error')}\n")
+                    else:
+                        rules = res.get("rules") or []
+                        if not rules:
+                            out_stream.write(
+                                "  (no associations mined yet — "
+                                "needs more episode history)\n")
+                        for r in rules:
+                            flag = ("⚠ self-talk only" if r["self_referential_only"]
+                                   else "grounded")
+                            out_stream.write(
+                                f"  {r['antecedent']} -> {r['consequent']}  "
+                                f"conf={r['confidence']:.2f} "
+                                f"lift={r['lift']:.2f} "
+                                f"support={r['support']:.2f} "
+                                f"n={r['evidence_count']}  [{flag}]\n")
             elif line == "/render":
                 res = _rpc({"op": "render"})
                 with write_lock:

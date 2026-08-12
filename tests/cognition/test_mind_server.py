@@ -142,6 +142,57 @@ def _mk_daemon_with_mind(results):
             mind)
 
 
+class TestPatternsOp:
+    """'It should learn causal and temporal relations' — the wire-
+    level surface for neuroslm/cognition/patterns.py's association
+    mining, so a connected client can actually see what's been
+    detected, not just the box's own process state."""
+
+    def _daemon_with_history(self):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        from neuroslm.memory.episodic import EpisodicMemory
+
+        def score_fn(text):
+            from neuroslm.cognition.runtime import ThoughtScore
+            return ThoughtScore(mean_nll=2.0, entropy_norm=0.5)
+
+        rt = CognitiveRuntime(
+            generate_fn=_EchoGen(), score_fn=score_fn,
+            embed_fn=lambda t: [1.0, 0.0],
+            memory=EpisodicMemory(maxlen=64),
+            cfg=MindConfig(n_candidates=1))
+        for _ in range(4):
+            rt.observe("You suck")
+            rt.observe("No, that's wrong")
+        return ChatDaemon(_EchoGen(), ChatDaemonConfig(), use_color=False,
+                          mind=rt)
+
+    def test_patterns_op_returns_mined_rules(self):
+        from neuroslm.cognition.server import MindServer
+        daemon = self._daemon_with_history()
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "patterns", "min_confidence": 0.0})
+            assert res["ok"] is True
+            rules = res["rules"]
+            assert any(r["antecedent"] == "insult"
+                      and r["consequent"] == "disagreement" for r in rules)
+        finally:
+            s.stop()
+
+    def test_patterns_op_without_mind_is_a_clean_error(self):
+        daemon = ChatDaemon(_EchoGen(), ChatDaemonConfig(), use_color=False)
+        from neuroslm.cognition.server import MindServer
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "patterns"})
+            assert res["ok"] is False
+        finally:
+            s.stop()
+
+
 class TestServerTelemetry:
     """§14.5: a connected client — laptop or `brian logs` — must be
     able to see WHY a tick did what it did, not just its text."""

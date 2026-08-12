@@ -15,3 +15,10 @@ from neuroslm.cognition.runtime import (  # noqa: F401
     format_introspection,
     selection_temperature,
 )
+from neuroslm.cognition.patterns import (  # noqa: F401
+    ActionClassification,
+    AssociationRule,
+    classify_action,
+    classify_action_via_generation,
+    mine_temporal_associations,
+)

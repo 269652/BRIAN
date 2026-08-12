@@ -3377,3 +3377,69 @@ raw episodes into semantic memory. This phase is the data model those
 would need, not those mechanisms themselves — retrieval today is
 unchanged (still `EpisodicMemory.retrieve`'s cosine-similarity top-k
 over ALL episodes regardless of `kind`).
+
+### 14.8 Knowledge extraction — generalized actions + temporal association mining (2026-08-12)
+
+`neuroslm/cognition/patterns.py` — two established techniques, chosen
+over inventing ad-hoc heuristics:
+
+**`classify_action(text)`** — rule-based dialogue-act classification
+(lexicon/pattern matching against a fixed taxonomy: insult,
+compliment, agreement, disagreement, apology, gratitude, request,
+greeting, farewell, question, with `statement` as the no-match
+fallback — in the tradition of DAMSL-style dialogue-act tagging, Core
+& Allen 1997). "You suck" stores the LITERAL text unchanged AND
+`context.action_class = "insult"` alongside it — wired into both
+`observe()` (percepts) and `tick()`'s STORE step (thoughts), so every
+episode, observed or inferred, carries its generalized action.
+
+**`mine_temporal_associations(episodes, window, min_support,
+min_confidence)`** — Apriori-derived sequential association-rule
+mining (Agrawal & Srikant, "Fast Algorithms for Mining Association
+Rules", VLDB 1994; sequential extension in "Mining Sequential
+Patterns", ICDE 1995) over the chronological `action_class` sequence.
+For each `(A, B)` pair where B follows A within `window` steps,
+computes the standard metrics:
+
+```
+confidence(A→B) = P(B within window | A)
+support(A→B)    = evidence / total valid antecedent positions
+lift(A→B)       = confidence(A→B) / P(B)     [>1 = positively associated]
+```
+
+Deliberately named **association**, never causation: passive
+observation alone cannot establish causation (Pearl's causal
+hierarchy — association sits below intervention and counterfactual
+reasoning; no volume of correlational mining crosses that gap without
+an actual intervention). Every `AssociationRule` additionally reports
+`grounded` (at least one supporting instance touched a
+`kind="observed"` episode) vs `self_referential_only` (every
+supporting instance was the mind's own `kind="inferred"` output
+talking to itself) — the exact self-referential-contamination risk
+flagged in the 2026-08-12 log analysis, now visible per rule instead
+of silently trusted.
+
+`CognitiveRuntime.detect_patterns(...)` mines the full episode
+history on demand (not run automatically per tick — needs enough
+history to mean anything). Exposed over the wire via `MindServer`'s
+`patterns` op and `chat connect`'s `/patterns` command, which prints
+each rule with an explicit `[grounded]` / `[⚠ self-talk only]` tag.
+
+All arithmetic is hand-verified in
+`tests/cognition/test_patterns.py::TestMineTemporalAssociationsArithmetic`
+against textbook-exact support/confidence/lift values before the
+implementation was written.
+
+**Classification uses the mind's own trunk/expert, not the regex
+lexicon, in production.** `classify_action` (regex) is the
+`CognitiveRuntime` DEFAULT when no `classify_fn` is injected — cheap,
+deterministic, what the test suite uses. `classify_action_via_generation(
+text, generate_fn)` is the real production classifier: prompts the
+model with the fixed taxonomy, parses its reply (case-insensitive
+substring match against every known label, robust to "This is clearly
+an insult." as well as a bare "insult"), and falls back to the
+lexicon only when the model's reply doesn't parse or the call itself
+fails. `build_runtime_from_hf_lm` and `build_runtime_from_harness`
+both wire this in by REUSING the already-built `generate_fn` closure
+(one model, two jobs — the same pattern `score_fn`/`embed_fn` already
+follow) rather than a parallel generation path.

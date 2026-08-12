@@ -3827,3 +3827,82 @@ unregressed (the `brain.py`-side `EpisodicMemory` consumer this
 change had to stay compatible with).
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestEpisodicRepresentation]
+
+### Knowledge extraction — generalized actions + Apriori-derived association mining (2026-08-12)
+
+"Is knowledge extraction and pattern detection wired? ... learn causal
+and temporal relations ... e.g. insulting causes a negative response
+... also generalized actions, e.g. 'You suck' stores the literal
+action as well as 'insult'." User then asked for both, "using proven
+real world algorithms and strict TDD."
+
+**`neuroslm/cognition/patterns.py`** — two real, cited techniques:
+
+1. `classify_action(text)` — rule-based dialogue-act lexicon
+   classifier (DAMSL-tradition, Core & Allen 1997), 10-class taxonomy
+   + `statement` fallback, priority-ordered multi-match resolution.
+   Wired into `observe()`/`tick()` STORE — every episode now carries
+   `context.action_class` alongside the literal text.
+2. `mine_temporal_associations(...)` — Apriori-derived sequential
+   association-rule mining (Agrawal & Srikant 1994/1995) over the
+   chronological action-class sequence: support/confidence/lift,
+   hand-verified against textbook-exact arithmetic BEFORE the
+   implementation was written (e.g. confidence=2/3, lift=2.0 on a
+   constructed toy sequence — the test asserts the exact value, not
+   just plausibility).
+
+**Named "association", never "causation"** — deliberately: passive
+observation alone cannot establish causation (Pearl's causal
+hierarchy). Every `AssociationRule` reports `grounded` vs
+`self_referential_only` — whether its evidence ever touched a real
+`kind="observed"` episode, or was mined entirely from the mind's own
+`kind="inferred"` self-talk. This directly closes the contamination
+risk flagged in the earlier log-analysis critique: a rule mined
+purely from the mind talking to itself is now visibly distinguishable
+from one grounded in real input, not silently trusted the same way.
+
+`CognitiveRuntime.detect_patterns()` mines on demand (not per-tick).
+Wired to `MindServer`'s `patterns` op + `chat connect`'s `/patterns`
+command, printing each rule with an explicit `[grounded]` /
+`[⚠ self-talk only]` tag.
+
+GREEN: tests/cognition/test_patterns.py 31/31 (all arithmetic hand-
+verified pre-implementation), test_cognitive_runtime.py 81 (was 76),
+test_mind_server.py 32 (was 30), test_chat_daemon.py 34 and
+test_brian_harness.py 13 unregressed.
+
+Scope note: this remains statistical pattern detection over already-
+observed history, not real-time causal experimentation — no
+intervention capability exists (the mind cannot deliberately test "if
+I do X, does Y follow" — it can only notice X→Y already happened
+repeatedly in what it's seen).
+
+[EVIDENCE: tests/cognition/test_patterns.py::TestMineTemporalAssociationsArithmetic; TestGroundingAndSelfReferentialFlag]
+
+### Classification switched to LM-based, not regex, in production (2026-08-12)
+
+Live pushback: "the classification should rather use its own LM
+trunk or expert to classify... much better than regex." Correct —
+implemented properly rather than papering over it:
+
+- `classify_action_via_generation(text, generate_fn)` — real zero-
+  shot classification via generation: prompts the model with the
+  fixed taxonomy, parses the reply (substring match against every
+  known label), falls back to the regex lexicon only when the reply
+  doesn't parse or the call raises.
+- `CognitiveRuntime` gains `classify_fn` (defaults to the regex
+  lexicon — kept as the fast, dependency-free default the test suite
+  uses, NOT the production path).
+- `build_runtime_from_hf_lm` / `build_runtime_from_harness` — the
+  actual production wiring — both inject the generation-based
+  classifier, REUSING the already-built `generate_fn` closure (one
+  model, two jobs: THINK and CLASSIFY), the same pattern
+  `score_fn`/`embed_fn` already follow. No second model, no parallel
+  generation path.
+
+RED-confirmed (8 contracts before implementation), GREEN:
+test_patterns.py 37 (was 31), test_cognitive_runtime.py 84 (was 81),
+test_mind_server.py 32, test_chat_daemon.py 34, test_brian_harness.py
+13 all unregressed.
+
+[EVIDENCE: tests/cognition/test_patterns.py::TestClassifyActionViaGeneration; tests/cognition/test_cognitive_runtime.py::TestClassifyFnInjection]
