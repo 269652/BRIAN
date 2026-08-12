@@ -864,17 +864,22 @@ class TestIsaacDeployCliWiring:
         assert "RTX" in IsaacSimDeployConfig().gpu_query
         assert "A100" not in IsaacSimDeployConfig().gpu_query
 
-    def test_isaac_onstart_pins_the_isaac_sim_version(self):
+    def test_isaac_onstart_does_not_pip_install_isaacsim(self):
+        """Pivot (2026-08-12, same day): the pip distribution
+        (isaacsim[all,extscache]) hit a fatal missing-native-library
+        wall live (ImportError: libomni.usd.so) inside SimulationApp's
+        OWN constructor, not this project's code — switched to the NGC
+        Docker container, which ships a self-contained, NVIDIA-tested
+        environment. The onstart no longer pip-installs isaacsim at
+        all; it's baked into the image chosen at instance-creation."""
         from neuroslm.connectors.vast_isaac import build_isaac_onstart
-        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
-                                 "ISAAC_SIM_VERSION": "4.5.0"})
-        assert "isaacsim[all,extscache]==4.5.0" in s
-        assert "pypi.nvidia.com" in s
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861})
+        assert "isaacsim[all" not in s
+        assert "pypi.nvidia.com" not in s
 
     def test_isaac_onstart_has_no_self_destroy_and_a_restart_loop(self):
         from neuroslm.connectors.vast_isaac import build_isaac_onstart
-        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
-                                 "ISAAC_SIM_VERSION": "4.5.0"})
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861})
         assert "destroy instance" not in s, (
             "an isaac-sim sensory source is an always-on companion "
             "to the mind box — destroyed only via `brian destroy "
@@ -884,17 +889,18 @@ class TestIsaacDeployCliWiring:
     def test_isaac_onstart_answers_the_eula_prompt_non_interactively(self):
         """Live incident (2026-08-12): omni.kit_app's check_eula() calls
         input() at import time — in a non-interactive onstart context
-        that's an immediate EOFError, and the crash-restart loop just
-        hammers the same prompt every 10s forever, never reaching the
-        sensor loop. ACCEPT_EULA=Y alone does not satisfy THIS specific
-        gate (it's a bare input() call, not an env-var check) — the
-        python invocation must feed it an answer via stdin."""
+        that's an immediate EOFError. Kept as a defensive measure for
+        the Docker image too (harmless if unneeded — `yes` just exits
+        when the pipe closes): env vars alone are not guaranteed to
+        satisfy a bare input() gate."""
         from neuroslm.connectors.vast_isaac import build_isaac_onstart
-        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
-                                 "ISAAC_SIM_VERSION": "4.5.0"})
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861})
         assert "yes 'Yes'" in s or 'yes "Yes"' in s, (
             "the sensor loop's stdin must be fed an EULA answer — "
             "env vars alone don't satisfy omni.kit_app's input() gate")
+        assert "ACCEPT_EULA" in s and "PRIVACY_CONSENT" in s, (
+            "the container's own documented headless-EULA mechanism "
+            "(env vars) should still be set alongside the stdin feed")
 
     def test_isaac_onstart_captures_the_real_python_exit_code(self):
         """Live incident (2026-08-12): `... | tee -a log; echo rc=$?`
@@ -902,14 +908,21 @@ class TestIsaacDeployCliWiring:
         process's — every crash logged 'process exited rc=0', masking
         the actual failure. Must read PIPESTATUS[0] instead."""
         from neuroslm.connectors.vast_isaac import build_isaac_onstart
-        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
-                                 "ISAAC_SIM_VERSION": "4.5.0"})
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861})
         assert "PIPESTATUS[0]" in s
+
+    def test_isaac_onstart_runs_the_containers_own_python(self):
+        """No separate pip-managed venv anymore — Isaac Sim's bundled
+        interpreter (/isaac-sim/python.sh) is the one true Python
+        inside this image; it wraps the container's own env setup."""
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861})
+        assert "/isaac-sim/python.sh" in s
+        assert "isaac_venv" not in s
 
     def test_isaac_onstart_writes_the_sensor_loop_script(self):
         from neuroslm.connectors.vast_isaac import build_isaac_onstart
-        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
-                                 "ISAAC_SIM_VERSION": "4.5.0"})
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861})
         assert "SimulationApp" in s
         assert "RemoteMindProxy" in s
         assert "SensoryBridge" in s
@@ -921,8 +934,10 @@ class TestIsaacDeployCliWiring:
 
         monkeypatch.delenv("GH_TOKEN", raising=False)
         monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.delenv("NGC_API_KEY", raising=False)
         env_file = tmp_path / ".env"
-        env_file.write_text("GH_TOKEN=ghp_fromdotenv\nHF_TOKEN=hf_fromdotenv\n")
+        env_file.write_text("GH_TOKEN=ghp_fromdotenv\nHF_TOKEN=hf_fromdotenv\n"
+                            "NGC_API_KEY=ngc_fromdotenv\n")
         monkeypatch.chdir(tmp_path)
 
         captured = {}
@@ -933,6 +948,7 @@ class TestIsaacDeployCliWiring:
         def fake_call(argv, cwd, env, stdin):
             onstart_path = env["ONSTART_FILE"]
             captured["onstart"] = open(onstart_path, encoding="utf-8").read()
+            captured["env"] = env
             return 0
 
         monkeypatch.setattr(vi.VastIsaacConnector, "_find_bash",
@@ -942,6 +958,7 @@ class TestIsaacDeployCliWiring:
         rc = vi.VastIsaacConnector().launch(vi.IsaacSimDeployConfig())
         assert rc == 0
         assert "ghp_fromdotenv" in captured["onstart"]
+        assert "ngc_fromdotenv" in captured["env"]["VAST_LOGIN"]
 
     def test_isaac_missing_token_warns_before_spending_money(
             self, monkeypatch, tmp_path, capsys):
@@ -957,11 +974,29 @@ class TestIsaacDeployCliWiring:
         err = capsys.readouterr().err
         assert "GH_TOKEN" in err and "missing" in err.lower()
 
+    def test_isaac_missing_ngc_key_warns_before_spending_money(
+            self, monkeypatch, tmp_path, capsys):
+        """§8.1: a missing NGC_API_KEY means the private-registry pull
+        fails — surface it BEFORE the box is rented, not after."""
+        import neuroslm.connectors.vast_isaac as vi
+
+        monkeypatch.setenv("GH_TOKEN", "ghp_x")
+        monkeypatch.delenv("NGC_API_KEY", raising=False)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(vi.VastIsaacConnector, "_find_bash",
+                            staticmethod(lambda: "bash"))
+        monkeypatch.setattr(vi.subprocess, "call", lambda *a, **k: 0)
+
+        vi.VastIsaacConnector().launch(vi.IsaacSimDeployConfig())
+        err = capsys.readouterr().err
+        assert "NGC_API_KEY" in err and "missing" in err.lower()
+
     def test_isaac_launch_uses_the_configured_gpu_query_and_label(
             self, monkeypatch, tmp_path):
         import neuroslm.connectors.vast_isaac as vi
 
         monkeypatch.setenv("GH_TOKEN", "ghp_x")
+        monkeypatch.setenv("NGC_API_KEY", "ngc_x")
         monkeypatch.chdir(tmp_path)
         captured = {}
 
@@ -978,3 +1013,59 @@ class TestIsaacDeployCliWiring:
         vi.VastIsaacConnector().launch(cfg)
         assert captured["env"]["VAST_LABEL"] == "my-isaac-box"
         assert captured["env"]["GPU_QUERY"] == "gpu_name=RTX_3090"
+
+    def test_isaac_launch_sets_the_ngc_image_and_login(
+            self, monkeypatch, tmp_path):
+        """The whole point of the pivot: --image points at the NGC
+        container, --login authenticates the pull, via the SAME
+        VAST_IMAGE/VAST_LOGIN env-var seams vast_discover.sh now
+        exposes (verified real via `vastai create instance --help`,
+        not guessed)."""
+        import neuroslm.connectors.vast_isaac as vi
+
+        monkeypatch.setenv("GH_TOKEN", "ghp_x")
+        monkeypatch.setenv("NGC_API_KEY", "ngc_secret")
+        monkeypatch.chdir(tmp_path)
+        captured = {}
+
+        def fake_call(argv, cwd, env, stdin):
+            captured["env"] = env
+            return 0
+
+        monkeypatch.setattr(vi.VastIsaacConnector, "_find_bash",
+                            staticmethod(lambda: "bash"))
+        monkeypatch.setattr(vi.subprocess, "call", fake_call)
+
+        cfg = vi.IsaacSimDeployConfig(image_tag="6.0.1")
+        vi.VastIsaacConnector().launch(cfg)
+        assert captured["env"]["VAST_IMAGE"] == "nvcr.io/nvidia/isaac-sim:6.0.1"
+        login = captured["env"]["VAST_LOGIN"]
+        assert "$oauthtoken" in login, (
+            "NGC's API-key auth ALWAYS uses the literal username "
+            "$oauthtoken — not a real username")
+        assert "ngc_secret" in login and "nvcr.io" in login
+
+    def test_ngc_api_key_never_appears_in_env_passed_to_the_container(
+            self, monkeypatch, tmp_path):
+        """NGC_API_KEY authenticates the vast.ai-side PULL only — it
+        must never be baked into the running container's own
+        environment (--env), unlike GH_TOKEN/HF_TOKEN which the box
+        genuinely needs at runtime to clone/download."""
+        import neuroslm.connectors.vast_isaac as vi
+
+        monkeypatch.setenv("GH_TOKEN", "ghp_x")
+        monkeypatch.setenv("NGC_API_KEY", "ngc_secret_value")
+        monkeypatch.chdir(tmp_path)
+        captured = {}
+
+        def fake_call(argv, cwd, env, stdin):
+            onstart_path = env["ONSTART_FILE"]
+            captured["onstart"] = open(onstart_path, encoding="utf-8").read()
+            return 0
+
+        monkeypatch.setattr(vi.VastIsaacConnector, "_find_bash",
+                            staticmethod(lambda: "bash"))
+        monkeypatch.setattr(vi.subprocess, "call", fake_call)
+
+        vi.VastIsaacConnector().launch(vi.IsaacSimDeployConfig())
+        assert "ngc_secret_value" not in captured["onstart"]

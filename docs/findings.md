@@ -4217,3 +4217,64 @@ RED-confirmed (18 contracts: `TestIsaacDeployCliWiring`, the
 Not deployed.
 
 [EVIDENCE: tests/cognition/test_mind_server.py::TestIsaacDeployCliWiring; tests/test_isaac_sim.py::TestOmniverseIsaacSimClientGuardedImport]
+
+### Isaac Sim deploy: three live attempts, two real bugs, one pivot (2026-08-12)
+
+The `deploy-isaac-sim` script above was actually deployed, three times,
+against real vast.ai hardware:
+
+1. **Instance 47554243** (RTX 4090) — never came up at all. `brian
+   logs` returned "No such container" for its entire lifetime; the
+   instance vanished from the account's own `vastai show instances`
+   listing. A host-allocation failure vast.ai never surfaced as an
+   error, not a bug in this project's code. Destroyed.
+2. **Instance 47555813** (RTX 4090) — provisioned, then stalled mid
+   image-pull (`status_msg: "a84b49fe85c9: Pull complete"`, unchanged
+   across 4 checks ~90s apart after 20+ minutes) on a slow/congested
+   host. Also not a code bug — a bad-host draw. Destroyed and retried.
+3. **Instance 47558083** (RTX 4090, reliability 0.998, a healthier
+   host) — got much further and surfaced two REAL bugs:
+   - `omni.kit_app`'s EULA check calls `input()` at import time.
+     `ACCEPT_EULA=Y` didn't satisfy it (bare stdin read, not an
+     env-var check) — non-interactive onstart → immediate `EOFError`
+     → crash-restart loop hammering the same prompt every 10s,
+     forever, without ever reaching the sensor loop.
+   - `... | tee -a log; echo rc=$?` reports `tee`'s exit code, not
+     Python's — every crash logged `rc=0`, inherited unnoticed from
+     `vast_mind.py`'s onstart pattern (present there too). This is
+     WHY bug 1 needed a full log read to diagnose instead of one line.
+
+   Both fixed (`< <(yes 'Yes')` process substitution; `${PIPESTATUS[0]}`),
+   redeployed on a fresh instance, and got further than any prior
+   attempt: `SimulationApp` actually started (13+ seconds in) and began
+   loading Kit extensions — then hit `ImportError: libomni.usd.so:
+   cannot open shared object file`, raised from INSIDE
+   `SimulationApp.__init__` itself, not this project's code. The pip
+   distribution of Isaac Sim has native shared-library dependencies
+   that don't resolve on a stock CUDA image — confirmed via research
+   as a recurring, known-hard class of issue across Isaac Sim's
+   pip/conda/venv install paths generally (same failure mode,
+   different missing libraries, multiple unrelated GitHub issues).
+
+**Pivot: NGC Docker container instead of pip.** Asked "is it possible"
+before this session even started building the pip path — the answer
+was yes, with the container flagged as the safer-but-more-complex
+option and deliberately deferred due to registry-auth uncertainty.
+That uncertainty is now resolved: `vastai create instance --login` is
+real (verified via `--help`, not guessed), with a worked NGC-shaped
+example in the command's own docstring. `scripts/vast_discover.sh`
+gained `VAST_IMAGE`/`VAST_LOGIN` overrides (additive — every other
+caller unaffected); `neuroslm/connectors/vast_isaac.py` rewritten to
+target `nvcr.io/nvidia/isaac-sim:6.0.1`, no more pip-installing
+isaacsim, sensor loop runs via the container's own bundled Python
+(`/isaac-sim/python.sh`). `NGC_API_KEY` added to `.env.example` +
+`bootstrap_secrets` + a pre-flight missing-key warning, never passed
+into the running container's own environment (only vast.ai's
+pull-time `--login` needs it).
+
+RED-confirmed (12 contracts: rewritten `TestIsaacDeployCliWiring`
+onstart/config assertions for the Docker path, `NGC_API_KEY` handling,
+`--login`/`--image` wiring). GREEN: `test_mind_server.py` 59 (was 53).
+Not yet re-deployed with the Docker path.
+
+[EVIDENCE: tests/cognition/test_mind_server.py::TestIsaacDeployCliWiring]

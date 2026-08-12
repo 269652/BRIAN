@@ -2037,7 +2037,7 @@ def cmd_deploy_isaac_sim(args: argparse.Namespace) -> int:
         IsaacSimDeployConfig, VastIsaacConnector,
     )
     cfg = IsaacSimDeployConfig(
-        isaac_sim_version=args.isaac_sim_version,
+        image_tag=args.image_tag,
         branch=args.branch,
         label=args.label or "neuroslm-isaac",
         port=args.port,
@@ -2049,7 +2049,7 @@ def cmd_deploy_isaac_sim(args: argparse.Namespace) -> int:
           "first deploy will need live debugging (docs/findings.md)")
     print("[deploy-isaac-sim] ⚠ always-on box: bills until "
           "`brian destroy <id>` — no self-destroy by design")
-    print(f"[deploy-isaac-sim] isaac_sim={cfg.isaac_sim_version} "
+    print(f"[deploy-isaac-sim] image=nvcr.io/nvidia/isaac-sim:{cfg.image_tag} "
           f"port={cfg.port} label={cfg.label} gpu_query={cfg.gpu_query!r}")
     return VastIsaacConnector().launch(cfg)
 
@@ -5878,9 +5878,11 @@ def _build_parser() -> argparse.ArgumentParser:
              "sensor loop (§15 remote bridge). ⚠ UNVERIFIED against "
              "real hardware — see docs/findings.md. Bills until "
              "`brian destroy <id>` — no self-destroy.")
-    sdi.add_argument("--isaac-sim-version", dest="isaac_sim_version",
-                     default="4.5.0",
-                     help="isaacsim pip package version (default 4.5.0)")
+    sdi.add_argument("--image-tag", dest="image_tag",
+                     default="6.0.1",
+                     help="nvcr.io/nvidia/isaac-sim tag to launch "
+                          "(default 6.0.1) — requires NGC_API_KEY in "
+                          ".env for the private-registry pull")
     sdi.add_argument("--port", type=int, default=7861,
                      help="local port the sensor loop reaches the mind "
                           "on, via the operator's relay tunnel (default "

@@ -21,6 +21,12 @@
 #   GPU_QUERY   - vast offer filter; default is a single A100 (see below)
 #   VAST_LABEL  - instance label (default neuroslm-discover)
 #   VAST_DISK   - disk size GB (default 30 — no checkpoint corpus needed)
+#   VAST_IMAGE  - docker image to launch (default pytorch/pytorch:2.3.0-
+#                 cuda12.1-cudnn8-runtime); e.g. brian deploy-isaac-sim
+#                 overrides this to nvcr.io/nvidia/isaac-sim:<tag>
+#   VAST_LOGIN  - `vastai create instance --login` arguments for a
+#                 private registry pull (e.g. NGC's nvcr.io); unset by
+#                 default (public images need no login)
 # ─────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
@@ -49,13 +55,26 @@ GH_TOKEN="${GH_TOKEN:-${GITHUB:-${GITHUB_PAT:-}}}"
 # the terminal (and this conversation) minutes after this file's
 # first redaction fix landed — the fix covered our secrets, not
 # vast.ai's own per-instance one.
-REDACT_SED=(-E "s#${GH_TOKEN}#***#g; s#${VAST_API_KEY}#***#g; s#'instance_api_key': '[^']*'#'instance_api_key': '***'#g")
+# NOTE: -E (extended regex) needs to appear once; EACH pattern after
+# the first must use its own -e "..." — `sed -E "p1" -E "p2"` silently
+# treats "p2" as a FILENAME to open (sed's single-bare-argument
+# convention), not a second script. Verified: `sed -E "s#a#*#" -E
+# "s#b#*#"` errors "can't read s#b#*#: No such file or directory".
+REDACT_SED=(-E -e "s#${GH_TOKEN}#***#g" -e "s#${VAST_API_KEY}#***#g" \
+           -e "s#'instance_api_key': '[^']*'#'instance_api_key': '***'#g")
 if [ -n "${HF_TOKEN:-}" ]; then
-    REDACT_SED=(-E "s#${GH_TOKEN}#***#g; s#${VAST_API_KEY}#***#g; s#${HF_TOKEN}#***#g; s#'instance_api_key': '[^']*'#'instance_api_key': '***'#g")
+    REDACT_SED+=(-e "s#${HF_TOKEN}#***#g")
+fi
+# NGC_API_KEY travels through --login (private-registry auth, e.g.
+# nvcr.io for brian deploy-isaac-sim) rather than --env, but redact it
+# by the same literal-value rule as our other secrets on principle —
+# nothing guarantees vast.ai never echoes --login back either.
+if [ -n "${NGC_API_KEY:-}" ]; then
+    REDACT_SED+=(-e "s#${NGC_API_KEY}#***#g")
 fi
 
 VAST_LABEL="${VAST_LABEL:-neuroslm-discover}"
-VAST_IMAGE="pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime"
+VAST_IMAGE="${VAST_IMAGE:-pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime}"
 VAST_DISK="${VAST_DISK:-30}"
 # A100 by default — a lower tier (e.g. RTX_3090) can land on a slow/congested
 # host and spend most of the rental on image pull + bootstrap rather than the
@@ -144,6 +163,13 @@ unset _onstart_line
 trace "onstart script loaded (${#ONSTART} chars)"
 
 # ─── Create the instance ─────────────────────────────────────────────────
+# --login (private-registry auth, e.g. NGC's nvcr.io) is opt-in — only
+# added when VAST_LOGIN is set, so every existing public-image caller
+# (train/discover/mind) is unaffected.
+CREATE_EXTRA_ARGS=()
+if [ -n "${VAST_LOGIN:-}" ]; then
+    CREATE_EXTRA_ARGS+=(--login "$VAST_LOGIN")
+fi
 trace "calling: vastai create instance $OFFER_ID --image $VAST_IMAGE --disk $VAST_DISK"
 echo "── creating instance ──"
 _CREATE_TMP="$(mktemp -t vast_create.XXXXXX)"
@@ -154,6 +180,7 @@ PYTHONUNBUFFERED=1 timeout 120 "$PYTHON" -u -c \
     --image "$VAST_IMAGE" \
     --disk "$VAST_DISK" \
     --label "$VAST_LABEL" \
+    "${CREATE_EXTRA_ARGS[@]}" \
     --env "-e GH_TOKEN=$GH_TOKEN -e HF_TOKEN=${HF_TOKEN:-} -e VAST_API_KEY=$VAST_API_KEY" \
     --onstart-cmd "$ONSTART" 2>&1 \
     | sed "${REDACT_SED[@]}" \

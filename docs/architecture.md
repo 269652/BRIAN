@@ -3835,3 +3835,100 @@ RED-confirmed (18 contracts: `TestIsaacDeployCliWiring`, the
 `test_articulation_prim_path_is_optional`). GREEN:
 `test_mind_server.py` 53 (was 41), `test_isaac_sim.py` 12 (was 11).
 Not deployed — `brian deploy-isaac-sim` has not been run.
+
+### 15.1 — Live deploy: pip → NGC Docker pivot, and two real bugs found in the field (2026-08-12, same day)
+
+The pip-based deploy above was actually run — twice — against real
+vast.ai hardware. First attempt vanished entirely (a host-allocation
+failure vast.ai never surfaced as an error; the instance simply
+disappeared from the account). Second attempt landed, and surfaced two
+REAL implementation bugs the "unverified" list above hadn't
+anticipated:
+
+1. **`omni.kit_app`'s EULA gate calls `input()` at import time.**
+   `ACCEPT_EULA=Y` (already set, per the Docker-container convention)
+   does not satisfy this — it's a bare stdin read, not an env-var
+   check. In the non-interactive onstart, stdin EOFs immediately →
+   `EOFError` → crash → 10s restart → same prompt → repeat forever.
+   Fixed: `< <(yes 'Yes')` feeds the prompt an answer via process
+   substitution (not a literal pipe stage, so `python|tee` stays a
+   clean 2-stage pipeline for the next fix to key off of).
+2. **`... | tee -a log; echo rc=$?` reports `tee`'s exit code, not
+   Python's** — inherited verbatim from `vast_mind.py`'s own onstart
+   pattern (§14.5), present there too. Every crash logged `rc=0`,
+   which is why bug 1 needed a full log read instead of a one-line
+   diagnosis. Fixed: `${PIPESTATUS[0]}`.
+
+With both fixed, a THIRD deploy got further than either prior attempt:
+`SimulationApp` actually started (13+ seconds in, past every previous
+crash point) and began loading Kit extensions — then hit a NEW, deeper
+wall: `ImportError: libomni.usd.so: cannot open shared object file`,
+raised from inside `SimulationApp.__init__` itself (`from omni.kit.usd
+import layers`), not from this project's code. The pip distribution of
+Isaac Sim 4.5.0 has native shared-library dependencies that don't
+resolve on the stock `pytorch/pytorch` CUDA image — a known, recurring
+class of issue across Isaac Sim's pip/conda/venv install paths
+generally (confirmed via research: the SAME failure mode, different
+missing libraries, across multiple unrelated GitHub issues and forum
+threads), not a typo fixable blind.
+
+**Pivot: NGC Docker container instead of pip.** `nvcr.io/nvidia/isaac-sim`
+is NVIDIA's fully-tested, self-contained image — every native lib it
+needs ships pre-linked inside it, sidestepping this whole class of
+problem. The registry-auth concern that ruled this out in the FIRST
+design pass (architecture.md §15 above) turned out to have a real,
+documented answer: `vastai create instance --login` — verified via
+`vastai create instance --help` on this machine, not guessed, with a
+worked example in the command's own docstring (`--login '-u bob -p
+PASS docker.io'`). For NGC specifically, the username is always the
+literal string `$oauthtoken` (NGC's API-key-auth convention), the
+password is the account's `NGC_API_KEY`.
+
+**What changed:**
+- `scripts/vast_discover.sh` gained `VAST_IMAGE`/`VAST_LOGIN` env-var
+  overrides — additive; every existing public-image caller
+  (train/discover/mind) is unaffected, since both default to their
+  prior hardcoded/absent values. `--login` is only appended to the
+  `vastai create instance` call when `VAST_LOGIN` is non-empty.
+- `neuroslm/connectors/vast_isaac.py`: `IsaacSimDeployConfig.image_tag`
+  (default `6.0.1`) replaces `isaac_sim_version`; the onstart no longer
+  pip-installs `isaacsim` at all (baked into the image) and runs the
+  sensor loop via the container's own bundled interpreter
+  (`/isaac-sim/python.sh`), not a separate venv. `neuroslm`'s own deps
+  (torch/transformers/numpy for the §15 cortices) still install via
+  `pip install -e .[ml]` — now into the container's Python, accepting
+  the same torch-coexistence bet as before, on a NVIDIA-tested base
+  this time rather than an ad-hoc one.
+- `NGC_API_KEY` added to `.env.example`, `bootstrap_secrets`, and a
+  pre-flight missing-key warning (mirrors the existing GH_TOKEN one) —
+  §8.1's "surface a missing secret before spending money" pattern.
+  Never passed via `--env` (the running container doesn't need it —
+  only the vast.ai-side pull does); `scripts/vast_discover.sh`'s
+  redaction list covers it anyway, on principle, the same as the other
+  three secrets.
+- The EULA/exit-code fixes from the pip path carry over unchanged
+  (defensive on the container path too — harmless if not strictly
+  needed there).
+
+**Still unverified, explicitly** (superseding the pip-path list — some
+items resolved, some carry over, one is new):
+1. ~~Exact `isaacsim.core.api`/`isaacsim.sensors.camera` import
+   surface~~ — same code, now running inside NVIDIA's own tested
+   image; the earlier concern was about MISSING libraries, not wrong
+   import paths, so this specific risk is substantially reduced.
+2. ~~GLIBC/Python-version compatibility with the base image~~ — moot;
+   the NGC image bundles its own complete environment.
+3. `pip install -e .[ml]` into the container's Python still risks a
+   torch-version interaction, now against NVIDIA's pinned torch rather
+   than an ad-hoc pip resolution — lower risk, still unproven.
+4. **NEW**: whether `--login` is honoured by every host in the RTX_4090
+   offer pool, or only some — vast.ai's docs confirm the CLI flag
+   exists and cite an NGC image as a valid example, but per-host
+   pull-auth reliability across the marketplace is not something this
+   connector can verify without deploying.
+5. Multi-GB NGC image pull timing — likely comparable to or slower
+   than the pip path's first-run extension cache, unmeasured.
+
+Not yet re-deployed with the Docker path — `docs/findings.md` records
+the two prior pip-path live attempts and their outcomes as evidence
+this pivot is grounded in what actually failed, not speculation.

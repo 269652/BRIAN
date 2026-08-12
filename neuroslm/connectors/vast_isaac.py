@@ -3,10 +3,11 @@
 (``brian deploy-isaac-sim``) — §15's remote bridge, deployed.
 
 Sibling of :mod:`vast_mind`, not a modification of it: an Isaac Sim
-box has a genuinely different shape (a different pip package entirely,
-a different GPU class, no ``neuroslm`` model to load) — same reasoning
-``vast_discover.sh``'s own docstring gives for not bolting a second
-job type onto the well-tested training launcher.
+box has a genuinely different shape (a different container image
+entirely, private-registry auth, a different GPU class, no
+``neuroslm`` model to load) — same reasoning ``vast_discover.sh``'s
+own docstring gives for not bolting a second job type onto the
+well-tested training launcher.
 
 **Why a separate box from the mind.** Isaac Sim's renderer needs an
 RTX-class GPU (hardware ray-tracing cores); this project's mind boxes
@@ -15,26 +16,33 @@ network — see :func:`neuroslm.cognition.server.open_isaac_relay` for
 how a laptop-owned SSH tunnel pair connects them without either rented
 box ever holding the operator's private key.
 
-**Why pip, not the NGC Docker container.** NVIDIA also ships Isaac Sim
-as ``nvcr.io/nvidia/isaac-sim``, but pulling it needs an NGC account +
-API key and (on vast.ai) either a registry-auth-capable image slot or
-docker-in-docker — both add real risk this connector can't verify
-without live hardware. The pip distribution
-(``pip install isaacsim[all,extscache]==<version> --extra-index-url
-https://pypi.nvidia.com``) needs no registry auth at all and fits the
-SAME stock-CUDA-image + onstart-script pattern every other connector
-in this repo already uses (reuses ``scripts/vast_discover.sh``
-verbatim, exactly like :mod:`vast_mind` does).
+**Why the NGC Docker container, not pip.** The pip distribution
+(``pip install isaacsim[all,extscache]``) was tried first and hit a
+fatal wall LIVE (2026-08-12): ``SimulationApp``'s OWN constructor
+raised ``ImportError: libomni.usd.so: cannot open shared object
+file`` — a missing native library in the pip package's dependency
+resolution on a stock CUDA image, not a bug in this connector's code.
+The NGC container (``nvcr.io/nvidia/isaac-sim``) is NVIDIA's
+fully-tested, self-contained artifact — it doesn't have this class of
+problem because every native lib it needs ships pre-linked inside the
+image. Pulling a private NGC image from vast.ai needs the account's
+own NGC API key; ``vastai create instance`` has a documented
+``--login`` flag for exactly this (verified via ``vastai create
+instance --help``, not guessed — see the worked example in that
+command's own docstring: ``--login '-u bob -p PASS docker.io'``).
+``scripts/vast_discover.sh`` was extended (additively — existing
+public-image callers are unaffected) with ``VAST_IMAGE``/``VAST_LOGIN``
+env-var overrides for exactly this.
 
 **⚠ UNVERIFIED.** Per CLAUDE.md §1's own exemption, vast.ai deploy
 scripts are "verified by deploying, not unit-tested." The Python-side
 config/CLI/onstart-templating below IS unit-tested (mirrors
-:mod:`vast_mind`'s coverage exactly). The actual Isaac Sim boot
-sequence — pip install timing (~10-15 min first run), the exact
-current ``isaacsim.core.api``/``isaacsim.sensors.camera`` import
-surface, GLIBC/Python-version compatibility on the base image — has
-NOT been run against real hardware and WILL need iteration on first
-deploy. See docs/findings.md for the explicit list of what to check.
+:mod:`vast_mind`'s coverage exactly). NOT verified: whether vast.ai's
+own infrastructure actually honours ``--login`` for every host in the
+offer pool, whether the container's bundled ``isaacsim`` Python API
+surface matches what :mod:`neuroslm.connectors.isaac_sim` expects, and
+image-pull timing for a multi-GB NGC image. See docs/findings.md for
+the explicit list of what to check on first deploy.
 
 The server binds 127.0.0.1 on the box, same as the mind; nothing is
 ever publicly exposed.
@@ -57,10 +65,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_GPU_QUERY = ("gpu_name=RTX_4090 num_gpus=1 rentable=true "
                       "verified=true reliability>0.95")
 
+_NGC_IMAGE = "nvcr.io/nvidia/isaac-sim"
+
 
 @dataclass
 class IsaacSimDeployConfig:
-    isaac_sim_version: str = "4.5.0"
+    image_tag: str = "6.0.1"
     branch: Optional[str] = None
     label: str = "neuroslm-isaac"
     gpu_query: str = _DEFAULT_GPU_QUERY
@@ -72,9 +82,11 @@ class IsaacSimDeployConfig:
 
 
 # The standalone Isaac Sim script, written to the box and run under
-# its own pip-installed Python environment. SimulationApp() must be
+# the CONTAINER's own bundled Python (/isaac-sim/python.sh) — no
+# separate pip-managed venv; the NGC image already IS a complete,
+# pre-linked Isaac Sim environment. SimulationApp() must be
 # constructed before any isaacsim/omni import — Isaac Sim's own
-# documented standalone-script contract.
+# documented standalone-script contract, unchanged by install method.
 _SENSOR_LOOP_SCRIPT = '''\
 # -*- coding: utf-8 -*-
 """Isaac Sim standalone sensor loop (generated by
@@ -131,26 +143,17 @@ GIT_LFS_SKIP_SMUDGE=1 git clone --branch '__BRANCH__' --single-branch \\
     "https://x-access-token:${GH_TOKEN}@github.com/__REPO_SLUG__.git" brian
 cd /workspace/brian
 
-echo "── Isaac Sim's own Python environment (isaacsim pins its Python "
-echo "   version -- do NOT reuse the repo's .venv convention here, this"
-echo "   is disposable rented infra, not local dev) ──"
-PYBIN="$(command -v python3.10 || command -v python3)"
-"$PYBIN" -m venv /workspace/isaac_venv
-/workspace/isaac_venv/bin/pip install --upgrade pip
-echo "── installing isaacsim __ISAAC_SIM_VERSION__ (first run: 10-15 "
-echo "   min extension cache download, no progress bar) ──"
-/workspace/isaac_venv/bin/pip install \\
-    "isaacsim[all,extscache]==__ISAAC_SIM_VERSION__" \\
-    --extra-index-url https://pypi.nvidia.com
-
-echo "── installing neuroslm (cortices + sensory bridge + RemoteMindProxy) ──"
-/workspace/isaac_venv/bin/pip install -e /workspace/brian[ml]
+echo "── installing neuroslm (cortices + sensory bridge + RemoteMindProxy) "
+echo "   into the CONTAINER's own Isaac Sim Python — no separate venv, "
+echo "   the NGC image already IS the environment ──"
+/isaac-sim/python.sh -m pip install -e /workspace/brian[ml]
 
 cat > /workspace/isaac_sensor_loop.py <<'PYEOF'
 __SENSOR_LOOP_SCRIPT__
 PYEOF
 
 mkdir -p logs/isaac
+# The container's own documented headless-EULA mechanism.
 export ACCEPT_EULA=Y PRIVACY_CONSENT=Y OMNI_KIT_ACCEPT_EULA=YES
 echo "── starting the isaac sim sensor loop (crash-restart loop) ──"
 # NO self-destroy: an isaac-sim sensory source is an always-on
@@ -160,20 +163,17 @@ echo "── starting the isaac sim sensor loop (crash-restart loop) ──"
 while true; do
     date -u +"[isaac-loop] (re)start @ %Y-%m-%dT%H:%M:%SZ"
     # omni.kit_app's check_eula() calls input() at import time — a
-    # bare stdin read, not an env-var check (ACCEPT_EULA alone does
-    # NOT satisfy it). In this non-interactive onstart context stdin
-    # would otherwise EOF immediately and the loop would hammer the
-    # same prompt every 10s forever without ever reaching the sensor
-    # loop (live incident, 2026-08-12) — `yes 'Yes'` feeds it an
-    # answer on every input() call for as long as the process runs.
-    # Fed via process substitution (not a literal pipe stage) so the
-    # main pipeline stays python|tee and PIPESTATUS[0] below is still
+    # bare stdin read, not (necessarily) satisfied by the env vars
+    # above alone. Defensive even on the container image: harmless if
+    # unneeded (`yes` just runs until the pipe closes). Fed via
+    # process substitution (not a literal pipe stage) so the main
+    # pipeline stays python|tee and PIPESTATUS[0] below is still
     # python's own exit code.
-    /workspace/isaac_venv/bin/python /workspace/isaac_sensor_loop.py \\
+    /isaac-sim/python.sh /workspace/isaac_sensor_loop.py \\
         < <(yes 'Yes') 2>&1 | tee -a "logs/isaac/$(date -u +%Y%m%d)_isaac.log"
     # `${PIPESTATUS[0]}` is the PYTHON process's exit code — a bare
     # `$?` here would report the LAST pipeline stage (tee, always 0),
-    # masking every real crash as "rc=0" (live incident, same boot).
+    # masking every real crash as "rc=0" (live incident, 2026-08-12).
     echo "[isaac-loop] process exited rc=${PIPESTATUS[0]} — restarting in 10s"
     sleep 10
 done
@@ -197,7 +197,6 @@ def build_isaac_onstart(env: dict) -> str:
         "__HF_TOKEN__": str(env.get("HF_TOKEN", "")),
         "__BRANCH__": str(env.get("BRANCH", "master")),
         "__REPO_SLUG__": repo_slug,
-        "__ISAAC_SIM_VERSION__": str(env.get("ISAAC_SIM_VERSION", "4.5.0")),
         "__SENSOR_LOOP_SCRIPT__": sensor_loop,
     }
     for key, val in replacements.items():
@@ -207,7 +206,9 @@ def build_isaac_onstart(env: dict) -> str:
 
 class VastIsaacConnector:
     """Launch an Isaac Sim sensory-source box via
-    ``scripts/vast_discover.sh`` — same reuse :mod:`vast_mind` makes."""
+    ``scripts/vast_discover.sh`` — same reuse :mod:`vast_mind` makes,
+    now with the ``VAST_IMAGE``/``VAST_LOGIN`` overrides that script
+    gained for exactly this connector."""
 
     @staticmethod
     def _find_bash() -> str:
@@ -222,7 +223,7 @@ class VastIsaacConnector:
         try:
             from neuroslm.utils.secrets import bootstrap_secrets
             bootstrap_secrets(
-                ["GH_TOKEN", "HF_TOKEN", "VAST_API_KEY"],
+                ["GH_TOKEN", "HF_TOKEN", "VAST_API_KEY", "NGC_API_KEY"],
                 aliases={"GH_TOKEN": ("GITHUB_TOKEN", "GITHUB_PAT")},
                 verbose=False)
         except Exception as exc:
@@ -234,6 +235,13 @@ class VastIsaacConnector:
                   "env and .env) — the box will fail to clone the repo. "
                   "Set it before deploying: export GH_TOKEN=ghp_... or "
                   "add it to .env.", file=sys.stderr)
+        ngc_api_key = os.environ.get("NGC_API_KEY", "")
+        if not ngc_api_key:
+            print("[deploy-isaac-sim] ⚠ NGC_API_KEY missing (checked "
+                  "process env and .env) — the private nvcr.io pull will "
+                  "fail. Get one at ngc.nvidia.com → Setup → Get API Key, "
+                  "then export NGC_API_KEY=... or add it to .env.",
+                  file=sys.stderr)
 
         branch = config.branch or _current_branch()
         onstart_content = build_isaac_onstart({
@@ -241,7 +249,6 @@ class VastIsaacConnector:
             "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
             "BRANCH": branch,
             "REPO_URL": os.environ.get("REPO_URL", ""),
-            "ISAAC_SIM_VERSION": config.isaac_sim_version,
             "PORT": config.port,
             "CAMERA_PRIM_PATH": config.camera_prim_path,
         })
@@ -258,6 +265,12 @@ class VastIsaacConnector:
             env["ONSTART_FILE"] = tf.name
             env["VAST_LABEL"] = config.label
             env["GPU_QUERY"] = config.gpu_query
+            env["VAST_IMAGE"] = f"{_NGC_IMAGE}:{config.image_tag}"
+            # NGC's API-key auth ALWAYS uses the literal username
+            # $oauthtoken (not a real account name) — never baked into
+            # the container's own --env (it authenticates the PULL
+            # only, the running container never needs it).
+            env["VAST_LOGIN"] = f"-u $oauthtoken -p {ngc_api_key} nvcr.io"
 
             bash = self._find_bash()
             script = str(REPO_ROOT / "scripts" / "vast_discover.sh")
