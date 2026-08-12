@@ -675,6 +675,67 @@ class TestCliWiring:
         assert argv[argv.index("-p") + 1] == "2222"
         assert "root@h.vast.ai" in argv
 
+    def test_isaac_relay_opens_a_forward_tunnel_to_the_mind(self):
+        """§15 remote bridge: connecting an Isaac Sim box (RTX,
+        wherever it actually is) to a mind box (A100, vast.ai) without
+        either box ever holding the operator's SSH private key —
+        BOTH tunnels originate from the operator's own machine, the
+        SAME security model as brian chat connect."""
+        from neuroslm.cognition.server import open_isaac_relay
+        seen = []
+
+        def spawner(argv):
+            seen.append(argv)
+            return object()
+
+        def resolver(iid):
+            return {"mind-1": "ssh://root@mind.vast.ai:2222",
+                   "isaac-1": "ssh://root@isaac.vast.ai:3333"}[iid]
+
+        open_isaac_relay("isaac-1", "mind-1", 7861,
+                         resolver=resolver, spawner=spawner,
+                         identity="~/.ssh/id")
+        to_mind = next(a for a in seen if "root@mind.vast.ai" in a)
+        assert "-L" in to_mind
+        assert to_mind[to_mind.index("-L") + 1] == "7861:127.0.0.1:7861"
+        assert to_mind[to_mind.index("-p") + 1] == "2222"
+        assert "-i" in to_mind
+
+    def test_isaac_relay_opens_a_reverse_tunnel_to_the_isaac_box(self):
+        from neuroslm.cognition.server import open_isaac_relay
+        seen = []
+
+        def spawner(argv):
+            seen.append(argv)
+            return object()
+
+        def resolver(iid):
+            return {"mind-1": "ssh://root@mind.vast.ai:2222",
+                   "isaac-1": "ssh://root@isaac.vast.ai:3333"}[iid]
+
+        open_isaac_relay("isaac-1", "mind-1", 7861,
+                         resolver=resolver, spawner=spawner)
+        to_isaac = next(a for a in seen if "root@isaac.vast.ai" in a)
+        assert "-R" in to_isaac, (
+            "the isaac-side leg must be a REMOTE forward (-R) — the "
+            "isaac box's own 127.0.0.1:port relays back through this "
+            "connection to the operator's machine, which the OTHER "
+            "leg forwards on to the mind box"
+        )
+        assert to_isaac[to_isaac.index("-R") + 1] == "7861:127.0.0.1:7861"
+        assert to_isaac[to_isaac.index("-p") + 1] == "3333"
+
+    def test_isaac_relay_returns_both_processes(self):
+        from neuroslm.cognition.server import open_isaac_relay
+
+        def resolver(iid):
+            return "ssh://root@h.vast.ai:22"
+
+        procs = open_isaac_relay("isaac-1", "mind-1", 7861,
+                                 resolver=resolver,
+                                 spawner=lambda argv: object())
+        assert len(procs) == 2
+
     def test_deploy_mind_parses(self):
         from neuroslm.cli import _build_parser
         args = _build_parser().parse_args(["deploy-mind"])
@@ -766,3 +827,129 @@ class TestCliWiring:
             "`brian destroy <id>`, never by its own onstart")
         assert "while true" in s and "--serve" in s and "--mind" in s
         assert "--port 7861" in s
+
+
+class TestIsaacDeployCliWiring:
+    """§15 remote bridge: `brian deploy-isaac-sim` — a sensory-source
+    box, separate from the mind box, running on an RTX-class GPU.
+
+    Per CLAUDE.md §1's own exemption, vast.ai deploy scripts are
+    'verified by deploying, not unit-tested' — the actual Isaac Sim
+    boot sequence (pip install, scene setup, SimulationApp) is
+    UNVERIFIED against real hardware (documented explicitly in
+    docs/findings.md). What IS pinned here is everything testable
+    without a GPU: config defaults, CLI parsing, onstart templating,
+    and the secret-handling safety net — the same class of contract
+    TestCliWiring already pins for the mind box."""
+
+    def test_deploy_isaac_sim_parses(self):
+        from neuroslm.cli import _build_parser
+        args = _build_parser().parse_args(["deploy-isaac-sim"])
+        assert args.func is not None
+        assert args.port == 7861
+
+    def test_bridge_isaac_subcommand_parses(self):
+        from neuroslm.cli import _build_parser
+        args = _build_parser().parse_args(
+            ["chat", "bridge-isaac", "--tunnel", "mind-1",
+             "--isaac-tunnel", "isaac-1"])
+        assert args.ckpt == "bridge-isaac"
+        assert args.tunnel == "mind-1"
+        assert args.isaac_tunnel == "isaac-1"
+
+    def test_deploy_isaac_sim_defaults_to_an_rtx_card(self):
+        """A100 (the mind's own default) has no RT cores — Isaac
+        Sim's renderer needs an RTX-class card."""
+        from neuroslm.connectors.vast_isaac import IsaacSimDeployConfig
+        assert "RTX" in IsaacSimDeployConfig().gpu_query
+        assert "A100" not in IsaacSimDeployConfig().gpu_query
+
+    def test_isaac_onstart_pins_the_isaac_sim_version(self):
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
+                                 "ISAAC_SIM_VERSION": "4.5.0"})
+        assert "isaacsim[all,extscache]==4.5.0" in s
+        assert "pypi.nvidia.com" in s
+
+    def test_isaac_onstart_has_no_self_destroy_and_a_restart_loop(self):
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
+                                 "ISAAC_SIM_VERSION": "4.5.0"})
+        assert "destroy instance" not in s, (
+            "an isaac-sim sensory source is an always-on companion "
+            "to the mind box — destroyed only via `brian destroy "
+            "<id>`, never by its own onstart")
+        assert "while true" in s
+
+    def test_isaac_onstart_writes_the_sensor_loop_script(self):
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
+                                 "ISAAC_SIM_VERSION": "4.5.0"})
+        assert "SimulationApp" in s
+        assert "RemoteMindProxy" in s
+        assert "SensoryBridge" in s
+        assert "port=7861" in s, "the port placeholder must be substituted"
+
+    def test_isaac_launch_falls_back_to_env_file_when_shell_env_is_empty(
+            self, monkeypatch, tmp_path):
+        import neuroslm.connectors.vast_isaac as vi
+
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        env_file = tmp_path / ".env"
+        env_file.write_text("GH_TOKEN=ghp_fromdotenv\nHF_TOKEN=hf_fromdotenv\n")
+        monkeypatch.chdir(tmp_path)
+
+        captured = {}
+
+        def fake_find_bash():
+            return "bash"
+
+        def fake_call(argv, cwd, env, stdin):
+            onstart_path = env["ONSTART_FILE"]
+            captured["onstart"] = open(onstart_path, encoding="utf-8").read()
+            return 0
+
+        monkeypatch.setattr(vi.VastIsaacConnector, "_find_bash",
+                            staticmethod(fake_find_bash))
+        monkeypatch.setattr(vi.subprocess, "call", fake_call)
+
+        rc = vi.VastIsaacConnector().launch(vi.IsaacSimDeployConfig())
+        assert rc == 0
+        assert "ghp_fromdotenv" in captured["onstart"]
+
+    def test_isaac_missing_token_warns_before_spending_money(
+            self, monkeypatch, tmp_path, capsys):
+        import neuroslm.connectors.vast_isaac as vi
+
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(vi.VastIsaacConnector, "_find_bash",
+                            staticmethod(lambda: "bash"))
+        monkeypatch.setattr(vi.subprocess, "call", lambda *a, **k: 0)
+
+        vi.VastIsaacConnector().launch(vi.IsaacSimDeployConfig())
+        err = capsys.readouterr().err
+        assert "GH_TOKEN" in err and "missing" in err.lower()
+
+    def test_isaac_launch_uses_the_configured_gpu_query_and_label(
+            self, monkeypatch, tmp_path):
+        import neuroslm.connectors.vast_isaac as vi
+
+        monkeypatch.setenv("GH_TOKEN", "ghp_x")
+        monkeypatch.chdir(tmp_path)
+        captured = {}
+
+        def fake_call(argv, cwd, env, stdin):
+            captured["env"] = env
+            return 0
+
+        monkeypatch.setattr(vi.VastIsaacConnector, "_find_bash",
+                            staticmethod(lambda: "bash"))
+        monkeypatch.setattr(vi.subprocess, "call", fake_call)
+
+        cfg = vi.IsaacSimDeployConfig(label="my-isaac-box",
+                                      gpu_query="gpu_name=RTX_3090")
+        vi.VastIsaacConnector().launch(cfg)
+        assert captured["env"]["VAST_LABEL"] == "my-isaac-box"
+        assert captured["env"]["GPU_QUERY"] == "gpu_name=RTX_3090"

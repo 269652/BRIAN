@@ -2020,6 +2020,40 @@ def cmd_deploy_mind(args: argparse.Namespace) -> int:
     return VastMindConnector().launch(cfg)
 
 
+def cmd_deploy_isaac_sim(args: argparse.Namespace) -> int:
+    """``brian deploy-isaac-sim`` — rent an RTX-class vast.ai box
+    running Isaac Sim's sensor loop (§15 remote bridge): a minimal
+    scene pumping visual/proprioceptive percepts into a mind server
+    deployed separately (e.g. via ``brian deploy-mind``, on A100)
+    over the SAME 127.0.0.1-bound wire protocol every other op uses.
+
+    ⚠ UNVERIFIED against real hardware — see docs/findings.md. Also
+    always-on: bills until ``brian destroy <id>``, no self-destroy.
+
+    Connecting the two boxes is a separate step:
+    ``brian chat bridge-isaac <isaac_id> <mind_id>``.
+    """
+    from neuroslm.connectors.vast_isaac import (
+        IsaacSimDeployConfig, VastIsaacConnector,
+    )
+    cfg = IsaacSimDeployConfig(
+        isaac_sim_version=args.isaac_sim_version,
+        branch=args.branch,
+        label=args.label or "neuroslm-isaac",
+        port=args.port,
+        camera_prim_path=args.camera_prim_path,
+    )
+    if args.gpu_query:
+        cfg.gpu_query = args.gpu_query
+    print("[deploy-isaac-sim] ⚠ UNVERIFIED against real hardware — "
+          "first deploy will need live debugging (docs/findings.md)")
+    print("[deploy-isaac-sim] ⚠ always-on box: bills until "
+          "`brian destroy <id>` — no self-destroy by design")
+    print(f"[deploy-isaac-sim] isaac_sim={cfg.isaac_sim_version} "
+          f"port={cfg.port} label={cfg.label} gpu_query={cfg.gpu_query!r}")
+    return VastIsaacConnector().launch(cfg)
+
+
 def cmd_deploy_brain(args: argparse.Namespace) -> int:
     """Launch a Brain (non-DSL) training run on vast.ai."""
     env = os.environ.copy()
@@ -4127,6 +4161,44 @@ def cmd_chat(args: argparse.Namespace) -> int:
             if tunnel_proc is not None:
                 tunnel_proc.terminate()
 
+    # `brian chat bridge-isaac` — §15 remote bridge: open the two-hop
+    # SSH relay (open_isaac_relay) connecting an Isaac Sim box to a
+    # mind box, both rented separately. Neither box ever holds the
+    # operator's private key — both tunnel legs originate here.
+    if args.ckpt == "bridge-isaac":
+        from neuroslm.cognition.server import open_isaac_relay
+        isaac_id = getattr(args, "isaac_tunnel", None)
+        mind_id = getattr(args, "tunnel", None)
+        if not isaac_id or not mind_id:
+            print("[bridge-isaac] ✗ both --tunnel <mind_instance_id> and "
+                  "--isaac-tunnel <isaac_instance_id> are required",
+                  file=sys.stderr)
+            return 1
+        port = getattr(args, "connect_port", None) or args.port
+        print(f"[bridge-isaac] opening relay: mind={mind_id} "
+              f"isaac={isaac_id} port={port} …")
+        try:
+            to_mind, to_isaac = open_isaac_relay(
+                isaac_id, mind_id, port,
+                identity=getattr(args, "identity", None))
+        except Exception as e:
+            print(f"[bridge-isaac] ✗ relay failed: {e}", file=sys.stderr)
+            return 1
+        print(f"[bridge-isaac] ✓ relay open — the isaac box can now "
+              f"reach 127.0.0.1:{port} to talk to the mind. "
+              f"Ctrl-C to close both legs.")
+        try:
+            to_mind.wait()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            for p in (to_mind, to_isaac):
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
+        return 0
+
     # --expert bypass: run on a frozen pretrained LM — no checkpoint
     # resolution at all. This is the zero-training entry point (§14.5):
     # the daemon (and --mind, if given) think with the expert directly.
@@ -5798,6 +5870,32 @@ def _build_parser() -> argparse.ArgumentParser:
                           "8GiB+ card under $0.15/hr)")
     sdm.set_defaults(func=cmd_deploy_mind)
 
+    # deploy-isaac-sim — §15 remote bridge sensory-source box
+    # (bills until destroyed!) ⚠ UNVERIFIED against real hardware.
+    sdi = sub.add_parser(
+        "deploy-isaac-sim",
+        help="Rent an RTX-class vast.ai box running Isaac Sim's "
+             "sensor loop (§15 remote bridge). ⚠ UNVERIFIED against "
+             "real hardware — see docs/findings.md. Bills until "
+             "`brian destroy <id>` — no self-destroy.")
+    sdi.add_argument("--isaac-sim-version", dest="isaac_sim_version",
+                     default="4.5.0",
+                     help="isaacsim pip package version (default 4.5.0)")
+    sdi.add_argument("--port", type=int, default=7861,
+                     help="local port the sensor loop reaches the mind "
+                          "on, via the operator's relay tunnel (default "
+                          "7861, matching deploy-mind's default)")
+    sdi.add_argument("--camera-prim-path", dest="camera_prim_path",
+                     default="/World/Camera")
+    sdi.add_argument("--branch",
+                     help="git branch the box clones (default: current)")
+    sdi.add_argument("--label", default=None,
+                     help="vast.ai instance label (default neuroslm-isaac)")
+    sdi.add_argument("--gpu-query", dest="gpu_query", default=None,
+                     help="vast offer filter override (default: an "
+                          "RTX_4090-class card — A100 has no RT cores)")
+    sdi.set_defaults(func=cmd_deploy_isaac_sim)
+
     # deploy-brain
     sdb = sub.add_parser("deploy-brain",
                          help="Launch a Brain (non-DSL) training run")
@@ -6316,6 +6414,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="(chat connect --tunnel) private key for the tunnel "
              "(ssh -i). Needed for nonstandard key filenames like "
              "~/.ssh/id, which ssh never auto-offers.")
+    sc_chat.add_argument(
+        "--isaac-tunnel", dest="isaac_tunnel", metavar="INSTANCE_ID",
+        default=None,
+        help="(chat bridge-isaac) the Isaac Sim box's vast.ai instance "
+             "id — paired with --tunnel (the mind box's id) to open "
+             "the §15 two-hop relay: neither rented box ever holds "
+             "the operator's SSH key.")
     sc_chat.add_argument(
         "--device", default="cpu", choices=["cpu", "cuda"],
         help="Inference device (default cpu — the daemon is built for "

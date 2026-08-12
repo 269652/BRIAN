@@ -50,13 +50,15 @@ class OmniverseIsaacSimClient:
     the application, not a standalone pip dependency this repo can
     vendor. See module docstring for the audio caveat."""
 
-    def __init__(self, camera_prim_path: str, articulation_prim_path: str,
+    def __init__(self, camera_prim_path: str,
+                articulation_prim_path: Optional[str] = None,
                 resolution: Tuple[int, int] = (224, 224),
                 audio_source: Optional[
                     Callable[[], Optional[Sequence[float]]]] = None):
         try:
             from isaacsim.sensors.camera import Camera
-            from isaacsim.core.prims import Articulation
+            if articulation_prim_path is not None:
+                from isaacsim.core.prims import Articulation
         except ImportError as exc:
             raise RuntimeError(
                 "OmniverseIsaacSimClient requires the `isaacsim` Python "
@@ -70,16 +72,23 @@ class OmniverseIsaacSimClient:
         self._camera = Camera(prim_path=camera_prim_path,
                               resolution=resolution)
         self._camera.initialize()
-        self._articulation = Articulation(
-            prim_paths_expr=articulation_prim_path)
-        self._articulation.initialize()
+        # A minimal starter scene (camera + ground plane only) has no
+        # robot to bind an Articulation to — proprioception is simply
+        # absent from that scene, not an error.
+        self._articulation = None
+        if articulation_prim_path is not None:
+            self._articulation = Articulation(
+                prim_paths_expr=articulation_prim_path)
+            self._articulation.initialize()
         self._audio_source = audio_source
 
     def get_frame(self):
         """(H, W, 4) RGBA ndarray, or None before the first render."""
         return self._camera.get_rgba()
 
-    def get_joint_state(self) -> Dict[str, Sequence[float]]:
+    def get_joint_state(self) -> Optional[Dict[str, Sequence[float]]]:
+        if self._articulation is None:
+            return None
         positions = self._articulation.get_joint_positions()
         velocities = self._articulation.get_joint_velocities()
         forces = self._articulation.get_measured_joint_forces()

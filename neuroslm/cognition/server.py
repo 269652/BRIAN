@@ -427,19 +427,9 @@ def connect_repl(host: str = "127.0.0.1", port: int = DEFAULT_PORT,
     return 0
 
 
-def open_vast_tunnel(instance_id: str, port: int = DEFAULT_PORT,
-                     *, resolver=None, spawner=None,
-                     identity: Optional[str] = None):
-    """Open ``ssh -N -L port:127.0.0.1:port`` to a vast instance.
-
-    ``resolver(instance_id) -> "ssh://root@host:sshport"`` defaults to
-    ``vastai ssh-url``; ``spawner(argv) -> Popen`` defaults to
-    ``subprocess.Popen``. Returns the tunnel process (caller owns it).
-
-    ``identity``: path to the private key to offer (``ssh -i``).
-    Needed whenever the key filename is nonstandard (e.g. ``~/.ssh/id``)
-    — ssh only auto-offers id_rsa/id_ecdsa/id_ed25519-style names.
-    """
+def _resolve_vast_ssh(instance_id: str, resolver=None):
+    """``resolver(instance_id) -> "ssh://root@host:sshport"`` defaults
+    to ``vastai ssh-url``. Returns ``(userhost, sshport)``."""
     if resolver is None:
         def resolver(iid):
             out = subprocess.run(["vastai", "ssh-url", str(iid)],
@@ -453,6 +443,23 @@ def open_vast_tunnel(instance_id: str, port: int = DEFAULT_PORT,
     # ssh://root@HOST:PORT → user@host + -p PORT
     body = url.split("://", 1)[-1]
     userhost, _, sshport = body.rpartition(":")
+    return userhost, sshport
+
+
+def open_vast_tunnel(instance_id: str, port: int = DEFAULT_PORT,
+                     *, resolver=None, spawner=None,
+                     identity: Optional[str] = None):
+    """Open ``ssh -N -L port:127.0.0.1:port`` to a vast instance.
+
+    ``resolver(instance_id) -> "ssh://root@host:sshport"`` defaults to
+    ``vastai ssh-url``; ``spawner(argv) -> Popen`` defaults to
+    ``subprocess.Popen``. Returns the tunnel process (caller owns it).
+
+    ``identity``: path to the private key to offer (``ssh -i``).
+    Needed whenever the key filename is nonstandard (e.g. ``~/.ssh/id``)
+    — ssh only auto-offers id_rsa/id_ecdsa/id_ed25519-style names.
+    """
+    userhost, sshport = _resolve_vast_ssh(instance_id, resolver)
     argv = ["ssh", "-N",
             "-o", "StrictHostKeyChecking=accept-new",
             "-p", sshport,
@@ -463,3 +470,56 @@ def open_vast_tunnel(instance_id: str, port: int = DEFAULT_PORT,
     if spawner is None:
         spawner = subprocess.Popen
     return spawner(argv)
+
+
+def open_isaac_relay(isaac_instance_id: str, mind_instance_id: str,
+                     port: int = DEFAULT_PORT, *, resolver=None,
+                     spawner=None, identity: Optional[str] = None):
+    """§15 remote bridge: connect an Isaac Sim box (RTX-class GPU,
+    wherever it actually is) to a mind box's wire protocol (A100,
+    vast.ai) WITHOUT either rented box ever holding the operator's SSH
+    private key — the security model this project has used since
+    §14.5 (SSH is the transport and auth layer, no public listener)
+    extends to two boxes exactly the way it already covers one:
+
+    Two ordinary tunnels, BOTH initiated from the operator's own
+    machine, chained through it:
+
+      1. FORWARD to the mind:  ``ssh -L port:127.0.0.1:port <mind>``
+         (identical to :func:`open_vast_tunnel` — laptop:port now
+         reaches the mind server).
+      2. REVERSE to the isaac box: ``ssh -R port:127.0.0.1:port
+         <isaac>`` — tells sshd on the isaac box to bind its OWN
+         127.0.0.1:port and relay any connection back through this
+         tunnel to the operator's machine, which leg 1 is already
+         forwarding on to the mind. A ``SensoryBridge``/
+         ``RemoteMindProxy`` running on the isaac box then just
+         connects to its own ``127.0.0.1:port`` — same-host, no
+         different from the in-process case as far as that code knows.
+
+    Returns ``(to_mind_process, to_isaac_process)`` — caller owns both
+    and must terminate them together.
+    """
+    if spawner is None:
+        spawner = subprocess.Popen
+    mind_userhost, mind_sshport = _resolve_vast_ssh(mind_instance_id, resolver)
+    isaac_userhost, isaac_sshport = _resolve_vast_ssh(isaac_instance_id,
+                                                       resolver)
+
+    to_mind = ["ssh", "-N",
+              "-o", "StrictHostKeyChecking=accept-new",
+              "-p", mind_sshport,
+              "-L", f"{port}:127.0.0.1:{port}"]
+    if identity:
+        to_mind += ["-i", str(identity)]
+    to_mind.append(mind_userhost)
+
+    to_isaac = ["ssh", "-N",
+               "-o", "StrictHostKeyChecking=accept-new",
+               "-p", isaac_sshport,
+               "-R", f"{port}:127.0.0.1:{port}"]
+    if identity:
+        to_isaac += ["-i", str(identity)]
+    to_isaac.append(isaac_userhost)
+
+    return spawner(to_mind), spawner(to_isaac)

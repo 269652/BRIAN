@@ -246,3 +246,14 @@ class TestOmniverseIsaacSimClientGuardedImport:
         with pytest.raises(RuntimeError, match="isaacsim"):
             OmniverseIsaacSimClient(camera_prim_path="/World/Camera",
                                     articulation_prim_path="/World/Robot")
+
+    def test_articulation_prim_path_is_optional(self):
+        """A minimal starter scene (camera + ground plane, no robot)
+        must not require an articulation prim that doesn't exist —
+        the guarded-import error is the only thing observable without
+        a real isaacsim install, but it must fire the SAME way whether
+        or not articulation_prim_path is given (proving the
+        constructor accepts its absence rather than requiring it)."""
+        from neuroslm.connectors.isaac_sim import OmniverseIsaacSimClient
+        with pytest.raises(RuntimeError, match="isaacsim"):
+            OmniverseIsaacSimClient(camera_prim_path="/World/Camera")

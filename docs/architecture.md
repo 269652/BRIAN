@@ -3762,3 +3762,76 @@ tunnel to the mind exactly as `brian chat connect` already does
 RED-confirmed (9 contracts: `TestObserveSensoryOp`, `TestEmbedDimOp`,
 `TestRemoteMindProxy`, `tests/cognition/test_mind_server.py`). GREEN:
 `test_mind_server.py` 41 (was 32).
+
+**`brian deploy-isaac-sim` + `brian chat bridge-isaac` (same day) —
+UNVERIFIED, ship anyway per CLAUDE.md §1's own exemption.** Asked
+directly "is it possible to make a deploy script that deploys Isaac
+Sim with a scene to a suitable GPU and connects it to the A100
+instance's sensory input" — yes, and the repo's OWN rule already
+anticipates exactly this class of artifact: "vast.ai deploy scripts
+(verified by deploying, not unit-tested)." Building it, clearly
+labelled as unverified rather than silently pretending otherwise, is
+the correct move — not refusing, and not hiding the risk.
+
+- **`neuroslm/connectors/vast_isaac.py`** — sibling of `vast_mind.py`
+  (not a modification: a genuinely different shape, same reasoning
+  `vast_discover.sh` gives for its own separateness). `pip install
+  "isaacsim[all,extscache]==4.5.0" --extra-index-url
+  https://pypi.nvidia.com` — chosen over the `nvcr.io/nvidia/isaac-sim`
+  Docker container specifically to avoid NGC registry auth and
+  docker-in-docker on vast.ai, neither of which this connector could
+  verify. Default GPU query targets `RTX_4090` (A100 has no RT cores).
+  Reuses `scripts/vast_discover.sh` verbatim, identical secret-handling
+  (`bootstrap_secrets`, the pre-spend GH_TOKEN warning) — zero bash
+  changes needed. The onstart writes a generated standalone Isaac Sim
+  script (`SimulationApp` → `isaacsim.core.api.World` + a default
+  ground plane → `OmniverseIsaacSimClient` + `SensoryBridge` → a
+  `while simulation_app.is_running()` pump loop) into a DEDICATED pip
+  venv, kept separate from the repo's own `.venv` convention on
+  purpose — this is disposable rented infra with a fundamentally
+  different, version-pinned Python runtime, not local dev.
+- **`OmniverseIsaacSimClient.articulation_prim_path` is now optional**
+  — the minimal starter scene ships camera + ground plane only, no
+  robot; proprioception is simply absent from that scene rather than
+  an error.
+- **`open_isaac_relay` + `brian chat bridge-isaac`**
+  (`neuroslm/cognition/server.py`) — the connection step, kept
+  strictly separate from either deploy. Two ordinary SSH tunnels, BOTH
+  opened from the OPERATOR's own machine (refactored out of
+  `open_vast_tunnel`'s existing resolver/spawner plumbing via a new
+  shared `_resolve_vast_ssh` helper — that function's own tested
+  behaviour is unchanged): a forward tunnel to the mind (identical to
+  `open_vast_tunnel`) and a REVERSE tunnel (`ssh -R`) to the Isaac Sim
+  box, so ITS sshd binds `127.0.0.1:port` locally and relays back
+  through the connection to the operator's machine, which the forward
+  leg is already forwarding on to the mind. Neither rented box ever
+  holds the operator's private key — the exact security model §14.5
+  already established for one box, extended to two without adding a
+  new secret anywhere.
+
+**What remains genuinely unverified — the explicit checklist for the
+first live deploy**, not glossed over:
+1. Isaac Sim 4.5.0's exact `isaacsim.core.api.World` /
+   `isaacsim.sensors.camera.Camera` import surface — confirmed via
+   research (docs, not execution) for the CURRENT namespace, not
+   confirmed by actually running it.
+2. GLIBC 2.35+ / Python 3.10 compatibility with
+   `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` (the base image
+   `vast_discover.sh` hardcodes) — untested combination.
+3. `pip install -e /workspace/brian[ml]` into the SAME venv as
+   `isaacsim[all,extscache]` risks a torch-version conflict; our own
+   `pyproject.toml` floor (`torch>=2.0`) should be loose enough to let
+   pip resolve around whatever isaacsim pins, but this is a bet, not a
+   proof.
+4. First-run extension caching takes 10-15 minutes with no progress
+   bar — a slow/failed pip step will look identical to a hang from the
+   outside; `brian logs` is the only way to tell.
+5. `vast.ai`'s RTX_4090 offer pool — availability/pricing volatility
+   untested (A100's pool is what every other connector in this repo
+   has actually exercised).
+
+RED-confirmed (18 contracts: `TestIsaacDeployCliWiring`, the
+`open_isaac_relay` additions to `TestCliWiring`,
+`test_articulation_prim_path_is_optional`). GREEN:
+`test_mind_server.py` 53 (was 41), `test_isaac_sim.py` 12 (was 11).
+Not deployed — `brian deploy-isaac-sim` has not been run.
