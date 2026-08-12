@@ -122,9 +122,10 @@ class _FakeMind:
 
 
 def _tick_result(**kw):
-    from neuroslm.cognition.runtime import TickResult
+    from neuroslm.cognition.runtime import TickResult, ThoughtScore
     base = dict(
-        thought="a thought", candidates=["a thought"], scores=[],
+        thought="a thought", candidates=["a thought"],
+        scores=[ThoughtScore(mean_nll=2.5, entropy_norm=0.4)],
         recalled=[{"content": "x"}], stored=True, inhibited=False,
         nt_levels={"DA": 0.15, "NE": 0.20, "5HT": 0.50, "ACh": 0.30,
                   "eCB": 0.10, "Glu": 0.45, "GABA": 0.15},
@@ -159,6 +160,26 @@ class TestServerTelemetry:
             assert tel["recalled"] == 1
             assert tel["stored"] is True
             assert tel["inhibited"] is False
+        finally:
+            s.stop()
+
+    def test_think_response_includes_full_debug_trace_and_tick_n(self):
+        """2026-08-12 live incident: the connected laptop client never
+        saw the DMN loop's autonomous thoughts OR the basal-ganglia
+        debug trace at all — both only ever reached the box's own
+        stdout (brian logs). The wire payload must carry the SAME
+        info format_debug_trace prints server-side."""
+        from neuroslm.cognition.server import MindServer
+        daemon, _ = _mk_daemon_with_mind([_tick_result(tick_n=7)])
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "think"})
+            tel = res["telemetry"]
+            assert tel["tick_n"] == 7
+            assert tel["thought"] == "a thought"
+            assert "BG deliberation" in tel["debug"]
+            assert "SELECTED" in tel["debug"]
         finally:
             s.stop()
 
@@ -219,6 +240,99 @@ class TestConnectClientTelemetry:
             out = out_stream.getvalue()
             assert "no ticks yet" in out.lower() or "none" in out.lower()
             assert out.count("GABA=") >= 1
+        finally:
+            s.stop()
+
+
+class TestBackgroundTickPolling:
+    """2026-08-12 live incident: 'still no wandering thoughts or
+    introspection also no debug logs' when connected via
+    `brian chat connect` — the DMN loop WAS running server-side
+    (confirmed in `brian logs`), but the wire protocol is pure
+    request/response, so a connected client only ever saw something
+    when IT initiated a `/think`. A background poller (its own
+    connection, so it never contends with the daemon's inference
+    lock or the main REPL socket) watches for tick_n advancing and
+    prints new thoughts as they happen — this is what makes the
+    always-on mind's own thinking visible live, not just on request.
+    """
+
+    def test_poll_prints_a_new_tick(self):
+        import io
+        import threading
+        from neuroslm.cognition.server import MindServer, _poll_new_ticks
+
+        daemon, _ = _mk_daemon_with_mind([_tick_result(
+            thought="a wandering idea", candidates=["a wandering idea"],
+            tick_n=1)])
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            _rpc(port, {"op": "think"})  # server-side tick happens
+            out = io.StringIO()
+            _poll_new_ticks("127.0.0.1", port, out, threading.Lock(),
+                            threading.Event(), poll_interval=0.01,
+                            max_polls=1)
+            text = out.getvalue()
+            assert "a wandering idea" in text
+            assert "BG deliberation" in text, (
+                "the debug trace must reach the client too, not just "
+                "the compact summary")
+        finally:
+            s.stop()
+
+    def test_poll_does_not_reprint_the_same_tick(self):
+        import io
+        import threading
+        from neuroslm.cognition.server import MindServer, _poll_new_ticks
+
+        daemon, _ = _mk_daemon_with_mind([_tick_result(
+            thought="same idea", candidates=["same idea"], tick_n=3)])
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            _rpc(port, {"op": "think"})
+            out = io.StringIO()
+            _poll_new_ticks("127.0.0.1", port, out, threading.Lock(),
+                            threading.Event(), poll_interval=0.01,
+                            max_polls=3)
+            assert out.getvalue().count("same idea") == 1, (
+                "a tick already shown must not be printed again on "
+                "every subsequent poll of the same tick_n")
+        finally:
+            s.stop()
+
+    def test_poll_stops_when_event_is_set(self):
+        import io
+        import threading
+        from neuroslm.cognition.server import MindServer, _poll_new_ticks
+
+        daemon, _ = _mk_daemon_with_mind([_tick_result()])
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            stop = threading.Event()
+            stop.set()  # already stopped — must return immediately
+            t0 = __import__("time").time()
+            _poll_new_ticks("127.0.0.1", port, io.StringIO(),
+                            threading.Lock(), stop, poll_interval=5.0)
+            assert __import__("time").time() - t0 < 1.0
+        finally:
+            s.stop()
+
+    def test_connect_repl_starts_and_cleanly_stops_the_poller(self):
+        import io
+        from neuroslm.cognition.server import MindServer, connect_repl
+
+        daemon, _ = _mk_daemon_with_mind([_tick_result()])
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            rc = connect_repl(
+                "127.0.0.1", port,
+                in_stream=io.StringIO("/quit\n"), out_stream=io.StringIO(),
+                poll_interval=0.05)
+            assert rc == 0
         finally:
             s.stop()
 

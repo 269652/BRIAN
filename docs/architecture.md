@@ -3262,7 +3262,19 @@ is attached (always true under `--serve`) — writes both lines
 immediately so the DMN loop is visible in `brian logs <box>` with zero
 clients connected. `MindServer`'s `think`/`status` ops carry the same
 telemetry over the wire (`status` peeks the last tick without forcing
-a new one); `chat connect`'s `/think` and `/status` print it.
+a new one); `chat connect`'s `/think` and `/status` print it, including
+the full `format_debug_trace` block (not just the compact summary).
+
+**Live visibility for a connected client** (2026-08-12): the wire
+protocol is pure request/response, so a connected `brian chat connect`
+client only saw the mind's own thinking when IT explicitly asked via
+`/think` — the DMN loop's autonomous ticks (confirmed running every
+~12-15s in `brian logs`) never reached the laptop. Fixed with a
+background poller (`_poll_new_ticks`, its own connection — never
+contends with the daemon's inference lock or the main REPL socket):
+polls `status` (a peek, no tick triggered), tracks `tick_n`, and
+prints the new thought + debug trace the moment the box's DMN loop
+produces one, unprompted, while the user sits at the `>` prompt.
 
 **Mind-wandering (DMN) + basal-ganglia debug trace** (2026-08-12): a
 tick with no sensory input this cycle (`TickResult.wandering=True`) is

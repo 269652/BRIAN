@@ -93,14 +93,21 @@ class MindServer:
 def _tick_telemetry(daemon: Any) -> Optional[dict]:
     """§14.5: the inner-state summary of the daemon's last cognitive
     tick — basal-ganglia pick, hippocampal recall/write, NT snapshot,
-    Φ. ``None`` when no mind is attached or no tick has happened yet
-    (peekable via the ``status`` op without forcing a new tick)."""
+    Φ, and the FULL deliberation trace (every candidate + score, not
+    just the compact summary — 2026-08-12: a connected client had no
+    way to see this, only `brian logs` on the box did). ``None`` when
+    no mind is attached or no tick has happened yet (peekable via the
+    ``status`` op without forcing a new tick).
+    """
     t = getattr(daemon, "last_tick", None)
     if t is None:
         return None
-    from neuroslm.cognition.runtime import format_introspection
+    from neuroslm.cognition.runtime import format_debug_trace, format_introspection
     return {
         "summary": format_introspection(t),
+        "debug": format_debug_trace(t),
+        "tick_n": t.tick_n,
+        "thought": t.thought,
         "nt_levels": t.nt_levels,
         "phi_proxy": t.phi_proxy,
         "recalled": len(t.recalled),
@@ -131,9 +138,58 @@ def _dispatch(daemon: Any, msg: dict) -> dict:
 
 # ── Client ───────────────────────────────────────────────────────────
 
+DEFAULT_POLL_INTERVAL = 4.0
+
+
+def _poll_new_ticks(host: str, port: int, out_stream, write_lock,
+                    stop_event, poll_interval: float = DEFAULT_POLL_INTERVAL,
+                    max_polls: Optional[int] = None) -> None:
+    """Background: watch for the DMN loop's own ticks and print them
+    live. 2026-08-12 live incident: the mind's autonomous thinking WAS
+    running server-side (confirmed in `brian logs`), but the wire
+    protocol is pure request/response — a connected client only ever
+    saw a thought when IT asked for one via ``/think``. This polls
+    ``status`` (a peek — never touches the daemon's inference lock or
+    triggers a tick) on its OWN connection, so it never contends with
+    the main REPL socket, and prints the full deliberation trace
+    whenever ``tick_n`` advances past what was last shown.
+
+    ``max_polls`` is a test seam — production callers leave it unset
+    and rely on ``stop_event`` to end the loop.
+    """
+    seen_tick_n = -1
+    polls = 0
+    while not stop_event.is_set():
+        res = None
+        try:
+            with socket.create_connection((host, port), timeout=5) as c:
+                f = c.makefile("rw", encoding="utf-8", newline="\n")
+                f.write(json.dumps({"op": "status"}) + "\n")
+                f.flush()
+                line = f.readline()
+                res = json.loads(line) if line else None
+        except (OSError, ValueError):
+            res = None  # box unreachable / mid-restart — just retry later
+
+        tel = (res or {}).get("telemetry") if res and res.get("ok") else None
+        if tel and tel.get("thought") and tel.get("tick_n", -1) != seen_tick_n:
+            seen_tick_n = tel["tick_n"]
+            with write_lock:
+                out_stream.write(f"\n[mind] {tel['summary']}\n")
+                if tel.get("debug"):
+                    out_stream.write(tel["debug"] + "\n")
+                out_stream.write("> ")
+                out_stream.flush()
+
+        polls += 1
+        if max_polls is not None and polls >= max_polls:
+            return
+        stop_event.wait(poll_interval)
+
 
 def connect_repl(host: str = "127.0.0.1", port: int = DEFAULT_PORT,
-                 *, in_stream=None, out_stream=None) -> int:
+                 *, in_stream=None, out_stream=None,
+                 poll_interval: float = DEFAULT_POLL_INTERVAL) -> int:
     """Interactive REPL against a remote MindServer.
 
     Slash commands mirror the local REPL: ``/think``, ``/render``,
@@ -161,51 +217,79 @@ def connect_repl(host: str = "127.0.0.1", port: int = DEFAULT_PORT,
             raise ConnectionError("server closed the connection")
         return json.loads(line)
 
+    # §14.5: the DMN loop keeps thinking whether or not anyone asks —
+    # a background poller (its own connection) shows those ticks live
+    # instead of only via `brian logs` on the box. write_lock keeps
+    # its prints from interleaving with the main loop's.
+    write_lock = threading.Lock()
+    stop_event = threading.Event()
+    poller = threading.Thread(
+        target=_poll_new_ticks,
+        args=(host, port, out_stream, write_lock, stop_event, poll_interval),
+        daemon=True, name="brian-connect-poller")
+
     try:
         hello = _rpc({"op": "ping"})
         if not hello.get("ok"):
             out_stream.write(f"[connect] ✗ bad handshake: {hello}\n")
             return 1
-        out_stream.write(f"[connect] mind online @ {host}:{port} — "
-                         f"/think /status /render /quit\n> ")
-        out_stream.flush()
+        poller.start()
+        with write_lock:
+            out_stream.write(f"[connect] mind online @ {host}:{port} — "
+                             f"/think /status /render /quit\n> ")
+            out_stream.flush()
         while True:
             line = in_stream.readline()
             if not line:
                 break
             line = line.strip()
             if not line:
-                out_stream.write("> ")
-                out_stream.flush()
+                with write_lock:
+                    out_stream.write("> ")
+                    out_stream.flush()
                 continue
             if line in ("/quit", "/exit", ":q"):
                 break
             if line == "/think":
                 res = _rpc({"op": "think"})
-                out_stream.write(f"[thought] {res.get('thought')}\n")
                 tel = res.get("telemetry")
-                if tel:
-                    out_stream.write(f"  {tel['summary']}\n")
+                with write_lock:
+                    out_stream.write(f"[thought] {res.get('thought')}\n")
+                    if tel:
+                        out_stream.write(f"  {tel['summary']}\n")
+                        if tel.get("debug"):
+                            out_stream.write(tel["debug"] + "\n")
             elif line == "/status":
                 res = _rpc({"op": "status"})
                 tel = res.get("telemetry")
-                out_stream.write(
-                    f"  {tel['summary']}\n" if tel
-                    else "  (no ticks yet)\n")
+                with write_lock:
+                    if tel:
+                        out_stream.write(f"  {tel['summary']}\n")
+                        if tel.get("debug"):
+                            out_stream.write(tel["debug"] + "\n")
+                    else:
+                        out_stream.write("  (no ticks yet)\n")
             elif line == "/render":
                 res = _rpc({"op": "render"})
-                out_stream.write(str(res.get("render", "")) + "\n")
+                with write_lock:
+                    out_stream.write(str(res.get("render", "")) + "\n")
             else:
-                out_stream.write("[generating…]\n")
-                out_stream.flush()
+                with write_lock:
+                    out_stream.write("[generating…]\n")
+                    out_stream.flush()
                 res = _rpc({"op": "say", "text": line})
-                out_stream.write(f"{res.get('reply')}\n")
-            out_stream.write("> ")
-            out_stream.flush()
+                with write_lock:
+                    out_stream.write(f"{res.get('reply')}\n")
+            with write_lock:
+                out_stream.write("> ")
+                out_stream.flush()
     except (ConnectionError, OSError) as e:
         out_stream.write(f"\n[connect] ✗ connection lost: {e}\n")
         return 1
     finally:
+        stop_event.set()
+        if poller.is_alive():
+            poller.join(timeout=2.0)
         try:
             conn.close()
         except OSError:

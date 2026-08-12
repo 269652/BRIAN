@@ -3711,3 +3711,26 @@ tick cadence drops to seconds — tracked as the immediate follow-up,
 not yet re-measured as of this entry.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestExpertModelMovedToDevice (2); tests/cognition/test_mind_server.py::TestCliWiring::test_deploy_mind_defaults_to_cuda_device + test_mind_onstart_requests_cuda_device]
+
+### Connected client saw no wandering thoughts or debug logs (2026-08-12)
+
+Live report on the (now GPU-fixed) box: DMN ticks confirmed running
+every ~12-15s in `brian logs`, but a connected `brian chat connect`
+client saw nothing unprompted, and `/think`/`/status` only ever
+returned the compact one-line summary, never the debug trace.
+
+**Root cause.** The wire protocol is pure request/response — nothing
+pushes server-side events to a connected client. The DMN loop's
+autonomous ticks and `format_debug_trace`'s full deliberation only
+ever reached the box's own stdout (`brian logs`), never the socket.
+
+**Fix.** `_tick_telemetry` now includes `debug` (full
+`format_debug_trace`), `tick_n`, and `thought` in the `think`/`status`
+payload. `connect_repl` starts a background poller
+(`_poll_new_ticks`) on its own connection — polls `status` (a peek,
+never triggers a tick or touches the daemon's inference lock), tracks
+`tick_n`, and prints new thoughts + their debug trace live, unprompted,
+while the user sits at the prompt. `write_lock` prevents interleaving
+with the main loop's own output.
+
+[EVIDENCE: tests/cognition/test_mind_server.py::TestBackgroundTickPolling (4); TestServerTelemetry::test_think_response_includes_full_debug_trace_and_tick_n]
