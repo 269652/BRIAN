@@ -3906,3 +3906,54 @@ test_mind_server.py 32, test_chat_daemon.py 34, test_brian_harness.py
 13 all unregressed.
 
 [EVIDENCE: tests/cognition/test_patterns.py::TestClassifyActionViaGeneration; tests/cognition/test_cognitive_runtime.py::TestClassifyFnInjection]
+
+### The curiosity loop — why thoughts weren't natural, and the intrinsic fix (2026-08-12)
+
+"Not producing realistic or natural thoughts... brainstorm for an
+elegant intrinsic solution." Live diagnosis from box 47509954 ticks
+2-9 (all four visible in the introspection telemetry itself — the
+debug instrumentation built this session is what made the diagnosis
+possible):
+
+1. Thoughts addressed an imaginary interlocutor ("Brian, ...",
+   "Thank you! Let's continue...") — the chat template made the
+   instruct model roleplay a conversation, not think.
+2. `HC[recall=1 write=no]` nine ticks straight, same episode recalled
+   every time — the NLL-EMA write gate was blind to semantic
+   repetition (NLL flat in 3.0-3.9 while content orbited one topic).
+3. NT pinned at baseline all nine ticks — the DA→selection-temperature
+   exploration path existed and was tested but nothing ever drove it.
+4. Zero associative jumps — retrieval anchored on the last thought,
+   similarity returned the same episode, next thought stayed in the
+   same basin.
+
+**Fix — one signal, four wirings (architecture.md §14.9):** semantic
+novelty (1 − max cosine vs stored episodes, via the recall machinery
+itself) replaces the NLL write gate, drives NT activation, and
+integrates into a boredom EMA that scales the EXISTING DA-modulated
+selection temperature (`curious_selection_temperature`) — the
+established novelty-seeking intrinsic-motivation family, not an
+invented heuristic. Inhibition of return suppresses just-recalled
+episodes (yields rather than blinds); boredom past threshold triggers
+replay-anchored wandering (random stored episode as the RECALL anchor
+— the associative-jump mechanism; never during respond). DMN ticks
+generate through a raw-completion `generate_wander_fn` seam (no chat
+template — inner speech has no addressee) with a BG prior penalizing
+second-person address in wandering candidates only.
+
+RED-confirmed (15 contracts before implementation; two test-fixture
+bugs found and fixed in MY OWN new tests during the pass — IOR/replay
+tests seeded memory via observe(), which queues sensory input and
+turns the tick into a respond, defeating the wandering-path
+assertions; and one trigger test used texts the fake embedding maps
+to identical vectors). GREEN: test_cognitive_runtime.py 101 (was 84),
+test_mind_server.py 32, test_patterns.py 37, test_chat_daemon.py 34
+all green. The old surprise_write_z/surprise_ema_alpha NLL-gate
+fields deleted cleanly (§7 — no deprecation shims).
+
+Not yet re-measured live: whether the loop actually produces
+natural-feeling wandering on the box — requires a redeploy; the
+Layer-A contracts pin the mechanisms, the felt quality needs the
+next live session.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestSemanticNoveltyGate, TestBoredomCuriosityLoop, TestInhibitionOfReturn, TestReplayAnchoredWandering, TestInnerSpeechRegister, TestSecondPersonPrior]

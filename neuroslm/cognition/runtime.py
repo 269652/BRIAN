@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import math
 import random as _random
+import re
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Tuple
@@ -95,12 +96,37 @@ class MindConfig:
     gaba_silence_threshold: float = 0.55
     """GABA level at/above which the tick is inhibited outright."""
 
-    surprise_write_z: float = 0.35
-    """Relative NLL distance from the running EMA required to write a
-    thought to episodic memory (hippocampal novelty gate)."""
+    novelty_write_threshold: float = 0.3
+    """Semantic novelty (1 − max cosine vs stored episodes) required
+    to write a thought to episodic memory (hippocampal novelty gate).
+    2026-08-12: replaced the NLL-EMA gate — live ticks showed NLL flat
+    in a 3.0-3.9 band while CONTENT orbited one topic; the old gate
+    wrote nothing for nine straight ticks and recall served a single
+    episode forever."""
 
-    surprise_ema_alpha: float = 0.2
-    """EMA rate of the thought-NLL trace the novelty gate compares to."""
+    novelty_ema_alpha: float = 0.25
+    """EMA rate of the boredom trace: boredom ← (1−α)·boredom +
+    α·(1−novelty). Falling novelty accumulates into boredom."""
+
+    curiosity_gain: float = 2.0
+    """How strongly boredom raises the basal ganglia's exploration
+    temperature: T_eff = T_DA · (1 + curiosity_gain·boredom). Wires
+    boredom into the SAME temperature path DA already modulates."""
+
+    replay_boredom_threshold: float = 0.6
+    """Boredom level at which idle wandering anchors RECALL on a
+    randomly sampled stored episode (hippocampal replay — the
+    associative-jump mechanism) instead of the last thought."""
+
+    ior_window: int = 3
+    """Inhibition of return: episodes recalled within the last N ticks
+    are transiently suppressed from retrieval, so one memory can't
+    dominate every tick. IOR yields when it would empty the result."""
+
+    second_person_penalty: float = 1.5
+    """BG prior (nats, added to a candidate's NLL) against
+    second-person address in WANDERING candidates — inner speech has
+    no addressee. Never applied on respond ticks."""
 
     max_prompt_chars: int = 1200
     """Hard cap on the composed thinking prompt (CPU latency guard)."""
@@ -160,6 +186,19 @@ class TickResult:
     """IIT-flavored proxy: population stdev of candidate NLLs (nats)
     — how distinguishable THINK's repertoire of options was this
     tick. A richer, more differentiated repertoire scores higher."""
+    novelty: float = 0.0
+    """Semantic novelty of the selected thought: 1 − max cosine vs
+    every stored episode (1.0 into an empty memory). The write gate,
+    the NT activation driver, and the boredom trace all consume this
+    one signal."""
+    boredom: float = 0.0
+    """EMA of (1 − novelty) — the curiosity homeostat's state. Rises
+    while thinking stays in one basin; drives exploration temperature
+    and replay."""
+    replay: bool = False
+    """True when this idle tick anchored RECALL on a randomly sampled
+    stored episode (hippocampal replay) because boredom crossed the
+    threshold — the mechanism behind associative jumps."""
 
 
 _NT_ORDER = ("DA", "NE", "5HT", "ACh", "eCB", "Glu", "GABA")
@@ -188,8 +227,11 @@ def format_introspection(result: TickResult) -> str:
     bg = (f"BG[action={result.action} n={n_cand}"
          + (f" pick={pick}" if pick is not None else "")
          + f" H={result.selection_entropy:.2f}]")
-    hc = f"HC[recall={len(result.recalled)} write={'yes' if result.stored else 'no'}]"
-    return f"Φ={result.phi_proxy:.2f} {nt_str} {bg} {hc}"
+    hc = (f"HC[recall={len(result.recalled)} "
+         f"write={'yes' if result.stored else 'no'}"
+         + (" replay" if result.replay else "") + "]")
+    cur = f"CUR[nov={result.novelty:.2f} bore={result.boredom:.2f}]"
+    return f"Φ={result.phi_proxy:.2f} {nt_str} {bg} {hc} {cur}"
 
 
 def _truncate(text: str, n: int = 90) -> str:
@@ -209,6 +251,8 @@ def format_debug_trace(result: TickResult) -> str:
     compact wire-protocol summary (:func:`format_introspection`).
     """
     mode = "DMN wandering" if result.wandering else "responding"
+    if result.replay:
+        mode += " (replay)"
     lines = [f"[tick {result.tick_n}] {mode} action={result.action}"]
 
     nt = result.nt_levels or {}
@@ -271,6 +315,27 @@ def selection_temperature(da_level: float, da_baseline: float,
     return cfg.selection_temp_base * (1.0 + cfg.da_temp_gain * excess)
 
 
+def curious_selection_temperature(da_level: float, da_baseline: float,
+                                  boredom: float, cfg: MindConfig) -> float:
+    """Boredom-augmented exploration temperature: the DA-modulated
+    temperature (:func:`selection_temperature`) further scaled by
+    ``1 + curiosity_gain·boredom``. Bored → hotter → more exploratory
+    selection; engaged (boredom≈0) → identical to the DA path alone.
+    This is the curiosity homeostat's actuator — the SAME knob DA
+    already turns, now also driven by declining semantic novelty."""
+    T = selection_temperature(da_level, da_baseline, cfg)
+    return T * (1.0 + cfg.curiosity_gain * max(0.0, min(1.0, boredom)))
+
+
+_SECOND_PERSON_RE = re.compile(r"\b(you|your|yours|yourself)\b|^brian\s*[,:]",
+                               re.IGNORECASE)
+
+
+def _is_second_person(text: str) -> bool:
+    """Does this candidate address someone? Inner speech shouldn't."""
+    return bool(_SECOND_PERSON_RE.search(text or ""))
+
+
 class CognitiveRuntime:
     """The always-on mind around a trained trunk. See module docstring.
 
@@ -307,11 +372,18 @@ class CognitiveRuntime:
                  cfg: Optional[MindConfig] = None,
                  rng: Optional[_random.Random] = None,
                  classify_fn: Optional[Callable[[str], "ActionClassification"]] = None,
+                 generate_wander_fn: Optional[GenerateFn] = None,
                  ) -> None:
         if nt is None:
             from neuroslm.emergent.driven_nt import DrivenNTSystem
             nt = DrivenNTSystem()
         self._gen = generate_fn
+        # Inner-speech register (D of the curiosity loop): DMN ticks
+        # generate through this seam — raw completion, no chat
+        # template, no imaginary addressee. Defaults to the main seam
+        # for injected/test setups; build_runtime_from_hf_lm wires a
+        # real completion-mode closure.
+        self._gen_wander = generate_wander_fn or generate_fn
         self._score = score_fn
         self._embed = embed_fn
         if classify_fn is None:
@@ -324,11 +396,14 @@ class CognitiveRuntime:
         self.rng = rng or _random.Random(0)
         self._sensory: Deque[str] = deque(maxlen=32)
         self._last_thought: Optional[str] = None
-        # Running NLL trace for the hippocampal novelty gate. None until
-        # the first thought seeds it (bootstrap: first thought is novel).
-        self._nll_ema: Optional[float] = None
         self._tick_n: int = 0
         self._wander_idx: int = 0
+        # Curiosity homeostat state: EMA of (1 − semantic novelty).
+        self._boredom: float = 0.0
+        # Inhibition of return: contents recalled in the last few
+        # ticks, transiently suppressed from retrieval.
+        self._recent_recall: Deque[str] = deque(
+            maxlen=max(1, self.cfg.ior_window) * max(1, self.cfg.recall_k))
 
     # ── SENSE ────────────────────────────────────────────────────────
 
@@ -391,12 +466,39 @@ class CognitiveRuntime:
         # DMN condition: nothing external arrived this cycle — the
         # tick is pure mind-wandering rather than a response.
         wandering = not bool(sensory)
-        anchor = (sensory[-1] if sensory
-                  else self._last_thought or self.cfg.persona)
 
-        # RECALL: hippocampal similarity read.
-        recalled = self.memory.retrieve(
-            list(self._embed(anchor)), k=self.cfg.recall_k)
+        # Hippocampal replay (C2 of the curiosity loop): when bored,
+        # an idle tick anchors RECALL on a randomly sampled stored
+        # episode instead of the last thought — the associative-jump
+        # mechanism that breaks the last_thought→similarity→same-basin
+        # chain. Never during respond: real input stays the anchor.
+        replay = False
+        anchor_vec = None
+        if wandering and self._boredom >= self.cfg.replay_boredom_threshold:
+            candidates_for_replay = [e for e in self.memory.all()
+                                     if e.get("content_vec") is not None]
+            if candidates_for_replay:
+                replay = True
+                anchor_vec = list(
+                    self.rng.choice(candidates_for_replay)["content_vec"])
+        if anchor_vec is None:
+            anchor = (sensory[-1] if sensory
+                      else self._last_thought or self.cfg.persona)
+            anchor_vec = list(self._embed(anchor))
+
+        # RECALL: hippocampal similarity read with inhibition of
+        # return (C1): episodes recalled in the last few ticks are
+        # transiently suppressed so one memory can't dominate every
+        # tick. IOR yields rather than blinds — when suppression would
+        # empty the result, the unsuppressed top-k is used anyway.
+        over_fetch = self.cfg.recall_k + len(self._recent_recall)
+        scored = self.memory.retrieve_scored(anchor_vec, k=over_fetch)
+        fresh = [e for _, e in scored
+                 if e.get("content") not in self._recent_recall]
+        recalled = fresh[: self.cfg.recall_k] if fresh else [
+            e for _, e in scored[: self.cfg.recall_k]]
+        for e in recalled:
+            self._recent_recall.append(e.get("content"))
 
         # THINK: K candidates from persona + recall + context. The
         # trigger — what this tick is actually ABOUT — is the real
@@ -404,11 +506,15 @@ class CognitiveRuntime:
         # chosen for an idle tick; captured here (not hidden inside
         # _compose_prompt) so the episode we may store below can
         # record it (Layer 2 — Context: "what happened around it").
+        # Inner-speech register (D): idle ticks generate through the
+        # wander seam (raw completion, no chat template) — an
+        # addressee only exists on respond ticks.
         trigger_text = sensory[-1] if sensory else self._next_wander_prompt()
         prompt = self._compose_prompt(sensory, recalled, trigger_text)
+        gen = self._gen if not wandering else self._gen_wander
         candidates: List[str] = []
         for _ in range(max(1, self.cfg.n_candidates)):
-            out = (self._gen(prompt, self.cfg.thought_n_tok) or "").strip()
+            out = (gen(prompt, self.cfg.thought_n_tok) or "").strip()
             if out:
                 candidates.append(out)
         if not candidates:
@@ -419,11 +525,24 @@ class CognitiveRuntime:
                               wandering=wandering,
                               action="respond" if not wandering else "think")
 
-        # GATE: DA-tempered softmax over −NLL (basal-ganglia selection).
+        # GATE: boredom-and-DA-tempered softmax over −NLL, with the
+        # inner-speech prior (D2) penalizing second-person address in
+        # WANDERING candidates only.
         scores = [self._score(c) for c in candidates]
-        idx, selection_entropy = self._select(scores, levels)
+        idx, selection_entropy = self._select(scores, levels, candidates,
+                                              wandering)
         thought, sc = candidates[idx], scores[idx]
         differentiation = _population_stdev([s.mean_nll for s in scores])
+
+        # NOVELTY (A of the curiosity loop): semantic novelty of the
+        # selected thought — 1 − max cosine vs every stored episode.
+        # Computed BEFORE storing (a thought can't be compared against
+        # itself). One signal, three consumers: the write gate below,
+        # the NT activation driver, and the boredom trace.
+        thought_vec = list(self._embed(thought))
+        top = self.memory.retrieve_scored(thought_vec, k=1)
+        novelty = 1.0 - top[0][0] if top else 1.0
+        novelty = max(0.0, min(1.0, novelty))
 
         # ACTION: the basal ganglia's actual act this tick — exactly
         # one of respond/speak/think. External input always surfaces
@@ -431,10 +550,10 @@ class CognitiveRuntime:
         # whether to remember the thought also decides whether to
         # voice it (speak) or keep it internal (think) — one signal,
         # two consequences, not a second invented gate.
-        stored = self._novelty_gate(sc.mean_nll)
+        stored = novelty >= self.cfg.novelty_write_threshold
         action = "respond" if not wandering else ("speak" if stored else "think")
 
-        # STORE: surprise-gated episodic write — as a full episode,
+        # STORE: novelty-gated episodic write — as a full episode,
         # not bare text. Layer 1 (event) is `thought` itself; the
         # rest lives in `context`, reusing EpisodicMemory's existing
         # (previously-unused) slot rather than inventing a parallel
@@ -445,7 +564,7 @@ class CognitiveRuntime:
             action_class = self._classify(thought).primary
             self.memory.add(
                 thought,
-                content_vec=list(self._embed(thought)),
+                content_vec=thought_vec,
                 nt_state=levels,
                 tags=["thought", f"action={action}",
                      "wandering" if wandering else "responding",
@@ -462,14 +581,19 @@ class CognitiveRuntime:
                     "phi_proxy": max(0.0, min(1.0, sc.entropy_norm)),
                     "selection_entropy": selection_entropy,
                     "differentiation": differentiation,
+                    "novelty": novelty,
                 })
 
-        # DRIVE: the tick's signals advance the NT dynamics. The
-        # selected thought's NLL is the loss/surprise driver (an
-        # unusually easy thought reads as reward); its inverse
-        # normalised entropy is the activation proxy.
-        self.nt.step_full(loss=sc.mean_nll,
-                          activation=1.0 - sc.entropy_norm)
+        # DRIVE (B): the tick's signals advance the NT dynamics — the
+        # selected thought's NLL as the loss/surprise driver, and
+        # SEMANTIC NOVELTY as the activation driver (novel content is
+        # arousing; the old entropy proxy barely moved, which is why
+        # NT sat pinned at baseline for nine straight live ticks).
+        # Boredom integrates 1−novelty and feeds the next tick's
+        # selection temperature via curious_selection_temperature.
+        self.nt.step_full(loss=sc.mean_nll, activation=novelty)
+        a = self.cfg.novelty_ema_alpha
+        self._boredom = (1.0 - a) * self._boredom + a * (1.0 - novelty)
 
         self._last_thought = thought
         return TickResult(thought=thought, candidates=candidates,
@@ -480,7 +604,9 @@ class CognitiveRuntime:
                           tick_n=tick_n, prior_thought=prior_thought,
                           wandering=wandering, action=action,
                           selection_entropy=selection_entropy,
-                          differentiation=differentiation)
+                          differentiation=differentiation,
+                          novelty=novelty, boredom=self._boredom,
+                          replay=replay)
 
     # ── Internals ────────────────────────────────────────────────────
 
@@ -520,12 +646,22 @@ class CognitiveRuntime:
         return p
 
     def _select(self, scores: List[ThoughtScore],
-                levels: Dict[str, float]) -> Tuple[int, float]:
+                levels: Dict[str, float],
+                candidates: Optional[List[str]] = None,
+                wandering: bool = False) -> Tuple[int, float]:
         """Basal-ganglia selection. Returns ``(chosen_index,
         selection_entropy)`` — the latter an IIT-flavored decisiveness
-        proxy: normalised entropy of the softmax(-NLL/T) choice
+        proxy: normalised entropy of the softmax(utility/T) choice
         distribution (0 = one option clearly excluded the rest, 1 =
-        arbitrary among near-equal options)."""
+        arbitrary among near-equal options).
+
+        Utility per candidate = −(NLL + prior), where the prior adds
+        ``second_person_penalty`` nats to WANDERING candidates that
+        address someone (inner speech has no addressee — D2 of the
+        curiosity loop; how action priors enter BG models generally).
+        Temperature = :func:`curious_selection_temperature` — the DA
+        path scaled up by boredom (B of the loop).
+        """
         if len(scores) == 1:
             return 0, 0.0
         # DrivenNTSystem exposes `baselines` as a property while
@@ -534,10 +670,17 @@ class CognitiveRuntime:
         baselines = self.nt.baselines
         if callable(baselines):
             baselines = baselines()
-        T = selection_temperature(levels.get("DA", 0.0),
-                                  baselines.get("DA", 0.15), self.cfg)
-        # softmax(−NLL / T), computed stably.
-        utils = [-s.mean_nll / max(T, 1e-6) for s in scores]
+        T = curious_selection_temperature(
+            levels.get("DA", 0.0), baselines.get("DA", 0.15),
+            self._boredom, self.cfg)
+        penalties = [0.0] * len(scores)
+        if wandering and candidates is not None:
+            penalties = [self.cfg.second_person_penalty
+                        if _is_second_person(c) else 0.0
+                        for c in candidates]
+        # softmax(−(NLL+prior) / T), computed stably.
+        utils = [-(s.mean_nll + p) / max(T, 1e-6)
+                for s, p in zip(scores, penalties)]
         m = max(utils)
         exps = [math.exp(u - m) for u in utils]
         z = sum(exps)
@@ -553,18 +696,6 @@ class CognitiveRuntime:
                 idx = i
                 break
         return idx, selection_entropy
-
-    def _novelty_gate(self, nll: float) -> bool:
-        """Hippocampal write gate: store when the thought's NLL sits
-        far (relatively) from the running EMA. Bootstrap: the first
-        thought seeds the EMA and is stored."""
-        if self._nll_ema is None:
-            self._nll_ema = float(nll)
-            return True
-        z = abs(float(nll) - self._nll_ema) / max(abs(self._nll_ema), 1e-6)
-        a = self.cfg.surprise_ema_alpha
-        self._nll_ema = (1.0 - a) * self._nll_ema + a * float(nll)
-        return z >= self.cfg.surprise_write_z
 
     # ── Knowledge extraction: cross-episode pattern mining ────────────
 
@@ -748,46 +879,60 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
         # its own — an instruct model's chat template supplies one.
         has_chat_template = bool(getattr(tokenizer, "chat_template", None))
 
-        @torch.no_grad()
-        def generate_fn(prompt: str, max_new_tokens: int) -> str:
-            if has_chat_template:
-                ids = list(tokenizer.apply_chat_template(
-                    [{"role": "user", "content": prompt}],
-                    add_generation_prompt=True, tokenize=True))
-            else:
-                ids = list(tokenizer.encode(prompt) or [0])
-            ids = ids[-(max_ctx - max(1, int(max_new_tokens))):]
-            x = torch.tensor([ids], dtype=torch.long, device=device)
-            gen_kwargs = dict(
-                input_ids=x,
-                max_new_tokens=int(max_new_tokens),
-                do_sample=True,
-                temperature=float(max(temperature, 1e-6)),
-                top_k=int(top_k) if top_k else 0,
-                use_cache=True,
-                pad_token_id=eos_id,
-                # Repetition controls: always on. Cheap, model-agnostic,
-                # and the second half of the fix for the observed loop.
-                repetition_penalty=1.3,
-                no_repeat_ngram_size=3,
-            )
-            if not has_chat_template:
-                # Base-model safety net: stop before it hallucinates
-                # the next USER turn instead of burning the whole
-                # token budget on a degenerate continuation. Instruct
-                # models don't need this — their chat template's own
-                # turn-end token already stops generation cleanly.
-                gen_kwargs["stop_strings"] = ["\nUSER:", "\nUser:", "\n\n"]
-                gen_kwargs["tokenizer"] = tokenizer
-            out = model.generate(**gen_kwargs)
-            new_ids = out[0, x.shape[1]:].tolist()
-            return tokenizer.decode(new_ids, skip_special_tokens=True)
+        def _make_generate(use_chat_template: bool) -> GenerateFn:
+            """One closure factory, two seams (D of the curiosity
+            loop): the chat seam (respond — an addressee exists) and
+            the raw-completion wander seam (inner speech — no chat
+            template, so the instruct model continues the thinker's
+            own first-person text instead of replying TO someone,
+            which is what produced 'Brian, ...' on every live tick)."""
+
+            @torch.no_grad()
+            def _generate(prompt: str, max_new_tokens: int) -> str:
+                if use_chat_template:
+                    ids = list(tokenizer.apply_chat_template(
+                        [{"role": "user", "content": prompt}],
+                        add_generation_prompt=True, tokenize=True))
+                else:
+                    ids = list(tokenizer.encode(prompt) or [0])
+                ids = ids[-(max_ctx - max(1, int(max_new_tokens))):]
+                x = torch.tensor([ids], dtype=torch.long, device=device)
+                gen_kwargs = dict(
+                    input_ids=x,
+                    max_new_tokens=int(max_new_tokens),
+                    do_sample=True,
+                    temperature=float(max(temperature, 1e-6)),
+                    top_k=int(top_k) if top_k else 0,
+                    use_cache=True,
+                    pad_token_id=eos_id,
+                    # Repetition controls: always on. Cheap,
+                    # model-agnostic, and the second half of the fix
+                    # for the observed degenerate loop.
+                    repetition_penalty=1.3,
+                    no_repeat_ngram_size=3,
+                )
+                if not use_chat_template:
+                    # No template turn-end token applies in raw
+                    # completion — stop before the model drifts into
+                    # hallucinating a conversation.
+                    gen_kwargs["stop_strings"] = ["\nUSER:", "\nUser:",
+                                                 "\n\n"]
+                    gen_kwargs["tokenizer"] = tokenizer
+                out = model.generate(**gen_kwargs)
+                new_ids = out[0, x.shape[1]:].tolist()
+                return tokenizer.decode(new_ids, skip_special_tokens=True)
+
+            return _generate
+
+        generate_fn = _make_generate(has_chat_template)
+        generate_wander_fn = _make_generate(False)
     else:
         from neuroslm.chat_daemon import _build_generate_fn_from_harness
         from types import SimpleNamespace
         generate_fn = _build_generate_fn_from_harness(
             SimpleNamespace(language_model=wrapper), tokenizer,
             device=device, temperature=temperature, top_k=top_k)
+        generate_wander_fn = generate_fn
 
     @torch.no_grad()
     def score_fn(text: str) -> ThoughtScore:
@@ -821,4 +966,5 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
 
     return CognitiveRuntime(generate_fn=generate_fn, score_fn=score_fn,
                             embed_fn=embed_fn, cfg=cfg,
-                            classify_fn=classify_fn)
+                            classify_fn=classify_fn,
+                            generate_wander_fn=generate_wander_fn)

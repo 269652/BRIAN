@@ -3443,3 +3443,58 @@ fails. `build_runtime_from_hf_lm` and `build_runtime_from_harness`
 both wire this in by REUSING the already-built `generate_fn` closure
 (one model, two jobs — the same pattern `score_fn`/`embed_fn` already
 follow) rather than a parallel generation path.
+
+### 14.9 The curiosity loop — semantic novelty, boredom, replay, inner speech (2026-08-12)
+
+Live diagnosis (box 47509954, ticks 2-9): thoughts addressed an
+imaginary interlocutor ("Brian, ...", "Thank you! Let's continue...");
+`HC[recall=1 write=no]` nine ticks straight with the SAME episode
+recalled every time; NT pinned at baseline; the `evolved from:` chain
+showed smooth continuation with zero associative jumps. Root cause in
+one sentence: the architecture had an exploration knob (DA→selection
+temperature) that nothing ever turned, a write gate (NLL-EMA) blind to
+semantic repetition, a retrieval anchor chained to its own last
+thought, and a chat template that made the instruct model roleplay a
+conversation instead of thinking.
+
+**One new signal, four wirings** — no new frameworks:
+
+- **A. Semantic novelty** `novelty = 1 − max_cos(embed(thought),
+  stored episodes)` (via the new `EpisodicMemory.retrieve_scored`,
+  the same machinery recall uses; 1.0 into an empty memory). This is
+  the established novelty-seeking intrinsic-motivation family
+  (Schmidhuber's artificial curiosity; Oudeyer's variants), computed
+  from what the runtime already has. It replaces the NLL-EMA write
+  gate (`MindConfig.novelty_write_threshold`) — identical text now
+  scores 0 novelty regardless of NLL — and becomes the NT
+  `activation` driver (novel content is arousing).
+- **B. Boredom → exploration.** `boredom ← EMA(1 − novelty)`
+  (`novelty_ema_alpha`); `curious_selection_temperature` scales the
+  existing DA-modulated temperature by `1 + curiosity_gain·boredom`.
+  The knob that already existed finally gets turned: engaged →
+  identical to the DA path; bored → hotter, more exploratory
+  selection. Self-cooling — recovered novelty lowers boredom.
+- **C. Inhibition of return + replay.** Episodes recalled in the last
+  `ior_window` ticks are transiently suppressed from retrieval (IOR
+  yields rather than blinds: if suppression would empty the result,
+  the unsuppressed top-k is used). When boredom crosses
+  `replay_boredom_threshold`, an idle tick anchors RECALL on a
+  RANDOMLY SAMPLED stored episode instead of the last thought —
+  hippocampal replay, the associative-jump mechanism; never during
+  respond (real input stays the anchor). `TickResult.replay` records
+  it; the debug trace shows "(replay)".
+- **D. Inner-speech register.** DMN ticks generate through a separate
+  `generate_wander_fn` seam — raw completion, NO chat template, so
+  the instruct model continues the thinker's own first-person text
+  instead of replying TO someone (`build_runtime_from_hf_lm` builds
+  both seams from one closure factory; respond keeps the chat seam).
+  Reinforced by a BG prior: `second_person_penalty` nats added to a
+  WANDERING candidate's NLL when it addresses someone ("you"/"your"/
+  "Brian,") — a value-shaping term on the existing −NLL/T utility,
+  exactly how action priors enter basal-ganglia models. Never applied
+  on respond, where an addressee genuinely exists.
+
+Telemetry: `format_introspection` gains `CUR[nov=.. bore=..]` and a
+`replay` marker in `HC[...]`; episodes store their `novelty` in
+`context`. The old `surprise_write_z`/`surprise_ema_alpha` NLL-gate
+fields are deleted (not deprecated — nothing consumed them any more).

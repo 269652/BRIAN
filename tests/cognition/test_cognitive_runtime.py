@@ -230,39 +230,35 @@ class TestInhibition:
         assert res.thought == "a thought"
 
 
-# ── Layer-A contract D: surprise-gated episodic writes ───────────────
+# ── Layer-A contract D: novelty-gated episodic writes ────────────────
+# (2026-08-12: the gate switched from NLL-EMA distance to SEMANTIC
+# novelty — see TestSemanticNoveltyGate for the full new contract and
+# the live evidence that motivated the change. These two keep the
+# original Layer-A behavioral claims pinned under the new mechanism.)
 
-class TestSurpriseGatedWrites:
+class TestNoveltyGatedWrites:
     def test_first_thought_is_stored_repetition_is_not(self):
         from neuroslm.cognition.runtime import MindConfig
         gen = _ScriptedGen(["same thought"])
-        scores = _score_map({"same thought": 3.0})
-        cfg = MindConfig(n_candidates=1, surprise_write_z=0.05)
-        rt = _mk_runtime(gen, scores=scores, cfg=cfg)
+        cfg = MindConfig(n_candidates=1)
+        rt = _mk_runtime(gen, cfg=cfg)
         first = rt.tick()
         assert first.stored is True, "bootstrap: first thought is novel"
         repeats = [rt.tick().stored for _ in range(6)]
         assert repeats[-1] is False, (
-            "an unchanging NLL converges to its EMA — repetitive "
+            "identical content has zero semantic novelty — repetitive "
             "thoughts must stop being written to episodic memory")
 
-    def test_novel_high_nll_thought_is_stored_again(self):
-        from neuroslm.cognition.runtime import MindConfig, ThoughtScore
-        outs = ["same thought"] * 8 + ["astonishing new idea"]
+    def test_semantically_novel_thought_is_stored_again(self):
+        from neuroslm.cognition.runtime import MindConfig
+        outs = ["same thought"] * 8 + ["coffee by the river at dawn"]
         gen = _ScriptedGen(outs)
-
-        def scores(text):
-            return ThoughtScore(
-                mean_nll=9.0 if "astonishing" in text else 3.0,
-                entropy_norm=0.5)
-
-        cfg = MindConfig(n_candidates=1, surprise_write_z=0.05)
-        rt = _mk_runtime(gen, scores=scores, cfg=cfg)
+        cfg = MindConfig(n_candidates=1)
+        rt = _mk_runtime(gen, cfg=cfg)
         results = [rt.tick() for _ in range(9)]
-        assert results[-1].thought == "astonishing new idea"
+        assert results[-1].thought == "coffee by the river at dawn"
         assert results[-1].stored is True, (
-            "a thought far from the NLL EMA is surprising — it must "
-            "be written")
+            "semantically distant content is novel — it must be written")
 
 
 # ── NT integration: the real DrivenNTSystem carries state ────────────
@@ -389,9 +385,8 @@ class TestActionTaxonomy:
 
     def test_idle_novel_thought_is_speak(self):
         from neuroslm.cognition.runtime import MindConfig
-        # surprise_write_z tiny -> the bootstrap-seeded first thought
-        # (and most subsequent ones) count as novel -> stored=True.
-        cfg = MindConfig(n_candidates=1, surprise_write_z=0.01)
+        # empty memory -> the first thought is maximally novel -> stored.
+        cfg = MindConfig(n_candidates=1)
         rt = _mk_runtime(_ScriptedGen(["a fresh idea"]), cfg=cfg)
         r = rt.tick()
         assert r.wandering is True
@@ -400,11 +395,11 @@ class TestActionTaxonomy:
 
     def test_idle_repetitive_thought_is_think(self):
         from neuroslm.cognition.runtime import MindConfig
-        cfg = MindConfig(n_candidates=1, surprise_write_z=0.35)
+        cfg = MindConfig(n_candidates=1)
         gen = _ScriptedGen(["same idea"])
         rt = _mk_runtime(gen, scores=_score_map({"same idea": 3.0}), cfg=cfg)
         rt.tick()  # bootstrap: first is always novel/stored
-        r2 = rt.tick()  # identical NLL -> converged -> not stored
+        r2 = rt.tick()  # identical text -> zero semantic novelty
         assert r2.stored is False
         assert r2.action == "think"
 
@@ -574,7 +569,7 @@ class TestEpisodicRepresentation:
 
     def test_inferred_thought_carries_full_context_layer(self):
         from neuroslm.cognition.runtime import MindConfig
-        cfg = MindConfig(n_candidates=1, surprise_write_z=0.01)
+        cfg = MindConfig(n_candidates=1)
         rt = _mk_runtime(_ScriptedGen(["a fresh idea"]), cfg=cfg)
         rt.tick()
         ep = [e for e in rt.memory.all() if e["content"] == "a fresh idea"][0]
@@ -590,8 +585,7 @@ class TestEpisodicRepresentation:
 
     def test_associations_record_which_episodes_shaped_this_thought(self):
         from neuroslm.cognition.runtime import MindConfig
-        cfg = MindConfig(n_candidates=1, surprise_write_z=0.01,
-                         recall_k=2)
+        cfg = MindConfig(n_candidates=1, recall_k=2)
         rt = _mk_runtime(_ScriptedGen(["first", "second"]), cfg=cfg)
         rt.tick()
         rt.tick()
@@ -599,11 +593,14 @@ class TestEpisodicRepresentation:
         assert isinstance(ep["context"]["associations"], list)
 
     def test_respond_trigger_is_the_actual_user_text(self):
-        rt = _mk_runtime(_ScriptedGen(["a reply"]))
-        rt.observe("what is the plan?")
+        # Distinct embedding axes (launch vs coffee) so the reply
+        # passes the semantic novelty gate and actually gets stored.
+        rt = _mk_runtime(_ScriptedGen(["coffee first, then work"]))
+        rt.observe("what is the launch plan?")
         rt.tick()
-        ep = [e for e in rt.memory.all() if e["content"] == "a reply"][0]
-        assert ep["context"]["trigger"] == "what is the plan?"
+        ep = [e for e in rt.memory.all()
+             if e["content"] == "coffee first, then work"][0]
+        assert ep["context"]["trigger"] == "what is the launch plan?"
 
     def test_wandering_trigger_is_the_wander_prompt_used(self):
         rt = _mk_runtime(_ScriptedGen(["a wander"]))
@@ -623,6 +620,248 @@ class TestEpisodicRepresentation:
             nt_levels={"GABA": 0.1})
         s = format_debug_trace(r)
         assert "[observed]" in s and "[inferred]" in s
+
+
+class TestSemanticNoveltyGate:
+    """A of the curiosity loop: the hippocampal write gate measures
+    SEMANTIC novelty (1 − max cosine vs stored episodes, using the
+    embedding machinery that already exists) instead of NLL-distance
+    from an EMA. Live evidence for the change: ticks 2-9 on box
+    47509954 showed NLL flat in a 3.0-3.9 band while the CONTENT
+    orbited one topic — the NLL gate saw 'novelty' where there was
+    none, wrote nothing (`write=no` nine ticks straight), and recall
+    served the same single episode forever."""
+
+    def test_first_thought_into_empty_memory_is_stored(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["the launch is tomorrow"]),
+                         cfg=MindConfig(n_candidates=1))
+        r = rt.tick()
+        assert r.stored is True
+        assert r.novelty == pytest.approx(1.0), (
+            "nothing stored yet — maximal novelty by definition")
+
+    def test_identical_repetition_is_not_stored(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["the launch is tomorrow"]),
+                         cfg=MindConfig(n_candidates=1))
+        rt.tick()
+        r2 = rt.tick()
+        assert r2.novelty == pytest.approx(0.0, abs=1e-6), (
+            "identical text embeds identically — semantic novelty 0")
+        assert r2.stored is False
+        assert r2.action == "think"
+
+    def test_semantically_distinct_thought_is_stored_again(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(
+            _ScriptedGen(["the launch is tomorrow",
+                         "I want coffee and music"]),
+            cfg=MindConfig(n_candidates=1))
+        rt.tick()
+        r2 = rt.tick()
+        assert r2.novelty > rt.cfg.novelty_write_threshold
+        assert r2.stored is True
+        assert r2.action == "speak"
+
+    def test_novelty_reported_in_unit_range(self):
+        rt = _mk_runtime(_ScriptedGen(["a thought"]))
+        r = rt.tick()
+        assert 0.0 <= r.novelty <= 1.0
+
+
+class TestBoredomCuriosityLoop:
+    """B of the curiosity loop: falling novelty accumulates into
+    boredom, and boredom raises the basal ganglia's exploration
+    temperature THROUGH the existing DA→T path's multiplier — the
+    exploration knob that existed all along but was never driven
+    (NT pinned at baseline for nine straight live ticks)."""
+
+    def test_boredom_rises_over_repetitive_ticks(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["same thought forever"]),
+                         cfg=MindConfig(n_candidates=1))
+        first = rt.tick()
+        for _ in range(4):
+            last = rt.tick()
+        assert last.boredom > first.boredom
+
+    def test_curious_temperature_monotone_in_boredom(self):
+        from neuroslm.cognition.runtime import (
+            MindConfig, curious_selection_temperature,
+        )
+        cfg = MindConfig()
+        t0 = curious_selection_temperature(0.15, 0.15, 0.0, cfg)
+        t_mid = curious_selection_temperature(0.15, 0.15, 0.5, cfg)
+        t_hi = curious_selection_temperature(0.15, 0.15, 1.0, cfg)
+        assert t0 < t_mid < t_hi
+        assert t0 == pytest.approx(cfg.selection_temp_base)
+
+    def test_novelty_drives_the_nt_activation_channel(self):
+        from neuroslm.cognition.runtime import MindConfig
+        nt = _FakeNT()
+        rt = _mk_runtime(_ScriptedGen(["a thought"]), nt=nt,
+                         cfg=MindConfig(n_candidates=1))
+        r = rt.tick()
+        assert nt.step_calls[-1].get("activation") == pytest.approx(r.novelty), (
+            "novel content is arousing — semantic novelty is the "
+            "honest activation driver, replacing the entropy proxy")
+
+
+class TestInhibitionOfReturn:
+    """C1: recently-recalled episodes are transiently suppressed so
+    the same memory can't dominate every tick (live evidence: the
+    SAME [inferred] episode recalled nine ticks straight)."""
+
+    @staticmethod
+    def _seed(rt, *contents):
+        # Seed memory WITHOUT queueing sensory input (observe() would
+        # turn the next tick into a respond and defeat the wandering-
+        # path assertions these tests make).
+        for c in contents:
+            rt.memory.add(c, content_vec=_vec_for(c),
+                          context={"kind": "observed"})
+
+    def test_same_episode_not_recalled_twice_in_a_row(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the launch"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=1))
+        self._seed(rt, "the launch code is ready",
+                  "coffee tastes great today")
+        rt._last_thought = "thinking about launch stuff"  # launch anchor
+        r1 = rt.tick()
+        assert any("launch code" in e["content"] for e in r1.recalled)
+        r2 = rt.tick()   # A now inhibited → B gets its turn
+        assert not any("launch code" in e["content"] for e in r2.recalled), (
+            "inhibition of return: the episode recalled last tick "
+            "must be suppressed this tick")
+
+    def test_ior_yields_rather_than_blinds(self):
+        """When ONLY suppressed episodes exist, IOR must yield (return
+        the best match anyway) — an empty recall would be worse than a
+        repeated one."""
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the launch"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=1))
+        self._seed(rt, "the launch code is ready")  # the ONLY episode
+        r1 = rt.tick()
+        r2 = rt.tick()
+        assert r2.recalled, "sole episode must still be recallable"
+
+
+class TestReplayAnchoredWandering:
+    """C2: when bored, the wander tick anchors RECALL on a randomly
+    sampled stored episode instead of the last thought — hippocampal
+    replay, the mechanism behind associative jumps. Without it the
+    anchor chain last_thought→similarity→same basin never breaks."""
+
+    def test_replay_fires_when_bored(self):
+        from neuroslm.cognition.runtime import MindConfig
+        cfg = MindConfig(n_candidates=1)
+        rt = _mk_runtime(_ScriptedGen(["same thought forever"]), cfg=cfg)
+        TestInhibitionOfReturn._seed(rt, "the launch code is ready",
+                                     "coffee tastes great today")
+        rt._boredom = 1.0   # force the bored state directly
+        r = rt.tick()
+        assert r.wandering is True
+        assert r.replay is True
+
+    def test_no_replay_when_engaged(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["a fresh thought"]),
+                         cfg=MindConfig(n_candidates=1))
+        TestInhibitionOfReturn._seed(rt, "the launch code is ready")
+        r = rt.tick()   # boredom starts at 0 — engaged wandering
+        assert r.wandering is True
+        assert r.replay is False
+
+    def test_no_replay_during_respond(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["a reply"]),
+                         cfg=MindConfig(n_candidates=1))
+        rt.observe("what is the plan?")
+        rt._boredom = 1.0
+        r = rt.tick()
+        assert r.action == "respond" and r.replay is False, (
+            "replay is a DMN mechanism — answering real input must "
+            "stay anchored on the input")
+
+
+class TestInnerSpeechRegister:
+    """D1: DMN ticks generate through a separate wander seam (raw
+    completion — no chat template, no imaginary addressee); respond
+    ticks keep the chat seam. Live evidence: every wandering thought
+    opened 'Brian, ...' or 'Thank you! Let's continue...' — the chat
+    template made the instruct model roleplay a conversation instead
+    of thinking."""
+
+    def test_wander_tick_uses_the_wander_seam(self):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        chat_gen = _ScriptedGen(["chat output"])
+        wander_gen = _ScriptedGen(["inner monologue output"])
+        rt = CognitiveRuntime(
+            generate_fn=chat_gen, score_fn=_score_map({}),
+            embed_fn=_vec_for, nt=_FakeNT(),
+            memory=EpisodicMemory(maxlen=64), rng=random.Random(0),
+            cfg=MindConfig(n_candidates=1),
+            generate_wander_fn=wander_gen)
+        r = rt.tick()
+        assert r.thought == "inner monologue output"
+        assert wander_gen.calls == 1 and chat_gen.calls == 0
+
+    def test_respond_tick_uses_the_chat_seam(self):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        chat_gen = _ScriptedGen(["chat output"])
+        wander_gen = _ScriptedGen(["inner monologue output"])
+        rt = CognitiveRuntime(
+            generate_fn=chat_gen, score_fn=_score_map({}),
+            embed_fn=_vec_for, nt=_FakeNT(),
+            memory=EpisodicMemory(maxlen=64), rng=random.Random(0),
+            cfg=MindConfig(n_candidates=1),
+            generate_wander_fn=wander_gen)
+        rt.observe("hello there")
+        r = rt.tick()
+        assert r.thought == "chat output"
+        assert chat_gen.calls == 1 and wander_gen.calls == 0
+
+    def test_wander_seam_defaults_to_the_main_seam(self):
+        rt = _mk_runtime(_ScriptedGen(["t"]))
+        assert rt._gen_wander is rt._gen
+
+
+class TestSecondPersonPrior:
+    """D2: a BG prior penalizes second-person address in WANDERING
+    candidates (inner speech has no addressee) — a value-shaping term
+    on the existing −NLL/T utility, exactly how action priors enter
+    basal-ganglia models. Never applied to respond ticks, where an
+    addressee genuinely exists."""
+
+    def test_wandering_prefers_the_first_person_candidate(self):
+        from neuroslm.cognition.runtime import MindConfig
+        cands = ["You should think about this, Brian",
+                "I keep coming back to the launch"]
+        cfg = MindConfig(n_candidates=2, selection_temp_base=0.01)
+        rt = _mk_runtime(
+            _ScriptedGen(cands),
+            scores=_score_map({c: 3.0 for c in cands}), cfg=cfg)
+        r = rt.tick()
+        assert r.thought == "I keep coming back to the launch", (
+            "equal NLL — the second-person candidate must lose on the "
+            "inner-speech prior alone")
+
+    def test_respond_does_not_penalize_second_person(self):
+        from neuroslm.cognition.runtime import MindConfig
+        cands = ["You are right about that", "I am not sure"]
+        cfg = MindConfig(n_candidates=2, selection_temp_base=0.01)
+        rt = _mk_runtime(
+            _ScriptedGen(cands),
+            scores=_score_map({"You are right about that": 2.0,
+                              "I am not sure": 3.0}), cfg=cfg)
+        rt.observe("was I right?")
+        r = rt.tick()
+        assert r.thought == "You are right about that", (
+            "a reply legitimately addresses someone — the prior must "
+            "not apply on respond ticks")
 
 
 class TestClassifyFnInjection:
@@ -667,7 +906,7 @@ class TestActionClassStoredOnEpisodes:
 
     def test_inferred_thought_carries_action_class(self):
         from neuroslm.cognition.runtime import MindConfig
-        cfg = MindConfig(n_candidates=1, surprise_write_z=0.01)
+        cfg = MindConfig(n_candidates=1)
         rt = _mk_runtime(_ScriptedGen(["Thanks for that"]), cfg=cfg)
         rt.tick()
         ep = [e for e in rt.memory.all()
@@ -837,14 +1076,14 @@ class TestChatDaemonHostsTheMind:
         first-class 'thought' in the dashboard/memory, even though it
         still fully happened and is fully logged."""
         from neuroslm.cognition.runtime import MindConfig
-        cfg = MindConfig(n_candidates=1, surprise_write_z=0.9)
+        cfg = MindConfig(n_candidates=1)
         gen = _ScriptedGen(["repetitive idea"])
         rt = _mk_runtime(
             gen, scores=_score_map({"repetitive idea": 3.0}), cfg=cfg)
         d = self._daemon(rt)
         d.think_once()   # bootstrap tick: always novel -> speak
         before = len(d.memory.recent(20, kinds=("thought",)))
-        d.think_once()  # identical NLL -> converged -> think
+        d.think_once()  # identical text -> zero semantic novelty -> think
         assert d.last_tick.action == "think"
         after = len(d.memory.recent(20, kinds=("thought",)))
         assert after == before, (

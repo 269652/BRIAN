@@ -30,13 +30,15 @@ class EpisodicMemory:
         with self.lock:
             return list(self.buffer)
 
-    def retrieve(self, query_vec, k=4):
-        """Similarity read (hippocampal recall): top-k episodes by
-        cosine similarity between ``query_vec`` and each stored
-        ``content_vec``. Episodes without a vector are skipped —
-        they were stored before the embedding path existed and cannot
+    def retrieve_scored(self, query_vec, k=4):
+        """Similarity read with scores: top-k ``(cosine, episode)``
+        pairs by similarity between ``query_vec`` and each stored
+        ``content_vec``. Episodes without a vector are skipped — they
+        were stored before the embedding path existed and cannot
         participate in similarity recall. Pure-python math so the
-        memory stays importable without numpy/torch.
+        memory stays importable without numpy/torch. The scores make
+        this usable both for recall (which episodes) and for semantic
+        novelty (HOW similar is the nearest one).
         """
         def _cos(a, b):
             if len(a) != len(b):
@@ -54,4 +56,10 @@ class EpisodicMemory:
                         if e.get("content_vec") is not None]
         scored = [(_cos(q, list(e["content_vec"])), e) for e in episodes]
         scored.sort(key=lambda t: t[0], reverse=True)
-        return [e for _, e in scored[:max(0, int(k))]]
+        return scored[:max(0, int(k))]
+
+    def retrieve(self, query_vec, k=4):
+        """Similarity read (hippocampal recall): top-k episodes only —
+        see :meth:`retrieve_scored` for the scored variant this
+        delegates to."""
+        return [e for _, e in self.retrieve_scored(query_vec, k)]
