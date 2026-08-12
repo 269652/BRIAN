@@ -3263,3 +3263,20 @@ immediately so the DMN loop is visible in `brian logs <box>` with zero
 clients connected. `MindServer`'s `think`/`status` ops carry the same
 telemetry over the wire (`status` peeks the last tick without forcing
 a new one); `chat connect`'s `/think` and `/status` print it.
+
+**Mind-wandering (DMN) + basal-ganglia debug trace** (2026-08-12): a
+tick with no sensory input this cycle (`TickResult.wandering=True`) is
+the DMN condition — `_compose_prompt` biases THINK toward one of
+`MindConfig.wander_prompts` ("let my mind wander from what I remember
+toward something new", …), rotated round-robin, instead of completing
+a flat prompt. A tick responding to real input skips this framing
+entirely — task-positive, not DMN. Each `TickResult` also carries
+`tick_n` (a monotonic cycle counter) and `prior_thought` (what
+preceded it), so a thought's lineage is traceable across ticks.
+`format_debug_trace(result)` renders the full basal-ganglia
+deliberation — every candidate + its trunk NLL, which one was
+`SELECTED`, the hippocampal episodes that shaped THINK, and the
+`evolved from:` lineage line — written to `log_stream` alongside the
+compact `format_introspection` summary, so `brian logs <box>` shows
+not just what the mind is thinking but the full menu it chose from and
+why.

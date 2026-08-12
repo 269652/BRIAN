@@ -11,6 +11,7 @@ from neuroslm.cognition.runtime import (  # noqa: F401
     MindConfig,
     ThoughtScore,
     TickResult,
+    format_debug_trace,
     format_introspection,
     selection_temperature,
 )

@@ -387,11 +387,15 @@ class ChatDaemon:
                 if result.thought:
                     self.post_thought(result.thought)
                 if self._log_stream is not None:
+                    from neuroslm.cognition.runtime import format_debug_trace
                     ts = time.strftime("%H:%M:%S")
                     self._log_stream.write(f"[{ts}] {intro}\n")
                     if result.thought:
                         self._log_stream.write(
                             f"[{ts}] \U0001f4ad {result.thought}\n")
+                    # Full basal-ganglia deliberation trace — every
+                    # candidate + score + which one won, plus lineage.
+                    self._log_stream.write(format_debug_trace(result) + "\n")
                     self._log_stream.flush()
                 return result.thought
             seed = self._next_thought_seed()
