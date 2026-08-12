@@ -523,6 +523,14 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
         from transformers import AutoModelForCausalLM
         model = AutoModelForCausalLM.from_pretrained(resolved)
     model.eval()
+    # 2026-08-12 live incident: from_pretrained() loads on CPU by
+    # default. Without this, an A100 mind deploy silently ran the
+    # whole expert on CPU — each DMN tick took ~55-60s instead of a
+    # couple seconds, and the daemon's non-blocking inference lock
+    # stayed held that whole time, so /think calls landing mid-tick
+    # returned None. Unconditional (not "if device != cpu") so a
+    # future default change can't silently reintroduce the bug.
+    model = model.to(device)
     if tokenizer_factory is not None:
         tokenizer = tokenizer_factory()
     else:

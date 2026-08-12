@@ -355,6 +355,23 @@ class TestCliWiring:
         err = capsys.readouterr().err
         assert "GH_TOKEN" in err and "missing" in err.lower()
 
+    def test_deploy_mind_defaults_to_cuda_device(self):
+        """2026-08-12 live incident companion fix: the model-placement
+        bug (build_runtime_from_hf_lm never called .to(device)) meant
+        even a correct --device cuda flag wouldn't have helped without
+        that fix, but the onstart ALSO never passed --device at all —
+        `brian chat`'s own CLI default is cpu. Both must be fixed for
+        an A100 mind deploy to actually use the GPU."""
+        from neuroslm.connectors.vast_mind import MindDeployConfig
+        assert MindDeployConfig().device == "cuda"
+
+    def test_mind_onstart_requests_cuda_device(self):
+        from neuroslm.connectors.vast_mind import build_mind_onstart
+        s = build_mind_onstart({"EXPERT": "smollm2_360m", "MIND": True,
+                                "PORT": 7861, "BRANCH": "master",
+                                "DEVICE": "cuda"})
+        assert "--device 'cuda'" in s
+
     def test_mind_onstart_has_no_self_destroy_and_a_restart_loop(self):
         from neuroslm.connectors.vast_mind import build_mind_onstart
         s = build_mind_onstart({"EXPERT": "smollm2_360m", "MIND": True,

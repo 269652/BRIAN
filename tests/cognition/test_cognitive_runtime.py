@@ -579,8 +579,13 @@ class _FakeHFModel:
         import torch
         self.config = type("C", (), {"n_positions": 64})()
         self._emb = torch.arange(32 * 4, dtype=torch.float32).reshape(32, 4)
+        self.to_calls = []
 
     def eval(self):
+        return self
+
+    def to(self, device):
+        self.to_calls.append(device)
         return self
 
     def get_input_embeddings(self):
@@ -675,6 +680,40 @@ class _FakeHFModelWithGenerate(_FakeHFModel):
         n_new = int(kw.get("max_new_tokens", 4))
         new = torch.full((B, n_new), 7, dtype=torch.long)
         return torch.cat([input_ids, new], dim=-1)
+
+
+class TestExpertModelMovedToDevice:
+    """2026-08-12 live incident: a mind box deployed on an A100 ran
+    each DMN tick in ~55-60s instead of a couple seconds, and manual
+    /think calls kept returning None. Root cause: AutoModelForCausalLM
+    .from_pretrained() loads on CPU by default — build_runtime_from_hf_lm
+    never called .to(device), so a "GPU" deploy silently ran the whole
+    1.5B model on CPU. Each tick held the daemon's non-blocking
+    inference lock for the full CPU-bound duration, so any client
+    /think landing mid-tick bounced off the lock and returned None."""
+
+    def test_model_moved_to_requested_device(self):
+        from neuroslm.cognition.runtime import build_runtime_from_hf_lm
+        model = _FakeHFModel()
+        build_runtime_from_hf_lm(
+            "fake/expert", device="cuda",
+            model_factory=lambda: model,
+            tokenizer_factory=_FakeHFTokenizer)
+        assert model.to_calls == ["cuda"], (
+            ".to(device) must be called unconditionally — a silently "
+            "CPU-bound 'GPU' deploy is exactly what happened live")
+
+    def test_cpu_device_also_moves_explicitly(self):
+        from neuroslm.cognition.runtime import build_runtime_from_hf_lm
+        model = _FakeHFModel()
+        build_runtime_from_hf_lm(
+            "fake/expert", device="cpu",
+            model_factory=lambda: model,
+            tokenizer_factory=_FakeHFTokenizer)
+        assert model.to_calls == ["cpu"], (
+            "the .to() call must be unconditional, not an "
+            "if device != 'cpu' special case that's easy to drift "
+            "out of sync with a future default change")
 
 
 class TestExpertGenerateUsesKVCache:

@@ -2009,6 +2009,7 @@ def cmd_deploy_mind(args: argparse.Namespace) -> int:
         port=args.port,
         branch=args.branch,
         label=args.label or "neuroslm-mind",
+        device=args.device,
     )
     if args.gpu_query:
         cfg.gpu_query = args.gpu_query
@@ -5784,6 +5785,10 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="Plain chat server without the cognition "
                           "layer (no recall/NT-gating/memory)")
     sdm.add_argument("--port", type=int, default=7861)
+    sdm.add_argument("--device", default="cuda", choices=["cpu", "cuda"],
+                     help="Inference device on the box (default cuda — "
+                          "this connector targets A100 by default; use "
+                          "cpu only with a matching --gpu-query override)")
     sdm.add_argument("--branch",
                      help="git branch the box clones (default: current)")
     sdm.add_argument("--label", default=None,

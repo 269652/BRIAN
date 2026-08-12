@@ -57,6 +57,11 @@ class MindDeployConfig:
     branch: Optional[str] = None
     label: str = "neuroslm-mind"
     gpu_query: str = _DEFAULT_GPU_QUERY
+    # 2026-08-12: the onstart never passed --device, so `brian chat`'s
+    # own CLI default (cpu) silently ran the expert on CPU despite
+    # renting an A100 — companion fix to build_runtime_from_hf_lm now
+    # actually calling .to(device).
+    device: str = "cuda"
 
 
 _ONSTART_TEMPLATE = """\
@@ -88,7 +93,7 @@ echo "── starting the always-on mind (crash-restart loop) ──"
 while true; do
     date -u +"[mind-loop] (re)start @ %Y-%m-%dT%H:%M:%SZ"
     python3 -m neuroslm.cli chat --expert '__EXPERT__' __MIND_FLAG__ \\
-        --serve --port __PORT__ --no-color \\
+        --serve --port __PORT__ --device '__DEVICE__' --no-color \\
         2>&1 | tee -a "logs/mind/$(date -u +%Y%m%d)_mind.log"
     echo "[mind-loop] server exited rc=$? — restarting in 10s"
     sleep 10
@@ -111,6 +116,7 @@ def build_mind_onstart(env: dict) -> str:
         "__EXPERT__": str(env.get("EXPERT", "smollm2_360m")),
         "__MIND_FLAG__": "--mind" if env.get("MIND") else "",
         "__PORT__": str(env.get("PORT", 7861)),
+        "__DEVICE__": str(env.get("DEVICE", "cuda")),
     }
     for key, val in replacements.items():
         result = result.replace(key, val)
@@ -163,6 +169,7 @@ class VastMindConnector:
             "EXPERT": config.expert,
             "MIND": config.mind,
             "PORT": config.port,
+            "DEVICE": config.device,
         })
 
         tf = tempfile.NamedTemporaryFile(
