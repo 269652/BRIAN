@@ -108,7 +108,9 @@ class SensoryBridge:
                 visual_cortex: Optional[Callable] = None,
                 acoustic_cortex: Optional[Callable] = None,
                 proprioceptive_cortex: Optional[Callable] = None,
-                on_error: Optional[Callable[[str, Exception], None]] = None):
+                on_error: Optional[Callable[[str, Exception], None]] = None,
+                on_percept: Optional[
+                    Callable[[str, bool, Optional[float]], None]] = None):
         self.runtime = runtime
         self.client = client
         dim = runtime.embed_dim()
@@ -117,10 +119,23 @@ class SensoryBridge:
         self.proprioceptive = (proprioceptive_cortex
                                or ProprioceptiveCortex(output_dim=dim))
         self._on_error = on_error or self._default_on_error
+        # Debug observability at the intake boundary (how a raw
+        # reading became a percept decision) — complements
+        # CognitiveRuntime's own SENSE/PROMPT debug trace, which only
+        # covers percepts that made it into the tick loop.
+        self._on_percept = on_percept or self._default_on_percept
 
     @staticmethod
     def _default_on_error(modality: str, exc: Exception) -> None:
         print(f"[isaac_sim] {modality} sensor read failed: {exc}",
+              file=sys.stderr)
+
+    @staticmethod
+    def _default_on_percept(modality: str, attended: bool,
+                            novelty: Optional[float]) -> None:
+        nov = f"{novelty:.2f}" if novelty is not None else "?"
+        state = "attended (novel)" if attended else "habituated (not novel)"
+        print(f"[isaac_sim] {modality} percept: {state}, novelty={nov}",
               file=sys.stderr)
 
     def _read(self, modality: str, fn: Optional[Callable]):
@@ -133,31 +148,39 @@ class SensoryBridge:
             self._on_error(modality, exc)
             return None
 
+    def _observe(self, modality: str, vec: Sequence[float]) -> bool:
+        ok = self.runtime.observe_sensory(modality, vec, source="isaac_sim")
+        novelty = getattr(self.runtime, "last_sensory_novelty", None)
+        self._on_percept(modality, ok, novelty)
+        return ok
+
     def pump(self) -> Dict[str, bool]:
         """One polling cycle. Returns ``{modality: attended}`` for
         every modality the client actually provided data for this
         cycle — ``attended`` is ``observe_sensory``'s own return value
-        (False means habituated/not novel enough, not "failed")."""
+        (False means habituated/not novel enough, not "failed").
+        ``on_percept`` fires for every modality read this cycle
+        (attended or not) — the intake-boundary half of sensory debug
+        observability; ``CognitiveRuntime``'s own SENSE/PROMPT trace
+        (``format_debug_trace``) covers what happens to an attended
+        percept once it reaches the tick loop."""
         attended: Dict[str, bool] = {}
 
         frame = self._read("visual", getattr(self.client, "get_frame", None))
         if frame is not None:
             vec = self.visual(frame)
-            attended["visual"] = self.runtime.observe_sensory(
-                "visual", vec, source="isaac_sim")
+            attended["visual"] = self._observe("visual", vec)
 
         joints = self._read("proprioceptive",
                             getattr(self.client, "get_joint_state", None))
         if joints is not None:
             vec = self.proprioceptive(joints)
-            attended["proprioceptive"] = self.runtime.observe_sensory(
-                "proprioceptive", vec, source="isaac_sim")
+            attended["proprioceptive"] = self._observe("proprioceptive", vec)
 
         audio = self._read("acoustic",
                            getattr(self.client, "get_audio_chunk", None))
         if audio is not None:
             vec = self.acoustic(audio)
-            attended["acoustic"] = self.runtime.observe_sensory(
-                "acoustic", vec, source="isaac_sim")
+            attended["acoustic"] = self._observe("acoustic", vec)
 
         return attended

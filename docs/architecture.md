@@ -3678,3 +3678,40 @@ separately verified once, live, against the actual
 `openai/clip-vit-base-patch32` checkpoint (32-dim output, finite,
 correctly discarding CLIP's text tower via
 `CLIPVisionModelWithProjection`).
+
+**Debug observability — the sensory → thought causal chain (same
+day).** "Add debug logs so I can see how sensory input gets processed
+and influences inner thought generation." Two boundaries, two log
+points, both flowing through the ALREADY-existing wire protocol
+(`_tick_telemetry`'s `debug` field, `_log_tick`'s `log_stream` write)
+with zero changes to `server.py`/`chat_daemon.py`:
+
+- **Intake boundary** (`SensoryBridge.pump()`): a new `on_percept`
+  callback (parallel to `on_error`) fires for every modality read each
+  cycle — attended or habituated — carrying the ACTUAL novelty score
+  behind `observe_sensory`'s bool return (now exposed via
+  `CognitiveRuntime.last_sensory_novelty`, useful even for a rejected
+  percept: how close was it?). Default: a stderr line, not silent.
+- **Tick-loop boundary** (`TickResult`/`format_debug_trace`): two new
+  fields — `sensory_modality` (which modality, if any, anchored THIS
+  tick's RECALL) and `prompt` (the exact composed text THINK
+  conditioned on, rendered in FULL — persona + RECALL's episodes + the
+  SENSE trigger). `_sensory_vecs` now carries `(vector, modality)`
+  tuples instead of bare vectors so the modality survives into the
+  tick. `format_debug_trace` gains a `SENSE: <modality> percept
+  anchored RECALL this tick` line and a `PROMPT:` block; the compact
+  `format_introspection` gains a terse `SENSE[<modality>]` tag,
+  omitted for text/wandering ticks. The reading order this restores
+  end to end: intake (attended/habituated + novelty) → SENSE (which
+  modality anchored RECALL) → HC recalled (what came back) → PROMPT
+  (what got composed) → BG deliberation (what THINK generated from
+  that prompt, and which candidate won).
+
+RED-confirmed (10 contracts: `TestFormatDebugTrace`+
+`TestFormatIntrospection` additions, `TestObserveSensory` additions,
+`tests/cognition/test_cognitive_runtime.py`; 2 contracts:
+`tests/test_isaac_sim.py::TestSensoryBridge`). One test-authoring
+bug (a missing local import in two new test methods — copy-paste
+against the file's per-method import convention) caught and fixed
+during the pass. GREEN: `test_cognitive_runtime.py` 138 (was 127),
+`test_isaac_sim.py` 11 (was 9).

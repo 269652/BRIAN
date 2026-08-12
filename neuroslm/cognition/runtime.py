@@ -244,6 +244,19 @@ class TickResult:
     a state transition: recall anchored on the last OBSERVED input
     (return-to-user), or suppressed entirely (clean slate) — instead
     of another continuation of the loop."""
+    sensory_modality: Optional[str] = None
+    """§15: which modality (if any) anchored THIS tick's RECALL —
+    'visual' / 'acoustic' / 'proprioceptive' when a sensory percept
+    (``observe_sensory``) drove the tick, ``None`` for a text-
+    triggered respond, a replay/reorient jump, or a plain DMN idle
+    tick. The debug-observability half of "how does sensory input
+    influence thought generation" — see also ``prompt``."""
+    prompt: Optional[str] = None
+    """The actual composed prompt THINK generated from this tick —
+    persona + RECALL's episodes + the SENSE trigger (a sensory
+    modality marker, the real user text, or the wander prompt). The
+    literal causal link between what was sensed/recalled and what the
+    trunk produced; rendered in full by ``format_debug_trace``."""
 
 
 _NT_ORDER = ("DA", "NE", "5HT", "ACh", "eCB", "Glu", "GABA")
@@ -276,7 +289,8 @@ def format_introspection(result: TickResult) -> str:
          f"write={'yes' if result.stored else 'no'}"
          + (" replay" if result.replay else "") + "]")
     cur = f"CUR[nov={result.novelty:.2f} bore={result.boredom:.2f}]"
-    return f"Φ={result.phi_proxy:.2f} {nt_str} {bg} {hc} {cur}"
+    sense = f" SENSE[{result.sensory_modality}]" if result.sensory_modality else ""
+    return f"Φ={result.phi_proxy:.2f} {nt_str} {bg} {hc} {cur}{sense}"
 
 
 def _truncate(text: str, n: int = 90) -> str:
@@ -306,10 +320,27 @@ def format_debug_trace(result: TickResult) -> str:
     lines.append("  NT[" + " ".join(
         f"{k}={float(nt.get(k, 0.0)):.2f}" for k in _NT_ORDER) + "]")
 
+    # §15: which sensory percept (if any) drove SENSE this tick — the
+    # first link in "how does sensory input influence thought
+    # generation" (the second is PROMPT below, the third is HC
+    # recalled, since a sensory anchor changes what RECALL retrieves).
+    if result.sensory_modality:
+        lines.append(f"  SENSE: {result.sensory_modality} percept "
+                     f"anchored RECALL this tick")
+
     if result.inhibited:
         lines.append("  BG: inhibited — no deliberation this tick "
                      "(GABA gated the act before THINK ran)")
         return "\n".join(lines)
+
+    # The exact prompt THINK conditioned on — persona + RECALL's
+    # episodes + the SENSE trigger, rendered in full (not truncated)
+    # so the causal chain from percept to prompt to thought is
+    # actually inspectable, not just asserted.
+    if result.prompt:
+        lines.append("  PROMPT:")
+        lines.append(result.prompt)
+
     if not result.candidates:
         lines.append("  BG: no candidates generated")
         return "\n".join(lines)
@@ -442,12 +473,18 @@ class CognitiveRuntime:
         self.cfg = cfg or MindConfig()
         self.rng = rng or _random.Random(0)
         self._sensory: Deque[str] = deque(maxlen=32)
-        # Lockstep with `_sensory`: the REAL embedding behind a
+        # Lockstep with `_sensory`: (vector, modality) behind a
         # non-text percept (§15 observe_sensory), or None for a plain
         # text percept (anchor derived from embed_fn as before). This
         # is what lets RECALL anchor on the actual sensory latent
-        # instead of re-embedding the percept's text marker.
-        self._sensory_vecs: Deque[Optional[List[float]]] = deque(maxlen=32)
+        # instead of re-embedding the percept's text marker, and lets
+        # a tick record WHICH modality drove it (debug observability).
+        self._sensory_vecs: Deque[Optional[Tuple[List[float], str]]] = deque(
+            maxlen=32)
+        # Debug/telemetry readback for the last observe_sensory() call
+        # — the actual novelty score behind its bool return, useful
+        # even when a percept was rejected as habituated.
+        self.last_sensory_novelty: Optional[float] = None
         self._last_thought: Optional[str] = None
         self._tick_n: int = 0
         self._wander_idx: int = 0
@@ -551,6 +588,7 @@ class CognitiveRuntime:
         top = self.memory.retrieve_scored(vec, k=1)
         novelty = 1.0 - top[0][0] if top else 1.0
         novelty = max(0.0, min(1.0, novelty))
+        self.last_sensory_novelty = novelty
         if novelty < self.cfg.novelty_write_threshold:
             return False
         label = f"[{modality} percept]"
@@ -560,7 +598,7 @@ class CognitiveRuntime:
                         context={"kind": "observed", "source": source,
                                 "modality": modality, "novelty": novelty})
         self._sensory.append(label)
-        self._sensory_vecs.append(vec)
+        self._sensory_vecs.append((vec, modality))
         self.nt.step_full(activation=novelty)
         return True
 
@@ -616,6 +654,12 @@ class CognitiveRuntime:
         replay = False
         anchor_vec = None
         suppress_recall = False
+        # Which modality (if any) actually anchored THIS tick's RECALL
+        # — debug observability into the sensory->thought causal
+        # chain (format_debug_trace's SENSE line). None for a
+        # text-triggered respond, a replay/reorient jump, or a plain
+        # DMN idle tick.
+        sensory_modality: Optional[str] = None
         if reorient:
             last_observed = next(
                 (e for e in reversed(self.memory.all())
@@ -642,7 +686,8 @@ class CognitiveRuntime:
                 # sensory cortex's own latent) — anchor on THAT vector
                 # directly, never on a re-embedding of its text
                 # marker, which carries none of the percept's content.
-                anchor_vec = list(sensory_vecs[-1])
+                anchor_vec, sensory_modality = sensory_vecs[-1]
+                anchor_vec = list(anchor_vec)
             else:
                 anchor = (sensory[-1] if sensory
                           else self._last_thought or self.cfg.persona)
@@ -705,7 +750,9 @@ class CognitiveRuntime:
                               nt_levels=levels, tick_n=tick_n,
                               prior_thought=prior_thought,
                               wandering=wandering,
-                              action="respond" if not wandering else "think")
+                              action="respond" if not wandering else "think",
+                              sensory_modality=sensory_modality,
+                              prompt=prompt)
 
         # GATE: boredom-and-DA-tempered softmax over −NLL, with the
         # inner-speech prior (D2) penalizing second-person address in
@@ -807,7 +854,8 @@ class CognitiveRuntime:
                           selection_entropy=selection_entropy,
                           differentiation=differentiation,
                           novelty=novelty, boredom=self._boredom,
-                          replay=replay, reorient=reorient)
+                          replay=replay, reorient=reorient,
+                          sensory_modality=sensory_modality, prompt=prompt)
 
     # ── Internals ────────────────────────────────────────────────────
 

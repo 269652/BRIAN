@@ -543,6 +543,40 @@ class TestFormatDebugTrace:
         assert "inhibit" in s.lower()
         assert "SELECTED" not in s
 
+    def test_sensory_modality_shown_when_a_percept_anchored_the_tick(self):
+        from neuroslm.cognition.runtime import format_debug_trace, TickResult, ThoughtScore
+        r = TickResult(
+            thought="a reply", tick_n=7, wandering=False, action="respond",
+            candidates=["a reply"],
+            scores=[ThoughtScore(mean_nll=1.0, entropy_norm=0.3)],
+            nt_levels={"GABA": 0.1}, sensory_modality="visual")
+        s = format_debug_trace(r)
+        assert "SENSE" in s and "visual" in s
+
+    def test_no_sense_line_when_tick_was_not_sensory_triggered(self):
+        from neuroslm.cognition.runtime import format_debug_trace
+        s = format_debug_trace(self._normal_result())  # sensory_modality=None
+        assert "SENSE" not in s
+
+    def test_prompt_shown_in_full_when_captured(self):
+        from neuroslm.cognition.runtime import format_debug_trace, TickResult, ThoughtScore
+        prompt_text = "persona line\nJust now: [visual percept]\nMy reply:"
+        r = TickResult(
+            thought="a reply", tick_n=8, wandering=False, action="respond",
+            candidates=["a reply"],
+            scores=[ThoughtScore(mean_nll=1.0, entropy_norm=0.3)],
+            nt_levels={"GABA": 0.1}, prompt=prompt_text)
+        s = format_debug_trace(r)
+        assert prompt_text in s, (
+            "the composed prompt must render in full — it's the "
+            "actual causal link between what was sensed/recalled and "
+            "what THINK produced")
+
+    def test_no_prompt_line_when_not_captured(self):
+        from neuroslm.cognition.runtime import format_debug_trace
+        s = format_debug_trace(self._normal_result())  # prompt=None
+        assert "PROMPT" not in s
+
 
 class TestEpisodicRepresentation:
     """'Don't make HC remember what BRIAN said. Make HC remember what
@@ -1111,6 +1145,45 @@ class TestObserveSensory:
             "RECALL must anchor on the real percept vector, not a "
             "re-embedding of its text marker")
 
+    def test_last_sensory_novelty_is_exposed(self):
+        """External callers (SensoryBridge, debug tooling) can read
+        the ACTUAL novelty score behind observe_sensory's bool return
+        — useful even when a percept was rejected as habituated, to
+        see how close it was."""
+        rt = self._rt()
+        rt.observe_sensory("visual", [1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                      0.0, 0.0])
+        assert rt.last_sensory_novelty is not None
+        assert 0.0 <= rt.last_sensory_novelty <= 1.0
+
+    def test_tick_records_which_modality_anchored_recall(self):
+        rt = self._rt()
+        rt.observe_sensory("acoustic", [0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
+                                        0.0, 0.0])
+        r = rt.tick()
+        assert r.sensory_modality == "acoustic"
+
+    def test_tick_records_the_composed_think_prompt(self):
+        rt = self._rt()
+        rt.observe_sensory("visual", [1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                      0.0, 0.0])
+        r = rt.tick()
+        assert r.prompt is not None
+        assert "[visual percept]" in r.prompt, (
+            "the captured prompt must be the SAME text THINK actually "
+            "conditioned on, marker included")
+
+    def test_wandering_tick_has_no_sensory_modality(self):
+        rt = self._rt()
+        r = rt.tick()  # nothing observed — pure DMN idle tick
+        assert r.sensory_modality is None
+
+    def test_text_percept_tick_has_no_sensory_modality(self):
+        rt = self._rt()
+        rt.observe("a plain text message arrives here")
+        r = rt.tick()
+        assert r.sensory_modality is None
+
 
 class TestInnerSpeechRegister:
     """D1: DMN ticks generate through a separate wander seam (raw
@@ -1310,6 +1383,16 @@ class TestFormatIntrospection:
         assert "inhibit" in s.lower()
         assert "GABA=0.15" in s, "NT snapshot still shown on silence"
         assert "recall=" not in s and "n=" not in s
+
+    def test_sensory_modality_tag_shown(self):
+        from neuroslm.cognition.runtime import format_introspection
+        s = format_introspection(self._result(sensory_modality="acoustic"))
+        assert "SENSE[acoustic]" in s
+
+    def test_no_sense_tag_when_not_sensory_triggered(self):
+        from neuroslm.cognition.runtime import format_introspection
+        s = format_introspection(self._result())  # sensory_modality=None
+        assert "SENSE[" not in s
 
 
 # ── Hosting: ChatDaemon runs the mind ────────────────────────────────

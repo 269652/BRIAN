@@ -4095,3 +4095,39 @@ implementation only, on `feature/isaac-sim-sensory-cortex`; no vast.ai
 spend, no live Isaac Sim connection attempted.
 
 [EVIDENCE: tests/sensory/test_cortices.py; tests/cognition/test_cognitive_runtime.py::TestEmbedDim, TestObserveSensory; tests/test_isaac_sim.py]
+
+### Sensory debug observability — the percept -> RECALL -> prompt -> thought chain (2026-08-12)
+
+"Add debug logs so I can see how sensory input gets processed and
+influences inner thought generation." §15 made SENSE caption-free but
+left the causal chain from percept to generated thought unobservable —
+`observe_sensory`'s bool return discarded the actual novelty score,
+and nothing recorded which modality anchored a tick's RECALL or what
+prompt THINK actually saw.
+
+Two log points, both riding the EXISTING wire protocol
+(`_tick_telemetry`'s `debug` field already carries `format_debug_trace`
+verbatim to a connected client; `ChatDaemon._log_tick` already writes
+it to `log_stream`) — zero changes needed in `server.py`/`chat_daemon.py`:
+
+- `SensoryBridge.pump()` gained an `on_percept(modality, attended,
+  novelty)` callback (parallel to the existing `on_error`), backed by
+  a new `CognitiveRuntime.last_sensory_novelty` readback — the intake
+  boundary, visible even for a habituated/rejected percept.
+- `TickResult` gained `sensory_modality` and `prompt`; `_sensory_vecs`
+  now carries `(vector, modality)` tuples so the modality survives
+  into the tick. `format_debug_trace` renders a `SENSE:` line and the
+  full `PROMPT:` text; `format_introspection` gets a terse
+  `SENSE[modality]` tag.
+
+RED-confirmed (12 contracts across `TestFormatDebugTrace`,
+`TestFormatIntrospection`, `TestObserveSensory`, and
+`test_isaac_sim.py::TestSensoryBridge`). One test-authoring bug (two
+new test methods missing their local `format_debug_trace` import,
+against the file's per-method import convention) caught and fixed
+during the pass — not a runtime bug. GREEN:
+`test_cognitive_runtime.py` 138 (was 127), `test_isaac_sim.py` 11
+(was 9), full regression sweep (cognition/sensory/isaac_sim/
+chat_daemon/memory, 207+22+11+34+14) unregressed.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestFormatDebugTrace, TestFormatIntrospection, TestObserveSensory; tests/test_isaac_sim.py::TestSensoryBridge]

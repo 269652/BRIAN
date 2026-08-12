@@ -205,6 +205,40 @@ class TestSensoryBridge:
         bridge.pump()
         assert len(calls) == 1
 
+    def test_on_percept_callback_fires_with_modality_attended_novelty(self):
+        """Debug observability at the intake boundary: how a raw
+        sensor reading turned into a percept decision (attended vs
+        habituated), and how novel it actually was — visible even
+        when the percept was rejected."""
+        rt = _mk_runtime()
+        events = []
+        client = _FakeIsaacClient(
+            frame=_frame(200),
+            joints={"positions": [0.5], "velocities": [0.1]})
+        bridge = self._bridge(
+            rt, client,
+            on_percept=lambda modality, attended, novelty:
+                events.append((modality, attended, novelty)))
+        bridge.pump()
+        modalities = {m for m, _, _ in events}
+        assert modalities == {"visual", "proprioceptive"}
+        for modality, attended, novelty in events:
+            assert attended is True
+            assert novelty is not None and 0.0 <= novelty <= 1.0
+
+    def test_on_percept_reports_habituated_percepts_too(self):
+        rt = _mk_runtime()
+        events = []
+        client = _FakeIsaacClient(frame=_frame(99), joints=None)
+        bridge = self._bridge(
+            rt, client,
+            on_percept=lambda modality, attended, novelty:
+                events.append((modality, attended, novelty)))
+        bridge.pump()
+        bridge.pump()  # identical frame again -> habituated
+        assert events[0] == ("visual", True, events[0][2])
+        assert events[1][0] == "visual" and events[1][1] is False
+
 
 class TestOmniverseIsaacSimClientGuardedImport:
     def test_raises_a_clear_error_without_the_isaacsim_package(self):
