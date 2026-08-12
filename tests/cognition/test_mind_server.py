@@ -881,6 +881,31 @@ class TestIsaacDeployCliWiring:
             "<id>`, never by its own onstart")
         assert "while true" in s
 
+    def test_isaac_onstart_answers_the_eula_prompt_non_interactively(self):
+        """Live incident (2026-08-12): omni.kit_app's check_eula() calls
+        input() at import time — in a non-interactive onstart context
+        that's an immediate EOFError, and the crash-restart loop just
+        hammers the same prompt every 10s forever, never reaching the
+        sensor loop. ACCEPT_EULA=Y alone does not satisfy THIS specific
+        gate (it's a bare input() call, not an env-var check) — the
+        python invocation must feed it an answer via stdin."""
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
+                                 "ISAAC_SIM_VERSION": "4.5.0"})
+        assert "yes 'Yes'" in s or 'yes "Yes"' in s, (
+            "the sensor loop's stdin must be fed an EULA answer — "
+            "env vars alone don't satisfy omni.kit_app's input() gate")
+
+    def test_isaac_onstart_captures_the_real_python_exit_code(self):
+        """Live incident (2026-08-12): `... | tee -a log; echo rc=$?`
+        reports tee's own exit code (always 0), not the python
+        process's — every crash logged 'process exited rc=0', masking
+        the actual failure. Must read PIPESTATUS[0] instead."""
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
+                                 "ISAAC_SIM_VERSION": "4.5.0"})
+        assert "PIPESTATUS[0]" in s
+
     def test_isaac_onstart_writes_the_sensor_loop_script(self):
         from neuroslm.connectors.vast_isaac import build_isaac_onstart
         s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,

@@ -151,7 +151,7 @@ __SENSOR_LOOP_SCRIPT__
 PYEOF
 
 mkdir -p logs/isaac
-export ACCEPT_EULA=Y PRIVACY_CONSENT=Y
+export ACCEPT_EULA=Y PRIVACY_CONSENT=Y OMNI_KIT_ACCEPT_EULA=YES
 echo "── starting the isaac sim sensor loop (crash-restart loop) ──"
 # NO self-destroy: an isaac-sim sensory source is an always-on
 # companion to the mind box, same philosophy as vast_mind.py — bills
@@ -159,9 +159,22 @@ echo "── starting the isaac sim sensor loop (crash-restart loop) ──"
 # can't hot-spin the billing meter against a broken install.
 while true; do
     date -u +"[isaac-loop] (re)start @ %Y-%m-%dT%H:%M:%SZ"
+    # omni.kit_app's check_eula() calls input() at import time — a
+    # bare stdin read, not an env-var check (ACCEPT_EULA alone does
+    # NOT satisfy it). In this non-interactive onstart context stdin
+    # would otherwise EOF immediately and the loop would hammer the
+    # same prompt every 10s forever without ever reaching the sensor
+    # loop (live incident, 2026-08-12) — `yes 'Yes'` feeds it an
+    # answer on every input() call for as long as the process runs.
+    # Fed via process substitution (not a literal pipe stage) so the
+    # main pipeline stays python|tee and PIPESTATUS[0] below is still
+    # python's own exit code.
     /workspace/isaac_venv/bin/python /workspace/isaac_sensor_loop.py \\
-        2>&1 | tee -a "logs/isaac/$(date -u +%Y%m%d)_isaac.log"
-    echo "[isaac-loop] process exited rc=$? — restarting in 10s"
+        < <(yes 'Yes') 2>&1 | tee -a "logs/isaac/$(date -u +%Y%m%d)_isaac.log"
+    # `${PIPESTATUS[0]}` is the PYTHON process's exit code — a bare
+    # `$?` here would report the LAST pipeline stage (tee, always 0),
+    # masking every real crash as "rc=0" (live incident, same boot).
+    echo "[isaac-loop] process exited rc=${PIPESTATUS[0]} — restarting in 10s"
     sleep 10
 done
 """
