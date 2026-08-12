@@ -787,6 +787,207 @@ class TestReplayAnchoredWandering:
             "stay anchored on the input")
 
 
+class TestProvenanceAwareRetrieval:
+    """Control fix 1 (2026-08-12 log analysis): retrieval was
+    provenance-blind — an [inferred] musing and an [observed] fact
+    competed as equals on cosine alone, so the mind's own prose
+    out-retrieved reality ('autobiographical contamination'). The
+    stored kind now carries a retrieval penalty for self-generated
+    episodes."""
+
+    def _rt(self, cfg=None):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        return CognitiveRuntime(
+            generate_fn=_ScriptedGen(["a thought"]),
+            score_fn=_score_map({}),
+            embed_fn=lambda t: [1.0, 0.0],   # constant anchor
+            nt=_FakeNT(), memory=EpisodicMemory(maxlen=64),
+            cfg=cfg or MindConfig(n_candidates=1, recall_k=1),
+            rng=random.Random(0))
+
+    def test_observed_beats_inferred_at_equal_cosine(self):
+        rt = self._rt()
+        rt.memory.add("my own musing", content_vec=[1.0, 0.0],
+                      context={"kind": "inferred"})
+        rt.memory.add("a real fact", content_vec=[1.0, 0.0],
+                      context={"kind": "observed"})
+        r = rt.tick()
+        assert [e["content"] for e in r.recalled] == ["a real fact"]
+
+    def test_penalty_outweighs_a_small_cosine_edge(self):
+        rt = self._rt()
+        # inferred is a PERFECT cosine match; observed is slightly off
+        # — the self-generated penalty (default 0.15) must flip it.
+        rt.memory.add("my own musing", content_vec=[1.0, 0.0],
+                      context={"kind": "inferred"})
+        rt.memory.add("a real fact", content_vec=[0.95, 0.312],
+                      context={"kind": "observed"})
+        r = rt.tick()
+        assert [e["content"] for e in r.recalled] == ["a real fact"]
+
+    def test_a_large_cosine_edge_still_wins(self):
+        rt = self._rt()
+        # provenance is a thumb on the scale, not a veto: a strongly
+        # more relevant inferred episode must still be retrievable.
+        rt.memory.add("my own musing", content_vec=[1.0, 0.0],
+                      context={"kind": "inferred"})
+        rt.memory.add("a real fact", content_vec=[0.0, 1.0],
+                      context={"kind": "observed"})
+        r = rt.tick()
+        assert [e["content"] for e in r.recalled] == ["my own musing"]
+
+
+class TestReplayPulse:
+    """Control fix 2: live trace showed persistent '(replay)' from
+    tick 10 onward — boredom crossed the threshold and STAYED there,
+    so replay fired every tick and became a drift amplifier. Replay
+    is a pulse, not a state: the jump consumes the boredom, and a
+    refractory window spaces jumps out."""
+
+    def _bored_rt(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["same thought forever"]),
+                         cfg=MindConfig(n_candidates=1))
+        TestInhibitionOfReturn._seed(rt, "the launch code is ready",
+                                     "coffee tastes great today")
+        rt._boredom = 1.0
+        return rt
+
+    def test_replay_consumes_boredom(self):
+        rt = self._bored_rt()
+        r = rt.tick()
+        assert r.replay is True
+        assert r.boredom < rt.cfg.replay_boredom_threshold, (
+            "the associative jump must RELIEVE boredom — otherwise "
+            "replay locks on and fires every tick")
+
+    def test_refractory_blocks_back_to_back_replay(self):
+        rt = self._bored_rt()
+        r1 = rt.tick()
+        assert r1.replay is True
+        rt._boredom = 1.0   # even if boredom is forced straight back up
+        r2 = rt.tick()
+        assert r2.replay is False, (
+            "a second jump within the refractory window must not fire")
+
+    def test_replay_returns_after_refractory_expires(self):
+        rt = self._bored_rt()
+        rt.tick()
+        rt._boredom = 1.0
+        rt._last_replay_tick = -100   # simulate the window expiring
+        r = rt.tick()
+        assert r.replay is True
+
+
+class TestReorientPolicy:
+    """Control fix 3: boredom sensed the loop but the policy only ever
+    answered with MORE generation. When novelty stays low for
+    `reorient_after` consecutive ticks (= the LOOPING condition), the
+    next wandering tick is a forced state transition: anchor on the
+    last OBSERVED input if one exists, else a clean-slate tick with
+    recall suppressed — not another continuation of the loop."""
+
+    def _looping_rt(self, observe_first=None):
+        from neuroslm.cognition.runtime import MindConfig
+        cfg = MindConfig(n_candidates=1, reorient_after=2)
+        rt = _mk_runtime(_ScriptedGen(["same thought forever"]), cfg=cfg)
+        if observe_first:
+            rt.observe(observe_first)
+            # The respond tick generates+stores "same thought forever"
+            # too (streak update is unconditional on action), so it
+            # already plays the "novelty 1.0 or high — streak 0" role
+            # below — one fewer generic tick is needed to reach the
+            # reorient_after boundary.
+            rt.tick()      # consume the sensory queue (respond tick)
+            rt.tick()      # identical -> novelty 0 -> streak 1
+        else:
+            rt.tick()          # novelty 1.0 or high — streak 0
+            rt.tick()          # identical -> novelty 0 -> streak 1
+        rt.tick()          # streak 2 == reorient_after
+        return rt
+
+    def test_loop_triggers_reorient(self):
+        rt = self._looping_rt()
+        r = rt.tick()
+        assert r.reorient is True
+        assert r.action == "reorient"
+
+    def test_reorient_anchors_on_last_observed_input(self):
+        rt = self._looping_rt(observe_first="the launch plan matters")
+        r = rt.tick()
+        assert r.reorient is True
+        assert any("launch plan" in e["content"] for e in r.recalled), (
+            "RETURN_TO_LAST_USER_INPUT: the reorient tick must anchor "
+            "recall on the last observed episode, not the loop's own "
+            "last thought")
+
+    def test_reorient_without_observed_input_is_clean_slate(self):
+        rt = self._looping_rt()
+        r = rt.tick()
+        assert r.reorient is True
+        assert r.recalled == [], (
+            "no observed episode to return to — reorient suppresses "
+            "recall entirely rather than re-feeding the loop's own "
+            "stored thoughts")
+
+    def test_streak_resets_after_reorient(self):
+        rt = self._looping_rt()
+        rt.tick()           # the reorient tick
+        r_next = rt.tick()  # streak was reset — no immediate re-trigger
+        assert r_next.reorient is False
+
+    def test_respond_never_reorients(self):
+        rt = self._looping_rt()
+        rt.observe("a direct question arrives")
+        r = rt.tick()
+        assert r.action == "respond"
+        assert r.reorient is False
+
+
+class TestPerceptUtilityGate:
+    """Control fix 4: observe() stored EVERY percept ('external events
+    are salient by default') — so 'Hellohello' became a permanent
+    autobiographical anchor that replay later resurfaced. Trivial
+    percepts are still PROCESSED (queued as sensory input, replied
+    to) but not committed to episodic memory."""
+
+    def _stored_contents(self, rt):
+        return [e["content"] for e in rt.memory.all()]
+
+    def test_one_word_statement_is_not_stored(self):
+        rt = _mk_runtime(_ScriptedGen(["t"]))
+        rt.observe("Hellohello")
+        assert "Hellohello" not in self._stored_contents(rt)
+
+    def test_short_greeting_is_not_stored(self):
+        rt = _mk_runtime(_ScriptedGen(["t"]))
+        rt.observe("Hey, good morning")
+        assert "Hey, good morning" not in self._stored_contents(rt)
+
+    def test_contentful_greeting_is_stored(self):
+        rt = _mk_runtime(_ScriptedGen(["t"]))
+        text = "Hello, my name is Moritz and I am building a mind"
+        rt.observe(text)
+        assert text in self._stored_contents(rt)
+
+    def test_short_but_salient_insult_is_stored(self):
+        rt = _mk_runtime(_ScriptedGen(["t"]))
+        rt.observe("You suck")
+        assert "You suck" in self._stored_contents(rt), (
+            "length is not salience — a two-word insult is an "
+            "emotionally salient event and belongs in memory")
+
+    def test_ungated_percept_still_reaches_the_sensory_queue(self):
+        gen = _ScriptedGen(["a reply"])
+        rt = _mk_runtime(gen)
+        rt.observe("Hellohello")
+        r = rt.tick()
+        assert r.action == "respond", (
+            "gating STORAGE must not gate PROCESSING — a trivial "
+            "greeting still gets responded to")
+        assert "Hellohello" in gen.prompts[0]
+
+
 class TestInnerSpeechRegister:
     """D1: DMN ticks generate through a separate wander seam (raw
     completion — no chat template, no imaginary addressee); respond
@@ -1244,7 +1445,7 @@ class TestExpertBackend:
 
     def test_expert_embeddings_power_recall(self):
         rt = self._rt()
-        rt.observe("alpha beta")
+        rt.observe("alpha beta gamma delta epsilon")
         eps = rt.memory.all()
         assert eps and eps[-1]["content_vec"] is not None
         assert len(eps[-1]["content_vec"]) == 4, (

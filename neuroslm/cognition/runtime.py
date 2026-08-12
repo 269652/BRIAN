@@ -128,6 +128,46 @@ class MindConfig:
     second-person address in WANDERING candidates — inner speech has
     no addressee. Never applied on respond ticks."""
 
+    inferred_recall_penalty: float = 0.15
+    """Provenance-aware retrieval (control fix 1): cosine-scale
+    penalty on kind="inferred" episodes during recall. Observed
+    reality outcompetes the mind's own prior prose at equal
+    relevance — a thumb on the scale, not a veto (a strongly more
+    relevant inferred episode still wins)."""
+
+    boredom_relief: float = 0.3
+    """Control fixes 2+3: a replay jump or a reorient CONSUMES
+    boredom (multiplied by this factor) — live trace showed replay
+    locking on and firing every tick once boredom crossed the
+    threshold and stayed."""
+
+    replay_refractory: int = 5
+    """Minimum ticks between replay jumps — replay is a pulse, not a
+    state."""
+
+    loop_novelty_threshold: float = 0.25
+    """A tick whose semantic novelty falls below this counts toward
+    the LOOPING streak."""
+
+    reorient_after: int = 3
+    """LOOPING condition (control fix 3): after this many consecutive
+    low-novelty ticks, the next wandering tick is a forced state
+    transition (reorient) instead of another continuation."""
+
+    trivial_percept_classes: Tuple[str, ...] = ("greeting", "farewell")
+    """Control fix 4: percept action classes gated by triviality —
+    short greetings/farewells are processed but not committed to
+    episodic memory."""
+
+    trivial_percept_max_words: int = 4
+    """A trivial-class percept at or under this word count is not
+    stored (a contentful long greeting still is)."""
+
+    percept_min_words: int = 3
+    """A bare 'statement'-class percept under this word count carries
+    ~no autobiographical content and is not stored. Salient classes
+    (insult, question, …) are stored regardless of length."""
+
     max_prompt_chars: int = 1200
     """Hard cap on the composed thinking prompt (CPU latency guard)."""
 
@@ -199,6 +239,11 @@ class TickResult:
     """True when this idle tick anchored RECALL on a randomly sampled
     stored episode (hippocampal replay) because boredom crossed the
     threshold — the mechanism behind associative jumps."""
+    reorient: bool = False
+    """True when the LOOPING condition (a low-novelty streak) forced
+    a state transition: recall anchored on the last OBSERVED input
+    (return-to-user), or suppressed entirely (clean slate) — instead
+    of another continuation of the loop."""
 
 
 _NT_ORDER = ("DA", "NE", "5HT", "ACh", "eCB", "Glu", "GABA")
@@ -253,6 +298,8 @@ def format_debug_trace(result: TickResult) -> str:
     mode = "DMN wandering" if result.wandering else "responding"
     if result.replay:
         mode += " (replay)"
+    if result.reorient:
+        mode += " (reorient)"
     lines = [f"[tick {result.tick_n}] {mode} action={result.action}"]
 
     nt = result.nt_levels or {}
@@ -404,6 +451,12 @@ class CognitiveRuntime:
         # ticks, transiently suppressed from retrieval.
         self._recent_recall: Deque[str] = deque(
             maxlen=max(1, self.cfg.ior_window) * max(1, self.cfg.recall_k))
+        # Replay pulse state: tick of the last replay jump (refractory
+        # window) — far in the past so the first jump is allowed.
+        self._last_replay_tick: int = -(10 ** 9)
+        # LOOPING streak: consecutive ticks with novelty below
+        # cfg.loop_novelty_threshold.
+        self._low_nov_streak: int = 0
 
     # ── SENSE ────────────────────────────────────────────────────────
 
@@ -428,13 +481,28 @@ class CognitiveRuntime:
         # "insult" — classified by self._classify (the mind's own
         # trunk/expert in production; the regex lexicon by default).
         action_class = self._classify(text).primary
-        self.memory.add(text,
-                        content_vec=list(self._embed(text)),
-                        nt_state=self.nt.levels(),
-                        tags=[source, "percept", "kind=observed",
-                             f"action_class={action_class}"],
-                        context={"kind": "observed", "source": source,
-                                "action_class": action_class})
+
+        # Utility gate (control fix 4): trivial percepts are PROCESSED
+        # (queued below, replied to) but not committed to episodic
+        # memory — live evidence: a stray "Hellohello" became a
+        # permanent autobiographical anchor that replay resurfaced.
+        # Length is not salience: a two-word insult IS stored; a
+        # two-word bare statement or short greeting is not.
+        n_words = len(text.split())
+        trivial = (
+            (action_class in self.cfg.trivial_percept_classes
+             and n_words <= self.cfg.trivial_percept_max_words)
+            or (action_class == "statement"
+                and n_words < self.cfg.percept_min_words)
+        )
+        if not trivial:
+            self.memory.add(text,
+                            content_vec=list(self._embed(text)),
+                            nt_state=self.nt.levels(),
+                            tags=[source, "percept", "kind=observed",
+                                 f"action_class={action_class}"],
+                            context={"kind": "observed", "source": source,
+                                    "action_class": action_class})
         self._sensory.append(text)
         self.nt.step_full(activation=1.0)
 
@@ -467,38 +535,85 @@ class CognitiveRuntime:
         # tick is pure mind-wandering rather than a response.
         wandering = not bool(sensory)
 
+        # REORIENT (control fix 3): the LOOPING condition — novelty
+        # below threshold for `reorient_after` consecutive ticks —
+        # forces a state transition instead of another continuation:
+        # anchor RECALL on the last OBSERVED input (return-to-user),
+        # or suppress recall entirely (clean slate) when no observed
+        # episode exists to return to. Wandering only — respond is
+        # already anchored on real input.
+        reorient = (wandering
+                    and self._low_nov_streak >= self.cfg.reorient_after)
+
         # Hippocampal replay (C2 of the curiosity loop): when bored,
         # an idle tick anchors RECALL on a randomly sampled stored
         # episode instead of the last thought — the associative-jump
         # mechanism that breaks the last_thought→similarity→same-basin
-        # chain. Never during respond: real input stays the anchor.
+        # chain. Never during respond, never during reorient, and a
+        # PULSE, not a state (control fix 2): refractory-gated here,
+        # boredom-consumed below — live trace showed replay locking on
+        # and firing every tick once boredom saturated.
         replay = False
         anchor_vec = None
-        if wandering and self._boredom >= self.cfg.replay_boredom_threshold:
+        suppress_recall = False
+        if reorient:
+            last_observed = next(
+                (e for e in reversed(self.memory.all())
+                 if (e.get("context") or {}).get("kind") == "observed"
+                 and e.get("content_vec") is not None), None)
+            if last_observed is not None:
+                anchor_vec = list(last_observed["content_vec"])
+            else:
+                suppress_recall = True
+        elif (wandering
+              and self._boredom >= self.cfg.replay_boredom_threshold
+              and (tick_n - self._last_replay_tick)
+              > self.cfg.replay_refractory):
             candidates_for_replay = [e for e in self.memory.all()
                                      if e.get("content_vec") is not None]
             if candidates_for_replay:
                 replay = True
+                self._last_replay_tick = tick_n
                 anchor_vec = list(
                     self.rng.choice(candidates_for_replay)["content_vec"])
-        if anchor_vec is None:
+        if anchor_vec is None and not suppress_recall:
             anchor = (sensory[-1] if sensory
                       else self._last_thought or self.cfg.persona)
             anchor_vec = list(self._embed(anchor))
 
-        # RECALL: hippocampal similarity read with inhibition of
-        # return (C1): episodes recalled in the last few ticks are
-        # transiently suppressed so one memory can't dominate every
-        # tick. IOR yields rather than blinds — when suppression would
-        # empty the result, the unsuppressed top-k is used anyway.
-        over_fetch = self.cfg.recall_k + len(self._recent_recall)
-        scored = self.memory.retrieve_scored(anchor_vec, k=over_fetch)
-        fresh = [e for _, e in scored
-                 if e.get("content") not in self._recent_recall]
-        recalled = fresh[: self.cfg.recall_k] if fresh else [
-            e for _, e in scored[: self.cfg.recall_k]]
-        for e in recalled:
-            self._recent_recall.append(e.get("content"))
+        # RECALL: hippocampal similarity read with provenance-aware
+        # scoring (control fix 1: kind="inferred" episodes carry a
+        # cosine-scale penalty, so observed reality outcompetes the
+        # mind's own prose at equal relevance — a thumb on the scale,
+        # not a veto) and inhibition of return (C1: episodes recalled
+        # in the last few ticks are transiently suppressed). IOR
+        # yields rather than blinds — when suppression would empty
+        # the result, the unsuppressed top-k is used anyway.
+        if suppress_recall:
+            recalled = []
+        else:
+            # Over-fetch past the raw-cosine top-k: the provenance
+            # penalty and IOR re-rank AFTER retrieve_scored's own
+            # top-k cut, so a penalized/suppressed episode that would
+            # otherwise place just outside a narrow k never gets a
+            # chance to be out-ranked correctly. Bounded by the total
+            # episode count (pure-python cosine, cheap at memory's
+            # capped maxlen).
+            over_fetch = max(self.cfg.recall_k + len(self._recent_recall),
+                             len(self.memory.all()))
+            scored = self.memory.retrieve_scored(anchor_vec, k=over_fetch)
+            pen = self.cfg.inferred_recall_penalty
+            adjusted = sorted(
+                ((sim - (pen if (e.get("context") or {}).get("kind")
+                         == "inferred" else 0.0), e)
+                 for sim, e in scored),
+                key=lambda t: t[0], reverse=True)
+            fresh = [e for _, e in adjusted
+                     if e.get("content") not in self._recent_recall]
+            recalled = fresh[: self.cfg.recall_k] if fresh else [
+                e for _, e in adjusted[: self.cfg.recall_k]]
+            for e in recalled:
+                self._recent_recall.append(e.get("content"))
 
         # THINK: K candidates from persona + recall + context. The
         # trigger — what this tick is actually ABOUT — is the real
@@ -545,13 +660,19 @@ class CognitiveRuntime:
         novelty = max(0.0, min(1.0, novelty))
 
         # ACTION: the basal ganglia's actual act this tick — exactly
-        # one of respond/speak/think. External input always surfaces
-        # (respond); otherwise the SAME novelty gate that decided
-        # whether to remember the thought also decides whether to
-        # voice it (speak) or keep it internal (think) — one signal,
-        # two consequences, not a second invented gate.
+        # one of respond/reorient/speak/think. External input always
+        # surfaces (respond); a forced state transition reports itself
+        # (reorient — surfaces, so the shift is visible); otherwise
+        # the SAME novelty gate that decided whether to remember the
+        # thought also decides whether to voice it (speak) or keep it
+        # internal (think) — one signal, two consequences.
         stored = novelty >= self.cfg.novelty_write_threshold
-        action = "respond" if not wandering else ("speak" if stored else "think")
+        if not wandering:
+            action = "respond"
+        elif reorient:
+            action = "reorient"
+        else:
+            action = "speak" if stored else "think"
 
         # STORE: novelty-gated episodic write — as a full episode,
         # not bare text. Layer 1 (event) is `thought` itself; the
@@ -595,6 +716,19 @@ class CognitiveRuntime:
         a = self.cfg.novelty_ema_alpha
         self._boredom = (1.0 - a) * self._boredom + a * (1.0 - novelty)
 
+        # LOOPING streak (control fix 3) + pulse relief (fix 2/3): a
+        # replay jump or a reorient CONSUMES boredom — the correction
+        # IS the relief; without this, replay locked on and fired
+        # every tick once boredom saturated (live trace, tick 10+).
+        if novelty < self.cfg.loop_novelty_threshold:
+            self._low_nov_streak += 1
+        else:
+            self._low_nov_streak = 0
+        if replay or reorient:
+            self._boredom *= self.cfg.boredom_relief
+        if reorient:
+            self._low_nov_streak = 0
+
         self._last_thought = thought
         return TickResult(thought=thought, candidates=candidates,
                           scores=scores, recalled=recalled,
@@ -606,7 +740,7 @@ class CognitiveRuntime:
                           selection_entropy=selection_entropy,
                           differentiation=differentiation,
                           novelty=novelty, boredom=self._boredom,
-                          replay=replay)
+                          replay=replay, reorient=reorient)
 
     # ── Internals ────────────────────────────────────────────────────
 

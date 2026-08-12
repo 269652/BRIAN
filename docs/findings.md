@@ -3957,3 +3957,69 @@ Layer-A contracts pin the mechanisms, the felt quality needs the
 next live session.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestSemanticNoveltyGate, TestBoredomCuriosityLoop, TestInhibitionOfReturn, TestReplayAnchoredWandering, TestInnerSpeechRegister, TestSecondPersonPrior]
+
+### Control layer — sensing a loop is not the same as governing it (2026-08-12)
+
+A follow-up live trace (same box lineage, later ticks) on §14.9's
+curiosity loop, externally critiqued and cross-checked against the
+actual implementation: "you don't appear to have a generation
+problem — you have a control problem." Four concrete findings, one
+corrected in the retelling (provenance WAS already stored per §14.7;
+the real gap was that retrieval never read it — not that it was
+missing):
+
+1. `(replay)` fired from tick 10 onward and never stopped — boredom
+   crossed `replay_boredom_threshold` once and then stayed saturated,
+   so replay became a permanent state instead of an occasional jump.
+2. Retrieval scored `inferred` (self-generated) and `observed` (real
+   input) episodes as equals on raw cosine — the mind's own prior
+   musings could out-retrieve reality. Live symptom: a stray
+   `"Hellohello"` percept became a stored anchor that replay later
+   resurfaced ("autobiographical contamination").
+3. Boredom was sensed correctly every tick but only ever fed hotter
+   sampling of the SAME stuck basin (§14.9-B) — nothing forced an
+   actual state transition once a loop was detected.
+4. Every percept was stored regardless of content — a bare "Hey" or a
+   corrupted `"Hellohello"` got equal permanent standing in episodic
+   memory alongside a substantive statement.
+
+**Fix — four wirings onto existing signals (architecture.md §14.10):**
+(1) RECALL subtracts `inferred_recall_penalty` from `inferred`
+episodes' cosine score before ranking (a thumb on the scale, not a
+veto — a strongly more relevant inferred episode still wins), which
+required over-fetching past `retrieve_scored`'s own raw-cosine top-k
+cut so the penalty has a real pool to re-rank. (2) A `replay_refractory`
+window plus a `boredom_relief` multiplier on a fired replay/reorient —
+the jump now consumes the boredom that triggered it, restoring the
+pulse. (3) A `_low_nov_streak` LOOPING detector: `reorient_after`
+consecutive low-novelty ticks force a new fourth basal-ganglia action,
+`"reorient"` — anchor RECALL on the last OBSERVED episode
+(return-to-last-input) or suppress recall entirely (clean slate) when
+none exists, resetting the streak. (4) `observe()` still processes
+every percept (queued, replied to) but only commits it to memory past
+a triviality check (trivial greeting/farewell classes under a word
+cap, or a bare short statement) — length is not salience, so a
+two-word insult is still stored.
+
+RED-confirmed (16 contracts: `TestProvenanceAwareRetrieval`,
+`TestReplayPulse`, `TestReorientPolicy`, `TestPerceptUtilityGate`)
+before implementation. Two issues surfaced during the GREEN pass: a
+real implementation bug (RECALL's original over-fetch was bounded by
+`recall_k`, so the provenance penalty had nothing outside the raw-cosine
+top-k left to re-rank — fixed by over-fetching to the full memory size)
+and a test-fixture timing bug in my own new `_looping_rt(observe_first=
+...)` helper (the respond tick that drains `observe_first`'s sensory
+queue also advances `_low_nov_streak`, since that update is
+unconditional on action — one fewer generic tick was needed to land the
+streak at the reorient boundary; fixed in the test, not the runtime).
+GREEN: test_cognitive_runtime.py 117 (was 101), test_mind_server.py 32,
+test_chat_daemon.py 34, test_memory.py 14, all unregressed.
+
+Not yet re-measured live — the next deployed session is where "does
+the mind actually stop looping and return to the user's last question"
+gets its real test; the Layer-A contracts pin the mechanisms only.
+
+Deferred: a persistent goal/task register (PFC-style state object) —
+noted as the honest next structural addition, not built here.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestProvenanceAwareRetrieval, TestReplayPulse, TestReorientPolicy, TestPerceptUtilityGate]

@@ -3498,3 +3498,73 @@ Telemetry: `format_introspection` gains `CUR[nov=.. bore=..]` and a
 `replay` marker in `HC[...]`; episodes store their `novelty` in
 `context`. The old `surprise_write_z`/`surprise_ema_alpha` NLL-gate
 fields are deleted (not deprecated — nothing consumed them any more).
+
+### 14.10 Control layer — provenance, replay pulse, reorient, percept gate (2026-08-12)
+
+A second live trace (same box lineage, later ticks) showed §14.9's
+mechanisms firing but not yet GOVERNING: `(replay)` from tick 10
+onward, permanent rather than a pulse; retrieval ranked an `inferred`
+musing and an `observed` fact as equals on cosine alone, so the mind's
+own prior prose out-retrieved reality ("autobiographical
+contamination" — a stray `"Hellohello"` became a stored anchor that
+replay later resurfaced); boredom rose and was *sensed* every tick but
+never *acted on* beyond hotter sampling of the same stuck basin. Four
+fixes, each a wiring onto existing signals — no new subsystem:
+
+- **1. Provenance-aware retrieval.** RECALL's cosine score gets a
+  `MindConfig.inferred_recall_penalty` (default 0.15) subtracted when
+  `context.kind == "inferred"` — a thumb on the scale, not a veto: a
+  strongly more relevant self-generated episode still wins
+  (`TestProvenanceAwareRetrieval::test_a_large_cosine_edge_still_wins`).
+  Provenance was already stored (§14.7); the gap was that retrieval
+  never read it. Re-ranking after the penalty requires seeing past
+  `retrieve_scored`'s own raw-cosine top-k cut, so RECALL now
+  over-fetches to `max(recall_k + |recent_recall|, |memory|)` before
+  applying the penalty and truncating — otherwise a penalized episode
+  ranked just outside a narrow top-k could never be correctly
+  out-ranked.
+- **2. Replay is a pulse, not a state.** `replay_refractory` (default
+  5 ticks) gates re-firing, and a fired replay or reorient multiplies
+  `_boredom` by `boredom_relief` (default 0.3) — the jump IS the
+  relief. Without this, boredom saturated once and stayed saturated,
+  so replay (and the temperature it drives) locked on permanently.
+- **3. Reorient policy — LOOPING forces a state transition.** A new
+  `_low_nov_streak` counts consecutive ticks with `novelty <
+  loop_novelty_threshold` (default 0.25); once it reaches
+  `reorient_after` (default 3) on a wandering tick, that tick becomes
+  a fourth basal-ganglia action, `"reorient"` (`TickResult.reorient`),
+  instead of another continuation. A reorient tick anchors RECALL on
+  the last OBSERVED episode if one exists (return-to-last-input) or
+  suppresses recall entirely — a clean slate — when none does; either
+  way it resets the streak and relieves boredom. Sensing a loop used
+  to only make selection hotter (§14.9-B); it now breaks the loop.
+  Respond ticks never reorient (real input is already the anchor).
+- **4. Percept utility gate.** `observe()` still *processes* every
+  percept (queued to sensory, replied to) but only *commits* it to
+  episodic memory when it clears a triviality check: a percept whose
+  action class is in `trivial_percept_classes` (default `greeting`,
+  `farewell`) and at or under `trivial_percept_max_words` (default 4)
+  words, or a bare `statement` under `percept_min_words` (default 3)
+  words, is processed but not stored. Length is not salience — a
+  two-word insult ("You suck") is still stored; a two-word greeting or
+  a stray `"Hellohello"` is not.
+
+Telemetry: `format_debug_trace`'s mode string appends `" (reorient)"`
+alongside the existing `" (replay)"` marker.
+
+RED-confirmed (16 contracts: `TestProvenanceAwareRetrieval`,
+`TestReplayPulse`, `TestReorientPolicy`, `TestPerceptUtilityGate`) before
+implementation. Two of my own new tests needed correction during the
+pass, not the runtime: the retrieval tests exposed the raw-cosine
+over-fetch gap above (a real implementation bug, fixed in `tick()`),
+while a `_looping_rt(observe_first=...)` timing assumption was off by
+one tick — the respond tick that consumes `observe_first`'s sensory
+queue also updates `_low_nov_streak` (the streak update is
+unconditional on action), so it already plays the role the helper's
+comments assigned to the first "generic" tick. GREEN:
+`test_cognitive_runtime.py` 117 (was 101), `test_mind_server.py` 32,
+`test_chat_daemon.py` 34, `test_memory.py` 14.
+
+Deferred: a persistent goal/task register (PFC-style state object) for
+`RECALL_GOAL`/`ASK_CLARIFICATION`-style behaviors beyond simple
+reorientation — the honest next structural addition, not built here.
