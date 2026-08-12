@@ -988,6 +988,130 @@ class TestPerceptUtilityGate:
         assert "Hellohello" in gen.prompts[0]
 
 
+class TestEmbedDim:
+    """§15: sensory cortices probe this once to size their projection
+    heads so a percept's content_vec lands in the same space as text
+    thoughts' embed_fn output."""
+
+    def test_matches_embed_fn_output_length(self):
+        rt = _mk_runtime(_ScriptedGen(["x"]))
+        assert rt.embed_dim() == len(_vec_for(rt.cfg.persona or " "))
+
+    def test_is_an_int(self):
+        rt = _mk_runtime(_ScriptedGen(["x"]))
+        assert isinstance(rt.embed_dim(), int)
+
+
+class TestObserveSensory:
+    """§15: non-text SENSE — a percept that arrives already embedded
+    (a sensory cortex's own latent vector), never captioned into text.
+    Gated by the SAME semantic-novelty signal that gates the mind's
+    own thoughts (§14.9) rather than by word count (there are no words)
+    — a habituated, unchanged stream is filtered at the door, exactly
+    the orienting-response habituation (Sokolov) this loop already
+    models for boredom."""
+
+    def _rt(self, cfg=None):
+        return _mk_runtime(_ScriptedGen(["a thought"]), cfg=cfg)
+
+    def test_novel_percept_is_stored_as_observed(self):
+        rt = self._rt()
+        stored = rt.observe_sensory("visual", [1.0, 0.0, 0.0, 0.0, 0.0,
+                                                0.0, 0.0, 0.0])
+        assert stored is True
+        eps = rt.memory.all()
+        assert len(eps) == 1
+        assert eps[0]["content_vec"] == [1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                         0.0, 0.0]
+        assert (eps[0].get("context") or {}).get("kind") == "observed"
+        assert (eps[0].get("context") or {}).get("modality") == "visual"
+
+    def test_stored_content_is_a_fixed_marker_never_a_caption(self):
+        """The literal `content` text is a content-INDEPENDENT modality
+        marker, never a description derived from the vector — the one
+        thing that would smuggle a caption back in."""
+        rt = self._rt()
+        rt.observe_sensory("visual", [1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                      0.0, 0.0])
+        rt2 = self._rt()
+        rt2.observe_sensory("visual", [0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
+                                       0.0, 0.0])
+        c1 = rt.memory.all()[0]["content"]
+        c2 = rt2.memory.all()[0]["content"]
+        assert c1 == c2, "the marker must not vary with vector content"
+
+    def test_redundant_percept_is_not_stored(self):
+        rt = self._rt()
+        vec = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        assert rt.observe_sensory("visual", vec) is True
+        assert rt.observe_sensory("visual", vec) is False, (
+            "an unchanged stream must habituate — no duplicate writes")
+        assert len(rt.memory.all()) == 1
+
+    def test_redundant_percept_does_not_interrupt_wandering(self):
+        rt = self._rt()
+        vec = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        rt.observe_sensory("visual", vec)
+        rt.tick()  # consumes the first, novel percept (respond)
+        rt.observe_sensory("visual", vec)  # same vec again — habituated
+        r = rt.tick()
+        assert r.wandering is True
+
+    def test_novel_percept_interrupts_wandering_like_text(self):
+        rt = self._rt()
+        rt.observe_sensory("acoustic", [0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
+                                        0.0, 0.0])
+        r = rt.tick()
+        assert r.action == "respond"
+
+    def test_distinct_modalities_are_labeled(self):
+        rt = self._rt()
+        rt.observe_sensory("proprioceptive", [0.0, 0.0, 1.0, 0.0, 0.0,
+                                              0.0, 0.0, 0.0])
+        ctx = rt.memory.all()[0]["context"]
+        assert ctx["modality"] == "proprioceptive"
+
+    def test_observed_sensory_percept_outranks_inferred_in_recall(self):
+        """Integration with control fix 1 (§14.10): a sensory-stored
+        percept carries kind='observed' just like a text percept, so
+        it gets the SAME retrieval advantage over the mind's own
+        inferred prose."""
+        rt = self._rt()
+        vec = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        # observe_sensory FIRST (memory is empty, so its own novelty
+        # gate — cosine vs what's already stored — passes); seed the
+        # competing inferred episode with the identical vector
+        # directly afterward so it doesn't block the percept's own
+        # novelty check.
+        rt.observe_sensory("visual", vec)
+        rt.memory.add("my own musing", content_vec=vec,
+                      context={"kind": "inferred"})
+        r = rt.tick()
+        assert r.recalled and r.recalled[0]["content"] != "my own musing"
+
+    def test_recall_anchors_on_the_real_percept_vector_not_its_marker_text(self):
+        """The one design property that actually makes this 'process
+        as latent embeddings, not captions': RECALL for the respond
+        tick a percept triggers must anchor on the VECTOR passed to
+        observe_sensory, never on a re-embedding of the fixed
+        '[modality percept]' marker string (which carries none of the
+        percept's real content)."""
+        rt = self._rt()
+        launch_vec = _vec_for("about the launch")
+        generic_vec = _vec_for("[visual percept]")  # what a broken
+                                                     # re-embed of the
+                                                     # marker text gives
+        rt.memory.add("about the launch", content_vec=launch_vec,
+                      context={"kind": "observed"})
+        rt.memory.add("something generic", content_vec=generic_vec,
+                      context={"kind": "observed"})
+        rt.observe_sensory("visual", launch_vec)
+        r = rt.tick()
+        assert any(e["content"] == "about the launch" for e in r.recalled), (
+            "RECALL must anchor on the real percept vector, not a "
+            "re-embedding of its text marker")
+
+
 class TestInnerSpeechRegister:
     """D1: DMN ticks generate through a separate wander seam (raw
     completion — no chat template, no imaginary addressee); respond

@@ -3568,3 +3568,113 @@ comments assigned to the first "generic" tick. GREEN:
 Deferred: a persistent goal/task register (PFC-style state object) for
 `RECALL_GOAL`/`ASK_CLARIFICATION`-style behaviors beyond simple
 reorientation — the honest next structural addition, not built here.
+
+## §15 — Sensory Cortices: Isaac Sim, embodied SENSE without captions (2026-08-12)
+
+"Directly process visual, acoustic and physical input as latent
+embeddings; not as text-based captions." Every prior SENSE path
+(`observe()`, §14) is text: a percept IS a string, embedded via the
+same `embed_fn` THINK's prompts use. §15 gives the mind a second SENSE
+path — `observe_sensory(modality, content_vec, source)` — for percepts
+that arrive PRE-EMBEDDED from a real sensor encoder, so a camera frame
+or a joint-torque reading never passes through a captioning step (an
+LM writing a sentence about what a camera saw) on its way into memory.
+
+**Three cortices, one convention** (`neuroslm/sensory/cortices.py`):
+raw signal → a real, checkable front end → a frozen linear projection
+into a caller-chosen `output_dim` — the SAME dimensionality
+`CognitiveRuntime.embed_dim()` reports for text, so a sensory
+`content_vec` competes in the identical cosine-similarity space
+`EpisodicMemory` already uses for thoughts and text percepts. No
+modality gets a separate memory or a separate retrieval path.
+
+- **VisualCortex** — a frozen pretrained CLIP vision tower
+  (`transformers.CLIPVisionModelWithProjection`, default
+  `openai/clip-vit-base-patch32` — already a project dependency, no
+  new library) plus a frozen linear projection. Real, pretrained,
+  semantic; verified end to end against the actual HF checkpoint
+  during this session (32-dim output, finite, non-degenerate).
+- **AcousticCortex** — exact DSP front end (`log_mel_spectrogram`:
+  STFT power spectrum → HTK mel filterbank, Davis & Mermelstein 1980)
+  feeding a frozen 1-D conv head. No general-purpose pretrained audio
+  embedding model is bundled, so — documented, not hidden — only the
+  final feature-mixing head is untrained: a frozen random projection,
+  a real and citable technique in its own right (Saxe et al. 2011,
+  "On Random Weights and Unsupervised Feature Learning"; Rahimi &
+  Recht 2007, "Random Features for Large-Scale Kernel Machines"), not
+  a stub. Swappable via the same call signature once a pretrained
+  audio encoder is worth bundling.
+- **ProprioceptiveCortex** — joint positions/velocities/forces (Isaac
+  Sim's `Articulation` API shape) → fixed-padded per channel to
+  `max_dof` → a frozen MLP. Standard robotics-RL proprioceptive
+  encoding; no pretrained-weight ambiguity to document.
+
+**`CognitiveRuntime.observe_sensory`** (runtime.py): gated by the SAME
+semantic-novelty signal that gates the mind's own thoughts (§14.9)
+rather than by word count (there are none) — a habituated, unchanged
+stream (the same frame every tick) is filtered at the door, the
+orienting-response habituation this loop's boredom trace already
+models (Sokolov 1963). A novel percept is written to episodic memory
+as `kind="observed"` (so it out-competes the mind's own inferred prose
+in RECALL exactly like an observed text percept, §14.10 fix 1) and
+queues a FIXED, content-independent modality marker
+(`"[visual percept]"`) that cues THINK's prompt — the only text
+involved, and it never varies with what was actually sensed, so no
+captioning sneaks back in through the back door.
+
+The one design property that actually delivers "as latent embeddings,
+not captions": `_sensory_vecs` tracks each queued percept's REAL
+vector in lockstep with the text queue (`None` for plain text, whose
+anchor is still derived from `embed_fn` as before). `tick()`'s RECALL
+anchors a sensory-triggered respond tick on THAT vector directly —
+never on a re-embedding of the fixed marker string, which would carry
+none of the percept's actual content
+(`TestObserveSensory::test_recall_anchors_on_the_real_percept_vector_not_its_marker_text`
+pins exactly this).
+
+**Isaac Sim bridge** (`neuroslm/connectors/isaac_sim.py`):
+`OmniverseIsaacSimClient` wraps the real Isaac Sim Python API
+(`isaacsim.sensors.camera.Camera.get_rgba()`,
+`isaacsim.core.prims.Articulation.get_joint_positions/velocities/
+measured_joint_forces()`) — importable only from inside a running
+Isaac Sim process, so the import is guarded and raises a clear
+`RuntimeError` at construction time rather than failing silently or
+degrading to fake behavior. Isaac Sim has no general-purpose
+microphone/soundscape simulation (as of Isaac Sim 6.0 its only
+acoustic sensor is an ultrasonic ranging array, not audio) — honestly
+reflected via an optional `audio_source` callback rather than invented.
+`SensoryBridge.pump()` is one polling cycle: reads whatever modalities
+the client provides, runs each through its cortex, calls
+`observe_sensory`. A sensor read failure on one modality is caught and
+surfaced (`on_error`, default a stderr line) rather than crashing the
+mind's tick loop or being silently swallowed.
+
+**Grounding THINK, not just SENSE (deferred).** This phase makes
+perception and memory caption-free end to end. THINK itself still only
+sees the fixed modality marker in its text prompt — the LM cannot yet
+literally attend to a raw visual/acoustic latent while generating. The
+principled next step is a true visual-language grounding path
+(LLaVA-style: a trainable projector maps a cortex's latent into the
+LM's own input-embedding space as prefix "soft tokens," generation via
+`inputs_embeds` instead of `input_ids`) — a real mechanism, not a
+caption, but a large enough change to the generation seam that it's
+scoped as deliberate follow-up work, not silently dropped.
+
+**Not deployed.** This phase is local implementation only — no
+vast.ai spend, no live Isaac Sim connection attempted (repo rule: no
+deploy without explicit in-turn permission, and Isaac Sim's footprint
+— a full Omniverse application, not a pip package — is a materially
+different, larger box than the current always-on mind server).
+
+RED-confirmed before implementation (22 contracts:
+`tests/sensory/test_cortices.py`; 10 contracts:
+`TestEmbedDim`+`TestObserveSensory`, `tests/cognition/
+test_cognitive_runtime.py`; 9 contracts: `tests/test_isaac_sim.py`).
+GREEN: `test_cortices.py` 22, `test_cognitive_runtime.py` 127 (was
+117), `test_isaac_sim.py` 9. No network calls in the suite — the
+VisualCortex/CLIP path is dependency-injected in every test exactly
+like `build_runtime_from_hf_lm`'s LM; the real production path was
+separately verified once, live, against the actual
+`openai/clip-vit-base-patch32` checkpoint (32-dim output, finite,
+correctly discarding CLIP's text tower via
+`CLIPVisionModelWithProjection`).

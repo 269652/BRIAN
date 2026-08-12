@@ -4023,3 +4023,75 @@ Deferred: a persistent goal/task register (PFC-style state object) —
 noted as the honest next structural addition, not built here.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestProvenanceAwareRetrieval, TestReplayPulse, TestReorientPolicy, TestPerceptUtilityGate]
+
+### Sensory cortices — Isaac Sim, embodied SENSE without captions (2026-08-12)
+
+"It should directly process visual, acoustic and physical input as
+latent embeddings; not as text based captions." Every SENSE path built
+through §14 is text: a percept is a string, embedded the same way
+THINK's own prompts are. Feeding a real sensor stream through that
+path would mean captioning first (an LM writing a sentence about a
+camera frame) and embedding the caption — exactly what was ruled out.
+
+**Fix (architecture.md §15): a second, embedding-native SENSE path.**
+`neuroslm/sensory/cortices.py` gives each modality a real front end
+projecting into the SAME dimensionality `CognitiveRuntime.embed_dim()`
+reports for text: `VisualCortex` (frozen pretrained CLIP vision tower,
+`transformers.CLIPVisionModelWithProjection` — already a project
+dependency, no new library), `AcousticCortex` (exact log-mel-spectrogram
+DSP + a frozen conv head — documented as untrained where no
+pretrained audio model is bundled, not hidden), `ProprioceptiveCortex`
+(frozen MLP over Isaac Sim's `Articulation` joint-state shape).
+`CognitiveRuntime.observe_sensory()` accepts a percept already
+embedded, gated by the SAME semantic-novelty signal that gates the
+mind's own thoughts (§14.9) — habituation to an unchanged stream,
+rather than a word-count rule that doesn't apply to raw sensor data.
+
+The property that actually makes this "latent embeddings, not
+captions" rather than just a relabeled caption pipeline: a
+sensory-triggered RECALL anchors on the REAL vector passed to
+`observe_sensory`, tracked in lockstep with the sensory queue
+(`_sensory_vecs`) — not on a re-embedding of the fixed, content-
+independent text marker (`"[visual percept]"`) that cues THINK's
+prompt. A test written to catch exactly this regression
+(`test_recall_anchors_on_the_real_percept_vector_not_its_marker_text`)
+initially would have passed even with the marker-re-embedding bug, by
+accident of the seed vectors chosen — caught and rewritten with
+vectors that discriminate the two anchor choices before it was trusted.
+
+`neuroslm/connectors/isaac_sim.py`'s `OmniverseIsaacSimClient` wraps
+the real Isaac Sim Python API (`isaacsim.sensors.camera.Camera`,
+`isaacsim.core.prims.Articulation`) — guarded import (only importable
+from inside a running Isaac Sim process), raises clearly rather than
+degrading silently. Isaac Sim has no general-purpose microphone
+simulation (confirmed via research this session — its only acoustic
+sensor as of Isaac Sim 6.0 is ultrasonic ranging, not audio); the
+bridge reflects that honestly via an optional `audio_source` callback
+rather than inventing one. `SensoryBridge.pump()` polls whatever
+modalities a client provides each cycle; a failed sensor read on one
+modality is caught and surfaced, not silent, and does not crash the
+tick loop.
+
+RED-confirmed before implementation (41 contracts total: 22 in
+`test_cortices.py`, 10 in `TestEmbedDim`+`TestObserveSensory`, 9 in
+`test_isaac_sim.py`). One test-authoring bug found and fixed during
+the pass (the anchor-fidelity test above); one real design gap found
+and fixed in the runtime itself — `tick()`'s RECALL originally had no
+path back to a percept's real vector at all (`_sensory` only ever held
+text), requiring the new `_sensory_vecs` lockstep queue rather than a
+one-line fix. GREEN: `test_cortices.py` 22, `test_cognitive_runtime.py`
+127 (was 117), `test_isaac_sim.py` 9. The VisualCortex/CLIP production
+path (no test double) was separately verified once, live, against the
+actual `openai/clip-vit-base-patch32` checkpoint from HF Hub — 32-dim
+output, finite, non-degenerate.
+
+Deferred, documented not dropped: THINK itself still only sees the
+fixed modality marker in its text prompt, not the raw latent — a true
+visual-language grounding path (LLaVA-style projector into the LM's
+input-embedding space, generation via `inputs_embeds`) is the
+principled next step, scoped separately because it's a materially
+larger change to the generation seam. Not deployed — local
+implementation only, on `feature/isaac-sim-sensory-cortex`; no vast.ai
+spend, no live Isaac Sim connection attempted.
+
+[EVIDENCE: tests/sensory/test_cortices.py; tests/cognition/test_cognitive_runtime.py::TestEmbedDim, TestObserveSensory; tests/test_isaac_sim.py]

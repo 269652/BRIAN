@@ -442,6 +442,12 @@ class CognitiveRuntime:
         self.cfg = cfg or MindConfig()
         self.rng = rng or _random.Random(0)
         self._sensory: Deque[str] = deque(maxlen=32)
+        # Lockstep with `_sensory`: the REAL embedding behind a
+        # non-text percept (§15 observe_sensory), or None for a plain
+        # text percept (anchor derived from embed_fn as before). This
+        # is what lets RECALL anchor on the actual sensory latent
+        # instead of re-embedding the percept's text marker.
+        self._sensory_vecs: Deque[Optional[List[float]]] = deque(maxlen=32)
         self._last_thought: Optional[str] = None
         self._tick_n: int = 0
         self._wander_idx: int = 0
@@ -457,6 +463,15 @@ class CognitiveRuntime:
         # LOOPING streak: consecutive ticks with novelty below
         # cfg.loop_novelty_threshold.
         self._low_nov_streak: int = 0
+
+    def embed_dim(self) -> int:
+        """Dimensionality of ``embed_fn``'s output. Sensory cortices
+        (§15, :mod:`neuroslm.sensory.cortices`) probe this once to
+        size their projection heads so a percept's ``content_vec``
+        lands in the SAME cosine-similarity space as text thoughts —
+        the one thing that makes cross-modal RECALL (§14.10 fix 1)
+        meaningful."""
+        return len(self._embed(self.cfg.persona or " "))
 
     # ── SENSE ────────────────────────────────────────────────────────
 
@@ -504,7 +519,50 @@ class CognitiveRuntime:
                             context={"kind": "observed", "source": source,
                                     "action_class": action_class})
         self._sensory.append(text)
+        self._sensory_vecs.append(None)
         self.nt.step_full(activation=1.0)
+
+    def observe_sensory(self, modality: str, content_vec: Sequence[float],
+                        source: str = "sensor") -> bool:
+        """Non-text SENSE (§15): a percept that arrives already
+        embedded — a sensory cortex's own latent vector (vision,
+        acoustic, proprioceptive) — never captioned into text. The
+        stored/retrieved representation IS ``content_vec``; the only
+        text involved is a fixed, content-INDEPENDENT modality marker
+        used solely to cue THINK's prompt ("Just now: [visual
+        percept]") — never a description derived from what was
+        actually sensed.
+
+        Gated by the SAME semantic-novelty signal that gates the
+        mind's own thoughts (§14.9) rather than by word count (there
+        are none): a habituated, unchanged stream — the same camera
+        frame every tick — is filtered at the door, the orienting-
+        response habituation (Sokolov 1963) this loop's boredom trace
+        already models. A novel percept both interrupts wandering
+        (queues the marker, anchoring the next RECALL on THIS vector
+        — see ``tick()``'s SENSE section) and is written to episodic
+        memory as an OBSERVED episode, so it out-competes the mind's
+        own inferred prose in retrieval exactly like an observed text
+        percept does (§14.10 fix 1).
+
+        Returns whether the percept was novel enough to be attended to.
+        """
+        vec = list(content_vec)
+        top = self.memory.retrieve_scored(vec, k=1)
+        novelty = 1.0 - top[0][0] if top else 1.0
+        novelty = max(0.0, min(1.0, novelty))
+        if novelty < self.cfg.novelty_write_threshold:
+            return False
+        label = f"[{modality} percept]"
+        self.memory.add(label, content_vec=vec, nt_state=self.nt.levels(),
+                        tags=[source, "percept", "kind=observed",
+                             f"modality={modality}"],
+                        context={"kind": "observed", "source": source,
+                                "modality": modality, "novelty": novelty})
+        self._sensory.append(label)
+        self._sensory_vecs.append(vec)
+        self.nt.step_full(activation=novelty)
+        return True
 
     # ── The cognitive cycle ──────────────────────────────────────────
 
@@ -530,7 +588,9 @@ class CognitiveRuntime:
 
         # SENSE: drain the queue (newest percept anchors the tick).
         sensory = list(self._sensory)
+        sensory_vecs = list(self._sensory_vecs)
         self._sensory.clear()
+        self._sensory_vecs.clear()
         # DMN condition: nothing external arrived this cycle — the
         # tick is pure mind-wandering rather than a response.
         wandering = not bool(sensory)
@@ -577,9 +637,16 @@ class CognitiveRuntime:
                 anchor_vec = list(
                     self.rng.choice(candidates_for_replay)["content_vec"])
         if anchor_vec is None and not suppress_recall:
-            anchor = (sensory[-1] if sensory
-                      else self._last_thought or self.cfg.persona)
-            anchor_vec = list(self._embed(anchor))
+            if sensory and sensory_vecs and sensory_vecs[-1] is not None:
+                # §15: the newest percept arrived pre-embedded (a
+                # sensory cortex's own latent) — anchor on THAT vector
+                # directly, never on a re-embedding of its text
+                # marker, which carries none of the percept's content.
+                anchor_vec = list(sensory_vecs[-1])
+            else:
+                anchor = (sensory[-1] if sensory
+                          else self._last_thought or self.cfg.persona)
+                anchor_vec = list(self._embed(anchor))
 
         # RECALL: hippocampal similarity read with provenance-aware
         # scoring (control fix 1: kind="inferred" episodes carry a
