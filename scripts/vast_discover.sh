@@ -33,6 +33,16 @@ GH_TOKEN="${GH_TOKEN:-${GITHUB:-${GITHUB_PAT:-}}}"
 : "${VAST_API_KEY:?✗ set VAST_API_KEY in .env}"
 : "${GH_TOKEN:?✗ set GH_TOKEN in .env}"
 
+# ── Redaction for anything `vastai create instance` prints ──────────
+# 2026-08-12 security finding: the API can echo the --env launch
+# string back in its JSON response, so every deploy was printing the
+# RAW VAST_API_KEY (and HF_TOKEN) to stdout — only GH_TOKEN was ever
+# redacted. Applied at every site that prints $CREATE_OUT.
+REDACT_SED=(-E "s#${GH_TOKEN}#***#g; s#${VAST_API_KEY}#***#g")
+if [ -n "${HF_TOKEN:-}" ]; then
+    REDACT_SED=(-E "s#${GH_TOKEN}#***#g; s#${VAST_API_KEY}#***#g; s#${HF_TOKEN}#***#g")
+fi
+
 VAST_LABEL="${VAST_LABEL:-neuroslm-discover}"
 VAST_IMAGE="pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime"
 VAST_DISK="${VAST_DISK:-30}"
@@ -135,7 +145,7 @@ PYTHONUNBUFFERED=1 timeout 120 "$PYTHON" -u -c \
     --label "$VAST_LABEL" \
     --env "-e GH_TOKEN=$GH_TOKEN -e HF_TOKEN=${HF_TOKEN:-} -e VAST_API_KEY=$VAST_API_KEY" \
     --onstart-cmd "$ONSTART" 2>&1 \
-    | sed -E "s#${GH_TOKEN}#***#g" \
+    | sed "${REDACT_SED[@]}" \
     | tee "$_CREATE_TMP"
 _CREATE_RC=${PIPESTATUS[0]}
 CREATE_OUT="$(cat "$_CREATE_TMP")"
@@ -163,11 +173,11 @@ if m:
 
 if [ -z "$INST_ID" ]; then
   echo "✗ instance create FAILED (no contract returned):" >&2
-  printf '%s\n' "$CREATE_OUT" | sed -E "s#${GH_TOKEN}#***#g" | head -10 >&2
+  printf '%s\n' "$CREATE_OUT" | sed "${REDACT_SED[@]}" | head -10 >&2
   exit 1
 fi
 
-printf '%s\n' "$CREATE_OUT" | sed -E "s#${GH_TOKEN}#***#g" | grep -E "success|new_contract" | head -2
+printf '%s\n' "$CREATE_OUT" | sed "${REDACT_SED[@]}" | grep -E "success|new_contract" | head -2
 
 cat <<DONE
 
