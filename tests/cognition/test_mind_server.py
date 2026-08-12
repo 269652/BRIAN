@@ -262,8 +262,9 @@ class TestBackgroundTickPolling:
         import threading
         from neuroslm.cognition.server import MindServer, _poll_new_ticks
 
+        long_thought = "a wandering idea about " + ("x" * 200)
         daemon, _ = _mk_daemon_with_mind([_tick_result(
-            thought="a wandering idea", candidates=["a wandering idea"],
+            thought=long_thought, candidates=[long_thought],
             tick_n=1)])
         s = MindServer(daemon, host="127.0.0.1", port=0)
         port = s.start()
@@ -274,7 +275,9 @@ class TestBackgroundTickPolling:
                             threading.Event(), poll_interval=0.01,
                             max_polls=1)
             text = out.getvalue()
-            assert "a wandering idea" in text
+            assert long_thought in text, (
+                "the winning thought must render in full to a "
+                "connected client, not truncated")
             assert "BG deliberation" in text, (
                 "the debug trace must reach the client too, not just "
                 "the compact summary")

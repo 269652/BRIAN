@@ -3292,3 +3292,47 @@ deliberation — every candidate + its trunk NLL, which one was
 compact `format_introspection` summary, so `brian logs <box>` shows
 not just what the mind is thinking but the full menu it chose from and
 why.
+
+### 14.6 Basal-ganglia action taxonomy + IIT-flavored metrics (2026-08-12)
+
+Every tick resolves to exactly one `TickResult.action`:
+
+| action | condition | dashboard | log_stream |
+|---|---|---|---|
+| `respond` | sensory present (external input) | always posted | always full trace |
+| `speak` | idle, thought passed the novelty gate (`stored`) | posted | always full trace |
+| `think` | idle, thought converged/repetitive (novelty gate rejected) | **not posted** | always full trace |
+
+No new gate was invented: `action` reuses the existing `wandering` and
+`stored` (hippocampal novelty-gate) signals. `think`-action ticks
+still fully happen and are fully logged (`format_debug_trace` shows
+everything regardless of action) — only the user-facing "thoughts"
+pane / poller-visible stream filters them out, so silent internal
+processing doesn't pollute what looks like the mind speaking.
+
+`_compose_prompt` cues THINK differently by action: idle ticks end on
+`"Thought:"` (after a rotating wander prompt); sensory-driven ticks
+end on `"My reply:"` — this is also what makes `respond` a genuine
+basal-ganglia act rather than a bypass: `ChatDaemon.respond()` now
+routes through `mind.tick()` when a mind is attached (legacy direct-
+`_gen()` path preserved when no mind is attached). Spontaneous
+re-entry into wandering after handling external input requires no
+special-case code — `_sensory` drains after the tick that consumes
+it, so the very next tick reverts to `wandering=True` automatically.
+
+**IIT-flavored telemetry** (explicitly proxies, not a rigorous Φ — the
+cognition layer has no activation-partition access to compute real
+integrated information): `selection_entropy` — normalised entropy of
+the basal ganglia's softmax(-NLL/T) choice distribution (low =
+confident exclusion of alternatives, high = arbitrary among near-equal
+options); `differentiation` — population stdev (nats) of the candidate
+repertoire's NLLs (how distinguishable THINK's options were). Both
+shown in `format_debug_trace`'s `BG deliberation (H=... diff=...)`
+line and `format_introspection`'s `BG[... H=...]`.
+
+**Full-text rendering**: `thought_n_tok` raised 32→96 (live thoughts
+were running out of token budget mid-sentence — read as a display bug,
+was actually the generation being cut short). `format_debug_trace`
+never truncates the `SELECTED` candidate — only the rejected
+alternatives in the menu are shortened. The connect-client poller
+prints the winning thought in full.

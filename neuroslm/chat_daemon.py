@@ -355,13 +355,56 @@ class ChatDaemon:
 
     def respond(self, user_text: str) -> str:
         """Run the user-turn generate. Posts user + reply + returns
-        the reply string."""
+        the reply string.
+
+        With a mind attached, this routes through ``mind.tick()`` —
+        a real 'respond' basal-ganglia action (recall + NT-gated
+        candidate selection over the user's message), not a bypass
+        of the cognitive cycle. ``post_user`` already queued the
+        text as sensory input, so the tick that follows sees it and
+        classifies as 'respond' (external input always surfaces).
+        """
         self.post_user(user_text)
+        if self._mind is not None:
+            with self._inference_lock:
+                result = self._mind.tick()
+            self._log_tick(result)
+            reply = result.thought or "…"
+            self.post_reply(reply)
+            return reply
         prompt = self._build_chat_prompt()
         with self._inference_lock:
             reply = self._gen(prompt, self.cfg.max_new_tokens)
         self.post_reply(reply)
         return reply
+
+    def _log_tick(self, result: Any) -> None:
+        """Shared by :meth:`respond` and :meth:`think_once`: record
+        the tick's telemetry (introspect memory entry + optional
+        log_stream) and surface the thought to the dashboard ONLY
+        when the basal ganglia actually chose to voice it — a
+        'think' action stays internal (fully logged, never posted as
+        a spoken thought); 'speak'/'respond' both surface."""
+        from neuroslm.cognition.runtime import (
+            format_debug_trace, format_introspection,
+        )
+        self.last_tick = result
+        intro = format_introspection(result)
+        self.post_introspect(intro)
+        if result.thought and result.action != "think":
+            self.post_thought(result.thought)
+        if self._log_stream is not None:
+            ts = time.strftime("%H:%M:%S")
+            self._log_stream.write(f"[{ts}] {intro}\n")
+            if result.thought:
+                self._log_stream.write(
+                    f"[{ts}] \U0001f4ad {result.thought}\n")
+            # Full basal-ganglia deliberation trace — every candidate
+            # + score + which one won, plus lineage — ALWAYS logged
+            # here regardless of action, so debugging sees everything
+            # the dashboard deliberately keeps internal.
+            self._log_stream.write(format_debug_trace(result) + "\n")
+            self._log_stream.flush()
 
     def think_once(self) -> Optional[str]:
         """Run one idle-thought tick. Returns the thought text, or
@@ -379,24 +422,8 @@ class ChatDaemon:
                 # §14 cognitive cycle: recall → think → NT-gate → store.
                 # An inhibited tick (high GABA) legitimately returns no
                 # thought — silence is a decision, not an error.
-                from neuroslm.cognition.runtime import format_introspection
                 result = self._mind.tick()
-                self.last_tick = result
-                intro = format_introspection(result)
-                self.post_introspect(intro)
-                if result.thought:
-                    self.post_thought(result.thought)
-                if self._log_stream is not None:
-                    from neuroslm.cognition.runtime import format_debug_trace
-                    ts = time.strftime("%H:%M:%S")
-                    self._log_stream.write(f"[{ts}] {intro}\n")
-                    if result.thought:
-                        self._log_stream.write(
-                            f"[{ts}] \U0001f4ad {result.thought}\n")
-                    # Full basal-ganglia deliberation trace — every
-                    # candidate + score + which one won, plus lineage.
-                    self._log_stream.write(format_debug_trace(result) + "\n")
-                    self._log_stream.flush()
+                self._log_tick(result)
                 return result.thought
             seed = self._next_thought_seed()
             recent = self.memory.recent(8)

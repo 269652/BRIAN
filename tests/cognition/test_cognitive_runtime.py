@@ -298,6 +298,15 @@ class TestRealNTIntegration:
 # by the hippocampus" — one formatted line per tick summarising the
 # whole cognitive cycle's decision, not just its text output.
 
+class TestThoughtTokenBudget:
+    def test_default_budget_is_generous_enough_to_avoid_mid_sentence_cutoff(self):
+        """Live report: thoughts consistently ran out of budget
+        mid-sentence ('...complement human'). 32 tokens is too tight
+        for a verbose instruct model; raised to 96."""
+        from neuroslm.cognition.runtime import MindConfig
+        assert MindConfig().thought_n_tok >= 96
+
+
 class TestMindWandering:
     """DMN condition: no sensory input this tick → THINK is biased
     toward associative, reflective continuation instead of a flat
@@ -363,6 +372,102 @@ class TestTickLineageAndWandering:
         assert rt.tick().wandering is False
 
 
+class TestActionTaxonomy:
+    """The basal ganglia produces exactly one of three actions per
+    tick: 'respond' (external input present — always surfaces),
+    'speak' (idle tick, but the thought was novel enough to pass the
+    hippocampal surprise gate — voiced spontaneously), or 'think'
+    (idle tick, thought converged/repetitive — stays internal). No
+    new NT machinery: reuses the existing wandering + novelty-gate
+    (stored) signals honestly rather than inventing a parallel gate."""
+
+    def test_sensory_present_is_always_respond(self):
+        rt = _mk_runtime(_ScriptedGen(["a reply"]))
+        rt.observe("hello there")
+        r = rt.tick()
+        assert r.action == "respond"
+
+    def test_idle_novel_thought_is_speak(self):
+        from neuroslm.cognition.runtime import MindConfig
+        # surprise_write_z tiny -> the bootstrap-seeded first thought
+        # (and most subsequent ones) count as novel -> stored=True.
+        cfg = MindConfig(n_candidates=1, surprise_write_z=0.01)
+        rt = _mk_runtime(_ScriptedGen(["a fresh idea"]), cfg=cfg)
+        r = rt.tick()
+        assert r.wandering is True
+        assert r.stored is True
+        assert r.action == "speak"
+
+    def test_idle_repetitive_thought_is_think(self):
+        from neuroslm.cognition.runtime import MindConfig
+        cfg = MindConfig(n_candidates=1, surprise_write_z=0.35)
+        gen = _ScriptedGen(["same idea"])
+        rt = _mk_runtime(gen, scores=_score_map({"same idea": 3.0}), cfg=cfg)
+        rt.tick()  # bootstrap: first is always novel/stored
+        r2 = rt.tick()  # identical NLL -> converged -> not stored
+        assert r2.stored is False
+        assert r2.action == "think"
+
+    def test_inhibited_tick_reports_pending_respond_if_sensory_queued(self):
+        rt = _mk_runtime(_ScriptedGen(["t"]), nt=_FakeNT(GABA=0.9))
+        rt.observe("urgent thing")
+        r = rt.tick()
+        assert r.inhibited is True
+        assert r.action == "respond", (
+            "inhibition suppressed the act, but the debug trace should "
+            "still show WHAT was suppressed — a pending response, not "
+            "generic silence")
+
+    def test_dmn_resumes_wandering_after_handling_external_input(self):
+        """'if the DMN loop is interrupted by an action... it should
+        spontaneously enter mind wandering again' — sensory drains
+        after one tick consumes it, so the very next tick reverts to
+        wandering with no special-case code required."""
+        rt = _mk_runtime(_ScriptedGen(["reply", "wander again"]))
+        rt.observe("a question")
+        r1 = rt.tick()
+        assert r1.wandering is False and r1.action == "respond"
+        r2 = rt.tick()
+        assert r2.wandering is True and r2.action in ("speak", "think")
+
+
+class TestIITFlavoredMetrics:
+    """'add more IIT metrics' — honest proxies computed from what the
+    cognition layer actually has (candidate NLLs + the selection
+    softmax), explicitly NOT a rigorous Φ: selection_entropy (how
+    decisive the basal-ganglia pick was — low = confident exclusion
+    of alternatives) and differentiation (how distinguishable the
+    candidate repertoire was — the spread of trunk NLL across
+    options)."""
+
+    def test_selection_entropy_in_unit_range(self):
+        rt = _mk_runtime(_ScriptedGen(["a", "b", "c"]))
+        r = rt.tick()
+        assert 0.0 <= r.selection_entropy <= 1.0
+
+    def test_single_candidate_has_zero_selection_entropy(self):
+        from neuroslm.cognition.runtime import MindConfig
+        cfg = MindConfig(n_candidates=1)
+        rt = _mk_runtime(_ScriptedGen(["only option"]), cfg=cfg)
+        r = rt.tick()
+        assert r.selection_entropy == pytest.approx(0.0)
+
+    def test_differentiation_reflects_nll_spread(self):
+        from neuroslm.cognition.runtime import MindConfig
+        cfg = MindConfig(n_candidates=2)
+        gen = _ScriptedGen(["close one", "close two"])
+        rt_close = _mk_runtime(
+            gen, scores=_score_map({"close one": 3.0, "close two": 3.05}),
+            cfg=cfg)
+        r_close = rt_close.tick()
+        gen2 = _ScriptedGen(["spread one", "spread two"])
+        rt_spread = _mk_runtime(
+            gen2, scores=_score_map({"spread one": 1.0, "spread two": 8.0}),
+            cfg=cfg)
+        r_spread = rt_spread.tick()
+        assert r_spread.differentiation > r_close.differentiation
+
+
 class TestFormatDebugTrace:
     """'debug log the actions generated by basal ganglia' — the full
     deliberation (every candidate + its score, which one won), not
@@ -372,13 +477,44 @@ class TestFormatDebugTrace:
         from neuroslm.cognition.runtime import TickResult, ThoughtScore
         return TickResult(
             thought="good one", tick_n=3, prior_thought="previous idea",
-            wandering=True,
+            wandering=True, action="speak",
             candidates=["good one", "meh idea"],
             scores=[ThoughtScore(mean_nll=2.1, entropy_norm=0.4),
                     ThoughtScore(mean_nll=3.5, entropy_norm=0.6)],
             recalled=[{"content": "episode A"}, {"content": "episode B"}],
             stored=True, inhibited=False,
-            nt_levels={"DA": 0.15, "GABA": 0.15}, phi_proxy=0.4)
+            nt_levels={"DA": 0.15, "NE": 0.20, "5HT": 0.50, "ACh": 0.30,
+                      "eCB": 0.10, "Glu": 0.45, "GABA": 0.15},
+            phi_proxy=0.4, selection_entropy=0.62, differentiation=0.99)
+
+    def test_action_shown(self):
+        from neuroslm.cognition.runtime import format_debug_trace
+        s = format_debug_trace(self._normal_result())
+        assert "action=speak" in s
+
+    def test_nt_levels_shown(self):
+        from neuroslm.cognition.runtime import format_debug_trace
+        s = format_debug_trace(self._normal_result())
+        assert "GABA=0.15" in s
+
+    def test_iit_metrics_shown(self):
+        from neuroslm.cognition.runtime import format_debug_trace
+        s = format_debug_trace(self._normal_result())
+        assert "H=0.62" in s or "0.62" in s
+        assert "0.99" in s
+
+    def test_selected_thought_is_never_truncated(self):
+        from neuroslm.cognition.runtime import format_debug_trace, TickResult, ThoughtScore
+        long_thought = "x" * 250
+        r = TickResult(
+            thought=long_thought, tick_n=1, wandering=True, action="speak",
+            candidates=[long_thought],
+            scores=[ThoughtScore(mean_nll=2.0, entropy_norm=0.3)],
+            nt_levels={"GABA": 0.1})
+        s = format_debug_trace(r)
+        assert long_thought in s, (
+            "the WINNING thought must render in full — only the "
+            "rejected alternatives in the menu get truncated")
 
     def test_every_candidate_shown_with_score_and_selection_marked(self):
         from neuroslm.cognition.runtime import format_debug_trace
@@ -539,6 +675,29 @@ class TestChatDaemonHostsTheMind:
             "the winning thought's text")
         assert "tick 1" in out
 
+    def test_think_action_tick_is_not_posted_to_the_thoughts_pane(self):
+        """A 'think' action (idle, repetitive/converged — the novelty
+        gate rejected it) stays internal: it must NOT appear as a
+        first-class 'thought' in the dashboard/memory, even though it
+        still fully happened and is fully logged."""
+        from neuroslm.cognition.runtime import MindConfig
+        cfg = MindConfig(n_candidates=1, surprise_write_z=0.9)
+        gen = _ScriptedGen(["repetitive idea"])
+        rt = _mk_runtime(
+            gen, scores=_score_map({"repetitive idea": 3.0}), cfg=cfg)
+        d = self._daemon(rt)
+        d.think_once()   # bootstrap tick: always novel -> speak
+        before = len(d.memory.recent(20, kinds=("thought",)))
+        d.think_once()  # identical NLL -> converged -> think
+        assert d.last_tick.action == "think"
+        after = len(d.memory.recent(20, kinds=("thought",)))
+        assert after == before, (
+            "an internal 'think' action must not be posted as a "
+            "user-visible thought")
+        # but it's still in the debug channel:
+        introspects = d.memory.recent(20, kinds=("introspect",))
+        assert introspects, "internal thinking must still be logged"
+
     def test_no_log_stream_is_a_silent_no_op(self):
         gen = _ScriptedGen(["mind thought"])
         rt = _mk_runtime(gen)
@@ -550,6 +709,42 @@ class TestChatDaemonHostsTheMind:
         d = ChatDaemon(_ScriptedGen(["legacy"]),
                        ChatDaemonConfig(), use_color=False)
         assert d.think_once() == "legacy"
+
+    def test_respond_routes_through_the_mind_when_attached(self):
+        """'respond action in case of external input' — a real basal-
+        ganglia act, not telemetry synthesised around a bypassed
+        generation path. respond() with a mind attached must actually
+        run mind.tick(), not the legacy direct-_gen seam."""
+        gen = _ScriptedGen(["a considered reply"])
+        rt = _mk_runtime(gen)
+        d = self._daemon(rt)
+        reply = d.respond("what is the plan?")
+        assert reply == "a considered reply"
+        assert d.last_tick is not None
+        assert d.last_tick.action == "respond"
+        assert d.last_tick.wandering is False
+        kinds = [e.kind for e in d.memory.recent(8)]
+        assert "reply" in kinds and "introspect" in kinds
+
+    def test_respond_without_mind_keeps_legacy_path(self):
+        from neuroslm.chat_daemon import ChatDaemon, ChatDaemonConfig
+        d = ChatDaemon(_ScriptedGen(["legacy reply"]),
+                       ChatDaemonConfig(), use_color=False)
+        assert d.respond("hi") == "legacy reply"
+
+    def test_dmn_resumes_wandering_after_a_respond_call(self):
+        """The spontaneous-re-entry claim, exercised end to end
+        through the daemon: after respond() consumes the sensory
+        queue, the NEXT background think_once() tick must be idle
+        wandering again — no special-case 'resume' code needed, it's
+        emergent from the queue draining."""
+        gen = _ScriptedGen(["a reply", "a wandering thought"])
+        rt = _mk_runtime(gen)
+        d = self._daemon(rt)
+        d.respond("a question")
+        assert d.last_tick.wandering is False
+        d.think_once()
+        assert d.last_tick.wandering is True
 
 
 class TestCliWiring:

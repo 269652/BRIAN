@@ -3734,3 +3734,54 @@ while the user sits at the prompt. `write_lock` prevents interleaving
 with the main loop's own output.
 
 [EVIDENCE: tests/cognition/test_mind_server.py::TestBackgroundTickPolling (4); TestServerTelemetry::test_think_response_includes_full_debug_trace_and_tick_n]
+
+### Basal-ganglia action taxonomy, IIT-flavored metrics, full-text thoughts, unified respond() (2026-08-12)
+
+Live feedback batch: "add more IIT metrics... thoughts appear cut
+off, render the whole thought... log NT levels and hippocampus
+summary... log basal ganglia action — think/speak/respond... DMN
+should spontaneously resume after being interrupted by an action."
+
+- **`TickResult.action`** ∈ {respond, speak, think} — external input
+  present → `respond` (always surfaces); idle + novelty-gate passed
+  (`stored`) → `speak`; idle + converged/repetitive → `think` (stays
+  internal). Reuses `wandering`/`stored`, no new gate invented.
+  `ChatDaemon.post_thought` now gated to `action != "think"` — silent
+  internal processing no longer appears as a spoken thought in the
+  dashboard/poller, though `format_debug_trace` still logs it in full
+  regardless (debug channel stays maximally transparent).
+- **Spontaneous re-entry is emergent, not new code**: verified by
+  test — `_sensory` drains after the tick that consumes it, so the
+  very next tick reverts to `wandering=True` automatically. This only
+  became a REAL, observable behavior once `respond()` was unified to
+  route through `mind.tick()` (previously it bypassed the cognitive
+  cycle entirely via a separate direct-`_gen()` seam — no tick, no
+  action, no telemetry for user replies at all).
+- **IIT-flavored metrics** (explicit proxies, not rigorous Φ):
+  `selection_entropy` (softmax choice-distribution entropy —
+  basal-ganglia decisiveness) and `differentiation` (candidate-NLL
+  population stdev — repertoire richness). Both computed from
+  existing candidate/score data, no new machinery.
+- **Full-text fix**: root cause of "thoughts cut off" was
+  `thought_n_tok=32` — too tight for a verbose instruct model, NOT a
+  truncation bug. Raised to 96. Separately, `format_debug_trace` was
+  truncating the `SELECTED` candidate at 90 chars like the rejected
+  menu items — fixed to render the winner in full.
+
+RED-confirmed (20 contracts before implementation; one test-authoring
+bug found in the process — `think_once()` returns the thought STRING
+not the TickResult, a test mistakenly asserted `.action` on it).
+GREEN: test_cognitive_runtime.py 70 (was 53), test_mind_server.py 30
+and test_chat_daemon.py 34 unregressed.
+
+**Same-day security finding (unrelated, surfaced while reviewing this
+batch's logs):** `vastai create instance` echoes its launch `--env`
+string back in the JSON response; both deploy scripts only ever
+redacted `GH_TOKEN` from printed output, so `VAST_API_KEY` and
+`HF_TOKEN` were printed in plain text on every deploy this session.
+Fixed in `scripts/vast_train.sh` + `scripts/vast_discover.sh`
+(`vast_mind.py` reuses the latter) — all three secrets now redacted
+at every print site. Rotation of `VAST_API_KEY`/`HF_TOKEN` recommended
+as a precaution.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestActionTaxonomy, TestIITFlavoredMetrics, TestThoughtTokenBudget]
