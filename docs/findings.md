@@ -3785,3 +3785,45 @@ at every print site. Rotation of `VAST_API_KEY`/`HF_TOKEN` recommended
 as a precaution.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestActionTaxonomy, TestIITFlavoredMetrics, TestThoughtTokenBudget]
+
+### Episodic representation — phases 1+2 of a proposed 5-phase memory redesign (2026-08-12)
+
+User proposal (in response to the memory-echo-loop critique above):
+separate the *event* from the *thought* — store an episode's context,
+internal state, trigger, and associations, not just the generated
+text; distinguish observed (real) from inferred (self-generated)
+memories; defer graph relationships / diverse retrieval operations /
+consolidation-to-semantic-memory as later phases; "the synthetic
+seeds ... become useful as initial experiences ... rather than
+pretending the model experienced hundreds of conversations."
+
+**Implementation choice**: `EpisodicMemory` already had `tags` and
+`context` dict slots in its schema, never populated by the cognition
+runtime — reused instead of adding a parallel `Episode` dataclass, so
+all 8 existing callers of `EpisodicMemory.add()` (`brain.py`
+included) stay untouched. `observe()` now tags percepts
+`context.kind="observed"`; `tick()`'s STORE step tags thoughts
+`context.kind="inferred"` with `trigger` (the real user text or the
+specific wander prompt used — captured before `_compose_prompt` runs,
+not hidden inside it), `action`, `wandering`, `tick_n`,
+`associations` (recalled episodes' content), and the REAL internal-
+state signals (`confidence`, `phi_proxy`, `selection_entropy`,
+`differentiation`) — explicitly no fabricated qualitative labels
+("mood=curious" was considered and rejected; nothing in the current
+architecture can honestly infer that). `format_debug_trace`'s `HC
+recalled` lines now show `[observed]`/`[inferred]` per item.
+
+**Scope discipline**: retrieval is UNCHANGED (still cosine-similarity
+top-k over all episodes regardless of kind) — phases 3 (graph
+relationships / situation-based retrieval operations) and 4-5
+(consolidation into semantic memory, synthetic bootstrap) are real
+follow-up work, not built here. This phase is the data model those
+phases would need.
+
+GREEN: 76/76 tests/cognition/test_cognitive_runtime.py (was 70; 6
+RED-confirmed before implementation), test_mind_server.py 30 and
+test_chat_daemon.py 34 unregressed, test_brian_harness.py 13
+unregressed (the `brain.py`-side `EpisodicMemory` consumer this
+change had to stay compatible with).
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestEpisodicRepresentation]

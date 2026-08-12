@@ -549,6 +549,82 @@ class TestFormatDebugTrace:
         assert "SELECTED" not in s
 
 
+class TestEpisodicRepresentation:
+    """'Don't make HC remember what BRIAN said. Make HC remember what
+    happened to BRIAN, what state BRIAN was in, what BRIAN noticed,
+    what BRIAN thought, and what resulted from it.'
+
+    Phases 1+2 of the proposed roadmap (episodic representation +
+    context/state metadata) — reusing EpisodicMemory's EXISTING
+    tags/context slots (present in the schema, never populated by the
+    cognition runtime) rather than inventing a parallel Episode type.
+    Phases 3-5 (graph relationships, situation/trigger-based
+    retrieval operations, consolidation into semantic memory) are
+    NOT built here — this is the data model those would need, not
+    those mechanisms themselves.
+    """
+
+    def test_observed_percept_is_tagged_and_contextualised(self):
+        rt = _mk_runtime(_ScriptedGen(["t"]))
+        rt.observe("the launch code is BLUE-7", source="user")
+        ep = rt.memory.all()[-1]
+        assert "kind=observed" in ep["tags"]
+        assert ep["context"]["kind"] == "observed"
+        assert ep["context"]["source"] == "user"
+
+    def test_inferred_thought_carries_full_context_layer(self):
+        from neuroslm.cognition.runtime import MindConfig
+        cfg = MindConfig(n_candidates=1, surprise_write_z=0.01)
+        rt = _mk_runtime(_ScriptedGen(["a fresh idea"]), cfg=cfg)
+        rt.tick()
+        ep = [e for e in rt.memory.all() if e["content"] == "a fresh idea"][0]
+        ctx = ep["context"]
+        assert ctx["kind"] == "inferred"
+        assert ctx["action"] in ("speak", "think", "respond")
+        assert ctx["wandering"] is True
+        assert "trigger" in ctx and ctx["trigger"]
+        assert "confidence" in ctx and 0.0 <= ctx["confidence"] <= 1.0
+        assert "phi_proxy" in ctx
+        assert "selection_entropy" in ctx
+        assert "differentiation" in ctx
+
+    def test_associations_record_which_episodes_shaped_this_thought(self):
+        from neuroslm.cognition.runtime import MindConfig
+        cfg = MindConfig(n_candidates=1, surprise_write_z=0.01,
+                         recall_k=2)
+        rt = _mk_runtime(_ScriptedGen(["first", "second"]), cfg=cfg)
+        rt.tick()
+        rt.tick()
+        ep = rt.memory.all()[-1]
+        assert isinstance(ep["context"]["associations"], list)
+
+    def test_respond_trigger_is_the_actual_user_text(self):
+        rt = _mk_runtime(_ScriptedGen(["a reply"]))
+        rt.observe("what is the plan?")
+        rt.tick()
+        ep = [e for e in rt.memory.all() if e["content"] == "a reply"][0]
+        assert ep["context"]["trigger"] == "what is the plan?"
+
+    def test_wandering_trigger_is_the_wander_prompt_used(self):
+        rt = _mk_runtime(_ScriptedGen(["a wander"]))
+        r = rt.tick()
+        ep = [e for e in rt.memory.all() if e["content"] == "a wander"][0]
+        assert ep["context"]["trigger"] in rt.cfg.wander_prompts
+
+    def test_recalled_episodes_labelled_observed_vs_inferred_in_debug_trace(self):
+        from neuroslm.cognition.runtime import format_debug_trace, TickResult, ThoughtScore
+        r = TickResult(
+            thought="x", tick_n=1, wandering=True, action="speak",
+            candidates=["x"], scores=[ThoughtScore(mean_nll=2.0, entropy_norm=0.3)],
+            recalled=[
+                {"content": "a fact I was told", "context": {"kind": "observed"}},
+                {"content": "a thought I had", "context": {"kind": "inferred"}},
+            ],
+            nt_levels={"GABA": 0.1})
+        s = format_debug_trace(r)
+        assert "[observed]" in s and "[inferred]" in s
+
+
 class TestFormatIntrospection:
     def _result(self, **kw):
         from neuroslm.cognition.runtime import TickResult

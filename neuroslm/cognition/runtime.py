@@ -237,7 +237,9 @@ def format_debug_trace(result: TickResult) -> str:
     if result.recalled:
         lines.append(f"  HC recalled {len(result.recalled)}:")
         for e in result.recalled:
-            lines.append(f"    - {_truncate(e.get('content', ''))}")
+            kind = (e.get("context") or {}).get("kind")
+            label = f"[{kind}] " if kind else ""
+            lines.append(f"    - {label}{_truncate(e.get('content', ''))}")
 
     if result.prior_thought:
         lines.append(f"  evolved from: \"{_truncate(result.prior_thought)}\"")
@@ -319,14 +321,23 @@ class CognitiveRuntime:
         """Sensory input. Percepts are always stored (external events
         are salient by default — the novelty gate applies to the
         mind's own thoughts, not to the world) and drive the NT
-        activation channel."""
+        activation channel.
+
+        Stored as an OBSERVED episode (``context.kind == "observed"``)
+        — reality that actually happened, as opposed to something the
+        mind inferred/generated. This distinction is what lets
+        ``format_debug_trace`` (and any future retrieval logic) tell
+        real input apart from the mind's own prior thoughts instead
+        of treating both as equivalent text.
+        """
         text = (text or "").strip()
         if not text:
             return
         self.memory.add(text,
                         content_vec=list(self._embed(text)),
                         nt_state=self.nt.levels(),
-                        tags=[source, "percept"])
+                        tags=[source, "percept", "kind=observed"],
+                        context={"kind": "observed", "source": source})
         self._sensory.append(text)
         self.nt.step_full(activation=1.0)
 
@@ -365,8 +376,14 @@ class CognitiveRuntime:
         recalled = self.memory.retrieve(
             list(self._embed(anchor)), k=self.cfg.recall_k)
 
-        # THINK: K candidates from persona + recall + context.
-        prompt = self._compose_prompt(sensory, recalled)
+        # THINK: K candidates from persona + recall + context. The
+        # trigger — what this tick is actually ABOUT — is the real
+        # user text for a respond, or the specific wander prompt
+        # chosen for an idle tick; captured here (not hidden inside
+        # _compose_prompt) so the episode we may store below can
+        # record it (Layer 2 — Context: "what happened around it").
+        trigger_text = sensory[-1] if sensory else self._next_wander_prompt()
+        prompt = self._compose_prompt(sensory, recalled, trigger_text)
         candidates: List[str] = []
         for _ in range(max(1, self.cfg.n_candidates)):
             out = (self._gen(prompt, self.cfg.thought_n_tok) or "").strip()
@@ -386,21 +403,41 @@ class CognitiveRuntime:
         thought, sc = candidates[idx], scores[idx]
         differentiation = _population_stdev([s.mean_nll for s in scores])
 
-        # STORE: surprise-gated episodic write.
-        stored = self._novelty_gate(sc.mean_nll)
-        if stored:
-            self.memory.add(thought,
-                            content_vec=list(self._embed(thought)),
-                            nt_state=levels,
-                            tags=["thought"])
-
         # ACTION: the basal ganglia's actual act this tick — exactly
         # one of respond/speak/think. External input always surfaces
         # (respond); otherwise the SAME novelty gate that decided
         # whether to remember the thought also decides whether to
         # voice it (speak) or keep it internal (think) — one signal,
         # two consequences, not a second invented gate.
+        stored = self._novelty_gate(sc.mean_nll)
         action = "respond" if not wandering else ("speak" if stored else "think")
+
+        # STORE: surprise-gated episodic write — as a full episode,
+        # not bare text. Layer 1 (event) is `thought` itself; the
+        # rest lives in `context`, reusing EpisodicMemory's existing
+        # (previously-unused) slot rather than inventing a parallel
+        # structure. `associations` names which prior episodes fed
+        # RECALL — real IIT-flavored state (confidence/phi/selection
+        # entropy/differentiation), never a fabricated mood label.
+        if stored:
+            self.memory.add(
+                thought,
+                content_vec=list(self._embed(thought)),
+                nt_state=levels,
+                tags=["thought", f"action={action}",
+                     "wandering" if wandering else "responding"],
+                context={
+                    "kind": "inferred",
+                    "action": action,
+                    "wandering": wandering,
+                    "trigger": trigger_text,
+                    "tick_n": tick_n,
+                    "associations": [e.get("content", "") for e in recalled],
+                    "confidence": max(0.0, min(1.0, 1.0 - sc.entropy_norm)),
+                    "phi_proxy": max(0.0, min(1.0, sc.entropy_norm)),
+                    "selection_entropy": selection_entropy,
+                    "differentiation": differentiation,
+                })
 
         # DRIVE: the tick's signals advance the NT dynamics. The
         # selected thought's NLL is the loss/surprise driver (an
@@ -423,7 +460,7 @@ class CognitiveRuntime:
     # ── Internals ────────────────────────────────────────────────────
 
     def _compose_prompt(self, sensory: List[str],
-                        recalled: List[dict]) -> str:
+                        recalled: List[dict], trigger_text: str) -> str:
         lines: List[str] = [self.cfg.persona, ""]
         if recalled:
             lines.append("I remember:")
@@ -442,8 +479,10 @@ class CognitiveRuntime:
         else:
             # DMN: nothing external arrived — bias THINK toward
             # associative, reflective continuation instead of a flat
-            # completion of nothing.
-            lines.append(self._next_wander_prompt())
+            # completion of nothing. `trigger_text` is the wander
+            # prompt already chosen by the caller (tick()), so it can
+            # be recorded as this episode's Layer-2 trigger too.
+            lines.append(trigger_text)
             lines.append("Thought:")
         return "\n".join(lines)[-self.cfg.max_prompt_chars:]
 

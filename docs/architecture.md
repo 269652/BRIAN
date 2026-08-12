@@ -3336,3 +3336,44 @@ was actually the generation being cut short). `format_debug_trace`
 never truncates the `SELECTED` candidate — only the rejected
 alternatives in the menu are shortened. The connect-client poller
 prints the winning thought in full.
+
+### 14.7 Episodic representation — event, context, state, associations (2026-08-12)
+
+Phases 1+2 of a proposed 5-phase memory redesign ("don't make HC
+remember what BRIAN said — make HC remember what happened to BRIAN,
+what state BRIAN was in, what BRIAN noticed, what BRIAN thought, and
+what resulted from it"). Implemented by REUSING `EpisodicMemory`'s
+existing (previously unpopulated) `tags`/`context` slots rather than
+inventing a parallel `Episode` type:
+
+- **Layer 1 (event)**: `content` — unchanged, the thought/percept text.
+- **`context.kind`**: `"observed"` (`observe()` — real external input)
+  vs `"inferred"` (`tick()`'s own THINK output) — the exact
+  already-existing distinction in the codebase, now made explicit and
+  queryable instead of implicit in which code path wrote the episode.
+- **Layer 2 (context)**: `context.trigger` — the actual user text for
+  a `respond`, or the specific wander prompt chosen for an idle tick
+  (captured in `tick()` before `_compose_prompt` runs, not hidden
+  inside it); `context.action` / `context.wandering` / `context.tick_n`.
+- **Layer 3 (internal state)**: `nt_state` (already existed) plus
+  `context.confidence` / `phi_proxy` / `selection_entropy` /
+  `differentiation` — all REAL computed signals already produced by
+  the tick, never a fabricated qualitative label ("mood=curious" was
+  explicitly rejected — nothing in the current architecture can
+  honestly infer that).
+- **Layer 5 (associations)**: `context.associations` — the content of
+  every episode RECALL pulled in to shape this tick's THINK step.
+- **Debug visibility**: `format_debug_trace`'s `HC recalled` lines now
+  show `[observed]`/`[inferred]` per recalled episode, so the "is HC
+  just echoing its own prior output" question is directly answerable
+  from the log instead of inferred from tone.
+
+**Explicitly NOT built here** (phases 3-5 of the proposal, each a
+real follow-up in its own right): graph relationships between
+episodes (`caused_by`/`resembles`/`contradicts`); retrieval operations
+beyond cosine similarity (situation-similarity, trigger-similarity,
+unresolved-hypothesis queries); a consolidation pipeline distilling
+raw episodes into semantic memory. This phase is the data model those
+would need, not those mechanisms themselves — retrieval today is
+unchanged (still `EpisodicMemory.retrieve`'s cosine-similarity top-k
+over ALL episodes regardless of `kind`).
