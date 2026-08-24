@@ -120,6 +120,13 @@ class MindConfig:
     reduce every subsystem vector to before comparing them — see
     neuroslm.cognition.consciousness.bucket_reduce."""
 
+    enable_narrative: bool = False
+    """Gates NarrativeSystem construction (§14.12,
+    neuroslm.memory.narrative) — an nn.Module, same torch-free-core
+    rationale as enable_consciousness_metrics. Off by default for bare
+    ``CognitiveRuntime()`` construction; the production builders turn
+    it on."""
+
     novelty_ema_alpha: float = 0.25
     """EMA rate of the boredom trace: boredom ← (1−α)·boredom +
     α·(1−novelty). Falling novelty accumulates into boredom."""
@@ -416,6 +423,15 @@ def format_debug_trace(result: TickResult) -> str:
     return "\n".join(lines)
 
 
+def _nt_valence(levels: Dict[str, float]) -> float:
+    """Valence proxy from existing NT state (§14.12): DA (reward/
+    exploration) minus GABA (inhibition/aversion), clamped to [-1, 1].
+    An honest, new-but-small proxy — not a learned valence head; no
+    such head exists on CognitiveRuntime's frozen-HF-expert escape
+    hatch, unlike Brain's trained ``thought_valence``."""
+    return max(-1.0, min(1.0, levels.get("DA", 0.0) - levels.get("GABA", 0.0)))
+
+
 def _population_stdev(values: List[float]) -> float:
     """IIT-flavored differentiation proxy: population stdev of the
     candidate repertoire's NLLs. 0 for <2 values (nothing to
@@ -497,6 +513,7 @@ class CognitiveRuntime:
                  rng: Optional[_random.Random] = None,
                  classify_fn: Optional[Callable[[str], "ActionClassification"]] = None,
                  generate_wander_fn: Optional[GenerateFn] = None,
+                 narrative: Optional[Any] = None,
                  ) -> None:
         if nt is None:
             from neuroslm.emergent.driven_nt import DrivenNTSystem
@@ -546,6 +563,17 @@ class CognitiveRuntime:
         # LOOPING streak: consecutive ticks with novelty below
         # cfg.loop_novelty_threshold.
         self._low_nov_streak: int = 0
+        # §14.12: self-narrative world model — injected instance wins
+        # (same DI convention as memory=/nt=); otherwise lazily built
+        # on first actual need (see _ensure_narrative), never here.
+        # __init__ must stay a cheap, side-effect-free store of its
+        # collaborators — constructing eagerly would call embed_dim()
+        # -> the real embed_fn during construction, which broke
+        # TestExpertModelMovedToDevice (a CPU-only test box
+        # constructing a "cuda"-device runtime purely to pin that
+        # .to(device) gets called, never expecting a real tensor op
+        # during __init__).
+        self.narrative = narrative
 
     def embed_dim(self) -> int:
         """Dimensionality of ``embed_fn``'s output. Sensory cortices
@@ -555,6 +583,16 @@ class CognitiveRuntime:
         the one thing that makes cross-modal RECALL (§14.10 fix 1)
         meaningful."""
         return len(self._embed(self.cfg.persona or " "))
+
+    def _ensure_narrative(self) -> Optional[Any]:
+        """Lazily constructs the NarrativeSystem (§14.12) on first
+        actual need, never inside ``__init__`` — see the comment there.
+        ``None`` when neither an instance was injected nor
+        ``cfg.enable_narrative`` is set."""
+        if self.narrative is None and self.cfg.enable_narrative:
+            from neuroslm.memory.narrative import NarrativeSystem
+            self.narrative = NarrativeSystem(d_sem=self.embed_dim())
+        return self.narrative
 
     # ── SENSE ────────────────────────────────────────────────────────
 
@@ -594,13 +632,20 @@ class CognitiveRuntime:
                 and n_words < self.cfg.percept_min_words)
         )
         if not trivial:
+            vec = list(self._embed(text))
             self.memory.add(text,
-                            content_vec=list(self._embed(text)),
+                            content_vec=vec,
                             nt_state=self.nt.levels(),
                             tags=[source, "percept", "kind=observed",
                                  f"action_class={action_class}"],
                             context={"kind": "observed", "source": source,
                                     "action_class": action_class})
+            narrative = self._ensure_narrative()
+            if narrative is not None:
+                import torch
+                narrative.record_world(
+                    torch.tensor(vec, dtype=torch.float32), content=text,
+                    valence=_nt_valence(self.nt.levels()), salience=0.5)
         self._sensory.append(text)
         self._sensory_vecs.append(None)
         self.nt.step_full(activation=1.0)
@@ -643,6 +688,12 @@ class CognitiveRuntime:
                              f"modality={modality}"],
                         context={"kind": "observed", "source": source,
                                 "modality": modality, "novelty": novelty})
+        narrative = self._ensure_narrative()
+        if narrative is not None:
+            import torch
+            narrative.record_world(
+                torch.tensor(vec, dtype=torch.float32), content=label,
+                valence=_nt_valence(self.nt.levels()), salience=novelty)
         self._sensory.append(label)
         self._sensory_vecs.append((vec, modality))
         self.nt.step_full(activation=novelty)
@@ -864,6 +915,13 @@ class CognitiveRuntime:
                     "differentiation": differentiation,
                     "novelty": novelty,
                 })
+            narrative = self._ensure_narrative()
+            if narrative is not None:
+                import torch
+                narrative.record_autobiographical(
+                    torch.tensor(thought_vec, dtype=torch.float32),
+                    content=thought, valence=_nt_valence(levels),
+                    salience=novelty)
 
         # DRIVE (B): the tick's signals advance the NT dynamics — the
         # selected thought's NLL as the loss/surprise driver, and
@@ -1055,6 +1113,26 @@ class CognitiveRuntime:
             flat, window=window, min_support=min_support,
             min_confidence=min_confidence)
 
+    # ── §14.12: self-narrative world model ─────────────────────────────
+
+    def self_summary(self, max_events: int = 12) -> dict:
+        """Distilled autobiographical story so far — thin delegation to
+        NarrativeSystem (reused, not reinvented). ``{}`` when
+        ``cfg.enable_narrative`` is off (the default)."""
+        narrative = self._ensure_narrative()
+        if narrative is None:
+            return {}
+        return narrative.self_summary(identity="BRIAN",
+                                      max_events=max_events)
+
+    def full_story(self) -> dict:
+        """Aggregate self + world narrative — thin delegation to
+        NarrativeSystem. ``{}`` when narrative is off."""
+        narrative = self._ensure_narrative()
+        if narrative is None:
+            return {}
+        return narrative.full_story(identity="BRIAN")
+
 
 # ── Production wiring ────────────────────────────────────────────────
 
@@ -1067,6 +1145,7 @@ def _production_cfg(cfg: Optional[MindConfig]) -> MindConfig:
     enabling them here."""
     cfg = cfg or MindConfig()
     cfg.enable_consciousness_metrics = True
+    cfg.enable_narrative = True
     return cfg
 
 

@@ -3920,6 +3920,67 @@ round-trip). `tests/test_phi.py` 8, unregressed after the
 `_phi_from_M` → `gaussian_mi_mip_phi` rename (no test referenced the
 private name).
 
+### 14.12 Self-narrative world model wired into STORE (`neuroslm/memory/narrative.py`, 2026-08-24)
+
+The same 2026-08-24 investigation that produced §14.11 also found that
+`neuroslm/memory/narrative.py::NarrativeSystem` — a real, tested,
+already-documented (§10.4) autobiographical/world/entity narrative
+mechanism, LSTM-gated writes over a running summary vector, JSON story
+export — was wired only into the older `Brain` class and had zero
+references anywhere in `neuroslm/cognition/`. `CognitiveRuntime`, the
+runtime `chat_daemon.py` actually drives, had exactly one memory
+dependency (`EpisodicMemory`, a bare ring buffer) and no narrative
+layer at all. This section reuses `NarrativeSystem` verbatim (§10.4's
+mechanism, now also reachable from the live mind) rather than building
+a second narrative implementation.
+
+**Wiring** (`MindConfig.enable_narrative`, default `False` — same
+torch-hard-dependency rationale as §14.11's `enable_consciousness_metrics`;
+production builders turn it on via the shared `_production_cfg`):
+
+- **Lazy, not eager, construction.** `CognitiveRuntime.__init__` never
+  constructs `NarrativeSystem` itself — `_ensure_narrative()` builds it
+  on first actual need (an observed percept, a stored thought, or an
+  explicit `self_summary()`/`full_story()` call). `NarrativeSystem(d_sem=...)`
+  needs `embed_dim()`, which invokes the real `embed_fn` — doing that
+  inside `__init__` broke `TestExpertModelMovedToDevice` (a CPU-only
+  test box constructing a `device="cuda"` runtime purely to pin that
+  `.to(device)` gets called, never expecting a real tensor op during
+  construction). Lazy construction keeps `__init__` a cheap,
+  side-effect-free store of its collaborators, matching every other
+  injected seam (`generate_fn`/`score_fn`/`embed_fn` are also never
+  called eagerly).
+- **STORE** (`tick()`): a novelty-gated thought write also calls
+  `narrative.record_autobiographical(thought_vec, content=thought,
+  valence=_nt_valence(levels), salience=novelty)` — reusing the
+  already-computed `thought_vec`/`novelty`, no new computation.
+- **SENSE** (`observe()`/`observe_sensory()`): a non-trivial observed
+  percept (text or sensory) also calls `narrative.record_world(...)`
+  with the same vector already written to episodic memory.
+- **`_nt_valence(levels)`** — a new, small, honestly-labeled helper:
+  `clamp(DA − GABA, −1, 1)`. Not a learned valence head (Brain's
+  `thought_valence` is trained; no such head exists on
+  `CognitiveRuntime`'s frozen-HF-expert escape hatch) — a proxy from NT
+  state already computed each tick.
+- Entity-stream recording (`entity_store.py`/`record_entity`) is
+  explicitly out of scope: `entity_store.py` has zero test coverage
+  (confirmed by the investigation) and per-speaker entity resolution is
+  a materially separate feature from "self narrative world model."
+- `CognitiveRuntime.self_summary(max_events=12)` /
+  `.full_story()` — thin delegation to `NarrativeSystem`, `{}` when
+  narrative is off/unconstructed.
+- `server.py`'s new `"narrative"` wire op (mirrors the `"patterns"`
+  op's not-attached guard) and the `/narrative` REPL command are the
+  concrete, wire-reachable answer to "where can I see thoughts and
+  mind wandering" — retrievable from a connected client instead of
+  `brian logs` on the box.
+
+GREEN: `tests/cognition/test_cognitive_runtime.py` 161 (was 146 — 15
+new: `TestNarrativeWiring` ×11, `TestNtValence` ×4).
+`tests/cognition/test_mind_server.py` 72 (was 69 — `TestNarrativeOp`
+×3). `tests/test_memory.py`/`tests/test_narrative_memory.py`
+unregressed (`NarrativeSystem` itself untouched, only a new consumer).
+
 ### 15.1 — Live deploy: pip → NGC Docker pivot, and two real bugs found in the field (2026-08-12, same day)
 
 The pip-based deploy above was actually run — twice — against real

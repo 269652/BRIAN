@@ -102,7 +102,7 @@ def _score_map(mapping, default_nll=5.0):
     return _score
 
 
-def _mk_runtime(gen, scores=None, nt=None, cfg=None, seed=0):
+def _mk_runtime(gen, scores=None, nt=None, cfg=None, seed=0, narrative=None):
     from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
     return CognitiveRuntime(
         generate_fn=gen,
@@ -112,6 +112,7 @@ def _mk_runtime(gen, scores=None, nt=None, cfg=None, seed=0):
         memory=EpisodicMemory(maxlen=64),
         cfg=cfg or MindConfig(n_candidates=2),
         rng=random.Random(seed),
+        narrative=narrative,
     )
 
 
@@ -1919,3 +1920,127 @@ class TestConsciousnessMetrics:
             "fake/expert", model_factory=lambda: model,
             tokenizer_factory=_FakeHFTokenizer)
         assert rt.cfg.enable_consciousness_metrics is True
+
+
+# ── §14.12: self-narrative world model wired into STORE ──────────────
+
+class TestNarrativeWiring:
+    """neuroslm.memory.narrative.NarrativeSystem, reused verbatim (not
+    reinvented) and glued into CognitiveRuntime's STORE/SENSE stages —
+    see docs/architecture.md §14.12."""
+
+    def _enabled_runtime(self, **cfg_kwargs):
+        from neuroslm.cognition.runtime import MindConfig
+        cfg = MindConfig(n_candidates=2, enable_narrative=True,
+                         novelty_write_threshold=0.0, **cfg_kwargs)
+        gen = _ScriptedGen(["first candidate thought",
+                           "second candidate thought"])
+        return _mk_runtime(gen, cfg=cfg), gen
+
+    def test_disabled_by_default_narrative_is_none(self):
+        gen = _ScriptedGen(["a thought", "another thought"])
+        rt = _mk_runtime(gen)  # default MindConfig -> disabled
+        assert rt.narrative is None
+        assert rt.self_summary() == {}
+        assert rt.full_story() == {}
+
+    def test_enabling_narrative_lazily_constructs_narrative_system(self):
+        """Lazy, not eager (§14.12 note in runtime.py's __init__):
+        __init__ must stay a cheap, side-effect-free store of its
+        collaborators — constructing NarrativeSystem there would call
+        embed_dim() -> the real embed_fn during construction."""
+        from neuroslm.memory.narrative import NarrativeSystem
+        rt, _ = self._enabled_runtime()
+        assert rt.narrative is None, "must not construct inside __init__"
+        rt.self_summary()  # first actual need triggers construction
+        assert isinstance(rt.narrative, NarrativeSystem)
+        assert rt.narrative.d_sem == rt.embed_dim()
+
+    def test_injected_narrative_instance_is_used_verbatim(self):
+        """An explicitly-passed narrative= wins over cfg.enable_narrative
+        auto-construction — same DI convention as memory=/nt=."""
+        from neuroslm.memory.narrative import NarrativeSystem
+        gen = _ScriptedGen(["a thought", "another thought"])
+        my_narrative = NarrativeSystem(d_sem=8)
+        rt = _mk_runtime(gen, narrative=my_narrative)
+        assert rt.narrative is my_narrative
+
+    def test_stored_thought_records_to_autobiographical(self):
+        rt, _ = self._enabled_runtime()
+        result = rt.tick()
+        assert result.stored, "first tick into empty memory always novel"
+        events = rt.narrative.autobiographical.events
+        assert len(events) == 1
+        assert events[0].content == result.thought
+
+    def test_unstored_thought_does_not_record_to_autobiographical(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["a thought", "another thought"])
+        cfg = MindConfig(n_candidates=2, enable_narrative=True,
+                         novelty_write_threshold=1.1)  # nothing clears this
+        rt = _mk_runtime(gen, cfg=cfg)
+        result = rt.tick()
+        assert not result.stored
+        # Nothing was ever recorded -> narrative may still be
+        # unconstructed (lazy); self_summary() is the public surface
+        # that reports "no events" either way.
+        assert rt.self_summary()["events"] == []
+
+    def test_observed_percept_records_to_world(self):
+        rt, _ = self._enabled_runtime()
+        rt.observe("I noticed the weather changed today")
+        assert len(rt.narrative.world.events) == 1
+        assert "weather" in rt.narrative.world.events[0].content
+
+    def test_trivial_percept_does_not_record_to_world(self):
+        rt, _ = self._enabled_runtime()
+        rt.observe("hi")  # greeting, <= trivial_percept_max_words
+        assert rt.full_story()["world"]["n_events"] == 0
+
+    def test_observed_sensory_percept_records_to_world(self):
+        rt, _ = self._enabled_runtime()
+        attended = rt.observe_sensory("visual", [1.0] * rt.embed_dim())
+        assert attended
+        assert len(rt.narrative.world.events) == 1
+        assert rt.narrative.world.events[0].content == "[visual percept]"
+
+    def test_self_summary_delegates_to_narrative_system(self):
+        rt, _ = self._enabled_runtime()
+        rt.tick()
+        summary = rt.self_summary(max_events=5)
+        assert summary["identity"] == "BRIAN"
+        assert len(summary["events"]) == 1
+
+    def test_full_story_delegates_to_narrative_system(self):
+        rt, _ = self._enabled_runtime()
+        rt.tick()
+        story = rt.full_story()
+        assert story["identity"] == "BRIAN"
+        assert story["self"]["events"]
+
+    def test_build_runtime_from_hf_lm_enables_narrative(self):
+        from neuroslm.cognition.runtime import build_runtime_from_hf_lm
+        model = _FakeHFModelWithGenerate()
+        rt = build_runtime_from_hf_lm(
+            "fake/expert", model_factory=lambda: model,
+            tokenizer_factory=_FakeHFTokenizer)
+        assert rt.cfg.enable_narrative is True
+
+
+class TestNtValence:
+    def test_da_dominant_is_positive(self):
+        from neuroslm.cognition.runtime import _nt_valence
+        assert _nt_valence({"DA": 0.8, "GABA": 0.1}) > 0.0
+
+    def test_gaba_dominant_is_negative(self):
+        from neuroslm.cognition.runtime import _nt_valence
+        assert _nt_valence({"DA": 0.1, "GABA": 0.8}) < 0.0
+
+    def test_clamped_to_unit_range(self):
+        from neuroslm.cognition.runtime import _nt_valence
+        assert _nt_valence({"DA": 100.0, "GABA": 0.0}) == 1.0
+        assert _nt_valence({"DA": 0.0, "GABA": 100.0}) == -1.0
+
+    def test_missing_keys_default_to_zero(self):
+        from neuroslm.cognition.runtime import _nt_valence
+        assert _nt_valence({}) == 0.0

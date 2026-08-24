@@ -4582,3 +4582,29 @@ memory persistence via `memory/store.py`'s existing `.mem` format.
 Phases 2-4 recorded as their own findings entries as each lands.
 
 [EVIDENCE: docs/architecture.md §14.11; tests/cognition/test_consciousness.py; tests/cognition/test_cognitive_runtime.py::TestConsciousnessMetrics; tests/cognition/test_mind_server.py::TestServerTelemetry::test_telemetry_carries_consciousness_metrics]
+
+### Self-narrative world model wired into STORE (Phase 2/4, 2026-08-24)
+
+`neuroslm/memory/narrative.py::NarrativeSystem` — real, tested,
+already documented at §10.4 — reused verbatim and glued into
+`CognitiveRuntime`'s SENSE/STORE stages via `MindConfig.enable_narrative`
+(default off, torch-gated like Phase 1; production builders turn it
+on). Lazy construction (`_ensure_narrative()`, first actual need, never
+inside `__init__`) — an eager version broke
+`TestExpertModelMovedToDevice` by forcing a real `embed_fn` call
+(CPU-only test box, `device="cuda"`) during construction; fixed by
+deferring, which also matches how every other injected seam already
+behaves. New `CognitiveRuntime.self_summary()`/`.full_story()` and the
+`server.py` `"narrative"` wire op + `/narrative` REPL command are the
+concrete answer to the user's earlier "where can I see thoughts and
+mind wandering" question — retrievable over the wire, not just via
+`brian logs`.
+
+Entity-stream recording (`entity_store.py`) deliberately left out of
+scope — zero test coverage, a materially separate feature.
+
+GREEN: `tests/cognition/test_cognitive_runtime.py` 161 (was 146),
+`tests/cognition/test_mind_server.py` 72 (was 69).
+`maintain_technical_report.py --verbose`: PASS.
+
+[EVIDENCE: docs/architecture.md §14.12; tests/cognition/test_cognitive_runtime.py::TestNarrativeWiring; tests/cognition/test_cognitive_runtime.py::TestNtValence; tests/cognition/test_mind_server.py::TestNarrativeOp]

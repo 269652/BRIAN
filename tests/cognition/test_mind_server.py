@@ -197,6 +197,67 @@ class TestPatternsOp:
             s.stop()
 
 
+class TestNarrativeOp:
+    """§14.12: the wire-level surface for
+    neuroslm/memory/narrative.py::NarrativeSystem — "where can I see
+    thoughts and mind wandering" answered over the wire, not just via
+    `brian logs` on the box."""
+
+    def _daemon_with_narrative_history(self):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        from neuroslm.memory.episodic import EpisodicMemory
+
+        def score_fn(text):
+            from neuroslm.cognition.runtime import ThoughtScore
+            return ThoughtScore(mean_nll=2.0, entropy_norm=0.5)
+
+        rt = CognitiveRuntime(
+            generate_fn=_EchoGen(), score_fn=score_fn,
+            embed_fn=lambda t: [1.0, 0.0],
+            memory=EpisodicMemory(maxlen=64),
+            cfg=MindConfig(n_candidates=1, enable_narrative=True))
+        rt.observe("I noticed something interesting happen")
+        return ChatDaemon(_EchoGen(), ChatDaemonConfig(), use_color=False,
+                          mind=rt)
+
+    def test_narrative_op_default_self_summary(self):
+        from neuroslm.cognition.server import MindServer
+        daemon = self._daemon_with_narrative_history()
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "narrative"})
+            assert res["ok"] is True
+            assert res["story"]["identity"] == "BRIAN"
+        finally:
+            s.stop()
+
+    def test_narrative_op_full_kind_includes_world(self):
+        from neuroslm.cognition.server import MindServer
+        daemon = self._daemon_with_narrative_history()
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "narrative", "kind": "full"})
+            assert res["ok"] is True
+            assert res["story"]["identity"] == "BRIAN"
+            assert "world" in res["story"]
+            assert res["story"]["world"]["n_events"] == 1
+        finally:
+            s.stop()
+
+    def test_narrative_op_without_mind_is_a_clean_error(self):
+        daemon = ChatDaemon(_EchoGen(), ChatDaemonConfig(), use_color=False)
+        from neuroslm.cognition.server import MindServer
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "narrative"})
+            assert res["ok"] is False
+        finally:
+            s.stop()
+
+
 class TestObserveSensoryOp:
     """§15 remote bridge: a sensory source (e.g. a SensoryBridge
     running wherever Isaac Sim actually runs — a different box than

@@ -151,6 +151,19 @@ def _dispatch(daemon: Any, msg: dict) -> dict:
              "grounded": r.grounded,
              "self_referential_only": r.self_referential_only}
             for r in rules]}
+    if op == "narrative":
+        # §14.12: the wire-level surface for
+        # neuroslm/memory/narrative.py::NarrativeSystem — mirrors the
+        # "patterns" op's not-attached guard above.
+        mind = getattr(daemon, "_mind", None)
+        if mind is None or not hasattr(mind, "self_summary"):
+            return {"ok": False,
+                    "error": "no mind attached — narrative needs the "
+                            "cognitive runtime"}
+        if msg.get("kind") == "full":
+            return {"ok": True, "story": mind.full_story()}
+        return {"ok": True, "story": mind.self_summary(
+            max_events=int(msg.get("max_events", 12)))}
     if op == "render":
         return {"ok": True, "render": daemon.render()}
     if op == "embed_dim":
@@ -402,6 +415,23 @@ def connect_repl(host: str = "127.0.0.1", port: int = DEFAULT_PORT,
                                 f"lift={r['lift']:.2f} "
                                 f"support={r['support']:.2f} "
                                 f"n={r['evidence_count']}  [{flag}]\n")
+            elif line == "/narrative":
+                res = _rpc({"op": "narrative"})
+                with write_lock:
+                    if not res.get("ok"):
+                        out_stream.write(f"  {res.get('error')}\n")
+                    else:
+                        story = res.get("story") or {}
+                        events = story.get("events") or []
+                        if not events:
+                            out_stream.write(
+                                "  (no self-narrative yet — needs a "
+                                "stored thought or observed percept)\n")
+                        for e in events:
+                            out_stream.write(
+                                f"  [t={e['t']}] {e['content']}  "
+                                f"valence={e['valence']:.2f} "
+                                f"salience={e['salience']:.2f}\n")
             elif line == "/render":
                 res = _rpc({"op": "render"})
                 with write_lock:
