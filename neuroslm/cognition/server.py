@@ -151,6 +151,23 @@ def _dispatch(daemon: Any, msg: dict) -> dict:
              "grounded": r.grounded,
              "self_referential_only": r.self_referential_only}
             for r in rules]}
+    if op == "reflections":
+        # §14.13: peek-only — unlike "patterns" (always re-mines on
+        # request), this reports the tick loop's own cached cadence
+        # result without recomputing.
+        mind = getattr(daemon, "_mind", None)
+        if mind is None or not hasattr(mind, "_mined_rules"):
+            return {"ok": False,
+                    "error": "no mind attached — reflections need the "
+                            "cognitive runtime"}
+        rules = mind._mined_rules
+        return {"ok": True, "rules": [
+            {"antecedent": r.antecedent, "consequent": r.consequent,
+             "support": r.support, "confidence": r.confidence,
+             "lift": r.lift, "evidence_count": r.evidence_count,
+             "grounded": r.grounded,
+             "self_referential_only": r.self_referential_only}
+            for r in rules]}
     if op == "narrative":
         # §14.12: the wire-level surface for
         # neuroslm/memory/narrative.py::NarrativeSystem — mirrors the

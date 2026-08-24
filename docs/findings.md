@@ -4608,3 +4608,25 @@ GREEN: `tests/cognition/test_cognitive_runtime.py` 161 (was 146),
 `maintain_technical_report.py --verbose`: PASS.
 
 [EVIDENCE: docs/architecture.md §14.12; tests/cognition/test_cognitive_runtime.py::TestNarrativeWiring; tests/cognition/test_cognitive_runtime.py::TestNtValence; tests/cognition/test_mind_server.py::TestNarrativeOp]
+
+### Autonomous knowledge extraction — reflection cadence (Phase 3/4, 2026-08-24)
+
+`detect_patterns`/`mine_temporal_associations` (§14.8) was real and
+tested but confirmed, by direct grep before this change, reachable
+ONLY via the on-demand `patterns` wire op — no call site anywhere in
+`tick()`. Fixed by adding `MindConfig.reflection_interval` (default 50,
+pure Python) and a new REFLECTION step at the top of `tick()` (before
+the GATE inhibition check, so it runs even on inhibited/no-candidate
+ticks) that calls `detect_patterns()` verbatim every N ticks, caching
+into `self._mined_rules`/`TickResult.mined_rules`. Mined rules are kept
+in the cache rather than force-mapped into `CausalRuleStore`/
+`RelationalMemoryGraph` (both expect embedding-prototype vectors this
+label-shaped data doesn't have) — a deeper integration is a flagged
+follow-up, not required by the literal ask. New peek-only `"reflections"`
+wire op reports the cached result without recomputing.
+
+GREEN: `tests/cognition/test_cognitive_runtime.py` 167 (was 161),
+`tests/cognition/test_mind_server.py` 74 (was 72).
+`maintain_technical_report.py --verbose`: PASS.
+
+[EVIDENCE: docs/architecture.md §14.13; tests/cognition/test_cognitive_runtime.py::TestAutonomousReflection; tests/cognition/test_mind_server.py::TestReflectionsOp]

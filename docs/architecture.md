@@ -3981,6 +3981,47 @@ new: `TestNarrativeWiring` ×11, `TestNtValence` ×4).
 ×3). `tests/test_memory.py`/`tests/test_narrative_memory.py`
 unregressed (`NarrativeSystem` itself untouched, only a new consumer).
 
+### 14.13 Autonomous knowledge extraction — reflection cadence (2026-08-24)
+
+§14.8 built real, tested, working knowledge extraction
+(`detect_patterns`/`mine_temporal_associations`, Apriori-derived
+temporal association mining over the episode history) — but it was
+reachable ONLY via the on-demand `patterns` wire op (confirmed by
+direct grep before this change: no call site anywhere in `tick()` or
+elsewhere in the tick cycle). A mind that never gets asked never
+reflects on its own experience. This section promotes it to a periodic
+cadence, reusing `detect_patterns()` verbatim.
+
+**Wiring**: `MindConfig.reflection_interval` (default `50` — pure
+Python, no torch dependency, safe to default on unlike §14.11/§14.12's
+flags). In `tick()`'s new REFLECTION step — placed BEFORE the GATE
+inhibition check, so it runs regardless of whether this tick's own
+deliberation succeeds — `tick_n % reflection_interval == 0` triggers
+`self.detect_patterns()` (default window/thresholds) inside a
+`try/except: pass` (mining must never abort a tick), caching the
+result into `self._mined_rules` and `TickResult.mined_rules`.
+`mined_rules` is `None` on every non-reflection tick, and an actual
+(possibly empty) list on a reflection tick — a consumer can tell "ran,
+found nothing" apart from "didn't run this tick."
+
+Storage decision, made explicitly rather than by omission: mined
+`AssociationRule`s stay in the `_mined_rules` cache (persisted for
+free in §14.14, since it's a flat dataclass) rather than being forced
+into `CausalRuleStore`/`RelationalMemoryGraph` — both expect
+embedding-prototype vectors this label-shaped data doesn't naturally
+have, and forcing that mapping would be exactly the "stub-shaped
+reuse" CLAUDE.md §14 warns against. A deeper embedding-based
+integration is a follow-up, not required by the literal ask.
+
+`server.py`'s new `"reflections"` wire op is peek-only (mirrors
+`"status"`'s no-side-effect philosophy) — unlike `"patterns"`, which
+always re-mines on request, it just reports the tick loop's own cached
+cadence result, cheap for an operator to poll.
+
+GREEN: `tests/cognition/test_cognitive_runtime.py` 167 (was 161 — 6
+new: `TestAutonomousReflection`). `tests/cognition/test_mind_server.py`
+74 (was 72 — `TestReflectionsOp` ×2).
+
 ### 15.1 — Live deploy: pip → NGC Docker pivot, and two real bugs found in the field (2026-08-12, same day)
 
 The pip-based deploy above was actually run — twice — against real

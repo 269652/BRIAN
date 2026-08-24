@@ -2044,3 +2044,85 @@ class TestNtValence:
     def test_missing_keys_default_to_zero(self):
         from neuroslm.cognition.runtime import _nt_valence
         assert _nt_valence({}) == 0.0
+
+
+# ── §14.13: autonomous knowledge extraction on a reflection cadence ──
+
+class TestAutonomousReflection:
+    """detect_patterns()/mine_temporal_associations is real and tested
+    (TestDetectPatterns) but was reachable ONLY via the on-demand
+    'patterns' wire op — never run automatically as part of the tick
+    cycle (confirmed by grep before this change). This promotes it to
+    a periodic cadence, reusing detect_patterns() verbatim."""
+
+    def _seed_insult_history(self, rt):
+        for _ in range(4):
+            rt.observe("You suck")
+            rt.observe("No, that's wrong")
+
+    def test_reflection_does_not_run_before_interval(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["a thought", "another thought"])
+        cfg = MindConfig(n_candidates=2, reflection_interval=5)
+        rt = _mk_runtime(gen, cfg=cfg)
+        for _ in range(4):
+            result = rt.tick()
+            assert result.mined_rules is None
+
+    def test_reflection_runs_automatically_at_interval(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["a thought", "another thought"])
+        cfg = MindConfig(n_candidates=2, reflection_interval=3)
+        rt = _mk_runtime(gen, cfg=cfg)
+        self._seed_insult_history(rt)
+        results = [rt.tick() for _ in range(3)]
+        assert results[0].mined_rules is None
+        assert results[1].mined_rules is None
+        assert results[2].mined_rules is not None  # 3rd tick == interval
+        assert rt._mined_rules == results[2].mined_rules
+
+    def test_reflection_disabled_when_interval_zero(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["a thought", "another thought"])
+        cfg = MindConfig(n_candidates=2, reflection_interval=0)
+        rt = _mk_runtime(gen, cfg=cfg)
+        for _ in range(10):
+            result = rt.tick()
+            assert result.mined_rules is None
+
+    def test_reflection_failure_does_not_crash_tick(self, monkeypatch):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["a thought", "another thought"])
+        cfg = MindConfig(n_candidates=2, reflection_interval=1)
+        rt = _mk_runtime(gen, cfg=cfg)
+
+        def boom(*a, **kw):
+            raise RuntimeError("mining exploded")
+
+        monkeypatch.setattr(rt, "detect_patterns", boom)
+        result = rt.tick()  # must not raise
+        assert result.thought is not None
+        assert result.mined_rules is None
+
+    def test_reflection_runs_even_on_an_inhibited_tick(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["a thought", "another thought"])
+        cfg = MindConfig(n_candidates=2, reflection_interval=1)
+        nt = _FakeNT(GABA=0.9)  # >= gaba_silence_threshold
+        rt = _mk_runtime(gen, nt=nt, cfg=cfg)
+        result = rt.tick()
+        assert result.inhibited
+        assert result.mined_rules is not None
+
+    def test_on_demand_patterns_unaffected_by_cadence(self):
+        """Regression pin: the existing on-demand path (detect_patterns
+        called directly, or via the server's 'patterns' op) must keep
+        working exactly as before, independent of the new cadence."""
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["a thought", "another thought"])
+        cfg = MindConfig(n_candidates=2, reflection_interval=0)  # disabled
+        rt = _mk_runtime(gen, cfg=cfg)
+        self._seed_insult_history(rt)
+        rules = rt.detect_patterns(min_confidence=0.0)
+        assert any(r.antecedent == "insult" and r.consequent == "disagreement"
+                  for r in rules)

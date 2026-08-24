@@ -258,6 +258,55 @@ class TestNarrativeOp:
             s.stop()
 
 
+class TestReflectionsOp:
+    """§14.13: peek-only surface for the tick loop's cached autonomous
+    reflection result — mirrors 'status'/'patterns' but never
+    recomputes, unlike 'patterns' (which always re-mines on request)."""
+
+    def _daemon_with_reflected_history(self):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        from neuroslm.memory.episodic import EpisodicMemory
+
+        def score_fn(text):
+            from neuroslm.cognition.runtime import ThoughtScore
+            return ThoughtScore(mean_nll=2.0, entropy_norm=0.5)
+
+        rt = CognitiveRuntime(
+            generate_fn=_EchoGen(), score_fn=score_fn,
+            embed_fn=lambda t: [1.0, 0.0],
+            memory=EpisodicMemory(maxlen=64),
+            cfg=MindConfig(n_candidates=1, reflection_interval=1))
+        for _ in range(4):
+            rt.observe("You suck")
+            rt.observe("No, that's wrong")
+        rt.tick()  # reflection_interval=1 -> mines on the very first tick
+        return ChatDaemon(_EchoGen(), ChatDaemonConfig(), use_color=False,
+                          mind=rt)
+
+    def test_reflections_op_returns_the_cached_rules(self):
+        from neuroslm.cognition.server import MindServer
+        daemon = self._daemon_with_reflected_history()
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "reflections"})
+            assert res["ok"] is True
+            assert isinstance(res["rules"], list)
+        finally:
+            s.stop()
+
+    def test_reflections_op_without_mind_is_a_clean_error(self):
+        daemon = ChatDaemon(_EchoGen(), ChatDaemonConfig(), use_color=False)
+        from neuroslm.cognition.server import MindServer
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            res = _rpc(port, {"op": "reflections"})
+            assert res["ok"] is False
+        finally:
+            s.stop()
+
+
 class TestObserveSensoryOp:
     """§15 remote bridge: a sensory source (e.g. a SensoryBridge
     running wherever Isaac Sim actually runs — a different box than

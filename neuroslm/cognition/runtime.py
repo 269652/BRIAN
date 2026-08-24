@@ -127,6 +127,14 @@ class MindConfig:
     ``CognitiveRuntime()`` construction; the production builders turn
     it on."""
 
+    reflection_interval: int = 50
+    """§14.13: ticks between automatic ``detect_patterns()`` reflections
+    — promotes knowledge extraction from purely on-demand (the
+    ``patterns`` wire op) to a periodic cadence. ``0`` disables
+    autonomous mining entirely; the on-demand wire op is unaffected
+    either way. Pure Python (no torch dependency) — safe to default
+    on, unlike the two flags above."""
+
     novelty_ema_alpha: float = 0.25
     """EMA rate of the boredom trace: boredom ← (1−α)·boredom +
     α·(1−novelty). Falling novelty accumulates into boredom."""
@@ -299,6 +307,13 @@ class TickResult:
     winning thought and the rest of this tick's subsystem state — see
     ``neuroslm.cognition.consciousness.compute_broadcast_strength``.
     Same off-by-default/0.0 conditions as ``phi_iit``."""
+    mined_rules: Optional[List["AssociationRule"]] = None
+    """§14.13: this tick's autonomous reflection result — populated
+    (possibly with an empty list, if nothing crossed the mining
+    thresholds) only on a reflection tick (``tick_n %
+    cfg.reflection_interval == 0``); ``None`` on every other tick, so a
+    consumer can tell "reflection ran and found nothing" apart from
+    "reflection didn't run this tick"."""
 
 
 _NT_ORDER = ("DA", "NE", "5HT", "ACh", "eCB", "Glu", "GABA")
@@ -563,6 +578,10 @@ class CognitiveRuntime:
         # LOOPING streak: consecutive ticks with novelty below
         # cfg.loop_novelty_threshold.
         self._low_nov_streak: int = 0
+        # §14.13: cache of the last autonomous reflection's mined
+        # rules — lets a peek-only wire op (server.py's "reflections")
+        # report the latest result without recomputing.
+        self._mined_rules: List["AssociationRule"] = []
         # §14.12: self-narrative world model — injected instance wins
         # (same DI convention as memory=/nt=); otherwise lazily built
         # on first actual need (see _ensure_narrative), never here.
@@ -708,6 +727,21 @@ class CognitiveRuntime:
         prior_thought = self._last_thought
         levels = self.nt.levels()
 
+        # REFLECTION (§14.13): autonomous knowledge extraction, on a
+        # cadence rather than only the on-demand "patterns" wire op.
+        # Runs before GATE so it applies regardless of whether THIS
+        # tick's own deliberation succeeds (inhibited/no-candidates
+        # ticks still get a chance to reflect on history so far).
+        # Never allowed to abort a tick over telemetry/analysis.
+        mined_this_tick: Optional[List["AssociationRule"]] = None
+        interval = self.cfg.reflection_interval
+        if interval > 0 and tick_n % interval == 0:
+            try:
+                mined_this_tick = self.detect_patterns()
+                self._mined_rules = mined_this_tick
+            except Exception:
+                mined_this_tick = None
+
         # GATE (pre-emptive): GABA inhibition suppresses the act
         # itself — an inhibited tick spends no generation compute.
         if levels.get("GABA", 0.0) >= self.cfg.gaba_silence_threshold:
@@ -719,7 +753,8 @@ class CognitiveRuntime:
             return TickResult(thought=None, inhibited=True,
                               nt_levels=levels, tick_n=tick_n,
                               prior_thought=prior_thought,
-                              action=pending_action)
+                              action=pending_action,
+                              mined_rules=mined_this_tick)
 
         # SENSE: drain the queue (newest percept anchors the tick).
         sensory = list(self._sensory)
@@ -849,7 +884,8 @@ class CognitiveRuntime:
                               wandering=wandering,
                               action="respond" if not wandering else "think",
                               sensory_modality=sensory_modality,
-                              prompt=prompt)
+                              prompt=prompt,
+                              mined_rules=mined_this_tick)
 
         # GATE: boredom-and-DA-tempered softmax over −NLL, with the
         # inner-speech prior (D2) penalizing second-person address in
@@ -995,7 +1031,8 @@ class CognitiveRuntime:
                           sensory_modality=sensory_modality, prompt=prompt,
                           phi_iit=phi_iit,
                           phi_iit_n_modules=phi_iit_n_modules,
-                          broadcast_strength=broadcast_strength)
+                          broadcast_strength=broadcast_strength,
+                          mined_rules=mined_this_tick)
 
     # ── Internals ────────────────────────────────────────────────────
 
@@ -1094,10 +1131,12 @@ class CognitiveRuntime:
         history (see ``neuroslm/cognition/patterns.py`` — Apriori-
         derived, statistical association, NOT causation; every rule
         reports whether its evidence is externally grounded or pure
-        self-talk). On-demand, not run automatically per tick — the
-        buffer needs enough history for the statistics to mean
-        anything, and this is an explicit analysis step, not part of
-        the SENSE→RECALL→THINK→GATE→STORE→DRIVE cycle itself.
+        self-talk). Reachable two ways: on-demand (the ``patterns``
+        wire op, any window/threshold), and automatically every
+        ``cfg.reflection_interval`` ticks (§14.13, ``tick()``'s
+        REFLECTION step, always the default window/thresholds) — the
+        cadence promotes knowledge extraction from a purely manual
+        analysis step to something the mind does on its own.
         """
         from neuroslm.cognition.patterns import mine_temporal_associations
         # EpisodicMemory stores action_class/kind nested under
