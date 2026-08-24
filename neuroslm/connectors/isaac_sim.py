@@ -147,13 +147,28 @@ class SensoryBridge:
         print(f"[isaac_sim] {modality} percept: {state}, novelty={nov}",
               file=sys.stderr)
 
-    def _read(self, modality: str, fn: Optional[Callable]):
-        if fn is None:
+    def _read_and_embed(self, modality: str, read_fn: Optional[Callable],
+                        cortex_fn: Callable) -> Optional[Sequence[float]]:
+        """Read raw sensor data AND run it through the cortex as ONE
+        resilience unit. Live incident (2026-08-24): a warm-up camera
+        frame (Isaac Sim's own documented "a few render frames may be
+        required before data is available") reached VisualCortex with
+        a malformed shape and raised deep inside the CLIP image
+        processor — that propagated all the way up and killed
+        SimulationApp, because only the RAW READ was ever guarded, not
+        the embedding step. A cortex failure is exactly as
+        transient/non-fatal as a sensor-read failure and gets the
+        SAME treatment: caught, surfaced via ``on_error``, skip this
+        modality this cycle — never crash the pump."""
+        if read_fn is None:
             return None
         try:
-            return fn()
-        except Exception as exc:  # noqa: BLE001 — one bad sensor must
-            # not kill the mind's tick loop; surfaced, not hidden.
+            raw = read_fn()
+            if raw is None:
+                return None
+            return cortex_fn(raw)
+        except Exception as exc:  # noqa: BLE001 — one bad sensor/cortex
+            # must not kill the mind's tick loop; surfaced, not hidden.
             self._on_error(modality, exc)
             return None
 
@@ -175,21 +190,21 @@ class SensoryBridge:
         percept once it reaches the tick loop."""
         attended: Dict[str, bool] = {}
 
-        frame = self._read("visual", getattr(self.client, "get_frame", None))
-        if frame is not None:
-            vec = self.visual(frame)
+        vec = self._read_and_embed(
+            "visual", getattr(self.client, "get_frame", None), self.visual)
+        if vec is not None:
             attended["visual"] = self._observe("visual", vec)
 
-        joints = self._read("proprioceptive",
-                            getattr(self.client, "get_joint_state", None))
-        if joints is not None:
-            vec = self.proprioceptive(joints)
+        vec = self._read_and_embed(
+            "proprioceptive", getattr(self.client, "get_joint_state", None),
+            self.proprioceptive)
+        if vec is not None:
             attended["proprioceptive"] = self._observe("proprioceptive", vec)
 
-        audio = self._read("acoustic",
-                           getattr(self.client, "get_audio_chunk", None))
-        if audio is not None:
-            vec = self.acoustic(audio)
+        vec = self._read_and_embed(
+            "acoustic", getattr(self.client, "get_audio_chunk", None),
+            self.acoustic)
+        if vec is not None:
             attended["acoustic"] = self._observe("acoustic", vec)
 
         return attended

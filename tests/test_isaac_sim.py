@@ -183,6 +183,45 @@ class TestSensoryBridge:
         assert "visual" not in attended
         assert attended["proprioceptive"] is True
 
+    def test_cortex_failure_on_one_modality_does_not_crash_the_pump(self):
+        """Live incident (2026-08-24): a warm-up camera frame (before
+        Isaac Sim's renderer has produced real data — its own
+        documented behaviour) reached VisualCortex with a malformed
+        shape and raised ValueError deep inside the CLIP image
+        processor, propagating all the way up and killing
+        SimulationApp. The sensor READ succeeding is not enough — the
+        CORTEX EMBEDDING step needs the same resilience boundary
+        _read() already gives raw sensor reads."""
+        rt = _mk_runtime()
+        client = _FakeIsaacClient(
+            frame=_frame(90),
+            joints={"positions": [0.5], "velocities": [0.0]})
+
+        def broken_visual_cortex(frame):
+            raise ValueError("Unable to infer channel dimension format")
+
+        bridge = self._bridge(rt, client, visual_cortex=broken_visual_cortex)
+        attended = bridge.pump()
+        assert "visual" not in attended, (
+            "a cortex-level exception must be caught exactly like a "
+            "sensor-read exception, not propagate and crash the pump")
+        assert attended["proprioceptive"] is True, (
+            "one modality failing must not take the others down with it")
+
+    def test_cortex_failure_is_surfaced_via_on_error(self):
+        rt = _mk_runtime()
+        client = _FakeIsaacClient(frame=_frame(90), joints=None)
+        seen = []
+
+        def broken_visual_cortex(frame):
+            raise ValueError("boom")
+
+        bridge = self._bridge(
+            rt, client, visual_cortex=broken_visual_cortex,
+            on_error=lambda modality, exc: seen.append((modality, str(exc))))
+        bridge.pump()
+        assert seen == [("visual", "boom")]
+
     def test_habituated_repeat_frame_is_not_re_stored(self):
         rt = _mk_runtime()
         client = _FakeIsaacClient(frame=_frame(77), joints=None)

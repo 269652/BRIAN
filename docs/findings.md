@@ -4356,4 +4356,38 @@ RED-confirmed (2 more contracts:
 GREEN: `test_mind_server.py` 66 (was 64). Not yet re-verified live —
 needs another fresh deploy.
 
-[EVIDENCE: tests/cognition/test_mind_server.py::TestIsaacDeployCliWiring]
+**Re-verified live, `chown` fix confirmed working** (isaac `48588261`,
+fresh deploy): direct `ssh -v` against the box authenticated
+successfully (`Authenticated to ... using "publickey"`) — the
+ownership fix closed the SSH gap completely. `brian chat bridge-isaac`
+then connected both legs cleanly, and the sensor loop reached
+`[isaac_sensor_loop] booted -- pumping sensory input to the mind` —
+`RemoteMindProxy` connected through the tunnel successfully.
+
+**One more real bug, found immediately after**: `bridge.pump()`
+crashed the whole loop (killing `SimulationApp`) on its first camera
+frame — `ValueError: Unable to infer channel dimension format` inside
+the CLIP image processor, one line after Isaac Sim's own warning
+`Annotator 'rgb' returned None or unexpected shape ... A few render
+frames may be required before data is available`. Root cause: a
+warm-up frame passed `SensoryBridge`'s `frame is not None` check but
+had a malformed shape the cortex couldn't embed — and the cortex
+EMBEDDING call (`self.visual(frame)`) was never wrapped in the same
+try/except that already guarded the raw sensor READ, despite the
+class's own docstring already promising "a client returning None...
+or one that raises... simply contributes nothing that cycle rather
+than crashing the pump." The promise covered reads, not cortex calls.
+
+Fixed: `SensoryBridge._read_and_embed()` folds the raw read AND the
+cortex embedding into one resilience unit — a cortex-level exception
+gets the exact same treatment as a sensor-read exception (caught,
+surfaced via `on_error`, skip this modality this cycle).
+
+RED-confirmed (2 contracts:
+`test_cortex_failure_on_one_modality_does_not_crash_the_pump`,
+`test_cortex_failure_is_surfaced_via_on_error`). GREEN:
+`test_isaac_sim.py` 14 (was 12), `test_mind_server.py` 66 unregressed.
+Not yet re-verified live — needs another fresh deploy to confirm the
+sensor loop survives its own warm-up period.
+
+[EVIDENCE: tests/test_isaac_sim.py::TestSensoryBridge]
