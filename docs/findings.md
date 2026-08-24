@@ -4483,3 +4483,45 @@ GREEN: `test_cortices.py` 24 (was 22), `test_isaac_sim.py` 14
 unregressed. Applying live now (same SSH pattern, no redeploy).
 
 [EVIDENCE: tests/sensory/test_cortices.py::TestVisualCortex::test_accepts_rgba_input_like_isaac_sims_camera, test_rgba_alpha_channel_is_ignored_not_corrupting]
+
+### §15 remote bridge — full end-to-end success, confirmed live (2026-08-24)
+
+Applied and confirmed. The isaac box (`48588261`) log shows the
+cortex embedding a real frame cleanly (`[isaac_sensor_loop]
+{'visual': False}` — `False` is correct, not a failure: the novelty
+gate correctly marks a static scene's repeat frames as habituated
+after the first) and the intake-boundary observability hook reporting
+it (`[isaac_sim] visual percept: habituated (not novel),
+novelty=0.00`). The MIND's own debug trace (box `48583845`) shows the
+percept actually arriving and driving a real tick:
+
+```
+[19:47:48] Φ=0.22 NT[DA=0.08 NE=0.20 5HT=0.39 ACh=0.30 eCB=0.09 Glu=0.46 GABA=0.15]
+  BG[action=respond n=3 pick=0 H=0.87] HC[recall=3 write=no]
+  CUR[nov=0.26 bore=0.51] SENSE[visual]
+```
+
+`SENSE[visual]` — a real camera frame from Isaac Sim, embedded through
+`VisualCortex`, delivered over `RemoteMindProxy`'s wire protocol
+through the operator-owned two-hop SSH relay, anchored a RECALL, and
+drove a `respond` action. Every piece built across this session's §15
+work is now confirmed working together on real hardware, live: the
+sensory cortices, the Isaac Sim bridge, the remote wire protocol, the
+NGC Docker deploy path, the SSH key injection fix, the cortex
+resilience fix, the camera-construction-ordering fix, and the RGBA
+channel fix.
+
+Total live-iteration count to get here: 3 ghost/stalled vast.ai
+provisioning attempts (host-side, not code bugs), 2 SSH auth root
+causes (ownership, then a missing `chown`), and 4 real code bugs found
+and fixed one at a time against actual hardware (cortex-crash
+resilience, `enable_cameras`, camera-before-reset ordering, RGBA→RGB)
+— each diagnosed from real error output or a live A/B diagnostic, none
+guessed blind. This is the intended shape of the "verified by
+deploying, not unit-tested" exemption CLAUDE.md §1 grants deploy
+scripts: every fix here also has a Python-level RED→GREEN contract
+pinning the DECISION (image choice, config flag, construction order,
+channel handling), even though the live boot sequence itself could
+only ever be proven by actually booting it.
+
+[EVIDENCE: live boxes 48583845 (mind), 48588261 (isaac) — see the preceding entries in this file for the individual fixes' test evidence]

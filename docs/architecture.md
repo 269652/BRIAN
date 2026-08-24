@@ -3932,3 +3932,36 @@ items resolved, some carry over, one is new):
 Not yet re-deployed with the Docker path — `docs/findings.md` records
 the two prior pip-path live attempts and their outcomes as evidence
 this pivot is grounded in what actually failed, not speculation.
+
+### 15.2 — Full end-to-end confirmation, live (2026-08-24)
+
+The Docker path was deployed and iterated on directly against real
+hardware until working. Every item on the §15.1 unverified list above
+resolved one way or another: `--login` IS honoured (confirmed —
+multiple successful private-registry pulls across several redeploys);
+image pull timing was a real cost driver on two bad hosts (one ghost
+instance, one stalled pull — both host-side, not code) but not on a
+healthy one; `pip install -e .[ml]` into the NGC image's Python never
+hit a torch conflict. Four additional real bugs surfaced and were
+fixed one at a time, each grounded in actual error output or a live
+A/B diagnostic (never guessed blind): the account's SSH key wasn't
+reaching the container (fixed by injecting it directly, then by fixing
+a `chown`-vs-`chmod` gap sshd's `StrictModes` caught); a cortex-level
+exception could crash the whole sensor loop (fixed by extending the
+same resilience boundary that already covered raw sensor reads);
+`SimulationApp({"headless": True})` alone never enabled camera
+rendering (needs `enable_cameras: True`); the camera had to be
+constructed before `world.reset()`, not after (found via an isolated
+diagnostic script, not a guess); Isaac Sim's RGBA camera output broke
+the RGB-only CLIP processor (fixed in `VisualCortex`, not
+Isaac-Sim-specific).
+
+Confirmed live, in the mind's own debug trace: `SENSE[visual]` — a
+real camera frame from Isaac Sim, embedded through `VisualCortex`,
+delivered over `RemoteMindProxy`'s wire protocol through the
+operator-owned two-hop SSH relay, anchoring a RECALL and driving a
+`respond` action. §15's entire design — SENSE as latent embeddings,
+never captions, competing in the same cosine-similarity space as the
+mind's own thoughts — is now demonstrated working end to end, not just
+unit-tested. See `docs/findings.md`'s "full end-to-end success"
+entry for the exact log lines.
