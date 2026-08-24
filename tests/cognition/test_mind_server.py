@@ -911,6 +911,88 @@ class TestIsaacDeployCliWiring:
         s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861})
         assert "PIPESTATUS[0]" in s
 
+    def test_isaac_onstart_injects_the_accounts_ssh_public_keys(self):
+        """Live incident (2026-08-24): the NGC container image doesn't
+        get vast.ai's standard per-account SSH key auto-injection the
+        way the mind box's stock pytorch/pytorch image does —
+        `vastai attach ssh` even reported the key as 'already
+        associated' while the box kept denying it, and a reboot didn't
+        fix it either. Write the key into authorized_keys ourselves,
+        unconditionally, rather than depend on a mechanism this custom
+        image doesn't honour."""
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        key = "ssh-ed25519 AAAAtest moritz@example.com"
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
+                                 "SSH_PUBLIC_KEYS": key})
+        assert key in s
+        assert "authorized_keys" in s
+
+    def test_isaac_onstart_ssh_key_injection_runs_before_the_clone(self):
+        """SSH access should come up as early in boot as possible —
+        placed before the (slower, more failure-prone) git clone
+        step, not after."""
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        key = "ssh-ed25519 AAAAtest moritz@example.com"
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
+                                 "SSH_PUBLIC_KEYS": key})
+        assert s.index("authorized_keys") < s.index("git clone")
+
+    def test_isaac_onstart_skips_key_injection_cleanly_when_none_given(self):
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
+                                 "SSH_PUBLIC_KEYS": ""})
+        assert "authorized_keys" not in s
+
+    def test_isaac_launch_fetches_and_injects_the_account_ssh_keys(
+            self, monkeypatch, tmp_path):
+        import neuroslm.connectors.vast_isaac as vi
+
+        monkeypatch.setenv("GH_TOKEN", "ghp_x")
+        monkeypatch.setenv("NGC_API_KEY", "ngc_x")
+        monkeypatch.chdir(tmp_path)
+        captured = {}
+
+        def fake_call(argv, cwd, env, stdin):
+            onstart_path = env["ONSTART_FILE"]
+            captured["onstart"] = open(onstart_path, encoding="utf-8").read()
+            return 0
+
+        monkeypatch.setattr(vi.VastIsaacConnector, "_find_bash",
+                            staticmethod(lambda: "bash"))
+        monkeypatch.setattr(vi.VastIsaacConnector, "_fetch_ssh_public_keys",
+                            staticmethod(lambda: ["ssh-ed25519 AAAAfetched "
+                                                  "moritz@example.com"]))
+        monkeypatch.setattr(vi.subprocess, "call", fake_call)
+
+        vi.VastIsaacConnector().launch(vi.IsaacSimDeployConfig())
+        assert "ssh-ed25519 AAAAfetched moritz@example.com" in captured["onstart"]
+
+    def test_isaac_launch_handles_ssh_key_fetch_failure_gracefully(
+            self, monkeypatch, tmp_path):
+        """§8.1: a fetch failure must not crash the deploy chain — the
+        box just boots without the defensive key-injection block,
+        same as before this fix existed."""
+        import neuroslm.connectors.vast_isaac as vi
+
+        monkeypatch.setenv("GH_TOKEN", "ghp_x")
+        monkeypatch.setenv("NGC_API_KEY", "ngc_x")
+        monkeypatch.chdir(tmp_path)
+
+        def fake_call(argv, cwd, env, stdin):
+            return 0
+
+        def failing_fetch():
+            raise RuntimeError("vastai show ssh-keys failed")
+
+        monkeypatch.setattr(vi.VastIsaacConnector, "_find_bash",
+                            staticmethod(lambda: "bash"))
+        monkeypatch.setattr(vi.VastIsaacConnector, "_fetch_ssh_public_keys",
+                            staticmethod(failing_fetch))
+        monkeypatch.setattr(vi.subprocess, "call", fake_call)
+
+        rc = vi.VastIsaacConnector().launch(vi.IsaacSimDeployConfig())
+        assert rc == 0
+
     def test_isaac_onstart_runs_the_containers_own_python(self):
         """No separate pip-managed venv anymore — Isaac Sim's bundled
         interpreter (/isaac-sim/python.sh) is the one true Python

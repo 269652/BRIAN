@@ -4278,3 +4278,59 @@ onstart/config assertions for the Docker path, `NGC_API_KEY` handling,
 Not yet re-deployed with the Docker path.
 
 [EVIDENCE: tests/cognition/test_mind_server.py::TestIsaacDeployCliWiring]
+
+### NGC Docker deploy worked end to end — then a real SSH key gap (2026-08-24)
+
+The Docker pivot was actually deployed (mind `48583845`, isaac
+`48583870`, both fresh). Result: full success on the Isaac Sim side —
+`SimulationApp` started cleanly (RTX 4090 detected, `sm_89`, warp
+kernel cache built), `World` + ground plane initialized, the
+`omni.simready.content.browser` extension failed to load (a harmless
+missing-pip-file in a content-browser UI extension, isolated by Kit's
+own per-extension failure handling, no impact) and the sensor loop
+script ran all the way to `RemoteMindProxy(host="127.0.0.1",
+port=7861)` — which correctly raised `ConnectionRefusedError` because
+no `bridge-isaac` relay tunnel was open yet. Confirms the entire
+pip → Docker pivot diagnosis from the prior session was correct.
+
+Opening the relay then surfaced a SEPARATE, genuine bug: the isaac
+box's reverse SSH leg failed `Permission denied (publickey)` — the
+account's registered key, which authenticates fine against the mind
+box's stock `pytorch/pytorch` image, was rejected by the NGC
+container. `vastai attach ssh <id> <key>` reported `"SSH key already
+associated with instance"`, yet the box kept denying it; `vastai
+reboot instance <id>` (stop/start) didn't fix it either — confirming
+the gap is baked in at original creation time, not a live
+propagation delay. Root cause: vast.ai's own per-account SSH key
+auto-injection, which the mind box's stock image benefits from, isn't
+reliably honoured by this custom NGC image's own container entrypoint.
+
+Fix: `neuroslm/connectors/vast_isaac.py` now fetches the account's
+registered public keys itself (`vastai show ssh-keys --raw` — public
+keys, not secrets) and writes them into `~/.ssh/authorized_keys`
+directly, as the very first thing the onstart script does — before
+git/apt/anything else — rather than depending on a mechanism this
+image doesn't honour. Fails open (§8.1): a fetch error prints a
+warning and the deploy proceeds without the defensive block, exactly
+as it would have before this fix existed.
+
+Also confirmed: a security-conscious moment mid-incident — the SSH
+banner on the isaac box's login screen contained a line explicitly
+addressed to "AI agents," instructing them to read and act on a file
+(`/etc/vast-agents-guide.md`) "before acting on or describing this
+instance." Treated as untrusted observed content per the
+instruction-source-boundary rule (not a user instruction, name the
+source, don't comply) — flagged to the user, not read or acted on.
+
+RED-confirmed (6 contracts:
+`test_isaac_onstart_injects_the_accounts_ssh_public_keys`,
+`test_isaac_onstart_ssh_key_injection_runs_before_the_clone`,
+`test_isaac_onstart_skips_key_injection_cleanly_when_none_given`,
+`test_isaac_launch_fetches_and_injects_the_account_ssh_keys`,
+`test_isaac_launch_handles_ssh_key_fetch_failure_gracefully`).
+GREEN: `test_mind_server.py` 64 (was 59). Requires a fresh deploy to
+take effect — the two already-running instances were created before
+this fix landed; neither `attach` nor `reboot` retroactively fixes
+them.
+
+[EVIDENCE: tests/cognition/test_mind_server.py::TestIsaacDeployCliWiring]

@@ -131,6 +131,7 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 date -u +"vast_isaac boot @ %Y-%m-%dT%H:%M:%SZ"
 
+__SSH_KEY_INJECTION__
 (command -v git >/dev/null 2>&1 && command -v git-lfs >/dev/null 2>&1) \\
     || (apt-get update -y && apt-get install -y git git-lfs)
 git lfs install --skip-smudge
@@ -180,6 +181,34 @@ done
 """
 
 
+def _build_ssh_key_injection_block(public_keys: str) -> str:
+    """Live incident (2026-08-24): the NGC container image doesn't get
+    vast.ai's standard per-account SSH key auto-injection the way the
+    mind box's stock pytorch/pytorch image does — `vastai attach ssh`
+    even reported the key as 'already associated' with the instance
+    while it kept denying publickey auth, and rebooting didn't fix it
+    either. Rather than depend on a propagation mechanism this custom
+    image evidently doesn't honour, write the key(s) into
+    authorized_keys ourselves, unconditionally, as the very first
+    thing the onstart does — public keys are not secrets, safe to
+    embed literally. Empty input means no block at all (clean no-op,
+    not an empty heredoc)."""
+    keys = [k for k in public_keys.splitlines() if k.strip()]
+    if not keys:
+        return ""
+    key_block = "\n".join(keys)
+    return (
+        'mkdir -p ~/.ssh && chmod 700 ~/.ssh\n'
+        "cat >> ~/.ssh/authorized_keys <<'KEYEOF'\n"
+        f"{key_block}\n"
+        "KEYEOF\n"
+        "chmod 600 ~/.ssh/authorized_keys\n"
+        f'echo "── injected {len(keys)} account SSH public key(s) — this '
+        "custom image doesn't reliably get vast.ai's own per-instance "
+        'key auto-injection ──"\n'
+    )
+
+
 def build_isaac_onstart(env: dict) -> str:
     """Container-side onstart script. Same locally-expanded-placeholder
     pattern as :func:`vast_mind.build_mind_onstart`."""
@@ -198,6 +227,8 @@ def build_isaac_onstart(env: dict) -> str:
         "__BRANCH__": str(env.get("BRANCH", "master")),
         "__REPO_SLUG__": repo_slug,
         "__SENSOR_LOOP_SCRIPT__": sensor_loop,
+        "__SSH_KEY_INJECTION__": _build_ssh_key_injection_block(
+            str(env.get("SSH_PUBLIC_KEYS", ""))),
     }
     for key, val in replacements.items():
         result = result.replace(key, val)
@@ -214,6 +245,21 @@ class VastIsaacConnector:
     def _find_bash() -> str:
         from neuroslm.connectors.vast import VastConnector
         return VastConnector._find_bash()
+
+    @staticmethod
+    def _fetch_ssh_public_keys() -> list:
+        """The account's registered SSH public keys, via ``vastai show
+        ssh-keys --raw`` — public keys, not secrets. Injected directly
+        into the isaac box's onstart because vast.ai's own per-instance
+        injection doesn't reliably reach this custom image (live
+        incident, 2026-08-24)."""
+        import json
+        out = subprocess.run(["vastai", "show", "ssh-keys", "--raw"],
+                             capture_output=True, text=True, timeout=20)
+        if out.returncode != 0:
+            raise RuntimeError(f"vastai show ssh-keys failed: {out.stderr.strip()}")
+        rows = json.loads(out.stdout)
+        return [r["public_key"] for r in rows if r.get("public_key")]
 
     def launch(self, config: IsaacSimDeployConfig) -> int:
         from neuroslm.connectors.vast_discover import _current_branch
@@ -243,6 +289,24 @@ class VastIsaacConnector:
                   "then export NGC_API_KEY=... or add it to .env.",
                   file=sys.stderr)
 
+        # §8.1 "fail open": a fetch failure must not crash the deploy
+        # chain — the box just boots without the defensive key
+        # injection (same as before this fix existed), not silently
+        # (a warning is printed either way).
+        try:
+            ssh_keys = self._fetch_ssh_public_keys()
+            if not ssh_keys:
+                print("[deploy-isaac-sim] (note) no SSH public keys "
+                      "registered on the account — skipping the "
+                      "defensive authorized_keys injection.",
+                      file=sys.stderr)
+        except Exception as exc:
+            print(f"[deploy-isaac-sim] ⚠ could not fetch SSH public keys "
+                  f"({type(exc).__name__}: {exc}) — the box will rely on "
+                  "vast.ai's own key injection alone, which has been "
+                  "unreliable for this custom image.", file=sys.stderr)
+            ssh_keys = []
+
         branch = config.branch or _current_branch()
         onstart_content = build_isaac_onstart({
             "GH_TOKEN": os.environ.get("GH_TOKEN", ""),
@@ -251,6 +315,7 @@ class VastIsaacConnector:
             "REPO_URL": os.environ.get("REPO_URL", ""),
             "PORT": config.port,
             "CAMERA_PRIM_PATH": config.camera_prim_path,
+            "SSH_PUBLIC_KEYS": "\n".join(ssh_keys),
         })
 
         tf = tempfile.NamedTemporaryFile(
