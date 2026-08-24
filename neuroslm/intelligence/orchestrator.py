@@ -681,8 +681,16 @@ class NeuralOrchestrator(nn.Module):
         return torch.stack([v[:d] for v in vecs], dim=0)   # (n, d)
 
     @staticmethod
-    def _phi_from_M(M: torch.Tensor) -> torch.Tensor:
+    def gaussian_mi_mip_phi(M: torch.Tensor) -> torch.Tensor:
         """Return a non-negative scalar Φ ≈ min over bipartitions of MI(A;B).
+
+        Public (renamed from the former ``_phi_from_M``) so other runtimes —
+        e.g. ``neuroslm.cognition.consciousness`` — can reuse this exact
+        Gaussian-MI/MIP estimator instead of building a second one. Takes
+        an already-assembled ``M`` (n modules × d dims); callers own their
+        own module-vector construction (this class's is
+        ``_stack_module_outputs``, the mind's is
+        ``neuroslm.cognition.consciousness.bucket_reduce``).
 
         Implementation:
           1. Mean-centre M; compute n×n Gram covariance.
@@ -792,7 +800,7 @@ class NeuralOrchestrator(nn.Module):
             if M is None:
                 return None
         try:
-            return self._phi_from_M(M)
+            return self.gaussian_mi_mip_phi(M)
         except Exception:
             return None
 
@@ -809,7 +817,7 @@ class NeuralOrchestrator(nn.Module):
         if M is None:
             return 0.0
         try:
-            phi = self._phi_from_M(M)
+            phi = self.gaussian_mi_mip_phi(M)
             v = float(phi.item())
             if v != v or v == float('inf') or v == float('-inf'):
                 return 0.0

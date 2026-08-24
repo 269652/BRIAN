@@ -104,6 +104,22 @@ class MindConfig:
     wrote nothing for nine straight ticks and recall served a single
     episode forever."""
 
+    enable_consciousness_metrics: bool = False
+    """Gates per-tick Φ_IIT/broadcast_strength computation (§14.11,
+    neuroslm.cognition.consciousness) — torch-dependent, unlike the
+    rest of this class. CognitiveRuntime's core is deliberately
+    torch-free (the test battery runs the whole loop with deterministic
+    fakes on CPU, module docstring); importing torch unconditionally
+    into every tick would silently break that. Off by default for bare
+    ``CognitiveRuntime()`` construction; ``build_runtime_from_harness``/
+    ``build_runtime_from_hf_lm`` (which already require torch) turn it
+    on for production."""
+
+    consciousness_bucket_k: int = 8
+    """Width `compute_phi_iit`/`compute_broadcast_strength` bucket-
+    reduce every subsystem vector to before comparing them — see
+    neuroslm.cognition.consciousness.bucket_reduce."""
+
     novelty_ema_alpha: float = 0.25
     """EMA rate of the boredom trace: boredom ← (1−α)·boredom +
     α·(1−novelty). Falling novelty accumulates into boredom."""
@@ -257,6 +273,25 @@ class TickResult:
     modality marker, the real user text, or the wander prompt). The
     literal causal link between what was sensed/recalled and what the
     trunk produced; rendered in full by ``format_debug_trace``."""
+    phi_iit: float = 0.0
+    """Real IIT-flavored Φ (§14.11): Gaussian-MI minimum-information-
+    partition over this tick's subsystem vectors (NT state, selected
+    thought, deliberation stats, recall, sensory percept) — see
+    ``neuroslm.cognition.consciousness.compute_phi_iit``, which reuses
+    ``NeuralOrchestrator.gaussian_mi_mip_phi`` verbatim rather than a
+    new estimator. Distinct from ``phi_proxy`` above (a cheap softmax-
+    entropy proxy) — both are kept, separately labeled. 0.0 when
+    ``cfg.enable_consciousness_metrics`` is off (the default) or fewer
+    than 2 subsystem signals were available this tick."""
+    phi_iit_n_modules: int = 0
+    """How many subsystem modules contributed to ``phi_iit`` this tick
+    — distinguishes a genuine near-zero Φ from a degenerate tick with
+    <2 available signals (both otherwise render as ``phi_iit=0.0``)."""
+    broadcast_strength: float = 0.0
+    """GWT-flavored proxy (§14.11): cosine correlation between the
+    winning thought and the rest of this tick's subsystem state — see
+    ``neuroslm.cognition.consciousness.compute_broadcast_strength``.
+    Same off-by-default/0.0 conditions as ``phi_iit``."""
 
 
 _NT_ORDER = ("DA", "NE", "5HT", "ACh", "eCB", "Glu", "GABA")
@@ -290,7 +325,11 @@ def format_introspection(result: TickResult) -> str:
          + (" replay" if result.replay else "") + "]")
     cur = f"CUR[nov={result.novelty:.2f} bore={result.boredom:.2f}]"
     sense = f" SENSE[{result.sensory_modality}]" if result.sensory_modality else ""
-    return f"Φ={result.phi_proxy:.2f} {nt_str} {bg} {hc} {cur}{sense}"
+    consciousness = (f" Φ_IIT={result.phi_iit:.2f}(n={result.phi_iit_n_modules}) "
+                     f"GWT={result.broadcast_strength:.2f}"
+                     if result.phi_iit_n_modules else "")
+    return (f"Φ={result.phi_proxy:.2f} {nt_str} {bg} {hc} {cur}{sense}"
+           f"{consciousness}")
 
 
 def _truncate(text: str, n: int = 90) -> str:
@@ -349,6 +388,13 @@ def format_debug_trace(result: TickResult) -> str:
                  f"decisiveness, diff={result.differentiation:.2f} nats "
                  f"repertoire spread — IIT-flavored proxies, not a "
                  f"rigorous Φ):")
+    if result.phi_iit_n_modules:
+        lines.append(f"  CONSCIOUSNESS: Φ_IIT={result.phi_iit:.3f} "
+                     f"(Gaussian-MI min-info-partition over "
+                     f"{result.phi_iit_n_modules} subsystem vectors, "
+                     f"gaussian_mi_mip_phi) GWT={result.broadcast_strength:.3f} "
+                     f"(cosine of the winning thought vs. the rest of this "
+                     f"tick's subsystem state)")
     for cand, sc in zip(result.candidates, result.scores):
         selected = cand == result.thought
         mark = "SELECTED" if selected else "        "
@@ -843,6 +889,39 @@ class CognitiveRuntime:
         if reorient:
             self._low_nov_streak = 0
 
+        # CONSCIOUSNESS METRICS (§14.11, torch-gated — see MindConfig.
+        # enable_consciousness_metrics): assemble this tick's real
+        # subsystem vectors and hand them to
+        # neuroslm.cognition.consciousness, which reuses
+        # NeuralOrchestrator's Gaussian-MI/MIP estimator verbatim
+        # rather than a sixth ad-hoc proxy. Never allowed to abort a
+        # tick over telemetry.
+        phi_iit, phi_iit_n_modules, broadcast_strength = 0.0, 0, 0.0
+        if self.cfg.enable_consciousness_metrics:
+            try:
+                from neuroslm.cognition.consciousness import (
+                    compute_broadcast_strength, compute_phi_iit)
+                modules: Dict[str, List[float]] = {
+                    "nt": [levels.get(k, 0.0) for k in _NT_ORDER],
+                    "thought": thought_vec,
+                    "deliberation": [selection_entropy, differentiation,
+                                     novelty, self._boredom, sc.mean_nll],
+                }
+                recall_vecs = [list(e["content_vec"]) for e in recalled
+                              if e.get("content_vec")]
+                if recall_vecs:
+                    modules["recall"] = [
+                        sum(col) / len(recall_vecs)
+                        for col in zip(*recall_vecs)]
+                if sensory_vecs and sensory_vecs[-1] is not None:
+                    modules["sensory"] = list(sensory_vecs[-1][0])
+                k = self.cfg.consciousness_bucket_k
+                phi_iit, phi_iit_n_modules = compute_phi_iit(modules, k=k)
+                broadcast_strength = compute_broadcast_strength(
+                    modules, "thought", k=k)
+            except Exception:
+                phi_iit, phi_iit_n_modules, broadcast_strength = 0.0, 0, 0.0
+
         self._last_thought = thought
         return TickResult(thought=thought, candidates=candidates,
                           scores=scores, recalled=recalled,
@@ -855,7 +934,10 @@ class CognitiveRuntime:
                           differentiation=differentiation,
                           novelty=novelty, boredom=self._boredom,
                           replay=replay, reorient=reorient,
-                          sensory_modality=sensory_modality, prompt=prompt)
+                          sensory_modality=sensory_modality, prompt=prompt,
+                          phi_iit=phi_iit,
+                          phi_iit_n_modules=phi_iit_n_modules,
+                          broadcast_strength=broadcast_strength)
 
     # ── Internals ────────────────────────────────────────────────────
 
@@ -976,6 +1058,18 @@ class CognitiveRuntime:
 
 # ── Production wiring ────────────────────────────────────────────────
 
+def _production_cfg(cfg: Optional[MindConfig]) -> MindConfig:
+    """Shared by both production builders below: turns on the torch-
+    dependent capabilities ``CognitiveRuntime``/``MindConfig`` default
+    off (see their docstrings — bare ``CognitiveRuntime()``, what the
+    test battery uses, stays torch-free). Anything built from a real
+    trunk/expert already requires torch, so there is no cost to
+    enabling them here."""
+    cfg = cfg or MindConfig()
+    cfg.enable_consciousness_metrics = True
+    return cfg
+
+
 def build_runtime_from_harness(harness: Any, tokenizer: Any,
                                device: str = "cpu",
                                cfg: Optional[MindConfig] = None,
@@ -1041,7 +1135,7 @@ def build_runtime_from_harness(harness: Any, tokenizer: Any,
         return classify_action_via_generation(text, generate_fn)
 
     return CognitiveRuntime(generate_fn=generate_fn, score_fn=score_fn,
-                            embed_fn=embed_fn, cfg=cfg,
+                            embed_fn=embed_fn, cfg=_production_cfg(cfg),
                             classify_fn=classify_fn)
 
 
@@ -1214,6 +1308,6 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
         return classify_action_via_generation(text, generate_fn)
 
     return CognitiveRuntime(generate_fn=generate_fn, score_fn=score_fn,
-                            embed_fn=embed_fn, cfg=cfg,
+                            embed_fn=embed_fn, cfg=_production_cfg(cfg),
                             classify_fn=classify_fn,
                             generate_wander_fn=generate_wander_fn)

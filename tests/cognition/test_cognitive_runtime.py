@@ -1831,3 +1831,91 @@ class TestGenerationQuality:
         rt, model = self._rt(_FakeChatTokenizer)
         out = rt._gen("hello", 3)
         assert out == _FakeChatTokenizer().decode([7, 7, 7])
+
+
+# ── §14.11: real IIT-flavored Φ + GWT-flavored broadcast strength ────
+
+class TestConsciousnessMetrics:
+    """CognitiveRuntime wiring for neuroslm.cognition.consciousness —
+    see tests/cognition/test_consciousness.py for the math itself. Here
+    we pin: off by default, populated when enabled, zeroed on an
+    inhibited tick, and surfaced in both telemetry formatters."""
+
+    def _enabled_runtime(self, **cfg_kwargs):
+        from neuroslm.cognition.runtime import MindConfig
+        cfg = MindConfig(n_candidates=2, enable_consciousness_metrics=True,
+                         **cfg_kwargs)
+        gen = _ScriptedGen(["first candidate thought",
+                           "second candidate thought"])
+        return _mk_runtime(gen, cfg=cfg), gen
+
+    def test_disabled_by_default_phi_iit_stays_zero(self):
+        gen = _ScriptedGen(["a thought", "another thought"])
+        rt = _mk_runtime(gen)  # default MindConfig -> disabled
+        result = rt.tick()
+        assert result.phi_iit == 0.0
+        assert result.phi_iit_n_modules == 0
+        assert result.broadcast_strength == 0.0
+
+    def test_enabled_tick_computes_phi_iit_with_modules_present(self):
+        rt, _ = self._enabled_runtime()
+        result = rt.tick()
+        # A wandering first tick always has >=2 subsystem vectors (NT
+        # state + the selected thought) even with empty memory.
+        assert result.phi_iit_n_modules >= 2
+        assert result.phi_iit >= 0.0
+        assert math.isfinite(result.phi_iit)
+        assert math.isfinite(result.broadcast_strength)
+
+    def test_inhibited_tick_reports_zero_phi_and_zero_modules(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["a thought", "another thought"])
+        cfg = MindConfig(n_candidates=2, enable_consciousness_metrics=True)
+        nt = _FakeNT(GABA=0.9)  # >= gaba_silence_threshold
+        rt = _mk_runtime(gen, nt=nt, cfg=cfg)
+        result = rt.tick()
+        assert result.inhibited
+        assert result.phi_iit == 0.0
+        assert result.phi_iit_n_modules == 0
+        assert result.broadcast_strength == 0.0
+
+    def test_format_introspection_includes_phi_iit_and_broadcast(self):
+        from neuroslm.cognition.runtime import format_introspection
+        rt, _ = self._enabled_runtime()
+        result = rt.tick()
+        line = format_introspection(result)
+        assert "Φ_IIT=" in line
+        assert "GWT=" in line
+
+    def test_format_debug_trace_includes_consciousness_line(self):
+        from neuroslm.cognition.runtime import format_debug_trace
+        rt, _ = self._enabled_runtime()
+        result = rt.tick()
+        trace = format_debug_trace(result)
+        assert "CONSCIOUSNESS:" in trace
+        assert "gaussian_mi_mip_phi" in trace
+
+    def test_disabled_tick_debug_trace_omits_consciousness_line(self):
+        from neuroslm.cognition.runtime import format_debug_trace
+        gen = _ScriptedGen(["a thought", "another thought"])
+        rt = _mk_runtime(gen)  # disabled
+        result = rt.tick()
+        assert "CONSCIOUSNESS:" not in format_debug_trace(result)
+
+    def test_phi_proxy_field_unchanged_still_present(self):
+        """Regression pin: adding phi_iit must not disturb the existing
+        cheap entropy-based phi_proxy."""
+        rt, _ = self._enabled_runtime()
+        result = rt.tick()
+        assert 0.0 <= result.phi_proxy <= 1.0
+
+    def test_build_runtime_from_hf_lm_enables_consciousness_metrics(self):
+        """Production builder wiring (§1b reuse, not a duplicate flag):
+        build_runtime_from_hf_lm must turn the flag on even when the
+        caller passes no cfg at all."""
+        from neuroslm.cognition.runtime import build_runtime_from_hf_lm
+        model = _FakeHFModelWithGenerate()
+        rt = build_runtime_from_hf_lm(
+            "fake/expert", model_factory=lambda: model,
+            tokenizer_factory=_FakeHFTokenizer)
+        assert rt.cfg.enable_consciousness_metrics is True

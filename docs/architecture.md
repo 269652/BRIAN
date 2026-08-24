@@ -3320,15 +3320,18 @@ re-entry into wandering after handling external input requires no
 special-case code — `_sensory` drains after the tick that consumes
 it, so the very next tick reverts to `wandering=True` automatically.
 
-**IIT-flavored telemetry** (explicitly proxies, not a rigorous Φ — the
-cognition layer has no activation-partition access to compute real
-integrated information): `selection_entropy` — normalised entropy of
+**IIT-flavored telemetry** (explicitly proxies, not a rigorous Φ):
+`selection_entropy` — normalised entropy of
 the basal ganglia's softmax(-NLL/T) choice distribution (low =
 confident exclusion of alternatives, high = arbitrary among near-equal
 options); `differentiation` — population stdev (nats) of the candidate
 repertoire's NLLs (how distinguishable THINK's options were). Both
 shown in `format_debug_trace`'s `BG deliberation (H=... diff=...)`
-line and `format_introspection`'s `BG[... H=...]`.
+line and `format_introspection`'s `BG[... H=...]`. §14.11 adds a
+second, genuinely IIT-flavored pair of metrics (`phi_iit`,
+`broadcast_strength`) alongside these — the cognition layer DOES now
+have access to a real Gaussian-MI/MIP integrated-information estimate,
+reused from `NeuralOrchestrator` rather than a new one.
 
 **Full-text rendering**: `thought_n_tok` raised 32→96 (live thoughts
 were running out of token budget mid-sentence — read as a display bug,
@@ -3835,6 +3838,87 @@ RED-confirmed (18 contracts: `TestIsaacDeployCliWiring`, the
 `test_articulation_prim_path_is_optional`). GREEN:
 `test_mind_server.py` 53 (was 41), `test_isaac_sim.py` 12 (was 11).
 Not deployed — `brian deploy-isaac-sim` has not been run.
+
+### 14.11 Real IIT-flavored Φ + a GWT-flavored broadcast metric (`neuroslm/cognition/consciousness.py`, 2026-08-24)
+
+§14.6 disclaimed `selection_entropy`/`differentiation` as proxies and,
+until this section, additionally claimed "the cognition layer has no
+activation-partition access to compute real integrated information."
+That second claim was false: `neuroslm/intelligence/orchestrator.py`'s
+`NeuralOrchestrator` already computes a genuinely IIT-flavored Φ —
+Gaussian mutual information over an exhaustive minimum-information-
+partition (MIP) search (`gaussian_mi_mip_phi`, public as of this
+change; was `_phi_from_M`) — and has it wired into `Brain`'s own
+forward pass and loss (`brain.py`'s `phi_loss_term`, `_last_phi`
+telemetry). It was simply never reused by `CognitiveRuntime`, the
+runtime `chat_daemon.py` actually drives.
+
+An investigation (2026-08-24) found FOUR separate, non-integrated Φ
+implementations in the repo before this change: this cheap
+`phi_proxy`/`selection_entropy`/`differentiation` trio (softmax entropy
+and NLL stdev — honest, but not integration-theoretic);
+`NeuralOrchestrator.gaussian_mi_mip_phi` (real, Brain-only);
+`neuroslm.verification.verifier.CohomologyValidator.compute_phi` (a
+covariance-norm proxy behind the orphaned `TripleGuard`); and
+`neuroslm.thsd.engine.PhiDynamicsComputer` (a correlation/variance
+stub matching `formal_framework.md` §6.2's own admission that it is "a
+tractable proxy" pending "a real algorithm" — CLAUDE.md §12 documents
+its actual role as Lean-proof-scaffold vocabulary, never a runtime
+metric). Per CLAUDE.md §1b/§14 (reuse before reinventing; no stubs),
+this section reuses the one real implementation rather than building a
+fifth.
+
+**`neuroslm/cognition/consciousness.py`**:
+
+- `bucket_reduce(vec, k=8)` — deterministic mean-pool to a fixed width.
+  `gaussian_mi_mip_phi`'s own module-stacking (`_stack_module_outputs`)
+  truncates every row to the SHORTEST vector — fine for Brain's
+  same-width NFG module outputs, but `CognitiveRuntime`'s real per-tick
+  signals are wildly heterogeneous (the 7-dim NT vector vs. an
+  `embed_dim()`-sized embedding). Bucket-reducing first keeps every
+  module's full extent represented.
+- `compute_phi_iit(modules, k=8) -> (phi, n_modules)` — bucket-reduces
+  each named module vector, stacks to `(n, k)`, calls
+  `NeuralOrchestrator.gaussian_mi_mip_phi` verbatim. `(0.0, n)` when
+  `n < 2` or on any numerical failure.
+- `compute_broadcast_strength(modules, winner_key, k=8)` — a second,
+  GWT-flavored metric: cosine(winner vector, mean of every OTHER module
+  vector) — Dehaene's "ignition" (a winning coalition becomes globally
+  accessible) as a zero-training proxy. Chosen over porting
+  `neuroslm.modules.workspace.GlobalWorkspace` because that module
+  needs LEARNED parameters with no checkpoint on `CognitiveRuntime`'s
+  frozen-HF-expert escape hatch — instantiating it untrained would be
+  the decorative stub CLAUDE.md §14 forbids.
+
+**Wiring**: `MindConfig.enable_consciousness_metrics` (default `False`)
+gates both — `CognitiveRuntime`'s core is deliberately torch-free (its
+test battery runs on CPU with deterministic fakes), so a torch-
+dependent capability must default off for bare construction and only
+switch on in the production builders (`build_runtime_from_harness`,
+`build_runtime_from_hf_lm`, via a shared `_production_cfg` helper).
+Each tick, when enabled, assembles a `modules` dict from signals
+already computed that tick — NT levels, the selected thought's vector,
+deliberation stats (`selection_entropy`, `differentiation`, `novelty`,
+boredom, NLL), the mean of RECALL's episode vectors (if any), and the
+sensory percept vector (if one anchored the tick) — and calls both
+functions inside a `try/except: pass` (telemetry must never abort a
+tick). `TickResult.phi_iit`/`phi_iit_n_modules`/`broadcast_strength`
+are new fields, kept alongside — not replacing — `phi_proxy`. Surfaced
+in `format_introspection` (`Φ_IIT=... GWT=...`), `format_debug_trace`
+(a `CONSCIOUSNESS:` line naming the estimator), and the `server.py`
+wire telemetry.
+
+GREEN: `tests/cognition/test_consciousness.py` (13, new — bucket-reduce
+correctness, Φ higher for correlated than decorrelated module
+constructions mirroring `tests/test_phi.py`'s own pattern, a spy pin
+that `compute_phi_iit` actually calls `gaussian_mi_mip_phi`, broadcast-
+strength edge cases). `tests/cognition/test_cognitive_runtime.py` 146
+(was 138 — 8 new: disabled-by-default, enabled-tick, inhibited-tick,
+both formatters, `phi_proxy` regression pin, production-builder
+wiring). `tests/cognition/test_mind_server.py` 69 (was 68 — telemetry
+round-trip). `tests/test_phi.py` 8, unregressed after the
+`_phi_from_M` → `gaussian_mi_mip_phi` rename (no test referenced the
+private name).
 
 ### 15.1 — Live deploy: pip → NGC Docker pivot, and two real bugs found in the field (2026-08-12, same day)
 

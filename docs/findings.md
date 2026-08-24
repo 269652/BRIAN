@@ -4525,3 +4525,60 @@ channel handling), even though the live boot sequence itself could
 only ever be proven by actually booting it.
 
 [EVIDENCE: live boxes 48583845 (mind), 48588261 (isaac) — see the preceding entries in this file for the individual fixes' test evidence]
+
+### Memory + consciousness-metric audit — what's real, what's orphaned, what's missing (2026-08-24)
+
+Following the §15 success above, asked to (1) analyse the live mind's
+behavior, (2) add IIT/consciousness-theory metrics, (3) verify the
+memory system genuinely builds a self-narrative world model and
+extracts knowledge from experience. A live-log pull (ticks 396-401)
+showed the SENSE→RECALL→THINK→GATE→STORE mechanism working correctly
+(coherent `evolved from:` lineage, well-differentiated selection
+entropy 0.56-0.98) but circling the same topic basin across many ticks
+— novel in embedding space (passes the cosine gate) but not in actual
+topic space — with every recalled episode in that window tagged
+`[inferred]`, none `[observed]`: the memory was self-referentially
+feeding on its own prior output.
+
+Two Explore-agent investigations (confirmed via direct spot-checks, not
+taken on faith) found the live `CognitiveRuntime` (driven by
+`chat_daemon.py` via `build_runtime_from_hf_lm`) architecturally
+thinner than the repo's own design intent:
+
+- **Memory**: exactly one memory dependency, `EpisodicMemory` — a
+  `deque(maxlen=512)` ring buffer, silent FIFO eviction, zero
+  consolidation, zero persistence (confirmed: neither production
+  builder passes a `memory=` override, both fall through to the
+  `512` default at the time). A full, real, mostly-tested self-
+  narrative + entity/relational-knowledge + consolidation + sleep-
+  cycle-replay stack already exists in `neuroslm/memory/` —
+  `narrative.py`, `entity_store.py`, `relational_graph.py`,
+  `consolidation.py`, `sleep_cycle.py`, `causal.py`,
+  `comprehension_gate.py`, `sheaf.py`/`hypergraph.py`, `store.py` — but
+  wired ONLY into the older `neuroslm/brain.py::Brain` (trunk-training)
+  class; zero references anywhere in `neuroslm/cognition/` (confirmed
+  by direct grep). `detect_patterns`/`mine_temporal_associations`
+  (real, working knowledge extraction, confirmed by direct grep) is
+  reachable only via the on-demand `patterns` wire op — never run
+  automatically as part of the tick cycle.
+- **IIT/Φ**: four separate, non-integrated Φ implementations. The best
+  — `NeuralOrchestrator._phi_from_M` (renamed `gaussian_mi_mip_phi`
+  this session) — is a real Gaussian-MI minimum-information-partition
+  estimator, wired into `Brain`'s loss/telemetry, but also Brain-only.
+  `neuroslm.thsd.engine.PhiDynamicsComputer` (the class CLAUDE.md §12
+  names) is confirmed fully orphaned — a correlation/variance stub
+  matching `formal_framework.md` §6.2's own admission it's "a tractable
+  proxy" pending "a real algorithm," never imported outside its own
+  test file; its real job is Lean-proof-scaffold vocabulary.
+
+A 4-phase plan was designed and approved (Plan-mode, `EnterPlanMode`/
+`ExitPlanMode`, saved at `.claude/plans/lazy-zooming-squid.md`) to wire
+the existing, already-tested machinery into the runtime that is
+actually deployed, rather than reinventing it: (1) real Φ_IIT +
+broadcast-strength metrics reusing `gaussian_mi_mip_phi` — see §14.11
+above, delivered this commit; (2) `NarrativeSystem` wired into STORE;
+(3) `detect_patterns` promoted to an automatic reflection cadence; (4)
+memory persistence via `memory/store.py`'s existing `.mem` format.
+Phases 2-4 recorded as their own findings entries as each lands.
+
+[EVIDENCE: docs/architecture.md §14.11; tests/cognition/test_consciousness.py; tests/cognition/test_cognitive_runtime.py::TestConsciousnessMetrics; tests/cognition/test_mind_server.py::TestServerTelemetry::test_telemetry_carries_consciousness_metrics]

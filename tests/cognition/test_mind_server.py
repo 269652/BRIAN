@@ -472,6 +472,23 @@ class TestServerTelemetry:
         res = _rpc(port, {"op": "think"})
         assert res["ok"] is True and res.get("telemetry") is None
 
+    def test_telemetry_carries_consciousness_metrics(self):
+        """§14.11: Φ_IIT/broadcast_strength must round-trip over the
+        wire alongside the existing cheap phi_proxy, not replace it."""
+        from neuroslm.cognition.server import MindServer
+        daemon, _ = _mk_daemon_with_mind([_tick_result(
+            phi_iit=0.73, phi_iit_n_modules=4, broadcast_strength=0.61)])
+        s = MindServer(daemon, host="127.0.0.1", port=0)
+        port = s.start()
+        try:
+            tel = _rpc(port, {"op": "think"})["telemetry"]
+            assert tel["phi_proxy"] == 0.40
+            assert tel["phi_iit"] == 0.73
+            assert tel["phi_iit_n_modules"] == 4
+            assert tel["broadcast_strength"] == 0.61
+        finally:
+            s.stop()
+
 
 class TestConnectClientTelemetry:
     def test_think_command_prints_inner_state(self):
