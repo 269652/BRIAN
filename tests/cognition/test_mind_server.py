@@ -927,6 +927,36 @@ class TestIsaacDeployCliWiring:
         assert key in s
         assert "authorized_keys" in s
 
+    def test_isaac_onstart_ssh_key_injection_fixes_ownership_not_just_mode(
+            self):
+        """Live incident (2026-08-24, take two): the FIRST version of
+        this fix (chmod only) still got 'Authentication refused: bad
+        ownership or modes for file /root/.ssh/authorized_keys' from
+        sshd — mkdir -p is a no-op on a pre-existing .ssh dir (likely
+        left by a partial vast.ai injection attempt), so chmod alone
+        never touched OWNERSHIP. sshd's StrictModes checks both."""
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        key = "ssh-ed25519 AAAAtest moritz@example.com"
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
+                                 "SSH_PUBLIC_KEYS": key})
+        assert "chown" in s, (
+            "chmod alone doesn't fix a pre-existing ownership mismatch "
+            "— sshd's StrictModes rejects the file either way")
+        assert "/root/.ssh" in s, (
+            "absolute path, not ~/.ssh — removes any ambiguity about "
+            "HOME resolution in the onstart's shell context")
+
+    def test_isaac_onstart_ssh_key_injection_also_defends_root_home_perms(
+            self):
+        """sshd's StrictModes walks the WHOLE ancestor chain, not just
+        .ssh/authorized_keys — a group/world-writable /root would
+        trip the same rejection regardless of .ssh's own perms."""
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        key = "ssh-ed25519 AAAAtest moritz@example.com"
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861,
+                                 "SSH_PUBLIC_KEYS": key})
+        assert "chmod go-w /root" in s
+
     def test_isaac_onstart_ssh_key_injection_runs_before_the_clone(self):
         """SSH access should come up as early in boot as possible —
         placed before the (slower, more failure-prone) git clone

@@ -4333,4 +4333,27 @@ take effect — the two already-running instances were created before
 this fix landed; neither `attach` nor `reboot` retroactively fixes
 them.
 
+**Take two, same deploy cycle**: the chmod-only version above was
+actually redeployed (isaac `48586957`, fresh, key-injection line
+confirmed in the boot log) — SSH still refused, this time with an
+exact sshd diagnostic: `Authentication refused: bad ownership or
+modes for file /root/.ssh/authorized_keys`. Root cause of the root
+cause: `mkdir -p` is a no-op on a pre-existing `.ssh` directory
+(plausibly left by a partial vast.ai injection attempt with the wrong
+owner), so `chmod` alone never touched OWNERSHIP — sshd's
+`StrictModes` rejects on either mismatch, and walks the WHOLE
+ancestor chain (`/root` too, not just `.ssh`). Fixed: explicit
+`chown root:root` on both the directory and the file, an absolute
+`/root/.ssh` path instead of `~` (removes any HOME-resolution
+ambiguity in the onstart's shell context — this always runs as root
+already), and `chmod go-w /root` as a minimal defensive strip of any
+group/world-write bit on the home directory itself, without resetting
+its mode to a guessed specific number.
+
+RED-confirmed (2 more contracts:
+`test_isaac_onstart_ssh_key_injection_fixes_ownership_not_just_mode`,
+`test_isaac_onstart_ssh_key_injection_also_defends_root_home_perms`).
+GREEN: `test_mind_server.py` 66 (was 64). Not yet re-verified live —
+needs another fresh deploy.
+
 [EVIDENCE: tests/cognition/test_mind_server.py::TestIsaacDeployCliWiring]

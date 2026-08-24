@@ -192,17 +192,38 @@ def _build_ssh_key_injection_block(public_keys: str) -> str:
     authorized_keys ourselves, unconditionally, as the very first
     thing the onstart does — public keys are not secrets, safe to
     embed literally. Empty input means no block at all (clean no-op,
-    not an empty heredoc)."""
+    not an empty heredoc).
+
+    Take two, same day: the chmod-only version above still got
+    sshd's `Authentication refused: bad ownership or modes for file
+    /root/.ssh/authorized_keys` — `mkdir -p` is a no-op on a
+    pre-existing `.ssh` dir (plausibly left by a partial vast.ai
+    injection attempt with the wrong owner), so `chmod` alone never
+    touched OWNERSHIP; sshd's StrictModes rejects on either mismatch.
+    `chown` explicitly, and use the absolute `/root/.ssh` path — this
+    always runs as root (the apt-get calls elsewhere in the onstart
+    already require it), so there's no ambiguity to remove by using
+    `~`, only a reason not to trust it."""
     keys = [k for k in public_keys.splitlines() if k.strip()]
     if not keys:
         return ""
     key_block = "\n".join(keys)
     return (
-        'mkdir -p ~/.ssh && chmod 700 ~/.ssh\n'
-        "cat >> ~/.ssh/authorized_keys <<'KEYEOF'\n"
+        # StrictModes walks the WHOLE ancestor chain, not just .ssh —
+        # a group/world-writable /root trips the same rejection
+        # regardless of .ssh's own perms. go-w only strips write bits
+        # (doesn't touch read/execute), the minimal change that
+        # satisfies sshd without guessing at a specific numeric mode
+        # some other process in the image might depend on.
+        "chmod go-w /root\n"
+        "mkdir -p /root/.ssh\n"
+        "chown root:root /root/.ssh\n"
+        "chmod 700 /root/.ssh\n"
+        "cat >> /root/.ssh/authorized_keys <<'KEYEOF'\n"
         f"{key_block}\n"
         "KEYEOF\n"
-        "chmod 600 ~/.ssh/authorized_keys\n"
+        "chown root:root /root/.ssh/authorized_keys\n"
+        "chmod 600 /root/.ssh/authorized_keys\n"
         f'echo "── injected {len(keys)} account SSH public key(s) — this '
         "custom image doesn't reliably get vast.ai's own per-instance "
         'key auto-injection ──"\n'
