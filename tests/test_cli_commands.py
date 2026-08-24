@@ -54,13 +54,24 @@ class TestCLICommands:
         not (Path(__file__).parent.parent / "neuroslm" / "cli.py").exists(),
         reason="CLI module not found"
     )
-    def test_brian_dna_compile_requires_arch(self):
-        """brian dna compile (no arch) should show help."""
+    def test_brian_dna_compile_requires_arch(self, tmp_path):
+        """brian dna compile (no arch, no brian.toml to fall back to)
+        should show help.
+
+        cwd is deliberately an empty tmp_path, not the repo root: since
+        `cmd_dna` falls back to `brian.toml [current].arch` when no
+        positional arch is given (see cli.py's cmd_dna docstring), running
+        from the real repo root resolves an arch via brian.toml and
+        actually compiles — writing into the tracked
+        architectures/SmolLM/evolution.dna as a side effect instead of
+        exercising the "arch required" error path this test means to
+        check.
+        """
         result = subprocess.run(
             [sys.executable, "-m", "neuroslm.cli", "dna", "compile"],
             capture_output=True,
             text=True,
-            cwd=str(Path(__file__).parent.parent),
+            cwd=str(tmp_path),
         )
         assert result.returncode != 0, "Should fail with missing arch arg"
         output = result.stdout + result.stderr
