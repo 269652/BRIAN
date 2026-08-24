@@ -143,8 +143,11 @@ def _parse_claim_body(body: str) -> dict[str, Any]:
     # Clean up: remove trailing commas, convert to JSON-compatible
     body = body.strip()
     
-    # Replace Python-style keys with JSON keys
-    body = re.sub(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'"\1":', body)
+    # Replace Python-style keys with JSON keys. Anchored to line-start
+    # (each key sits on its own line) so an identifier-then-colon inside
+    # an already-quoted value — e.g. the "hf:" in a "hf://..." checkpoint
+    # URI — doesn't also get quoted, which corrupts the JSON.
+    body = re.sub(r'(?m)^(\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', body)
     
     # Try to parse as JSON
     try:
@@ -296,7 +299,10 @@ class TemplateRenderer:
             if value is None:
                 return "—"
             elif isinstance(value, float):
-                return f"{value:.1f}"
+                # str(), not a fixed ".1f", so a claim value's own
+                # precision (6.55, not just 6.5/155.0-style values) is
+                # preserved rather than silently truncated.
+                return str(value)
             elif isinstance(value, list):
                 # If it's a log citation triple, format it
                 if len(value) == 3 and isinstance(value[0], str):

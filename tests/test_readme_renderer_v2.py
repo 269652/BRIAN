@@ -140,7 +140,25 @@ Train PPL: ${claim.H22.train_ppl}
         result = renderer.render(template)
         assert "Checkpoint: hf://model/checkpoint.pt" in result
         assert "Train PPL: 23.6" in result
-    
+
+    def test_claim_float_field_keeps_its_own_precision(self, temp_repo):
+        """A claim float isn't forced to one decimal place — gap_ratio:
+        6.55 must render as 6.55, not truncate to 6.5."""
+        metrics = {}
+        renderer = TemplateRenderer(temp_repo, metrics)
+
+        template = '''
+$claim{
+    id: "H22",
+    hypothesis: "H22",
+    gap_ratio: 6.55
+}
+
+Gap ratio: ${claim.H22.gap_ratio}
+'''
+        result = renderer.render(template)
+        assert "Gap ratio: 6.55" in result
+
     def test_citation(self, temp_repo):
         metrics = {}
         renderer = TemplateRenderer(temp_repo, metrics)
