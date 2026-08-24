@@ -1052,6 +1052,24 @@ class TestIsaacDeployCliWiring:
         s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861})
         assert '"enable_cameras": True' in s
 
+    def test_isaac_onstart_creates_the_camera_before_world_reset(self):
+        """Live incident (2026-08-24), the ACTUAL root cause behind
+        get_rgba() never returning real data: a standalone diagnostic
+        (identical setup, camera created BEFORE world.reset()) got a
+        valid (224,224,4) uint8 frame from step 1 onward. The
+        production sensor loop created the camera (via
+        OmniverseIsaacSimClient, inside 'client = ...') AFTER
+        world.reset() -- and never produced one real frame in 5+
+        minutes / thousands of ticks live. Not a warm-up timing issue
+        -- an ordering bug. Isaac Sim's reset() must see the camera
+        prim already in the stage to wire up its render product."""
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861})
+        assert s.index("OmniverseIsaacSimClient(camera_prim_path") < s.index(
+            "world.reset()"), (
+            "the camera must be constructed BEFORE world.reset(), not "
+            "after -- confirmed via a live A/B diagnostic, not a guess")
+
     def test_isaac_launch_falls_back_to_env_file_when_shell_env_is_empty(
             self, monkeypatch, tmp_path):
         import neuroslm.connectors.vast_isaac as vi

@@ -4421,7 +4421,35 @@ headless_mode`). GREEN: `test_mind_server.py` 67 (was 66). Applied
 live via SSH to the running box (edited `/workspace/
 isaac_sensor_loop.py` directly, killed the stable process so the
 existing crash-restart loop re-launched it with the fix — no
-redeploy, no additional spend) — verification of an actual delivered
-percept in progress.
+redeploy, no additional spend). Applied and confirmed the process
+booted and connected through the bridge cleanly — but 5+ more minutes
+of live polling still showed zero `{attended}` percept lines.
+`enable_cameras=True` was necessary but not sufficient.
 
-[EVIDENCE: tests/cognition/test_mind_server.py::TestIsaacDeployCliWiring::test_isaac_onstart_enables_cameras_in_headless_mode]
+**Actual root cause, found via an isolated A/B diagnostic (not another
+guess).** Wrote a standalone script with the identical
+World/ground-plane/Camera setup, run directly on the box via SSH
+(paused the production sensor loop first so nothing contended for the
+GPU) — printing `get_rgba()`'s shape/dtype after every step for 60
+steps. Result: `step=0` returned `None`, every step from `step=1`
+onward returned a real `(224, 224, 4) uint8` frame. The ONE structural
+difference from the production script: the diagnostic constructs the
+`Camera` BEFORE `world.reset()`; the production sensor loop
+constructs it (via `OmniverseIsaacSimClient`, inside the `client = ...`
+line) AFTER `world.reset()` — and never produced a single real frame
+across 5+ minutes / thousands of ticks live. Not a warm-up-duration
+issue at all — an ordering bug: `world.reset()` needs the camera prim
+already present in the stage to wire up its render product.
+
+Fixed: moved `client = OmniverseIsaacSimClient(...)` to before
+`world.reset()` in the sensor loop template. RED-confirmed (1
+contract: `test_isaac_onstart_creates_the_camera_before_world_reset`)
+— one test-authoring bug caught during the GREEN pass, not an
+implementation bug: the test's own explanatory docstring happened to
+contain the literal substring `world.reset()` earlier in the onstart
+script than the real call (inside my own comment explaining the fix),
+confusing a naive `.index()` ordering check — fixed by rewording the
+comment, not the code, which was already correct. GREEN:
+`test_mind_server.py` 68 (was 67).
+
+[EVIDENCE: tests/cognition/test_mind_server.py::TestIsaacDeployCliWiring::test_isaac_onstart_enables_cameras_in_headless_mode, test_isaac_onstart_creates_the_camera_before_world_reset]

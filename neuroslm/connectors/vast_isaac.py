@@ -113,12 +113,20 @@ from neuroslm.cognition.server import RemoteMindProxy
 
 world = World()
 world.scene.add_default_ground_plane()
+# Live incident (2026-08-24), confirmed via a live A/B diagnostic (not
+# a guess): the camera must be constructed BEFORE the world is reset,
+# not after. Creating it after that reset left get_rgba() returning
+# None forever (5+ minutes / thousands of ticks live, zero real
+# frames) -- an isolated script with the SAME setup but camera-first
+# order got a valid (224,224,4) uint8 frame from step 1 onward. The
+# reset needs the camera prim already in the stage to wire up its
+# render product.
+client = OmniverseIsaacSimClient(camera_prim_path="__CAMERA_PRIM_PATH__")
 world.reset()
 
 print("[isaac_sensor_loop] connecting to the mind via the operator's "
      "relay tunnel (127.0.0.1:__PORT__) ...", flush=True)
 proxy = RemoteMindProxy(host="127.0.0.1", port=__PORT__)
-client = OmniverseIsaacSimClient(camera_prim_path="__CAMERA_PRIM_PATH__")
 bridge = SensoryBridge(proxy, client)
 
 print("[isaac_sensor_loop] booted -- pumping sensory input to the mind",
