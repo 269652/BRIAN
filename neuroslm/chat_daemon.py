@@ -597,6 +597,7 @@ def run_chat_daemon(
         expert: Optional[str] = None,
         serve: bool = False,
         serve_port: int = 7861,
+        memory_path: Optional[str] = None,
         out_stream=sys.stdout,
         in_stream=sys.stdin,
 ) -> int:
@@ -638,6 +639,7 @@ def run_chat_daemon(
             model_factory=lambda: model,
             tokenizer_factory=lambda: hf_tok,
         ) if mind else None
+        _load_mind_memory_if_present(runtime, memory_path, out_stream)
         # The daemon's reply path shares the SAME loaded model via the
         # same wrapper class the runtime builder uses.
         _rt_for_gen = runtime or build_runtime_from_hf_lm(
@@ -661,10 +663,9 @@ def run_chat_daemon(
                            f"zero-training mode")
         if not no_thoughts:
             daemon.start_thought_thread()
-        if serve:
-            return _run_server(daemon, serve_port, out_stream=out_stream)
-        return _run_repl(daemon, out_stream=out_stream,
-                         in_stream=in_stream)
+        return _run_daemon_loop(daemon, runtime, memory_path, serve=serve,
+                                serve_port=serve_port, out_stream=out_stream,
+                                in_stream=in_stream)
 
     # Resolve arch root
     arch_path = _resolve_chat_arch(arch_root, ckpt_path)
@@ -726,6 +727,7 @@ def run_chat_daemon(
         runtime = build_runtime_from_harness(harness, tok, device=device,
                                              temperature=temperature,
                                              top_k=top_k)
+        _load_mind_memory_if_present(runtime, memory_path, out_stream)
     daemon = ChatDaemon(
         gen_fn,
         ChatDaemonConfig(
@@ -743,9 +745,66 @@ def run_chat_daemon(
     if not no_thoughts:
         daemon.start_thought_thread()
 
+    return _run_daemon_loop(daemon, runtime, memory_path, serve=serve,
+                            serve_port=serve_port, out_stream=out_stream,
+                            in_stream=in_stream)
+
+
+def _load_mind_memory_if_present(runtime, memory_path: Optional[str],
+                                 out_stream) -> None:
+    """§14.14 boot-time load: restores ``runtime``'s episodic/narrative
+    state from ``memory_path`` if both are present and the file exists.
+    A no-op (never an error to the caller) when there's no mind to
+    restore into, no path was given, or the file doesn't exist yet
+    (first boot) — a load failure is reported and swallowed rather
+    than aborting the boot (§8.1 "fail open" convention)."""
+    if runtime is None or not memory_path:
+        return
+    p = Path(memory_path)
+    if not p.exists():
+        return
+    from neuroslm.memory.store import load_mind_memory
+    try:
+        stats = load_mind_memory(p, runtime)
+        out_stream.write(
+            f"[chat] resumed {stats.get('n_episodes', 0)} episodes / "
+            f"{stats.get('n_narrative_events', 0)} narrative events "
+            f"from {p}\n")
+        out_stream.flush()
+    except Exception as e:
+        out_stream.write(
+            f"[chat] ✗ could not load memory from {p}: "
+            f"{type(e).__name__}: {e} — starting fresh\n")
+        out_stream.flush()
+
+
+def _run_daemon_loop(daemon: ChatDaemon, runtime, memory_path: Optional[str],
+                     *, serve: bool, serve_port: int, out_stream, in_stream
+                     ) -> int:
+    """Runs the server or REPL loop, then saves ``runtime``'s memory to
+    ``memory_path`` on clean shutdown (§14.14) — save-on-exit only, no
+    periodic background write (avoids write amplification on a rented
+    box's disk). The single place both ``run_chat_daemon`` boot paths
+    (``--expert`` and the checkpoint/trunk path) route their final
+    return through, so the save-on-exit logic exists exactly once."""
     if serve:
-        return _run_server(daemon, serve_port, out_stream=out_stream)
-    return _run_repl(daemon, out_stream=out_stream, in_stream=in_stream)
+        code = _run_server(daemon, serve_port, out_stream=out_stream)
+    else:
+        code = _run_repl(daemon, out_stream=out_stream, in_stream=in_stream)
+    if runtime is not None and memory_path:
+        from neuroslm.memory.store import save_mind_memory
+        try:
+            stats = save_mind_memory(memory_path, runtime)
+            out_stream.write(
+                f"[chat] saved {stats.get('n_episodes', 0)} episodes to "
+                f"{memory_path}\n")
+            out_stream.flush()
+        except Exception as e:
+            out_stream.write(
+                f"[chat] ✗ could not save memory to {memory_path}: "
+                f"{type(e).__name__}: {e}\n")
+            out_stream.flush()
+    return code
 
 
 def _run_server(daemon: ChatDaemon, port: int, *,

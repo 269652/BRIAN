@@ -4219,6 +4219,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
             mind=bool(getattr(args, "mind", False)),
             serve=bool(getattr(args, "serve", False)),
             serve_port=int(getattr(args, "port", 7861)),
+            memory_path=getattr(args, "memory", None),
         )
 
     ckpt: Optional[str] = getattr(args, "pt", None) or args.ckpt
@@ -4315,6 +4316,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
         mind=bool(getattr(args, "mind", False)),
         serve=bool(getattr(args, "serve", False)),
         serve_port=int(getattr(args, "port", 7861)),
+        memory_path=getattr(args, "memory", None),
     )
 
 
@@ -6389,6 +6391,14 @@ def _build_parser() -> argparse.ArgumentParser:
              "checkpoint — usable with zero training. Bare flag = the "
              "general roster slot (smollm2_360m); accepts any roster "
              "alias or HF owner/repo id. Composes with --mind.")
+    sc_chat.add_argument(
+        "--memory", dest="memory", default=None, metavar="PATH",
+        help="§14.14: persist the mind's episodic/narrative memory "
+             "across restarts. Loaded from PATH on boot if it exists; "
+             "saved to PATH on clean shutdown. Requires --mind (a "
+             "checkpoint-only, no-mind chat has nothing to persist). "
+             "Survives a process restart on the same box; does NOT by "
+             "itself survive destroying/recreating the instance.")
     sc_chat.add_argument(
         "--serve", action="store_true",
         help="Headless server mode: expose the daemon on a localhost "

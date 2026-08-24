@@ -3908,7 +3908,7 @@ in `format_introspection` (`Φ_IIT=... GWT=...`), `format_debug_trace`
 (a `CONSCIOUSNESS:` line naming the estimator), and the `server.py`
 wire telemetry.
 
-GREEN: `tests/cognition/test_consciousness.py` (13, new — bucket-reduce
+GREEN: `tests/cognition/test_iit_consciousness.py` (13, new — bucket-reduce
 correctness, Φ higher for correlated than decorrelated module
 constructions mirroring `tests/test_phi.py`'s own pattern, a spy pin
 that `compute_phi_iit` actually calls `gaussian_mi_mip_phi`, broadcast-
@@ -4021,6 +4021,68 @@ cadence result, cheap for an operator to poll.
 GREEN: `tests/cognition/test_cognitive_runtime.py` 167 (was 161 — 6
 new: `TestAutonomousReflection`). `tests/cognition/test_mind_server.py`
 74 (was 72 — `TestReflectionsOp` ×2).
+
+### 14.14 Memory persistence — the mind survives a process restart (`neuroslm/memory/store.py`, 2026-08-24)
+
+Closing the last gap the 2026-08-24 investigation found: `CognitiveRuntime`
+had NO persistence at all before this — `EpisodicMemory` + (since §14.12)
+`NarrativeSystem` + (since §14.13) mined association rules all lived
+only in process memory, lost on every restart. Reuses the SAME
+checkpoint format PATTERN the older `Brain` class already has
+(`memory/store.py`'s pickle + JSON-sidecar `.mem` file, §10's
+narrative-stream serialization) rather than inventing a second scheme.
+
+**Refactor first**: `_stream_state`/`_fit`/`_restore_stream` — previously
+private closures duplicated inline inside `save_memory`/`load_memory`
+— are now module-level functions taking `d_sem`/`device` explicitly.
+Both the Brain-shaped and the new Mind-shaped path share ONE
+narrative-(de)serialization implementation; `tests/test_memory.py`'s
+existing 14 tests confirm the refactor is behavior-preserving.
+
+**`MIND_FORMAT = "neuroslm.memory.mind.v1"`** — deliberately distinct
+from Brain's `FORMAT` tag, so a wrong-shaped file is rejected with a
+clear `ValueError` at load time rather than silently mis-interpreted
+(mirrors the existing `FORMAT` guard).
+
+**`save_mind_memory(path, mind)` / `load_mind_memory(path, mind)`**:
+serializes `mind.memory.all()` (already plain Python — no torch
+tensors, simpler than Brain's graph-shaped path), `mind.narrative`'s
+streams if attached, `mind._mined_rules` (flat dataclasses, pickle for
+free), and the tick/boredom/wander counters (so a resumed mind's
+curiosity homeostat doesn't silently reset to zero). Load respects the
+CURRENT run's `EpisodicMemory.maxlen` — if the file holds more
+episodes than the buffer can hold, only the most recent survive
+(ring-buffer semantics preserved, not silently ignored). A file saved
+with narrative enabled, loaded into a run with `cfg.enable_narrative`
+off, skips the narrative section silently rather than erroring —
+config-gated, like every other capability here.
+
+**Daemon wiring**: `run_chat_daemon` gains `memory_path`. Two new
+helpers in `chat_daemon.py` — `_load_mind_memory_if_present` (boot-time,
+fail-open: a load error is reported and swallowed, never aborts the
+boot, §8.1's convention) and `_run_daemon_loop` (the single place both
+boot paths' — `--expert` and the checkpoint/trunk path — final
+`_run_server`/`_run_repl` call now routes through, so "save on clean
+exit" exists exactly once instead of duplicated at 4 return sites).
+Save-on-exit ONLY — no periodic background write, to avoid write
+amplification on a rented box's disk. New `brian chat --memory PATH`
+CLI flag (requires `--mind`; a checkpoint-only chat has nothing to
+persist).
+
+**Caveat, stated plainly rather than oversold**: this survives a
+`chat_daemon` PROCESS RESTART on the same vast.ai instance (the exact
+git-fetch-and-restart live-patch pattern used throughout this
+session's §15 work). It does NOT by itself survive destroying and
+recreating the instance — that additionally needs the operator to copy
+the `.mem` file off-box first.
+
+GREEN: `tests/cognition/test_persistence.py` 8 (new — save/load
+roundtrip, narrative streams, tick/boredom/mined-rules counters, wrong-
+format rejection, maxlen respected on load). `tests/test_chat_daemon.py`
+43 (was 34 — `TestMindMemoryPersistence` ×9, all torch-free per this
+suite's own convention: the fake mind's `.narrative` stays `None`).
+`tests/test_cli_hf_chat.py` 33 (was 32 — `--memory` flag threading).
+`tests/test_memory.py` 14 unregressed after the shared-helper refactor.
 
 ### 15.1 — Live deploy: pip → NGC Docker pivot, and two real bugs found in the field (2026-08-12, same day)
 

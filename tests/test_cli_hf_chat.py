@@ -303,6 +303,35 @@ class TestCmdChat:
         assert called["ckpt_path"] == str(ckpt)
         assert called["no_color"] is True
         assert called["no_thoughts"] is True
+        assert called["memory_path"] is None, (
+            "no --memory flag given -> None, not KeyError/AttributeError")
+
+    def test_memory_flag_threads_through_to_run_chat_daemon(
+            self, monkeypatch, tmp_path):
+        """§14.14: --memory PATH must reach run_chat_daemon as
+        memory_path — the mind's own persistence opt-in."""
+        from neuroslm import cli
+        ckpt = tmp_path / "fake.pt"
+        ckpt.write_bytes(b"\x00")
+        mem_path = str(tmp_path / "brian.mem")
+        called = {}
+
+        def fake_run(**kw):
+            called.update(kw)
+            return 0
+
+        monkeypatch.setattr(
+            "neuroslm.chat_daemon.run_chat_daemon", fake_run)
+        args = argparse.Namespace(
+            ckpt=str(ckpt), latest=False, repo=None, prefix=None,
+            arch=None, device="cpu", temperature=0.8, top_k=40,
+            max_new_tokens=96, thought_tokens=32, thought_period=12.0,
+            idle_threshold=6.0, no_color=True, no_thoughts=True,
+            mind=True, memory=mem_path,
+        )
+        rc = cli.cmd_chat(args)
+        assert rc == 0
+        assert called["memory_path"] == mem_path
 
     def test_latest_pulls_then_boots(self, monkeypatch, tmp_path):
         from neuroslm import cli

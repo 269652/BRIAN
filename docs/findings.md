@@ -4581,7 +4581,7 @@ above, delivered this commit; (2) `NarrativeSystem` wired into STORE;
 memory persistence via `memory/store.py`'s existing `.mem` format.
 Phases 2-4 recorded as their own findings entries as each lands.
 
-[EVIDENCE: docs/architecture.md §14.11; tests/cognition/test_consciousness.py; tests/cognition/test_cognitive_runtime.py::TestConsciousnessMetrics; tests/cognition/test_mind_server.py::TestServerTelemetry::test_telemetry_carries_consciousness_metrics]
+[EVIDENCE: docs/architecture.md §14.11; tests/cognition/test_iit_consciousness.py; tests/cognition/test_cognitive_runtime.py::TestConsciousnessMetrics; tests/cognition/test_mind_server.py::TestServerTelemetry::test_telemetry_carries_consciousness_metrics]
 
 ### Self-narrative world model wired into STORE (Phase 2/4, 2026-08-24)
 
@@ -4630,3 +4630,44 @@ GREEN: `tests/cognition/test_cognitive_runtime.py` 167 (was 161),
 `maintain_technical_report.py --verbose`: PASS.
 
 [EVIDENCE: docs/architecture.md §14.13; tests/cognition/test_cognitive_runtime.py::TestAutonomousReflection; tests/cognition/test_mind_server.py::TestReflectionsOp]
+
+### Memory persistence — the mind survives a process restart (Phase 4/4, 2026-08-24)
+
+Closes the last gap from this investigation's audit: `CognitiveRuntime`
+had zero persistence — `EpisodicMemory` + (§14.12) `NarrativeSystem` +
+(§14.13) mined rules all lived only in process memory. Reuses the
+Brain-side `.mem` checkpoint FORMAT PATTERN (`memory/store.py`, pickle
++ JSON sidecar) rather than inventing a second scheme: extracted
+`_stream_state`/`_fit`/`_restore_stream` to module-level (previously
+duplicated private closures) so Brain- and Mind-shaped paths share one
+narrative-serialization implementation; new `MIND_FORMAT` tag rejects a
+wrong-shaped file at load with a clear error; `save_mind_memory`/
+`load_mind_memory` respect the current run's `EpisodicMemory.maxlen`
+(most-recent-survive semantics) and skip narrative restoration
+silently when the current run has it disabled.
+
+`chat_daemon.py` gained `_load_mind_memory_if_present` (boot-time,
+fail-open) and `_run_daemon_loop` (the one place both boot paths'
+final `_run_server`/`_run_repl` call routes through now, so save-on-
+exit exists once instead of duplicated at 4 return sites) plus a new
+`brian chat --memory PATH` flag. Save-on-exit only, no periodic
+background write.
+
+**Caveat recorded plainly**: survives a `chat_daemon` process restart
+on the same box, NOT a vast.ai instance destroy/recreate — that still
+needs the operator to copy the `.mem` file off-box first.
+
+This closes all four phases of `.claude/plans/lazy-zooming-squid.md`
+(approved via `EnterPlanMode`/`ExitPlanMode`), responding to the
+original ask: analyse the live mind, add IIT + consciousness-theory
+metrics (§14.11), verify/fix that the memory system builds a self-
+narrative world model (§14.12) and extracts knowledge from experience
+(§14.13), with persistence (§14.14) closing the "as designed" gap that
+raw `EpisodicMemory` alone left open.
+
+GREEN: `tests/cognition/test_persistence.py` 8 (new),
+`tests/test_chat_daemon.py` 43 (was 34), `tests/test_cli_hf_chat.py` 33
+(was 32), `tests/test_memory.py` 14 unregressed.
+`maintain_technical_report.py --verbose`: PASS.
+
+[EVIDENCE: docs/architecture.md §14.14; tests/cognition/test_persistence.py; tests/test_chat_daemon.py::TestMindMemoryPersistence; tests/test_cli_hf_chat.py::TestCmdChat::test_memory_flag_threads_through_to_run_chat_daemon]

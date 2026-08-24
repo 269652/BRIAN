@@ -1838,7 +1838,7 @@ class TestGenerationQuality:
 
 class TestConsciousnessMetrics:
     """CognitiveRuntime wiring for neuroslm.cognition.consciousness —
-    see tests/cognition/test_consciousness.py for the math itself. Here
+    see tests/cognition/test_iit_consciousness.py for the math itself. Here
     we pin: off by default, populated when enabled, zeroed on an
     inhibited tick, and surfaced in both telemetry formatters."""
 

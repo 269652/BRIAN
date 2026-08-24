@@ -420,3 +420,120 @@ class TestDataclasses:
         assert c.thought_n_tok <= 128
         assert c.thought_period > 0
         assert len(c.thought_seeds) >= 3
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 8. §14.14 --memory wiring — tested at the helper-function level, not
+#    the full HF-loading run_chat_daemon body (this suite deliberately
+#    never loads torch — see module docstring). A fake mind whose
+#    .narrative stays None keeps save/load_mind_memory's own narrative
+#    branch (the only torch-dependent path) unexercised here.
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestMindMemoryPersistence:
+
+    def _fake_mind(self):
+        from neuroslm.memory.episodic import EpisodicMemory
+
+        class _FakeMind:
+            def __init__(self):
+                self.memory = EpisodicMemory(maxlen=8)
+                self.narrative = None
+                self._tick_n = 0
+                self._boredom = 0.0
+                self._wander_idx = 0
+                self._mined_rules = []
+
+        return _FakeMind()
+
+    def test_load_skipped_when_no_memory_path(self):
+        from neuroslm.chat_daemon import _load_mind_memory_if_present
+        mind = self._fake_mind()
+        out = io.StringIO()
+        _load_mind_memory_if_present(mind, None, out)
+        assert mind.memory.all() == []
+        assert out.getvalue() == ""
+
+    def test_load_skipped_when_runtime_is_none(self, tmp_path):
+        from neuroslm.chat_daemon import _load_mind_memory_if_present
+        out = io.StringIO()
+        _load_mind_memory_if_present(None, str(tmp_path / "x.mem"), out)
+        assert out.getvalue() == ""
+
+    def test_load_skipped_when_file_does_not_exist(self, tmp_path):
+        from neuroslm.chat_daemon import _load_mind_memory_if_present
+        mind = self._fake_mind()
+        out = io.StringIO()
+        _load_mind_memory_if_present(
+            mind, str(tmp_path / "missing.mem"), out)
+        assert mind.memory.all() == []
+        assert out.getvalue() == ""
+
+    def test_load_restores_episodes_and_reports_the_count(self, tmp_path):
+        from neuroslm.chat_daemon import _load_mind_memory_if_present
+        from neuroslm.memory.store import save_mind_memory
+        mind = self._fake_mind()
+        mind.memory.add("an earlier thought", content_vec=[1.0, 0.0])
+        path = tmp_path / "mind.mem"
+        save_mind_memory(path, mind)
+
+        fresh = self._fake_mind()
+        out = io.StringIO()
+        _load_mind_memory_if_present(fresh, str(path), out)
+        assert [e["content"] for e in fresh.memory.all()] == \
+            ["an earlier thought"]
+        assert "resumed" in out.getvalue()
+
+    def test_load_failure_does_not_raise(self, tmp_path):
+        from neuroslm.chat_daemon import _load_mind_memory_if_present
+        bad = tmp_path / "corrupt.mem"
+        bad.write_bytes(b"not a pickle")
+        mind = self._fake_mind()
+        out = io.StringIO()
+        _load_mind_memory_if_present(mind, str(bad), out)  # must not raise
+        assert "could not load" in out.getvalue().lower()
+
+    def test_run_daemon_loop_saves_on_clean_exit(self, monkeypatch, tmp_path):
+        from neuroslm import chat_daemon as cd
+        mind = self._fake_mind()
+        mind.memory.add("something worth keeping", content_vec=[1.0, 0.0])
+        monkeypatch.setattr(cd, "_run_repl", lambda daemon, **kw: 0)
+        path = tmp_path / "out.mem"
+        out = io.StringIO()
+        rc = cd._run_daemon_loop(
+            MagicMock(), mind, str(path), serve=False, serve_port=7861,
+            out_stream=out, in_stream=io.StringIO())
+        assert rc == 0
+        assert path.exists()
+        assert "saved" in out.getvalue()
+
+    def test_run_daemon_loop_uses_run_server_when_serve(self, monkeypatch):
+        from neuroslm import chat_daemon as cd
+        calls = []
+        monkeypatch.setattr(
+            cd, "_run_server",
+            lambda daemon, port, **kw: calls.append(port) or 0)
+        rc = cd._run_daemon_loop(
+            MagicMock(), None, None, serve=True, serve_port=9999,
+            out_stream=io.StringIO(), in_stream=io.StringIO())
+        assert rc == 0
+        assert calls == [9999]
+
+    def test_run_daemon_loop_skips_save_without_memory_path(self, monkeypatch):
+        from neuroslm import chat_daemon as cd
+        mind = self._fake_mind()
+        monkeypatch.setattr(cd, "_run_repl", lambda daemon, **kw: 0)
+        out = io.StringIO()
+        cd._run_daemon_loop(
+            MagicMock(), mind, None, serve=False, serve_port=7861,
+            out_stream=out, in_stream=io.StringIO())
+        assert "saved" not in out.getvalue()
+
+    def test_run_daemon_loop_propagates_the_exit_code(self, monkeypatch):
+        from neuroslm import chat_daemon as cd
+        monkeypatch.setattr(cd, "_run_repl", lambda daemon, **kw: 1)
+        rc = cd._run_daemon_loop(
+            MagicMock(), None, None, serve=False, serve_port=7861,
+            out_stream=io.StringIO(), in_stream=io.StringIO())
+        assert rc == 1
