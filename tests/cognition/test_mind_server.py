@@ -1040,6 +1040,18 @@ class TestIsaacDeployCliWiring:
         assert "SensoryBridge" in s
         assert "port=7861" in s, "the port placeholder must be substituted"
 
+    def test_isaac_onstart_enables_cameras_in_headless_mode(self):
+        """Live incident (2026-08-24): SimulationApp({"headless": True})
+        alone boots the Kit framework fine but never turns on the RTX
+        render pipeline cameras need — get_rgba() returned None
+        forever (confirmed live: the box ran crash-free for 10+
+        minutes with zero frames ever reaching the mind). Documented
+        fix, confirmed via multiple independent sources: pass
+        enable_cameras=True in the SAME config dict."""
+        from neuroslm.connectors.vast_isaac import build_isaac_onstart
+        s = build_isaac_onstart({"BRANCH": "master", "PORT": 7861})
+        assert '"enable_cameras": True' in s
+
     def test_isaac_launch_falls_back_to_env_file_when_shell_env_is_empty(
             self, monkeypatch, tmp_path):
         import neuroslm.connectors.vast_isaac as vi

@@ -4390,4 +4390,38 @@ RED-confirmed (2 contracts:
 Not yet re-verified live — needs another fresh deploy to confirm the
 sensor loop survives its own warm-up period.
 
-[EVIDENCE: tests/test_isaac_sim.py::TestSensoryBridge]
+**Re-verified live via SSH, without a redeploy** (isaac `48588261`,
+same instance the SSH/chown fix landed on): pulled the cortex
+resilience fix in place (`git fetch && git reset --hard`, editable
+install picks it up on the next process start — no reinstall needed)
+and confirmed via `ps aux` that the sensor loop process ran
+continuously, crash-free, for 10+ minutes (`203% CPU`, `22:08`
+accumulated CPU time, no restart) — the resilience fix holds.
+
+**But no percept ever reached the mind.** Cross-checked the mind
+box's own log for `SENSE[visual]` evidence (§15's own debug trace) —
+zero matches. `grep`ing the isaac box's on-disk log directly showed
+`Annotator 'rgb' returned None or unexpected shape ... A few render
+frames may be required before data is available` stopped appearing
+after ~100 seconds of boot — but no `{attended}` percept line ever
+appeared either, meaning `get_rgba()` kept returning `None`
+indefinitely (gracefully skipped by the resilience fix — no crash,
+just never producing real data).
+
+Root cause, confirmed via research (multiple independent sources,
+including an open IsaacLab GitHub issue with the exact same symptom):
+`SimulationApp({"headless": True})` alone boots the Kit application
+framework fine but never enables the RTX render pipeline cameras
+depend on — the documented fix is `enable_cameras: True` in the SAME
+config dict. Neither this project's onstart nor its sensor loop
+script had ever set it.
+
+RED-confirmed (1 contract: `test_isaac_onstart_enables_cameras_in_
+headless_mode`). GREEN: `test_mind_server.py` 67 (was 66). Applied
+live via SSH to the running box (edited `/workspace/
+isaac_sensor_loop.py` directly, killed the stable process so the
+existing crash-restart loop re-launched it with the fix — no
+redeploy, no additional spend) — verification of an actual delivered
+percept in progress.
+
+[EVIDENCE: tests/cognition/test_mind_server.py::TestIsaacDeployCliWiring::test_isaac_onstart_enables_cameras_in_headless_mode]

@@ -98,7 +98,12 @@ import time
 sys.path.insert(0, "/workspace/brian")
 
 from isaacsim import SimulationApp
-simulation_app = SimulationApp({"headless": True})
+# Live incident (2026-08-24): headless=True alone boots the Kit
+# framework fine but never turns on the RTX render pipeline cameras
+# need -- get_rgba() returned None forever, confirmed live (the box
+# ran crash-free for 10+ minutes with zero frames ever reaching the
+# mind). enable_cameras=True is the documented fix for exactly this.
+simulation_app = SimulationApp({"headless": True, "enable_cameras": True})
 
 # isaacsim/omni imports are only valid AFTER SimulationApp() exists.
 from isaacsim.core.api import World
