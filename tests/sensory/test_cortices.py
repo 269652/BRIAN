@@ -243,3 +243,31 @@ class TestVisualCortex:
         sig = inspect.signature(VisualCortex.__init__)
         assert "model_factory" in sig.parameters
         assert "processor_factory" in sig.parameters
+
+    def test_accepts_rgba_input_like_isaac_sims_camera(self):
+        """Live incident (2026-08-24): Isaac Sim's Camera.get_rgba()
+        returns (H, W, 4) RGBA — handed straight to the real CLIP
+        processor, which raised ValueError: Unable to infer channel
+        dimension format (it only accepts 1 or 3 channels). Must not
+        raise on a 4-channel input; the alpha channel is dropped, not
+        forwarded to a processor that can't interpret it."""
+        import numpy as np
+        cortex = self._rt()
+        rgba = np.ones((32, 32, 4), dtype="uint8") * 128
+        vec = cortex(rgba)
+        assert len(vec) == 32
+        assert all(math.isfinite(x) for x in vec)
+
+    def test_rgba_alpha_channel_is_ignored_not_corrupting(self):
+        """Dropping alpha must mean exactly that — the SAME RGB
+        content with a DIFFERENT alpha value produces the IDENTICAL
+        embedding, proving alpha is discarded, not, say, blended in or
+        misread as a 4th color channel."""
+        import numpy as np
+        cortex = self._rt()
+        rgb = np.ones((32, 32, 3), dtype="uint8") * 77
+        rgba_alpha_255 = np.concatenate(
+            [rgb, np.full((32, 32, 1), 255, dtype="uint8")], axis=-1)
+        rgba_alpha_0 = np.concatenate(
+            [rgb, np.full((32, 32, 1), 0, dtype="uint8")], axis=-1)
+        assert cortex(rgba_alpha_255) == cortex(rgba_alpha_0) == cortex(rgb)

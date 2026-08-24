@@ -4452,4 +4452,34 @@ confusing a naive `.index()` ordering check — fixed by rewording the
 comment, not the code, which was already correct. GREEN:
 `test_mind_server.py` 68 (was 67).
 
-[EVIDENCE: tests/cognition/test_mind_server.py::TestIsaacDeployCliWiring::test_isaac_onstart_enables_cameras_in_headless_mode, test_isaac_onstart_creates_the_camera_before_world_reset]
+**Re-applied live, real progress confirmed, one more bug found.**
+Regenerated `/workspace/isaac_sensor_loop.py` from the fixed template
+and restarted (same no-redeploy SSH pattern). This time `get_rgba()`
+genuinely started returning data — confirmed indirectly: the earlier
+silent "nothing happens" state was replaced by a REPEATING, CAUGHT
+error, `[isaac_sim] visual sensor read failed: Unable to infer channel
+dimension format`, proving the cortex embedding call is now actually
+being reached every tick (§15's resilience fix from earlier catches it
+cleanly — no crash, no restart, just a reported skip). Root cause:
+Isaac Sim's `Camera.get_rgba()` returns `(H, W, 4)` RGBA; the real HF
+CLIP image processor only accepts 1 or 3 channels and raises on an
+unrecognised 4-channel array — not an Isaac-Sim-specific problem,
+just an untested input shape for `VisualCortex`.
+
+Fixed in `neuroslm/sensory/cortices.py`: `VisualCortex._drop_alpha()`
+slices RGBA to RGB before handing the image to the processor. One
+test caught a real fidelity gap in the pass itself: the FIRST test
+written (does an RGBA array crash the cortex?) passed vacuously
+without the fix, because the test's own fake CLIP processor is more
+permissive than the real one about channel count — it doesn't
+actually reproduce the failure it's meant to guard against. The
+SECOND test (an RGBA image with a manipulated alpha channel must
+embed IDENTICALLY to the same image without it) properly
+RED-confirmed and GREEN-confirmed the fix; kept both, since the first
+still documents the incident even though it isn't the test doing the
+real discriminating work.
+
+GREEN: `test_cortices.py` 24 (was 22), `test_isaac_sim.py` 14
+unregressed. Applying live now (same SSH pattern, no redeploy).
+
+[EVIDENCE: tests/sensory/test_cortices.py::TestVisualCortex::test_accepts_rgba_input_like_isaac_sims_camera, test_rgba_alpha_channel_is_ignored_not_corrupting]

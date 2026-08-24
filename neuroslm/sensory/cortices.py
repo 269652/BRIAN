@@ -220,8 +220,24 @@ class VisualCortex:
         import numpy as np
         return np.zeros((8, 8, 3), dtype="uint8")
 
+    @staticmethod
+    def _drop_alpha(image):
+        """RGBA -> RGB. Live incident (2026-08-24): Isaac Sim's
+        ``Camera.get_rgba()`` returns ``(H, W, 4)`` — handed straight
+        to the real CLIP processor, that raised ``ValueError: Unable
+        to infer channel dimension format`` (it only accepts 1 or 3
+        channels). The alpha channel is dropped, not forwarded to a
+        processor that can't interpret it — real-camera images are
+        routinely RGBA, this isn't Isaac-Sim-specific."""
+        import numpy as np
+        if isinstance(image, np.ndarray) and image.ndim == 3 \
+                and image.shape[-1] == 4:
+            return image[..., :3]
+        return image
+
     @torch.no_grad()
     def _forward_embeds(self, image) -> torch.Tensor:
+        image = self._drop_alpha(image)
         inputs = self.processor(images=image, return_tensors="pt")
         pixel_values = inputs["pixel_values"].to(self.device)
         out = self.model(pixel_values=pixel_values)
