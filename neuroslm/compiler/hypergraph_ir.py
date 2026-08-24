@@ -276,8 +276,8 @@ _NODE_PATTERNS = {
 }
 
 _EDGE_PATTERNS = {
-    "synapse":     re.compile(r"synapse\s+(\w+)\s*->\s*(\w+)\s*\{([^}]*)\}"),
-    "modulation":  re.compile(r"modulation\s+(\w+)\s*->\s*(\w+)\s*\{([^}]*)\}"),
+    "synapse":     re.compile(r"synapse\s+(\w+)\s*->\s*(\w+)\s*:?\s*\{([^}]*)\}"),
+    "modulation":  re.compile(r"modulation\s+(\w+)\s*->\s*(\w+)\s*:?\s*\{([^}]*)\}"),
 }
 
 

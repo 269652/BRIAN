@@ -79,6 +79,41 @@ class TestLiftToHypergraph:
         assert SAMPLE[start:end].startswith("population")
 
 
+COLON_SAMPLE = """architecture demo { d_sem: 256, dt: 0.01 }
+
+population cortex { count: 512, dynamics: "rate_code" }
+population striatum { count: 256, dynamics: "rate_code" }
+
+synapse cortex -> striatum: { weight: 0.5 }
+modulation dopamine -> striatum: { gain: 1.2 }
+"""
+
+
+class TestLiftToHypergraphColonSyntax:
+    """`X -> Y: { ... }` (colon-before-brace) must lift identically to
+    the brace-only form. architectures/master/arch.neuro uses this form
+    for every nuclei/qualia synapse and modulation (see commit 779e9b4's
+    bulk `key {` -> `key: {` autofix); the lifter's regex must not treat
+    the colon as a syntax error and silently drop the edge."""
+
+    def test_synapse_with_colon_is_a_hyperedge(self):
+        ir = lift_dsl_to_hypergraph(COLON_SAMPLE)
+        syn = [e for e in ir.hyperedges if e.kind == "synapse"]
+        assert len(syn) == 1
+        assert syn[0].members == ["cortex", "striatum"]
+
+    def test_modulation_with_colon_is_a_hyperedge(self):
+        ir = lift_dsl_to_hypergraph(COLON_SAMPLE)
+        mod = [e for e in ir.hyperedges if e.kind == "modulation"]
+        assert len(mod) == 1
+        assert mod[0].members == ["dopamine", "striatum"]
+
+    def test_synapse_with_colon_carries_attrs(self):
+        ir = lift_dsl_to_hypergraph(COLON_SAMPLE)
+        syn = next(e for e in ir.hyperedges if e.kind == "synapse")
+        assert float(syn.attrs["weight"]) == 0.5
+
+
 class TestSourceMapBitIdentity:
     """SourceMap.render() reproduces the DSL byte-for-byte."""
 
