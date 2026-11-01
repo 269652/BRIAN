@@ -1,2 +1,104 @@
 [mind-eval] expert=deepseek_r1_qwen_7b device=cuda seed=0 -> results/mind_eval/20261101T164334Z_deepseek-r1-qwen-7b.json
-Fetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]Fetching 2 files:  50%|█████     | 1/2 [01:36<01:36, 96.72s/it]
+Fetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]Fetching 2 files:  50%|█████     | 1/2 [01:36<01:36, 96.72s/it]Fetching 2 files: 100%|██████████| 2/2 [02:05<00:00, 62.53s/it]Fetching 2 files: 100%|██████████| 2/2 [02:05<00:00, 62.53s/it]
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 29.03it/s]
+[mind-eval] probe loop_escape
+── loop_escape/full run 0: I watched the river flow past the old mill.
+[tick 2] DMN wandering action=think
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.10 Glu=0.45 GABA=0.15]
+  CUR[nov=0.58 bore=0.20]
+  WS[R=0.32 θ=0.50 ignited=no 40Hz γ=1.00 in[s=0.00 m=0.49 l=0.58 s=0.93 n=0.58]]
+  BG deliberation (H=0.07 decisiveness, diff=2.61 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 6.87 "It's time to plan for a trip later this week but first..."
+    [        ] nll=11.44 "What if..."
+    [SELECTED] nll= 5.29 "Maybe today's topic should be about emotions or personal growth? Hmm..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "The sight of the rushing river reminded me of my youth spent near such places where life felt slower yet alive through moments captured in these gentle ripples across streams."
+[tick 3] DMN wandering action=think
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.10 Glu=0.45 GABA=0.15]
+  CUR[nov=0.56 bore=0.26]
+  WS[R=0.20 θ=0.49 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.32 l=0.74 s=0.53 n=0.56]]
+  BG deliberation (H=0.47 decisiveness, diff=0.78 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 5.36 "What does "flow" mean here?"
+    [        ] nll= 7.24 ""Today's topic could focus on emotional intelligence.""
+    [        ] nll= 6.00 ""Maybe today’s topic could focus on **emotions** or relate back to that connection with the river.""
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe today's topic should be about emotions or personal growth? Hmm..."
+[tick 4] DMN wandering action=think
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.10 Glu=0.45 GABA=0.15]
+  CUR[nov=0.41 bore=0.34]
+  WS[R=0.12 θ=0.49 ignited=no 40Hz γ=0.96 in[s=0.00 m=0.29 l=0.71 s=0.25 n=0.41]]
+  BG deliberation (H=0.75 decisiveness, diff=0.37 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 4.95 "Maybe there's some kind of movement involved since both 'river' and 'mill' involve motion or something that moves?"
+    [SELECTED] nll= 4.05 "The words seem like they are part of some larger text or maybe from specific events? Maybe there's more context needed?"
+    [        ] nll= 4.53 "The word that comes after 'river' (which was 2nd) seems crucially important; if only we could find words where **the second letter of each word** forms another meaningful sequence or follows some rule..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "What does "flow" mean here?"
+[tick 5] DMN wandering action=think
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.09 Glu=0.40 GABA=0.15]
+  CUR[nov=0.37 bore=0.41]
+  WS[R=0.18 θ=0.47 ignited=no 36Hz γ=0.97 in[s=0.00 m=0.39 l=0.60 s=0.85 n=0.37]]
+  BG deliberation (H=0.15 decisiveness, diff=1.01 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 7.33 "Perhaps connecting to personal experiences could help here?"
+    [        ] nll= 6.89 "Maybe these sentences can form parts of longer thoughts?"
+    [SELECTED] nll= 4.99 "If every word could be associated with its own image, would compiling these images into albums help people better understand someone?"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "The words seem like they are part of some larger text or maybe from specific events? Maybe there's more context needed?"
+[tick 6] DMN wandering action=think
+  NT[DA=0.14 NE=0.22 5HT=0.50 ACh=0.31 eCB=0.08 Glu=0.36 GABA=0.15]
+  CUR[nov=0.39 bore=0.46]
+  WS[R=0.05 θ=0.44 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.39 l=0.62 s=0.41 n=0.39]]
+  BG deliberation (H=0.59 decisiveness, diff=1.88 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 6.60 "Maybe not alone; perhaps incorporating other voices or perspectives might enrich things?"
+    [        ] nll=10.41 "Maybe yes?"
+    [SELECTED] nll= 6.27 "Maybe creating photo books or storyboards from words can enhance understanding?"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "If every word could be associated with its own image, would compiling these images into albums help people better understand someone?"
+[tick 7] DMN wandering action=think
+  NT[DA=0.07 NE=0.22 5HT=0.49 ACh=0.29 eCB=0.08 Glu=0.34 GABA=0.15]
+  CUR[nov=0.50 bore=0.47]
+  WS[R=0.06 θ=0.41 ignited=no 44Hz γ=0.87 in[s=0.00 m=0.34 l=0.33 s=0.61 n=0.50]]
+  BG deliberation (H=0.39 decisiveness, diff=0.75 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 8.98 "To be precise with my current knowledge..."
+    [        ] nll= 8.84 "Could this lead to better storytelling?"
+    [SELECTED] nll= 7.31 "Yes! Let's make a photo book!"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe creating photo books or storyboards from words can enhance understanding?"
+[tick 8] DMN wandering action=think
+  NT[DA=0.04 NE=0.21 5HT=0.49 ACh=0.28 eCB=0.08 Glu=0.34 GABA=0.15]
+  CUR[nov=0.33 bore=0.52]
+  WS[R=0.08 θ=0.37 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.33 l=0.61 s=0.12 n=0.33]]
+  BG deliberation (H=0.88 decisiveness, diff=0.37 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 5.30 "Maybe this time we can go on a boat ride instead of walking? That way maybe more people would see our cool photos!"
+    [        ] nll= 6.02 "Hmm... Maybe if someone can solve this problem about numbers..."
+    [        ] nll= 5.20 "What if we could create photos automatically based on sounds? Like converting speech into images?"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Yes! Let's make a photo book!"
+[tick 9] DMN wandering action=think
+  NT[DA=0.06 NE=0.23 5HT=0.49 ACh=0.25 eCB=0.07 Glu=0.32 GABA=0.16]
+  CUR[nov=0.28 bore=0.57]
+  WS[R=0.05 θ=0.34 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.45 l=0.56 s=0.53 n=0.28]]
+  BG deliberation (H=0.47 decisiveness, diff=0.48 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 4.48 "My idea seems too bold for someone like you; perhaps that's why they're trying not to get hurt by your previous actions but are still being influenced?"
+    [        ] nll= 5.63 "Why did you bring that up?"
+    [SELECTED] nll= 4.91 "So far today no one has been reading these posts; they all seem like random clicks or just noise unless someone's talking about something specific..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe this time we can go on a boat ride instead of walking? That way maybe more people would see our cool photos!"
+[tick 10] DMN wandering action=think
+  NT[DA=0.09 NE=0.26 5HT=0.49 ACh=0.25 eCB=0.07 Glu=0.29 GABA=0.16]
+  CUR[nov=0.27 bore=0.61]
+  WS[R=0.12 θ=0.30 ignited=no 40Hz γ=1.00 in[s=0.00 m=0.37 l=0.79 s=0.66 n=0.27]]
+  BG deliberation (H=0.34 decisiveness, diff=1.54 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 4.19 "Maybe my brain can't process information if left alone—so instead of letting it get distracted by irrelevant stuff during work hours (like social media), maybe focusing more would be better..."
+    [        ] nll= 7.92 "Maybe this isn't as chaotic after all..."
+    [        ] nll= 5.49 "How can we predict the next number based on this sequence?"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "So far today no one has been reading these posts; they all seem like random clicks or just noise unless someone's talking about something specific..."
