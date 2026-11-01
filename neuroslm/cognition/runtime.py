@@ -167,6 +167,17 @@ class MindConfig:
     mind's own classifier — an LM in production). Feeds NE's driver;
     never touches text."""
 
+    curiosity_value: float = 2.0
+    """Intrinsic motivation as VALUE (Schmidhuber/Oudeyer): BG utility
+    gains curiosity_value · boredom · novelty(candidate), novelty vs
+    working memory ∪ stored episodes. Smoke run 58698239: likelihood
+    alone rewarded copying the last thought (novelty 0.04)."""
+
+    gen_boredom_gain: float = 0.67
+    """Boredom also heats GENERATION: the trunk samples at its base
+    temperature × (1 + gen_boredom_gain·boredom) (R1: 0.6 → 1.0), so
+    the candidates themselves diversify, not just the choice."""
+
     mmr_lambda: float = 0.3
     """Hippocampal retrieval diversity at baseline ACh: recall picks
     episodes by maximal marginal relevance, relevance − λ·redundancy
@@ -907,12 +918,22 @@ class CognitiveRuntime:
         # wander seam (raw completion, no chat template) — an
         # addressee only exists on respond ticks.
         trigger_text = sensory[-1] if sensory else self._next_wander_prompt()
-        prompt = self._compose_prompt(sensory, recalled, trigger_text)
+        # REORIENT is a state transition: the train of thought is
+        # dropped from the prompt, not just re-anchored in recall.
+        prompt = self._compose_prompt(sensory, recalled, trigger_text,
+                                      keep_last_thought=not reorient)
+        gen_scale = 1.0 + self.cfg.gen_boredom_gain * max(
+            0.0, min(1.0, self._boredom))
         gen = self._gen if not wandering else self._gen_wander
         candidates: List[str] = []
         reasonings: List[Optional[str]] = []
         for _ in range(max(1, self.cfg.n_candidates)):
-            out = (gen(prompt, self.cfg.thought_n_tok) or "").strip()
+            if getattr(gen, "accepts_temperature_scale", False):
+                out = gen(prompt, self.cfg.thought_n_tok,
+                          temperature_scale=gen_scale)
+            else:
+                out = gen(prompt, self.cfg.thought_n_tok)
+            out = (out or "").strip()
             if out:
                 candidates.append(out)
                 reasonings.append(self._reasoning() if self._reasoning
@@ -925,14 +946,15 @@ class CognitiveRuntime:
                               wandering=wandering,
                               action="respond" if not wandering else "think")
 
-        # GATE: boredom-and-DA-tempered softmax over −NLL, with the
-        # inner-speech prior (D2) penalizing second-person address in
-        # WANDERING candidates only.
+        # GATE: BG softmax over likelihood + DA goal pull + curiosity
+        # value, at a boredom-heated / NE-cooled temperature.
         scores = [self._score(c) for c in candidates]
         cand_vecs = [list(self._embed(c)) for c in candidates]
         goal_rel = [(_cosine(v, self._goal_vec) if self._goal_vec else 0.0)
                     for v in cand_vecs]
-        idx, selection_entropy = self._select(scores, levels, goal_rel)
+        cand_nov = [self._novelty_of(v) for v in cand_vecs]
+        idx, selection_entropy = self._select(scores, levels, goal_rel,
+                                              cand_nov)
         thought, sc = candidates[idx], scores[idx]
         differentiation = _population_stdev([s.mean_nll for s in scores])
 
@@ -1070,6 +1092,16 @@ class CognitiveRuntime:
 
     # ── Internals ────────────────────────────────────────────────────
 
+    def _novelty_of(self, vec: List[float]) -> float:
+        """1 − max cosine vs stored episodes ∪ working memory."""
+        top = self.memory.retrieve_scored(vec, k=1)
+        best = top[0][0] if top else None
+        if self.cfg.wm_size > 0:
+            for v in self._wm:
+                c = _cosine(vec, v)
+                best = c if best is None else max(best, c)
+        return max(0.0, min(1.0, 1.0 - best)) if best is not None else 1.0
+
     def _update_control(self, novelty: float) -> None:
         """LOOPING streak against the (relative or absolute) threshold,
         then fold this tick's novelty into the slow baseline."""
@@ -1084,7 +1116,8 @@ class CognitiveRuntime:
         self._nov_base = (1 - a) * self._nov_base + a * novelty
 
     def _compose_prompt(self, sensory: List[str],
-                        recalled: List[dict], trigger_text: str) -> str:
+                        recalled: List[dict], trigger_text: str,
+                        keep_last_thought: bool = True) -> str:
         if sensory:
             return self._compose_reply_prompt(sensory, recalled)
         lines: List[str] = [self.cfg.persona, ""]
@@ -1093,7 +1126,7 @@ class CognitiveRuntime:
             for e in recalled:
                 lines.append(f"- {e['content']}")
             lines.append("")
-        if self._last_thought:
+        if self._last_thought and keep_last_thought:
             lines.append(f"My last thought: {self._last_thought}")
         # DMN: nothing external arrived — bias THINK toward
         # associative, reflective continuation instead of a flat
@@ -1140,7 +1173,8 @@ class CognitiveRuntime:
 
     def _select(self, scores: List[ThoughtScore],
                 levels: Dict[str, float],
-                goal_rel: Optional[List[float]] = None
+                goal_rel: Optional[List[float]] = None,
+                novelty: Optional[List[float]] = None
                 ) -> Tuple[int, float]:
         """Basal-ganglia selection. Returns ``(chosen_index,
         selection_entropy)`` — the latter an IIT-flavored decisiveness
@@ -1167,8 +1201,10 @@ class CognitiveRuntime:
         da_gain = (max(0.0, levels.get("DA", 0.0))
                    / max(baselines.get("DA", 0.15), 1e-6))
         rel = goal_rel or [0.0] * len(scores)
-        utils = [(-s.mean_nll + self.cfg.goal_weight * da_gain * g)
-                 / max(T, 1e-6) for s, g in zip(scores, rel)]
+        nov = novelty or [0.0] * len(scores)
+        cur = self.cfg.curiosity_value * max(0.0, min(1.0, self._boredom))
+        utils = [(-s.mean_nll + self.cfg.goal_weight * da_gain * g + cur * n)
+                 / max(T, 1e-6) for s, g, n in zip(scores, rel, nov)]
         m = max(utils)
         exps = [math.exp(u - m) for u in utils]
         z = sum(exps)
@@ -1423,7 +1459,8 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
             which is what produced 'Brian, ...' on every live tick)."""
 
             @torch.no_grad()
-            def _sample(ids: List[int], n: int) -> List[int]:
+            def _sample(ids: List[int], n: int,
+                        scale: float = 1.0) -> List[int]:
                 ids = ids[-(max_ctx - max(1, int(n))):]
                 x = torch.tensor([ids], dtype=torch.long, device=device)
                 gen_kwargs = dict(
@@ -1438,20 +1475,22 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
                 )
                 if reasoning_model:
                     # DeepSeek's recommended R1 sampling.
-                    gen_kwargs.update(temperature=0.6, top_p=0.95, top_k=0)
+                    gen_kwargs.update(temperature=0.6 * scale, top_p=0.95,
+                                      top_k=0)
                 else:
                     # No repetition bans or stop strings for any trunk
                     # (2026-11-01 design principle: no output-shaping
                     # rules; the 2026-08-11 guards against base-SmolLM2
                     # loops are gone with it).
                     gen_kwargs.update(
-                        temperature=float(max(temperature, 1e-6)),
+                        temperature=float(max(temperature, 1e-6)) * scale,
                         top_k=int(top_k) if top_k else 0)
                 out = model.generate(**gen_kwargs)
                 return out[0, x.shape[1]:].tolist()
 
             @torch.no_grad()
-            def _generate(prompt: str, max_new_tokens: int) -> str:
+            def _generate(prompt: str, max_new_tokens: int,
+                          temperature_scale: float = 1.0) -> str:
                 n = int(max_new_tokens)
                 if use_chat_template:
                     enc = tokenizer.apply_chat_template(
@@ -1466,7 +1505,8 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
                     ids = list(tokenizer.encode(prompt) or [0])
                 last["reasoning"] = None
                 if use_chat_template and reasoning_model:
-                    new = _sample(ids, reasoning_budget + n)
+                    new = _sample(ids, reasoning_budget + n,
+                                  temperature_scale)
                     text = _decode_raw(new)
                     if _THINK_CLOSE in text:
                         answer, last["reasoning"] = split_reasoning(text)
@@ -1480,14 +1520,17 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
                     close = list(tokenizer.encode(
                         "\n" + _THINK_CLOSE + "\n\n"))
                     return split_reasoning(
-                        _decode_raw(_sample(ids + think + close, n)))[0]
-                text = tokenizer.decode(_sample(ids, n),
+                        _decode_raw(_sample(ids + think + close, n,
+                                            temperature_scale)))[0]
+                text = tokenizer.decode(_sample(ids, n, temperature_scale),
                                         skip_special_tokens=True)
                 if reasoning_model:
                     answer, reasoning = split_reasoning(text)
                     text = answer or reasoning
                 return text
 
+            # the runtime passes a boredom-driven temperature scale
+            _generate.accepts_temperature_scale = True
             return _generate
 
         generate_fn = _make_generate(has_chat_template)

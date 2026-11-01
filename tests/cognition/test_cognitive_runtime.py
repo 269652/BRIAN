@@ -2487,3 +2487,73 @@ class TestDiverseHippocampalRecall:
         assert recall_diversity(0.15, 0.30, c) > recall_diversity(0.30, 0.30, c)
         assert recall_diversity(0.60, 0.30, c) < recall_diversity(0.30, 0.30, c)
         assert recall_diversity(0.30, 0.30, c) == pytest.approx(c.mmr_lambda)
+
+
+# ── Smoke run 58698239: without guardrails the mind looped ──────────
+# Likelihood selection rewarded copying "My last thought" (the most
+# probable continuation); boredom only heated SELECTION among near-
+# copies; reorient kept the last thought in the prompt.
+
+class TestCuriosityIsValue:
+    """Intrinsic motivation as value (Schmidhuber/Oudeyer): utility
+    gains curiosity_value · boredom · novelty(candidate), novelty vs
+    working memory ∪ stored episodes."""
+
+    CANDS = ["thinking about the river", "thinking about the moon"]
+
+    def _tick(self, boredom):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(
+            _ScriptedGen(self.CANDS),
+            scores=_score_map({self.CANDS[0]: 2.9, self.CANDS[1]: 3.0}),
+            cfg=MindConfig(n_candidates=2, selection_temp_base=0.01,
+                           curiosity_gain=0.0))
+        rt._wm.append(_vec_for("thinking about the river"))
+        rt._boredom = boredom
+        return rt.tick()
+
+    def test_bored_mind_prefers_the_novel_candidate(self):
+        assert self._tick(boredom=0.8).thought == "thinking about the moon"
+
+    def test_engaged_mind_follows_likelihood(self):
+        assert self._tick(boredom=0.0).thought == "thinking about the river"
+
+
+class TestBoredomReachesGeneration:
+    def test_sampling_temperature_scales_with_boredom(self):
+        from neuroslm.cognition.runtime import MindConfig
+        seams, model = _reasoning_seams(["a calm idea"], budget=8)
+        rt = seams.runtime(cfg=MindConfig(n_candidates=1,
+                                          workspace_oscillator=False))
+        rt._boredom = 1.0
+        rt.tick()
+        # calls[0] = the candidate; a stored thought is then classified
+        # by one more (unscaled) generation call
+        t = model.calls[0][1]["temperature"]
+        assert t == pytest.approx(0.6 * (1 + rt.cfg.gen_boredom_gain))
+
+    def test_engaged_mind_samples_at_the_base_temperature(self):
+        from neuroslm.cognition.runtime import MindConfig
+        seams, model = _reasoning_seams(["a calm idea"], budget=8)
+        rt = seams.runtime(cfg=MindConfig(n_candidates=1,
+                                          workspace_oscillator=False))
+        rt.tick()
+        assert model.calls[0][1]["temperature"] == pytest.approx(0.6)
+
+    def test_plain_generate_fns_still_work(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["x"]), cfg=MindConfig(n_candidates=1))
+        rt._boredom = 1.0
+        assert rt.tick().thought == "x"
+
+
+class TestReorientBreaksTheTrainOfThought:
+    def test_reorient_prompt_drops_the_last_thought(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["the same thought"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1,
+                                             novelty_write_threshold=2.0))
+        rs = [rt.tick() for _ in range(7)]
+        i = next(k for k, r in enumerate(rs) if r.reorient)
+        assert "My last thought:" not in gen.prompts[i]
+        assert "My last thought:" in gen.prompts[i - 1]

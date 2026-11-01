@@ -4518,3 +4518,39 @@ ACh vs recall diversity) are registered only after the smoke run shows
 the mechanisms engage.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestNEGain, TestThreatAppraisalDrivesNE, TestDASteersTowardTheGoal, TestDiverseHippocampalRecall]
+
+### Smoke run 58698239 (build `4ada8428`): reply path fixed; wandering loops without guardrails (2026-11-01)
+
+**Reply path — clean** (n = 1 per condition, descriptive only):
+- `episodic_recall`: full "My sister's name is Ilsebill." ✓ (the first
+  exact name from R1). no_recall answered "I don't know your sister's
+  name. Can you tell me what it is…?", honest with no confabulation.
+  The bare LM was ✓ (2 distractors keep the fact in its window).
+- `source_monitoring`: "red box" ✓ in full, no_provenance and
+  no_oscillator; bare 0.00.
+- `metacognition`: "The capital of France is Paris." ✓.
+
+**Wandering — loops.** `loop_escape` stream novelty was 0.04 in full,
+no_control and no_osc_feedback alike. Thoughts were coherent (NLL ≈ 1)
+but repetitive. Tick 3 re-selected tick 2's thought verbatim, then the
+mind slid into a river flow-rate calculation basin. Working-memory
+novelty read the loop correctly (≈ 0), boredom rose, and a reorient
+fired at tick 5, but none of it broke the loop:
+- the prompt carried "My last thought" verbatim, so R1 copied or
+  continued it;
+- likelihood-only selection rewarded the copy as the most probable
+  candidate;
+- boredom heated only *selection* among near-copies;
+- reorient left the last thought in the prompt.
+
+The removed n-gram ban had been masking this.
+
+**Mechanism fixes (no content rules):**
+- (1) curiosity as value: utility + `curiosity_value`·boredom·novelty(candidate);
+- (2) boredom heats *generation* too (×(1 + `gen_boredom_gain`·boredom); R1 0.6 → 1.0);
+- (3) a reorient tick drops "My last thought" from the prompt.
+
+Next: a second smoke run.
+
+[EVIDENCE: logs/mind_eval/20261101_58698239_container.log (local capture)]
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestCuriosityIsValue, TestBoredomReachesGeneration, TestReorientBreaksTheTrainOfThought]
