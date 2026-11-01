@@ -2137,8 +2137,8 @@ class TestThoughtsAreNotCutOff:
 
     def test_trim_to_last_complete_sentence(self):
         from neuroslm.cognition.runtime import trim_to_sentence
-        assert trim_to_sentence("One idea. Then another that trails"
-                                ) == "One idea."
+        assert trim_to_sentence("One complete idea here. Then another "
+                                "that trails") == "One complete idea here."
         assert trim_to_sentence("Is it? Maybe so! And then the") \
             == "Is it? Maybe so!"
         assert trim_to_sentence("Complete thought.") == "Complete thought."
@@ -2238,9 +2238,11 @@ class TestConfirmatoryFreezeFixes:
         rt.observe("the river was beautiful today")
         rt.tick()
         prompt = gen.prompts[-1]
-        assert rt.cfg.respond_instruction in prompt
-        assert prompt.index(rt.cfg.respond_instruction) < prompt.index(
-            "My reply:")
+        # run 58689719: R1 read a first-person prompt as a document to
+        # analyse ("Brian appears focused on…"); a reply prompt now
+        # ADDRESSES the mind and ends on the instruction
+        assert prompt.rstrip().endswith(rt.cfg.respond_instruction)
+        assert "My reply:" not in prompt
 
     def test_wandering_prompt_has_no_reply_instruction(self):
         from neuroslm.cognition.runtime import MindConfig
@@ -2396,3 +2398,50 @@ class TestRespondTicksDoNotSeedTheIdleBaseline:
         assert not rt._osc._r_seen
         rt.tick()                       # wandering
         assert rt._osc._r_seen
+
+
+
+class TestReplyPathAfterRun58689719:
+    """episodic_recall/full went 0/3 on reply-generation artefacts:
+    'Ilseen Bill' (forced think close), 'Sure!' (trim dropped the
+    content), 'Brian appears focused on…' (R1 analysed the prompt)."""
+
+    def test_reply_prompt_addresses_the_mind_in_second_person(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["I hear you."])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1))
+        rt.memory.add("the launch code is ready",
+                      content_vec=_vec_for("the launch code is ready"),
+                      context={"kind": "observed"})
+        rt.observe("what about the launch code?")
+        rt.tick()
+        p = gen.prompts[-1]
+        assert p.startswith(rt.cfg.respond_persona)
+        assert rt.cfg.persona not in p
+        assert "Things you remember:" in p and "I remember:" not in p
+        assert "Just now: what about the launch code?" in p
+
+    def test_wandering_prompt_stays_first_person_inner_speech(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["a wander"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1))
+        rt.tick()
+        p = gen.prompts[-1]
+        assert p.startswith(rt.cfg.persona)
+        assert p.rstrip().endswith("Thought:")
+
+    def test_trim_keeps_the_text_when_trimming_would_gut_it(self):
+        from neuroslm.cognition.runtime import trim_to_sentence
+        cut = "Sure! The key is under the green watering can by the door and"
+        assert trim_to_sentence(cut) == cut
+
+    def test_new_scaffold_labels_are_stripped(self):
+        from neuroslm.cognition.runtime import strip_scaffold
+        assert strip_scaffold("Fine.\nThings you remember: x") == "Fine."
+        assert strip_scaffold("Fine.\nYour last thought: x") == "Fine."
+
+    def test_reply_reasoning_budget_is_1024(self):
+        import inspect
+        from neuroslm.cognition.runtime import build_hf_seams
+        assert inspect.signature(build_hf_seams).parameters[
+            "reasoning_budget"].default == 1024

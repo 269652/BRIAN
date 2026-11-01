@@ -4421,3 +4421,37 @@ arm (H65(d), previously unscorable).
 
 [EVIDENCE: tests/cognition/test_controller_phi.py (φ = 2 bits for a cross-coupled pair, 0 for disconnected units; interventions; TPM determinism)]
 [EVIDENCE: tests/cognition/test_indicator_eval.py::TestFollowUpBatteryWiring]
+
+### Run 58689719 stopped (development): reply generation, not memory, failed; confirmatory build #4 (2026-11-01)
+
+**58689719** (follow-up battery, `2adf46eb`) was stopped by the
+maintainer after `episodic_recall/full`. That condition scored **0/3**,
+and all three failures were reply-generation artefacts, not memory
+failures:
+
+| Item | Reply | Cause |
+|---|---|---|
+| Ilsebill | "…likely **Ilseen Bill**, based on your shorthand noted previously" | fact retrieved; budget-forced think close garbled the name |
+| spare key | "Sure!" | sentence trimming discarded a cut-off answer's content |
+| Pemberton | "Brian appears focused on strategies…" | R1 analysed the first-person prompt as a document |
+
+**Fixes:**
+- (1) Reply prompts *address* the mind (`respond_persona`, "Things you
+  remember:", "Your last thought:", "Just now: …", instruction last).
+  Idle prompts keep first-person inner speech. On truncation the
+  memories give way first; persona and input survive.
+- (2) `trim_to_sentence` keeps the untrimmed text when trimming would
+  drop more than two thirds of it.
+- (3) The reply reasoning budget goes 512 → 1024 tokens.
+- (4) Answer probes print every reply tick's full trace (candidates +
+  think trace).
+
+Scoring rules unchanged: still a strict word match. Near misses like
+"Ilseen Bill" are reported alongside, never re-scored.
+
+**Freeze:** the commit carrying this entry is tagged
+`mind-eval-confirm-4`. H64–H68 and H62's remaining probes are scored
+on it.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestReplyPathAfterRun58689719]
+[EVIDENCE: tests/cognition/test_indicator_eval.py::TestAnswerProbesShowReplyTicks]

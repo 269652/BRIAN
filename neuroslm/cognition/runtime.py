@@ -61,7 +61,11 @@ def trim_to_sentence(text: str) -> str:
     ends = list(_SENTENCE_END.finditer(t))
     if not ends or ends[-1].end() == len(t):
         return t
-    return t[:ends[-1].end()]
+    cut = t[:ends[-1].end()]
+    # Run 58689719: "Sure! The key is under the…" trimmed to "Sure!" —
+    # when trimming would drop most of the text, the fragment is the
+    # lesser evil.
+    return cut if len(cut) >= len(t) / 3 else t
 
 
 def _hf_load_kwargs(device: str) -> dict:
@@ -279,13 +283,20 @@ class MindConfig:
     shrunk several-fold by the training-scale prior of 1.0 — run
     58678026: NE/ACh/GABA per-run sd 0.002-0.005)."""
 
+    respond_persona: str = (
+        "You are BRIAN, an always-on mind: you think in language and "
+        "remember what happens to you.")
+    """Second-person framing for REPLY prompts. Run 58689719: a
+    first-person prompt ("I am BRIAN…") was read by R1 as a document
+    to analyse ("Brian appears focused on…"). Reply prompts now
+    address the mind; idle (DMN) prompts keep first-person inner
+    speech (``persona``)."""
+
     respond_instruction: str = (
-        "(Speak as this mind, in the first person, replying directly to "
-        "what was just said. Do not describe or analyse this text.)")
-    """Appended before "My reply:" on respond ticks. R1-family models
-    want instructions in the user turn, not a system prompt; without it
-    R1 commented on the persona ("The passage reflects Brian's deep
-    contemplation…", run 58678026)."""
+        "Reply directly to what was just said, in the first person, as "
+        "yourself. Do not describe or analyse this text.")
+    """Last line of a reply prompt. R1-family models want instructions
+    in the user turn, not a system prompt."""
 
     self_narration_penalty: float = 1.5
     """BG prior (nats) against a candidate narrating the mind in the
@@ -590,7 +601,8 @@ _SELF_NARRATION_RE = re.compile(
 # a new prompt ("⏎ Previous thoughts: …", run 58680199).
 _SCAFFOLD_RE = re.compile(
     r"(?:^|\n)\s*(?:I remember|My last thought|Just now|My reply|Thought|"
-    r"Previous thoughts?)\s*:", re.IGNORECASE)
+    r"Previous thoughts?|Things you remember|Your last thought)\s*:",
+    re.IGNORECASE)
 
 
 def strip_scaffold(text: str) -> str:
@@ -1090,6 +1102,8 @@ class CognitiveRuntime:
 
     def _compose_prompt(self, sensory: List[str],
                         recalled: List[dict], trigger_text: str) -> str:
+        if sensory:
+            return self._compose_reply_prompt(sensory, recalled)
         lines: List[str] = [self.cfg.persona, ""]
         if recalled:
             lines.append("I remember:")
@@ -1098,23 +1112,40 @@ class CognitiveRuntime:
             lines.append("")
         if self._last_thought:
             lines.append(f"My last thought: {self._last_thought}")
-        if sensory:
-            for s in sensory:
-                lines.append(f"Just now: {s}")
-            # 'respond' action: cue a reply, not a free-floating
-            # thought — this is what THINK produces for the basal
-            # ganglia to surface as the actual answer to real input.
-            lines.append(self.cfg.respond_instruction)
-            lines.append("My reply:")
-        else:
-            # DMN: nothing external arrived — bias THINK toward
-            # associative, reflective continuation instead of a flat
-            # completion of nothing. `trigger_text` is the wander
-            # prompt already chosen by the caller (tick()), so it can
-            # be recorded as this episode's Layer-2 trigger too.
-            lines.append(trigger_text)
-            lines.append("Thought:")
+        # DMN: nothing external arrived — bias THINK toward
+        # associative, reflective continuation instead of a flat
+        # completion of nothing. `trigger_text` is the wander prompt
+        # already chosen by the caller (tick()), so it can be recorded
+        # as this episode's Layer-2 trigger too.
+        lines.append(trigger_text)
+        lines.append("Thought:")
         return "\n".join(lines)[-self.cfg.max_prompt_chars:]
+
+    def _compose_reply_prompt(self, sensory: List[str],
+                              recalled: List[dict]) -> str:
+        """A conversation turn ADDRESSED to the mind (second person):
+        context, then what was just said, then the reply instruction.
+        Truncation keeps the head (persona) and the tail (input +
+        instruction); the middle (memories) gives way first."""
+        head = [self.cfg.respond_persona, ""]
+        mid: List[str] = []
+        if recalled:
+            mid.append("Things you remember:")
+            mid.extend(f"- {e['content']}" for e in recalled)
+            mid.append("")
+        if self._last_thought:
+            mid.append(f"Your last thought: {self._last_thought}")
+            mid.append("")
+        tail = [f"Just now: {s}" for s in sensory]
+        tail.append(self.cfg.respond_instruction)
+        head_s, tail_s = "\n".join(head), "\n".join(tail)
+        room = self.cfg.max_prompt_chars - len(head_s) - len(tail_s) - 2
+        mid_s = "\n".join(mid)
+        if room <= 0:
+            mid_s = ""
+        elif len(mid_s) > room:
+            mid_s = mid_s[-room:]
+        return "\n".join(x for x in (head_s, mid_s, tail_s) if x)
 
     def _next_wander_prompt(self) -> str:
         """Round-robin over ``cfg.wander_prompts`` so idle mind-
@@ -1319,7 +1350,7 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
                    top_k: int = 40,
                    model_factory: Optional[Callable[[], Any]] = None,
                    tokenizer_factory: Optional[Callable[[], Any]] = None,
-                   reasoning_budget: int = 512,
+                   reasoning_budget: int = 1024,
                    ) -> MindSeams:
     """Build the mind's seams from a frozen pretrained HF expert.
 

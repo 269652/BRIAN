@@ -760,3 +760,16 @@ class TestProgressIsVisible:
                                 cfg=MindConfig(n_candidates=1),
                                 progress=lines.append)
         assert any("source_monitoring/full item 1/1" in l for l in lines)
+
+
+
+class TestAnswerProbesShowReplyTicks:
+    def test_episodic_recall_logs_each_reply_tick_trace(self):
+        from neuroslm.cognition.indicators import probe_episodic_recall
+        lines = []
+        probe_episodic_recall(_seams(_Reader(["pemberton", "3852"])),
+                              items=_recall_items()[:1], n_distractors=1,
+                              cfg=MindConfig(n_candidates=1),
+                              progress=lines.append)
+        traces = [l for l in lines if "responding" in l and "[tick" in l]
+        assert len(traces) >= 3, "fact, distractor and question ticks"

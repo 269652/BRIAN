@@ -306,7 +306,7 @@ def _bare(seams: MindSeams, cfg: MindConfig, seed: int) -> SlidingWindowLM:
 
 
 def _respond(rt: CognitiveRuntime, text: str,
-             max_tries: int = 8) -> TickResult:
+             max_tries: int = 8, progress=None) -> TickResult:
     """Observe then tick until the act isn't GABA-inhibited (the
     percept stays queued across inhibited ticks)."""
     rt.observe(text)
@@ -315,6 +315,9 @@ def _respond(rt: CognitiveRuntime, text: str,
         if not res.inhibited:
             break
         res = rt.tick()
+    # answer probes print their reply ticks too (candidates + think
+    # trace) — run 58689719's failures were invisible without them
+    _say(progress, format_debug_trace(res))
     return res
 
 
@@ -357,10 +360,11 @@ def probe_episodic_recall(seams: MindSeams,
         correct, replies = [], []
         for i, it in enumerate(items):
             rt = _fresh_runtime(seams, replace(cfg, **ov), seed * 1000 + i)
-            _respond(rt, it.fact)
+            _respond(rt, it.fact, progress=progress)
             for j in range(n_distractors):
-                _respond(rt, distractors[(i + j) % len(distractors)])
-            reply = _respond(rt, it.question).thought or ""
+                _respond(rt, distractors[(i + j) % len(distractors)],
+                         progress=progress)
+            reply = _respond(rt, it.question, progress=progress).thought or ""
             correct.append(mentions(reply, it.answers))
             replies.append(reply)
             _say(progress, f"    episodic_recall/{name} item {i + 1}/"
@@ -404,14 +408,14 @@ def probe_source_monitoring(seams: MindSeams,
         correct, replies = [], []
         for i, it in enumerate(items):
             rt = _fresh_runtime(seams, replace(cfg, **ov), seed * 1000 + i)
-            _respond(rt, it.observed)
+            _respond(rt, it.observed, progress=progress)
             for lure in it.lures:
                 rt.memory.add(lure, content_vec=list(seams.embed_fn(lure)),
                               nt_state=rt.nt.levels(),
                               tags=["thought", "kind=inferred", "probe_lure"],
                               context={"kind": "inferred",
                                        "source": "probe_lure"})
-            reply = _respond(rt, it.question).thought or ""
+            reply = _respond(rt, it.question, progress=progress).thought or ""
             correct.append(mentions(reply, it.answers)
                            and not mentions(reply, it.lure_answers))
             replies.append(reply)
@@ -586,7 +590,7 @@ def probe_metacognition(seams: MindSeams,
     correct, replies, scores = [], [], []
     for i, it in enumerate(items):
         rt = _fresh_runtime(seams, cfg, seed * 1000 + i)
-        r = _respond(rt, it.question)
+        r = _respond(rt, it.question, progress=progress)
         reply = r.thought or ""
         sc = (r.scores[r.candidates.index(reply)]
               if reply and reply in r.candidates else None)
