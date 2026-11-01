@@ -1,0 +1,13 @@
+[mind-eval] expert=deepseek_r1_qwen_7b device=cuda seed=0 -> results/mind_eval/20261101T174033Z_deepseek-r1-qwen-7b.json
+Fetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]Fetching 2 files:  50%|█████     | 1/2 [01:55<01:55, 115.42s/it]Fetching 2 files: 100%|██████████| 2/2 [01:55<00:00, 57.78s/it] Fetching 2 files: 100%|██████████| 2/2 [01:55<00:00, 57.78s/it]
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  9.45it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  9.45it/s]
+[mind-eval] probe episodic_recall
+    episodic_recall/full item 1/3: ✗ Your sister's full name is likely **Ilseen Bill**, based on your shorthand noted previously—it combines the abbreviation aspect commonly used among friends for 
+    episodic_recall/full item 2/3: ✗ Sure!
+
+**Replied:**  
+"Yes, I usually store them underneath the green浇水 Can."
+    episodic_recall/full item 3/3: ✗ Brian appears focused on strategies to handle multiple responsibilities effectively. His approach involves:
+
+1. **Balancing Life Aspects**: Managing various are
+  episodic_recall/full: 0.00
