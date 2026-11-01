@@ -42,6 +42,7 @@ class MindEvalDeployConfig:
     label: str = "neuroslm-mind-eval"
     gpu_query: str = _DEFAULT_GPU_QUERY
     auto_destroy: bool = True
+    push_interval: int = 120
 
 
 _ONSTART_TEMPLATE = """\
@@ -67,6 +68,24 @@ SKIP_LFS_RESUME=1 bash scripts/vast_bootstrap.sh
 export BOOT_TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p results/mind_eval logs/mind_eval
 LOGFILE="logs/mind_eval/${BOOT_TIMESTAMP}.log"
+touch "$LOGFILE"
+
+echo "── starting log pusher (background, every __PUSH_INTERVAL__s) ──"
+# A box that dies mid-run must not take the only copy of the log
+# (mind-wandering traces stream into it tick by tick).
+(
+  while true; do
+    sleep '__PUSH_INTERVAL__'
+    TS="$(date -u +%H:%M:%SZ)" python3 -c "
+import os
+from neuroslm.genetic.modulation_pusher import push_artifacts
+r = push_artifacts('.', ['results/mind_eval', '$LOGFILE'],
+                   message='mind-eval: auto-push @ ' + os.environ.get('TS', ''))
+print('[pusher]', r)
+"
+  done
+) > /workspace/mind_eval_pusher.log 2>&1 &
+PUSHER_PID=$!
 
 echo "── running the indicator battery ──"
 set +e
@@ -75,6 +94,8 @@ python3 -m neuroslm.cli eval mind --expert '__EXPERT__' --device cuda \\
 EVAL_RC=${PIPESTATUS[0]}
 set -e
 echo "── eval exited rc=$EVAL_RC ──"
+kill $PUSHER_PID 2>/dev/null || true
+sleep 2
 
 TS="$(date -u +%H:%M:%SZ)" python3 -c "
 import os
@@ -111,6 +132,7 @@ def build_mind_eval_onstart(env: dict) -> str:
         "__EXPERT__": expert,
         "__EVAL_ARGS__": str(env.get("EVAL_ARGS", "")),
         "__LABEL__": str(env.get("LABEL", "neuroslm-mind-eval")),
+        "__PUSH_INTERVAL__": str(env.get("PUSH_INTERVAL", 120)),
     }.items():
         result = result.replace(key, val)
     return result
@@ -148,6 +170,7 @@ class VastMindEvalConnector:
             "EVAL_ARGS": " ".join(shlex.quote(a) for a in config.eval_args),
             "LABEL": config.label,
             "AUTO_DESTROY": "1" if config.auto_destroy else "0",
+            "PUSH_INTERVAL": config.push_interval,
         })
         tf = tempfile.NamedTemporaryFile(
             mode="w", suffix=".sh", delete=False, encoding="utf-8",

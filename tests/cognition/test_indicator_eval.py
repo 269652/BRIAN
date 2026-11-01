@@ -512,3 +512,34 @@ class TestMultiExpertEval:
         assert "--expert 'smollm2_360m_instruct,deepseek_r1_qwen_1_5b'" in s
         assert "--out-dir results/mind_eval" in s
         assert "'results/mind_eval'" in s, "push the whole results dir"
+
+
+class TestLogCapture:
+    def test_loop_escape_logs_every_wandering_tick_trace(self):
+        from neuroslm.cognition.indicators import probe_loop_escape
+        lines = []
+        probe_loop_escape(_seams(lambda p, n: "The same thought again."),
+                          seed_texts=["I watched the river."],
+                          n_idle_ticks=3, cfg=MindConfig(n_candidates=2),
+                          seed=0, progress=lines.append)
+        traces = [l for l in lines if "DMN wandering" in l]
+        assert len(traces) >= 2 * 3 - 1, "full + no_control idle ticks"
+        assert any("[bare]" in l for l in lines)
+
+    def test_pci_logs_channels_reached_per_run(self):
+        from neuroslm.cognition.indicators import (
+            probe_perturbational_complexity)
+        lines = []
+        probe_perturbational_complexity(
+            _seams(_fairground_gen), seed_texts=["I watched the river."],
+            n_warmup=1, n_response_ticks=3, pulses=("da",),
+            cfg=MindConfig(n_candidates=2), progress=lines.append)
+        assert any("channels=" in l and "DA" in l for l in lines)
+
+    def test_onstart_pushes_logs_periodically_not_only_at_the_end(self):
+        from neuroslm.connectors.vast_mind_eval import build_mind_eval_onstart
+        s = build_mind_eval_onstart({"AUTO_DESTROY": "1",
+                                     "PUSH_INTERVAL": 120})
+        assert "sleep '120'" in s
+        assert "kill $PUSHER_PID" in s
+        assert s.count("push_artifacts") >= 2, "periodic + final push"

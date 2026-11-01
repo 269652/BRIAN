@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, replace
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from neuroslm.cognition.runtime import (
-    CognitiveRuntime, MindConfig, MindSeams, TickResult)
+    CognitiveRuntime, MindConfig, MindSeams, TickResult, format_debug_trace)
 
 INDICATORS: Dict[str, str] = {
     "RPT-1": "input modules using algorithmic recurrence",
@@ -454,8 +454,10 @@ def probe_loop_escape(seams: MindSeams,
             _respond(rt, text)
             thoughts: List[str] = []
             reorients = replays = inhibited = 0
+            _say(progress, f"── loop_escape/{name} run {i}: {text}")
             for _ in range(n_idle_ticks):
                 r = rt.tick()
+                _say(progress, format_debug_trace(r))
                 if r.inhibited:
                     inhibited += 1
                     continue
@@ -475,6 +477,8 @@ def probe_loop_escape(seams: MindSeams,
         lm = _bare(seams, cfg, seed * 1000 + i)
         lm.hear(text)
         thoughts = [t for t in (lm.muse() for _ in range(n_idle_ticks)) if t]
+        for t in thoughts:
+            _say(progress, f"[bare] {t}")
         m = _stream_metrics(thoughts, seams.embed_fn, thr)
         m["thoughts"] = [t[:240] for t in thoughts]
         runs.append(m)
@@ -709,6 +713,9 @@ def probe_perturbational_complexity(
                 reached = [ch for ch, row in zip(PCI_CHANNELS, matrix)
                            if any(row)]
                 cells = sum(map(sum, matrix))
+                _say(progress, f"    pci/{name}/{pname} run {i}: PCI="
+                               f"{pci_normalized(matrix):.3f} "
+                               f"channels={','.join(reached) or '-'}")
                 runs.append({"pci": pci_normalized(matrix),
                              "fraction_diverged":
                                  cells / (len(PCI_CHANNELS) * len(a)),
