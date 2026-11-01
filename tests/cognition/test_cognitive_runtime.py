@@ -1081,41 +1081,6 @@ class TestInnerSpeechRegister:
         assert rt._gen_wander is rt._gen
 
 
-class TestSecondPersonPrior:
-    """D2: a BG prior penalizes second-person address in WANDERING
-    candidates (inner speech has no addressee) — a value-shaping term
-    on the existing −NLL/T utility, exactly how action priors enter
-    basal-ganglia models. Never applied to respond ticks, where an
-    addressee genuinely exists."""
-
-    def test_wandering_prefers_the_first_person_candidate(self):
-        from neuroslm.cognition.runtime import MindConfig
-        cands = ["You should think about this, Brian",
-                "I keep coming back to the launch"]
-        cfg = MindConfig(n_candidates=2, selection_temp_base=0.01)
-        rt = _mk_runtime(
-            _ScriptedGen(cands),
-            scores=_score_map({c: 3.0 for c in cands}), cfg=cfg)
-        r = rt.tick()
-        assert r.thought == "I keep coming back to the launch", (
-            "equal NLL — the second-person candidate must lose on the "
-            "inner-speech prior alone")
-
-    def test_respond_does_not_penalize_second_person(self):
-        from neuroslm.cognition.runtime import MindConfig
-        cands = ["You are right about that", "I am not sure"]
-        cfg = MindConfig(n_candidates=2, selection_temp_base=0.01)
-        rt = _mk_runtime(
-            _ScriptedGen(cands),
-            scores=_score_map({"You are right about that": 2.0,
-                              "I am not sure": 3.0}), cfg=cfg)
-        rt.observe("was I right?")
-        r = rt.tick()
-        assert r.thought == "You are right about that", (
-            "a reply legitimately addresses someone — the prior must "
-            "not apply on respond ticks")
-
-
 class TestClassifyFnInjection:
     """The mind classifies with its OWN trunk/expert when one is
     wired in (classify_fn=...); the regex lexicon is the fallback
@@ -1659,25 +1624,6 @@ class TestGenerationQuality:
             tokenizer_factory=tok_factory)
         return rt, model
 
-    def test_repetition_controls_always_applied(self):
-        rt, model = self._rt(_FakeHFTokenizer)
-        rt._gen("hello", 8)
-        kw = model.generate_calls[-1]
-        assert kw.get("repetition_penalty", 1.0) > 1.0
-        assert kw.get("no_repeat_ngram_size", 0) >= 2
-
-    def test_stop_strings_for_base_models(self):
-        rt, model = self._rt(_FakeHFTokenizer)
-        rt._gen("hello", 8)
-        kw = model.generate_calls[-1]
-        assert "stop_strings" in kw
-        assert any("USER" in s for s in kw["stop_strings"]), (
-            "a base model has no learned turn-end token — without a "
-            "stop string it hallucinates the next USER turn, exactly "
-            "the live degenerate loop reported")
-        assert kw.get("tokenizer") is not None, (
-            "HF stop_strings requires the tokenizer= kwarg on generate()")
-
     def test_chat_template_used_when_available(self):
         rt, model = self._rt(_FakeChatTokenizer)
         rt._gen("hello", 8)
@@ -2135,27 +2081,6 @@ class TestThoughtsAreNotCutOff:
         assert c.thought_n_tok >= 192
         assert c.max_prompt_chars >= 4000
 
-    def test_trim_to_last_complete_sentence(self):
-        from neuroslm.cognition.runtime import trim_to_sentence
-        assert trim_to_sentence("One complete idea here. Then another "
-                                "that trails") == "One complete idea here."
-        assert trim_to_sentence("Is it? Maybe so! And then the") \
-            == "Is it? Maybe so!"
-        assert trim_to_sentence("Complete thought.") == "Complete thought."
-        assert trim_to_sentence('She said "yes." And') == 'She said "yes."'
-        assert trim_to_sentence("no boundary at all") == "no boundary at all"
-        assert trim_to_sentence("Pi is 3.14 and") == "Pi is 3.14 and", (
-            "a decimal point is not a sentence end")
-
-    def test_candidates_are_trimmed_before_selection(self):
-        from neuroslm.cognition.runtime import MindConfig
-        rt = _mk_runtime(_ScriptedGen(["A full thought. And a cut-off tr"]),
-                         cfg=MindConfig(n_candidates=1,
-                                        workspace_oscillator=False))
-        assert rt.tick().thought == "A full thought."
-
-
-
 class TestTraceShowsFullText:
     """2026-11-01: 'a lot of thoughts are cut off' — 39/40 selected R1
     thoughts were complete; the '…' came from the trace truncating
@@ -2251,28 +2176,6 @@ class TestConfirmatoryFreezeFixes:
         rt.tick()
         assert rt.cfg.respond_instruction not in gen.prompts[-1]
 
-    def test_third_person_self_narration_loses_selection(self):
-        """Run 58678026: 'The passage reflects Brian's deep
-        contemplation…' — R1 analysed the persona instead of being it."""
-        from neuroslm.cognition.runtime import MindConfig
-        narr = "The passage reflects Brian's deep contemplation."
-        reply = "I loved watching it too."
-        gen = _ScriptedGen([narr, reply])
-        rt = _mk_runtime(gen, scores=_score_map({narr: 3.0, reply: 3.8}),
-                         cfg=MindConfig(n_candidates=2,
-                                        selection_temp_base=0.05))
-        rt.observe("the river was beautiful today")
-        assert rt.tick().thought == reply
-
-    def test_narration_detector(self):
-        from neuroslm.cognition.runtime import _is_self_narration
-        assert _is_self_narration("The passage reflects Brian's mood.")
-        assert _is_self_narration("So Brian continues this line of thinking")
-        assert not _is_self_narration("I think the river is calm.")
-        assert not _is_self_narration("Brian, look at this")  # address
-
-
-
 # ── H67: control layer that works on any trunk (confirmatory run 58680199) ──
 
 class TestWorkingMemoryNovelty:
@@ -2360,34 +2263,6 @@ class TestRelativeControlThresholds:
         assert rt._nov_base == pytest.approx(0.62)
 
 
-class TestNarrationAndScaffold:
-    def test_generic_third_person_narration_is_penalised(self):
-        from neuroslm.cognition.runtime import _is_self_narration
-        assert _is_self_narration(
-            "The user started by thinking about modeling experiments.")
-        assert _is_self_narration("The passage describes a calm river.")
-        # mentioning the user is fine; narrating them is not
-        assert not _is_self_narration("I could ask the user about it later?")
-        assert not _is_self_narration("Users of maps often get lost.")
-
-    def test_scaffold_echo_is_cut(self):
-        from neuroslm.cognition.runtime import strip_scaffold
-        assert strip_scaffold(
-            'What does "flow" mean here?\nPrevious thoughts: rivers flowing'
-        ) == 'What does "flow" mean here?'
-        assert strip_scaffold("An idea.\nJust now: something") == "An idea."
-        assert strip_scaffold("Plain thought.") == "Plain thought."
-        assert strip_scaffold("I remember: nothing") == ""
-
-    def test_runtime_strips_scaffold_before_selection(self):
-        from neuroslm.cognition.runtime import MindConfig
-        rt = _mk_runtime(_ScriptedGen(
-            ["A real thought.\nMy last thought: echo"]),
-            cfg=MindConfig(n_candidates=1))
-        assert rt.tick().thought == "A real thought."
-
-
-
 class TestRespondTicksDoNotSeedTheIdleBaseline:
     def test_runtime_passes_update_baseline_only_when_wandering(self):
         from neuroslm.cognition.runtime import MindConfig
@@ -2430,16 +2305,6 @@ class TestReplyPathAfterRun58689719:
         assert p.startswith(rt.cfg.persona)
         assert p.rstrip().endswith("Thought:")
 
-    def test_trim_keeps_the_text_when_trimming_would_gut_it(self):
-        from neuroslm.cognition.runtime import trim_to_sentence
-        cut = "Sure! The key is under the green watering can by the door and"
-        assert trim_to_sentence(cut) == cut
-
-    def test_new_scaffold_labels_are_stripped(self):
-        from neuroslm.cognition.runtime import strip_scaffold
-        assert strip_scaffold("Fine.\nThings you remember: x") == "Fine."
-        assert strip_scaffold("Fine.\nYour last thought: x") == "Fine."
-
     def test_reply_reasoning_budget_is_1024(self):
         import inspect
         from neuroslm.cognition.runtime import build_hf_seams
@@ -2467,17 +2332,6 @@ class TestReasoningModelSampling:
             assert kw["temperature"] == pytest.approx(0.6)
             assert kw["top_p"] == pytest.approx(0.95)
 
-    def test_non_reasoning_models_keep_the_loop_guards(self):
-        from neuroslm.cognition.runtime import build_hf_seams
-        model = _FakeHFModelWithGenerate()
-        seams = build_hf_seams("fake/expert", model_factory=lambda: model,
-                               tokenizer_factory=_FakeHFTokenizer)
-        seams.generate_fn("hello", 4)
-        kw = model.generate_calls[-1]
-        assert kw["no_repeat_ngram_size"] == 3
-        assert kw["repetition_penalty"] > 1.0
-
-
 class TestReplyPromptHasNoName:
     """Run 58692548: "You are BRIAN…" made R1 treat Brian as a third
     party ("someone named Brian has provided his thoughts")."""
@@ -2489,3 +2343,55 @@ class TestReplyPromptHasNoName:
         rt.observe("the river was beautiful today")
         rt.tick()
         assert "brian" not in gen.prompts[-1].lower()
+
+
+class TestNoOutputShapingRules:
+    """Design principle (maintainer, 2026-11-01): no hard rules that
+    edit or veto the mind's output — no repetition bans, stop strings,
+    content penalties, scaffold cutting or sentence trimming. Behaviour
+    comes from the mechanisms plus plain instructions; selection is the
+    trunk's own likelihood under the NT/curiosity temperature. Resource
+    budgets (token caps, the reasoning budget) are not content rules."""
+
+    def _kwargs(self, tok_factory, model):
+        from neuroslm.cognition.runtime import build_hf_seams
+        seams = build_hf_seams("fake/expert", model_factory=lambda: model,
+                               tokenizer_factory=tok_factory)
+        seams.generate_fn("hello", 4)
+        seams.generate_wander_fn("hello", 4)
+        return model.generate_calls[-2:]
+
+    def test_no_generation_guards_for_any_trunk(self):
+        for tok in (_FakeHFTokenizer, _FakeChatTokenizer):
+            for kw in self._kwargs(tok, _FakeHFModelWithGenerate()):
+                for banned in ("repetition_penalty", "no_repeat_ngram_size",
+                               "stop_strings"):
+                    assert banned not in kw, (tok.__name__, banned)
+
+    def test_candidates_reach_selection_verbatim(self):
+        from neuroslm.cognition.runtime import MindConfig
+        raw = "A full thought. And then\nThought: more trailing"
+        rt = _mk_runtime(_ScriptedGen([raw]),
+                         cfg=MindConfig(n_candidates=1))
+        assert rt.tick().thought == raw.strip()
+
+    def test_selection_ignores_content(self):
+        """Second-person address or third-person narration is no longer
+        penalised: the lower NLL wins either way."""
+        from neuroslm.cognition.runtime import MindConfig
+        cands = ["You should think about this, Brian.",
+                 "I keep coming back to the launch."]
+        rt = _mk_runtime(_ScriptedGen(cands),
+                         scores=_score_map({cands[0]: 2.0, cands[1]: 3.0}),
+                         cfg=MindConfig(n_candidates=2,
+                                        selection_temp_base=0.01))
+        assert rt.tick().thought == cands[0]
+
+    def test_the_rule_machinery_is_gone(self):
+        import neuroslm.cognition.runtime as rtm
+        from neuroslm.cognition.runtime import MindConfig
+        for name in ("trim_to_sentence", "strip_scaffold",
+                     "_is_second_person", "_is_self_narration"):
+            assert not hasattr(rtm, name), name
+        for field in ("second_person_penalty", "self_narration_penalty"):
+            assert not hasattr(MindConfig(), field), field

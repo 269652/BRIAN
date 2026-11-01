@@ -50,24 +50,6 @@ visible <think> trace and is the default for every mind entry point
 ``deepseek_r1_qwen_1_5b`` on CPU."""
 
 
-_SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*(?=\s|$)")
-
-
-def trim_to_sentence(text: str) -> str:
-    """Cut a generation that stopped mid-sentence back to its last
-    complete sentence. Text that ends a sentence, or has no sentence
-    boundary at all, is returned unchanged; '3.14' is not a boundary."""
-    t = (text or "").strip()
-    ends = list(_SENTENCE_END.finditer(t))
-    if not ends or ends[-1].end() == len(t):
-        return t
-    cut = t[:ends[-1].end()]
-    # Run 58689719: "Sure! The key is under the…" trimmed to "Sure!" —
-    # when trimming would drop most of the text, the fragment is the
-    # lesser evil.
-    return cut if len(cut) >= len(t) / 3 else t
-
-
 def _hf_load_kwargs(device: str) -> dict:
     """GPU: load in the checkpoint's dtype (bf16 for R1) — transformers
     4.x otherwise defaults to fp32. CPU: fp32 (bf16 matmuls are slow)."""
@@ -203,11 +185,6 @@ class MindConfig:
     are transiently suppressed from retrieval, so one memory can't
     dominate every tick. IOR yields when it would empty the result."""
 
-    second_person_penalty: float = 1.5
-    """BG prior (nats, added to a candidate's NLL) against
-    second-person address in WANDERING candidates — inner speech has
-    no addressee. Never applied on respond ticks."""
-
     inferred_recall_penalty: float = 0.15
     """Provenance-aware retrieval (control fix 1): cosine-scale
     penalty on kind="inferred" episodes during recall. Observed
@@ -298,10 +275,6 @@ class MindConfig:
         "yourself. Do not describe or analyse this text.")
     """Last line of a reply prompt. R1-family models want instructions
     in the user turn, not a system prompt."""
-
-    self_narration_penalty: float = 1.5
-    """BG prior (nats) against a candidate narrating the mind in the
-    third person ("Brian's…", "So Brian continues…") — on every tick."""
 
     nt_driver_alpha: float = 0.1
     """EMA rate of the default DrivenNTSystem's driver z-scoring. Its
@@ -585,34 +558,6 @@ def curious_selection_temperature(da_level: float, da_baseline: float,
     return T * (1.0 + cfg.curiosity_gain * max(0.0, min(1.0, boredom)))
 
 
-_SECOND_PERSON_RE = re.compile(r"\b(you|your|yours|yourself)\b|^brian\s*[,:]",
-                               re.IGNORECASE)
-
-
-_SELF_NARRATION_RE = re.compile(
-    r"\bbrian(?:'s|’s)|\b(?:so|then|now|and)\s+brian\b|\bbrian\s+"
-    r"(?:is|was|continues|reflects|thinks|feels|wonders|considers|seems)\b"
-    # run 58680199: "The user started by thinking about…" (spoken)
-    r"|\bthe\s+(?:user|passage|text|author|speaker|narrator)\s+"
-    r"(?:is|was|started|starts|began|begins|seems|describes|reflects|"
-    r"thinks|wants|continues|asked|asks|mentions|wonders|considers)\b",
-    re.IGNORECASE)
-
-# Prompt-section labels the trunk imitates when it starts hallucinating
-# a new prompt ("⏎ Previous thoughts: …", run 58680199).
-_SCAFFOLD_RE = re.compile(
-    r"(?:^|\n)\s*(?:I remember|My last thought|Just now|My reply|Thought|"
-    r"Previous thoughts?|Things you remember|Your last thought)\s*:",
-    re.IGNORECASE)
-
-
-def strip_scaffold(text: str) -> str:
-    """Cut a candidate where it starts echoing the prompt's scaffold."""
-    t = text or ""
-    m = _SCAFFOLD_RE.search(t)
-    return (t[:m.start()] if m else t).strip()
-
-
 def loop_threshold(baseline: Optional[float], cfg: "MindConfig") -> float:
     """Novelty below which a tick counts toward the LOOPING streak."""
     if cfg.control_thresholds == "absolute" or baseline is None:
@@ -625,17 +570,6 @@ def replay_threshold(baseline: Optional[float], cfg: "MindConfig") -> float:
     if cfg.control_thresholds == "absolute" or baseline is None:
         return cfg.replay_boredom_threshold
     return (1.0 - baseline) + cfg.replay_margin
-
-
-def _is_self_narration(text: str) -> bool:
-    """Does this candidate narrate the mind in the third person? (An
-    address — "Brian, look" — is the second-person prior's job.)"""
-    return bool(_SELF_NARRATION_RE.search(text or ""))
-
-
-def _is_second_person(text: str) -> bool:
-    """Does this candidate address someone? Inner speech shouldn't."""
-    return bool(_SECOND_PERSON_RE.search(text or ""))
 
 
 class CognitiveRuntime:
@@ -932,8 +866,7 @@ class CognitiveRuntime:
         candidates: List[str] = []
         reasonings: List[Optional[str]] = []
         for _ in range(max(1, self.cfg.n_candidates)):
-            out = trim_to_sentence(strip_scaffold(
-                gen(prompt, self.cfg.thought_n_tok) or ""))
+            out = (gen(prompt, self.cfg.thought_n_tok) or "").strip()
             if out:
                 candidates.append(out)
                 reasonings.append(self._reasoning() if self._reasoning
@@ -950,8 +883,7 @@ class CognitiveRuntime:
         # inner-speech prior (D2) penalizing second-person address in
         # WANDERING candidates only.
         scores = [self._score(c) for c in candidates]
-        idx, selection_entropy = self._select(scores, levels, candidates,
-                                              wandering)
+        idx, selection_entropy = self._select(scores, levels)
         thought, sc = candidates[idx], scores[idx]
         differentiation = _population_stdev([s.mean_nll for s in scores])
 
@@ -1157,21 +1089,17 @@ class CognitiveRuntime:
         return p
 
     def _select(self, scores: List[ThoughtScore],
-                levels: Dict[str, float],
-                candidates: Optional[List[str]] = None,
-                wandering: bool = False) -> Tuple[int, float]:
+                levels: Dict[str, float]) -> Tuple[int, float]:
         """Basal-ganglia selection. Returns ``(chosen_index,
         selection_entropy)`` — the latter an IIT-flavored decisiveness
         proxy: normalised entropy of the softmax(utility/T) choice
         distribution (0 = one option clearly excluded the rest, 1 =
         arbitrary among near-equal options).
 
-        Utility per candidate = −(NLL + prior), where the prior adds
-        ``second_person_penalty`` nats to WANDERING candidates that
-        address someone (inner speech has no addressee — D2 of the
-        curiosity loop; how action priors enter BG models generally).
-        Temperature = :func:`curious_selection_temperature` — the DA
-        path scaled up by boredom (B of the loop).
+        Utility per candidate = −NLL: the trunk's own likelihood, with
+        no content rules (2026-11-01 design principle — no output-
+        shaping priors). Temperature = :func:`curious_selection_temperature`
+        — the DA path scaled up by boredom (B of the loop).
         """
         if len(scores) == 1:
             return 0, 0.0
@@ -1184,17 +1112,8 @@ class CognitiveRuntime:
         T = curious_selection_temperature(
             levels.get("DA", 0.0), baselines.get("DA", 0.15),
             self._boredom, self.cfg)
-        penalties = [0.0] * len(scores)
-        if candidates is not None:
-            penalties = [
-                (self.cfg.second_person_penalty
-                 if wandering and _is_second_person(c) else 0.0)
-                + (self.cfg.self_narration_penalty
-                   if _is_self_narration(c) else 0.0)
-                for c in candidates]
-        # softmax(−(NLL+prior) / T), computed stably.
-        utils = [-(s.mean_nll + p) / max(T, 1e-6)
-                for s, p in zip(scores, penalties)]
+        # softmax(−NLL / T), computed stably.
+        utils = [-s.mean_nll / max(T, 1e-6) for s in scores]
         m = max(utils)
         exps = [math.exp(u - m) for u in utils]
         z = sum(exps)
@@ -1463,26 +1382,16 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
                     pad_token_id=eos_id,
                 )
                 if reasoning_model:
-                    # DeepSeek's recommended R1 sampling. The loop
-                    # guards below act on the WHOLE sequence incl. the
-                    # prompt in HF: run 58692548's R1 could not write
-                    # "Ilsebill" and confabulated whole scenes.
+                    # DeepSeek's recommended R1 sampling.
                     gen_kwargs.update(temperature=0.6, top_p=0.95, top_k=0)
                 else:
-                    # Base/instruct loop guards (2026-08-11: base
-                    # SmolLM2 looped "Well, I do." ×5).
+                    # No repetition bans or stop strings for any trunk
+                    # (2026-11-01 design principle: no output-shaping
+                    # rules; the 2026-08-11 guards against base-SmolLM2
+                    # loops are gone with it).
                     gen_kwargs.update(
                         temperature=float(max(temperature, 1e-6)),
-                        top_k=int(top_k) if top_k else 0,
-                        repetition_penalty=1.3,
-                        no_repeat_ngram_size=3)
-                if not use_chat_template:
-                    # No template turn-end token applies in raw
-                    # completion — stop before the model drifts into
-                    # hallucinating a conversation.
-                    gen_kwargs["stop_strings"] = ["\nUSER:", "\nUser:",
-                                                 "\n\n"]
-                    gen_kwargs["tokenizer"] = tokenizer
+                        top_k=int(top_k) if top_k else 0)
                 out = model.generate(**gen_kwargs)
                 return out[0, x.shape[1]:].tolist()
 

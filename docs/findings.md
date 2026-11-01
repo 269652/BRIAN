@@ -4490,3 +4490,18 @@ n = 1) has been read trace by trace and found clean. Only then is a
 build frozen for H64–H68.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestReasoningModelSampling, TestReplyPromptHasNoName]
+
+### Design principle: no output-shaping rules (maintainer, 2026-11-01)
+
+The mind's behaviour must come from its mechanisms (memory, novelty,
+NT, workspace, likelihood-based selection) plus plain instructions,
+never from rules that edit or veto output. **Removed:** repetition
+penalty and n-gram ban (all trunks), wander-seam stop strings, the
+second-person and self-narration BG priors, scaffold cutting, and
+sentence trimming. **Kept as resource budgets, not content rules:**
+the 192-token thought length and R1's 1024-token reasoning budget with
+forced close.
+
+Consequence for earlier fixes: H67(d) (scaffold/narration leakage)
+becomes descriptive, since there is no longer a rule to test.
+Leakage, if any, is now an emergent behaviour to report.
