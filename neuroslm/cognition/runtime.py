@@ -284,13 +284,14 @@ class MindConfig:
     58678026: NE/ACh/GABA per-run sd 0.002-0.005)."""
 
     respond_persona: str = (
-        "You are BRIAN, an always-on mind: you think in language and "
-        "remember what happens to you.")
+        "You are an always-on mind: you think in language and remember "
+        "what happens to you.")
     """Second-person framing for REPLY prompts. Run 58689719: a
     first-person prompt ("I am BRIAN…") was read by R1 as a document
     to analyse ("Brian appears focused on…"). Reply prompts now
     address the mind; idle (DMN) prompts keep first-person inner
-    speech (``persona``)."""
+    speech (``persona``). No name: "You are BRIAN…" made R1 treat
+    Brian as a third party (run 58692548)."""
 
     respond_instruction: str = (
         "Reply directly to what was just said, in the first person, as "
@@ -1458,16 +1459,23 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
                     attention_mask=torch.ones_like(x),
                     max_new_tokens=int(n),
                     do_sample=True,
-                    temperature=float(max(temperature, 1e-6)),
-                    top_k=int(top_k) if top_k else 0,
                     use_cache=True,
                     pad_token_id=eos_id,
-                    # Repetition controls: always on. Cheap,
-                    # model-agnostic, and the second half of the fix
-                    # for the observed degenerate loop.
-                    repetition_penalty=1.3,
-                    no_repeat_ngram_size=3,
                 )
+                if reasoning_model:
+                    # DeepSeek's recommended R1 sampling. The loop
+                    # guards below act on the WHOLE sequence incl. the
+                    # prompt in HF: run 58692548's R1 could not write
+                    # "Ilsebill" and confabulated whole scenes.
+                    gen_kwargs.update(temperature=0.6, top_p=0.95, top_k=0)
+                else:
+                    # Base/instruct loop guards (2026-08-11: base
+                    # SmolLM2 looped "Well, I do." ×5).
+                    gen_kwargs.update(
+                        temperature=float(max(temperature, 1e-6)),
+                        top_k=int(top_k) if top_k else 0,
+                        repetition_penalty=1.3,
+                        no_repeat_ngram_size=3)
                 if not use_chat_template:
                     # No template turn-end token applies in raw
                     # completion — stop before the model drifts into

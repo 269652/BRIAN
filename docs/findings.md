@@ -4455,3 +4455,38 @@ on it.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestReplyPathAfterRun58689719]
 [EVIDENCE: tests/cognition/test_indicator_eval.py::TestAnswerProbesShowReplyTicks]
+
+### Run 58692548 stopped (development): the loop guards banned repeating the prompt (2026-11-01)
+
+With build #4's full reply-tick traces visible, R1's replies turned
+out to **confabulate whole scenes**:
+- tick 1, input "My sister's name is Ilsebill": an Instagram profile
+  picture and three days of messages;
+- tick 2, input "The weather turned cold": thinking about a sister's
+  adopted cat;
+- tick 5, input a broken coffee machine: a numbered list on
+  remote-work performance.
+
+The name came out as "Ilsee bill", "Illee Bill", "Ilsebell", never
+"Ilsebill".
+
+**Cause.** Every generation ran with `no_repeat_ngram_size=3` and
+`repetition_penalty=1.3`. In HF transformers both act on the *whole*
+sequence, including the prompt. R1 was barred from restating any
+prompt trigram (it could not write the name, or "the coffee machine")
+and penalised for reusing any prompt word. Over ~1000 tokens of
+reasoning that compounds into drift. These guards were added on
+2026-08-11 for base-SmolLM2 loops. **They probably degraded every
+R1-7B run so far, including the "Ilseen Bill" miss in 58689719.**
+
+**Fixes:** reasoning models now use DeepSeek's recommended sampling
+(T = 0.6, top-p = 0.95, no repetition penalty, no n-gram ban). The
+guards stay for non-reasoning trunks. Reply prompts no longer name the
+mind ("You are BRIAN…" made R1 treat Brian as a third party).
+
+**Process change:** the "confirmatory" label is suspended until a
+~30-minute smoke run (all answer probes + a short `loop_escape`,
+n = 1) has been read trace by trace and found clean. Only then is a
+build frozen for H64–H68.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestReasoningModelSampling, TestReplyPromptHasNoName]

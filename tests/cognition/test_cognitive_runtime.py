@@ -2445,3 +2445,47 @@ class TestReplyPathAfterRun58689719:
         from neuroslm.cognition.runtime import build_hf_seams
         assert inspect.signature(build_hf_seams).parameters[
             "reasoning_budget"].default == 1024
+
+
+
+class TestReasoningModelSampling:
+    """Run 58692548: R1 could not write "Ilsebill" ("Ilsee bill",
+    "Illee Bill", "Ilsebell") and confabulated whole scenes.
+    no_repeat_ngram_size=3 and repetition_penalty=1.3 act on the WHOLE
+    sequence incl. the prompt in HF transformers — they banned
+    restating any prompt trigram and penalised every prompt word. They
+    were added for base-SmolLM2 loops; reasoning models now use
+    DeepSeek's recommended sampling instead."""
+
+    def test_reasoning_models_use_deepseek_sampling(self):
+        seams, model = _reasoning_seams(["ok</think>Fine."], budget=8)
+        seams.generate_fn("hi", 8)
+        seams.generate_wander_fn("hi", 8)
+        for _, kw in model.calls:
+            assert "no_repeat_ngram_size" not in kw
+            assert kw.get("repetition_penalty", 1.0) == 1.0
+            assert kw["temperature"] == pytest.approx(0.6)
+            assert kw["top_p"] == pytest.approx(0.95)
+
+    def test_non_reasoning_models_keep_the_loop_guards(self):
+        from neuroslm.cognition.runtime import build_hf_seams
+        model = _FakeHFModelWithGenerate()
+        seams = build_hf_seams("fake/expert", model_factory=lambda: model,
+                               tokenizer_factory=_FakeHFTokenizer)
+        seams.generate_fn("hello", 4)
+        kw = model.generate_calls[-1]
+        assert kw["no_repeat_ngram_size"] == 3
+        assert kw["repetition_penalty"] > 1.0
+
+
+class TestReplyPromptHasNoName:
+    """Run 58692548: "You are BRIAN…" made R1 treat Brian as a third
+    party ("someone named Brian has provided his thoughts")."""
+
+    def test_reply_prompt_does_not_name_the_mind(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["I hear you."])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1))
+        rt.observe("the river was beautiful today")
+        rt.tick()
+        assert "brian" not in gen.prompts[-1].lower()
