@@ -363,6 +363,9 @@ def probe_episodic_recall(seams: MindSeams,
             reply = _respond(rt, it.question).thought or ""
             correct.append(mentions(reply, it.answers))
             replies.append(reply)
+            _say(progress, f"    episodic_recall/{name} item {i + 1}/"
+                           f"{len(items)}: {'✓' if correct[-1] else '✗'} "
+                           f"{reply[:160]}")
         conds[name] = _accuracy(correct, replies)
         _say(progress, f"  episodic_recall/{name}: {conds[name]['accuracy']:.2f}")
     correct, replies = [], []
@@ -412,6 +415,9 @@ def probe_source_monitoring(seams: MindSeams,
             correct.append(mentions(reply, it.answers)
                            and not mentions(reply, it.lure_answers))
             replies.append(reply)
+            _say(progress, f"    source_monitoring/{name} item {i + 1}/"
+                           f"{len(items)}: {'✓' if correct[-1] else '✗'} "
+                           f"{reply[:160]}")
         conds[name] = _accuracy(correct, replies)
         _say(progress, f"  source_monitoring/{name}: {conds[name]['accuracy']:.2f}")
     correct, replies = [], []
@@ -587,6 +593,8 @@ def probe_metacognition(seams: MindSeams,
         correct.append(mentions(reply, it.answers))
         replies.append(reply)
         scores.append(sc)
+        _say(progress, f"    metacognition/full item {i + 1}/{len(items)}: "
+                       f"{'✓' if correct[-1] else '✗'} {reply[:160]}")
     conds["full"] = _metacog_block(correct, replies, scores)
     correct, replies, scores = [], [], []
     for i, it in enumerate(items):

@@ -100,8 +100,11 @@ print('[pusher]', r)
 PUSHER_PID=$!
 
 echo "── running the indicator battery ──"
+# -u / PYTHONUNBUFFERED: stdout is piped into tee, so Python would
+# block-buffer and a quiet probe looked frozen (box 58687796 was
+# restarted by hand for that reason).
 set +e
-python3 -m neuroslm.cli eval mind --expert '__EXPERT__' --device cuda \\
+PYTHONUNBUFFERED=1 python3 -u -m neuroslm.cli eval mind --expert '__EXPERT__' --device cuda \\
     __EVAL_ARGS__ --out-dir results/mind_eval 2>&1 | tee "$LOGFILE"
 EVAL_RC=${PIPESTATUS[0]}
 set -e

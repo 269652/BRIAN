@@ -717,3 +717,46 @@ class TestFollowUpBatteryWiring:
             cfg=MindConfig(n_candidates=1), n_items=1)
         json.dumps(report)
         assert report["probes"]["controller_phi"]["samples"] == 1
+
+
+class TestProgressIsVisible:
+    """Box 58687796 looked frozen and was restarted by hand: the
+    non-loop probes print no tick traces, and the few lines they do
+    print sat in Python's block buffer (stdout piped into tee)."""
+
+    def test_onstart_runs_the_eval_unbuffered(self):
+        from neuroslm.connectors.vast_mind_eval import build_mind_eval_onstart
+        s = build_mind_eval_onstart({"AUTO_DESTROY": "1"})
+        assert "PYTHONUNBUFFERED=1" in s
+        assert "python3 -u -m neuroslm.cli eval mind" in s
+
+    def test_item_level_progress_in_answer_probes(self):
+        from neuroslm.cognition.indicators import (
+            QAItem, probe_episodic_recall, probe_metacognition)
+        items = _recall_items()
+        lines = []
+        probe_episodic_recall(_seams(_Reader(["pemberton", "3852"])),
+                              items=items, n_distractors=1,
+                              cfg=MindConfig(n_candidates=1),
+                              progress=lines.append)
+        assert any("episodic_recall/full item 2/2" in l for l in lines)
+        lines = []
+        probe_metacognition(_seams(lambda p, n: "Paris."),
+                            items=[QAItem("What is the capital of France?",
+                                          ("paris",))],
+                            cfg=MindConfig(n_candidates=1),
+                            progress=lines.append)
+        assert any("metacognition/full item 1/1" in l for l in lines)
+
+    def test_source_monitoring_reports_each_item(self):
+        from neuroslm.cognition.indicators import (
+            SourceItem, probe_source_monitoring)
+        item = SourceItem("The key is in the red box.",
+                          ("I imagine the key is in the blue box.",),
+                          "Which box is the key in?", ("red",), ("blue",))
+        lines = []
+        probe_source_monitoring(_seams(_Reader(["red", "blue"])),
+                                items=[item],
+                                cfg=MindConfig(n_candidates=1),
+                                progress=lines.append)
+        assert any("source_monitoring/full item 1/1" in l for l in lines)
