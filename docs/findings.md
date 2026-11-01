@@ -4023,3 +4023,79 @@ Deferred: a persistent goal/task register (PFC-style state object) —
 noted as the honest next structural addition, not built here.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestProvenanceAwareRetrieval, TestReplayPulse, TestReorientPolicy, TestPerceptUtilityGate]
+
+### H62 — Consciousness-indicator battery: pre-registered predictions (2026-11-01)
+
+**Status:** ⏳ Instrument built and fixture-verified; decision-grade run
+pending (`brian deploy-mind-eval`, needs explicit deploy go-ahead).
+
+**Context.** Research direction changed 2026-11-01: the cognition layer
+(§14) is now developed as an artificial-consciousness research
+instrument, not a competitive SLM. The audit in architecture.md §14.11
+maps the runtime against the 14 indicator properties of Butlin, Long
+et al. (2023): 0 present, 8 partial/proxy, 6 absent. The battery turns
+four of the partial ones into probes, plus a perturbational-complexity
+analogue for IIT (see §14.11 for why IIT is measured, not indicated), each run as full runtime vs. a
+single-mechanism ablation vs. a bare sliding-window LM with the same
+1200-char prompt budget.
+
+**Spec.** `neuroslm/cognition/indicators.py` (`run_indicator_battery`),
+`brian eval mind`, `brian deploy-mind-eval`
+(`neuroslm/connectors/vast_mind_eval.py`). Expert: SmolLM2-360M-Instruct
+(frozen, `--expert` mode). Report JSON → `results/mind_eval/`.
+
+**Pre-registered predictions** (written before the first real run; the
+run is judged against these, not against post-hoc readings):
+
+| Probe | Indicator | Prediction | Falsified if |
+|---|---|---|---|
+| `episodic_recall` (6 distractors) | GWT-3 | full ≥ 0.6; bare ≤ 0.2 (fact is ~2.7k chars back, outside the window); no_recall ≤ 0.2 | full − bare < 0.3 |
+| `source_monitoring` | HOT-2 | full − no_provenance ≥ 0.15; full > bare | full ≤ no_provenance |
+| `loop_escape` (12 idle ticks) | GWT-4 | full mean stream novelty > no_control; shorter low-novelty streak | full novelty ≤ no_control |
+| `perturbational_complexity` | IIT (PCI) | `null` pulse PCI = 0 exactly (twin determinism); `da`/`memory` pulses: full reaches more channels than `no_recall` (memory) and than `no_control` | null PCI > 0 on GPU means the twin method is invalid there, and the probe is reported as non-deterministic, not as PCI |
+| `metacognition` | HOT-2 | **expected null:** type-2 AUROC (1 − entropy) for full and bare both within 0.5 ± 0.15 and |full − bare| < 0.1. Nothing in the runtime reads confidence, and the scorer rates a thought *unconditionally* (not given the question) | — (baseline for the future self-model) |
+
+**Already found (fixture level, Layer A).** The battery exposed two
+RECALL bugs before any live run. A respond tick recalled its own just-stored
+percept, and the IOR deque then suppressed that memory when the user
+later asked about it. Both are fixed: current percepts are excluded from
+recall, and IOR applies on wandering ticks only. See architecture.md §14.11.
+
+[EVIDENCE: tests/cognition/test_indicator_eval.py (36 contracts)]
+[EVIDENCE: tests/emergent/test_driven_nt.py::test_perturb_shifts_one_channel_in_logit_space_then_leaks_back]
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestInhibitionOfReturn::test_respond_ticks_are_exempt, ::test_respond_tick_never_recalls_its_own_percept]
+
+### H63 — Does a DeepSeek-R1 trunk improve mind-wandering and introspection? (pre-registered, 2026-11-01)
+
+**Status:** ⏳ Pending run (`brian deploy-mind-eval --expert
+smollm2_360m_instruct,deepseek_r1_qwen_1_5b,deepseek_r1_qwen_7b`,
+needs explicit deploy go-ahead).
+
+**Hypothesis.** Swapping the trunk from SmolLM2-360M-Instruct to an
+R1 distill improves the cognition layer's measured function, beyond
+just making each thought sound better: the probes measure what the
+loop does with the trunk, under the same runtime.
+
+**Operationalisation.** "Better mind-wandering" = higher external
+stream novelty and shorter low-novelty streaks on `loop_escape` (full
+condition). "Better introspection" = higher type-2 AUROC on
+`metacognition` and higher `source_monitoring` accuracy.
+
+**Predictions.**
+
+| Measure | SmolLM2-360M-Instruct → R1-Qwen-1.5B / 7B |
+|---|---|
+| `metacognition` accuracy | rises (larger, stronger models) |
+| `metacognition` AUROC (1 − entropy) | rises by ≥ 0.10 |
+| `source_monitoring` full | rises; the observed fact is easier to keep apart from musings |
+| `loop_escape` novelty (full) | rises; *but* novelty alone also rewards incoherence (see limits) |
+| `perturbational_complexity` | no prediction (exploratory) |
+| full − ablation contrasts | keep their sign. If the loop's mechanisms only help a weak trunk, the contrasts shrink with R1, which is itself a finding |
+
+**Known limits, stated before the data.** (1) Novelty is not quality:
+a trunk that emits random text maximises novelty. A fixed-judge
+coherence rating is the missing measure and should be added before
+anyone calls R1's wandering "better". (2) R1 think traces are
+introspective *reports*, not access. (3) Accuracy differences partly
+reflect model size, not the cognitive loop; the full − bare contrast
+is the loop-attributable part.

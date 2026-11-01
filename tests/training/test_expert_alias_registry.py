@@ -117,6 +117,19 @@ class TestResolveExpertAlias:
         assert resolve_expert_alias("qwen2_5_3b_instruct") \
             == "Qwen/Qwen2.5-3B-Instruct"
 
+    def test_deepseek_open_weight_aliases(self):
+        from neuroslm.experts import resolve_expert_alias
+        expected = {
+            "deepseek_r1_qwen_1_5b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+            "deepseek_r1_qwen_7b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+            "deepseek_r1_qwen_14b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+            "deepseek_r1_llama_8b": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+            "deepseek_r1_0528_qwen3_8b": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
+            "deepseek_llm_7b_chat": "deepseek-ai/deepseek-llm-7b-chat",
+        }
+        for alias, repo in expected.items():
+            assert resolve_expert_alias(alias) == repo
+
     def test_unknown_bare_alias_raises_with_hint(self):
         from neuroslm.experts import resolve_expert_alias
         with pytest.raises(ValueError) as ei:

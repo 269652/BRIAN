@@ -9,8 +9,10 @@ Hosted by ``neuroslm.chat_daemon.ChatDaemon`` (``brian chat --mind``).
 from neuroslm.cognition.runtime import (  # noqa: F401
     CognitiveRuntime,
     MindConfig,
+    MindSeams,
     ThoughtScore,
     TickResult,
+    build_hf_seams,
     curious_selection_temperature,
     format_debug_trace,
     format_introspection,

@@ -400,6 +400,17 @@ class DrivenNTSystem(nn.Module):
 
         return nt_hat
 
+    def perturb(self, channel: str, delta_logit: float) -> None:
+        """Kick one channel's logit by ``delta_logit`` (a TMS-like
+        pulse for the §14.11 perturbational-complexity probe). The
+        OU leak in :meth:`step_full` then relaxes it toward μ."""
+        if channel not in self._y:
+            raise KeyError(f"unknown NT channel {channel!r}; "
+                           f"expected one of {list(self._y)}")
+        y = max(-20.0, min(20.0, self._y[channel] + float(delta_logit)))
+        self._y[channel] = y
+        self._level[channel] = _sigmoid(y)
+
     # ── Accessors ────────────────────────────────────────────────────
 
     def levels(self) -> Dict[str, float]:

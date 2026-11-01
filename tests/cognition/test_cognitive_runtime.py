@@ -748,6 +748,43 @@ class TestInhibitionOfReturn:
         r2 = rt.tick()
         assert r2.recalled, "sole episode must still be recallable"
 
+    def test_respond_ticks_are_exempt(self):
+        """IOR is a DMN anti-fixation device. On a respond tick the
+        most relevant memory must be available even if it was recalled
+        recently — found by the §14.11 episodic_recall probe: a fact
+        recalled on its own percept tick was still suppressed five
+        ticks later when the user asked about it."""
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["ok"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=1))
+        rt.observe("the launch code is ready")
+        rt.tick()      # respond tick recalls the fresh launch percept
+        rt.observe("coffee tastes great today")
+        rt.tick()
+        rt.observe("what about the launch code?")
+        r = rt.tick()
+        assert any("launch code is ready" in e["content"]
+                   for e in r.recalled), (
+            "respond ticks must not inhibit the relevant memory")
+
+    def test_respond_tick_never_recalls_its_own_percept(self):
+        """observe() stores the percept BEFORE the tick, so it is its
+        own nearest neighbour (cos 1). It is already in the prompt as
+        'Just now:' — recalling it too wastes a recall slot on a
+        duplicate and displaces the memory the input is about."""
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["ok"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=1))
+        rt.memory.add("the launch code is ready",
+                      content_vec=_vec_for("the launch code is ready"),
+                      context={"kind": "observed"})
+        # launch+moon axes: cos(percept, itself)=1 > cos(percept, fact)
+        rt.observe("is the launch code ready for the moon?")
+        r = rt.tick()
+        contents = [e["content"] for e in r.recalled]
+        assert "is the launch code ready for the moon?" not in contents
+        assert contents == ["the launch code is ready"]
+
 
 class TestReplayAnchoredWandering:
     """C2: when bored, the wander tick anchors RECALL on a randomly
@@ -1566,6 +1603,17 @@ class _FakeChatTokenizer(_FakeHFTokenizer):
         return self.encode(f"<user>{text}<assistant>")
 
 
+class _FakeChatTokenizerV5(_FakeChatTokenizer):
+    """transformers >= 5: apply_chat_template(tokenize=True) returns a
+    dict-like BatchEncoding, not a list of ids."""
+
+    def apply_chat_template(self, messages, add_generation_prompt=True,
+                            tokenize=True, **kw):
+        ids = super().apply_chat_template(messages, add_generation_prompt,
+                                          tokenize)
+        return {"input_ids": ids, "attention_mask": [1] * len(ids)}
+
+
 class TestGenerationQuality:
     """2026-08-11 live incident: `brian chat connect` produced a
     degenerate loop —
@@ -1624,3 +1672,126 @@ class TestGenerationQuality:
         rt, model = self._rt(_FakeChatTokenizer)
         out = rt._gen("hello", 3)
         assert out == _FakeChatTokenizer().decode([7, 7, 7])
+
+    def test_chat_template_accepts_transformers_v5_batch_encoding(self):
+        """Fresh installs resolve transformers 5.x, where the old
+        list(apply_chat_template(...)) yielded the dict's KEYS and
+        crashed every respond tick (found by the first real
+        `brian eval mind` run)."""
+        rt, model = self._rt(_FakeChatTokenizerV5)
+        out = rt._gen("hello", 3)
+        assert out == _FakeChatTokenizer().decode([7, 7, 7])
+
+
+# ── Reasoning experts (DeepSeek-R1 family): think trace as introspection
+
+class _CharTokenizer:
+    """Char-level tokenizer: text round-trips exactly, so a scripted
+    model can emit precise <think> sequences."""
+    eos_token_id = 0
+    chat_template = "{% generation %}<think>\n"   # R1-style marker
+
+    def encode(self, text):
+        return [ord(c) % 256 for c in (text or " ")]
+
+    def decode(self, ids, **kw):
+        return "".join(chr(i) for i in ids)
+
+    def apply_chat_template(self, messages, add_generation_prompt=True,
+                            tokenize=True, **kw):
+        return {"input_ids": self.encode(
+            f"<u>{messages[-1]['content']}<a><think>\n")}
+
+
+class _ScriptedReasoningModel(_FakeHFModel):
+    """generate() emits scripted text per call, cut at max_new_tokens."""
+
+    def __init__(self, scripts):
+        import torch
+        super().__init__()
+        self.config = type("C", (), {"n_positions": 8192})()
+        self._emb = torch.randn(256, 4)
+        self.scripts = list(scripts)
+        self.calls = []
+
+    def __call__(self, input_ids=None):
+        import torch
+        B, T = input_ids.shape
+        return self._Out(torch.zeros(B, T, 256))
+
+    def generate(self, input_ids=None, **kw):
+        import torch
+        self.calls.append((input_ids[0].tolist(), kw))
+        text = self.scripts[(len(self.calls) - 1) % len(self.scripts)]
+        new = [ord(c) for c in text][: int(kw["max_new_tokens"])]
+        return torch.cat([input_ids, torch.tensor([new])], dim=-1)
+
+
+def _reasoning_seams(scripts, budget=32):
+    from neuroslm.cognition.runtime import build_hf_seams
+    model = _ScriptedReasoningModel(scripts)
+    seams = build_hf_seams("fake/r1", model_factory=lambda: model,
+                           tokenizer_factory=_CharTokenizer,
+                           reasoning_budget=budget)
+    return seams, model
+
+
+class TestSplitReasoning:
+    def test_closed_block_with_opening_tag(self):
+        from neuroslm.cognition.runtime import split_reasoning
+        assert split_reasoning("<think>hmm, rivers</think>\n\nRivers bend.") \
+            == ("Rivers bend.", "hmm, rivers")
+
+    def test_template_opened_block(self):
+        """R1 chat templates put '<think>\n' in the PROMPT, so the
+        output starts inside the block."""
+        from neuroslm.cognition.runtime import split_reasoning
+        assert split_reasoning("hmm</think>Answer.") == ("Answer.", "hmm")
+
+    def test_unterminated_block_has_no_answer(self):
+        from neuroslm.cognition.runtime import split_reasoning
+        assert split_reasoning("<think>still going") == ("", "still going")
+
+    def test_plain_text_is_all_answer(self):
+        from neuroslm.cognition.runtime import split_reasoning
+        assert split_reasoning("Just a reply.") == ("Just a reply.", "")
+
+
+class TestReasoningExpert:
+    def test_closed_think_returns_answer_and_records_trace(self):
+        seams, model = _reasoning_seams(["I wonder.</think>\n\nHello there."],
+                                        budget=64)
+        assert seams.generate_fn("hi", 16) == "Hello there."
+        assert seams.reasoning_fn() == "I wonder."
+        assert len(model.calls) == 1
+        assert model.calls[0][1]["max_new_tokens"] == 64 + 16
+
+    def test_budget_forcing_closes_an_overlong_think(self):
+        """s1-style budget forcing: an unterminated think block is
+        closed by appending '</think>' and the answer is generated as
+        a continuation."""
+        seams, model = _reasoning_seams(
+            ["thinking forever and ever and ever", "Final."], budget=10)
+        assert seams.generate_fn("hi", 16) == "Final."
+        assert seams.reasoning_fn() == "thinking f"
+        assert len(model.calls) == 2
+        second_prompt = "".join(chr(i) for i in model.calls[1][0])
+        assert second_prompt.endswith("thinking f\n</think>\n\n")
+
+    def test_non_reasoning_tokenizer_is_untouched(self):
+        from neuroslm.cognition.runtime import build_hf_seams
+        seams = build_hf_seams("fake/expert",
+                               model_factory=_FakeHFModelWithGenerate,
+                               tokenizer_factory=_FakeChatTokenizer)
+        assert seams.reasoning_fn() is None
+
+    def test_tick_surfaces_the_selected_thoughts_reasoning(self):
+        from neuroslm.cognition.runtime import MindConfig, format_debug_trace
+        seams, _ = _reasoning_seams(
+            ["Why did they say that?</think>\n\nI hear you."], budget=64)
+        rt = seams.runtime(cfg=MindConfig(n_candidates=2))
+        rt.observe("tell me about rivers please")
+        res = rt.tick()
+        assert res.thought == "I hear you."
+        assert res.reasoning == "Why did they say that?"
+        assert "Why did they say that?" in format_debug_trace(res)

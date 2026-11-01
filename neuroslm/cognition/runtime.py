@@ -63,6 +63,53 @@ class ThoughtScore:
 
 ScoreFn = Callable[[str], ThoughtScore]
 
+_THINK_OPEN, _THINK_CLOSE = "<think>", "</think>"
+
+
+def split_reasoning(text: str) -> Tuple[str, str]:
+    """``(answer, reasoning)`` from a reasoning model's output. Handles
+    an explicit ``<think>`` and a template-opened block (R1 chat
+    templates put ``<think>`` in the prompt). An unterminated block
+    has no answer yet."""
+    t = text or ""
+    if _THINK_CLOSE in t:
+        head, _, tail = t.partition(_THINK_CLOSE)
+        return tail.strip(), head.replace(_THINK_OPEN, "").strip()
+    if _THINK_OPEN in t:
+        return "", t.split(_THINK_OPEN, 1)[1].strip()
+    return t.strip(), ""
+
+
+@dataclass
+class MindSeams:
+    """The trunk-facing seams a :class:`CognitiveRuntime` is built from,
+    separated from any one runtime so a caller (the §14.11 indicator
+    battery) can build many fresh runtimes over one loaded model.
+
+    ``reseed`` re-seeds the generator's sampling RNG (torch for HF
+    experts) so each probe item is reproducible."""
+    generate_fn: GenerateFn
+    score_fn: ScoreFn
+    embed_fn: EmbedFn
+    generate_wander_fn: Optional[GenerateFn] = None
+    classify_fn: Optional[Callable[[str], "ActionClassification"]] = None
+    reseed: Optional[Callable[[int], None]] = None
+    reasoning_fn: Optional[Callable[[], Optional[str]]] = None
+    """Think trace of the most recent ``generate_fn`` call (reasoning
+    experts only; None otherwise)."""
+
+    def runtime(self, cfg: Optional["MindConfig"] = None,
+                nt: Optional[Any] = None,
+                memory: Optional[EpisodicMemory] = None,
+                rng: Optional[_random.Random] = None) -> "CognitiveRuntime":
+        return CognitiveRuntime(generate_fn=self.generate_fn,
+                                score_fn=self.score_fn,
+                                embed_fn=self.embed_fn, nt=nt,
+                                memory=memory, cfg=cfg, rng=rng,
+                                classify_fn=self.classify_fn,
+                                generate_wander_fn=self.generate_wander_fn,
+                                reasoning_fn=self.reasoning_fn)
+
 
 @dataclass
 class MindConfig:
@@ -239,6 +286,10 @@ class TickResult:
     """True when this idle tick anchored RECALL on a randomly sampled
     stored episode (hippocampal replay) because boredom crossed the
     threshold — the mechanism behind associative jumps."""
+    reasoning: Optional[str] = None
+    """Reasoning experts only: the think trace that produced the
+    SELECTED thought — the model's own visible deliberation, kept as
+    an introspection channel (§14.12)."""
     reorient: bool = False
     """True when the LOOPING condition (a low-novelty streak) forced
     a state transition: recall anchored on the last OBSERVED input
@@ -325,6 +376,9 @@ def format_debug_trace(result: TickResult) -> str:
         # alternatives are shortened for a scannable menu.
         text = cand if selected else _truncate(cand)
         lines.append(f"    [{mark}] nll={sc.mean_nll:5.2f} \"{text}\"")
+
+    if result.reasoning:
+        lines.append(f"  think trace (SELECTED): \"{result.reasoning}\"")
 
     if result.recalled:
         lines.append(f"  HC recalled {len(result.recalled)}:")
@@ -420,6 +474,7 @@ class CognitiveRuntime:
                  rng: Optional[_random.Random] = None,
                  classify_fn: Optional[Callable[[str], "ActionClassification"]] = None,
                  generate_wander_fn: Optional[GenerateFn] = None,
+                 reasoning_fn: Optional[Callable[[], Optional[str]]] = None,
                  ) -> None:
         if nt is None:
             from neuroslm.emergent.driven_nt import DrivenNTSystem
@@ -431,6 +486,7 @@ class CognitiveRuntime:
         # for injected/test setups; build_runtime_from_hf_lm wires a
         # real completion-mode closure.
         self._gen_wander = generate_wander_fn or generate_fn
+        self._reasoning = reasoning_fn
         self._score = score_fn
         self._embed = embed_fn
         if classify_fn is None:
@@ -603,13 +659,22 @@ class CognitiveRuntime:
                              len(self.memory.all()))
             scored = self.memory.retrieve_scored(anchor_vec, k=over_fetch)
             pen = self.cfg.inferred_recall_penalty
+            # The current percepts are already in the prompt as "Just
+            # now:"; observe() stored them before this tick, so they
+            # would otherwise be their own nearest neighbours (§14.11).
+            current = set(sensory)
             adjusted = sorted(
                 ((sim - (pen if (e.get("context") or {}).get("kind")
                          == "inferred" else 0.0), e)
-                 for sim, e in scored),
+                 for sim, e in scored
+                 if e.get("content") not in current),
                 key=lambda t: t[0], reverse=True)
+            # IOR is a DMN anti-fixation device: on a respond tick the
+            # most relevant memory wins even if it was recalled lately
+            # (§14.11 episodic_recall probe).
             fresh = [e for _, e in adjusted
-                     if e.get("content") not in self._recent_recall]
+                     if not wandering
+                     or e.get("content") not in self._recent_recall]
             recalled = fresh[: self.cfg.recall_k] if fresh else [
                 e for _, e in adjusted[: self.cfg.recall_k]]
             for e in recalled:
@@ -628,10 +693,13 @@ class CognitiveRuntime:
         prompt = self._compose_prompt(sensory, recalled, trigger_text)
         gen = self._gen if not wandering else self._gen_wander
         candidates: List[str] = []
+        reasonings: List[Optional[str]] = []
         for _ in range(max(1, self.cfg.n_candidates)):
             out = (gen(prompt, self.cfg.thought_n_tok) or "").strip()
             if out:
                 candidates.append(out)
+                reasonings.append(self._reasoning() if self._reasoning
+                                  else None)
         if not candidates:
             self.nt.step_full()
             return TickResult(thought=None, recalled=recalled,
@@ -740,7 +808,8 @@ class CognitiveRuntime:
                           selection_entropy=selection_entropy,
                           differentiation=differentiation,
                           novelty=novelty, boredom=self._boredom,
-                          replay=replay, reorient=reorient)
+                          replay=replay, reorient=reorient,
+                          reasoning=reasonings[idx])
 
     # ── Internals ────────────────────────────────────────────────────
 
@@ -939,6 +1008,22 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
                              tokenizer_factory: Optional[Callable[[], Any]] = None,
                              ) -> CognitiveRuntime:
     """Wire the mind to a frozen pretrained HF expert — no trunk needed.
+    See :func:`build_hf_seams` for the wiring itself."""
+    return build_hf_seams(model_id, device=device, temperature=temperature,
+                          top_k=top_k, model_factory=model_factory,
+                          tokenizer_factory=tokenizer_factory,
+                          ).runtime(cfg=cfg)
+
+
+def build_hf_seams(model_id: str = "smollm2_360m",
+                   device: str = "cpu",
+                   temperature: float = 0.8,
+                   top_k: int = 40,
+                   model_factory: Optional[Callable[[], Any]] = None,
+                   tokenizer_factory: Optional[Callable[[], Any]] = None,
+                   reasoning_budget: int = 512,
+                   ) -> MindSeams:
+    """Build the mind's seams from a frozen pretrained HF expert.
 
     The doctrine's escape hatch for using BRIAN before full trunk
     training: THINK/score/embed all come from one of the LM experts
@@ -997,6 +1082,7 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
 
     wrapper = _HFLMWrapper(model)
     embed_table = model.get_input_embeddings().weight
+    last: Dict[str, Optional[str]] = {"reasoning": None}
 
     if hasattr(model, "generate"):
         # KV-cache fast path. The daemon's naive seam re-runs a FULL
@@ -1012,6 +1098,16 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
         # model has no learned turn-end token, so it never stops on
         # its own — an instruct model's chat template supplies one.
         has_chat_template = bool(getattr(tokenizer, "chat_template", None))
+        # Reasoning experts (DeepSeek-R1 family) open a <think> block
+        # from their chat template.
+        reasoning_model = _THINK_OPEN in str(
+            getattr(tokenizer, "chat_template", "") or "")
+        eos_text = getattr(tokenizer, "eos_token", None)
+
+        def _decode_raw(new_ids) -> str:
+            # Keep <think> markers (skip_special_tokens may strip them).
+            text = tokenizer.decode(new_ids, skip_special_tokens=False)
+            return text.replace(eos_text, "") if eos_text else text
 
         def _make_generate(use_chat_template: bool) -> GenerateFn:
             """One closure factory, two seams (D of the curiosity
@@ -1022,18 +1118,12 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
             which is what produced 'Brian, ...' on every live tick)."""
 
             @torch.no_grad()
-            def _generate(prompt: str, max_new_tokens: int) -> str:
-                if use_chat_template:
-                    ids = list(tokenizer.apply_chat_template(
-                        [{"role": "user", "content": prompt}],
-                        add_generation_prompt=True, tokenize=True))
-                else:
-                    ids = list(tokenizer.encode(prompt) or [0])
-                ids = ids[-(max_ctx - max(1, int(max_new_tokens))):]
+            def _sample(ids: List[int], n: int) -> List[int]:
+                ids = ids[-(max_ctx - max(1, int(n))):]
                 x = torch.tensor([ids], dtype=torch.long, device=device)
                 gen_kwargs = dict(
                     input_ids=x,
-                    max_new_tokens=int(max_new_tokens),
+                    max_new_tokens=int(n),
                     do_sample=True,
                     temperature=float(max(temperature, 1e-6)),
                     top_k=int(top_k) if top_k else 0,
@@ -1053,14 +1143,52 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
                                                  "\n\n"]
                     gen_kwargs["tokenizer"] = tokenizer
                 out = model.generate(**gen_kwargs)
-                new_ids = out[0, x.shape[1]:].tolist()
-                return tokenizer.decode(new_ids, skip_special_tokens=True)
+                return out[0, x.shape[1]:].tolist()
+
+            @torch.no_grad()
+            def _generate(prompt: str, max_new_tokens: int) -> str:
+                n = int(max_new_tokens)
+                if use_chat_template:
+                    enc = tokenizer.apply_chat_template(
+                        [{"role": "user", "content": prompt}],
+                        add_generation_prompt=True, tokenize=True)
+                    # transformers >= 5 returns a dict-like
+                    # BatchEncoding here, < 5 a plain id list.
+                    if hasattr(enc, "keys"):
+                        enc = enc["input_ids"]
+                    ids = list(enc)
+                else:
+                    ids = list(tokenizer.encode(prompt) or [0])
+                last["reasoning"] = None
+                if use_chat_template and reasoning_model:
+                    new = _sample(ids, reasoning_budget + n)
+                    text = _decode_raw(new)
+                    if _THINK_CLOSE in text:
+                        answer, last["reasoning"] = split_reasoning(text)
+                        return answer
+                    # Budget forcing (Muennighoff et al. 2025, s1):
+                    # close an overlong think block and generate the
+                    # answer as its continuation.
+                    think = new[:reasoning_budget]
+                    last["reasoning"] = _decode_raw(think).replace(
+                        _THINK_OPEN, "").strip()
+                    close = list(tokenizer.encode(
+                        "\n" + _THINK_CLOSE + "\n\n"))
+                    return split_reasoning(
+                        _decode_raw(_sample(ids + think + close, n)))[0]
+                text = tokenizer.decode(_sample(ids, n),
+                                        skip_special_tokens=True)
+                if reasoning_model:
+                    answer, reasoning = split_reasoning(text)
+                    text = answer or reasoning
+                return text
 
             return _generate
 
         generate_fn = _make_generate(has_chat_template)
         generate_wander_fn = _make_generate(False)
     else:
+        reasoning_model = False
         from neuroslm.chat_daemon import _build_generate_fn_from_harness
         from types import SimpleNamespace
         generate_fn = _build_generate_fn_from_harness(
@@ -1098,7 +1226,13 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
     def classify_fn(text: str) -> "ActionClassification":
         return classify_action_via_generation(text, generate_fn)
 
-    return CognitiveRuntime(generate_fn=generate_fn, score_fn=score_fn,
-                            embed_fn=embed_fn, cfg=cfg,
-                            classify_fn=classify_fn,
-                            generate_wander_fn=generate_wander_fn)
+    def reseed(seed: int) -> None:
+        torch.manual_seed(int(seed))
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(int(seed))
+
+    return MindSeams(generate_fn=generate_fn, score_fn=score_fn,
+                     embed_fn=embed_fn, classify_fn=classify_fn,
+                     generate_wander_fn=generate_wander_fn, reseed=reseed,
+                     reasoning_fn=lambda: (last["reasoning"]
+                                           if reasoning_model else None))

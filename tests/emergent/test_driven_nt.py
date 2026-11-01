@@ -18,6 +18,8 @@ from __future__ import annotations
 import math
 import random
 
+import pytest
+
 from neuroslm.emergent.driven_nt import DrivenNTSystem
 
 
@@ -284,3 +286,25 @@ def test_compat_shim_step_only_drives_activation():
         nt.step(activity=0.1)
     final_ne = nt.levels()["NE"]
     assert abs(final_ne - base_ne) < abs(pushed_ne - base_ne) / 2
+
+
+def test_perturb_shifts_one_channel_in_logit_space_then_leaks_back():
+    """§14.11 PCI pulse: a direct, TMS-like kick to one channel's
+    logit — the other channels untouched, the kicked one decaying
+    back toward baseline under the ordinary OU leak."""
+    nt = DrivenNTSystem()
+    before = nt.levels()
+    nt.perturb("DA", 2.0)
+    after = nt.levels()
+    expected = 1.0 / (1.0 + math.exp(-(math.log(0.15 / 0.85) + 2.0)))
+    assert after["DA"] == pytest.approx(expected, abs=1e-4)
+    assert all(after[k] == before[k] for k in after if k != "DA")
+    for _ in range(200):
+        nt.step_full()
+    assert abs(nt.levels()["DA"] - 0.15) < abs(after["DA"] - 0.15) / 2
+
+
+def test_perturb_rejects_unknown_channel():
+    nt = DrivenNTSystem()
+    with pytest.raises(KeyError):
+        nt.perturb("dopamine", 1.0)

@@ -168,7 +168,7 @@ else
     echo "[onstart] VAST_API_KEY not in env or vastai CLI missing -- cannot self-destroy"
 fi
 
-echo "── discover run exited; FAILED to self-destroy. Run: vastai destroy instance <contract_id> ──\""""
+echo "── run exited; FAILED to self-destroy. Run: vastai destroy instance <contract_id> ──\""""
 
 # --no-auto-destroy trades the self-destroy safety net for the ability to
 # inspect the box after a failure — otherwise a crash-and-self-destroy

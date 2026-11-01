@@ -2020,6 +2020,32 @@ def cmd_deploy_mind(args: argparse.Namespace) -> int:
     return VastMindConnector().launch(cfg)
 
 
+def cmd_deploy_mind_eval(args: argparse.Namespace) -> int:
+    """``brian deploy-mind-eval`` — run the §14.11 indicator battery on
+    a rented vast.ai GPU. Batch job: pushes the report JSON + log back
+    to git and self-destroys (``--no-auto-destroy`` keeps the box)."""
+    from neuroslm.connectors.vast_mind_eval import (
+        MindEvalDeployConfig, VastMindEvalConnector)
+    eval_args: List[str] = []
+    if args.probes:
+        eval_args += ["--probes", args.probes]
+    if args.n_items is not None:
+        eval_args += ["--n-items", str(args.n_items)]
+    eval_args += ["--n-distractors", str(args.n_distractors),
+                  "--idle-ticks", str(args.idle_ticks),
+                  "--seed", str(args.seed)]
+    cfg = MindEvalDeployConfig(
+        expert=args.expert, eval_args=eval_args, branch=args.branch,
+        label=args.label or "neuroslm-mind-eval",
+        auto_destroy=not args.no_auto_destroy)
+    if args.gpu_query:
+        cfg.gpu_query = args.gpu_query
+    print(f"[deploy-mind-eval] expert={cfg.expert} label={cfg.label} "
+          f"auto_destroy={cfg.auto_destroy} args={' '.join(eval_args)}")
+    _require_human_confirmation("vast (mind-eval)", 0)
+    return VastMindEvalConnector().launch(cfg)
+
+
 def cmd_deploy_brain(args: argparse.Namespace) -> int:
     """Launch a Brain (non-DSL) training run on vast.ai."""
     env = os.environ.copy()
@@ -3280,8 +3306,54 @@ def cmd_eval(args: argparse.Namespace) -> int:
     """Group command: `brian eval ood` etc."""
     if args.eval_kind == "ood":
         return _eval_ood(args)
+    if args.eval_kind == "mind":
+        return _eval_mind(args)
     print(f"unknown eval kind: {args.eval_kind}")
     return 2
+
+
+def _eval_mind(args: argparse.Namespace) -> int:
+    """``brian eval mind`` — the §14.11 consciousness-indicator battery
+    on the cognition runtime over a frozen expert. ``--expert a,b``
+    runs it once per expert (one report each) so trunks can be
+    compared in one go. Reports land in ``--out-dir`` (default
+    ``results/mind_eval/<UTC>_<expert>.json``) or ``--out``."""
+    import json
+    from datetime import datetime, timezone
+
+    import neuroslm.cognition.indicators as indicators
+    import neuroslm.cognition.runtime as runtime
+    import neuroslm.train_dsl as train_dsl
+    from neuroslm.connectors.vast_mind_eval import expert_slug
+
+    experts = [e.strip() for e in args.expert.split(",") if e.strip()]
+    if args.out and len(experts) > 1:
+        print("[mind-eval] --out names ONE file; use --out-dir with "
+              "several experts", file=sys.stderr)
+        return 2
+    out_dir = (Path(args.out_dir) if args.out_dir
+               else REPO_ROOT / "results" / "mind_eval")
+    probes = ([p.strip() for p in args.probes.split(",") if p.strip()]
+              if args.probes else None)
+    sha, branch = train_dsl._git_commit_info()
+    for expert in experts:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        out = (Path(args.out) if args.out
+               else out_dir / f"{stamp}_{expert_slug(expert)}.json")
+        print(f"[mind-eval] expert={expert} device={args.device} "
+              f"seed={args.seed} -> {out}")
+        seams = runtime.build_hf_seams(expert, device=args.device)
+        report = indicators.run_indicator_battery(
+            seams, probes=probes, seed=args.seed, n_items=args.n_items,
+            n_distractors=args.n_distractors, n_idle_ticks=args.idle_ticks,
+            progress=print)
+        report["meta"].update(expert=expert, device=args.device,
+                              utc=stamp, git_commit=sha, branch=branch)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        print(indicators.format_report(report))
+        print(f"[mind-eval] wrote {out}")
+    return 0
 
 
 def _find_dsl_checkpoints() -> List[Tuple[int, str]]:
@@ -5156,6 +5228,22 @@ def cmd_update_readme(args: argparse.Namespace) -> int:
 
 # ── arg parser ────────────────────────────────────────────────────────
 
+def _add_mind_eval_args(p: argparse.ArgumentParser) -> None:
+    """Battery flags shared by ``eval mind`` and ``deploy-mind-eval``."""
+    p.add_argument("--expert", default="smollm2_360m_instruct",
+                   help="Expert model(s): roster alias or HF id; comma "
+                        "list runs the battery once per expert")
+    p.add_argument("--probes", default=None,
+                   help="comma list (default all): episodic_recall,"
+                        "source_monitoring,loop_escape,metacognition")
+    p.add_argument("--n-items", dest="n_items", type=int, default=None,
+                   help="cap items per probe (default: full bank)")
+    p.add_argument("--n-distractors", dest="n_distractors", type=int,
+                   default=6)
+    p.add_argument("--idle-ticks", dest="idle_ticks", type=int, default=12)
+    p.add_argument("--seed", type=int, default=0)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="brian",
@@ -5798,6 +5886,24 @@ def _build_parser() -> argparse.ArgumentParser:
                           "8GiB+ card under $0.15/hr)")
     sdm.set_defaults(func=cmd_deploy_mind)
 
+    # deploy-mind-eval — §14.11 indicator battery as a self-destroying job
+    sdme = sub.add_parser(
+        "deploy-mind-eval",
+        help="Run the consciousness-indicator battery (`eval mind`) on a "
+             "vast.ai GPU; pushes results/mind_eval/*.json, self-destroys")
+    _add_mind_eval_args(sdme)
+    sdme.add_argument("--branch",
+                      help="git branch the box clones (default: current)")
+    sdme.add_argument("--label", default=None,
+                      help="vast.ai label (default neuroslm-mind-eval)")
+    sdme.add_argument("--gpu-query", dest="gpu_query", default=None,
+                      help="vast offer filter override (default A100)")
+    sdme.add_argument("--no-auto-destroy", dest="no_auto_destroy",
+                      action="store_true",
+                      help="leave the box running after the eval (you "
+                           "must `brian destroy <id>` yourself)")
+    sdme.set_defaults(func=cmd_deploy_mind_eval)
+
     # deploy-brain
     sdb = sub.add_parser("deploy-brain",
                          help="Launch a Brain (non-DSL) training run")
@@ -6059,6 +6165,17 @@ def _build_parser() -> argparse.ArgumentParser:
     ese_ood.add_argument("--tag",
                          help="role tag (defaults to step number)")
     ese_ood.add_argument("--windows", type=int)
+    ese_mind = ese.add_parser(
+        "mind",
+        help="Consciousness-indicator battery (architecture.md §14.11): "
+             "full runtime vs single-mechanism ablations vs bare LM")
+    _add_mind_eval_args(ese_mind)
+    ese_mind.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
+    ese_mind.add_argument("--out", default=None,
+                          help="report path (single expert only)")
+    ese_mind.add_argument("--out-dir", dest="out_dir", default=None,
+                          help="report directory (default results/"
+                               "mind_eval); one <UTC>_<expert>.json each")
     se.set_defaults(func=cmd_eval)
 
     # analyze-log

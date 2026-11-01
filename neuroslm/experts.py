@@ -138,6 +138,16 @@ _EXPERT_ALIAS_REGISTRY: "dict[str, str]" = {
     "smollm2_1_7b_instruct":  "HuggingFaceTB/SmolLM2-1.7B-Instruct",
     "qwen2_5_1_5b_instruct":  "Qwen/Qwen2.5-1.5B-Instruct",
     "qwen2_5_3b_instruct":    "Qwen/Qwen2.5-3B-Instruct",
+    # DeepSeek open weights (§14.11 trunk comparison). The R1 distills
+    # are reasoning models: replies arrive as <think>…</think> answer,
+    # handled by cognition.runtime.build_hf_seams (budget forcing +
+    # the think trace kept as an introspection channel).
+    "deepseek_r1_qwen_1_5b":     "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+    "deepseek_r1_qwen_7b":       "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    "deepseek_r1_qwen_14b":      "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+    "deepseek_r1_llama_8b":      "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+    "deepseek_r1_0528_qwen3_8b": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
+    "deepseek_llm_7b_chat":      "deepseek-ai/deepseek-llm-7b-chat",
 }
 
 

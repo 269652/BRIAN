@@ -3568,3 +3568,147 @@ comments assigned to the first "generic" tick. GREEN:
 Deferred: a persistent goal/task register (PFC-style state object) for
 `RECALL_GOAL`/`ASK_CLARIFICATION`-style behaviors beyond simple
 reorientation — the honest next structural addition, not built here.
+
+### 14.11 Consciousness-indicator audit + evaluation battery (2026-11-01)
+
+*Research direction adopted 2026-11-01 (conversation w/ maintainer):
+the cognition layer is now developed as an artificial-consciousness
+research instrument, not toward a competitive SLM. The trunk stays a
+frozen pretrained expert (`--expert`, §14.5) unless a probe needs more.*
+
+**Method.** Butlin, Long et al. (2023), *Consciousness in Artificial
+Intelligence: Insights from the Science of Consciousness*, derive 14
+indicator properties from the major scientific theories (recurrent
+processing RPT, global workspace GWT, higher-order HOT, attention
+schema AST, predictive processing PP, agency/embodiment AE). An
+indicator is evidence that an architecture has a property a theory
+deems relevant, under computational functionalism — never evidence of
+experience. Every claim BRIAN makes on this axis is phrased at that
+level, and every indicator marked "present" must be backed by a
+behavioural probe with an ablation, not by the existence of a module.
+
+**Audit of the §14.5–14.10 runtime** (status: ✅ present and probed ·
+🟡 partial / proxy only · ❌ absent):
+
+| Ind. | Property | Status | What the runtime has (and lacks) |
+|---|---|---|---|
+| RPT-1 | algorithmic recurrence in input modules | 🟡 | Tick-level recurrence (last thought → next prompt, NT state carried across ticks); the trunk itself is a feed-forward transformer per token. Recurrence is in the loop, not in perception. |
+| RPT-2 | organised, integrated perceptual representations | ❌ | Text-only input; percepts are a mean-of-token-embeddings vector. No perceptual organisation. |
+| GWT-1 | specialised modules operating in parallel | 🟡 | Distinct modules (episodic memory, BG selection, NT system, action classifier, pattern miner) but they run as one sequential pipeline per tick. |
+| GWT-2 | limited-capacity workspace with selective bottleneck | 🟡 | BG selects ONE of K candidates per tick — a real bottleneck — but selection is by unconditional trunk NLL, not by competition among module-proposed contents. |
+| GWT-3 | global broadcast to all modules | 🟡 | The selected thought reaches memory write, NT drive and the next THINK; the classifier sees it only if stored. No "ignition" (non-linear, all-or-none availability). Probed: `episodic_recall`. |
+| GWT-4 | state-dependent attention, querying modules in succession | 🟡 | Boredom/replay/reorient (§14.9–14.10) redirect RECALL by internal state; there is no multi-step querying of modules for a task. Probed: `loop_escape`. |
+| HOT-1 | generative / noisy perception | 🟡 | THINK samples stochastically from the trunk, but for thoughts, not percepts. |
+| HOT-2 | metacognitive monitoring (reliable vs noise) | 🟡 | Provenance (`observed` vs `inferred`) is a reality-monitoring distinction, but it is assigned by construction, not monitored. Per-thought confidence (1 − entropy) is stored and read by nothing. Probed: `source_monitoring`, `metacognition`. |
+| HOT-3 | belief formation updated by metacognition | ❌ | No belief store, no belief revision. The deferred goal register (§14.10) is the nearest planned piece. |
+| HOT-4 | sparse, smooth quality space | ❌ | Not assessed; dense mean embeddings. |
+| AST-1 | model of its own attention | ❌ | IOR/replay/reorient manipulate attention but nothing represents the attention state to the system itself. |
+| PP-1 | predictive coding in input modules | ❌ | NLL is a prediction-error signal used for selection; trunk-level predictive coding is gated out of the runtime (§14.2). |
+| AE-1 | agency: learning from feedback, competing goals | ❌ | No learning at runtime; DA is driven by NLL, not by outcomes. |
+| AE-2 | embodiment: output→input contingency model | ❌ | No environment the actions change. |
+
+**Evaluation battery** (`neuroslm/cognition/indicators.py`,
+`brian eval mind`, remote: `brian deploy-mind-eval`). Every probe runs
+three conditions on the same generator: **full** runtime, a
+**single-mechanism ablation**, and **bare** — the same generator as a
+sliding-window LM with the SAME prompt budget (`max_prompt_chars`) and
+no cognitive loop (the "bare trunk" of §14.1). Fresh runtime + reseed
+per item; accuracy reported with a Wilson 95% interval; raw replies
+kept in the JSON for audit.
+
+| Probe | Indicator | Ablation | Measures |
+|---|---|---|---|
+| `episodic_recall` | GWT-3 | `recall_k=0` | an invented fact, then N distractor turns, then the question — is the fact still available once it has left the context window? |
+| `source_monitoring` | HOT-2 | `inferred_recall_penalty=0` | an observed fact competes with three self-generated contradicting musings stored as `inferred` — does the reply follow what was observed? |
+| `loop_escape` | GWT-4 | curiosity/replay/reorient off | unprompted idle ticks after a seed; novelty measured *externally* on the thought stream (1 − max cosine to earlier thoughts), longest low-novelty streak, distinct ratio, count of control acts |
+| `metacognition` | HOT-2 | — (full vs bare) | type-2 AUROC of the system's own confidence (1 − entropy, −NLL) for discriminating its correct from incorrect factual replies; 0.5 = no metacognitive access |
+| `perturbational_complexity` | IIT (PCI) | `recall_k=0`; control off | twin runtimes with identical seeds; a pulse (`da`/`gaba` logit kick via `DrivenNTSystem.perturb`, or a foreign `memory` episode) hits one twin; the divergence matrix over 16 internal channels × ticks is binarised and scored as normalised Lempel-Ziv complexity, plus channels reached. A `null` pulse must give PCI = 0 (validates the twin method) |
+
+**IIT is measured, not indicated.** Butlin et al. leave IIT out of the
+indicator list on purpose: IIT rejects computational functionalism and
+locates Φ in the physical causal structure of the substrate. Taken at
+its word, IIT assigns software on clocked digital hardware Φ ≈ 0 no
+matter what the software computes, so no runtime change can make
+BRIAN "conscious under IIT", and exact Φ^max is not computable for an
+LLM-driven loop anyway (it needs an interventional TPM over a discrete
+causal network, super-exponential in its size). What *is* defensible
+is IIT's empirical arm: the **Perturbational Complexity Index**
+(Casali, Massimini, Tononi et al. 2013, *Sci. Transl. Med.*), which
+operationalises "integrated and differentiated" as the LZ complexity of
+the binarised response to a direct perturbation, and separates wake
+from NREM sleep and anaesthesia in humans. The runtime analogue
+replaces TMS-EEG with a logit/memory pulse and electrodes with the
+runtime's own state channels; significance is twin divergence above a
+fixed per-channel threshold rather than a bootstrap against the
+pre-stimulus baseline. It is a functional-level analogue and is
+reported as such. It is never presented as Φ.
+
+**Runtime fixes the battery forced** (found on the deterministic
+fixtures before any live run). The full runtime initially scored 0 on
+`episodic_recall` and `source_monitoring`, for two reasons in RECALL: (1) `observe()` stores a percept
+before the tick, so every respond tick recalled its own percept
+(cos 1) as a duplicate of the "Just now:" line, wasting a slot; (2)
+that self-recall entered the IOR deque, and because the deque holds
+`ior_window × recall_k` *contents* rather than ticks, the fact was
+still suppressed five turns later when the user asked about it. Fixes:
+RECALL excludes the current percepts, and IOR applies on wandering
+ticks only. IOR is a DMN anti-fixation device (§14.9-C), and on
+respond ticks relevance to real input wins, the same rule replay
+already follows. Pinned by
+`TestInhibitionOfReturn::test_respond_ticks_are_exempt` and
+`::test_respond_tick_never_recalls_its_own_percept`.
+
+What the battery deliberately does not claim: a high score on any
+probe is evidence for one indicator property, and several probes test
+function a non-conscious retrieval system also has (`episodic_recall`
+is the floor, not the ceiling). The absent rows above are the research
+backlog in priority order: a real **global workspace** (competition
+among module-proposed contents + ignition + broadcast; GWT-2/3), then
+a **metacognitive self-model** that reads the confidence/provenance
+signals and revises beliefs (HOT-2/3, absorbing the goal register),
+then an **attention schema** (AST-1). Each lands with its own probe
+and ablation before it is called present.
+
+### 14.12 Reasoning experts: DeepSeek-R1 trunks, think trace as introspection (2026-11-01)
+
+The trunk is swappable (`--expert`), so whether a stronger or different
+language cortex changes the mind's function is an experiment, not a
+rewrite. DeepSeek open weights are registered in `experts.py`: the
+R1 distills (`deepseek_r1_qwen_1_5b/7b/14b`, `deepseek_r1_llama_8b`,
+`deepseek_r1_0528_qwen3_8b`) and the non-reasoning
+`deepseek_llm_7b_chat`. All use standard HF architectures; none needs
+`trust_remote_code`.
+
+The R1 family are **reasoning models**. Their chat template opens a
+`<think>` block and replies arrive as `<think>…</think> answer`.
+`build_hf_seams` detects this from the template and changes only the
+respond (chat) seam:
+
+- **Budget forcing** (Muennighoff et al. 2025, *s1*): a respond call
+  gets `reasoning_budget` (default 512) extra tokens to think. If the
+  block hasn't closed by then, the seam appends `</think>` and
+  generates the answer as a continuation, so a long deliberation can
+  never consume the reply.
+- **The think trace is an introspection channel.**
+  `MindSeams.reasoning_fn` exposes the trace of the last generation.
+  The runtime records the trace behind the SELECTED candidate as
+  `TickResult.reasoning`, and `format_debug_trace` prints it in full.
+  This is the model's own visible deliberation. It is *not* privileged
+  access to its computation: there is published evidence that
+  chain-of-thought traces are often unfaithful to the actual
+  computation, so the trace is introspective report and gets evaluated
+  as such.
+- The DMN wander seam stays raw completion; any stray think tags are
+  stripped.
+
+**Fresh-install fix found on the way.** transformers ≥ 5 returns a
+dict-like `BatchEncoding` from `apply_chat_template(tokenize=True)`.
+The old `list(...)` call turned it into its *keys* and crashed every
+respond tick. The first real `brian eval mind` run hit this; any fresh
+`deploy-mind` box would have too, because transformers is unpinned.
+Pinned by `TestGenerationQuality::test_chat_template_accepts_transformers_v5_batch_encoding`.
+
+**Comparison protocol.** `brian eval mind --expert a,b,…` (and the
+same flag on `deploy-mind-eval`) runs the §14.11 battery once per
+trunk on one box, writing one report each. H63 pre-registers what
+"better mind-wandering and introspection" has to mean before the run.
