@@ -191,3 +191,44 @@ class TestAdaptiveIgnition:
         from neuroslm.cognition.oscillator import GammaWorkspace
         with pytest.raises(ValueError):
             GammaWorkspace(ignition_mode="vibes")
+
+
+
+class TestBaselineFromWanderingOnly:
+    """Run 58683237: the adaptive baseline was seeded by the REPLY tick
+    (sensory module on, R≈0.3-0.5) → θ started at 0.50 while idle R ran
+    0.03-0.20: 0 ignitions in 26 ticks, nothing stored, recall stuck on
+    the one seed episode. Reply ticks now neither seed nor move the
+    idle baseline; before the first idle tick they use the fixed bar."""
+
+    MOD = {"sensory": 0.0, "memory": 0.6, "language": 0.7,
+           "selection": 0.5, "novelty": 0.4}
+
+    def _ws(self):
+        from neuroslm.cognition.oscillator import GammaWorkspace
+        return GammaWorkspace(seed=0, ignition_mode="adaptive",
+                              ignition_threshold=0.25)
+
+    def test_reply_tick_does_not_touch_the_baseline(self):
+        ws = self._ws()
+        reply = dict(self.MOD, sensory=1.0)
+        out = ws.step(reply, BASE_NT, update_baseline=False)
+        assert not ws._r_seen
+        assert out.threshold == pytest.approx(0.25), (
+            "unseeded: decide against the fixed bar")
+
+    def test_first_idle_tick_seeds_the_baseline(self):
+        ws = self._ws()
+        ws.step(dict(self.MOD, sensory=1.0), BASE_NT, update_baseline=False)
+        idle = ws.step(self.MOD, BASE_NT)
+        assert ws._r_seen
+        assert idle.threshold == pytest.approx(
+            max(0.1, idle.sync_r + 0.05))
+
+    def test_reply_ticks_later_leave_the_idle_baseline_alone(self):
+        ws = self._ws()
+        for _ in range(5):
+            ws.step(self.MOD, BASE_NT)
+        mu, var = ws._r_mu, ws._r_var
+        ws.step(dict(self.MOD, sensory=1.0), BASE_NT, update_baseline=False)
+        assert (ws._r_mu, ws._r_var) == (mu, var)

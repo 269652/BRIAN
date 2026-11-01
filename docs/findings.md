@@ -4359,3 +4359,27 @@ single-mechanism ablations `wm_size=0` and
 scored on it. A change following its data reclassifies the run.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestWorkingMemoryNovelty, TestRelativeControlThresholds, TestNarrationAndScaffold]
+
+### Run 58683237 stopped (development); reply-seeded baseline fixed; confirmatory build #3 (2026-11-01)
+
+**58683237** (`mind-eval-confirm-2`): stopped by the maintainer in
+`loop_escape/full` run 0 after 26 ticks, to ship this fix. Reclassified
+as development and not scored. It was the first eval box whose log
+streamed to git (pusher fix `cf2bc5ca` confirmed live).
+
+**Bug (descriptive, 26 ticks):** 0 ignitions and 0 stored thoughts.
+Recall returned the single seed percept on every tick (inhibition of
+return yields when nothing else exists). The adaptive baseline had been
+seeded by the *reply* tick: the sensory module is on there, giving
+R ≈ 0.3–0.5, so θ started at 0.50. Idle R ran 0.03–0.20, and θ needed
+~20 ticks to come down (0.50 → 0.11). This blocks H66(a/b) and makes
+H65(c) unscorable. **H67 was visibly active:** boredom was relieved
+twice (0.61 → 0.18, 0.64 → 0.20), i.e. replay or reorient fired.
+
+**Fix:** reply ticks (`update_baseline=False`) neither seed nor move
+the idle baseline. Before the first idle tick they decide against the
+fixed bar (0.25). H64–H67 are scored unchanged on the commit carrying
+this entry (tag `mind-eval-confirm-3`).
+
+[EVIDENCE: tests/cognition/test_workspace_oscillator.py::TestBaselineFromWanderingOnly]
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestRespondTicksDoNotSeedTheIdleBaseline]

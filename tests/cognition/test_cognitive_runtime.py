@@ -2383,3 +2383,16 @@ class TestNarrationAndScaffold:
             ["A real thought.\nMy last thought: echo"]),
             cfg=MindConfig(n_candidates=1))
         assert rt.tick().thought == "A real thought."
+
+
+
+class TestRespondTicksDoNotSeedTheIdleBaseline:
+    def test_runtime_passes_update_baseline_only_when_wandering(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["I hear you."]),
+                         cfg=MindConfig(n_candidates=1), osc=True)
+        rt.observe("the river was beautiful today")
+        rt.tick()                       # respond
+        assert not rt._osc._r_seen
+        rt.tick()                       # wandering
+        assert rt._osc._r_seen

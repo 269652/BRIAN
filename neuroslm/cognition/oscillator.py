@@ -121,7 +121,13 @@ class GammaWorkspace:
         return s_ach, s_gaba
 
     def step(self, activations: Mapping[str, float],
-             nt_levels: Mapping[str, float]) -> OscillatorStep:
+             nt_levels: Mapping[str, float],
+             update_baseline: bool = True) -> OscillatorStep:
+        """One tick. ``update_baseline=False`` (reply ticks): the
+        sensory module is on, a different regime — the idle baseline is
+        neither seeded nor moved; before it exists, decide against the
+        fixed bar (run 58683237: a reply-seeded θ=0.50 blocked every
+        idle ignition)."""
         a = np.repeat([max(0.0, min(1.0, float(activations.get(m, 0.0))))
                        for m in MODULES], self.n_per_module)
         s_ach, s_gaba = self._scales(nt_levels)
@@ -148,15 +154,20 @@ class GammaWorkspace:
             thr = self.ignition_threshold
             ignited = sync_r >= thr
         else:
-            if not self._r_seen:
-                self._r_mu, self._r_seen = sync_r, True
-            thr = max(self.ignition_floor,
-                      self._r_mu + self.adapt_k * math.sqrt(self._r_var))
-            ignited = sync_r > thr
-            d = sync_r - self._r_mu
-            self._r_mu += self.adapt_alpha * d
-            self._r_var = (1 - self.adapt_alpha) * (
-                self._r_var + self.adapt_alpha * d * d)
+            if not update_baseline and not self._r_seen:
+                thr = self.ignition_threshold
+                ignited = sync_r >= thr
+            else:
+                if not self._r_seen:
+                    self._r_mu, self._r_seen = sync_r, True
+                thr = max(self.ignition_floor,
+                          self._r_mu + self.adapt_k * math.sqrt(self._r_var))
+                ignited = sync_r > thr
+                if update_baseline:
+                    d = sync_r - self._r_mu
+                    self._r_mu += self.adapt_alpha * d
+                    self._r_var = (1 - self.adapt_alpha) * (
+                        self._r_var + self.adapt_alpha * d * d)
         return OscillatorStep(sync_r=sync_r, ignited=bool(ignited),
                               peak_hz=peak_hz, gamma_power=gamma_power,
                               threshold=float(thr))

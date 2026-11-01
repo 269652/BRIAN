@@ -975,7 +975,8 @@ class CognitiveRuntime:
         }
         osc = None
         if self._osc is not None:
-            osc = self._osc.step(ws_inputs, levels)
+            osc = self._osc.step(ws_inputs, levels,
+                                 update_baseline=wandering)
         stored = (novelty >= self.cfg.novelty_write_threshold
                   and (osc is None or osc.ignited))
         if not wandering:
