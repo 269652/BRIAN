@@ -41,6 +41,19 @@ from neuroslm.memory.episodic import EpisodicMemory
 from neuroslm.cognition.patterns import ActionClassification  # noqa: F401 (re-export)
 
 GenerateFn = Callable[[str, int], str]
+
+DEFAULT_MIND_EXPERT = "deepseek_r1_qwen_7b"
+"""The mind's default trunk (§14.12). SmolLM2-360M set the thought-
+quality floor in run 58670004; a DeepSeek-R1 distill thinks in a
+visible <think> trace and is the default for every mind entry point
+(chat --expert, deploy-mind, eval mind, deploy-mind-eval). Use
+``deepseek_r1_qwen_1_5b`` on CPU."""
+
+
+def _hf_load_kwargs(device: str) -> dict:
+    """GPU: load in the checkpoint's dtype (bf16 for R1) — transformers
+    4.x otherwise defaults to fp32. CPU: fp32 (bf16 matmuls are slow)."""
+    return {} if str(device) == "cpu" else {"torch_dtype": "auto"}
 EmbedFn = Callable[[str], Sequence[float]]
 
 
@@ -218,6 +231,30 @@ class MindConfig:
     max_prompt_chars: int = 1200
     """Hard cap on the composed thinking prompt (CPU latency guard)."""
 
+    workspace_oscillator: bool = True
+    """§14.13 oscillatory global workspace: a Kuramoto gamma-band phase
+    model over the runtime's modules decides whether the selected
+    thought IGNITES (is broadcast: stored + spoken). Off → every
+    novel thought broadcasts, as before §14.13."""
+
+    osc_nt_feedback: bool = True
+    """ACh scales the oscillator's coupling and GABA its frequency.
+    Off → the ignition↔NT loop is cut (the H65 ablation)."""
+
+    osc_coupling_ratio: float = 2.0
+    """Coupling as a multiple of the Kuramoto critical coupling."""
+
+    osc_ignition_threshold: float = 0.25
+    """Global order parameter R (over all oscillators) that counts as
+    ignition. See oscillator.py for how the operating point was set."""
+
+    osc_n_per_module: int = 8
+    osc_f0_hz: float = 40.0
+    osc_f_sd_hz: float = 4.0
+    osc_noise: float = 2.0
+    osc_ms_per_tick: int = 250
+    osc_seed: int = 0
+
     wander_prompts: Tuple[str, ...] = (
         "Let my mind wander from what I remember toward something new.",
         "I notice a thread connecting my last thought to what came "
@@ -286,6 +323,15 @@ class TickResult:
     """True when this idle tick anchored RECALL on a randomly sampled
     stored episode (hippocampal replay) because boredom crossed the
     threshold — the mechanism behind associative jumps."""
+    ignited: Optional[bool] = None
+    """§14.13: did the selected thought ignite the oscillatory
+    workspace (global phase-locking ≥ threshold)? None when the
+    oscillator is off."""
+    sync_r: Optional[float] = None
+    """Global Kuramoto order parameter R over the ignition window."""
+    gamma_peak_hz: Optional[float] = None
+    gamma_power: Optional[float] = None
+    """Fraction of the population signal's power in 30-100 Hz."""
     reasoning: Optional[str] = None
     """Reasoning experts only: the think trace that produced the
     SELECTED thought — the model's own visible deliberation, kept as
@@ -356,6 +402,12 @@ def format_debug_trace(result: TickResult) -> str:
     nt = result.nt_levels or {}
     lines.append("  NT[" + " ".join(
         f"{k}={float(nt.get(k, 0.0)):.2f}" for k in _NT_ORDER) + "]")
+
+    if result.sync_r is not None:
+        lines.append(
+            f"  WS[R={result.sync_r:.2f} "
+            f"ignited={'yes' if result.ignited else 'no'} "
+            f"{result.gamma_peak_hz:.0f}Hz γ={result.gamma_power:.2f}]")
 
     if result.inhibited:
         lines.append("  BG: inhibited — no deliberation this tick "
@@ -513,6 +565,19 @@ class CognitiveRuntime:
         # LOOPING streak: consecutive ticks with novelty below
         # cfg.loop_novelty_threshold.
         self._low_nov_streak: int = 0
+        self._osc = None
+        if self.cfg.workspace_oscillator:
+            from neuroslm.cognition.oscillator import GammaWorkspace
+            base = nt.baselines() if callable(nt.baselines) else nt.baselines
+            c = self.cfg
+            self._osc = GammaWorkspace(
+                n_per_module=c.osc_n_per_module, f0_hz=c.osc_f0_hz,
+                f_sd_hz=c.osc_f_sd_hz, coupling_ratio=c.osc_coupling_ratio,
+                noise=c.osc_noise, ms_per_tick=c.osc_ms_per_tick,
+                ignition_threshold=c.osc_ignition_threshold,
+                nt_feedback=c.osc_nt_feedback,
+                ach0=base.get("ACh", 0.30), gaba0=base.get("GABA", 0.15),
+                seed=c.osc_seed)
 
     # ── SENSE ────────────────────────────────────────────────────────
 
@@ -645,6 +710,7 @@ class CognitiveRuntime:
         # in the last few ticks are transiently suppressed). IOR
         # yields rather than blinds — when suppression would empty
         # the result, the unsuppressed top-k is used anyway.
+        recall_strength = 0.0
         if suppress_recall:
             recalled = []
         else:
@@ -679,6 +745,9 @@ class CognitiveRuntime:
                 e for _, e in adjusted[: self.cfg.recall_k]]
             for e in recalled:
                 self._recent_recall.append(e.get("content"))
+            sims = {id(e): sim for sim, e in scored}
+            recall_strength = max((sims.get(id(e), 0.0) for e in recalled),
+                                  default=0.0)
 
         # THINK: K candidates from persona + recall + context. The
         # trigger — what this tick is actually ABOUT — is the real
@@ -734,7 +803,19 @@ class CognitiveRuntime:
         # the SAME novelty gate that decided whether to remember the
         # thought also decides whether to voice it (speak) or keep it
         # internal (think) — one signal, two consequences.
-        stored = novelty >= self.cfg.novelty_write_threshold
+        # WORKSPACE (§14.13): the selected thought is broadcast only if
+        # the module oscillators phase-lock globally this tick.
+        osc = None
+        if self._osc is not None:
+            osc = self._osc.step({
+                "sensory": 1.0 if sensory else 0.0,
+                "memory": recall_strength,
+                "language": 1.0 - sc.entropy_norm,
+                "selection": 1.0 - selection_entropy,
+                "novelty": novelty,
+            }, levels)
+        stored = (novelty >= self.cfg.novelty_write_threshold
+                  and (osc is None or osc.ignited))
         if not wandering:
             action = "respond"
         elif reorient:
@@ -780,7 +861,15 @@ class CognitiveRuntime:
         # NT sat pinned at baseline for nine straight live ticks).
         # Boredom integrates 1−novelty and feeds the next tick's
         # selection temperature via curious_selection_temperature.
-        self.nt.step_full(loss=sc.mean_nll, activation=novelty)
+        # §14.13: NE ← novelty surprise against the curiosity
+        # homeostat's expectation (1 − boredom); GABA/−ACh ← workspace
+        # ignition (or broadcast, without the oscillator); ACh ← BG
+        # decisiveness. Before this, NE/ACh/GABA never moved.
+        ignition = float(osc.ignited) if osc is not None else float(stored)
+        self.nt.step_full(loss=sc.mean_nll, activation=novelty,
+                          grad_norm=abs(novelty - (1.0 - self._boredom)),
+                          ignition_rate=ignition,
+                          attn_entropy_norm=selection_entropy)
         a = self.cfg.novelty_ema_alpha
         self._boredom = (1.0 - a) * self._boredom + a * (1.0 - novelty)
 
@@ -809,7 +898,11 @@ class CognitiveRuntime:
                           differentiation=differentiation,
                           novelty=novelty, boredom=self._boredom,
                           replay=replay, reorient=reorient,
-                          reasoning=reasonings[idx])
+                          reasoning=reasonings[idx],
+                          ignited=osc.ignited if osc else None,
+                          sync_r=osc.sync_r if osc else None,
+                          gamma_peak_hz=osc.peak_hz if osc else None,
+                          gamma_power=osc.gamma_power if osc else None)
 
     # ── Internals ────────────────────────────────────────────────────
 
@@ -999,7 +1092,7 @@ def build_runtime_from_harness(harness: Any, tokenizer: Any,
                             classify_fn=classify_fn)
 
 
-def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
+def build_runtime_from_hf_lm(model_id: str = DEFAULT_MIND_EXPERT,
                              device: str = "cpu",
                              cfg: Optional[MindConfig] = None,
                              temperature: float = 0.8,
@@ -1015,7 +1108,7 @@ def build_runtime_from_hf_lm(model_id: str = "smollm2_360m",
                           ).runtime(cfg=cfg)
 
 
-def build_hf_seams(model_id: str = "smollm2_360m",
+def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
                    device: str = "cpu",
                    temperature: float = 0.8,
                    top_k: int = 40,
@@ -1027,7 +1120,7 @@ def build_hf_seams(model_id: str = "smollm2_360m",
 
     The doctrine's escape hatch for using BRIAN before full trunk
     training: THINK/score/embed all come from one of the LM experts
-    (default the `general` roster slot, ``smollm2_360m``) instead of a
+    (default :data:`DEFAULT_MIND_EXPERT`) instead of a
     checkpointed trunk. ``model_id`` accepts a roster alias, a full
     ``owner/repo`` id, or an ``hf://`` URL (resolved via
     :func:`neuroslm.experts.resolve_expert_alias` — pure, typo-safe).
@@ -1047,7 +1140,8 @@ def build_hf_seams(model_id: str = "smollm2_360m",
         model = model_factory()
     else:
         from transformers import AutoModelForCausalLM
-        model = AutoModelForCausalLM.from_pretrained(resolved)
+        model = AutoModelForCausalLM.from_pretrained(
+            resolved, **_hf_load_kwargs(device))
     model.eval()
     # 2026-08-12 live incident: from_pretrained() loads on CPU by
     # default. Without this, an A100 mind deploy silently ran the

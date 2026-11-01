@@ -29,6 +29,7 @@ from typing import List, Optional
 
 from neuroslm.connectors.vast_discover import (
     _LEAVE_RUNNING_BLOCK, _SELF_DESTROY_BLOCK, _current_branch)
+from neuroslm.cognition.runtime import DEFAULT_MIND_EXPERT
 from neuroslm.connectors.vast_mind import _DEFAULT_GPU_QUERY
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -36,7 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 @dataclass
 class MindEvalDeployConfig:
-    expert: str = "smollm2_360m_instruct"
+    expert: str = DEFAULT_MIND_EXPERT
     eval_args: List[str] = field(default_factory=list)
     branch: Optional[str] = None
     label: str = "neuroslm-mind-eval"
@@ -120,7 +121,7 @@ def build_mind_eval_onstart(env: dict) -> str:
     repo_slug = (repo_url.removeprefix("https://github.com/")
                  .removesuffix(".git"))
     auto_destroy = str(env.get("AUTO_DESTROY", "1")) != "0"
-    expert = str(env.get("EXPERT", "smollm2_360m"))
+    expert = str(env.get("EXPERT", DEFAULT_MIND_EXPERT))
     result = _ONSTART_TEMPLATE.replace(
         "__SELF_DESTROY_BLOCK__",
         _SELF_DESTROY_BLOCK if auto_destroy else _LEAVE_RUNNING_BLOCK)
@@ -182,6 +183,8 @@ class VastMindEvalConnector:
             env = os.environ.copy()
             env["ONSTART_FILE"] = tf.name
             env["VAST_LABEL"] = config.label
+            # DEFAULT_MIND_EXPERT (R1-7B) is ~15 GB of weights alone.
+            env.setdefault("VAST_DISK", "60")
             env["GPU_QUERY"] = config.gpu_query
             bash = self._find_bash()
             script = str(REPO_ROOT / "scripts" / "vast_discover.sh")

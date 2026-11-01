@@ -22,6 +22,7 @@ import re
 import pytest
 
 from neuroslm.cognition.runtime import MindConfig, MindSeams, ThoughtScore
+from neuroslm.cognition.runtime import DEFAULT_MIND_EXPERT
 
 _STOP = {"what", "is", "my", "the", "a", "an", "i", "in", "of", "on",
          "which", "did", "do", "to", "was", "where", "when", "it", "at"}
@@ -405,9 +406,7 @@ class TestCli:
         from neuroslm.cli import _build_parser
         a = _build_parser().parse_args(["eval", "mind"])
         assert a.eval_kind == "mind"
-        # Instruct, not base: a base model has no turn-end token and
-        # degenerates in the respond path (experts.py registry note).
-        assert a.expert == "smollm2_360m_instruct"
+        assert a.expert == DEFAULT_MIND_EXPERT
         assert a.probes is None and a.out is None
 
     def test_eval_mind_flags(self):
@@ -421,7 +420,7 @@ class TestCli:
     def test_deploy_mind_eval_parses(self):
         from neuroslm.cli import _build_parser
         a = _build_parser().parse_args(["deploy-mind-eval"])
-        assert a.expert == "smollm2_360m_instruct"
+        assert a.expert == DEFAULT_MIND_EXPERT
         assert a.no_auto_destroy is False
 
     def test_deploy_mind_eval_requires_human_confirmation_first(
@@ -543,3 +542,86 @@ class TestLogCapture:
         assert "sleep '120'" in s
         assert "kill $PUSHER_PID" in s
         assert s.count("push_artifacts") >= 2, "periodic + final push"
+
+
+# ── §14.13 falsification surface: ignition dynamics + NT movement ────
+
+class TestOscillationMetrics:
+    def test_lag1_autocorrelation(self):
+        from neuroslm.cognition.indicators import lag1_autocorr
+        assert lag1_autocorr([1, 0, 1, 0, 1, 0, 1, 0]) < -0.8
+        assert lag1_autocorr([1, 1, 1, 1, 0, 0, 0, 0]) > 0.5
+        assert lag1_autocorr([1, 1, 1, 1]) is None, "constant: undefined"
+        assert lag1_autocorr([1]) is None
+
+    def _run(self, cfg):
+        from neuroslm.cognition.indicators import probe_loop_escape
+        return probe_loop_escape(
+            _seams(lambda p, n: "The same thought again."),
+            seed_texts=["I watched the river."], n_idle_ticks=6,
+            cfg=cfg, seed=0)
+
+    def test_oscillator_ablations_run_when_the_workspace_is_on(self):
+        res = self._run(MindConfig(n_candidates=2))
+        assert {"full", "no_control", "no_osc_feedback",
+                "no_oscillator", "bare"} <= set(res["conditions"])
+
+    def test_no_oscillator_ablations_when_it_is_off(self):
+        res = self._run(MindConfig(n_candidates=2,
+                                   workspace_oscillator=False))
+        assert "no_osc_feedback" not in res["conditions"]
+        assert "no_oscillator" not in res["conditions"]
+
+    def test_reports_ignition_dynamics_and_nt_movement(self):
+        res = self._run(MindConfig(n_candidates=2))
+        full = res["conditions"]["full"]
+        run = full["runs"][0]
+        assert len(run["ignition_series"]) == run["n_thoughts"]
+        assert 0.0 <= full["ignition_rate"] <= 1.0
+        assert "ignition_lag1" in full
+        assert full["mean_gamma_peak_hz"] > 0.0
+        for ch in ("NE", "ACh", "GABA", "DA"):
+            assert ch in full["nt_sd"]
+        assert res["conditions"]["no_oscillator"]["ignition_rate"] is None
+
+    def test_pci_watches_the_workspace(self):
+        from neuroslm.cognition.indicators import PCI_CHANNELS
+        assert "ignited" in PCI_CHANNELS and "sync_r" in PCI_CHANNELS
+
+
+class TestDiskForTheDeepSeekTrunk:
+    """A 7B R1 trunk is ~15 GB of weights; vast_discover.sh's 30 GB
+    default also holds the image + pip deps."""
+
+    def _env(self, monkeypatch, connector, cfg, preset=None):
+        import subprocess
+        seen = {}
+        monkeypatch.setattr(subprocess, "call",
+                            lambda cmd, **kw: seen.update(kw["env"]) or 0)
+        if preset is None:
+            monkeypatch.delenv("VAST_DISK", raising=False)
+        else:
+            monkeypatch.setenv("VAST_DISK", preset)
+        monkeypatch.setenv("GH_TOKEN", "x")
+        connector().launch(cfg)
+        return seen
+
+    def test_mind_eval_requests_60gb(self, monkeypatch):
+        from neuroslm.connectors.vast_mind_eval import (
+            MindEvalDeployConfig, VastMindEvalConnector)
+        env = self._env(monkeypatch, VastMindEvalConnector,
+                        MindEvalDeployConfig())
+        assert int(env["VAST_DISK"]) >= 60
+
+    def test_mind_requests_60gb(self, monkeypatch):
+        from neuroslm.connectors.vast_mind import (
+            MindDeployConfig, VastMindConnector)
+        env = self._env(monkeypatch, VastMindConnector, MindDeployConfig())
+        assert int(env["VAST_DISK"]) >= 60
+
+    def test_explicit_vast_disk_wins(self, monkeypatch):
+        from neuroslm.connectors.vast_mind_eval import (
+            MindEvalDeployConfig, VastMindEvalConnector)
+        env = self._env(monkeypatch, VastMindEvalConnector,
+                        MindEvalDeployConfig(), preset="120")
+        assert env["VAST_DISK"] == "120"

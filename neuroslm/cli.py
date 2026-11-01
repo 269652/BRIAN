@@ -5230,7 +5230,8 @@ def cmd_update_readme(args: argparse.Namespace) -> int:
 
 def _add_mind_eval_args(p: argparse.ArgumentParser) -> None:
     """Battery flags shared by ``eval mind`` and ``deploy-mind-eval``."""
-    p.add_argument("--expert", default="smollm2_360m_instruct",
+    from neuroslm.cognition.runtime import DEFAULT_MIND_EXPERT
+    p.add_argument("--expert", default=DEFAULT_MIND_EXPERT,
                    help="Expert model(s): roster alias or HF id; comma "
                         "list runs the battery once per expert")
     p.add_argument("--probes", default=None,
@@ -5866,9 +5867,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Rent a vast.ai box running the always-on mind server "
              "(chat --expert --mind --serve). ⚠ bills until "
              "`brian destroy <id>` — no self-destroy.")
-    sdm.add_argument("--expert", default="smollm2_360m",
+    from neuroslm.cognition.runtime import DEFAULT_MIND_EXPERT
+    sdm.add_argument("--expert", default=DEFAULT_MIND_EXPERT,
                      help="Expert model (roster alias or HF id; "
-                          "default smollm2_360m)")
+                          f"default {DEFAULT_MIND_EXPERT})")
     sdm.add_argument("--no-mind", action="store_true",
                      help="Plain chat server without the cognition "
                           "layer (no recall/NT-gating/memory)")
@@ -6400,11 +6402,11 @@ def _build_parser() -> argparse.ArgumentParser:
              "cognitive cycles (episodic recall, NT-gated selection, "
              "surprise-gated memory) instead of seed-continuations.")
     sc_chat.add_argument(
-        "--expert", nargs="?", const="smollm2_360m", default=None,
+        "--expert", nargs="?", const=DEFAULT_MIND_EXPERT, default=None,
         metavar="MODEL_ID",
         help="Run on a frozen pretrained LM expert instead of a trunk "
              "checkpoint — usable with zero training. Bare flag = the "
-             "general roster slot (smollm2_360m); accepts any roster "
+             f"mind's default trunk ({DEFAULT_MIND_EXPERT}); accepts any roster "
              "alias or HF owner/repo id. Composes with --mind.")
     sc_chat.add_argument(
         "--serve", action="store_true",

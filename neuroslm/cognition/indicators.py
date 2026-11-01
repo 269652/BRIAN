@@ -239,6 +239,22 @@ def _mean(xs: Sequence[float]) -> Optional[float]:
     return sum(xs) / len(xs) if xs else None
 
 
+def lag1_autocorr(xs: Sequence[float]) -> Optional[float]:
+    """Lag-1 autocorrelation; negative = alternation (a tick-scale
+    oscillation), None for a constant or too-short series."""
+    if len(xs) < 2:
+        return None
+    m = sum(xs) / len(xs)
+    den = sum((x - m) ** 2 for x in xs)
+    if den == 0.0:
+        return None
+    return sum((xs[t] - m) * (xs[t + 1] - m)
+               for t in range(len(xs) - 1)) / den
+
+
+_NT_ORDER = ("DA", "NE", "5HT", "ACh", "eCB", "Glu", "GABA")
+
+
 # ── Conditions ───────────────────────────────────────────────────────
 
 class SlidingWindowLM:
@@ -428,8 +444,26 @@ def _aggregate_runs(runs: List[dict]) -> dict:
                      "distinct_ratio")}
     for k in ("reorients", "replays", "inhibited"):
         out[k] = sum(r.get(k, 0) for r in runs)
+    if runs and "ignition_series" in runs[0]:
+        series = [r["ignition_series"] for r in runs]
+        has_osc = all(None not in s for s in series)
+        out["ignition_rate"] = (_mean([x for s in series for x in s])
+                                if has_osc else None)
+        lags = [lag1_autocorr(s) for s in series] if has_osc else []
+        out["ignition_lag1"] = _mean([v for v in lags if v is not None])
+        peaks = [p for r in runs for p in r["gamma_peaks"]]
+        out["mean_gamma_peak_hz"] = _mean(peaks)
+        out["mean_sync_r"] = _mean([x for r in runs for x in r["sync_rs"]])
+        out["nt_sd"] = {ch: _mean([st_pstdev(r["nt"][ch]) for r in runs
+                                   if len(r["nt"][ch]) > 1])
+                        for ch in _NT_ORDER}
     out["runs"] = runs
     return out
+
+
+def st_pstdev(xs: Sequence[float]) -> float:
+    m = sum(xs) / len(xs)
+    return math.sqrt(sum((x - m) ** 2 for x in xs) / len(xs))
 
 
 def probe_loop_escape(seams: MindSeams,
@@ -446,6 +480,11 @@ def probe_loop_escape(seams: MindSeams,
                  "no_control": {"curiosity_gain": 0.0,
                                 "replay_boredom_threshold": 2.0,
                                 "reorient_after": 10 ** 9}}
+    if cfg.workspace_oscillator:
+        # §14.13 falsification arms: cut the ignition↔NT loop, or the
+        # workspace gating altogether.
+        ablations["no_osc_feedback"] = {"osc_nt_feedback": False}
+        ablations["no_oscillator"] = {"workspace_oscillator": False}
     conds: Dict[str, dict] = {}
     for name, ov in ablations.items():
         runs = []
@@ -453,6 +492,10 @@ def probe_loop_escape(seams: MindSeams,
             rt = _fresh_runtime(seams, replace(cfg, **ov), seed * 1000 + i)
             _respond(rt, text)
             thoughts: List[str] = []
+            ign: List[Optional[int]] = []
+            sync_rs: List[float] = []
+            peaks: List[float] = []
+            nt: Dict[str, List[float]] = {ch: [] for ch in _NT_ORDER}
             reorients = replays = inhibited = 0
             _say(progress, f"── loop_escape/{name} run {i}: {text}")
             for _ in range(n_idle_ticks):
@@ -463,11 +506,19 @@ def probe_loop_escape(seams: MindSeams,
                     continue
                 reorients += int(r.reorient)
                 replays += int(r.replay)
+                for ch in _NT_ORDER:
+                    nt[ch].append(float(r.nt_levels.get(ch, 0.0)))
                 if r.thought:
                     thoughts.append(r.thought)
+                    ign.append(None if r.ignited is None else int(r.ignited))
+                    if r.sync_r is not None:
+                        sync_rs.append(r.sync_r)
+                        peaks.append(r.gamma_peak_hz)
             m = _stream_metrics(thoughts, seams.embed_fn, thr)
             m.update(reorients=reorients, replays=replays,
-                     inhibited=inhibited, thoughts=[t[:240] for t in thoughts])
+                     inhibited=inhibited, thoughts=[t[:240] for t in thoughts],
+                     ignition_series=ign, sync_rs=sync_rs,
+                     gamma_peaks=peaks, nt=nt)
             runs.append(m)
         conds[name] = _aggregate_runs(runs)
         _say(progress, f"  loop_escape/{name}: novelty="
@@ -491,6 +542,9 @@ def probe_loop_escape(seams: MindSeams,
             "n_idle_ticks": n_idle_ticks,
             "conditions": conds,
             "contrasts": {**_contrasts(conds, "mean_novelty"),
+                          **{k.replace("full_minus", "lag1_full_minus"): v
+                             for k, v in _contrasts(
+                                 conds, "ignition_lag1").items()},
                           **{k.replace("full_minus", "streak_full_minus"): v
                              for k, v in _contrasts(
                                  conds, "longest_low_streak").items()}}}
@@ -599,7 +653,8 @@ def pci_normalized(matrix: Sequence[Sequence[int]]) -> float:
 _NT_CHANNELS = ("DA", "NE", "5HT", "ACh", "eCB", "Glu", "GABA")
 PCI_CHANNELS: Tuple[str, ...] = _NT_CHANNELS + (
     "boredom", "novelty", "selection_entropy", "differentiation",
-    "action", "stored", "inhibited", "recall", "thought")
+    "action", "stored", "inhibited", "recall", "thought",
+    "ignited", "sync_r")
 """The runtime's observable internal state per tick — the 'electrodes'
 of the PCI analogue: NT homeostat, curiosity homeostat, BG
 deliberation, BG act, hippocampal write/read, and thought content."""
@@ -627,8 +682,12 @@ def _diverged(name: str, a: TickResult, b: TickResult, embed_fn) -> bool:
                    - b.nt_levels.get(name, 0.0)) > _SCALAR_DELTA[name]
     if name in _SCALAR_DELTA:
         return abs(getattr(a, name) - getattr(b, name)) > _SCALAR_DELTA[name]
-    if name in ("action", "stored", "inhibited"):
+    if name in ("action", "stored", "inhibited", "ignited"):
         return getattr(a, name) != getattr(b, name)
+    if name == "sync_r":
+        if a.sync_r is None or b.sync_r is None:
+            return (a.sync_r is None) != (b.sync_r is None)
+        return abs(a.sync_r - b.sync_r) > 0.05
     if name == "recall":
         return ({e.get("content") for e in a.recalled}
                 != {e.get("content") for e in b.recalled})
@@ -811,5 +870,12 @@ def format_report(report: dict) -> str:
                      f"streak={_fmt(c['longest_low_streak'])} "
                      f"distinct={_fmt(c['distinct_ratio'])} "
                      f"reorients={c['reorients']} replays={c['replays']}")
+                if c.get("ignition_rate") is not None:
+                    sd = c["nt_sd"]
+                    m += (f" ign={_fmt(c['ignition_rate'])}"
+                          f" lag1={_fmt(c['ignition_lag1'])}"
+                          f" γ={_fmt(c['mean_gamma_peak_hz'])}Hz"
+                          f" sd(NE,ACh,GABA)={_fmt(sd['NE'])},"
+                          f"{_fmt(sd['ACh'])},{_fmt(sd['GABA'])}")
             lines.append(f"{name:<18} {res['indicator']:<10} {cond:<15} {m}")
     return "\n".join(lines)

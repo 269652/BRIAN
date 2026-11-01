@@ -3712,3 +3712,81 @@ Pinned by `TestGenerationQuality::test_chat_template_accepts_transformers_v5_bat
 same flag on `deploy-mind-eval`) runs the §14.11 battery once per
 trunk on one box, writing one report each. H63 pre-registers what
 "better mind-wandering and introspection" has to mean before the run.
+
+### 14.13 Live NT drivers + oscillatory global workspace (2026-11-01)
+
+**Dead channels (fix).** The first live battery (run 58670004,
+SmolLM2 trunk) showed NE, ACh and GABA at baseline with sd = 0 for
+every tick: the loop only ever passed `loss` and `activation` to
+`DrivenNTSystem.step_full`, so three of seven channels had no input.
+The GABA silence gate could therefore never fire on its own. Every
+tick now passes all five drivers, each from a signal the loop already
+computes:
+
+| Driver | Runtime signal | Channels (via W) |
+|---|---|---|
+| `loss` | selected thought's NLL | DA, 5HT |
+| `activation` | semantic novelty | Glu, eCB |
+| `grad_norm` | novelty surprise \|novelty − (1 − boredom)\| | NE (+GABA) |
+| `ignition_rate` | workspace ignition (or broadcast, oscillator off) | GABA, −ACh |
+| `attn_entropy_norm` | BG selection entropy (ACh ← decisiveness) | ACh |
+
+**Why nothing oscillated.** Each NT channel is a first-order leaky
+(OU) system: it can drift and relax, but not oscillate. Oscillation
+needs second-order or coupled dynamics.
+
+**The oscillatory workspace** (`cognition/oscillator.py`,
+`MindConfig.workspace_oscillator`, **on by default**). Each module
+(sensory, memory, language, selection, novelty) owns 8 gamma-band
+phase oscillators (f₀ = 40 Hz, sd 4 Hz). One tick integrates 250 ms
+of Kuramoto dynamics at 1 ms steps:
+
+    dθ_i = ω_i·s_GABA dt + (K·s_ACh/N) Σ_j a_i a_j sin(θ_j − θ_i) dt + σ√dt ξ
+
+where a_i is the activation of oscillator i's module this tick:
+sensory input present, recall strength, thought confidence, BG
+decisiveness, and novelty. **Ignition** means the global order
+parameter R = |Σ a_j e^{iθ_j}|/N stays ≥ 0.25 over the last 50 ms.
+R is normalised by *all* oscillators, so a single locked module of
+five caps R at 0.2 and cannot ignite. That is the "global" in global
+workspace.
+
+A thought is **broadcast** (stored, spoken) only if it is novel *and*
+the workspace ignites. Phases persist across ticks.
+`TickResult.ignited/sync_r/gamma_peak_hz/gamma_power` record each
+tick, and the debug trace shows `WS[R=… ignited=… 40Hz γ=…]`.
+
+**The second-order loop.**
+
+    ignition → GABA↑, ACh↓ → coupling↓ (s_ACh), frequency↓ (s_GABA)
+             → synchrony↓ → no ignition → GABA, ACh relax → coupling↑ …
+
+This is a delayed negative feedback through the NT homeostat, the
+smallest closed loop that *can* produce tick-scale alternation. The
+H65 experiment asks whether it does.
+
+**Operating point, fixed before any outcome:** K = 2.0 × K_c (the
+Kuramoto critical coupling), threshold 0.25. These were chosen so that
+the reference activation patterns from run 58670004 are separated:
+dull idle R ≈ 0.13 < θ < novel idle 0.29 < reply 0.50. Ignition then
+depends on content, and sits close enough to θ for ACh to tip it. The
+NT gains are a-priori design choices: cholinergic enhancement of gamma
+synchrony, and slower gamma under stronger inhibition (PING).
+
+**What this is and isn't.** Gamma synchrony as a binding or ignition
+mechanism is one contested strand of consciousness science (binding by
+synchrony; Dehaene-style ignition). This adds a mechanism and a way to
+test it. It does not add evidence of experience. The 40 Hz peak itself
+is put in by f₀, so observing it validates the implementation only.
+The falsifiable claims are about dynamics and function (H64, H65).
+
+Ablations in `loop_escape` whenever the workspace is on:
+`no_osc_feedback` (oscillator on, NT modulation cut) and
+`no_oscillator` (no ignition gating). PCI gains `ignited` and `sync_r`
+channels.
+
+**Default trunk.** `DEFAULT_MIND_EXPERT = "deepseek_r1_qwen_7b"`
+(`cognition/runtime.py`), one constant for `chat --expert`,
+`deploy-mind`, `eval mind` and `deploy-mind-eval`. Use
+`deepseek_r1_qwen_1_5b` on CPU. GPU loads use the checkpoint dtype
+(bf16). The mind connectors default `VAST_DISK` to 60 GB.

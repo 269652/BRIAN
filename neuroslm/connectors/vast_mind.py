@@ -37,6 +37,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from neuroslm.cognition.runtime import DEFAULT_MIND_EXPERT
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # 2026-08-11: switched from the cheap-card default (gpu_ram>=8, <$0.15/hr)
@@ -51,7 +53,7 @@ _DEFAULT_GPU_QUERY = ("gpu_name=A100_SXM4 num_gpus=1 rentable=true "
 
 @dataclass
 class MindDeployConfig:
-    expert: str = "smollm2_360m"
+    expert: str = DEFAULT_MIND_EXPERT
     mind: bool = True
     port: int = 7861
     branch: Optional[str] = None
@@ -113,7 +115,7 @@ def build_mind_onstart(env: dict) -> str:
         "__HF_TOKEN__": str(env.get("HF_TOKEN", "")),
         "__BRANCH__": str(env.get("BRANCH", "master")),
         "__REPO_SLUG__": repo_slug,
-        "__EXPERT__": str(env.get("EXPERT", "smollm2_360m")),
+        "__EXPERT__": str(env.get("EXPERT", DEFAULT_MIND_EXPERT)),
         "__MIND_FLAG__": "--mind" if env.get("MIND") else "",
         "__PORT__": str(env.get("PORT", 7861)),
         "__DEVICE__": str(env.get("DEVICE", "cuda")),
@@ -183,6 +185,8 @@ class VastMindConnector:
             env = os.environ.copy()
             env["ONSTART_FILE"] = tf.name
             env["VAST_LABEL"] = config.label
+            # DEFAULT_MIND_EXPERT (R1-7B) is ~15 GB of weights alone.
+            env.setdefault("VAST_DISK", "60")
             env["GPU_QUERY"] = config.gpu_query
 
             bash = self._find_bash()

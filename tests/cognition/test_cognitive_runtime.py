@@ -253,7 +253,9 @@ class TestNoveltyGatedWrites:
         from neuroslm.cognition.runtime import MindConfig
         outs = ["same thought"] * 8 + ["coffee by the river at dawn"]
         gen = _ScriptedGen(outs)
-        cfg = MindConfig(n_candidates=1)
+        # storage-dependent contract, independent of §14.13 ignition
+        # (pinned in TestOscillatoryWorkspace) — workspace off.
+        cfg = MindConfig(n_candidates=1, workspace_oscillator=False)
         rt = _mk_runtime(gen, cfg=cfg)
         results = [rt.tick() for _ in range(9)]
         assert results[-1].thought == "coffee by the river at dawn"
@@ -603,7 +605,12 @@ class TestEpisodicRepresentation:
         assert ep["context"]["trigger"] == "what is the launch plan?"
 
     def test_wandering_trigger_is_the_wander_prompt_used(self):
-        rt = _mk_runtime(_ScriptedGen(["a wander"]))
+        from neuroslm.cognition.runtime import MindConfig
+        # storage-dependent contract, independent of §14.13 ignition
+        # (pinned in TestOscillatoryWorkspace) — workspace off.
+        rt = _mk_runtime(_ScriptedGen(["a wander"]),
+                         cfg=MindConfig(n_candidates=2,
+                                        workspace_oscillator=False))
         r = rt.tick()
         ep = [e for e in rt.memory.all() if e["content"] == "a wander"][0]
         assert ep["context"]["trigger"] in rt.cfg.wander_prompts
@@ -1234,8 +1241,12 @@ class TestChatDaemonHostsTheMind:
                           ChatDaemonConfig(), use_color=False, mind=rt)
 
     def test_think_once_delegates_to_mind(self):
+        from neuroslm.cognition.runtime import MindConfig
         gen = _ScriptedGen(["mind thought"])
-        rt = _mk_runtime(gen)
+        # storage-dependent contract, independent of §14.13 ignition
+        # (pinned in TestOscillatoryWorkspace) — workspace off.
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=2,
+                                             workspace_oscillator=False))
         d = self._daemon(rt)
         out = d.think_once()
         assert out == "mind thought"
@@ -1492,7 +1503,8 @@ class TestExpertBackend:
     def test_chat_expert_flag_parses(self):
         from neuroslm.cli import _build_parser
         args = _build_parser().parse_args(["chat", "--expert"])
-        assert args.expert == "smollm2_360m"
+        from neuroslm.cognition.runtime import DEFAULT_MIND_EXPERT
+        assert args.expert == DEFAULT_MIND_EXPERT
         args = _build_parser().parse_args(
             ["chat", "--expert", "Qwen/Qwen2.5-0.5B"])
         assert args.expert == "Qwen/Qwen2.5-0.5B"
@@ -1795,3 +1807,158 @@ class TestReasoningExpert:
         assert res.thought == "I hear you."
         assert res.reasoning == "Why did they say that?"
         assert "Why did they say that?" in format_debug_trace(res)
+
+
+# ── §14.13: dead NT channels wired + oscillatory workspace ───────────
+
+class TestNTDriversWired:
+    """Live run 58670004: NE, ACh and GABA sat at baseline with sd=0
+    for every tick — the loop only ever passed loss + activation."""
+
+    def test_every_tick_passes_all_five_drivers(self):
+        from neuroslm.cognition.runtime import MindConfig
+        nt = _FakeNT()
+        rt = _mk_runtime(_ScriptedGen(["thinking about the river"]), nt=nt,
+                         cfg=MindConfig(n_candidates=2))
+        rt.tick()
+        kw = nt.step_calls[-1]
+        for k in ("loss", "activation", "grad_norm", "ignition_rate",
+                  "attn_entropy_norm"):
+            assert kw.get(k) is not None, k
+
+    def test_drivers_carry_the_ticks_own_signals(self):
+        from neuroslm.cognition.runtime import MindConfig
+        nt = _FakeNT()
+        rt = _mk_runtime(_ScriptedGen(["thinking about the river"]), nt=nt,
+                         cfg=MindConfig(n_candidates=2))
+        r = rt.tick()
+        kw = nt.step_calls[-1]
+        assert kw["attn_entropy_norm"] == pytest.approx(r.selection_entropy)
+        assert kw["ignition_rate"] == (1.0 if r.ignited else 0.0)
+        # NE: novelty surprise vs the curiosity homeostat's expectation
+        assert kw["grad_norm"] == pytest.approx(abs(r.novelty - 1.0))
+
+    def test_ignition_falls_back_to_storage_without_oscillator(self):
+        from neuroslm.cognition.runtime import MindConfig
+        nt = _FakeNT()
+        rt = _mk_runtime(_ScriptedGen(["thinking about the river"]), nt=nt,
+                         cfg=MindConfig(n_candidates=2,
+                                        workspace_oscillator=False))
+        r = rt.tick()
+        assert r.ignited is None
+        assert nt.step_calls[-1]["ignition_rate"] == (1.0 if r.stored else 0.0)
+
+    def test_real_nt_channels_now_move(self):
+        from neuroslm.cognition.runtime import MindConfig
+        from neuroslm.emergent.driven_nt import DrivenNTSystem
+        topics = ["code", "weather", "music", "launch", "coffee", "river",
+                  "chess", "moon"]
+        gen = _ScriptedGen([f"thinking about the {t}" for t in topics])
+        nt = DrivenNTSystem()
+        # driver wiring, not ignition: with the deterministic fakes the
+        # workspace never ignites, nothing is stored and novelty (hence
+        # the NE driver) would be constant by construction.
+        rt = _mk_runtime(gen, nt=nt, cfg=MindConfig(
+            n_candidates=2, workspace_oscillator=False))
+        seen = {k: set() for k in ("NE", "ACh", "GABA")}
+        for _ in range(30):
+            rt.tick()
+            for k in seen:
+                seen[k].add(round(nt.levels()[k], 4))
+        for k, vals in seen.items():
+            assert len(vals) > 3, f"{k} still flat: {vals}"
+
+
+class TestOscillatoryWorkspace:
+    def test_on_by_default(self):
+        from neuroslm.cognition.runtime import MindConfig
+        assert MindConfig().workspace_oscillator is True
+
+    def test_tick_reports_workspace_state(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
+                         cfg=MindConfig(n_candidates=2))
+        r = rt.tick()
+        assert isinstance(r.ignited, bool)
+        assert 0.0 <= r.sync_r <= 1.0
+        assert r.gamma_peak_hz > 0.0
+        assert 0.0 <= r.gamma_power <= 1.0
+
+    def test_off_reports_nothing(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
+                         cfg=MindConfig(n_candidates=2,
+                                        workspace_oscillator=False))
+        r = rt.tick()
+        assert r.ignited is None and r.sync_r is None
+
+    def test_no_ignition_means_no_broadcast(self):
+        """A novel thought that fails to ignite stays local: not
+        written to memory, not spoken."""
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
+                         cfg=MindConfig(n_candidates=2,
+                                        osc_ignition_threshold=1.01))
+        r = rt.tick()
+        assert r.novelty >= rt.cfg.novelty_write_threshold
+        assert r.ignited is False
+        assert r.stored is False and r.action == "think"
+        assert not rt.memory.all()
+
+    def test_ignition_plus_novelty_broadcasts(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
+                         cfg=MindConfig(n_candidates=2,
+                                        osc_ignition_threshold=0.0))
+        r = rt.tick()
+        assert r.ignited is True and r.stored is True
+        assert r.action == "speak"
+
+    def test_debug_trace_shows_the_workspace(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
+                         cfg=MindConfig(n_candidates=2))
+        text = format_debug_trace_of(rt.tick())
+        assert "WS[" in text and "Hz" in text
+
+
+def format_debug_trace_of(r):
+    from neuroslm.cognition.runtime import format_debug_trace
+    return format_debug_trace(r)
+
+
+class TestDeepSeekDefaultTrunk:
+    """2026-11-01: the mind's default trunk is a DeepSeek-R1 distill
+    (thought quality on SmolLM2-360M was the floor in run 58670004).
+    One constant, every mind entry point — no drift between them."""
+
+    def test_default_is_a_deepseek_r1_distill(self):
+        from neuroslm.cognition.runtime import DEFAULT_MIND_EXPERT
+        from neuroslm.experts import resolve_expert_alias
+        assert resolve_expert_alias(DEFAULT_MIND_EXPERT).startswith(
+            "deepseek-ai/DeepSeek-R1-Distill")
+
+    def test_every_mind_entry_point_uses_it(self):
+        import inspect
+        from neuroslm.cli import _build_parser
+        from neuroslm.cognition.runtime import (
+            build_hf_seams, build_runtime_from_hf_lm)
+        from neuroslm.connectors.vast_mind import MindDeployConfig
+        from neuroslm.connectors.vast_mind_eval import MindEvalDeployConfig
+        from neuroslm.cognition.runtime import DEFAULT_MIND_EXPERT as D
+        p = _build_parser()
+        assert p.parse_args(["chat", "--expert"]).expert == D
+        assert p.parse_args(["deploy-mind"]).expert == D
+        assert p.parse_args(["eval", "mind"]).expert == D
+        assert p.parse_args(["deploy-mind-eval"]).expert == D
+        assert MindDeployConfig().expert == D
+        assert MindEvalDeployConfig().expert == D
+        for fn in (build_hf_seams, build_runtime_from_hf_lm):
+            assert inspect.signature(fn).parameters["model_id"].default == D
+
+    def test_gpu_loads_in_the_checkpoint_dtype_cpu_in_fp32(self):
+        """transformers 4.x defaults to fp32 — a 7B model would double
+        its VRAM and halve throughput on the A100."""
+        from neuroslm.cognition.runtime import _hf_load_kwargs
+        assert _hf_load_kwargs("cuda") == {"torch_dtype": "auto"}
+        assert _hf_load_kwargs("cpu") == {}

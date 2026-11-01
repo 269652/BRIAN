@@ -461,7 +461,8 @@ class TestCliWiring:
     def test_deploy_mind_parses(self):
         from neuroslm.cli import _build_parser
         args = _build_parser().parse_args(["deploy-mind"])
-        assert args.expert == "smollm2_360m"
+        from neuroslm.cognition.runtime import DEFAULT_MIND_EXPERT
+        assert args.expert == DEFAULT_MIND_EXPERT
         assert args.no_mind is False and args.port == 7861
 
     def test_deploy_mind_defaults_to_a100(self):

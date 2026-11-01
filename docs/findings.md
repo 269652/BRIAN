@@ -4099,3 +4099,42 @@ anyone calls R1's wandering "better". (2) R1 think traces are
 introspective *reports*, not access. (3) Accuracy differences partly
 reflect model size, not the cognitive loop; the full − bare contrast
 is the loop-attributable part.
+
+### H64 — Wiring NE/ACh/GABA makes the NT field respond to cognition (pre-registered, 2026-11-01)
+
+**Status:** ⏳ Fixture-verified; live run pending.
+
+**Bug.** Run 58670004 (SmolLM2-360M-Instruct, `loop_escape`, 60 full
+ticks): NE, ACh and GABA sd = 0.000. The runtime passed 2 of
+`DrivenNTSystem`'s 5 drivers (architecture.md §14.13).
+
+**Prediction.** In `loop_escape` (full), the mean per-run sd of NE, ACh
+and GABA are each ≥ 0.01. DA keeps moving (sd ≥ 0.01).
+**Falsified if** any of NE/ACh/GABA has sd < 0.005 in the full
+condition.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestNTDriversWired]
+
+### H65 — An oscillatory workspace with NT feedback produces tick-scale alternation (pre-registered, 2026-11-01)
+
+**Status:** ⏳ Fixture-verified mechanism; live run pending.
+
+**Mechanism.** Kuramoto gamma-band workspace gating broadcast, with
+ignition → GABA↑/ACh↓ → coupling↓ feedback (architecture.md §14.13).
+
+**Predictions**, judged on `loop_escape`. Arms: full,
+`no_osc_feedback`, `no_oscillator`.
+
+| # | Claim | Prediction | Falsified if | Kind |
+|---|---|---|---|---|
+| a | Implementation | mean gamma peak in 30-100 Hz on ignited ticks | outside the band | sanity (f₀ puts it there) |
+| b | Content dependence | ignition rate strictly between 0.05 and 0.95 in full | ≤ 0.05 or ≥ 0.95 (gate is constant) | mechanism |
+| c | **Tick-scale oscillation** | ignition lag-1 autocorrelation in full < 0 and < `no_osc_feedback` by ≥ 0.1 | full lag-1 ≥ no_osc_feedback lag-1 | **the test** |
+| d | Function | `source_monitoring` full ≥ no_oscillator (fewer low-confidence musings broadcast into memory) | full < no_oscillator by > 1 CI half-width | exploratory |
+
+(c) is the claim that matters. If it fails, the loop is a filter, not
+an oscillator, and §14.13's "second-order dynamics" claim is withdrawn.
+
+[EVIDENCE: tests/cognition/test_workspace_oscillator.py (12 — Kuramoto K_c limit, gamma peak, ACh/GABA modulation, global-ignition normalisation, determinism)]
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestOscillatoryWorkspace]
+[EVIDENCE: tests/cognition/test_indicator_eval.py::TestOscillationMetrics]
