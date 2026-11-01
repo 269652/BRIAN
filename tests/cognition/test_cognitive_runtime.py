@@ -2152,3 +2152,68 @@ class TestThoughtsAreNotCutOff:
                          cfg=MindConfig(n_candidates=1,
                                         workspace_oscillator=False))
         assert rt.tick().thought == "A full thought."
+
+
+
+class TestTraceShowsFullText:
+    """2026-11-01: 'a lot of thoughts are cut off' — 39/40 selected R1
+    thoughts were complete; the '…' came from the trace truncating
+    rejected candidates, recalled episodes and lineage at 90 chars."""
+
+    def _r(self):
+        from neuroslm.cognition.runtime import ThoughtScore, TickResult
+        long_a, long_b = "a" * 300, "b" * 300
+        return TickResult(
+            thought=long_a, tick_n=1, wandering=True, action="speak",
+            candidates=[long_a, long_b],
+            scores=[ThoughtScore(2.0, 0.3), ThoughtScore(3.0, 0.3)],
+            recalled=[{"content": "c" * 300, "context": {"kind": "observed"}}],
+            prior_thought="d" * 300, nt_levels={"GABA": 0.1})
+
+    def test_rejected_candidates_recall_and_lineage_render_in_full(self):
+        from neuroslm.cognition.runtime import format_debug_trace
+        text = format_debug_trace(self._r())
+        for ch in "abcd":
+            assert ch * 300 in text, ch
+        assert "…" not in text
+
+
+class TestWanderingDoesNotRecallItsOwnLastThought:
+    """Run 58676023: 4/5 ignitions had memory input m=1.00 — a wandering
+    tick anchors RECALL on the last thought, and once that thought was
+    stored it came back as its own nearest neighbour (cos 1), although
+    it is already in the prompt as 'My last thought:'. That inflated
+    the workspace's memory activation right after every broadcast —
+    an artificial positive ignition autocorrelation (store → m=1 →
+    ignite → store), against H65(c)'s negative lag-1."""
+
+    def test_last_thought_is_excluded_from_recall(self):
+        from neuroslm.cognition.runtime import MindConfig
+        # moon axis: novel against the launch memory, so it is stored
+        gen = _ScriptedGen(["thinking about the moon",
+                            "more on the launch"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1, recall_k=3))
+        rt.memory.add("the launch code is ready",
+                      content_vec=_vec_for("the launch code is ready"),
+                      context={"kind": "observed"})
+        first = rt.tick()
+        assert first.stored, "setup: the first thought must be stored"
+        second = rt.tick()
+        contents = [e["content"] for e in second.recalled]
+        assert "thinking about the moon" not in contents
+        assert "the launch code is ready" in contents
+
+    def test_memory_activation_reflects_other_episodes(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["thinking about the launch",
+                            "more on the launch"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1), osc=True)
+        rt.memory.add("coffee tastes great today",
+                      content_vec=_vec_for("coffee tastes great today"),
+                      context={"kind": "observed"})
+        rt.tick()
+        rt.memory.add("thinking about the launch",
+                      content_vec=_vec_for("thinking about the launch"),
+                      context={"kind": "inferred"})
+        r = rt.tick()
+        assert r.workspace_inputs["memory"] < 0.99

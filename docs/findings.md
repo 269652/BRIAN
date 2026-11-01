@@ -4190,8 +4190,12 @@ The anisotropy explanation is confirmed only if the next run's
 **Motivation (run 58676023, first 8 idle ticks, R1-7B, anecdotal).**
 Centring the embeddings (previous entry) worked: novelty now spreads
 0.25–0.45 and passes the 0.3 gate on 6 of 8 ticks. But the fixed
-ignition bar (R ≥ 0.25) was never crossed (R 0.05–0.23), so still
-nothing was stored. That bar came from a *guessed* "novel idle"
+ignition bar (R ≥ 0.25) was not crossed in those 8 ticks (R
+0.05–0.23). **Correction (same day, 41 full ticks, runs 0–3):** it
+ignited on 5 of 41 ticks (12%), all novel, giving 5 `speak` ticks.
+The bar is strict, not a permanent veto, and H65(b)'s 0.05–0.95 range
+is met so far. H66 stands as an alternative hypothesis, not as a
+repair of a dead gate. That bar came from a *guessed* "novel idle"
 activation pattern (novelty 0.7); R1's idle novelty sits near 0.35,
 and sensory = 0 on every idle tick. Under H65(b) the fixed workspace is
 heading for falsification as a content-dependent gate during
@@ -4235,3 +4239,28 @@ distractor count must be raised before H62 is scored.
 
 [EVIDENCE: tests/cognition/test_workspace_oscillator.py::TestAdaptiveIgnition]
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestNoveltyExpectationForNE, TestAdaptiveWorkspaceDefaults, TestThoughtsAreNotCutOff]
+
+### Run 58676023 — self-recall confound in the workspace's memory input (2026-11-01)
+
+**Observed (41 full `loop_escape` ticks, R1-7B, commit `56464b37`):**
+4 of the 5 ignitions had workspace memory input `m = 1.00`. On a
+wandering tick, RECALL is anchored on the last thought. Once that
+thought was stored, it came back as its own nearest neighbour (cos 1),
+although it is already in the prompt as "My last thought:". The memory
+activation was therefore pinned at 1.0 right after every broadcast:
+store → m = 1 → ignite → store (the consecutive `speak` run r1 t2→t4).
+
+**Consequence:** an artificial *positive* ignition autocorrelation,
+which works directly against H65(c)'s predicted negative lag-1. **H65(c)
+on run 58676023 is confounded and must not be scored as a falsification
+or a confirmation.** H65(a)/(b) and the other probes are unaffected by
+the sign of the bias but carry the same caveat.
+
+**Fix:** RECALL excludes all content already in the prompt (current
+percepts and the last thought). Also: the debug trace no longer
+truncates candidates, recall or lineage. 39 of 40 selected thoughts
+were complete; the "cut off" thoughts were the trace's 90-char display
+cut.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestWanderingDoesNotRecallItsOwnLastThought, TestTraceShowsFullText]
+[EVIDENCE: logs/mind_eval/20261101_58676023_container.log (local capture)]
