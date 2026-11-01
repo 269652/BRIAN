@@ -1,3 +1,161 @@
 [mind-eval] expert=deepseek_r1_qwen_7b device=cuda seed=0 -> results/mind_eval/20261101T170133Z_deepseek-r1-qwen-7b.json
 Fetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]Fetching 2 files:  50%|█████     | 1/2 [01:53<01:53, 113.78s/it]Fetching 2 files: 100%|██████████| 2/2 [02:09<00:00, 64.55s/it] Fetching 2 files: 100%|██████████| 2/2 [02:09<00:00, 64.55s/it]
 Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 45.21it/s]
+[mind-eval] probe loop_escape
+── loop_escape/full run 0: I watched the river flow past the old mill.
+[tick 2] DMN wandering action=think
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.10 Glu=0.45 GABA=0.15]
+  CUR[nov=0.58 bore=0.20]
+  WS[R=0.09 θ=0.14 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.49 l=0.61 s=0.43 n=0.58]]
+  BG deliberation (H=0.57 decisiveness, diff=1.10 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 8.23 "Maybe a poem about rivers?"
+    [        ] nll= 6.05 "How does a person survive without knowing their identity?"
+    [SELECTED] nll= 5.75 "Maybe today’s prompt could be about rivers or flowing water?"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "The sight of the rushing river reminded me of my youth spent near such places where life felt slower yet alive through moments captured in these gentle ripples across streams."
+[tick 3] DMN wandering action=speak
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.10 Glu=0.45 GABA=0.15]
+  CUR[nov=0.48 bore=0.28]
+  WS[R=0.17 θ=0.13 ignited=yes 40Hz γ=0.99 in[s=0.00 m=0.42 l=0.68 s=0.96 n=0.48]]
+  BG deliberation (H=0.04 decisiveness, diff=1.31 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.38 "So if that's true then maybe this [the initial description] can lead into talking about how time flows differently for different people?"
+    [SELECTED] nll= 3.24 ""But how does one write code that's both efficient and easy for others (and oneself) to understand?""
+    [        ] nll= 6.39 "Perhaps thinking in terms that relate to flow? Like physics?"
+  HC recalled 1:
+    - [inferred] The sight of the rushing river reminded me of my youth spent near such places where life felt slower yet alive through moments captured in these gentle ripples across streams.
+  evolved from: "Maybe today’s prompt could be about rivers or flowing water?"
+[tick 4] DMN wandering action=speak
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.10 Glu=0.45 GABA=0.15]
+  CUR[nov=0.38 bore=0.36]
+  WS[R=0.24 θ=0.16 ignited=yes 40Hz γ=0.99 in[s=0.00 m=0.52 l=0.78 s=0.96 n=0.38]]
+  BG deliberation (H=0.04 decisiveness, diff=1.87 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 4.76 "Maybe if you represent numbers as sums or products instead of relying solely on positional notation? ⏎ Hmm..."
+    [SELECTED] nll= 3.93 "Perhaps focusing more on readability can lead to better maintainability over time because simpler solutions are easier not just now but also years down the line.""
+    [        ] nll= 8.26 "Maybe using simple variable names helps readability?"
+  HC recalled 2:
+    - [observed] I watched the river flow past the old mill.
+    - [inferred] The sight of the rushing river reminded me of my youth spent near such places where life felt slower yet alive through moments captured in these gentle ripples across streams.
+  evolved from: ""But how does one write code that's both efficient and easy for others (and oneself) to understand?""
+[tick 5] DMN wandering action=think
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.09 Glu=0.40 GABA=0.15]
+  CUR[nov=0.41 bore=0.42]
+  WS[R=0.17 θ=0.20 ignited=no 40Hz γ=1.00 in[s=0.00 m=0.62 l=0.58 s=0.29 n=0.41]]
+  BG deliberation (H=0.71 decisiveness, diff=0.70 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 6.92 "Maybe we should prioritize clarity of expression above all else?"
+    [SELECTED] nll= 5.95 "Maybe using higher-order functions could help with efficiency while keeping things readable?"
+    [        ] nll= 5.22 "Maybe we should prioritize efficiency as well? Because if something works right this moment with low overhead, maybe even though someone else reads your code later doesn't have anything against you.""
+  HC recalled 1:
+    - [inferred] "But how does one write code that's both efficient and easy for others (and oneself) to understand?"
+  evolved from: "Perhaps focusing more on readability can lead to better maintainability over time because simpler solutions are easier not just now but also years down the line.""
+[tick 6] DMN wandering action=think
+  NT[DA=0.10 NE=0.20 5HT=0.50 ACh=0.28 eCB=0.09 Glu=0.37 GABA=0.13]
+  CUR[nov=0.39 bore=0.47]
+  WS[R=0.09 θ=0.20 ignited=no 40Hz γ=0.97 in[s=0.00 m=0.59 l=0.70 s=0.45 n=0.39]]
+  BG deliberation (H=0.55 decisiveness, diff=1.37 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 4.46 "What if we use [something] like `functools.lru_cache`? But that requires importing something unnecessary for simple tasks?"
+    [        ] nll= 4.98 "What if we have some kind of function that checks whether two strings represent different entities?"
+    [        ] nll= 7.60 "Oh! It’s related to partial evaluation!"
+  HC recalled 1:
+    - [inferred] Perhaps focusing more on readability can lead to better maintainability over time because simpler solutions are easier not just now but also years down the line."
+  evolved from: "Maybe using higher-order functions could help with efficiency while keeping things readable?"
+[tick 7] DMN wandering action=think
+  NT[DA=0.13 NE=0.21 5HT=0.50 ACh=0.28 eCB=0.08 Glu=0.35 GABA=0.12]
+  CUR[nov=0.30 bore=0.53]
+  WS[R=0.16 θ=0.19 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.61 l=0.61 s=0.69 n=0.30]]
+  BG deliberation (H=0.31 decisiveness, diff=1.11 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 5.15 "Maybe using memoization could help speed up calculations without complicating things too much?"
+    [        ] nll= 7.88 "Maybe using decorators could be helpful here without needing extra imports?"
+    [        ] nll= 6.51 "Maybe using a decorator could help organize some helper functions without cluttering the main script.""
+  HC recalled 3:
+    - [inferred] "But how does one write code that's both efficient and easy for others (and oneself) to understand?"
+    - [inferred] Perhaps focusing more on readability can lead to better maintainability over time because simpler solutions are easier not just now but also years down the line."
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "What if we use [something] like `functools.lru_cache`? But that requires importing something unnecessary for simple tasks?"
+[tick 8] DMN wandering action=think
+  NT[DA=0.12 NE=0.24 5HT=0.50 ACh=0.30 eCB=0.07 Glu=0.32 GABA=0.12]
+  CUR[nov=0.31 bore=0.57]
+  WS[R=0.13 θ=0.19 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.60 l=0.68 s=0.32 n=0.31]]
+  BG deliberation (H=0.68 decisiveness, diff=0.69 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 4.54 "What if I consider writing a function with multiple return points? Like returning early based on conditions within nested functions or control structures?""
+    [        ] nll= 5.16 "What if we model a problem where each node represents data about its position at different times... Hmm..."
+    [        ] nll= 6.22 "perhaps integrating some AI concepts into programming might make systems smarter or adaptive.""
+  HC recalled 3:
+    - [inferred] Perhaps focusing more on readability can lead to better maintainability over time because simpler solutions are easier not just now but also years down the line."
+    - [inferred] "But how does one write code that's both efficient and easy for others (and oneself) to understand?"
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe using memoization could help speed up calculations without complicating things too much?"
+[tick 9] DMN wandering action=think
+  NT[DA=0.13 NE=0.24 5HT=0.50 ACh=0.28 eCB=0.07 Glu=0.30 GABA=0.11]
+  CUR[nov=0.33 bore=0.59]
+  WS[R=0.09 θ=0.19 ignited=no 44Hz γ=0.97 in[s=0.00 m=0.63 l=0.65 s=0.30 n=0.33]]
+  BG deliberation (H=0.70 decisiveness, diff=0.53 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 6.30 "Maybe using exceptions could help encapsulate certain failure cases without disrupting normal execution paths.""
+    [SELECTED] nll= 5.04 "If we have two separate streams of events being processed asynchronously by different parts of the system... How might this affect performance?"
+    [        ] nll= 5.95 "The user might be interested in exploring whether such scenarios affect performance metrics like execution speed.""
+  HC recalled 3:
+    - [inferred] Perhaps focusing more on readability can lead to better maintainability over time because simpler solutions are easier not just now but also years down the line."
+    - [inferred] "But how does one write code that's both efficient and easy for others (and oneself) to understand?"
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "What if I consider writing a function with multiple return points? Like returning early based on conditions within nested functions or control structures?""
+[tick 10] DMN wandering (reorient) action=reorient
+  NT[DA=0.13 NE=0.22 5HT=0.50 ACh=0.27 eCB=0.07 Glu=0.30 GABA=0.11]
+  CUR[nov=0.41 bore=0.18]
+  WS[R=0.09 θ=0.18 ignited=no 40Hz γ=0.98 in[s=0.00 m=0.49 l=0.59 s=0.06 n=0.41]]
+  BG deliberation (H=0.94 decisiveness, diff=0.23 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.23 "A key aspect driving high-performance computation systems relies heavily on minimizing latency between operations while maximizing throughput given finite resources like memory bandwidth or computational units..."
+    [SELECTED] nll= 5.74 "Maybe having multiple asynchronous event processors could lead some form of congestion or resource competition?"
+    [        ] nll= 5.71 "Maybe there are inherent limits or inefficiencies due to asynchronicity?"
+  HC recalled 1:
+    - [inferred] The sight of the rushing river reminded me of my youth spent near such places where life felt slower yet alive through moments captured in these gentle ripples across streams.
+  evolved from: "If we have two separate streams of events being processed asynchronously by different parts of the system... How might this affect performance?"
+[tick 11] DMN wandering action=speak
+  NT[DA=0.10 NE=0.21 5HT=0.49 ACh=0.25 eCB=0.07 Glu=0.31 GABA=0.10]
+  CUR[nov=0.38 bore=0.29]
+  WS[R=0.20 θ=0.16 ignited=yes 40Hz γ=0.99 in[s=0.00 m=0.52 l=0.66 s=0.98 n=0.38]]
+  BG deliberation (H=0.02 decisiveness, diff=1.07 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 5.06 "So if each processor has its own queue with limited size... Wait no—I need something else—because queues will become clogged as messages get stuck waiting.""
+    [        ] nll= 6.64 "If each processor has its own queue, perhaps you'd have more independent control.""
+    [        ] nll= 7.65 "So maybe each processor has its own queue?"
+  HC recalled 3:
+    - [inferred] Perhaps focusing more on readability can lead to better maintainability over time because simpler solutions are easier not just now but also years down the line."
+    - [inferred] "But how does one write code that's both efficient and easy for others (and oneself) to understand?"
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe having multiple asynchronous event processors could lead some form of congestion or resource competition?"
+[tick 12] DMN wandering action=think
+  NT[DA=0.10 NE=0.18 5HT=0.49 ACh=0.27 eCB=0.07 Glu=0.32 GABA=0.12]
+  CUR[nov=0.35 bore=0.38]
+  WS[R=0.10 θ=0.19 ignited=no 40Hz γ=0.95 in[s=0.00 m=0.62 l=0.53 s=0.05 n=0.35]]
+  BG deliberation (H=0.95 decisiveness, diff=0.64 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.10 "Maybe instead of using FIFO order which leads to starvation or blocking due to processing delays—if you model your concurrency patterns after biology’s cell signaling mechanisms—the message passing would be much smoother? ⏎ Hmm..."
+    [SELECTED] nll= 6.22 "Maybe instead of having fixed-size buffers or using single resources like channels which could block processing..."
+    [        ] nll= 4.71 "Maybe instead of using simple variables or constants like x=5 which aren't really variable they're static—if we use named values so their identity doesn’t change—but then again maybe assigning them creates problems where you have multiple instances?"
+  HC recalled 3:
+    - [inferred] Perhaps focusing more on readability can lead to better maintainability over time because simpler solutions are easier not just now but also years down the line."
+    - [inferred] "But how does one write code that's both efficient and easy for others (and oneself) to understand?"
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "So if each processor has its own queue with limited size... Wait no—I need something else—because queues will become clogged as messages get stuck waiting.""
+[tick 13] DMN wandering action=think
+  NT[DA=0.07 NE=0.18 5HT=0.49 ACh=0.25 eCB=0.07 Glu=0.32 GABA=0.11]
+  CUR[nov=0.35 bore=0.45]
+  WS[R=0.02 θ=0.18 ignited=no 40Hz γ=0.98 in[s=0.00 m=0.60 l=0.72 s=0.29 n=0.35]]
+  BG deliberation (H=0.71 decisiveness, diff=0.41 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 6.13 "Perhaps use a set to represent active requests rather than counts because sets automatically handle uniqueness without duplicates..."
+    [SELECTED] nll= 5.20 "Perhaps implementing a priority-based queuing system might solve some issues? Let me consider this..."
+    [        ] nll= 6.00 "Perhaps use dynamic allocation—if a message arrives but there's not enough buffer space left on any processors to store all pending ones..."
+  HC recalled 1:
+    - [inferred] So if each processor has its own queue with limited size... Wait no—I need something else—because queues will become clogged as messages get stuck waiting."
+  evolved from: "Maybe instead of having fixed-size buffers or using single resources like channels which could block processing..."
+[tick 14] DMN wandering action=think
+  NT[DA=0.09 NE=0.17 5HT=0.49 ACh=0.25 eCB=0.07 Glu=0.32 GABA=0.11]
+  CUR[nov=0.32 bore=0.50]
+  WS[R=0.05 θ=0.17 ignited=no 40Hz γ=0.93 in[s=0.00 m=0.60 l=0.68 s=0.92 n=0.32]]
+  BG deliberation (H=0.08 decisiveness, diff=1.34 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 4.72 "Maybe using breadth-first search could help distribute tasks evenly across multiple processors without causing too much congestion at any single point.""
+    [        ] nll= 7.80 "Maybe using event-driven architecture could be beneficial here.""
+    [        ] nll= 7.23 "Maybe using breadth-first search could help model task processing.""
+  HC recalled 3:
+    - [inferred] So if each processor has its own queue with limited size... Wait no—I need something else—because queues will become clogged as messages get stuck waiting."
+    - [inferred] Perhaps focusing more on readability can lead to better maintainability over time because simpler solutions are easier not just now but also years down the line."
+    - [inferred] "But how does one write code that's both efficient and easy for others (and oneself) to understand?"
+  evolved from: "Perhaps implementing a priority-based queuing system might solve some issues? Let me consider this..."
