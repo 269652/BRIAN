@@ -3832,3 +3832,19 @@ information bipartition, normalised by the smaller part. The probe
 reports φ per state, mean and max (with MIP), the TPM itself, and the
 contrast against `no_osc_feedback`. The maths is pinned on textbook
 cases (a cross-coupled pair integrates 2 bits; disconnected units 0).
+
+### 14.15 Neuromodulated selection and retrieval (2026-11-01)
+
+Design principle: no content rules (no bans, penalties or text
+surgery). Neuromodulators act on the *dynamics* of choice and recall,
+each through a mechanism from the literature:
+
+| Modulator | Function | Wiring |
+|---|---|---|
+| DA | goal-directed thinking | BG utility U = −NLL + `goal_weight`·(DA/DA₀)·cos(candidate, goal). The goal is the most recent observed input (the task set). `TickResult.goal_relevance` |
+| NE | urgency / threat, adaptive gain (Aston-Jones & Cohen 2005) | selection temperature ÷ (1 + `ne_gain`·max(0, NE−NE₀)/NE₀). NE is driven by novelty surprise and by the **appraisal** of a percept's action class (`appraisal`: insult 1.0, disagreement/request 0.5; the classifier is the trunk in production) |
+| ACh | retrieval mode (Hasselmo) | hippocampal recall by maximal marginal relevance, redundancy weight λ = `mmr_lambda`·ACh₀/ACh, clipped to [λ₀/2, 2λ₀]. Low ACh gives diverse, associative recall |
+| boredom | exploration | selection temperature × (1 + `curiosity_gain`·boredom) |
+
+DA no longer raises the selection temperature. Its former exploration
+role now belongs to boredom alone, so DA means goal pursuit.

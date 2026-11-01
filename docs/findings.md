@@ -4505,3 +4505,16 @@ forced close.
 Consequence for earlier fixes: H67(d) (scaffold/narration leakage)
 becomes descriptive, since there is no longer a rule to test.
 Leakage, if any, is now an emergent behaviour to report.
+
+### Development: neuromodulated selection and retrieval (2026-11-01, not yet measured)
+
+Per the maintainer: NE should boost selection under urgency or threat,
+hippocampal retrieval should be diverse, and DA should steer
+goal-directed thinking, all wired through mechanisms rather than rules
+(architecture.md §14.15). Implemented and unit-pinned; **no live
+measurement yet**. The next step is the smoke run. H-predictions
+(e.g. DA-gain vs goal relevance, appraisal → NE → reply decisiveness,
+ACh vs recall diversity) are registered only after the smoke run shows
+the mechanisms engage.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestNEGain, TestThreatAppraisalDrivesNE, TestDASteersTowardTheGoal, TestDiverseHippocampalRecall]

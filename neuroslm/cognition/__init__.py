@@ -13,9 +13,9 @@ from neuroslm.cognition.runtime import (  # noqa: F401
     ThoughtScore,
     TickResult,
     build_hf_seams,
-    curious_selection_temperature,
     format_debug_trace,
     format_introspection,
+    recall_diversity,
     selection_temperature,
 )
 from neuroslm.cognition.patterns import (  # noqa: F401

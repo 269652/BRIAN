@@ -149,11 +149,28 @@ class MindConfig:
     prompt — the persistent context the trunk thinks within."""
 
     selection_temp_base: float = 0.3
-    """Selection softmax temperature at baseline DA (near-greedy)."""
+    """Selection softmax temperature at baseline NE, zero boredom."""
 
-    da_temp_gain: float = 2.0
-    """How strongly DA above its baseline raises selection temperature
-    (dopaminergic exploration)."""
+    ne_gain: float = 2.0
+    """Adaptive gain (Aston-Jones & Cohen 2005): selection temperature
+    is divided by 1 + ne_gain·max(0, NE−NE₀)/NE₀ — urgency makes the
+    choice decisive."""
+
+    goal_weight: float = 2.0
+    """DA-weighted goal pull in the BG utility, nats per unit cosine at
+    baseline DA: U = −NLL + goal_weight·(DA/DA₀)·cos(candidate, goal).
+    The goal is the most recent observed input (the task set)."""
+
+    appraisal: Dict[str, float] = field(default_factory=lambda: {
+        "insult": 1.0, "disagreement": 0.5, "request": 0.5})
+    """Amygdala→LC: arousal of a percept by its action class (the
+    mind's own classifier — an LM in production). Feeds NE's driver;
+    never touches text."""
+
+    mmr_lambda: float = 0.3
+    """Hippocampal retrieval diversity at baseline ACh: recall picks
+    episodes by maximal marginal relevance, relevance − λ·redundancy
+    with episodes already recalled. See :func:`recall_diversity`."""
 
     gaba_silence_threshold: float = 0.55
     """GABA level at/above which the tick is inhibited outright."""
@@ -394,6 +411,9 @@ class TickResult:
     memory, language, selection, novelty)."""
     gamma_power: Optional[float] = None
     """Fraction of the population signal's power in 30-100 Hz."""
+    goal_relevance: float = 0.0
+    """Cosine of the selected thought to the current goal (most recent
+    observed input); 0 when there is no goal yet."""
     reasoning: Optional[str] = None
     """Reasoning experts only: the think trace that produced the
     SELECTED thought — the model's own visible deliberation, kept as
@@ -523,6 +543,25 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
     return sum(x * y for x, y in zip(a, b)) / (na * nb)
 
 
+def _mmr(pool: List[Tuple[float, dict]], k: int,
+         lam: float) -> List[dict]:
+    """Greedy maximal-marginal-relevance pick of ``k`` episodes from
+    (relevance, episode) pairs: relevance − λ·max cos to those chosen."""
+    chosen: List[dict] = []
+    left = list(pool)
+    while left and len(chosen) < k:
+        def mmr(t):
+            v = t[1].get("content_vec")
+            red = max((_cosine(v, c["content_vec"]) for c in chosen
+                       if v is not None and c.get("content_vec") is not None),
+                      default=0.0)
+            return t[0] - lam * red
+        best = max(left, key=mmr)
+        chosen.append(best[1])
+        left.remove(best)
+    return chosen
+
+
 def _population_stdev(values: List[float]) -> float:
     """IIT-flavored differentiation proxy: population stdev of the
     candidate repertoire's NLLs. 0 for <2 values (nothing to
@@ -534,28 +573,25 @@ def _population_stdev(values: List[float]) -> float:
     return var ** 0.5
 
 
-def selection_temperature(da_level: float, da_baseline: float,
-                          cfg: MindConfig) -> float:
-    """Basal-ganglia exploration knob: T = T₀ · (1 + g·max(0, DA−DA₀)).
+def selection_temperature(ne_level: float, ne_baseline: float,
+                          boredom: float, cfg: MindConfig) -> float:
+    """BG softmax temperature: T₀ · (1 + curiosity_gain·boredom)
+    / (1 + ne_gain·max(0, NE−NE₀)/NE₀). Boredom heats selection
+    (exploration); NE above baseline cools it (adaptive gain: urgency
+    → decisive choice)."""
+    heat = 1.0 + cfg.curiosity_gain * max(0.0, min(1.0, boredom))
+    excess = max(0.0, float(ne_level) - float(ne_baseline))
+    gain = 1.0 + cfg.ne_gain * excess / max(float(ne_baseline), 1e-6)
+    return cfg.selection_temp_base * heat / gain
 
-    At baseline DA the selection softmax runs at ``selection_temp_base``
-    (near-greedy on trunk NLL); DA above baseline raises T monotonically
-    — dopamine trades exploitation for exploration.
-    """
-    excess = max(0.0, float(da_level) - float(da_baseline))
-    return cfg.selection_temp_base * (1.0 + cfg.da_temp_gain * excess)
 
-
-def curious_selection_temperature(da_level: float, da_baseline: float,
-                                  boredom: float, cfg: MindConfig) -> float:
-    """Boredom-augmented exploration temperature: the DA-modulated
-    temperature (:func:`selection_temperature`) further scaled by
-    ``1 + curiosity_gain·boredom``. Bored → hotter → more exploratory
-    selection; engaged (boredom≈0) → identical to the DA path alone.
-    This is the curiosity homeostat's actuator — the SAME knob DA
-    already turns, now also driven by declining semantic novelty."""
-    T = selection_temperature(da_level, da_baseline, cfg)
-    return T * (1.0 + cfg.curiosity_gain * max(0.0, min(1.0, boredom)))
+def recall_diversity(ach_level: float, ach_baseline: float,
+                     cfg: MindConfig) -> float:
+    """MMR redundancy weight λ, set by ACh (Hasselmo): λ₀·ACh₀/ACh,
+    clipped to [λ₀/2, 2λ₀] — low ACh = diverse associative recall,
+    high ACh = focused recall."""
+    ratio = float(ach_baseline) / max(float(ach_level), 1e-6)
+    return cfg.mmr_lambda * max(0.5, min(2.0, ratio))
 
 
 def loop_threshold(baseline: Optional[float], cfg: "MindConfig") -> float:
@@ -658,6 +694,7 @@ class CognitiveRuntime:
         # own slow novelty baseline for relative control thresholds.
         self._wm: Deque[List[float]] = deque(maxlen=max(1, self.cfg.wm_size))
         self._nov_base: Optional[float] = None
+        self._goal_vec: Optional[List[float]] = None
         self._osc = None
         if self.cfg.workspace_oscillator:
             from neuroslm.cognition.oscillator import GammaWorkspace
@@ -720,7 +757,11 @@ class CognitiveRuntime:
                             context={"kind": "observed", "source": source,
                                     "action_class": action_class})
         self._sensory.append(text)
-        self.nt.step_full(activation=1.0)
+        # The task set: the latest observed input is the current goal.
+        self._goal_vec = list(self._embed(text))
+        self.nt.step_full(
+            activation=1.0,
+            grad_norm=float(self.cfg.appraisal.get(action_class, 0.0)))
 
     # ── The cognitive cycle ──────────────────────────────────────────
 
@@ -843,8 +884,13 @@ class CognitiveRuntime:
             fresh = [e for _, e in adjusted
                      if not wandering
                      or e.get("content") not in self._recent_recall]
-            recalled = fresh[: self.cfg.recall_k] if fresh else [
-                e for _, e in adjusted[: self.cfg.recall_k]]
+            pool = ([t for t in adjusted if t[1] in fresh] if fresh
+                    else adjusted)
+            base = self.nt.baselines
+            base = base() if callable(base) else base
+            lam = recall_diversity(levels.get("ACh", 0.30),
+                                   base.get("ACh", 0.30), self.cfg)
+            recalled = _mmr(pool, self.cfg.recall_k, lam)
             for e in recalled:
                 self._recent_recall.append(e.get("content"))
             sims = {id(e): sim for sim, e in scored}
@@ -883,7 +929,10 @@ class CognitiveRuntime:
         # inner-speech prior (D2) penalizing second-person address in
         # WANDERING candidates only.
         scores = [self._score(c) for c in candidates]
-        idx, selection_entropy = self._select(scores, levels)
+        cand_vecs = [list(self._embed(c)) for c in candidates]
+        goal_rel = [(_cosine(v, self._goal_vec) if self._goal_vec else 0.0)
+                    for v in cand_vecs]
+        idx, selection_entropy = self._select(scores, levels, goal_rel)
         thought, sc = candidates[idx], scores[idx]
         differentiation = _population_stdev([s.mean_nll for s in scores])
 
@@ -892,7 +941,7 @@ class CognitiveRuntime:
         # Computed BEFORE storing (a thought can't be compared against
         # itself). One signal, three consumers: the write gate below,
         # the NT activation driver, and the boredom trace.
-        thought_vec = list(self._embed(thought))
+        thought_vec = cand_vecs[idx]
         top = self.memory.retrieve_scored(thought_vec, k=1)
         best = top[0][0] if top else None
         if self.cfg.wm_size > 0:
@@ -1007,6 +1056,7 @@ class CognitiveRuntime:
                           tick_n=tick_n, prior_thought=prior_thought,
                           wandering=wandering, action=action,
                           selection_entropy=selection_entropy,
+                          goal_relevance=goal_rel[idx],
                           differentiation=differentiation,
                           novelty=novelty, boredom=self._boredom,
                           replay=replay, reorient=reorient,
@@ -1089,17 +1139,19 @@ class CognitiveRuntime:
         return p
 
     def _select(self, scores: List[ThoughtScore],
-                levels: Dict[str, float]) -> Tuple[int, float]:
+                levels: Dict[str, float],
+                goal_rel: Optional[List[float]] = None
+                ) -> Tuple[int, float]:
         """Basal-ganglia selection. Returns ``(chosen_index,
         selection_entropy)`` — the latter an IIT-flavored decisiveness
         proxy: normalised entropy of the softmax(utility/T) choice
         distribution (0 = one option clearly excluded the rest, 1 =
         arbitrary among near-equal options).
 
-        Utility per candidate = −NLL: the trunk's own likelihood, with
-        no content rules (2026-11-01 design principle — no output-
-        shaping priors). Temperature = :func:`curious_selection_temperature`
-        — the DA path scaled up by boredom (B of the loop).
+        Utility = −NLL + goal_weight·(DA/DA₀)·cos(candidate, goal):
+        the trunk's own likelihood plus dopamine-weighted pull toward
+        the current goal. Temperature = :func:`selection_temperature`
+        (boredom heats, NE cools). No content rules (2026-11-01).
         """
         if len(scores) == 1:
             return 0, 0.0
@@ -1109,11 +1161,14 @@ class CognitiveRuntime:
         baselines = self.nt.baselines
         if callable(baselines):
             baselines = baselines()
-        T = curious_selection_temperature(
-            levels.get("DA", 0.0), baselines.get("DA", 0.15),
+        T = selection_temperature(
+            levels.get("NE", 0.20), baselines.get("NE", 0.20),
             self._boredom, self.cfg)
-        # softmax(−NLL / T), computed stably.
-        utils = [-s.mean_nll / max(T, 1e-6) for s in scores]
+        da_gain = (max(0.0, levels.get("DA", 0.0))
+                   / max(baselines.get("DA", 0.15), 1e-6))
+        rel = goal_rel or [0.0] * len(scores)
+        utils = [(-s.mean_nll + self.cfg.goal_weight * da_gain * g)
+                 / max(T, 1e-6) for s, g in zip(scores, rel)]
         m = max(utils)
         exps = [math.exp(u - m) for u in utils]
         z = sum(exps)

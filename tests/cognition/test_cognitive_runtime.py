@@ -173,7 +173,7 @@ class TestEpisodicRecall:
         assert any("river" in c for c in contents)
 
 
-# ── Layer-A contract B: DA gates exploration in selection ────────────
+# ── Layer-A contract B: selection is greedy at baseline ──────────────
 
 class TestNTGatedSelection:
     CANDS = ["good thought", "worse thought"]
@@ -191,29 +191,6 @@ class TestNTGatedSelection:
         assert picks == {"good thought"}, (
             "at baseline DA and near-zero temperature, selection is "
             "greedy on trunk NLL")
-
-    def test_high_da_explores(self):
-        from neuroslm.cognition.runtime import MindConfig
-        gen = _ScriptedGen(self.CANDS)
-        cfg = MindConfig(n_candidates=2, selection_temp_base=0.01,
-                         da_temp_gain=400.0)
-        rt = _mk_runtime(gen, scores=self._scores(),
-                         nt=_FakeNT(DA=0.95), cfg=cfg, seed=1)
-        picks = [rt.tick().thought for _ in range(24)]
-        assert "worse thought" in picks, (
-            "high DA must raise selection temperature enough that "
-            "non-greedy thoughts occur — dopaminergic exploration")
-
-    def test_selection_temperature_monotone_in_da(self):
-        from neuroslm.cognition.runtime import selection_temperature, MindConfig
-        cfg = MindConfig()
-        base = {"DA": 0.15}
-        t_lo = selection_temperature(0.15, 0.15, cfg)
-        t_mid = selection_temperature(0.5, 0.15, cfg)
-        t_hi = selection_temperature(0.95, 0.15, cfg)
-        assert t_lo <= t_mid <= t_hi
-        assert t_lo == pytest.approx(cfg.selection_temp_base)
-
 
 # ── Layer-A contract C: GABA inhibition = silence ────────────────────
 
@@ -699,17 +676,6 @@ class TestBoredomCuriosityLoop:
         for _ in range(4):
             last = rt.tick()
         assert last.boredom > first.boredom
-
-    def test_curious_temperature_monotone_in_boredom(self):
-        from neuroslm.cognition.runtime import (
-            MindConfig, curious_selection_temperature,
-        )
-        cfg = MindConfig()
-        t0 = curious_selection_temperature(0.15, 0.15, 0.0, cfg)
-        t_mid = curious_selection_temperature(0.15, 0.15, 0.5, cfg)
-        t_hi = curious_selection_temperature(0.15, 0.15, 1.0, cfg)
-        assert t0 < t_mid < t_hi
-        assert t0 == pytest.approx(cfg.selection_temp_base)
 
     def test_novelty_drives_the_nt_activation_channel(self):
         from neuroslm.cognition.runtime import MindConfig
@@ -2395,3 +2361,129 @@ class TestNoOutputShapingRules:
             assert not hasattr(rtm, name), name
         for field in ("second_person_penalty", "self_narration_penalty"):
             assert not hasattr(MindConfig(), field), field
+
+
+# ── Neuromodulated selection and retrieval (maintainer, 2026-11-01) ──
+# "NE should boost selection on urgency/threat, hippocampal selection
+#  should support diverse retrieval, DA should steer goal-directed
+#  thinking — wired naturally." No content rules: every term acts on
+#  the dynamics (utility, temperature, retrieval), never on text.
+
+class TestNEGain:
+    """Adaptive gain (Aston-Jones & Cohen 2005): NE above baseline
+    divides the selection temperature — urgency makes choice decisive."""
+
+    def test_temperature_falls_with_ne_and_rises_with_boredom(self):
+        from neuroslm.cognition.runtime import MindConfig, selection_temperature
+        c = MindConfig()
+        t0 = selection_temperature(0.20, 0.20, 0.0, c)
+        assert t0 == pytest.approx(c.selection_temp_base)
+        assert selection_temperature(0.60, 0.20, 0.0, c) < t0
+        assert selection_temperature(0.20, 0.20, 0.5, c) > t0
+        assert selection_temperature(0.10, 0.20, 0.0, c) == pytest.approx(t0), (
+            "NE below baseline does not heat selection")
+
+    def test_high_ne_makes_the_choice_more_decisive(self):
+        from neuroslm.cognition.runtime import MindConfig
+        cands = ["good thought", "worse thought"]
+        scores = _score_map({"good thought": 3.0, "worse thought": 3.4})
+        cfg = MindConfig(n_candidates=2, selection_temp_base=1.0)
+        calm = _mk_runtime(_ScriptedGen(cands), scores=scores,
+                           nt=_FakeNT(NE=0.20), cfg=cfg).tick()
+        urgent = _mk_runtime(_ScriptedGen(cands), scores=scores,
+                             nt=_FakeNT(NE=0.80), cfg=cfg).tick()
+        assert urgent.selection_entropy < calm.selection_entropy
+
+
+class TestThreatAppraisalDrivesNE:
+    """Amygdala→LC: the percept's appraisal (the mind's OWN classifier,
+    an LM in production) drives NE through the existing driver."""
+
+    def test_aversive_percept_drives_ne(self):
+        nt = _FakeNT()
+        rt = _mk_runtime(_ScriptedGen(["ok"]), nt=nt)
+        rt.observe("you suck, shut up")
+        assert nt.step_calls[-1]["grad_norm"] == pytest.approx(
+            rt.cfg.appraisal["insult"])
+
+    def test_neutral_percept_does_not(self):
+        nt = _FakeNT()
+        rt = _mk_runtime(_ScriptedGen(["ok"]), nt=nt)
+        rt.observe("the river was calm this afternoon")
+        assert nt.step_calls[-1]["grad_norm"] == pytest.approx(0.0)
+
+
+class TestDASteersTowardTheGoal:
+    """DA weights each candidate's relevance to the current goal (the
+    most recent observed input, the task set) in the BG utility:
+    U = −NLL + goal_weight · (DA/DA₀) · cos(candidate, goal)."""
+
+    CANDS = ["thinking about the launch", "thinking about coffee"]
+
+    def _tick(self, da):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(
+            _ScriptedGen(self.CANDS),
+            scores=_score_map({self.CANDS[0]: 3.5, self.CANDS[1]: 3.0}),
+            nt=_FakeNT(DA=da),
+            cfg=MindConfig(n_candidates=2, selection_temp_base=0.01))
+        rt.observe("the launch code is ready")
+        return rt.tick()
+
+    def test_dopamine_pulls_thought_onto_the_goal(self):
+        r = self._tick(da=0.45)
+        assert r.thought == "thinking about the launch"
+        # goal "the launch code is ready" spans launch+code axes in the
+        # fake embedding: cos ≈ 0.74 for the launch thought, ≈ 0.1 for
+        # coffee
+        assert r.goal_relevance > 0.5
+
+    def test_without_dopamine_likelihood_decides(self):
+        assert self._tick(da=0.0).thought == "thinking about coffee"
+
+    def test_no_goal_no_goal_term(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(
+            _ScriptedGen(self.CANDS),
+            scores=_score_map({self.CANDS[0]: 3.5, self.CANDS[1]: 3.0}),
+            nt=_FakeNT(DA=0.45),
+            cfg=MindConfig(n_candidates=2, selection_temp_base=0.01))
+        r = rt.tick()
+        assert r.thought == "thinking about coffee"
+        assert r.goal_relevance == 0.0
+
+
+class TestDiverseHippocampalRecall:
+    """Retrieval by maximal marginal relevance: relevant AND mutually
+    distinct episodes. ACh sets the mode (Hasselmo): high ACh = focused
+    recall, low ACh = diverse, associative recall."""
+
+    def _rt(self, cfg, nt=None):
+        rt = _mk_runtime(_ScriptedGen(["thinking about the launch"]),
+                         cfg=cfg, nt=nt)
+        for text in ("the launch code is ready", "the launch code is ready!",
+                     "launch day under the moon"):
+            rt.memory.add(text, content_vec=_vec_for(text),
+                          context={"kind": "observed"})
+        rt._last_thought = "launch launch"
+        return rt
+
+    def test_recall_includes_a_distinct_episode(self):
+        from neuroslm.cognition.runtime import MindConfig
+        r = self._rt(MindConfig(n_candidates=1, recall_k=2)).tick()
+        contents = [e["content"] for e in r.recalled]
+        assert "launch day under the moon" in contents
+
+    def test_without_diversity_duplicates_win(self):
+        from neuroslm.cognition.runtime import MindConfig
+        r = self._rt(MindConfig(n_candidates=1, recall_k=2,
+                                mmr_lambda=0.0)).tick()
+        contents = [e["content"] for e in r.recalled]
+        assert "launch day under the moon" not in contents
+
+    def test_ach_sets_the_retrieval_mode(self):
+        from neuroslm.cognition.runtime import MindConfig, recall_diversity
+        c = MindConfig()
+        assert recall_diversity(0.15, 0.30, c) > recall_diversity(0.30, 0.30, c)
+        assert recall_diversity(0.60, 0.30, c) < recall_diversity(0.30, 0.30, c)
+        assert recall_diversity(0.30, 0.30, c) == pytest.approx(c.mmr_lambda)
