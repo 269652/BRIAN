@@ -50,6 +50,20 @@ visible <think> trace and is the default for every mind entry point
 ``deepseek_r1_qwen_1_5b`` on CPU."""
 
 
+_SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*(?=\s|$)")
+
+
+def trim_to_sentence(text: str) -> str:
+    """Cut a generation that stopped mid-sentence back to its last
+    complete sentence. Text that ends a sentence, or has no sentence
+    boundary at all, is returned unchanged; '3.14' is not a boundary."""
+    t = (text or "").strip()
+    ends = list(_SENTENCE_END.finditer(t))
+    if not ends or ends[-1].end() == len(t):
+        return t
+    return t[:ends[-1].end()]
+
+
 def _hf_load_kwargs(device: str) -> dict:
     """GPU: load in the checkpoint's dtype (bf16 for R1) — transformers
     4.x otherwise defaults to fp32. CPU: fp32 (bf16 matmuls are slow)."""
@@ -133,7 +147,7 @@ class MindConfig:
     n_candidates: int = 3
     """Candidate thoughts generated per tick (basal-ganglia menu size)."""
 
-    thought_n_tok: int = 96
+    thought_n_tok: int = 192
     """Token budget per candidate. 2026-08-12: raised from 32 — live
     thoughts on a verbose instruct model consistently ran out of
     budget mid-sentence ("...complement human"), which read as a
@@ -230,8 +244,10 @@ class MindConfig:
     ~no autobiographical content and is not stored. Salient classes
     (insult, question, …) are stored regardless of length."""
 
-    max_prompt_chars: int = 1200
-    """Hard cap on the composed thinking prompt (CPU latency guard)."""
+    max_prompt_chars: int = 4000
+    """Hard cap on the composed thinking prompt, truncated from the
+    LEFT. 2026-11-01: raised from 1200 — with R1's long thoughts the
+    persona and recalled memories at the top fell off the prompt."""
 
     nt_driver_alpha: float = 0.1
     """EMA rate of the default DrivenNTSystem's driver z-scoring. Its
@@ -253,8 +269,15 @@ class MindConfig:
     """Coupling as a multiple of the Kuramoto critical coupling."""
 
     osc_ignition_threshold: float = 0.25
-    """Global order parameter R (over all oscillators) that counts as
-    ignition. See oscillator.py for how the operating point was set."""
+    """Fixed mode: the R that counts as ignition. Adaptive mode: the
+    seed of the running baseline μ_R. See oscillator.py."""
+
+    osc_ignition_mode: str = "adaptive"
+    """'adaptive' (H66): ignite when R exceeds its own recent baseline
+    by osc_adapt_k sd; 'fixed': R ≥ osc_ignition_threshold (H65)."""
+
+    osc_ignition_floor: float = 0.1
+    osc_adapt_k: float = 1.0
 
     osc_n_per_module: int = 8
     osc_f0_hz: float = 40.0
@@ -338,6 +361,7 @@ class TickResult:
     sync_r: Optional[float] = None
     """Global Kuramoto order parameter R over the ignition window."""
     gamma_peak_hz: Optional[float] = None
+    ignition_threshold: Optional[float] = None
     workspace_inputs: Optional[Dict[str, float]] = None
     """Module activations fed to the workspace this tick (sensory,
     memory, language, selection, novelty)."""
@@ -423,7 +447,7 @@ def format_debug_trace(result: TickResult) -> str:
                        ("sensory", "memory", "language", "selection",
                         "novelty"))
         lines.append(
-            f"  WS[R={result.sync_r:.2f} "
+            f"  WS[R={result.sync_r:.2f} θ={result.ignition_threshold:.2f} "
             f"ignited={'yes' if result.ignited else 'no'} "
             f"{result.gamma_peak_hz:.0f}Hz γ={result.gamma_power:.2f} "
             f"in[{ins}]]")
@@ -585,6 +609,10 @@ class CognitiveRuntime:
         # LOOPING streak: consecutive ticks with novelty below
         # cfg.loop_novelty_threshold.
         self._low_nov_streak: int = 0
+        # NE's novelty expectation, seeded with the first observation
+        # (boredom starts at 0 by design, which made it a biased
+        # expectation for ~10 ticks — run 58676023).
+        self._nov_expect: Optional[float] = None
         self._osc = None
         if self.cfg.workspace_oscillator:
             from neuroslm.cognition.oscillator import GammaWorkspace
@@ -596,6 +624,8 @@ class CognitiveRuntime:
                 noise=c.osc_noise, ms_per_tick=c.osc_ms_per_tick,
                 ignition_threshold=c.osc_ignition_threshold,
                 nt_feedback=c.osc_nt_feedback,
+                ignition_mode=c.osc_ignition_mode,
+                ignition_floor=c.osc_ignition_floor, adapt_k=c.osc_adapt_k,
                 ach0=base.get("ACh", 0.30), gaba0=base.get("GABA", 0.15),
                 seed=c.osc_seed)
 
@@ -784,7 +814,8 @@ class CognitiveRuntime:
         candidates: List[str] = []
         reasonings: List[Optional[str]] = []
         for _ in range(max(1, self.cfg.n_candidates)):
-            out = (gen(prompt, self.cfg.thought_n_tok) or "").strip()
+            out = trim_to_sentence(gen(prompt, self.cfg.thought_n_tok)
+                                   or "")
             if out:
                 candidates.append(out)
                 reasonings.append(self._reasoning() if self._reasoning
@@ -887,8 +918,13 @@ class CognitiveRuntime:
         # ignition (or broadcast, without the oscillator); ACh ← BG
         # decisiveness. Before this, NE/ACh/GABA never moved.
         ignition = float(osc.ignited) if osc is not None else float(stored)
+        ne_drive = (0.0 if self._nov_expect is None
+                    else abs(novelty - self._nov_expect))
+        a_n = self.cfg.novelty_ema_alpha
+        self._nov_expect = (novelty if self._nov_expect is None else
+                            (1 - a_n) * self._nov_expect + a_n * novelty)
         self.nt.step_full(loss=sc.mean_nll, activation=novelty,
-                          grad_norm=abs(novelty - (1.0 - self._boredom)),
+                          grad_norm=ne_drive,
                           ignition_rate=ignition,
                           attn_entropy_norm=selection_entropy)
         a = self.cfg.novelty_ema_alpha
@@ -924,7 +960,8 @@ class CognitiveRuntime:
                           sync_r=osc.sync_r if osc else None,
                           gamma_peak_hz=osc.peak_hz if osc else None,
                           gamma_power=osc.gamma_power if osc else None,
-                          workspace_inputs=ws_inputs)
+                          workspace_inputs=ws_inputs,
+                          ignition_threshold=osc.threshold if osc else None)
 
     # ── Internals ────────────────────────────────────────────────────
 

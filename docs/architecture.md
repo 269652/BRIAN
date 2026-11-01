@@ -3798,3 +3798,13 @@ threshold means the same thing across trunks). The runtime's NT
 z-scores its drivers at `MindConfig.nt_driver_alpha = 0.1`, the tick
 timescale rather than the training timescale. The debug trace shows
 `CUR[nov bore]` and the workspace's module inputs `WS[… in[s m l b n]]`.
+
+**H66 adaptive ignition (default).** Ignition fires when R exceeds the
+workspace's own recent baseline, θ_t = max(0.1, μ_R + 1·σ_R) (EWMA
+α = 0.2, seeded at the old fixed bar 0.25). Run 58676023 showed the
+fixed bar, set from guessed activations, never crossed on R1-7B's idle
+ticks. `osc_ignition_mode="fixed"` keeps H65's behaviour and is the
+`fixed_threshold` arm. The trace shows `WS[R=… θ=…]`. NE's driver uses
+its own novelty expectation, seeded with the first observation.
+Thoughts get 192 tokens and are trimmed to the last complete sentence;
+the prompt budget is 4000 chars.

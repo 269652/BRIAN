@@ -564,7 +564,8 @@ class TestOscillationMetrics:
     def test_oscillator_ablations_run_when_the_workspace_is_on(self):
         res = self._run(MindConfig(n_candidates=2))
         assert {"full", "no_control", "no_osc_feedback",
-                "no_oscillator", "bare"} <= set(res["conditions"])
+                "no_oscillator", "fixed_threshold",
+                "bare"} <= set(res["conditions"])
 
     def test_no_oscillator_ablations_when_it_is_off(self):
         res = self._run(MindConfig(n_candidates=2,

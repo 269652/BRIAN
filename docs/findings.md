@@ -4182,3 +4182,56 @@ The anisotropy explanation is confirmed only if the next run's
 `CUR[nov=…]` values spread across 0–1 and `speak` ticks appear.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestEmbeddingsAreMeanCentred, TestNTStandardisesOnTheRuntimeTimescale, TestTraceExplainsTheGates, TestGenerateHasAnAttentionMask]
+
+### H66 — Adaptive ignition: the workspace ignites on departures from its own baseline (pre-registered, 2026-11-01)
+
+**Status:** ⏳ Fixture-verified; live run pending.
+
+**Motivation (run 58676023, first 8 idle ticks, R1-7B, anecdotal).**
+Centring the embeddings (previous entry) worked: novelty now spreads
+0.25–0.45 and passes the 0.3 gate on 6 of 8 ticks. But the fixed
+ignition bar (R ≥ 0.25) was never crossed (R 0.05–0.23), so still
+nothing was stored. That bar came from a *guessed* "novel idle"
+activation pattern (novelty 0.7); R1's idle novelty sits near 0.35,
+and sensory = 0 on every idle tick. Under H65(b) the fixed workspace is
+heading for falsification as a content-dependent gate during
+wandering. That run is left to finish as H65's test.
+
+**Mechanism.** `osc_ignition_mode="adaptive"` (new default): ignite
+when R > θ_t = max(0.1, μ_R + 1·σ_R), where μ_R and σ_R are an EWMA
+(α = 0.2) of the system's *own* recent R, updated after each decision
+and seeded at (0.25, 0.05). The floor 0.1 sits above the incoherent
+finite-size level for N = 40. The k, α and floor values were set a
+priori and were not fitted to any data.
+
+**Arms** (`loop_escape`): full (adaptive), `fixed_threshold` (H65's
+bar), `no_osc_feedback`, `no_oscillator`.
+
+| # | Prediction | Falsified if |
+|---|---|---|
+| a | full idle ignition rate in [0.10, 0.50] | outside |
+| b | full stores/speaks: ≥ 10% of idle ticks `speak`, memory grows (more distinct recalled episodes than `fixed_threshold`) | `speak` < 10% |
+| c | H65(c) retested: ignition lag-1 autocorrelation full < no_osc_feedback by ≥ 0.1 | full lag-1 ≥ no_osc_feedback lag-1 |
+| d | habituation: within a run, ignition rate in the first half > second half under steady wandering | second half ≥ first half |
+
+A self-normalising threshold makes (a) partly a property of k by
+construction. (b), (c) and (d) carry the evidential weight.
+
+**Bundled in the same commit, recorded as a stack per CLAUDE.md §10:**
+(1) NE's input now uses its own novelty expectation, seeded with the
+first observation. Previously it used 1 − boredom, which is biased for
+~10 ticks after boredom starts at 0 (run 58676023: NE 0.20 → 0.16).
+(2) Thought budget 96 → 192 tokens, prompt budget 1200 → 4000 chars,
+and candidates trimmed to their last complete sentence (R1's thoughts
+were cut mid-sentence, and the left-truncated prompt could drop the
+persona and recall). Follow-up backlog: single-mechanism ablation of
+(2) on loop_escape novelty.
+
+**H62 deviation:** the bare-LM baseline shares `max_prompt_chars`, so
+its window grew 1200 → 4000. With ~192-token replies, 6 distractor
+turns (~5k chars) still push the fact out, so H62's recall prediction
+stands. The next run checks this; if bare recall rises, the
+distractor count must be raised before H62 is scored.
+
+[EVIDENCE: tests/cognition/test_workspace_oscillator.py::TestAdaptiveIgnition]
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestNoveltyExpectationForNE, TestAdaptiveWorkspaceDefaults, TestThoughtsAreNotCutOff]

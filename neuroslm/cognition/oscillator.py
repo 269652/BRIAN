@@ -16,7 +16,17 @@ tick. The global order parameter
 
 is high only when many oscillators are both active AND phase-locked;
 one perfectly locked module of five caps R at 0.2. **Ignition** =
-mean R over the last ``window_ms`` ≥ ``ignition_threshold``.
+mean R over the last ``window_ms`` crossing a threshold:
+
+    fixed     R ≥ ignition_threshold
+    adaptive  R > θ_t = max(floor, μ_R + k·σ_R)   (default, H66)
+
+where μ_R, σ_R are an exponentially weighted mean/sd of the system's
+OWN recent R, updated after each decision and seeded at
+(ignition_threshold, 0.05). Ignition is a departure from ongoing
+activity, not an absolute level — run 58676023 showed the fixed bar
+(set from guessed activations) never crossed on R1-7B's idle ticks.
+The floor sits above the incoherent finite-size level (≈ ā/√N).
 
 Neuromodulation (``nt_feedback``):
     s_ACh  = max(0, 1 + ach_gain·(ACh − ACh₀)/ACh₀)   coupling gain
@@ -56,6 +66,8 @@ class OscillatorStep:
     ignited: bool
     peak_hz: float
     """Peak frequency of the population signal Σ a_j cos θ_j / N."""
+    threshold: float
+    """The ignition threshold applied this tick."""
     gamma_power: float
     """Fraction of (non-DC) spectral power in 30-100 Hz."""
 
@@ -68,7 +80,17 @@ class GammaWorkspace:
                  window_ms: int = 50, ach_gain: float = 1.0,
                  gaba_gain: float = 1.0, nt_feedback: bool = True,
                  ach0: float = 0.30, gaba0: float = 0.15,
-                 seed: int = 0) -> None:
+                 ignition_mode: str = "adaptive",
+                 ignition_floor: float = 0.1, adapt_k: float = 1.0,
+                 adapt_alpha: float = 0.2, seed: int = 0) -> None:
+        if ignition_mode not in ("fixed", "adaptive"):
+            raise ValueError(f"ignition_mode {ignition_mode!r}: "
+                             f"expected 'fixed' or 'adaptive'")
+        self.ignition_mode = ignition_mode
+        self.ignition_floor = float(ignition_floor)
+        self.adapt_k, self.adapt_alpha = float(adapt_k), float(adapt_alpha)
+        self._r_mu = float(ignition_threshold)
+        self._r_var = 0.05 ** 2
         self.n_per_module = int(n_per_module)
         self.N = self.n_per_module * len(MODULES)
         self.dt = float(dt_ms) / 1000.0
@@ -119,9 +141,20 @@ class GammaWorkspace:
 
         sync_r = float(np.mean(R[-self.window:]))
         peak_hz, gamma_power = self._spectrum(x)
-        return OscillatorStep(sync_r=sync_r,
-                              ignited=bool(sync_r >= self.ignition_threshold),
-                              peak_hz=peak_hz, gamma_power=gamma_power)
+        if self.ignition_mode == "fixed":
+            thr = self.ignition_threshold
+            ignited = sync_r >= thr
+        else:
+            thr = max(self.ignition_floor,
+                      self._r_mu + self.adapt_k * math.sqrt(self._r_var))
+            ignited = sync_r > thr
+            d = sync_r - self._r_mu
+            self._r_mu += self.adapt_alpha * d
+            self._r_var = (1 - self.adapt_alpha) * (
+                self._r_var + self.adapt_alpha * d * d)
+        return OscillatorStep(sync_r=sync_r, ignited=bool(ignited),
+                              peak_hz=peak_hz, gamma_power=gamma_power,
+                              threshold=float(thr))
 
     def _spectrum(self, x: np.ndarray):
         x = x - x.mean()

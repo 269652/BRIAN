@@ -102,15 +102,22 @@ def _score_map(mapping, default_nll=5.0):
     return _score
 
 
-def _mk_runtime(gen, scores=None, nt=None, cfg=None, seed=0):
+def _mk_runtime(gen, scores=None, nt=None, cfg=None, seed=0, osc=False):
+    """Mechanism tests isolate their mechanism: the §14.13 workspace
+    (which gates storage on ignition) is OFF unless a test opts in
+    with ``osc=True``. Ignition gating has its own contracts."""
+    import dataclasses
     from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+    cfg = cfg or MindConfig(n_candidates=2)
+    if not osc:
+        cfg = dataclasses.replace(cfg, workspace_oscillator=False)
     return CognitiveRuntime(
         generate_fn=gen,
         score_fn=scores or _score_map({}),
         embed_fn=_vec_for,
         nt=nt if nt is not None else _FakeNT(),
         memory=EpisodicMemory(maxlen=64),
-        cfg=cfg or MindConfig(n_candidates=2),
+        cfg=cfg,
         rng=random.Random(seed),
     )
 
@@ -1819,7 +1826,7 @@ class TestNTDriversWired:
         from neuroslm.cognition.runtime import MindConfig
         nt = _FakeNT()
         rt = _mk_runtime(_ScriptedGen(["thinking about the river"]), nt=nt,
-                         cfg=MindConfig(n_candidates=2))
+                         cfg=MindConfig(n_candidates=2), osc=True)
         rt.tick()
         kw = nt.step_calls[-1]
         for k in ("loss", "activation", "grad_norm", "ignition_rate",
@@ -1830,20 +1837,22 @@ class TestNTDriversWired:
         from neuroslm.cognition.runtime import MindConfig
         nt = _FakeNT()
         rt = _mk_runtime(_ScriptedGen(["thinking about the river"]), nt=nt,
-                         cfg=MindConfig(n_candidates=2))
+                         cfg=MindConfig(n_candidates=2), osc=True)
         r = rt.tick()
         kw = nt.step_calls[-1]
         assert kw["attn_entropy_norm"] == pytest.approx(r.selection_entropy)
         assert kw["ignition_rate"] == (1.0 if r.ignited else 0.0)
-        # NE: novelty surprise vs the curiosity homeostat's expectation
-        assert kw["grad_norm"] == pytest.approx(abs(r.novelty - 1.0))
+        # NE: novelty surprise vs a novelty expectation SEEDED with the
+        # first observation — no cold-start transient (run 58676023:
+        # NE drifted 0.20→0.16 as boredom warmed up from 0)
+        assert kw["grad_norm"] == pytest.approx(0.0)
 
     def test_ignition_falls_back_to_storage_without_oscillator(self):
         from neuroslm.cognition.runtime import MindConfig
         nt = _FakeNT()
         rt = _mk_runtime(_ScriptedGen(["thinking about the river"]), nt=nt,
                          cfg=MindConfig(n_candidates=2,
-                                        workspace_oscillator=False))
+                                        workspace_oscillator=False), osc=True)
         r = rt.tick()
         assert r.ignited is None
         assert nt.step_calls[-1]["ignition_rate"] == (1.0 if r.stored else 0.0)
@@ -1859,7 +1868,7 @@ class TestNTDriversWired:
         # workspace never ignites, nothing is stored and novelty (hence
         # the NE driver) would be constant by construction.
         rt = _mk_runtime(gen, nt=nt, cfg=MindConfig(
-            n_candidates=2, workspace_oscillator=False))
+            n_candidates=2, workspace_oscillator=False), osc=True)
         seen = {k: set() for k in ("NE", "ACh", "GABA")}
         for _ in range(30):
             rt.tick()
@@ -1877,7 +1886,7 @@ class TestOscillatoryWorkspace:
     def test_tick_reports_workspace_state(self):
         from neuroslm.cognition.runtime import MindConfig
         rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
-                         cfg=MindConfig(n_candidates=2))
+                         cfg=MindConfig(n_candidates=2), osc=True)
         r = rt.tick()
         assert isinstance(r.ignited, bool)
         assert 0.0 <= r.sync_r <= 1.0
@@ -1888,7 +1897,7 @@ class TestOscillatoryWorkspace:
         from neuroslm.cognition.runtime import MindConfig
         rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
                          cfg=MindConfig(n_candidates=2,
-                                        workspace_oscillator=False))
+                                        workspace_oscillator=False), osc=True)
         r = rt.tick()
         assert r.ignited is None and r.sync_r is None
 
@@ -1898,7 +1907,7 @@ class TestOscillatoryWorkspace:
         from neuroslm.cognition.runtime import MindConfig
         rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
                          cfg=MindConfig(n_candidates=2,
-                                        osc_ignition_threshold=1.01))
+                                        osc_ignition_threshold=1.01), osc=True)
         r = rt.tick()
         assert r.novelty >= rt.cfg.novelty_write_threshold
         assert r.ignited is False
@@ -1909,7 +1918,8 @@ class TestOscillatoryWorkspace:
         from neuroslm.cognition.runtime import MindConfig
         rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
                          cfg=MindConfig(n_candidates=2,
-                                        osc_ignition_threshold=0.0))
+                                        osc_ignition_mode="fixed",
+                                        osc_ignition_threshold=0.0), osc=True)
         r = rt.tick()
         assert r.ignited is True and r.stored is True
         assert r.action == "speak"
@@ -1917,7 +1927,7 @@ class TestOscillatoryWorkspace:
     def test_debug_trace_shows_the_workspace(self):
         from neuroslm.cognition.runtime import MindConfig
         rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
-                         cfg=MindConfig(n_candidates=2))
+                         cfg=MindConfig(n_candidates=2), osc=True)
         text = format_debug_trace_of(rt.tick())
         assert "WS[" in text and "Hz" in text
 
@@ -2051,7 +2061,7 @@ class TestTraceExplainsTheGates:
     def test_trace_shows_novelty_boredom_and_workspace_inputs(self):
         from neuroslm.cognition.runtime import MindConfig, format_debug_trace
         rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
-                         cfg=MindConfig(n_candidates=2))
+                         cfg=MindConfig(n_candidates=2), osc=True)
         r = rt.tick()
         assert set(r.workspace_inputs) == {"sensory", "memory", "language",
                                            "selection", "novelty"}
@@ -2072,3 +2082,73 @@ class TestGenerateHasAnAttentionMask:
         seams.generate_fn("hello", 3)
         mask = model.generate_calls[-1].get("attention_mask")
         assert mask is not None and bool(mask.all())
+
+
+
+class TestNoveltyExpectationForNE:
+    def test_constant_novelty_gives_a_flat_ne_driver(self):
+        from neuroslm.cognition.runtime import MindConfig
+        nt = _FakeNT()
+        rt = _mk_runtime(_ScriptedGen(["same thought"]), nt=nt,
+                         cfg=MindConfig(n_candidates=1,
+                                        workspace_oscillator=False,
+                                        novelty_write_threshold=2.0))
+        for _ in range(8):
+            rt.tick()
+        drivers = [c["grad_norm"] for c in nt.step_calls]
+        assert max(drivers) == pytest.approx(0.0, abs=1e-9)
+
+    def test_a_novelty_jump_drives_ne(self):
+        from neuroslm.cognition.runtime import MindConfig
+        nt = _FakeNT()
+        gen = _ScriptedGen(["thinking about code"] * 6
+                           + ["thinking about the moon"])
+        rt = _mk_runtime(gen, nt=nt, cfg=MindConfig(
+            n_candidates=1, workspace_oscillator=False))
+        rs = [rt.tick() for _ in range(7)]
+        assert nt.step_calls[-1]["grad_norm"] > 0.3
+        assert rs[-1].novelty > rs[-2].novelty
+
+
+class TestAdaptiveWorkspaceDefaults:
+    def test_runtime_default_is_adaptive(self):
+        from neuroslm.cognition.runtime import MindConfig
+        assert MindConfig().osc_ignition_mode == "adaptive"
+
+    def test_trace_shows_the_threshold(self):
+        from neuroslm.cognition.runtime import MindConfig, format_debug_trace
+        rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
+                         cfg=MindConfig(n_candidates=2), osc=True)
+        assert "θ=" in format_debug_trace(rt.tick())
+
+
+class TestThoughtsAreNotCutOff:
+    """Runs 58673415/58676023: R1's thoughts ended mid-sentence ("…so
+    we can write:") at the 96-token budget, and the 1200-char prompt,
+    truncated from the LEFT, could drop the persona and recalled
+    memories once thoughts got long."""
+
+    def test_budgets_fit_a_verbose_trunk(self):
+        from neuroslm.cognition.runtime import MindConfig
+        c = MindConfig()
+        assert c.thought_n_tok >= 192
+        assert c.max_prompt_chars >= 4000
+
+    def test_trim_to_last_complete_sentence(self):
+        from neuroslm.cognition.runtime import trim_to_sentence
+        assert trim_to_sentence("One idea. Then another that trails"
+                                ) == "One idea."
+        assert trim_to_sentence("Is it? Maybe so! And then the") \
+            == "Is it? Maybe so!"
+        assert trim_to_sentence("Complete thought.") == "Complete thought."
+        assert trim_to_sentence('She said "yes." And') == 'She said "yes."'
+        assert trim_to_sentence("no boundary at all") == "no boundary at all"
+        assert trim_to_sentence("Pi is 3.14 and") == "Pi is 3.14 and", (
+            "a decimal point is not a sentence end")
+
+    def test_candidates_are_trimmed_before_selection(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["A full thought. And a cut-off tr"]),
+                         cfg=MindConfig(n_candidates=1,
+                                        workspace_oscillator=False))
+        assert rt.tick().thought == "A full thought."

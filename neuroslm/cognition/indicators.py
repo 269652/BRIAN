@@ -485,6 +485,9 @@ def probe_loop_escape(seams: MindSeams,
         # workspace gating altogether.
         ablations["no_osc_feedback"] = {"osc_nt_feedback": False}
         ablations["no_oscillator"] = {"workspace_oscillator": False}
+        if cfg.osc_ignition_mode == "adaptive":
+            # H66 vs H65: the same workspace with run 58676023's bar
+            ablations["fixed_threshold"] = {"osc_ignition_mode": "fixed"}
     conds: Dict[str, dict] = {}
     for name, ov in ablations.items():
         runs = []

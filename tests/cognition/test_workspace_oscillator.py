@@ -118,3 +118,67 @@ class TestStateAndDeterminism:
         for _ in range(10):
             last = ws.step(ALL_ON, BASE_NT).sync_r
         assert last > first, "locking accumulates over ticks"
+
+
+class TestAdaptiveIgnition:
+    """H66 (run 58676023): with the FIXED threshold 0.25, R1-7B's idle
+    ticks never ignited (R 0.05-0.23) — the operating point rested on a
+    guessed novelty level. Adaptive mode: ignite when R exceeds its own
+    recent baseline, θ_t = max(floor, μ_R + k·σ_R), stats updated AFTER
+    the decision, seeded at the old operating point."""
+
+    MOD = {"sensory": 0.0, "memory": 0.7, "language": 0.7,
+           "selection": 0.4, "novelty": 0.35}
+
+    def _ws(self, **kw):
+        from neuroslm.cognition.oscillator import GammaWorkspace
+        base = dict(seed=0, ignition_mode="adaptive")
+        base.update(kw)
+        return GammaWorkspace(**base)
+
+    def test_first_tick_uses_the_seeded_operating_point(self):
+        ws = self._ws(ignition_threshold=0.25)
+        out = ws.step(self.MOD, BASE_NT)
+        assert out.threshold == pytest.approx(0.25 + 1.0 * 0.05)
+
+    def test_steady_input_habituates(self):
+        """Stationary input → the threshold settles just above the
+        system's own R: steady activity is not ignition."""
+        ws = self._ws()
+        outs = [ws.step(self.MOD, BASE_NT) for _ in range(60)]
+        late = outs[30:]
+        assert sum(o.ignited for o in late) / len(late) < 0.35
+        assert abs(late[-1].threshold - late[-1].sync_r) < 0.15
+
+    def test_a_jump_above_baseline_ignites_even_below_the_old_fixed_bar(self):
+        ws = self._ws()
+        dull = {k: 0.3 for k in ALL_ON}
+        dull["sensory"] = 0.0
+        for _ in range(30):
+            ws.step(dull, BASE_NT)
+        rich = dict(self.MOD, memory=0.9, language=0.85, selection=0.7,
+                    novelty=0.6)
+        hits = [ws.step(rich, BASE_NT) for _ in range(3)]
+        assert any(h.ignited for h in hits)
+        assert any(h.sync_r < 0.25 and h.ignited for h in hits) or \
+            all(h.sync_r >= 0.25 for h in hits)
+
+    def test_floor_blocks_noise_level_ignition(self):
+        ws = self._ws(ignition_floor=0.1)
+        silent = {k: 0.05 for k in ALL_ON}
+        outs = [ws.step(silent, BASE_NT) for _ in range(40)]
+        assert all(o.threshold >= 0.1 for o in outs)
+        assert not any(o.ignited for o in outs[5:])
+
+    def test_fixed_mode_is_unchanged(self):
+        from neuroslm.cognition.oscillator import GammaWorkspace
+        ws = GammaWorkspace(seed=0, ignition_mode="fixed",
+                            ignition_threshold=0.25)
+        out = ws.step(self.MOD, BASE_NT)
+        assert out.threshold == 0.25
+        assert out.ignited == (out.sync_r >= 0.25)
+
+    def test_rejects_unknown_mode(self):
+        from neuroslm.cognition.oscillator import GammaWorkspace
+        with pytest.raises(ValueError):
+            GammaWorkspace(ignition_mode="vibes")
