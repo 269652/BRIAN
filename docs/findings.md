@@ -4383,3 +4383,41 @@ this entry (tag `mind-eval-confirm-3`).
 
 [EVIDENCE: tests/cognition/test_workspace_oscillator.py::TestBaselineFromWanderingOnly]
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestRespondTicksDoNotSeedTheIdleBaseline]
+
+### H63 withdrawn untested (2026-11-01)
+
+The maintainer judged R1-7B clearly better than SmolLM2-360M from the
+development runs' thought quality and dropped the comparison run. **H63
+is withdrawn, not confirmed:** no battery number compares the two
+trunks on the same build. Any later claim that the trunk swap improved
+a measured indicator needs that run.
+
+### H68 — Controller φ and PCI integration (pre-registered, follow-up battery)
+
+**Measures** (architecture.md §14.14):
+
+(1) **Controller φ**: exact IIT 2.0 φ (Balduzzi & Tononi 2008) from an
+*interventional* TPM over five binary macro-nodes (SYNC, DA, ACh,
+GABA, BORED). Each of the 32 states is set, one idle tick runs, the
+next state is read, averaged over n samples. Full vs
+`no_osc_feedback`. This is not IIT 3.0/4.0 Φ^max, and not a property
+of the LLM or the hardware.
+
+(2) **PCI** (§14.11) with a `no_oscillator` arm and a GABA pulse.
+
+**Predictions:**
+
+| # | Prediction | Falsified if |
+|---|---|---|
+| a | φ_mean(full) > 0: the controller's causal graph is integrated at this grain | φ_mean(full) ≤ 0.01 bits |
+| b | φ_mean(full) > φ_mean(no_osc_feedback): cutting NT→workspace coupling disintegrates the controller | full ≤ no_osc_feedback |
+| c | PCI null pulse = 0 in every arm (twin determinism) | any null PCI > 0. The twin method is then invalid on GPU and PCI is unreported |
+| d | PCI `da`/`gaba` pulses: full reaches more channels than `no_oscillator` | full ≤ no_oscillator |
+
+The follow-up battery also scores, as registered under H62 (except
+H63): `episodic_recall` (GWT-3), `metacognition` (HOT-2 type-2 AUROC,
+expected null), and `source_monitoring` with its new `no_oscillator`
+arm (H65(d), previously unscorable).
+
+[EVIDENCE: tests/cognition/test_controller_phi.py (φ = 2 bits for a cross-coupled pair, 0 for disconnected units; interventions; TPM determinism)]
+[EVIDENCE: tests/cognition/test_indicator_eval.py::TestFollowUpBatteryWiring]

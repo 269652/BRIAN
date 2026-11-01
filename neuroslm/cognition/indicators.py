@@ -24,6 +24,7 @@ import re
 from dataclasses import asdict, dataclass, replace
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from neuroslm.cognition.controller_phi import probe_controller_phi
 from neuroslm.cognition.runtime import (
     CognitiveRuntime, MindConfig, MindSeams, TickResult, format_debug_trace)
 
@@ -392,6 +393,9 @@ def probe_source_monitoring(seams: MindSeams,
     cfg = cfg or MindConfig()
     ablations = {"full": {},
                  "no_provenance": {"inferred_recall_penalty": 0.0}}
+    if cfg.workspace_oscillator:
+        # H65(d): does ignition-gated broadcast change reality monitoring?
+        ablations["no_oscillator"] = {"workspace_oscillator": False}
     conds: Dict[str, dict] = {}
     for name, ov in ablations.items():
         correct, replies = [], []
@@ -742,7 +746,7 @@ def _twin_trajectory(seams: MindSeams, cfg: MindConfig, seed: int,
 def probe_perturbational_complexity(
         seams: MindSeams, seed_texts: Sequence[str] = LOOP_SEEDS,
         n_warmup: int = 2, n_response_ticks: int = 6,
-        pulses: Sequence[str] = ("null", "da", "memory"),
+        pulses: Sequence[str] = ("null", "da", "gaba", "memory"),
         cfg: Optional[MindConfig] = None, seed: int = 0,
         progress=None) -> dict:
     """IIT family — a PCI analogue (Casali et al. 2013): perturb one
@@ -760,16 +764,25 @@ def probe_perturbational_complexity(
                                 "replay_boredom_threshold": 2.0,
                                 "replay_margin": 2.0,
                                 "reorient_after": 10 ** 9}}
+    if cfg.workspace_oscillator:
+        # IIT's integration claim, applied: without the workspace that
+        # binds the modules, perturbations should spread less.
+        ablations["no_oscillator"] = {"workspace_oscillator": False}
     conds: Dict[str, dict] = {}
     for name, ov in ablations.items():
         c_cfg = replace(cfg, **ov)
         conds[name] = {}
+        # The unperturbed twin is deterministic given (cfg, seed): run it
+        # once per seed and compare every pulse against it (~40% fewer
+        # ticks; the null pulse still validates determinism).
+        base = {i: _twin_trajectory(seams, c_cfg, seed * 1000 + i, text,
+                                    None, n_warmup, n_response_ticks)
+                for i, text in enumerate(seed_texts)}
         for pname in pulses:
             runs = []
             for i, text in enumerate(seed_texts):
                 s = seed * 1000 + i
-                a = _twin_trajectory(seams, c_cfg, s, text, None,
-                                     n_warmup, n_response_ticks)
+                a = base[i]
                 b = _twin_trajectory(seams, c_cfg, s, text, PULSES[pname],
                                      n_warmup, n_response_ticks)
                 matrix = [[int(_diverged(ch, ra, rb, seams.embed_fn))
@@ -804,7 +817,7 @@ def probe_perturbational_complexity(
 # ── Battery ──────────────────────────────────────────────────────────
 
 PROBES = ("episodic_recall", "source_monitoring", "loop_escape",
-          "metacognition", "perturbational_complexity")
+          "metacognition", "perturbational_complexity", "controller_phi")
 
 
 def run_indicator_battery(seams: MindSeams,
@@ -840,6 +853,10 @@ def run_indicator_battery(seams: MindSeams,
             seams, take(QA_ITEMS), cfg, seed, progress),
         "perturbational_complexity": lambda: probe_perturbational_complexity(
             seams, take(LOOP_SEEDS), cfg=cfg, seed=seed, progress=progress),
+        # samples per TPM row: n_items if given (default 4)
+        "controller_phi": lambda: probe_controller_phi(
+            seams, cfg=cfg, samples=n_items or 4, seed=seed,
+            progress=progress),
     }
     for p in probes:
         _say(progress, f"[mind-eval] probe {p}")
@@ -855,6 +872,12 @@ def format_report(report: dict) -> str:
     lines = ["probe              indicator  condition       metric"]
     for name, res in report["probes"].items():
         for cond, c in res["conditions"].items():
+            if "phi_mean" in c:
+                lines.append(
+                    f"{name[:18]:<18} {'IIT/φ':<10} {cond:<15} "
+                    f"φ_mean={_fmt(c['phi_mean'])} φ_max={_fmt(c['phi_max'])}"
+                    f" argmax={c['argmax_state']} MIP={c['argmax_mip']}")
+                continue
             if res["indicator"] == "IIT/PCI":
                 for pulse, pc in c.items():
                     lines.append(

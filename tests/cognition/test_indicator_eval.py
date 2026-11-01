@@ -659,3 +659,61 @@ class TestPushIsObservable:
     def test_preflight_runs_before_the_battery(self):
         s = self._s()
         assert s.index("push --dry-run") < s.index("neuroslm.cli eval mind")
+
+
+class TestFollowUpBatteryWiring:
+    """2026-11-01 follow-up battery: H65(d) needs a no_oscillator arm in
+    source_monitoring; PCI gets the workspace ablation + the GABA pulse
+    (GABA is now driven); controller φ joins the battery."""
+
+    def test_source_monitoring_has_a_no_oscillator_arm(self):
+        from neuroslm.cognition.indicators import (
+            SourceItem, probe_source_monitoring)
+        item = SourceItem("The key is in the red box.",
+                          ("I imagine the key is in the blue box.",),
+                          "Which box is the key in?", ("red",), ("blue",))
+        res = probe_source_monitoring(_seams(_Reader(["red", "blue"])),
+                                      items=[item],
+                                      cfg=MindConfig(n_candidates=2))
+        assert "no_oscillator" in res["conditions"]
+        assert "full_minus_no_oscillator" in res["contrasts"]
+
+    def test_pci_adds_the_workspace_ablation_and_gaba_pulse(self):
+        from neuroslm.cognition.indicators import (
+            probe_perturbational_complexity)
+        import inspect
+        assert "gaba" in inspect.signature(
+            probe_perturbational_complexity).parameters["pulses"].default
+        res = probe_perturbational_complexity(
+            _seams(_fairground_gen), seed_texts=["I watched the river."],
+            n_warmup=1, n_response_ticks=2, pulses=("null",),
+            cfg=MindConfig(n_candidates=2), seed=0)
+        assert "no_oscillator" in res["conditions"]
+
+    def test_pci_reuses_the_unperturbed_twin_across_pulses(self):
+        from neuroslm.cognition.indicators import (
+            probe_perturbational_complexity)
+        seams = _seams(_fairground_gen)
+        built = []
+        orig = seams.runtime
+
+        def counting(*a, **k):
+            built.append(1)
+            return orig(*a, **k)
+        seams.runtime = counting
+        pulses = ("null", "da", "memory")
+        res = probe_perturbational_complexity(
+            seams, seed_texts=["I watched the river."], n_warmup=1,
+            n_response_ticks=2, pulses=pulses,
+            cfg=MindConfig(n_candidates=2), seed=0)
+        n_cond = len(res["conditions"])
+        assert len(built) == n_cond * (1 + len(pulses))
+
+    def test_battery_runs_controller_phi(self):
+        from neuroslm.cognition.indicators import PROBES, run_indicator_battery
+        assert "controller_phi" in PROBES
+        report = run_indicator_battery(
+            _seams(_fairground_gen), probes=["controller_phi"],
+            cfg=MindConfig(n_candidates=1), n_items=1)
+        json.dumps(report)
+        assert report["probes"]["controller_phi"]["samples"] == 1

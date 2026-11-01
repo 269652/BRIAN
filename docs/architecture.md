@@ -3808,3 +3808,27 @@ ticks. `osc_ignition_mode="fixed"` keeps H65's behaviour and is the
 its own novelty expectation, seeded with the first observation.
 Thoughts get 192 tokens and are trimmed to the last complete sentence;
 the prompt budget is 4000 chars.
+
+### 14.14 Controller φ — exact IIT 2.0 integration at the controller grain (2026-11-01)
+
+Rigorous Φ is not computable for BRIAN as a whole. There is no
+discrete unit grain for an LLM, no interventional TPM over its state
+space, and exact Φ is super-exponential. IIT locates Φ in the physical
+substrate (the GPU) in any case. `cognition/controller_phi.py`
+computes what *is* rigorous: **exact IIT 2.0 φ** (Balduzzi & Tononi
+2008) of the runtime controller's causal graph at a declared grain of
+five binary macro-nodes:
+
+| Node | ON when | Intervention |
+|---|---|---|
+| SYNC | workspace phase coherence ≥ 0.5 | phases locked / scrambled |
+| DA, ACh, GABA | level above baseline | logit kicked ±1 around μ |
+| BORED | boredom ≥ 0.5 | set 0.75 / 0.1 |
+
+The TPM is built **by intervention**: set each of the 32 states, run
+one idle tick, read the next state, and average over seeded samples.
+φ for each state is the effective information across the minimum
+information bipartition, normalised by the smaller part. The probe
+reports φ per state, mean and max (with MIP), the TPM itself, and the
+contrast against `no_osc_feedback`. The maths is pinned on textbook
+cases (a cross-coupled pair integrates 2 bits; disconnected units 0).
