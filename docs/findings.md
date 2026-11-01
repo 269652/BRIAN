@@ -4309,3 +4309,53 @@ ignitions per run, and 12 ticks gave 0–1.
 [EVIDENCE: tests/emergent/test_driven_nt.py::test_warmup_variance_init_lets_unit_scale_drivers_move_channels]
 [EVIDENCE: tests/cognition/test_workspace_oscillator.py::TestAdaptiveIgnition::test_baseline_is_seeded_from_the_first_observed_r]
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestConfirmatoryFreezeFixes]
+
+### Run 58680199 stopped before scoring; H67 pre-registered; confirmatory build #2 (2026-11-01)
+
+**58680199** (`mind-eval-confirm-1`) was stopped by the maintainer
+during `loop_escape/full` run 2 (67 ticks, no summaries), to ship the
+fixes below. **Nothing from it is scored.** It is reclassified as a
+development run; local log: `logs/mind_eval/20261101_58680199_container.log`.
+Descriptively: NE/ACh/GABA per-run sd 0.025/0.031/0.018 (H64's bar
+0.01 cleared), ignition 6/67, reorient 0, replay 0. The box's pushes
+all failed on the empty-dir pathspec bug (fixed in `cf2bc5ca`).
+
+### H67 — A trunk-independent control layer: working-memory novelty + relative thresholds (pre-registered)
+
+**Motivation (58680199, descriptive).** Reorient (novelty < 0.25) and
+replay (boredom ≥ 0.6) never fired: R1's centred novelty sat at
+0.34–0.77 and boredom peaked at 0.59. A ~30-tick
+fluid-dynamics→probability basin never registered as repetitive,
+because novelty was measured only against stored episodes, and at ~9%
+ignition almost nothing was stored.
+
+**Mechanism.**
+(1) Novelty is measured against stored episodes ∪ the last 8 selected
+thoughts (`wm_size`).
+(2) `control_thresholds="relative"`: a tick counts as LOOPING if
+novelty < 0.75 × baseline; replay fires if boredom ≥ (1 − baseline) +
+0.1. The baseline is an EWMA of novelty (α = 0.05), seeded with the
+first value.
+(3) The narration prior also catches "the user/passage/text …
+started/is/describes …".
+(4) Candidates are cut where they start echoing prompt-section labels.
+All parameter values are a-priori design choices, not fitted.
+
+**Predictions** (`loop_escape`, full vs `no_control`):
+
+| # | Prediction | Falsified if |
+|---|---|---|
+| a | control acts happen: mean ≥ 1 reorient per 40-tick run in full; 0 in no_control | full mean < 1 |
+| b | GWT-4 as originally registered (H62): full stream novelty > no_control by ≥ 0.03 | full ≤ no_control |
+| c | full longest low-novelty streak < no_control | full ≥ no_control |
+| d | leakage: 0 selected thoughts containing a scaffold label; ≤ 1 narration | > 0 scaffold or > 1 narration |
+
+**Stack note (§10).** (1) and (2) are bundled. Follow-up backlog:
+single-mechanism ablations `wm_size=0` and
+`control_thresholds="absolute"`.
+
+**Freeze.** The commit carrying this entry is tagged
+`mind-eval-confirm-2`. H64, H65 (as re-registered), H66 and H67 are
+scored on it. A change following its data reclassifies the run.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestWorkingMemoryNovelty, TestRelativeControlThresholds, TestNarrationAndScaffold]

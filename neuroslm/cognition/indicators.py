@@ -479,6 +479,7 @@ def probe_loop_escape(seams: MindSeams,
     ablations = {"full": {},
                  "no_control": {"curiosity_gain": 0.0,
                                 "replay_boredom_threshold": 2.0,
+                                "replay_margin": 2.0,
                                 "reorient_after": 10 ** 9}}
     if cfg.workspace_oscillator:
         # §14.13 falsification arms: cut the ignition↔NT loop, or the
@@ -757,6 +758,7 @@ def probe_perturbational_complexity(
                  "no_recall": {"recall_k": 0},
                  "no_control": {"curiosity_gain": 0.0,
                                 "replay_boredom_threshold": 2.0,
+                                "replay_margin": 2.0,
                                 "reorient_after": 10 ** 9}}
     conds: Dict[str, dict] = {}
     for name, ov in ablations.items():

@@ -249,6 +249,30 @@ class MindConfig:
     LEFT. 2026-11-01: raised from 1200 — with R1's long thoughts the
     persona and recalled memories at the top fell off the prompt."""
 
+    wm_size: int = 8
+    """Working memory: novelty is measured against the last ``wm_size``
+    SELECTED thoughts as well as stored episodes (0 = stored only).
+    Run 58680199: a ~30-tick basin never registered as repetitive —
+    with ~9% ignition almost nothing was stored to compare against."""
+
+    control_thresholds: str = "relative"
+    """'relative' (H67): LOOPING and replay are judged against the run's
+    own slow novelty baseline (``loop_ratio``, ``replay_margin``);
+    'absolute': ``loop_novelty_threshold`` / ``replay_boredom_threshold``
+    (tuned on SmolLM2; never fired on R1-7B's centred novelty)."""
+
+    loop_ratio: float = 0.75
+    """Relative LOOPING: novelty < loop_ratio × baseline. At SmolLM2's
+    baseline (~0.3) this is ≈ the old absolute 0.25."""
+
+    replay_margin: float = 0.1
+    """Relative replay: boredom ≥ (1 − baseline) + replay_margin, i.e.
+    boredom above what the run's own novelty level implies."""
+
+    nov_baseline_alpha: float = 0.05
+    """EWMA rate of the novelty baseline (~20-tick memory), seeded with
+    the first novelty."""
+
     nt_driver_var_init: str = "warmup"
     """Variance init of the default NT's driver z-scores: 'warmup'
     takes it from the first samples ([0,1]-bounded runtime drivers were
@@ -506,6 +530,14 @@ def format_debug_trace(result: TickResult) -> str:
     return "\n".join(lines)
 
 
+def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return sum(x * y for x, y in zip(a, b)) / (na * nb)
+
+
 def _population_stdev(values: List[float]) -> float:
     """IIT-flavored differentiation proxy: population stdev of the
     candidate repertoire's NLLs. 0 for <2 values (nothing to
@@ -547,8 +579,39 @@ _SECOND_PERSON_RE = re.compile(r"\b(you|your|yours|yourself)\b|^brian\s*[,:]",
 
 _SELF_NARRATION_RE = re.compile(
     r"\bbrian(?:'s|’s)|\b(?:so|then|now|and)\s+brian\b|\bbrian\s+"
-    r"(?:is|was|continues|reflects|thinks|feels|wonders|considers|seems)\b",
+    r"(?:is|was|continues|reflects|thinks|feels|wonders|considers|seems)\b"
+    # run 58680199: "The user started by thinking about…" (spoken)
+    r"|\bthe\s+(?:user|passage|text|author|speaker|narrator)\s+"
+    r"(?:is|was|started|starts|began|begins|seems|describes|reflects|"
+    r"thinks|wants|continues|asked|asks|mentions|wonders|considers)\b",
     re.IGNORECASE)
+
+# Prompt-section labels the trunk imitates when it starts hallucinating
+# a new prompt ("⏎ Previous thoughts: …", run 58680199).
+_SCAFFOLD_RE = re.compile(
+    r"(?:^|\n)\s*(?:I remember|My last thought|Just now|My reply|Thought|"
+    r"Previous thoughts?)\s*:", re.IGNORECASE)
+
+
+def strip_scaffold(text: str) -> str:
+    """Cut a candidate where it starts echoing the prompt's scaffold."""
+    t = text or ""
+    m = _SCAFFOLD_RE.search(t)
+    return (t[:m.start()] if m else t).strip()
+
+
+def loop_threshold(baseline: Optional[float], cfg: "MindConfig") -> float:
+    """Novelty below which a tick counts toward the LOOPING streak."""
+    if cfg.control_thresholds == "absolute" or baseline is None:
+        return cfg.loop_novelty_threshold
+    return cfg.loop_ratio * baseline
+
+
+def replay_threshold(baseline: Optional[float], cfg: "MindConfig") -> float:
+    """Boredom at which an idle tick may replay."""
+    if cfg.control_thresholds == "absolute" or baseline is None:
+        return cfg.replay_boredom_threshold
+    return (1.0 - baseline) + cfg.replay_margin
 
 
 def _is_self_narration(text: str) -> bool:
@@ -644,6 +707,10 @@ class CognitiveRuntime:
         # (boredom starts at 0 by design, which made it a biased
         # expectation for ~10 ticks — run 58676023).
         self._nov_expect: Optional[float] = None
+        # H67: working memory of selected-thought vectors + the run's
+        # own slow novelty baseline for relative control thresholds.
+        self._wm: Deque[List[float]] = deque(maxlen=max(1, self.cfg.wm_size))
+        self._nov_base: Optional[float] = None
         self._osc = None
         if self.cfg.workspace_oscillator:
             from neuroslm.cognition.oscillator import GammaWorkspace
@@ -768,7 +835,8 @@ class CognitiveRuntime:
             else:
                 suppress_recall = True
         elif (wandering
-              and self._boredom >= self.cfg.replay_boredom_threshold
+              and self._boredom >= replay_threshold(self._nov_base,
+                                                    self.cfg)
               and (tick_n - self._last_replay_tick)
               > self.cfg.replay_refractory):
             candidates_for_replay = [e for e in self.memory.all()
@@ -851,8 +919,8 @@ class CognitiveRuntime:
         candidates: List[str] = []
         reasonings: List[Optional[str]] = []
         for _ in range(max(1, self.cfg.n_candidates)):
-            out = trim_to_sentence(gen(prompt, self.cfg.thought_n_tok)
-                                   or "")
+            out = trim_to_sentence(strip_scaffold(
+                gen(prompt, self.cfg.thought_n_tok) or ""))
             if out:
                 candidates.append(out)
                 reasonings.append(self._reasoning() if self._reasoning
@@ -881,7 +949,12 @@ class CognitiveRuntime:
         # the NT activation driver, and the boredom trace.
         thought_vec = list(self._embed(thought))
         top = self.memory.retrieve_scored(thought_vec, k=1)
-        novelty = 1.0 - top[0][0] if top else 1.0
+        best = top[0][0] if top else None
+        if self.cfg.wm_size > 0:
+            for v in self._wm:
+                c = _cosine(thought_vec, v)
+                best = c if best is None else max(best, c)
+        novelty = 1.0 - best if best is not None else 1.0
         novelty = max(0.0, min(1.0, novelty))
 
         # ACTION: the basal ganglia's actual act this tick — exactly
@@ -971,10 +1044,9 @@ class CognitiveRuntime:
         # replay jump or a reorient CONSUMES boredom — the correction
         # IS the relief; without this, replay locked on and fired
         # every tick once boredom saturated (live trace, tick 10+).
-        if novelty < self.cfg.loop_novelty_threshold:
-            self._low_nov_streak += 1
-        else:
-            self._low_nov_streak = 0
+        self._update_control(novelty)
+        if self.cfg.wm_size > 0:
+            self._wm.append(thought_vec)
         if replay or reorient:
             self._boredom *= self.cfg.boredom_relief
         if reorient:
@@ -1001,6 +1073,19 @@ class CognitiveRuntime:
                           ignition_threshold=osc.threshold if osc else None)
 
     # ── Internals ────────────────────────────────────────────────────
+
+    def _update_control(self, novelty: float) -> None:
+        """LOOPING streak against the (relative or absolute) threshold,
+        then fold this tick's novelty into the slow baseline."""
+        if self._nov_base is None:
+            self._nov_base = novelty
+        thr = loop_threshold(self._nov_base, self.cfg)
+        if novelty < thr:
+            self._low_nov_streak += 1
+        else:
+            self._low_nov_streak = 0
+        a = self.cfg.nov_baseline_alpha
+        self._nov_base = (1 - a) * self._nov_base + a * novelty
 
     def _compose_prompt(self, sensory: List[str],
                         recalled: List[dict], trigger_text: str) -> str:

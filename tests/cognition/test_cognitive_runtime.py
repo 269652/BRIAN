@@ -2092,7 +2092,8 @@ class TestNoveltyExpectationForNE:
         rt = _mk_runtime(_ScriptedGen(["same thought"]), nt=nt,
                          cfg=MindConfig(n_candidates=1,
                                         workspace_oscillator=False,
-                                        novelty_write_threshold=2.0))
+                                        novelty_write_threshold=2.0,
+                                        wm_size=0))  # constant novelty
         for _ in range(8):
             rt.tick()
         drivers = [c["grad_norm"] for c in nt.step_calls]
@@ -2267,3 +2268,118 @@ class TestConfirmatoryFreezeFixes:
         assert _is_self_narration("So Brian continues this line of thinking")
         assert not _is_self_narration("I think the river is calm.")
         assert not _is_self_narration("Brian, look at this")  # address
+
+
+
+# ── H67: control layer that works on any trunk (confirmatory run 58680199) ──
+
+class TestWorkingMemoryNovelty:
+    """Run 58680199 (R1-7B): a ~30-tick fluid-dynamics→probability basin
+    never registered as repetitive — novelty is measured against STORED
+    episodes, and with ignition at ~9% almost nothing was stored. The
+    last N selected thoughts now count too."""
+
+    def test_repetition_registers_without_any_storage(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["the same thought"]),
+                         cfg=MindConfig(n_candidates=1,
+                                        novelty_write_threshold=2.0))
+        rs = [rt.tick() for _ in range(3)]
+        assert not any(r.stored for r in rs)
+        assert rs[0].novelty == pytest.approx(1.0)
+        assert rs[1].novelty == pytest.approx(0.0, abs=1e-6)
+
+    def test_wm_size_zero_restores_storage_only_novelty(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["the same thought"]),
+                         cfg=MindConfig(n_candidates=1, wm_size=0,
+                                        novelty_write_threshold=2.0))
+        rs = [rt.tick() for _ in range(3)]
+        assert rs[1].novelty == pytest.approx(1.0)
+
+    def test_wm_is_bounded(self):
+        from neuroslm.cognition.runtime import MindConfig
+        topics = ["code", "weather", "music", "launch", "coffee"]
+        rt = _mk_runtime(_ScriptedGen([f"about {t}" for t in topics]),
+                         cfg=MindConfig(n_candidates=1, wm_size=3,
+                                        novelty_write_threshold=2.0))
+        for _ in range(5):
+            rt.tick()
+        assert len(rt._wm) == 3
+
+    def test_unstored_repetition_now_triggers_reorient(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["the same thought"]),
+                         cfg=MindConfig(n_candidates=1,
+                                        novelty_write_threshold=2.0))
+        rs = [rt.tick() for _ in range(7)]
+        assert any(r.reorient for r in rs)
+
+
+class TestRelativeControlThresholds:
+    """Run 58680199: reorient (novelty < 0.25) and replay (boredom ≥ 0.6)
+    never fired — R1's centred novelty sat at 0.34-0.77 and boredom
+    peaked at 0.59. Absolute thresholds tuned on SmolLM2 don't transfer;
+    relative ones compare against the run's own slow novelty baseline."""
+
+    def test_default_is_relative(self):
+        from neuroslm.cognition.runtime import MindConfig
+        assert MindConfig().control_thresholds == "relative"
+
+    def test_loop_threshold_scales_with_the_baseline(self):
+        from neuroslm.cognition.runtime import loop_threshold, MindConfig
+        c = MindConfig()
+        assert loop_threshold(0.6, c) == pytest.approx(0.75 * 0.6)
+        assert loop_threshold(0.3, c) == pytest.approx(0.75 * 0.3)
+        a = MindConfig(control_thresholds="absolute")
+        assert loop_threshold(0.6, a) == a.loop_novelty_threshold
+
+    def test_replay_threshold_scales_with_the_baseline(self):
+        from neuroslm.cognition.runtime import replay_threshold, MindConfig
+        c = MindConfig()
+        assert replay_threshold(0.6, c) == pytest.approx(0.4 + c.replay_margin)
+        a = MindConfig(control_thresholds="absolute")
+        assert replay_threshold(0.6, a) == a.replay_boredom_threshold
+
+    def test_a_sustained_drop_below_baseline_counts_as_looping(self):
+        """High-novelty trunk: novelty ~0.65 for a while, then a basin at
+        ~0.40 — above the old absolute 0.25, below 0.75 × baseline."""
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["x"]), cfg=MindConfig(
+            n_candidates=1, wm_size=0))
+        for v in [0.65, 0.66, 0.64, 0.65, 0.40, 0.41, 0.39]:
+            rt._update_control(v)
+        assert rt._low_nov_streak >= 3
+
+    def test_baseline_is_seeded_with_the_first_novelty(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["x"]), cfg=MindConfig(n_candidates=1))
+        rt._update_control(0.62)
+        assert rt._nov_base == pytest.approx(0.62)
+
+
+class TestNarrationAndScaffold:
+    def test_generic_third_person_narration_is_penalised(self):
+        from neuroslm.cognition.runtime import _is_self_narration
+        assert _is_self_narration(
+            "The user started by thinking about modeling experiments.")
+        assert _is_self_narration("The passage describes a calm river.")
+        # mentioning the user is fine; narrating them is not
+        assert not _is_self_narration("I could ask the user about it later?")
+        assert not _is_self_narration("Users of maps often get lost.")
+
+    def test_scaffold_echo_is_cut(self):
+        from neuroslm.cognition.runtime import strip_scaffold
+        assert strip_scaffold(
+            'What does "flow" mean here?\nPrevious thoughts: rivers flowing'
+        ) == 'What does "flow" mean here?'
+        assert strip_scaffold("An idea.\nJust now: something") == "An idea."
+        assert strip_scaffold("Plain thought.") == "Plain thought."
+        assert strip_scaffold("I remember: nothing") == ""
+
+    def test_runtime_strips_scaffold_before_selection(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(
+            ["A real thought.\nMy last thought: echo"]),
+            cfg=MindConfig(n_candidates=1))
+        assert rt.tick().thought == "A real thought."
