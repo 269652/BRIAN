@@ -468,3 +468,83 @@
   HC recalled 1:
     - [inferred] The sight of the rushing river reminded me of my youth spent near such places where life felt slower yet alive through moments captured in these gentle ripples across streams.
   evolved from: "Maybe if we can model this scenario as a directed acyclic graph..."
+[tick 41] DMN wandering action=think
+  NT[DA=0.13 NE=0.21 5HT=0.49 ACh=0.30 eCB=0.09 Glu=0.44 GABA=0.15]
+  CUR[nov=0.36 bore=0.65]
+  WS[R=0.12 θ=0.12 ignited=no 40Hz γ=0.98 in[s=0.00 m=0.65 l=0.52 s=0.26 n=0.36]]
+  BG deliberation (H=0.74 decisiveness, diff=0.88 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 5.08 "Maybe considering different approaches could help me analyze this problem from multiple angles..."
+    [        ] nll= 5.00 "Maybe considering different types of data structures could help me model certain kinds of processes..."
+    [        ] nll= 6.91 "Maybe considering different types of rivers could help model varying cognitive processes..."
+  HC recalled 3:
+    - [inferred] "But how does one write code that's both efficient and easy for others (and oneself) to understand?"
+    - [inferred] Perhaps focusing more on readability can lead to better maintainability over time because simpler solutions are easier not just now but also years down the line."
+    - [inferred] So if each processor has its own queue with limited size... Wait no—I need something else—because queues will become clogged as messages get stuck waiting."
+  evolved from: "It might be useful to consider various aspects that contribute to how 'river' impacts our memory or emotional state..."
+── loop_escape/full run 1: Today I learned how bees communicate with dances.
+[tick 2] DMN wandering action=think
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.10 Glu=0.45 GABA=0.15]
+  CUR[nov=0.31 bore=0.26]
+  WS[R=0.20 θ=0.25 ignited=no 40Hz γ=1.00 in[s=0.00 m=0.47 l=0.81 s=0.85 n=0.31]]
+  BG deliberation (H=0.15 decisiveness, diff=1.31 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 7.90 "What if the world were...?"
+    [SELECTED] nll= 4.74 "Okay Brian, ⏎ Alright so thinking about how bees use dance communication—I wonder if the amount ofnectar or other resources affects whether they show different types of dances?"
+    [        ] nll= 5.94 "Okay Brian—let's figure out the question now based on these clues... Hmm..."
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "Oh wow, isn't that amazing?! Bees do have incredibly sophisticated ways of communicating—and all thanks to that impressive waltz-dance thingy they perform whenever they find nectar farther away than expected. How can anyone resist spending time gazing at those little pollinators zip-zapping around? Anyway, enough suspense—it’s 3 AM (or whatever hour you’re currently snacking on), let me get back down to earth…  ⏎  ⏎ Well, moving forward—if any of my readers haven’t already caught wind of this incredible bee trivia, congrats—they’ve got a golden opportunity to expand both their knowledge base AND maybe strike up some interesting conversations tomorrow morning before heading off to wherever life takes 'em next day. So keep sharing your discoveries friend—you don’t need any sleep deprivation to spread light!"
+[tick 3] DMN wandering action=think
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.10 Glu=0.45 GABA=0.15]
+  CUR[nov=0.19 bore=0.40]
+  WS[R=0.21 θ=0.24 ignited=no 40Hz γ=1.00 in[s=0.00 m=0.50 l=0.77 s=0.89 n=0.19]]
+  BG deliberation (H=0.11 decisiveness, diff=1.00 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 6.45 "Maybe worker bees have specialized roles based on their behavior?"
+    [        ] nll= 6.00 "Maybe Bees Use Different Dances for Different Types of Messages ⏎ Let me try this:"
+    [SELECTED] nll= 4.14 "So there's also this idea that more nectar would mean shorter dances since workers don't want to spend too much energy ⏎ Wait—that doesn’t make sense because actually, wouldn’t longer dances require more effort? Maybe instead maybe higher levels of nectar result in less tiring for the worker bee?"
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "Okay Brian, ⏎ Alright so thinking about how bees use dance communication—I wonder if the amount ofnectar or other resources affects whether they show different types of dances?"
+[tick 4] DMN wandering action=think
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.10 Glu=0.45 GABA=0.15]
+  CUR[nov=0.33 bore=0.47]
+  WS[R=0.15 θ=0.24 ignited=no 40Hz γ=0.98 in[s=0.00 m=0.42 l=0.80 s=0.64 n=0.33]]
+  BG deliberation (H=0.36 decisiveness, diff=1.12 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 4.86 "The length of their dance corresponds inversely—if you give them lots of honeycombs (more value), they will take fewer steps; conversely, if given little or none at all..., then perhaps... Hmm?"
+    [        ] nll= 7.36 "If the amount of nectar increases, then perhaps the dance becomes quicker?"
+    [SELECTED] nll= 5.16 "The duration of dance (let’s say D) relates inversely or directly to something about honey production?"
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "So there's also this idea that more nectar would mean shorter dances since workers don't want to spend too much energy ⏎ Wait—that doesn’t make sense because actually, wouldn’t longer dances require more effort? Maybe instead maybe higher levels of nectar result in less tiring for the worker bee?"
+[tick 5] DMN wandering (reorient) action=reorient
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.10 Glu=0.43 GABA=0.15]
+  CUR[nov=0.25 bore=0.16]
+  WS[R=0.14 θ=0.23 ignited=no 40Hz γ=0.99 in[s=0.00 m=1.00 l=0.69 s=0.53 n=0.25]]
+  BG deliberation (H=0.47 decisiveness, diff=1.59 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 5.18 "Maybe if the number of dances increases over time due to better understanding by bees? Or perhaps because more types are being discovered?"
+    [        ] nll= 5.96 "Maybe the more accurate model isn't linear but exponential? Because as time passes since discovery...?"
+    [        ] nll= 8.88 "Maybe the number of dances affects total production?"
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "The duration of dance (let’s say D) relates inversely or directly to something about honey production?"
+[tick 6] DMN wandering action=think
+  NT[DA=0.11 NE=0.20 5HT=0.50 ACh=0.28 eCB=0.09 Glu=0.40 GABA=0.15]
+  CUR[nov=0.30 bore=0.30]
+  WS[R=0.06 θ=0.22 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.43 l=0.69 s=0.66 n=0.30]]
+  BG deliberation (H=0.34 decisiveness, diff=0.42 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 4.69 "Perhaps as humans improve their knowledge (or maybe not), but also considering that other animals learn from experience too... Hmm..."
+    [        ] nll= 5.66 "How could you represent these dance sequences as mathematical functions or equations?"
+    [        ] nll= 5.49 "What does "increase" mean here?"
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "Maybe if the number of dances increases over time due to better understanding by bees? Or perhaps because more types are being discovered?"
+[tick 7] DMN wandering action=think
+  NT[DA=0.11 NE=0.17 5HT=0.50 ACh=0.28 eCB=0.09 Glu=0.38 GABA=0.14]
+  CUR[nov=0.32 bore=0.39]
+  WS[R=0.06 θ=0.22 ignited=no 44Hz γ=0.85 in[s=0.00 m=0.41 l=0.60 s=0.56 n=0.32]]
+  BG deliberation (H=0.44 decisiveness, diff=0.63 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 7.05 "Maybe we can get better at something if others do so?"
+    [SELECTED] nll= 5.54 "Maybe we can model human learning behavior using similar techniques to those used by ants for optimization?"
+    [        ] nll= 6.56 "Maybe another species can teach us something about learning?"
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "Perhaps as humans improve their knowledge (or maybe not), but also considering that other animals learn from experience too... Hmm..."
