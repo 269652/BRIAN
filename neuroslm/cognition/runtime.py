@@ -249,6 +249,24 @@ class MindConfig:
     LEFT. 2026-11-01: raised from 1200 — with R1's long thoughts the
     persona and recalled memories at the top fell off the prompt."""
 
+    nt_driver_var_init: str = "warmup"
+    """Variance init of the default NT's driver z-scores: 'warmup'
+    takes it from the first samples ([0,1]-bounded runtime drivers were
+    shrunk several-fold by the training-scale prior of 1.0 — run
+    58678026: NE/ACh/GABA per-run sd 0.002-0.005)."""
+
+    respond_instruction: str = (
+        "(Speak as this mind, in the first person, replying directly to "
+        "what was just said. Do not describe or analyse this text.)")
+    """Appended before "My reply:" on respond ticks. R1-family models
+    want instructions in the user turn, not a system prompt; without it
+    R1 commented on the persona ("The passage reflects Brian's deep
+    contemplation…", run 58678026)."""
+
+    self_narration_penalty: float = 1.5
+    """BG prior (nats) against a candidate narrating the mind in the
+    third person ("Brian's…", "So Brian continues…") — on every tick."""
+
     nt_driver_alpha: float = 0.1
     """EMA rate of the default DrivenNTSystem's driver z-scoring. Its
     own default (0.005, ~200 steps) suits training; over a dozen ticks
@@ -527,6 +545,18 @@ _SECOND_PERSON_RE = re.compile(r"\b(you|your|yours|yourself)\b|^brian\s*[,:]",
                                re.IGNORECASE)
 
 
+_SELF_NARRATION_RE = re.compile(
+    r"\bbrian(?:'s|’s)|\b(?:so|then|now|and)\s+brian\b|\bbrian\s+"
+    r"(?:is|was|continues|reflects|thinks|feels|wonders|considers|seems)\b",
+    re.IGNORECASE)
+
+
+def _is_self_narration(text: str) -> bool:
+    """Does this candidate narrate the mind in the third person? (An
+    address — "Brian, look" — is the second-person prior's job.)"""
+    return bool(_SELF_NARRATION_RE.search(text or ""))
+
+
 def _is_second_person(text: str) -> bool:
     """Does this candidate address someone? Inner speech shouldn't."""
     return bool(_SECOND_PERSON_RE.search(text or ""))
@@ -574,7 +604,8 @@ class CognitiveRuntime:
         cfg = cfg or MindConfig()
         if nt is None:
             from neuroslm.emergent.driven_nt import DrivenNTSystem
-            nt = DrivenNTSystem(driver_alpha=cfg.nt_driver_alpha)
+            nt = DrivenNTSystem(driver_alpha=cfg.nt_driver_alpha,
+                                driver_var_init=cfg.nt_driver_var_init)
         self._gen = generate_fn
         # Inner-speech register (D of the curiosity loop): DMN ticks
         # generate through this seam — raw completion, no chat
@@ -987,6 +1018,7 @@ class CognitiveRuntime:
             # 'respond' action: cue a reply, not a free-floating
             # thought — this is what THINK produces for the basal
             # ganglia to surface as the actual answer to real input.
+            lines.append(self.cfg.respond_instruction)
             lines.append("My reply:")
         else:
             # DMN: nothing external arrived — bias THINK toward
@@ -1035,10 +1067,13 @@ class CognitiveRuntime:
             levels.get("DA", 0.0), baselines.get("DA", 0.15),
             self._boredom, self.cfg)
         penalties = [0.0] * len(scores)
-        if wandering and candidates is not None:
-            penalties = [self.cfg.second_person_penalty
-                        if _is_second_person(c) else 0.0
-                        for c in candidates]
+        if candidates is not None:
+            penalties = [
+                (self.cfg.second_person_penalty
+                 if wandering and _is_second_person(c) else 0.0)
+                + (self.cfg.self_narration_penalty
+                   if _is_self_narration(c) else 0.0)
+                for c in candidates]
         # softmax(−(NLL+prior) / T), computed stably.
         utils = [-(s.mean_nll + p) / max(T, 1e-6)
                 for s, p in zip(scores, penalties)]

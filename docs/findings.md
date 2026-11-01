@@ -4264,3 +4264,48 @@ cut.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestWanderingDoesNotRecallItsOwnLastThought, TestTraceShowsFullText]
 [EVIDENCE: logs/mind_eval/20261101_58676023_container.log (local capture)]
+
+### Confirmatory protocol for H64/H65/H66: development runs closed, code frozen (2026-11-01)
+
+**Development runs (not scored; each one exposed bugs):**
+
+| Run | Commit | What it exposed |
+|---|---|---|
+| 58670004 | `67dfbb4e` | SmolLM2 baseline; NE/ACh/GABA dead (→ H64) |
+| 58673415 | `73dc8bb0` | anisotropic novelty, slow NT standardisation, missing telemetry |
+| 58676023 | `56464b37` | fixed ignition bar strict; self-recall of the last thought (memory input pinned at 1.0) |
+| 58678026 | `0c2650b9` | NT drivers shrunk by the variance prior (NE/ACh/GABA sd 0.002–0.005); adaptive θ stuck in warm-up (ignition 2/30); persona leakage on reply ticks |
+
+**Fixes for 58678026:**
+- (1) `DrivenNTSystem(driver_var_init="warmup")`, used by the runtime:
+  driver variance comes from the first samples instead of the 1.0
+  prior. Over a 12-tick run, ACh sd goes 0.005 → 0.015 on a uniform
+  [0.2, 0.8] driver (unit test, not a model measurement). Training
+  default unchanged.
+- (2) Adaptive ignition seeds μ_R with the system's first observed R;
+  tick 1 cannot ignite.
+- (3) Reply ticks carry an explicit first-person instruction before
+  "My reply:". DeepSeek recommends instructions in the user turn
+  rather than a system prompt for R1. There is also a BG prior
+  (1.5 nats) against third-person self-narration ("Brian's…").
+
+**Open design issue (not fixed, recorded):** LOOPING detection depends
+on memory writes. Novelty is measured against *stored* episodes, so
+when the workspace rarely ignites, repetitive thinking is never stored
+and never registers as repetitive. Reorienting is then muted. The
+`no_oscillator` arm of the confirmatory run quantifies this.
+
+**Freeze.** The commit carrying this entry is the confirmatory build.
+H64, H65 and H66 are scored on it exactly as registered above (H65 as
+re-registered after run 58673415; H66 as registered, with its seed
+deviation documented here). If any code change follows its data, the
+run is reclassified as development. Run command:
+
+    brian deploy-mind-eval --probes loop_escape,source_monitoring --n-items 5 --idle-ticks 40
+
+`--idle-ticks 40`: H65(c)'s lag-1 autocorrelation needs many
+ignitions per run, and 12 ticks gave 0–1.
+
+[EVIDENCE: tests/emergent/test_driven_nt.py::test_warmup_variance_init_lets_unit_scale_drivers_move_channels]
+[EVIDENCE: tests/cognition/test_workspace_oscillator.py::TestAdaptiveIgnition::test_baseline_is_seeded_from_the_first_observed_r]
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestConfirmatoryFreezeFixes]

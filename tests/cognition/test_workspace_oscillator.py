@@ -26,8 +26,10 @@ BASE_NT = {"ACh": 0.30, "GABA": 0.15}
 
 def _ws(**kw):
     from neuroslm.cognition.oscillator import GammaWorkspace
+    # locking physics against a FIXED bar; adaptive ignition (which
+    # habituates to a steady locked state) has its own contracts
     base = dict(n_per_module=40, f0_hz=40.0, f_sd_hz=4.0, noise=0.0,
-                ms_per_tick=1000, seed=0)
+                ms_per_tick=1000, seed=0, ignition_mode="fixed")
     base.update(kw)
     return GammaWorkspace(**base)
 
@@ -136,10 +138,17 @@ class TestAdaptiveIgnition:
         base.update(kw)
         return GammaWorkspace(**base)
 
-    def test_first_tick_uses_the_seeded_operating_point(self):
+    def test_baseline_is_seeded_from_the_first_observed_r(self):
+        """Run 58678026: seeding at the old bar (0.25) while R1's R sat
+        near 0.12 spent ~8-10 of each 12-tick run in a warm-up
+        transient (ignition 2/30). The baseline now starts at the
+        system's own first R; tick 1 cannot ignite."""
         ws = self._ws(ignition_threshold=0.25)
         out = ws.step(self.MOD, BASE_NT)
-        assert out.threshold == pytest.approx(0.25 + 1.0 * 0.05)
+        assert out.threshold == pytest.approx(
+            max(0.1, out.sync_r + 1.0 * 0.05))
+        assert not out.ignited
+        assert ws._r_mu == pytest.approx(out.sync_r)
 
     def test_steady_input_habituates(self):
         """Stationary input → the threshold settles just above the

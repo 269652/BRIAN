@@ -22,8 +22,10 @@ mean R over the last ``window_ms`` crossing a threshold:
     adaptive  R > θ_t = max(floor, μ_R + k·σ_R)   (default, H66)
 
 where μ_R, σ_R are an exponentially weighted mean/sd of the system's
-OWN recent R, updated after each decision and seeded at
-(ignition_threshold, 0.05). Ignition is a departure from ongoing
+OWN recent R, updated after each decision. μ_R is seeded with the
+FIRST observed R (σ₀ = 0.05), so tick 1 cannot ignite; run 58678026
+showed seeding at the old bar spent most of a 12-tick run in a
+warm-up transient. ``ignition_threshold`` is the fixed-mode bar. Ignition is a departure from ongoing
 activity, not an absolute level — run 58676023 showed the fixed bar
 (set from guessed activations) never crossed on R1-7B's idle ticks.
 The floor sits above the incoherent finite-size level (≈ ā/√N).
@@ -89,8 +91,9 @@ class GammaWorkspace:
         self.ignition_mode = ignition_mode
         self.ignition_floor = float(ignition_floor)
         self.adapt_k, self.adapt_alpha = float(adapt_k), float(adapt_alpha)
-        self._r_mu = float(ignition_threshold)
+        self._r_mu: float = float(ignition_threshold)
         self._r_var = 0.05 ** 2
+        self._r_seen = False
         self.n_per_module = int(n_per_module)
         self.N = self.n_per_module * len(MODULES)
         self.dt = float(dt_ms) / 1000.0
@@ -145,6 +148,8 @@ class GammaWorkspace:
             thr = self.ignition_threshold
             ignited = sync_r >= thr
         else:
+            if not self._r_seen:
+                self._r_mu, self._r_seen = sync_r, True
             thr = max(self.ignition_floor,
                       self._r_mu + self.adapt_k * math.sqrt(self._r_var))
             ignited = sync_r > thr

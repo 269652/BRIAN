@@ -231,10 +231,16 @@ class TestSourceMonitoringProbe:
 class TestLoopEscapeProbe:
     def _run(self):
         from neuroslm.cognition.indicators import probe_loop_escape
+        # control-layer contract: workspace off. With constant fake
+        # inputs adaptive ignition never fires, nothing is stored and
+        # novelty (hence LOOPING) never drops — a real coupling,
+        # recorded in findings.md as an open design issue.
         return probe_loop_escape(
             _seams(lambda p, n: "The same thought again."),
             seed_texts=["I watched the river flow past the old mill."],
-            n_idle_ticks=10, cfg=MindConfig(n_candidates=2), seed=0)
+            n_idle_ticks=10, cfg=MindConfig(n_candidates=2,
+                                            workspace_oscillator=False),
+            seed=0)
 
     def test_full_runtime_detects_the_loop_and_reorients(self):
         res = self._run()

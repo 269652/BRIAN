@@ -2217,3 +2217,53 @@ class TestWanderingDoesNotRecallItsOwnLastThought:
                       context={"kind": "inferred"})
         r = rt.tick()
         assert r.workspace_inputs["memory"] < 0.99
+
+
+
+class TestConfirmatoryFreezeFixes:
+    """Fixes from run 58678026, shipped before the confirmatory run."""
+
+    def test_runtime_nt_uses_warmup_variance_init(self):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        assert MindConfig().nt_driver_var_init == "warmup"
+        rt = CognitiveRuntime(generate_fn=_ScriptedGen(["x"]),
+                              score_fn=_score_map({}), embed_fn=_vec_for)
+        assert all(st.var_init == "warmup" for st in rt.nt._stats.values())
+
+    def test_respond_prompt_instructs_a_first_person_reply(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["I hear you."])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1))
+        rt.observe("the river was beautiful today")
+        rt.tick()
+        prompt = gen.prompts[-1]
+        assert rt.cfg.respond_instruction in prompt
+        assert prompt.index(rt.cfg.respond_instruction) < prompt.index(
+            "My reply:")
+
+    def test_wandering_prompt_has_no_reply_instruction(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["a wander"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1))
+        rt.tick()
+        assert rt.cfg.respond_instruction not in gen.prompts[-1]
+
+    def test_third_person_self_narration_loses_selection(self):
+        """Run 58678026: 'The passage reflects Brian's deep
+        contemplation…' — R1 analysed the persona instead of being it."""
+        from neuroslm.cognition.runtime import MindConfig
+        narr = "The passage reflects Brian's deep contemplation."
+        reply = "I loved watching it too."
+        gen = _ScriptedGen([narr, reply])
+        rt = _mk_runtime(gen, scores=_score_map({narr: 3.0, reply: 3.8}),
+                         cfg=MindConfig(n_candidates=2,
+                                        selection_temp_base=0.05))
+        rt.observe("the river was beautiful today")
+        assert rt.tick().thought == reply
+
+    def test_narration_detector(self):
+        from neuroslm.cognition.runtime import _is_self_narration
+        assert _is_self_narration("The passage reflects Brian's mood.")
+        assert _is_self_narration("So Brian continues this line of thinking")
+        assert not _is_self_narration("I think the river is calm.")
+        assert not _is_self_narration("Brian, look at this")  # address

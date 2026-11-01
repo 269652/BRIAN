@@ -308,3 +308,48 @@ def test_perturb_rejects_unknown_channel():
     nt = DrivenNTSystem()
     with pytest.raises(KeyError):
         nt.perturb("dopamine", 1.0)
+
+
+
+def test_warmup_variance_init_lets_unit_scale_drivers_move_channels():
+    """Run 58678026: NE/ACh/GABA per-run sd 0.002-0.005. Runtime drivers
+    live in [0,1]; the variance PRIOR of 1.0 shrank their z-scores
+    several-fold. 'warmup' init takes the variance from the first
+    samples instead, so a driver moves its channel at its own scale."""
+    import random as _r
+
+    def ach_sd(init):
+        nt = DrivenNTSystem(driver_alpha=0.1, driver_var_init=init)
+        rng = _r.Random(0)
+        levels = []
+        # 12 ticks = one eval run, where the bug showed (over long
+        # horizons even the prior's variance converges)
+        for _ in range(12):
+            nt.step_full(attn_entropy_norm=rng.uniform(0.2, 0.8))
+            levels.append(nt.levels()["ACh"])
+        m = sum(levels) / len(levels)
+        return (sum((x - m) ** 2 for x in levels) / len(levels)) ** 0.5
+
+    assert ach_sd("warmup") > 2 * ach_sd("prior")
+    assert ach_sd("warmup") > 0.01
+
+
+def test_prior_init_is_the_default_and_unchanged():
+    nt = DrivenNTSystem()
+    assert all(st.var_init == "prior" for st in nt._stats.values())
+
+
+def test_warmup_init_has_a_variance_floor():
+    """A constant warmup (e.g. no ignition yet) must not make the first
+    change an infinite z: the floor keeps it finite and the ±5 clamp
+    applies."""
+    nt = DrivenNTSystem(driver_alpha=0.1, driver_var_init="warmup")
+    for _ in range(6):
+        nt.step_full(ignition_rate=0.0)
+    nt.step_full(ignition_rate=1.0)
+    assert 0.15 < nt.levels()["GABA"] < 0.9
+
+
+def test_rejects_unknown_var_init():
+    with pytest.raises(ValueError):
+        DrivenNTSystem(driver_var_init="vibes")

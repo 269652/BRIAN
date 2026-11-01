@@ -97,17 +97,43 @@ class _RunningStats:
     During warmup (n < 5) returns z=0 so channels remain at their tonic
     baseline rather than being slammed by an ill-estimated mean.
     """
-    __slots__ = ("alpha", "mean", "var", "n")
+    __slots__ = ("alpha", "mean", "var", "n", "var_init", "_warm")
 
-    def __init__(self, alpha: float = 0.02):
+    _WARMUP = 5
+    # 'warmup' init: sd floor 0.1 — for [0,1]-bounded runtime drivers a
+    # 0.1 move is one sigma; keeps a constant warmup from making the
+    # first change an unbounded z (the ±5 clamp still applies).
+    _WARM_VAR_FLOOR = 0.01
+
+    def __init__(self, alpha: float = 0.02, var_init: str = "prior"):
+        if var_init not in ("prior", "warmup"):
+            raise ValueError(f"var_init {var_init!r}: expected 'prior' "
+                             f"or 'warmup'")
         self.alpha = float(alpha)
         self.mean = 0.0
         self.var = 1.0    # safe divisor for the first sample
         self.n = 0
+        self.var_init = var_init
+        self._warm: list = []
+
+    def _floor(self) -> float:
+        return self._WARM_VAR_FLOOR if self.var_init == "warmup" else 1e-8
 
     def update(self, x: float) -> float:
         x = float(x)
         self.n += 1
+        if self.var_init == "warmup" and self.n <= self._WARMUP:
+            # 'warmup': the first samples SET mean and variance (no
+            # unit-variance prior, which shrank [0,1] runtime drivers'
+            # z-scores several-fold — run 58678026).
+            self._warm.append(x)
+            if self.n < self._WARMUP:
+                return 0.0
+            m = sum(self._warm) / len(self._warm)
+            self.mean = m
+            self.var = sum((v - m) ** 2 for v in self._warm) / len(self._warm)
+            self._warm = []
+            return (x - self.mean) / math.sqrt(max(self.var, self._floor()))
         if self.n == 1:
             self.mean = x
             self.var = 1.0
@@ -118,7 +144,7 @@ class _RunningStats:
         self.var = (1.0 - self.alpha) * self.var + self.alpha * delta * (x - self.mean)
         if self.n < 5:
             return 0.0
-        sd = math.sqrt(max(self.var, 1e-8))
+        sd = math.sqrt(max(self.var, self._floor()))
         return (x - self.mean) / sd
 
     def peek(self, x: float) -> float:
@@ -135,7 +161,7 @@ class _RunningStats:
         x = float(x)
         if self.n < 5:
             return 0.0
-        sd = math.sqrt(max(self.var, 1e-8))
+        sd = math.sqrt(max(self.var, self._floor()))
         return (x - self.mean) / sd
 
 
@@ -198,6 +224,7 @@ class DrivenNTSystem(nn.Module):
                  alpha: Optional[Dict[str, float]] = None,
                  W: Optional[Dict[str, tuple]] = None,
                  driver_alpha: float = 0.005,
+                 driver_var_init: str = "prior",
                  trainable_W: bool = False,
                  # accepted for back-compat with previous signature; ignored.
                  taus: Optional[Dict[str, float]] = None,
@@ -233,7 +260,8 @@ class DrivenNTSystem(nn.Module):
 
         # One running standardiser per driver.
         self._stats: Dict[str, _RunningStats] = {
-            k: _RunningStats(alpha=driver_alpha) for k in _DRIVERS
+            k: _RunningStats(alpha=driver_alpha, var_init=driver_var_init)
+            for k in _DRIVERS
         }
 
         # Retained for API-introspection (not used in dynamics).
