@@ -48,8 +48,16 @@ def push_artifacts(repo_root, paths, message: Optional[str] = None,
         return {"pushed": False, "reason": "not a git repo"}
 
     paths = [str(p) for p in paths]
-    # keep only paths that exist (relative to root)
-    present = [p for p in paths if (root / p).exists()]
+    # keep only paths with something to commit: a file, or a directory
+    # holding at least one file. An EMPTY dir passed a plain exists()
+    # check and made `git commit -- <paths>` abort on its pathspec,
+    # taking every other artifact down with it (mind-eval boxes
+    # 58670004-58680199 never pushed a log because of this).
+    def _has_content(path: Path) -> bool:
+        return path.is_file() or (path.is_dir() and any(
+            q.is_file() for q in path.rglob("*")))
+
+    present = [p for p in paths if _has_content(root / p)]
     if not present:
         return {"pushed": False, "reason": "no artifacts present"}
 

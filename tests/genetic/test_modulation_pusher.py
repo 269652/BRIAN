@@ -50,7 +50,10 @@ class TestPush:
         (work / "modulations").mkdir()
         result = push_modulations(work, message="nothing")
         assert result["pushed"] is False
-        assert "no changes" in result["reason"]
+        # an EMPTY store has no artifacts at all (was reported as "no
+        # changes" before empty dirs were filtered out — see
+        # TestEmptyDirectoryAlongsideAFile)
+        assert "no artifacts" in result["reason"]
 
     def test_scopes_commit_to_modulations_only(self, tmp_path):
         bare = tmp_path / "remote.git"
@@ -88,6 +91,38 @@ class TestPushArtifacts:
         work = tmp_path / "work"
         _init_repo(work, bare)
         res = push_artifacts(work, ["nope", "also_nope"], message="x")
+        assert res["pushed"] is False
+        assert "no artifacts" in res["reason"]
+
+
+class TestEmptyDirectoryAlongsideAFile:
+    """Mind-eval boxes 58670004-58680199 never pushed: the pusher passes
+    results/mind_eval (an EMPTY dir until the report is written) with
+    the log file; the empty dir passed the exists() filter and `git
+    commit -- <paths>` aborted on its pathspec, taking the log down
+    with it (seen live: "pathspec 'results/mind_eval' did not match")."""
+
+    def test_empty_dir_does_not_block_the_other_artifacts(self, tmp_path):
+        from neuroslm.genetic.modulation_pusher import push_artifacts
+        bare = tmp_path / "remote.git"
+        work = tmp_path / "work"
+        _init_repo(work, bare)
+        (work / "results" / "mind_eval").mkdir(parents=True)
+        (work / "logs").mkdir()
+        (work / "logs" / "run.log").write_text("tick 1")
+        res = push_artifacts(work, ["results/mind_eval", "logs/run.log"],
+                             message="log")
+        assert res["pushed"] is True, res
+        log = _git(["log", "--oneline", "--name-only", "master"], bare).stdout
+        assert "logs/run.log" in log
+
+    def test_only_empty_dirs_is_a_clean_skip(self, tmp_path):
+        from neuroslm.genetic.modulation_pusher import push_artifacts
+        bare = tmp_path / "remote.git"
+        work = tmp_path / "work"
+        _init_repo(work, bare)
+        (work / "results" / "mind_eval").mkdir(parents=True)
+        res = push_artifacts(work, ["results/mind_eval"], message="x")
         assert res["pushed"] is False
         assert "no artifacts" in res["reason"]
 
