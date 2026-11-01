@@ -48,6 +48,7 @@ import json
 import os
 import re
 import subprocess
+import time
 import shutil
 import sys
 from pathlib import Path
@@ -2107,6 +2108,90 @@ def _print_log_file(path: Path) -> None:
     sys.stdout.flush()
 
 
+_FOLLOW_GAP = ("# [brian logs -f] --- gap: the log rolled past the fetch "
+               "window; earlier lines not shown ---")
+
+
+def _new_log_lines(prev: List[str], cur: List[str],
+                   anchor_len: int = 5) -> List[str]:
+    """Lines of tail snapshot ``cur`` not yet shown from ``prev``.
+
+    Aligns on prev's last lines EXCLUDING its final one (it may have
+    been mid-write); a re-fetched final line is only reprinted if it
+    changed. No overlap at all → a visible gap marker, never a silent
+    skip.
+    """
+    if not prev:
+        return list(cur)
+    if cur[:len(prev)] == prev:
+        return cur[len(prev):]
+    body = prev[:-1] if len(prev) > 1 else prev
+    anchor = body[-anchor_len:]
+    n = len(anchor)
+    for start in range(len(cur) - n, -1, -1):
+        if cur[start:start + n] == anchor:
+            new = cur[start + n:]
+            if new and len(prev) > 1 and new[0] == prev[-1]:
+                new = new[1:]
+            return new
+    return [_FOLLOW_GAP] + list(cur)
+
+
+def _fetch_vast_log(instance_id: str, tail: int = 2000) -> Tuple[int, str]:
+    """One container-log snapshot (stdout only — vast.sh's .env noise
+    goes to stderr)."""
+    r = subprocess.run(
+        [_bash(), "scripts/vast.sh", "logs", str(instance_id),
+         "--tail", str(tail)],
+        cwd=str(REPO_ROOT), capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    return r.returncode, r.stdout or ""
+
+
+def _console_print(line: str) -> None:
+    """print() that degrades unencodable characters (a cp1252 Windows
+    console can't show the log's '──'/'γ'/'Φ') instead of raising."""
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(line.encode(enc, errors="replace").decode(enc), flush=True)
+
+
+def _follow_logs(instance_id: str, interval: float = 10.0,
+                 pattern: Optional[str] = None, fetch=None,
+                 sleep=time.sleep, out=None, gone_after: int = 3) -> int:
+    """``brian logs <id> -f``: poll the container log and print only
+    new lines (optionally regex-filtered). Stops after ``gone_after``
+    consecutive empty/failed polls (instance finished or destroyed) or
+    on Ctrl-C."""
+    import re as _re
+    fetch = fetch or (lambda: _fetch_vast_log(instance_id))
+    out = out or _console_print
+    rx = _re.compile(pattern) if pattern else None
+    prev: List[str] = []
+    misses = 0
+    out(f"# following {instance_id} every {interval:g}s"
+        + (f", filter /{pattern}/" if pattern else "") + " — Ctrl-C to stop")
+    try:
+        while True:
+            rc, text = fetch()
+            cur = text.splitlines()
+            if rc != 0 or not cur:
+                misses += 1
+                if misses >= gone_after:
+                    out(f"# instance {instance_id} no longer returns logs "
+                        f"(finished or destroyed) — stopping")
+                    return 0
+            else:
+                misses = 0
+                for line in _new_log_lines(prev, cur):
+                    if rx is None or rx.search(line) or line == _FOLLOW_GAP:
+                        out(line)
+                prev = cur
+            sleep(interval)
+    except KeyboardInterrupt:
+        return 0
+
+
 def cmd_logs(args: argparse.Namespace) -> int:
     """Show training logs for a vast.ai instance.
 
@@ -2143,6 +2228,10 @@ def cmd_logs(args: argparse.Namespace) -> int:
         print("brian logs: pass an instance id (e.g. `brian logs 40952126`) "
               "or use `--latest` to view the newest log in logs/vast/.")
         return 1
+
+    if getattr(args, "follow", False):
+        return _follow_logs(str(args.instance_id), args.interval,
+                            args.filter)
 
     # Mode 2a: try live container first
     env = os.environ.copy()
@@ -5995,6 +6084,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "                       Runs `git fetch && git pull` once if the\n"
             "                       local file is missing (maybe a sibling\n"
             "                       workstation already pushed it).\n"
+            "  brian logs <id> -f   Follow: poll every --interval seconds,\n"
+            "                       print only new lines (--filter REGEX);\n"
+            "                       stops when the instance is gone.\n"
             "  brian logs --latest  Print the newest .log in logs/vast/ by\n"
             "                       mtime. Strictly local, no vast API call.\n"
             "                       Useful when the last instance was just\n"
@@ -6007,6 +6099,13 @@ def _build_parser() -> argparse.ArgumentParser:
     sl.add_argument("--latest", action="store_true",
                     help="show the newest .log in logs/vast/ by mtime "
                          "(strictly local — no vast API call)")
+    sl.add_argument("-f", "--follow", action="store_true",
+                    help="keep polling the live container log and print "
+                         "only new lines until the instance is gone")
+    sl.add_argument("--interval", type=float, default=10.0,
+                    help="seconds between polls in --follow mode")
+    sl.add_argument("--filter", default=None, metavar="REGEX",
+                    help="--follow: print only new lines matching REGEX")
     sl.set_defaults(func=cmd_logs)
 
     # status

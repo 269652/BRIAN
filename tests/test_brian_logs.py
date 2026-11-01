@@ -352,3 +352,118 @@ class TestLogsHelpText:
             parser.parse_args(["logs", "--help"])
         out = capsys.readouterr().out
         assert "--latest" in out
+
+
+# ── brian logs <id> -f — follow mode ─────────────────────────────────
+
+class TestNewLogLines:
+    """Which lines of a fresh tail snapshot are new since the last."""
+
+    def test_first_snapshot_is_all_new(self):
+        from neuroslm.cli import _new_log_lines
+        assert _new_log_lines([], ["a", "b"]) == ["a", "b"]
+
+    def test_growing_log_yields_only_the_tail(self):
+        from neuroslm.cli import _new_log_lines
+        assert _new_log_lines(["a", "b"], ["a", "b", "c", "d"]) == ["c", "d"]
+
+    def test_identical_snapshot_yields_nothing(self):
+        from neuroslm.cli import _new_log_lines
+        assert _new_log_lines(["a", "b"], ["a", "b"]) == []
+
+    def test_rolled_tail_window(self):
+        from neuroslm.cli import _new_log_lines
+        prev = [f"l{i}" for i in range(1, 31)]
+        cur = [f"l{i}" for i in range(11, 36)]
+        assert _new_log_lines(prev, cur) == [f"l{i}" for i in range(31, 36)]
+
+    def test_partially_written_last_line_is_reprinted_complete(self):
+        from neuroslm.cli import _new_log_lines
+        assert _new_log_lines(["a", "b", "par"],
+                              ["a", "b", "partial done", "c"]) \
+            == ["partial done", "c"]
+
+    def test_no_overlap_marks_the_gap(self):
+        from neuroslm.cli import _new_log_lines
+        out = _new_log_lines(["x1", "x2", "x3"], ["y1", "y2"])
+        assert "gap" in out[0].lower()
+        assert out[1:] == ["y1", "y2"]
+
+
+class TestFollowLogs:
+    def _drive(self, snapshots, pattern=None):
+        from neuroslm.cli import _follow_logs
+        it = iter(snapshots)
+        printed, sleeps = [], []
+        rc = _follow_logs("42", interval=5, pattern=pattern,
+                          fetch=lambda: next(it), sleep=sleeps.append,
+                          out=printed.append)
+        return rc, printed, sleeps
+
+    def test_prints_each_line_once_and_stops_when_instance_is_gone(self):
+        rc, printed, sleeps = self._drive([
+            (0, "a\nb"), (0, "a\nb\nc"), (0, "a\nb\nc"),
+            (1, ""), (0, ""), (1, "")])
+        assert rc == 0
+        body = [l for l in printed if not l.startswith("#")]
+        assert body == ["a", "b", "c"]
+        assert "no longer" in printed[-1]
+        assert sleeps and all(s == 5 for s in sleeps)
+
+    def test_a_transient_miss_does_not_stop_or_reprint(self):
+        rc, printed, _ = self._drive([
+            (0, "a"), (1, ""), (0, "a\nb"), (1, ""), (1, ""), (1, "")])
+        assert [l for l in printed if not l.startswith("#")] == ["a", "b"]
+
+    def test_filter_applies_to_new_lines(self):
+        _, printed, _ = self._drive(
+            [(0, "WS[R=0.3]\nnoise\nWS[R=0.1]"), (1, ""), (1, ""), (1, "")],
+            pattern=r"WS\[")
+        assert [l for l in printed if not l.startswith("#")] == \
+            ["WS[R=0.3]", "WS[R=0.1]"]
+
+    def test_default_output_survives_a_cp1252_console(self, monkeypatch):
+        """Live smoke on Windows: the log's '──', 'γ', 'Φ' crashed
+        print() on a cp1252 console. Unencodable chars degrade, the
+        follow loop keeps running."""
+        import io
+        from neuroslm.cli import _follow_logs
+        buf = io.BytesIO()
+        monkeypatch.setattr(sys, "stdout",
+                            io.TextIOWrapper(buf, encoding="cp1252"))
+        snaps = iter([(0, "── WS[R=0.3 γ=0.8] Φ"), (1, ""), (1, ""), (1, "")])
+        assert _follow_logs("42", interval=0, fetch=lambda: next(snaps),
+                            sleep=lambda s: None) == 0
+        sys.stdout.flush()
+        assert b"WS[R=0.3" in buf.getvalue()
+
+    def test_ctrl_c_exits_cleanly(self):
+        from neuroslm.cli import _follow_logs
+
+        def _interrupt(_):
+            raise KeyboardInterrupt
+        assert _follow_logs("42", interval=1, fetch=lambda: (0, "a"),
+                            sleep=_interrupt, out=lambda s: None) == 0
+
+
+class TestFollowCli:
+    def test_flags_parse(self):
+        from neuroslm.cli import _build_parser
+        a = _build_parser().parse_args(["logs", "123", "-f"])
+        assert a.follow is True and a.interval == 10.0 and a.filter is None
+        a = _build_parser().parse_args(
+            ["logs", "123", "--follow", "--interval", "3", "--filter", "WS"])
+        assert a.interval == 3.0 and a.filter == "WS"
+
+    def test_follow_dispatches_without_a_one_shot_dump(self, monkeypatch):
+        import neuroslm.cli as cli
+        calls = []
+        monkeypatch.setattr(cli, "_follow_logs",
+                            lambda iid, interval, pattern: calls.append(
+                                (iid, interval, pattern)) or 0)
+        monkeypatch.setattr(cli, "_run", lambda *a, **k: pytest.fail(
+            "follow mode must not run the one-shot dump"))
+        a = cli._build_parser().parse_args(["logs", "123", "-f",
+                                            "--filter", "WS"])
+        assert a.func(a) == 0
+        assert calls == [("123", 10.0, "WS")]
