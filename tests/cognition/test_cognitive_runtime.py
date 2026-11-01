@@ -1960,5 +1960,115 @@ class TestDeepSeekDefaultTrunk:
         """transformers 4.x defaults to fp32 — a 7B model would double
         its VRAM and halve throughput on the A100."""
         from neuroslm.cognition.runtime import _hf_load_kwargs
-        assert _hf_load_kwargs("cuda") == {"torch_dtype": "auto"}
+        # `dtype`, not `torch_dtype`: run 58673415 (transformers 4.57)
+        # logged "`torch_dtype` is deprecated! Use `dtype` instead!"
+        assert _hf_load_kwargs("cuda") == {"dtype": "auto"}
         assert _hf_load_kwargs("cpu") == {}
+
+
+
+# ── Fixes from live run 58673415 (R1-7B + oscillator) ───────────────
+
+class TestEmbeddingsAreMeanCentred:
+    """Run 58673415: 16/16 ticks 'think' — tick 2 ignited yet was not
+    stored, so the novelty gate rejected a math thought against river
+    memories. Mean-pooled INPUT embeddings share a large common
+    component (anisotropy), so raw cosines between unrelated texts sit
+    high and the absolute 0.3 novelty threshold stops transferring
+    across trunks. Fix: subtract the embedding-table mean (the
+    standard anisotropy correction). Unverified on R1 until the next
+    run — this pins the math only."""
+
+    def test_embed_is_mean_pooled_rows_minus_table_mean(self):
+        import torch
+        from neuroslm.cognition.runtime import build_hf_seams
+        model = _FakeHFModelWithGenerate()
+        seams = build_hf_seams("fake/expert", model_factory=lambda: model,
+                               tokenizer_factory=_FakeHFTokenizer)
+        tok = _FakeHFTokenizer()
+        ids = tok.encode("alpha beta")
+        table = model._emb
+        expected = table[torch.tensor(ids)].mean(0) - table.mean(0)
+        got = torch.tensor(seams.embed_fn("alpha beta"))
+        assert torch.allclose(got, expected, atol=1e-5)
+
+    def test_the_common_component_no_longer_dominates_cosine(self):
+        """A table whose rows share a big common offset: raw mean-pooled
+        vectors of disjoint token sets have cos≈1; centred ones don't."""
+        import torch
+        from neuroslm.cognition.runtime import build_hf_seams
+        model = _FakeHFModelWithGenerate()
+        g = torch.Generator().manual_seed(0)
+        model._emb = torch.randn(32, 4, generator=g) + 50.0
+
+        class _Tok(_FakeHFTokenizer):
+            def encode(self, text):
+                return [1, 2, 3] if text == "a" else [20, 21, 22]
+        seams = build_hf_seams("fake/expert", model_factory=lambda: model,
+                               tokenizer_factory=_Tok)
+        cos = torch.nn.functional.cosine_similarity
+        raw = cos(model._emb[[1, 2, 3]].mean(0),
+                  model._emb[[20, 21, 22]].mean(0), dim=0)
+        cen = cos(torch.tensor(seams.embed_fn("a")),
+                  torch.tensor(seams.embed_fn("b")), dim=0)
+        assert raw > 0.99
+        assert cen < 0.9
+
+
+class TestNTStandardisesOnTheRuntimeTimescale:
+    """Run 58673415: DA 0.15→0.05, GABA 0.15→0.10 — monotone within
+    each run. DrivenNTSystem's driver z-scores use driver_alpha=0.005
+    (~200-step memory, tuned for training steps); over a dozen ticks
+    the running mean stays pinned at the FIRST sample, so one early
+    ignition reads as 'normal' forever and every later tick is a
+    persistent negative z."""
+
+    def test_runtime_builds_its_nt_with_the_config_alpha(self):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        rt = CognitiveRuntime(generate_fn=_ScriptedGen(["x"]),
+                              score_fn=_score_map({}), embed_fn=_vec_for,
+                              cfg=MindConfig(nt_driver_alpha=0.1))
+        assert all(st.alpha == 0.1 for st in rt.nt._stats.values())
+        assert MindConfig().nt_driver_alpha >= 0.05
+
+    def test_a_single_early_ignition_does_not_shift_gaba_for_good(self):
+        from neuroslm.emergent.driven_nt import DrivenNTSystem
+
+        def run(alpha):
+            nt = DrivenNTSystem(driver_alpha=alpha)
+            nt.step_full(ignition_rate=1.0)
+            for _ in range(40):
+                nt.step_full(ignition_rate=0.0)
+            return abs(nt.levels()["GABA"] - 0.15)
+        assert run(0.005) > 0.02, "slow stats: the first sample sticks"
+        assert run(0.1) < run(0.005) / 3
+
+
+class TestTraceExplainsTheGates:
+    """Run 58673415's trace could not say WHY a thought stayed 'think'
+    — novelty and the workspace inputs were never logged."""
+
+    def test_trace_shows_novelty_boredom_and_workspace_inputs(self):
+        from neuroslm.cognition.runtime import MindConfig, format_debug_trace
+        rt = _mk_runtime(_ScriptedGen(["thinking about the river"]),
+                         cfg=MindConfig(n_candidates=2))
+        r = rt.tick()
+        assert set(r.workspace_inputs) == {"sensory", "memory", "language",
+                                           "selection", "novelty"}
+        text = format_debug_trace(r)
+        assert "CUR[nov=" in text and "bore=" in text
+        assert "in[s=" in text, "WS line carries the module activations"
+
+
+class TestGenerateHasAnAttentionMask:
+    """Run 58673415: 'The attention mask is not set ... pad token is
+    same as eos token' (R1: pad == eos)."""
+
+    def test_generate_receives_an_all_ones_mask(self):
+        from neuroslm.cognition.runtime import build_hf_seams
+        model = _FakeHFModelWithGenerate()
+        seams = build_hf_seams("fake/expert", model_factory=lambda: model,
+                               tokenizer_factory=_FakeChatTokenizer)
+        seams.generate_fn("hello", 3)
+        mask = model.generate_calls[-1].get("attention_mask")
+        assert mask is not None and bool(mask.all())

@@ -4138,3 +4138,47 @@ an oscillator, and §14.13's "second-order dynamics" claim is withdrawn.
 [EVIDENCE: tests/cognition/test_workspace_oscillator.py (12 — Kuramoto K_c limit, gamma peak, ACh/GABA modulation, global-ignition normalisation, determinism)]
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestOscillatoryWorkspace]
 [EVIDENCE: tests/cognition/test_indicator_eval.py::TestOscillationMetrics]
+
+### Run 58673415 — first R1-7B + oscillator run: partial, bugs found, H64/H65 re-registered (2026-11-01)
+
+**Run.** vast.ai `58673415`, A100 SXM4, $0.88/hr, commit `73dc8bb0`,
+`deploy-mind-eval --probes loop_escape,source_monitoring,perturbational_complexity --n-items 5`,
+trunk DeepSeek-R1-Distill-Qwen-7B. Stopped during `loop_escape/full`
+after ~16 ticks (no summaries). Log:
+`logs/mind_eval/20261101_58673415_container.log` (local capture).
+
+**Observed (descriptive only, n too small to score anything):**
+- 16/16 ticks `action=think`: nothing stored or spoken. Tick 2
+  *ignited* (R = 0.26) and was still not stored, so the novelty gate
+  rejected a math thought against river memories.
+- Recall frozen on the same two seed episodes every tick (memory
+  never grew).
+- NE, ACh, GABA now move (H64's bug is gone), but every channel
+  drifts monotonically within a run (DA 0.15→0.05, GABA 0.15→0.10).
+- Ignition 1 of the first 8 ticks (R 0.05–0.26).
+- R1's mind-wandering drifts into math problem-solving
+  ("differential equations", "Lyapunov functions"). This is a trunk
+  prior, not addressed here.
+
+**Bugs fixed (commit after `0c89dbf9`):**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| novelty gate rejects everything | mean-pooled input embeddings are anisotropic; the absolute 0.3 threshold stops transferring across trunks (**hypothesis, not measured**: no local GPU) | embeddings mean-centred against the embedding-table mean (`_mean_centred_embed_fn`) |
+| monotone NT drift | `DrivenNTSystem` z-scores with `driver_alpha=0.005` (training timescale); over a dozen ticks the mean stays at the first sample | runtime NT uses `MindConfig.nt_driver_alpha = 0.1` |
+| trace can't show which gate blocked | novelty and workspace inputs not logged | `CUR[nov bore]` line; `WS[… in[s m l b n]]` |
+| `torch_dtype is deprecated` | transformers 4.57 | `dtype="auto"` |
+| attention-mask warning | R1 pad == eos | explicit all-ones mask |
+
+**Deviation from pre-registration (stated so it can be audited).**
+H64 and H65 were registered against `73dc8bb0`. The NT-timescale fix
+changes the feedback loop H65(c) tests, and centring changes the
+novelty and memory activations the workspace sees. Both changes were
+made *after* seeing run 58673415. H64 and H65 are therefore
+**re-registered unchanged (same predictions, same falsification
+criteria) against the fixed commit**. The workspace operating point
+(K = 2.0 K_c, θ = 0.25) was deliberately **not** retuned on this data.
+The anisotropy explanation is confirmed only if the next run's
+`CUR[nov=…]` values spread across 0–1 and `speak` ticks appear.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestEmbeddingsAreMeanCentred, TestNTStandardisesOnTheRuntimeTimescale, TestTraceExplainsTheGates, TestGenerateHasAnAttentionMask]

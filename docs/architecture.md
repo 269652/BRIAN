@@ -3790,3 +3790,11 @@ channels.
 `deploy-mind`, `eval mind` and `deploy-mind-eval`. Use
 `deepseek_r1_qwen_1_5b` on CPU. GPU loads use the checkpoint dtype
 (bf16). The mind connectors default `VAST_DISK` to 60 GB.
+
+**Fixes after run 58673415** (details: findings.md): episodic and
+novelty embeddings are **mean-centred** against the trunk's
+embedding-table mean (anisotropy correction, so the absolute novelty
+threshold means the same thing across trunks). The runtime's NT
+z-scores its drivers at `MindConfig.nt_driver_alpha = 0.1`, the tick
+timescale rather than the training timescale. The debug trace shows
+`CUR[nov bore]` and the workspace's module inputs `WS[… in[s m l b n]]`.

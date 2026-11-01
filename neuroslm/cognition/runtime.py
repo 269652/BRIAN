@@ -53,7 +53,9 @@ visible <think> trace and is the default for every mind entry point
 def _hf_load_kwargs(device: str) -> dict:
     """GPU: load in the checkpoint's dtype (bf16 for R1) — transformers
     4.x otherwise defaults to fp32. CPU: fp32 (bf16 matmuls are slow)."""
-    return {} if str(device) == "cpu" else {"torch_dtype": "auto"}
+    return {} if str(device) == "cpu" else {"dtype": "auto"}
+
+
 EmbedFn = Callable[[str], Sequence[float]]
 
 
@@ -231,6 +233,12 @@ class MindConfig:
     max_prompt_chars: int = 1200
     """Hard cap on the composed thinking prompt (CPU latency guard)."""
 
+    nt_driver_alpha: float = 0.1
+    """EMA rate of the default DrivenNTSystem's driver z-scoring. Its
+    own default (0.005, ~200 steps) suits training; over a dozen ticks
+    it pins the running mean at the FIRST sample, so one early event
+    shifts a channel for good (run 58673415: DA 0.15→0.05)."""
+
     workspace_oscillator: bool = True
     """§14.13 oscillatory global workspace: a Kuramoto gamma-band phase
     model over the runtime's modules decides whether the selected
@@ -330,6 +338,9 @@ class TickResult:
     sync_r: Optional[float] = None
     """Global Kuramoto order parameter R over the ignition window."""
     gamma_peak_hz: Optional[float] = None
+    workspace_inputs: Optional[Dict[str, float]] = None
+    """Module activations fed to the workspace this tick (sensory,
+    memory, language, selection, novelty)."""
     gamma_power: Optional[float] = None
     """Fraction of the population signal's power in 30-100 Hz."""
     reasoning: Optional[str] = None
@@ -403,11 +414,19 @@ def format_debug_trace(result: TickResult) -> str:
     lines.append("  NT[" + " ".join(
         f"{k}={float(nt.get(k, 0.0)):.2f}" for k in _NT_ORDER) + "]")
 
+    if result.candidates and not result.inhibited:
+        lines.append(f"  CUR[nov={result.novelty:.2f} "
+                     f"bore={result.boredom:.2f}]")
     if result.sync_r is not None:
+        wi = result.workspace_inputs or {}
+        ins = " ".join(f"{k[0]}={wi.get(k, 0.0):.2f}" for k in
+                       ("sensory", "memory", "language", "selection",
+                        "novelty"))
         lines.append(
             f"  WS[R={result.sync_r:.2f} "
             f"ignited={'yes' if result.ignited else 'no'} "
-            f"{result.gamma_peak_hz:.0f}Hz γ={result.gamma_power:.2f}]")
+            f"{result.gamma_peak_hz:.0f}Hz γ={result.gamma_power:.2f} "
+            f"in[{ins}]]")
 
     if result.inhibited:
         lines.append("  BG: inhibited — no deliberation this tick "
@@ -528,9 +547,10 @@ class CognitiveRuntime:
                  generate_wander_fn: Optional[GenerateFn] = None,
                  reasoning_fn: Optional[Callable[[], Optional[str]]] = None,
                  ) -> None:
+        cfg = cfg or MindConfig()
         if nt is None:
             from neuroslm.emergent.driven_nt import DrivenNTSystem
-            nt = DrivenNTSystem()
+            nt = DrivenNTSystem(driver_alpha=cfg.nt_driver_alpha)
         self._gen = generate_fn
         # Inner-speech register (D of the curiosity loop): DMN ticks
         # generate through this seam — raw completion, no chat
@@ -547,7 +567,7 @@ class CognitiveRuntime:
         self._classify = classify_fn
         self.nt = nt
         self.memory = memory if memory is not None else EpisodicMemory(512)
-        self.cfg = cfg or MindConfig()
+        self.cfg = cfg
         self.rng = rng or _random.Random(0)
         self._sensory: Deque[str] = deque(maxlen=32)
         self._last_thought: Optional[str] = None
@@ -805,15 +825,16 @@ class CognitiveRuntime:
         # internal (think) — one signal, two consequences.
         # WORKSPACE (§14.13): the selected thought is broadcast only if
         # the module oscillators phase-lock globally this tick.
+        ws_inputs = {
+            "sensory": 1.0 if sensory else 0.0,
+            "memory": recall_strength,
+            "language": 1.0 - sc.entropy_norm,
+            "selection": 1.0 - selection_entropy,
+            "novelty": novelty,
+        }
         osc = None
         if self._osc is not None:
-            osc = self._osc.step({
-                "sensory": 1.0 if sensory else 0.0,
-                "memory": recall_strength,
-                "language": 1.0 - sc.entropy_norm,
-                "selection": 1.0 - selection_entropy,
-                "novelty": novelty,
-            }, levels)
+            osc = self._osc.step(ws_inputs, levels)
         stored = (novelty >= self.cfg.novelty_write_threshold
                   and (osc is None or osc.ignited))
         if not wandering:
@@ -902,7 +923,8 @@ class CognitiveRuntime:
                           ignited=osc.ignited if osc else None,
                           sync_r=osc.sync_r if osc else None,
                           gamma_peak_hz=osc.peak_hz if osc else None,
-                          gamma_power=osc.gamma_power if osc else None)
+                          gamma_power=osc.gamma_power if osc else None,
+                          workspace_inputs=ws_inputs)
 
     # ── Internals ────────────────────────────────────────────────────
 
@@ -1023,6 +1045,30 @@ class CognitiveRuntime:
 
 # ── Production wiring ────────────────────────────────────────────────
 
+def _mean_centred_embed_fn(embed_table: Any, tokenizer: Any,
+                           device: str) -> EmbedFn:
+    """Mean-pooled token embedding MINUS the embedding-table mean.
+
+    Input embeddings share a large common component (anisotropy), so
+    raw mean-pooled cosines between unrelated texts sit high and an
+    absolute novelty threshold stops meaning the same thing across
+    trunks (run 58673415, R1-7B: 16/16 ticks failed the 0.3 novelty
+    gate). Removing the common mean is the standard correction
+    (Mu & Viswanath 2018, "All-but-the-Top")."""
+    import torch
+
+    table_mean = embed_table.detach().float().mean(dim=0)
+
+    @torch.no_grad()
+    def embed_fn(text: str) -> Sequence[float]:
+        ids = tokenizer.encode(text or " ") or [0]
+        rows = embed_table[torch.tensor(ids, dtype=torch.long,
+                                        device=device)]
+        return (rows.float().mean(dim=0) - table_mean).cpu().tolist()
+
+    return embed_fn
+
+
 def build_runtime_from_harness(harness: Any, tokenizer: Any,
                                device: str = "cpu",
                                cfg: Optional[MindConfig] = None,
@@ -1072,12 +1118,7 @@ def build_runtime_from_harness(harness: Any, tokenizer: Any,
         ent = float(-(lp.exp() * lp).sum(-1).mean()) / math.log(V)
         return ThoughtScore(mean_nll=nll, entropy_norm=ent)
 
-    @torch.no_grad()
-    def embed_fn(text: str) -> Sequence[float]:
-        ids = tokenizer.encode(text or " ") or [0]
-        rows = embed_table[torch.tensor(ids, dtype=torch.long,
-                                        device=device)]
-        return rows.float().mean(dim=0).cpu().tolist()
+    embed_fn = _mean_centred_embed_fn(embed_table, tokenizer, device)
 
     # The mind classifies with its OWN trunk — reuses the SAME
     # generate_fn closure THINK uses (one model, two jobs), never the
@@ -1217,6 +1258,9 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
                 x = torch.tensor([ids], dtype=torch.long, device=device)
                 gen_kwargs = dict(
                     input_ids=x,
+                    # single unpadded sequence; explicit because R1's
+                    # pad token == eos (run 58673415 warning)
+                    attention_mask=torch.ones_like(x),
                     max_new_tokens=int(n),
                     do_sample=True,
                     temperature=float(max(temperature, 1e-6)),
@@ -1305,12 +1349,7 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
         ent = float(-(lp.exp() * lp).sum(-1).mean()) / math.log(V)
         return ThoughtScore(mean_nll=nll, entropy_norm=ent)
 
-    @torch.no_grad()
-    def embed_fn(text: str) -> Sequence[float]:
-        ids = tokenizer.encode(text or " ") or [0]
-        rows = embed_table[torch.tensor(ids, dtype=torch.long,
-                                        device=device)]
-        return rows.float().mean(dim=0).cpu().tolist()
+    embed_fn = _mean_centred_embed_fn(embed_table, tokenizer, device)
 
     # The mind classifies with its OWN trunk/expert — reuses the SAME
     # generate_fn closure THINK uses (one model, two jobs), never the
