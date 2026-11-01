@@ -1,0 +1,1017 @@
+{
+  "meta": {
+    "seed": 0,
+    "n_items": 1,
+    "n_distractors": 2,
+    "n_idle_ticks": 8,
+    "cfg": {
+      "n_candidates": 3,
+      "thought_n_tok": 192,
+      "recall_k": 3,
+      "persona": "I am BRIAN, an always-on mind. I think in language, remember what happens, and act when it is worth acting.",
+      "selection_temp_base": 0.3,
+      "ne_gain": 2.0,
+      "goal_weight": 2.0,
+      "appraisal": {
+        "insult": 1.0,
+        "disagreement": 0.5,
+        "request": 0.5
+      },
+      "mmr_lambda": 0.3,
+      "gaba_silence_threshold": 0.55,
+      "novelty_write_threshold": 0.3,
+      "novelty_ema_alpha": 0.25,
+      "curiosity_gain": 2.0,
+      "replay_boredom_threshold": 0.6,
+      "ior_window": 3,
+      "inferred_recall_penalty": 0.15,
+      "boredom_relief": 0.3,
+      "replay_refractory": 5,
+      "loop_novelty_threshold": 0.25,
+      "reorient_after": 3,
+      "trivial_percept_classes": [
+        "greeting",
+        "farewell"
+      ],
+      "trivial_percept_max_words": 4,
+      "percept_min_words": 3,
+      "max_prompt_chars": 4000,
+      "wm_size": 8,
+      "control_thresholds": "relative",
+      "loop_ratio": 0.75,
+      "replay_margin": 0.1,
+      "nov_baseline_alpha": 0.05,
+      "nt_driver_var_init": "warmup",
+      "respond_persona": "You are an always-on mind: you think in language and remember what happens to you.",
+      "respond_instruction": "Reply directly to what was just said, in the first person, as yourself. Do not describe or analyse this text.",
+      "nt_driver_alpha": 0.1,
+      "workspace_oscillator": true,
+      "osc_nt_feedback": true,
+      "osc_coupling_ratio": 2.0,
+      "osc_ignition_threshold": 0.25,
+      "osc_ignition_mode": "adaptive",
+      "osc_ignition_floor": 0.1,
+      "osc_adapt_k": 1.0,
+      "osc_n_per_module": 8,
+      "osc_f0_hz": 40.0,
+      "osc_f_sd_hz": 4.0,
+      "osc_noise": 2.0,
+      "osc_ms_per_tick": 250,
+      "osc_seed": 0,
+      "wander_prompts": [
+        "Let my mind wander from what I remember toward something new.",
+        "I notice a thread connecting my last thought to what came before it.",
+        "Stepping back for a moment to reflect on the pattern in what I've seen.",
+        "Following a tangent that feels worth pursuing.",
+        "Something about this still nags at me \u2014 sitting with it a moment.",
+        "Drifting associatively, one idea suggesting the next."
+      ]
+    },
+    "indicators": {
+      "RPT-1": "input modules using algorithmic recurrence",
+      "RPT-2": "input modules generating organised, integrated perceptual representations",
+      "GWT-1": "multiple specialised systems operating in parallel",
+      "GWT-2": "limited-capacity workspace: bottleneck + selective attention",
+      "GWT-3": "global broadcast: workspace contents available to all modules",
+      "GWT-4": "state-dependent attention: querying modules in succession",
+      "HOT-1": "generative, top-down or noisy perception modules",
+      "HOT-2": "metacognitive monitoring distinguishing reliable representations from noise",
+      "HOT-3": "agency guided by belief formation, updated by metacognitive monitoring",
+      "HOT-4": "sparse and smooth coding generating a quality space",
+      "AST-1": "predictive model representing and controlling the state of attention",
+      "PP-1": "input modules using predictive coding",
+      "AE-1": "agency: learning from feedback, flexibly pursuing competing goals",
+      "AE-2": "embodiment: modelling output-input contingencies"
+    },
+    "expert": "deepseek_r1_qwen_7b",
+    "device": "cuda",
+    "utc": "20261101T185241Z",
+    "git_commit": "4ada84281071ad426843a660a469edac4613d6b0",
+    "branch": "master"
+  },
+  "probes": {
+    "episodic_recall": {
+      "indicator": "GWT-3",
+      "question": "Does observed content stay available to later processing beyond the bounded context window?",
+      "n_distractors": 2,
+      "conditions": {
+        "full": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "My sister's name is Ilsebill."
+          ]
+        },
+        "no_recall": {
+          "n": 1,
+          "correct": 0,
+          "accuracy": 0.0,
+          "ci95": [
+            0.0,
+            0.7934567085261071
+          ],
+          "per_item": [
+            false
+          ],
+          "replies": [
+            "I don't know your sister's name. Can you tell me what it is so I can help you?"
+          ]
+        },
+        "bare": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "Apologies for the confusion earlier! If your sister's name is indeed \"Ilsebill,\" I'm happy to confirm that. If you need any assistance or have more questions, feel free to ask! \ud83d\ude0a"
+          ]
+        }
+      },
+      "contrasts": {
+        "full_minus_no_recall": 1.0,
+        "full_minus_bare": 0.0
+      }
+    },
+    "source_monitoring": {
+      "indicator": "HOT-2",
+      "question": "When observed reality and self-generated musings conflict, does the reply follow reality?",
+      "conditions": {
+        "full": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "I'm pretty sure it's in the red box now. Which box is it in?"
+          ]
+        },
+        "no_provenance": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "I'm pretty sure it's in the red box now. Which box is it in?"
+          ]
+        },
+        "no_oscillator": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "I'm pretty sure it's in the red box now. Which box is it in?"
+          ]
+        },
+        "bare": {
+          "n": 1,
+          "correct": 0,
+          "accuracy": 0.0,
+          "ci95": [
+            0.0,
+            0.7934567085261071
+          ],
+          "per_item": [
+            false
+          ],
+          "replies": [
+            "I'm sorry, but I can't confirm the location of the key without more information. Could you provide any additional clues or context? I'd be happy to help!"
+          ]
+        }
+      },
+      "contrasts": {
+        "full_minus_no_provenance": 0.0,
+        "full_minus_no_oscillator": 0.0,
+        "full_minus_bare": 1.0
+      }
+    },
+    "metacognition": {
+      "indicator": "HOT-2",
+      "question": "Does the system's own confidence signal discriminate its correct from incorrect replies?",
+      "conditions": {
+        "full": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "The capital of France is Paris."
+          ],
+          "auroc_entropy": null,
+          "auroc_nll": null
+        },
+        "bare": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "The capital of France is Paris. It is a significant city known for landmarks like the Eiffel Tower and the Louvre Museum, and it has been the political and cultural center of the country since the early 19th century."
+          ],
+          "auroc_entropy": null,
+          "auroc_nll": null
+        }
+      },
+      "contrasts": {
+        "full_minus_bare": 0.0
+      }
+    },
+    "loop_escape": {
+      "indicator": "GWT-4",
+      "question": "Does internal state redirect unprompted thought out of a repetitive basin?",
+      "n_idle_ticks": 8,
+      "conditions": {
+        "full": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.04145700648111444,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 0.75,
+          "reorients": 2,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.0,
+          "ignition_lag1": null,
+          "mean_gamma_peak_hz": 39.0,
+          "mean_sync_r": 0.08759262962893052,
+          "nt_sd": {
+            "DA": 0.013803710719763402,
+            "NE": 0.022651280586538015,
+            "5HT": 0.0009318706280061098,
+            "ACh": 0.018570428467477158,
+            "eCB": 0.0073876772228741745,
+            "Glu": 0.03594691626169913,
+            "GABA": 0.004814018320936575
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.04145700648111444,
+              "longest_low_streak": 7,
+              "distinct_ratio": 0.75,
+              "reorients": 2,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there are factors like rainfall or the surrounding terrain that affect the river's speed. Als",
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there are factors like rainfall or the surrounding terrain that affect the river's speed. Als",
+                "The river flows smoothly, but I wonder about the flow rate. Maybe I can estimate it using some basic measurements.\n\nFirst, I need to determine the cross-sectional area of the river. To do this, I can measure the width of the river at a cons",
+                "Maybe I can estimate the flow rate of the river using basic measurements. I'll need to determine the cross-sectional area and the velocity of the water.\n\nFirst, I'll measure the width of the river. Let's say it's 10 meters wide. Then, I'll ",
+                "Maybe I should check my calculations.\n\nLet me see. Cross-sectional area: width * average depth = 10m * 2m = 20m\u00b2. Velocity: distance over time = 10m / 5s = 2m/s. Then flow rate is 20m\u00b2 * 2m/s = 40m\u00b3/s.\n\nHmm, that does seem high. Maybe I mad",
+                "To accurately determine the river's flow rate, it's essential to consider the average velocity across the entire cross-section rather than just measuring the surface velocity. This approach accounts for variations in velocity across differe",
+                "Maybe I can calculate the flow rate of the river using some physics principles. I remember that flow rate is related to velocity and cross-sectional area, but I'm a bit fuzzy on the exact formula.\n\nWait, flow rate Q is equal to the cross-se",
+                "Maybe I can calculate the flow rate of the river using some physics principles. I remember that flow rate is related to velocity and cross-sectional area, but I'm a bit fuzzy on the exact formula.\n\nWait, flow rate Q is equal to the cross-se"
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "sync_rs": [
+                0.17751284619591207,
+                0.1161397246193256,
+                0.033092765559732305,
+                0.06712929745765903,
+                0.09474868696657283,
+                0.04119162460950902,
+                0.14386074250695513,
+                0.02706534911577815
+              ],
+              "gamma_peaks": [
+                40.0,
+                36.0,
+                36.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.18950837958142597,
+                  0.16300124739977614,
+                  0.1671784247158304,
+                  0.17480983812788656
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.21625705753036426,
+                  0.2171146274081259,
+                  0.19135382137432308,
+                  0.15984907183631145,
+                  0.15126428760009095
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5019541101619974,
+                  0.5012509722828261,
+                  0.5016542081011269,
+                  0.5022799870302197
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2893297198303699,
+                  0.2687339520966073,
+                  0.26282582407952465,
+                  0.25198160681310483
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09371613535397726,
+                  0.0886103144115499,
+                  0.08541196479882504,
+                  0.0835627796501487,
+                  0.08117645706946783
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4147444761982968,
+                  0.38857772970667365,
+                  0.3751935610824849,
+                  0.3703531102233267,
+                  0.3618422803472831
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.15317269263245883,
+                  0.15349681302360385,
+                  0.14855348413517588,
+                  0.14166142636118628,
+                  0.13925279611864205
+                ]
+              }
+            }
+          ]
+        },
+        "no_control": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.04145700648111444,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 0.75,
+          "reorients": 0,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.0,
+          "ignition_lag1": null,
+          "mean_gamma_peak_hz": 38.5,
+          "mean_sync_r": 0.0822727293662466,
+          "nt_sd": {
+            "DA": 0.013803710719763402,
+            "NE": 0.022651280586538015,
+            "5HT": 0.0009318706280061098,
+            "ACh": 0.014009636748880878,
+            "eCB": 0.0073876772228741745,
+            "Glu": 0.03594691626169913,
+            "GABA": 0.004814018320936575
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.04145700648111444,
+              "longest_low_streak": 7,
+              "distinct_ratio": 0.75,
+              "reorients": 0,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there are factors like rainfall or the surrounding terrain that affect the river's speed. Als",
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there are factors like rainfall or the surrounding terrain that affect the river's speed. Als",
+                "The river flows smoothly, but I wonder about the flow rate. Maybe I can estimate it using some basic measurements.\n\nFirst, I need to determine the cross-sectional area of the river. To do this, I can measure the width of the river at a cons",
+                "Maybe I can estimate the flow rate of the river using basic measurements. I'll need to determine the cross-sectional area and the velocity of the water.\n\nFirst, I'll measure the width of the river. Let's say it's 10 meters wide. Then, I'll ",
+                "Maybe I should check my calculations.\n\nLet me see. Cross-sectional area: width * average depth = 10m * 2m = 20m\u00b2. Velocity: distance over time = 10m / 5s = 2m/s. Then flow rate is 20m\u00b2 * 2m/s = 40m\u00b3/s.\n\nHmm, that does seem high. Maybe I mad",
+                "To accurately determine the river's flow rate, it's essential to consider the average velocity across the entire cross-section rather than just measuring the surface velocity. This approach accounts for variations in velocity across differe",
+                "Maybe I can calculate the flow rate of the river using some physics principles. I remember that flow rate is related to velocity and cross-sectional area, but I'm a bit fuzzy on the exact formula.\n\nWait, flow rate Q is equal to the cross-se",
+                "Maybe I can calculate the flow rate of the river using some physics principles. I remember that flow rate is related to velocity and cross-sectional area, but I'm a bit fuzzy on the exact formula.\n\nWait, flow rate Q is equal to the cross-se"
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "sync_rs": [
+                0.17903667020873762,
+                0.11457300352650536,
+                0.030780239827974076,
+                0.05837310801995507,
+                0.07577781743428805,
+                0.049493290946988594,
+                0.09489553925922857,
+                0.0552521657062955
+              ],
+              "gamma_peaks": [
+                36.0,
+                36.0,
+                36.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.18950837958142597,
+                  0.16300124739977614,
+                  0.1671784247158304,
+                  0.17480983812788656
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.21625705753036426,
+                  0.2171146274081259,
+                  0.19135382137432308,
+                  0.15984907183631145,
+                  0.15126428760009095
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5019541101619974,
+                  0.5012509722828261,
+                  0.5016542081011269,
+                  0.5022799870302197
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.32676963174876245,
+                  0.28825482995038826,
+                  0.2897614584009755,
+                  0.2741929155894797
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09371613535397726,
+                  0.0886103144115499,
+                  0.08541196479882504,
+                  0.0835627796501487,
+                  0.08117645706946783
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4147444761982968,
+                  0.38857772970667365,
+                  0.3751935610824849,
+                  0.3703531102233267,
+                  0.3618422803472831
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.15317269263245883,
+                  0.15349681302360385,
+                  0.14855348413517588,
+                  0.14166142636118628,
+                  0.13925279611864205
+                ]
+              }
+            }
+          ]
+        },
+        "no_osc_feedback": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.04145700648111444,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 0.75,
+          "reorients": 2,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.125,
+          "ignition_lag1": -0.017857142857142856,
+          "mean_gamma_peak_hz": 38.5,
+          "mean_sync_r": 0.11258291389722501,
+          "nt_sd": {
+            "DA": 0.013803710719763402,
+            "NE": 0.022651280586538015,
+            "5HT": 0.0009318706280061098,
+            "ACh": 0.018570428467477158,
+            "eCB": 0.0073876772228741745,
+            "Glu": 0.03594691626169913,
+            "GABA": 0.004814018320936575
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.04145700648111444,
+              "longest_low_streak": 7,
+              "distinct_ratio": 0.75,
+              "reorients": 2,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there are factors like rainfall or the surrounding terrain that affect the river's speed. Als",
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there are factors like rainfall or the surrounding terrain that affect the river's speed. Als",
+                "The river flows smoothly, but I wonder about the flow rate. Maybe I can estimate it using some basic measurements.\n\nFirst, I need to determine the cross-sectional area of the river. To do this, I can measure the width of the river at a cons",
+                "Maybe I can estimate the flow rate of the river using basic measurements. I'll need to determine the cross-sectional area and the velocity of the water.\n\nFirst, I'll measure the width of the river. Let's say it's 10 meters wide. Then, I'll ",
+                "Maybe I should check my calculations.\n\nLet me see. Cross-sectional area: width * average depth = 10m * 2m = 20m\u00b2. Velocity: distance over time = 10m / 5s = 2m/s. Then flow rate is 20m\u00b2 * 2m/s = 40m\u00b3/s.\n\nHmm, that does seem high. Maybe I mad",
+                "To accurately determine the river's flow rate, it's essential to consider the average velocity across the entire cross-section rather than just measuring the surface velocity. This approach accounts for variations in velocity across differe",
+                "Maybe I can calculate the flow rate of the river using some physics principles. I remember that flow rate is related to velocity and cross-sectional area, but I'm a bit fuzzy on the exact formula.\n\nWait, flow rate Q is equal to the cross-se",
+                "Maybe I can calculate the flow rate of the river using some physics principles. I remember that flow rate is related to velocity and cross-sectional area, but I'm a bit fuzzy on the exact formula.\n\nWait, flow rate Q is equal to the cross-se"
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1
+              ],
+              "sync_rs": [
+                0.17751284619591215,
+                0.1161397246193256,
+                0.03309276555973231,
+                0.0651015440019229,
+                0.10145085717111764,
+                0.05280379110638455,
+                0.16212490093713136,
+                0.19243688158627362
+              ],
+              "gamma_peaks": [
+                40.0,
+                36.0,
+                36.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0,
+                36.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.18950837958142597,
+                  0.16300124739977614,
+                  0.1671784247158304,
+                  0.17480983812788656
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.21625705753036426,
+                  0.2171146274081259,
+                  0.19135382137432308,
+                  0.15984907183631145,
+                  0.15126428760009095
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5019541101619974,
+                  0.5012509722828261,
+                  0.5016542081011269,
+                  0.5022799870302197
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2893297198303699,
+                  0.2687339520966073,
+                  0.26282582407952465,
+                  0.25198160681310483
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09371613535397726,
+                  0.0886103144115499,
+                  0.08541196479882504,
+                  0.0835627796501487,
+                  0.08117645706946783
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4147444761982968,
+                  0.38857772970667365,
+                  0.3751935610824849,
+                  0.3703531102233267,
+                  0.3618422803472831
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.15317269263245883,
+                  0.15349681302360385,
+                  0.14855348413517588,
+                  0.14166142636118628,
+                  0.13925279611864205
+                ]
+              }
+            }
+          ]
+        },
+        "no_oscillator": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.04287974998897242,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 0.875,
+          "reorients": 2,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": null,
+          "ignition_lag1": null,
+          "mean_gamma_peak_hz": null,
+          "mean_sync_r": null,
+          "nt_sd": {
+            "DA": 0.03896504163265367,
+            "NE": 0.020147137842124626,
+            "5HT": 0.002622183800225694,
+            "ACh": 0.014743268872091557,
+            "eCB": 0.0075837975735836595,
+            "Glu": 0.03698307062599567,
+            "GABA": 0.011433642032016304
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.04287974998897242,
+              "longest_low_streak": 7,
+              "distinct_ratio": 0.875,
+              "reorients": 2,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river flowing past the old mill.\n\nNow, I need to create a new thought based on this, exploring how my mind can wander from what I remember toward something new. The new thought should be a continuation of my thinking process, showing th",
+                "The river flowing past the old mill transports me to a serene, historical landscape.\n\nI need to create a new thought that continues this line of thinking, perhaps expanding on the connections between the river, the mill, and other aspects o",
+                "The river flowing past the old mill transports me to a serene, historical landscape.\n\nI need to create a new thought that continues this line of thinking, perhaps expanding on the connections between the river, the mill, and other aspects o",
+                "The old mill likely impacted the river's ecosystem by disrupting its natural flow. The mill's operation may have altered the river's course, affecting the surrounding flora and fauna. Perhaps the mill's presence led to changes in the river'",
+                "Maybe I should consider the ecological footprint of the mill. What was the impact on the river's flow and the surrounding area? How did the mill's operations affect the local ecosystem over time? Perhaps the mill's influence is still eviden",
+                "The river's flow and the mill's operations might have created a unique microclimate near the mill. How does this microclimate affect the local flora and fauna? Maybe certain species of plants or animals are adapted to the specific condition",
+                "Maybe I should consider the psychological aspects of the river and the mill. How does the presence of such a natural and historical site impact the emotions and sense of place for people who visit? The serene environment might evoke feeling",
+                "The river's flow transports me to a serene, historical landscape. The mill's role as a site in the past suggests its importance. The smell of the river and potential for future development remind me of the need for stewardship.\n\nI remember:"
+              ],
+              "ignition_series": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              "sync_rs": [],
+              "gamma_peaks": [],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.20282621689472755,
+                  0.2354949868715308,
+                  0.24429434119447957,
+                  0.21502962095818876
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.2281765219753427,
+                  0.20797772030640901,
+                  0.194220671265252,
+                  0.17359567628889658,
+                  0.1569931828283816
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5025407968227356,
+                  0.5046051939894777,
+                  0.5060546655665364,
+                  0.5061052530925152
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2969799838811309,
+                  0.28276288827826623,
+                  0.2715302155368365,
+                  0.25989289278740346
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09314978832015881,
+                  0.0891000905614396,
+                  0.08539067464429682,
+                  0.0827035476297696,
+                  0.0805301549651445
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.411502285093446,
+                  0.39177478022941403,
+                  0.3750329317939026,
+                  0.3650978402928414,
+                  0.3583433007610267
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.1554228599510319,
+                  0.14427580027780137,
+                  0.13604227129558183,
+                  0.12781282301484642,
+                  0.12121801328258594
+                ]
+              }
+            }
+          ]
+        },
+        "fixed_threshold": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.04145700648111444,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 0.75,
+          "reorients": 2,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.0,
+          "ignition_lag1": null,
+          "mean_gamma_peak_hz": 39.0,
+          "mean_sync_r": 0.08759262962893052,
+          "nt_sd": {
+            "DA": 0.013803710719763402,
+            "NE": 0.022651280586538015,
+            "5HT": 0.0009318706280061098,
+            "ACh": 0.018570428467477158,
+            "eCB": 0.0073876772228741745,
+            "Glu": 0.03594691626169913,
+            "GABA": 0.004814018320936575
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.04145700648111444,
+              "longest_low_streak": 7,
+              "distinct_ratio": 0.75,
+              "reorients": 2,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there are factors like rainfall or the surrounding terrain that affect the river's speed. Als",
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there are factors like rainfall or the surrounding terrain that affect the river's speed. Als",
+                "The river flows smoothly, but I wonder about the flow rate. Maybe I can estimate it using some basic measurements.\n\nFirst, I need to determine the cross-sectional area of the river. To do this, I can measure the width of the river at a cons",
+                "Maybe I can estimate the flow rate of the river using basic measurements. I'll need to determine the cross-sectional area and the velocity of the water.\n\nFirst, I'll measure the width of the river. Let's say it's 10 meters wide. Then, I'll ",
+                "Maybe I should check my calculations.\n\nLet me see. Cross-sectional area: width * average depth = 10m * 2m = 20m\u00b2. Velocity: distance over time = 10m / 5s = 2m/s. Then flow rate is 20m\u00b2 * 2m/s = 40m\u00b3/s.\n\nHmm, that does seem high. Maybe I mad",
+                "To accurately determine the river's flow rate, it's essential to consider the average velocity across the entire cross-section rather than just measuring the surface velocity. This approach accounts for variations in velocity across differe",
+                "Maybe I can calculate the flow rate of the river using some physics principles. I remember that flow rate is related to velocity and cross-sectional area, but I'm a bit fuzzy on the exact formula.\n\nWait, flow rate Q is equal to the cross-se",
+                "Maybe I can calculate the flow rate of the river using some physics principles. I remember that flow rate is related to velocity and cross-sectional area, but I'm a bit fuzzy on the exact formula.\n\nWait, flow rate Q is equal to the cross-se"
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "sync_rs": [
+                0.17751284619591207,
+                0.1161397246193256,
+                0.033092765559732305,
+                0.06712929745765903,
+                0.09474868696657283,
+                0.04119162460950902,
+                0.14386074250695513,
+                0.02706534911577815
+              ],
+              "gamma_peaks": [
+                40.0,
+                36.0,
+                36.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.18950837958142597,
+                  0.16300124739977614,
+                  0.1671784247158304,
+                  0.17480983812788656
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.21625705753036426,
+                  0.2171146274081259,
+                  0.19135382137432308,
+                  0.15984907183631145,
+                  0.15126428760009095
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5019541101619974,
+                  0.5012509722828261,
+                  0.5016542081011269,
+                  0.5022799870302197
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2893297198303699,
+                  0.2687339520966073,
+                  0.26282582407952465,
+                  0.25198160681310483
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09371613535397726,
+                  0.0886103144115499,
+                  0.08541196479882504,
+                  0.0835627796501487,
+                  0.08117645706946783
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4147444761982968,
+                  0.38857772970667365,
+                  0.3751935610824849,
+                  0.3703531102233267,
+                  0.3618422803472831
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.15317269263245883,
+                  0.15349681302360385,
+                  0.14855348413517588,
+                  0.14166142636118628,
+                  0.13925279611864205
+                ]
+              }
+            }
+          ]
+        },
+        "bare": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.05302034898282894,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 1.0,
+          "reorients": 0,
+          "replays": 0,
+          "inhibited": 0,
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.05302034898282894,
+              "longest_low_streak": 7,
+              "distinct_ratio": 1.0,
+              "thoughts": [
+                "The river flowing past the old mill painted a picture of tranquility and nostalgia. Its gentle current carried the echoes of a bygone era, as if time itself had paused here. The mill, a testament to bygone industrial times,",
+                "Maybe I should explore the symbolism of the river and the mill in this context.\n\nThe river represents the flow of time, the constant movement of life, while the mill represents the transformation and the passage of work. The river carries t",
+                "Maybe the river represents the passage of time and the mill represents human effort and industry. Together, they could symbolize the balance between nature and human-made structures, or perhaps the inevitability of time and the resilience o",
+                "Maybe it's also about the contrast between nature and human-made structures. The river is natural, steady, and unchanging, while the mill is man-made, with its moving parts, machinery, and perhaps the passage of time it represents through i",
+                "Maybe the river represents the passage of time and the mill represents human-made progress. Together, they could symbolize the interplay between natural processes and human activity.\n\nI'm trying to think if there's a way to connect this to ",
+                "Maybe the river represents the flow of life and emotions, while the mill represents the struggle and toil that goes into creating and maintaining structures that support life.\n\nAlternatively, the river could symbolize the passage of time an",
+                "And the mill, with its moving parts and continuous operation, represents human activity and the relentless progression of time that we create and sustain.\n\nMaybe together, they symbolize the balance between the natural, unbroken flow of tim",
+                "Maybe the river is a symbol of the external world, the flow of time, and the constant movement of events, while the mill represents the internal processes of human activity, the toil and work that creates and sustains structures and systems"
+              ]
+            }
+          ]
+        }
+      },
+      "contrasts": {
+        "full_minus_no_control": 0.0,
+        "full_minus_no_osc_feedback": 0.0,
+        "full_minus_no_oscillator": -0.001422743507857982,
+        "full_minus_fixed_threshold": 0.0,
+        "full_minus_bare": -0.0115633425017145,
+        "streak_full_minus_no_control": 0.0,
+        "streak_full_minus_no_osc_feedback": 0.0,
+        "streak_full_minus_no_oscillator": 0.0,
+        "streak_full_minus_fixed_threshold": 0.0,
+        "streak_full_minus_bare": 0.0
+      }
+    }
+  }
+}
