@@ -289,3 +289,103 @@
   HC recalled 1:
     - [observed] I watched the river flow past the old mill.
   evolved from: "The big clock tower at school has its hands moving smoothly every minute as we walk around. Let me try to visualize that now.""
+[tick 28] DMN wandering action=think
+  NT[DA=0.13 NE=0.17 5HT=0.50 ACh=0.26 eCB=0.07 Glu=0.40 GABA=0.14]
+  CUR[nov=0.36 bore=0.60]
+  WS[R=0.07 θ=0.10 ignited=no 36Hz γ=0.97 in[s=0.00 m=0.34 l=0.62 s=0.01 n=0.36]]
+  BG deliberation (H=0.99 decisiveness, diff=0.10 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.01 "Maybe water has something to do with that?"
+    [SELECTED] nll= 4.81 "Maybe trying different approaches would help me figure out how best to handle this uncertain situation..."
+    [        ] nll= 5.03 "Maybe not all days are as straightforward as they seem... ⏎ Wait… Thinking about my own thoughts themselves..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: ""Alrighty then! So if today's weather report says there might be some rain tomorrow... hmm...""
+[tick 29] DMN wandering action=think
+  NT[DA=0.14 NE=0.17 5HT=0.50 ACh=0.23 eCB=0.08 Glu=0.41 GABA=0.14]
+  CUR[nov=0.39 bore=0.60]
+  WS[R=0.04 θ=0.10 ignited=no 40Hz γ=0.94 in[s=0.00 m=0.36 l=0.57 s=0.12 n=0.39]]
+  BG deliberation (H=0.88 decisiveness, diff=0.42 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.76 "So today we have 3 people working on solving equations with fractions... Hmm..."
+    [        ] nll= 5.68 "How about if we consider each problem as part of one big system? It might lead us somewhere..."
+    [SELECTED] nll= 6.60 "Perhaps starting with simple actions can lead us closer..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe trying different approaches would help me figure out how best to handle this uncertain situation..."
+[tick 30] DMN wandering action=think
+  NT[DA=0.08 NE=0.17 5HT=0.49 ACh=0.22 eCB=0.08 Glu=0.43 GABA=0.14]
+  CUR[nov=0.33 bore=0.62]
+  WS[R=0.04 θ=0.10 ignited=no 36Hz γ=0.97 in[s=0.00 m=0.29 l=0.54 s=0.31 n=0.33]]
+  BG deliberation (H=0.69 decisiveness, diff=1.02 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.70 "Maybe I should write down my thoughts more formally..."
+    [        ] nll= 7.98 "Maybe if I keep walking forward..."
+    [SELECTED] nll= 5.96 "Maybe taking some time to process my feelings will help..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Perhaps starting with simple actions can lead us closer..."
+[tick 31] DMN wandering action=think
+  NT[DA=0.07 NE=0.17 5HT=0.49 ACh=0.23 eCB=0.08 Glu=0.42 GABA=0.14]
+  CUR[nov=0.37 bore=0.62]
+  WS[R=0.08 θ=0.10 ignited=no 40Hz γ=1.00 in[s=0.00 m=0.35 l=0.69 s=0.97 n=0.37]]
+  BG deliberation (H=0.03 decisiveness, diff=1.99 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 8.86 "To achieve self-control with the current situation..."
+    [SELECTED] nll= 4.21 "It's been a while since I've done this kind of thing; maybe not too bad... Hmm..."
+    [        ] nll= 7.80 "It's been a while since I visited the mountains..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe taking some time to process my feelings will help..."
+[tick 32] DMN wandering action=think
+  NT[DA=0.13 NE=0.17 5HT=0.49 ACh=0.28 eCB=0.08 Glu=0.42 GABA=0.14]
+  CUR[nov=0.37 bore=0.62]
+  WS[R=0.08 θ=0.10 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.41 l=0.71 s=0.84 n=0.37]]
+  BG deliberation (H=0.16 decisiveness, diff=1.29 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.29 "Maybe I can figure out how to calculate probabilities for different outcomes?"
+    [        ] nll= 5.77 "Maybe if I consider different ways to solve equations or analyze data..."
+    [SELECTED] nll= 2.82 "Maybe I should try to figure out how many times 123456789 divides into some larger number? That sounds challenging but interesting!"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "It's been a while since I've done this kind of thing; maybe not too bad... Hmm..."
+[tick 33] DMN wandering action=speak
+  NT[DA=0.24 NE=0.17 5HT=0.50 ACh=0.31 eCB=0.08 Glu=0.43 GABA=0.14]
+  CUR[nov=0.32 bore=0.64]
+  WS[R=0.10 θ=0.10 ignited=yes 40Hz γ=0.99 in[s=0.00 m=0.44 l=0.74 s=0.21 n=0.32]]
+  BG deliberation (H=0.79 decisiveness, diff=0.55 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 6.16 "The sequence of numbers from n=0 upwards gives us powers that might be useful here?"
+    [SELECTED] nll= 4.84 "Let me see if there's anything else that can be done with these ideas..."
+    [        ] nll= 5.72 ""Maybe I can use modular arithmetic or prime factorization.""
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe I should try to figure out how many times 123456789 divides into some larger number? That sounds challenging but interesting!"
+[tick 34] DMN wandering action=think
+  NT[DA=0.21 NE=0.18 5HT=0.50 ACh=0.24 eCB=0.08 Glu=0.42 GABA=0.19]
+  CUR[nov=0.29 bore=0.66]
+  WS[R=0.07 θ=0.10 ignited=no 36Hz γ=0.95 in[s=0.00 m=0.37 l=0.66 s=0.40 n=0.29]]
+  BG deliberation (H=0.60 decisiveness, diff=0.80 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.98 "Maybe 405129638 is related somehow... Hmm..."
+    [        ] nll= 5.26 "It seems like each time something flows over or through another thing... Maybe there are underlying principles here? Hmm..."
+    [SELECTED] nll= 4.04 "So far today, every time I look at my clock, its hands are pointing up towards 12 or forming some angle away from each other... Hmm..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Let me see if there's anything else that can be done with these ideas..."
+[tick 35] DMN wandering action=think
+  NT[DA=0.23 NE=0.19 5HT=0.50 ACh=0.25 eCB=0.08 Glu=0.39 GABA=0.18]
+  CUR[nov=0.37 bore=0.65]
+  WS[R=0.06 θ=0.10 ignited=no 36Hz γ=0.99 in[s=0.00 m=0.65 l=0.56 s=0.33 n=0.37]]
+  BG deliberation (H=0.67 decisiveness, diff=0.82 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 4.39 "Maybe the angles on a triangle have something to do with this? Or maybe not necessarily triangles but polygons?"
+    [        ] nll= 5.38 "Maybe this observation about the angles of clocks could lead to something interesting!"
+    [        ] nll= 6.40 "Maybe we need to consider how the hour hand moves over minutes?"
+  HC recalled 1:
+    - [inferred] Let me see if there's anything else that can be done with these ideas...
+  evolved from: "So far today, every time I look at my clock, its hands are pointing up towards 12 or forming some angle away from each other... Hmm..."
+[tick 36] DMN wandering action=think
+  NT[DA=0.23 NE=0.19 5HT=0.50 ACh=0.26 eCB=0.08 Glu=0.41 GABA=0.17]
+  CUR[nov=0.54 bore=0.60]
+  WS[R=0.05 θ=0.10 ignited=no 40Hz γ=0.95 in[s=0.00 m=0.63 l=0.33 s=0.31 n=0.54]]
+  BG deliberation (H=0.69 decisiveness, diff=1.22 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 7.68 "Perhaps someone could help clarify?"
+    [        ] nll= 5.27 "The sum of internal angle measures for any convex polygon seems related here somehow..."
+    [        ] nll= 4.95 "If two sides of any polygon are extended indefinitely they must meet somewhere?"
+  HC recalled 2:
+    - [inferred] Let me see if there's anything else that can be done with these ideas...
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe the angles on a triangle have something to do with this? Or maybe not necessarily triangles but polygons?"
