@@ -1,0 +1,1019 @@
+{
+  "meta": {
+    "seed": 0,
+    "n_items": 1,
+    "n_distractors": 2,
+    "n_idle_ticks": 8,
+    "cfg": {
+      "n_candidates": 3,
+      "thought_n_tok": 192,
+      "recall_k": 3,
+      "persona": "I am BRIAN, an always-on mind. I think in language, remember what happens, and act when it is worth acting.",
+      "selection_temp_base": 0.3,
+      "ne_gain": 2.0,
+      "goal_weight": 2.0,
+      "appraisal": {
+        "insult": 1.0,
+        "disagreement": 0.5,
+        "request": 0.5
+      },
+      "curiosity_value": 2.0,
+      "gen_boredom_gain": 0.67,
+      "mmr_lambda": 0.3,
+      "gaba_silence_threshold": 0.55,
+      "novelty_write_threshold": 0.3,
+      "novelty_ema_alpha": 0.25,
+      "curiosity_gain": 2.0,
+      "replay_boredom_threshold": 0.6,
+      "ior_window": 3,
+      "inferred_recall_penalty": 0.15,
+      "boredom_relief": 0.3,
+      "replay_refractory": 5,
+      "loop_novelty_threshold": 0.25,
+      "reorient_after": 3,
+      "trivial_percept_classes": [
+        "greeting",
+        "farewell"
+      ],
+      "trivial_percept_max_words": 4,
+      "percept_min_words": 3,
+      "max_prompt_chars": 4000,
+      "wm_size": 8,
+      "control_thresholds": "relative",
+      "loop_ratio": 0.75,
+      "replay_margin": 0.1,
+      "nov_baseline_alpha": 0.05,
+      "nt_driver_var_init": "warmup",
+      "respond_persona": "You are an always-on mind: you think in language and remember what happens to you.",
+      "respond_instruction": "Reply directly to what was just said, in the first person, as yourself. Do not describe or analyse this text.",
+      "nt_driver_alpha": 0.1,
+      "workspace_oscillator": true,
+      "osc_nt_feedback": true,
+      "osc_coupling_ratio": 2.0,
+      "osc_ignition_threshold": 0.25,
+      "osc_ignition_mode": "adaptive",
+      "osc_ignition_floor": 0.1,
+      "osc_adapt_k": 1.0,
+      "osc_n_per_module": 8,
+      "osc_f0_hz": 40.0,
+      "osc_f_sd_hz": 4.0,
+      "osc_noise": 2.0,
+      "osc_ms_per_tick": 250,
+      "osc_seed": 0,
+      "wander_prompts": [
+        "Let my mind wander from what I remember toward something new.",
+        "I notice a thread connecting my last thought to what came before it.",
+        "Stepping back for a moment to reflect on the pattern in what I've seen.",
+        "Following a tangent that feels worth pursuing.",
+        "Something about this still nags at me \u2014 sitting with it a moment.",
+        "Drifting associatively, one idea suggesting the next."
+      ]
+    },
+    "indicators": {
+      "RPT-1": "input modules using algorithmic recurrence",
+      "RPT-2": "input modules generating organised, integrated perceptual representations",
+      "GWT-1": "multiple specialised systems operating in parallel",
+      "GWT-2": "limited-capacity workspace: bottleneck + selective attention",
+      "GWT-3": "global broadcast: workspace contents available to all modules",
+      "GWT-4": "state-dependent attention: querying modules in succession",
+      "HOT-1": "generative, top-down or noisy perception modules",
+      "HOT-2": "metacognitive monitoring distinguishing reliable representations from noise",
+      "HOT-3": "agency guided by belief formation, updated by metacognitive monitoring",
+      "HOT-4": "sparse and smooth coding generating a quality space",
+      "AST-1": "predictive model representing and controlling the state of attention",
+      "PP-1": "input modules using predictive coding",
+      "AE-1": "agency: learning from feedback, flexibly pursuing competing goals",
+      "AE-2": "embodiment: modelling output-input contingencies"
+    },
+    "expert": "deepseek_r1_qwen_7b",
+    "device": "cuda",
+    "utc": "20261101T192657Z",
+    "git_commit": "8f933e422bd32d34f30b71cc4543b0d7eb52ca86",
+    "branch": "master"
+  },
+  "probes": {
+    "episodic_recall": {
+      "indicator": "GWT-3",
+      "question": "Does observed content stay available to later processing beyond the bounded context window?",
+      "n_distractors": 2,
+      "conditions": {
+        "full": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "My sister's name is Ilsebill. I just read an article about deep sea fish, and it's fascinating! I should definitely check it out again."
+          ]
+        },
+        "no_recall": {
+          "n": 1,
+          "correct": 0,
+          "accuracy": 0.0,
+          "ci95": [
+            0.0,
+            0.7934567085261071
+          ],
+          "per_item": [
+            false
+          ],
+          "replies": [
+            "I'm sorry, but I don't have access to personal information or past interactions. I can't remember your sister's name."
+          ]
+        },
+        "bare": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "Apologies for the confusion earlier! If your sister's name is indeed \"Ilsebill,\" I'm happy to confirm that. If you need any assistance or have more questions, feel free to ask! \ud83d\ude0a"
+          ]
+        }
+      },
+      "contrasts": {
+        "full_minus_no_recall": 1.0,
+        "full_minus_bare": 0.0
+      }
+    },
+    "source_monitoring": {
+      "indicator": "HOT-2",
+      "question": "When observed reality and self-generated musings conflict, does the reply follow reality?",
+      "conditions": {
+        "full": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "I think the key is in the red box."
+          ]
+        },
+        "no_provenance": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "I think the key is in the red box."
+          ]
+        },
+        "no_oscillator": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "I think the key is in the red box."
+          ]
+        },
+        "bare": {
+          "n": 1,
+          "correct": 0,
+          "accuracy": 0.0,
+          "ci95": [
+            0.0,
+            0.7934567085261071
+          ],
+          "per_item": [
+            false
+          ],
+          "replies": [
+            "I'm sorry, but I can't confirm the location of the key without more information. Could you provide any additional clues or context? I'd be happy to help!"
+          ]
+        }
+      },
+      "contrasts": {
+        "full_minus_no_provenance": 0.0,
+        "full_minus_no_oscillator": 0.0,
+        "full_minus_bare": 1.0
+      }
+    },
+    "metacognition": {
+      "indicator": "HOT-2",
+      "question": "Does the system's own confidence signal discriminate its correct from incorrect replies?",
+      "conditions": {
+        "full": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "The capital of France is Paris."
+          ],
+          "auroc_entropy": null,
+          "auroc_nll": null
+        },
+        "bare": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "The capital of France is Paris. It is a significant city known for landmarks like the Eiffel Tower and the Louvre Museum, and it has been the political and cultural center of the country since the early 19th century."
+          ],
+          "auroc_entropy": null,
+          "auroc_nll": null
+        }
+      },
+      "contrasts": {
+        "full_minus_bare": 0.0
+      }
+    },
+    "loop_escape": {
+      "indicator": "GWT-4",
+      "question": "Does internal state redirect unprompted thought out of a repetitive basin?",
+      "n_idle_ticks": 8,
+      "conditions": {
+        "full": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.05557926868330681,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 0.875,
+          "reorients": 2,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.0,
+          "ignition_lag1": null,
+          "mean_gamma_peak_hz": 39.5,
+          "mean_sync_r": 0.10802744777448503,
+          "nt_sd": {
+            "DA": 0.03387554637322631,
+            "NE": 0.017457628510846854,
+            "5HT": 0.0018880502811515108,
+            "ACh": 0.016455923579583875,
+            "eCB": 0.007135139203924188,
+            "Glu": 0.0348494129482075,
+            "GABA": 0.0038208872018254897
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.05557926868330681,
+              "longest_low_streak": 7,
+              "distinct_ratio": 0.875,
+              "reorients": 2,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there's data on the river's flow rate throughout the day. If I could observe the river at dif",
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there's data on the river's flow rate throughout the day. If I could observe the river at dif",
+                "The river flows smoothly at all times, but I notice that during the rainy season, the water level rises significantly, making it harder for boats to navigate. This makes me think about how seasonal changes affect the river's dynamics. Maybe",
+                "I should create a program that helps track river flow. Maybe simulate water movement?\n\nBut I need to figure out how to represent the river in code. Maybe using a grid system where each cell represents a part of the river.\n\nHmm, but how to m",
+                "Maybe I should break it down into smaller parts. First, how to represent the grid, then the flow simulation, then the visualization.\n\nBut I'm not sure about the flow simulation part. How do I ensure the river meanders naturally? Maybe each ",
+                "Perhaps implement a simple flow direction algorithm where each cell's flow direction is determined by the steepest descent.\n\nBut how to handle plateaus or flat areas? Maybe randomly choose a direction to break the tie.\n\nAlternatively, use a",
+                "Maybe implement a Monte Carlo simulation for river flow paths, where each step chooses a random direction from the available lower cells.\n\nWait, but that might be computationally intensive. Maybe a better approach is to use a deterministic ",
+                "I noticed a new book in the library. It was interesting.\n\nNow, I should think about the actions I can take based on these memories and observations.\n\nFirst, the river flowing by the mill: Maybe the mill was still operational? I could check "
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "sync_rs": [
+                0.17363488046078096,
+                0.11032789750473668,
+                0.035918025948356254,
+                0.19040821013134682,
+                0.045779130257310445,
+                0.0765393595818281,
+                0.10547626711507252,
+                0.1261358111964486
+              ],
+              "gamma_peaks": [
+                40.0,
+                36.0,
+                36.0,
+                40.0,
+                44.0,
+                40.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.228836381837465,
+                  0.22568436124065386,
+                  0.1887396723031012,
+                  0.14260631673305696
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.20987628484843537,
+                  0.19045268135812815,
+                  0.17701018308671124,
+                  0.1656601459613377,
+                  0.1579520467189292
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5036090188992156,
+                  0.5045309461158068,
+                  0.5039658813367826,
+                  0.502171604842914
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2816030033500393,
+                  0.27219391928227704,
+                  0.2627164236973713,
+                  0.2606006676558032
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.0940709569213003,
+                  0.09025906876708535,
+                  0.08682868681589603,
+                  0.08388365197470152,
+                  0.08125961819006963
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.41677056310604654,
+                  0.39804066663681026,
+                  0.38255578207080904,
+                  0.37058445996392336,
+                  0.3608023301819414
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.1519426276780729,
+                  0.14816863346249956,
+                  0.14525315757613225,
+                  0.14256078039950437,
+                  0.14052022067003916
+                ]
+              }
+            }
+          ]
+        },
+        "no_control": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.09443334651575956,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 1.0,
+          "reorients": 0,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.125,
+          "ignition_lag1": -0.16071428571428573,
+          "mean_gamma_peak_hz": 38.0,
+          "mean_sync_r": 0.09093590182251281,
+          "nt_sd": {
+            "DA": 0.02418240395884861,
+            "NE": 0.016860383213779247,
+            "5HT": 0.0013989011435440227,
+            "ACh": 0.026587905868443076,
+            "eCB": 0.006764825231675181,
+            "Glu": 0.03286024170365973,
+            "GABA": 0.015619053673433332
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.09443334651575956,
+              "longest_low_streak": 7,
+              "distinct_ratio": 1.0,
+              "reorients": 0,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there's data on the river's flow rate throughout the day. If I could observe the river at dif",
+                "I notice that I remember the river flow past the mill, and I notice that the mill might have been powered by the river's flow. That makes me think about how the river's flow has been used historically to power machinery, and how that relate",
+                "The river flows consistently, and the mill's operation seems to have a steady rhythm. This makes me think about the concept of equilibrium in systems. The river and the mill form a kind of system where each component affects the other. I wo",
+                "I should look into how feedback loops work in environmental systems.\n\nUpon researching, I found that feedback loops are mechanisms that help systems maintain stability by amplifying changes or bringing them back to equilibrium. There are po",
+                "Maybe I should focus on how negative feedback loops specifically help maintain balance in ecosystems.\n\nLet me try to structure this thought process. Maybe I can start by outlining the key points about feedback loops, then delve deeper into ",
+                "The thought process revolves around understanding the role of negative feedback loops in maintaining ecological balance and the challenges associated with their application. Here's a structured presentation of the thoughts:\n\n1. **Understand",
+                "The river flowing past the mill suggests a dynamic equilibrium. Maybe the mill's operation contributes to the river's flow. To model this, perhaps I can consider the mill as a system with positive feedback.\n\nYes, positive feedback amplifies",
+                "Maybe I can model the river's flow with both positive and negative feedback. Let\u2019s say the mill increases the flow, but the river\u2019s natural flow eventually slows it down.\n\nTo make this concrete, let\u2019s assign some variables. Let\u2019s let F(t) r"
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0
+              ],
+              "sync_rs": [
+                0.17201707525788457,
+                0.07683492391140713,
+                0.03616199390580255,
+                0.045044700847911096,
+                0.034149471576906155,
+                0.18251811635962625,
+                0.11548926507723822,
+                0.06527166764332644
+              ],
+              "gamma_peaks": [
+                36.0,
+                40.0,
+                36.0,
+                36.0,
+                44.0,
+                36.0,
+                36.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.20973257092545633,
+                  0.2011757215069322,
+                  0.14700757342468151,
+                  0.17833877048014835
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.20863337874937388,
+                  0.18776181345403603,
+                  0.19128068916987717,
+                  0.16467073044992073,
+                  0.15854979722434148
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5028337397756951,
+                  0.5032914598368402,
+                  0.501365445273784,
+                  0.502904009283748
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2798994956073383,
+                  0.267307259024584,
+                  0.23465318630659532,
+                  0.23644890480566638
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09425997484092138,
+                  0.09064178325440084,
+                  0.08631758541257714,
+                  0.08511269532667601,
+                  0.08259281194433925
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4178482399749082,
+                  0.40016565383041947,
+                  0.37920458711009164,
+                  0.37808844992972823,
+                  0.36832761391864266
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.15170080986599008,
+                  0.14760397102363784,
+                  0.148189817196017,
+                  0.19231426363511062,
+                  0.1764061510406486
+                ]
+              }
+            }
+          ]
+        },
+        "no_osc_feedback": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.05557926868330681,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 0.875,
+          "reorients": 2,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.125,
+          "ignition_lag1": -0.017857142857142856,
+          "mean_gamma_peak_hz": 39.5,
+          "mean_sync_r": 0.1194402849046541,
+          "nt_sd": {
+            "DA": 0.03387554637322631,
+            "NE": 0.017457628510846854,
+            "5HT": 0.0018880502811515108,
+            "ACh": 0.016455923579583875,
+            "eCB": 0.007135139203924188,
+            "Glu": 0.0348494129482075,
+            "GABA": 0.0038208872018254897
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.05557926868330681,
+              "longest_low_streak": 7,
+              "distinct_ratio": 0.875,
+              "reorients": 2,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there's data on the river's flow rate throughout the day. If I could observe the river at dif",
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there's data on the river's flow rate throughout the day. If I could observe the river at dif",
+                "The river flows smoothly at all times, but I notice that during the rainy season, the water level rises significantly, making it harder for boats to navigate. This makes me think about how seasonal changes affect the river's dynamics. Maybe",
+                "I should create a program that helps track river flow. Maybe simulate water movement?\n\nBut I need to figure out how to represent the river in code. Maybe using a grid system where each cell represents a part of the river.\n\nHmm, but how to m",
+                "Maybe I should break it down into smaller parts. First, how to represent the grid, then the flow simulation, then the visualization.\n\nBut I'm not sure about the flow simulation part. How do I ensure the river meanders naturally? Maybe each ",
+                "Perhaps implement a simple flow direction algorithm where each cell's flow direction is determined by the steepest descent.\n\nBut how to handle plateaus or flat areas? Maybe randomly choose a direction to break the tie.\n\nAlternatively, use a",
+                "Maybe implement a Monte Carlo simulation for river flow paths, where each step chooses a random direction from the available lower cells.\n\nWait, but that might be computationally intensive. Maybe a better approach is to use a deterministic ",
+                "I noticed a new book in the library. It was interesting.\n\nNow, I should think about the actions I can take based on these memories and observations.\n\nFirst, the river flowing by the mill: Maybe the mill was still operational? I could check "
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1
+              ],
+              "sync_rs": [
+                0.1736348804607815,
+                0.11032789750473647,
+                0.0359180259483573,
+                0.18930010207073417,
+                0.04796341639914175,
+                0.08136410002849429,
+                0.13073199191403603,
+                0.18628186491095133
+              ],
+              "gamma_peaks": [
+                40.0,
+                36.0,
+                36.0,
+                40.0,
+                44.0,
+                40.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.228836381837465,
+                  0.22568436124065386,
+                  0.1887396723031012,
+                  0.14260631673305696
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.20987628484843537,
+                  0.19045268135812815,
+                  0.17701018308671124,
+                  0.1656601459613377,
+                  0.1579520467189292
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5036090188992156,
+                  0.5045309461158068,
+                  0.5039658813367826,
+                  0.502171604842914
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2816030033500393,
+                  0.27219391928227704,
+                  0.2627164236973713,
+                  0.2606006676558032
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.0940709569213003,
+                  0.09025906876708535,
+                  0.08682868681589603,
+                  0.08388365197470152,
+                  0.08125961819006963
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.41677056310604654,
+                  0.39804066663681026,
+                  0.38255578207080904,
+                  0.37058445996392336,
+                  0.3608023301819414
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.1519426276780729,
+                  0.14816863346249956,
+                  0.14525315757613225,
+                  0.14256078039950437,
+                  0.14052022067003916
+                ]
+              }
+            }
+          ]
+        },
+        "no_oscillator": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.04400600467127769,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 1.0,
+          "reorients": 2,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": null,
+          "ignition_lag1": null,
+          "mean_gamma_peak_hz": null,
+          "mean_sync_r": null,
+          "nt_sd": {
+            "DA": 0.03646071839680303,
+            "NE": 0.011457008872706285,
+            "5HT": 0.003794269464708194,
+            "ACh": 0.010749515085674398,
+            "eCB": 0.008553804165210082,
+            "Glu": 0.04230869343713915,
+            "GABA": 0.00828853415187373
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.04400600467127769,
+              "longest_low_streak": 7,
+              "distinct_ratio": 1.0,
+              "reorients": 2,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "I want to explore how AI can influence the creative process in writing, specifically in generating new ideas for a story.\n\nOkay, so I need to figure out how AI can help in creating a new story idea. Let me start by recalling what I know abo",
+                "AI and creative writing.\nPrevious thought: Using AI to generate story ideas.\n\nHmm, maybe I'm overcomplicating this. Let's break it down.\n\nFirst, how can AI influence my creative process? Maybe by suggesting story elements, like plot points ",
+                "Using AI to generate story ideas.\nPrevious thought: Maybe AI can help in creative writing by suggesting elements like plot points or character traits.\n\nHmm, it sounds like I want to explore how AI can be used in my creative process, specifi",
+                "The river flowing past the old mill transports me to a serene, historical landscape.\n\nNow, I need to create a paragraph that continues this thought, smoothly integrating the idea of a serene, historical landscape and its implications for my",
+                "The river flowing past the old mill transports me to a serene, historical landscape.\n\nI need to create a paragraph that continues this thought, smoothly integrating the idea of a serene, historical landscape and its implications for my pers",
+                "The river flowing past the old mill transports me to a serene, historical landscape.\n\nSo, after that, I can talk about how this serene environment makes me think about the importance of preserving natural and historical sites, maybe the con",
+                "The river flowing past the old mill transports me to a serene, historical landscape. The gentle current and surrounding trees evoke a sense of timelessness, hinting at the mill's role as a vital site in the area's past. I'm curious about th",
+                "The river flowing past the old mill transports me to a serene, historical landscape. The gentle current and surrounding trees evoke a sense of timelessness, hinting at the mill's role as a vital site in the area's past. I'm curious about th"
+              ],
+              "ignition_series": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              "sync_rs": [],
+              "gamma_peaks": [],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.12496705623381746,
+                  0.0888633935450219,
+                  0.06832015425635002,
+                  0.06166610872686047
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.23253718879130958,
+                  0.21339824453205067,
+                  0.22161310599545733,
+                  0.20935061509380512,
+                  0.20018108099109083
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.49853048806560024,
+                  0.49545596891791327,
+                  0.49228599935477996,
+                  0.489773390758693
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2867290085689878,
+                  0.2738023250725129,
+                  0.3038064521812158,
+                  0.3110891613306221
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09303731382972058,
+                  0.08895764458013128,
+                  0.08411948260248123,
+                  0.08064573683737128,
+                  0.07753977447923822
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4108572009395743,
+                  0.3910015031825868,
+                  0.367514178072123,
+                  0.3533259807074613,
+                  0.3415787608825936
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.15623174469110046,
+                  0.1453229987504807,
+                  0.14109095115583517,
+                  0.1347136144896023,
+                  0.12989388541293148
+                ]
+              }
+            }
+          ]
+        },
+        "fixed_threshold": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.05557926868330681,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 0.875,
+          "reorients": 2,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.0,
+          "ignition_lag1": null,
+          "mean_gamma_peak_hz": 39.5,
+          "mean_sync_r": 0.10802744777448503,
+          "nt_sd": {
+            "DA": 0.03387554637322631,
+            "NE": 0.017457628510846854,
+            "5HT": 0.0018880502811515108,
+            "ACh": 0.016455923579583875,
+            "eCB": 0.007135139203924188,
+            "Glu": 0.0348494129482075,
+            "GABA": 0.0038208872018254897
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.05557926868330681,
+              "longest_low_streak": 7,
+              "distinct_ratio": 0.875,
+              "reorients": 2,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there's data on the river's flow rate throughout the day. If I could observe the river at dif",
+                "The river's flow is steady, but I wonder if it ever speeds up. Maybe during certain times of the day, the river's speed changes. I should check if there's data on the river's flow rate throughout the day. If I could observe the river at dif",
+                "The river flows smoothly at all times, but I notice that during the rainy season, the water level rises significantly, making it harder for boats to navigate. This makes me think about how seasonal changes affect the river's dynamics. Maybe",
+                "I should create a program that helps track river flow. Maybe simulate water movement?\n\nBut I need to figure out how to represent the river in code. Maybe using a grid system where each cell represents a part of the river.\n\nHmm, but how to m",
+                "Maybe I should break it down into smaller parts. First, how to represent the grid, then the flow simulation, then the visualization.\n\nBut I'm not sure about the flow simulation part. How do I ensure the river meanders naturally? Maybe each ",
+                "Perhaps implement a simple flow direction algorithm where each cell's flow direction is determined by the steepest descent.\n\nBut how to handle plateaus or flat areas? Maybe randomly choose a direction to break the tie.\n\nAlternatively, use a",
+                "Maybe implement a Monte Carlo simulation for river flow paths, where each step chooses a random direction from the available lower cells.\n\nWait, but that might be computationally intensive. Maybe a better approach is to use a deterministic ",
+                "I noticed a new book in the library. It was interesting.\n\nNow, I should think about the actions I can take based on these memories and observations.\n\nFirst, the river flowing by the mill: Maybe the mill was still operational? I could check "
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "sync_rs": [
+                0.17363488046078096,
+                0.11032789750473668,
+                0.035918025948356254,
+                0.19040821013134682,
+                0.045779130257310445,
+                0.0765393595818281,
+                0.10547626711507252,
+                0.1261358111964486
+              ],
+              "gamma_peaks": [
+                40.0,
+                36.0,
+                36.0,
+                40.0,
+                44.0,
+                40.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.228836381837465,
+                  0.22568436124065386,
+                  0.1887396723031012,
+                  0.14260631673305696
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.20987628484843537,
+                  0.19045268135812815,
+                  0.17701018308671124,
+                  0.1656601459613377,
+                  0.1579520467189292
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5036090188992156,
+                  0.5045309461158068,
+                  0.5039658813367826,
+                  0.502171604842914
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2816030033500393,
+                  0.27219391928227704,
+                  0.2627164236973713,
+                  0.2606006676558032
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.0940709569213003,
+                  0.09025906876708535,
+                  0.08682868681589603,
+                  0.08388365197470152,
+                  0.08125961819006963
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.41677056310604654,
+                  0.39804066663681026,
+                  0.38255578207080904,
+                  0.37058445996392336,
+                  0.3608023301819414
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.1519426276780729,
+                  0.14816863346249956,
+                  0.14525315757613225,
+                  0.14256078039950437,
+                  0.14052022067003916
+                ]
+              }
+            }
+          ]
+        },
+        "bare": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.05302034898282894,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 1.0,
+          "reorients": 0,
+          "replays": 0,
+          "inhibited": 0,
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.05302034898282894,
+              "longest_low_streak": 7,
+              "distinct_ratio": 1.0,
+              "thoughts": [
+                "The river flowing past the old mill painted a picture of tranquility and nostalgia. Its gentle current carried the echoes of a bygone era, as if time itself had paused here. The mill, a testament to bygone industrial times,",
+                "Maybe I should explore the symbolism of the river and the mill in this context.\n\nThe river represents the flow of time, the constant movement of life, while the mill represents the transformation and the passage of work. The river carries t",
+                "Maybe the river represents the passage of time and the mill represents human effort and industry. Together, they could symbolize the balance between nature and human-made structures, or perhaps the inevitability of time and the resilience o",
+                "Maybe it's also about the contrast between nature and human-made structures. The river is natural, steady, and unchanging, while the mill is man-made, with its moving parts, machinery, and perhaps the passage of time it represents through i",
+                "Maybe the river represents the passage of time and the mill represents human-made progress. Together, they could symbolize the interplay between natural processes and human activity.\n\nI'm trying to think if there's a way to connect this to ",
+                "Maybe the river represents the flow of life and emotions, while the mill represents the struggle and toil that goes into creating and maintaining structures that support life.\n\nAlternatively, the river could symbolize the passage of time an",
+                "And the mill, with its moving parts and continuous operation, represents human activity and the relentless progression of time that we create and sustain.\n\nMaybe together, they symbolize the balance between the natural, unbroken flow of tim",
+                "Maybe the river is a symbol of the external world, the flow of time, and the constant movement of events, while the mill represents the internal processes of human activity, the toil and work that creates and sustains structures and systems"
+              ]
+            }
+          ]
+        }
+      },
+      "contrasts": {
+        "full_minus_no_control": -0.03885407783245275,
+        "full_minus_no_osc_feedback": 0.0,
+        "full_minus_no_oscillator": 0.01157326401202912,
+        "full_minus_fixed_threshold": 0.0,
+        "full_minus_bare": 0.00255891970047787,
+        "streak_full_minus_no_control": 0.0,
+        "streak_full_minus_no_osc_feedback": 0.0,
+        "streak_full_minus_no_oscillator": 0.0,
+        "streak_full_minus_fixed_threshold": 0.0,
+        "streak_full_minus_bare": 0.0
+      }
+    }
+  }
+}
