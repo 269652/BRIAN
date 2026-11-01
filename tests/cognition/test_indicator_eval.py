@@ -626,3 +626,30 @@ class TestDiskForTheDeepSeekTrunk:
         env = self._env(monkeypatch, VastMindEvalConnector,
                         MindEvalDeployConfig(), preset="120")
         assert env["VAST_DISK"] == "120"
+
+
+class TestPushIsObservable:
+    """Runs 58673415/58676023/58678026 never pushed a single log to git,
+    and nothing said why: the pusher wrote its status to a file on the
+    box, unreachable without SSH (these boxes run without --ssh)."""
+
+    def _s(self):
+        from neuroslm.connectors.vast_mind_eval import build_mind_eval_onstart
+        return build_mind_eval_onstart({"AUTO_DESTROY": "1",
+                                        "GH_TOKEN": "ghp_SECRET"})
+
+    def test_pusher_status_goes_to_the_container_log(self):
+        s = self._s()
+        assert "mind_eval_pusher.log" not in s
+        assert "[pusher]" in s
+
+    def test_boot_preflight_checks_push_auth_and_redacts_the_token(self):
+        s = self._s()
+        assert "push --dry-run" in s
+        assert "[preflight]" in s
+        i = s.index("push --dry-run")
+        assert "sed" in s[i:i + 300], "git's error output is redacted"
+
+    def test_preflight_runs_before_the_battery(self):
+        s = self._s()
+        assert s.index("push --dry-run") < s.index("neuroslm.cli eval mind")

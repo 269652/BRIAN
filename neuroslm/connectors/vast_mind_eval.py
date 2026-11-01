@@ -63,6 +63,16 @@ GIT_LFS_SKIP_SMUDGE=1 git clone --branch '__BRANCH__' --single-branch \\
     "https://x-access-token:${GH_TOKEN}@github.com/__REPO_SLUG__.git" brian
 cd brian
 
+echo "── preflight: can this box push results back? ──"
+# Three runs never pushed a log and nothing said why; fail loudly in
+# the first minute instead (token redacted from git's error output).
+if git push --dry-run origin HEAD 2>&1 | sed -E 's#//[^@/]*@#//***@#g' \
+        | tail -3; [ "${PIPESTATUS[0]}" = "0" ]; then
+    echo "[preflight] push auth OK"
+else
+    echo "[preflight] PUSH WILL FAIL — logs/results stay on the box; check GH_TOKEN write access"
+fi
+
 echo "── bootstrap (pip deps only — no checkpoint pull needed) ──"
 SKIP_LFS_RESUME=1 bash scripts/vast_bootstrap.sh
 
@@ -73,7 +83,8 @@ touch "$LOGFILE"
 
 echo "── starting log pusher (background, every __PUSH_INTERVAL__s) ──"
 # A box that dies mid-run must not take the only copy of the log
-# (mind-wandering traces stream into it tick by tick).
+# (mind-wandering traces stream into it tick by tick). Status lines go
+# to the container log, so `brian logs <id>` shows every push result.
 (
   while true; do
     sleep '__PUSH_INTERVAL__'
@@ -85,7 +96,7 @@ r = push_artifacts('.', ['results/mind_eval', '$LOGFILE'],
 print('[pusher]', r)
 "
   done
-) > /workspace/mind_eval_pusher.log 2>&1 &
+) 2>&1 &
 PUSHER_PID=$!
 
 echo "── running the indicator battery ──"
