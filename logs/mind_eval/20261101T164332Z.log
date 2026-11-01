@@ -560,3 +560,173 @@
   HC recalled 1:
     - [observed] Today I learned how bees communicate with dances.
   evolved from: "If we consider that knowledge can be represented as nodes connected by edges (like graphs), then skills could also form such structures where each skill points towards other related skills or concepts..."
+[tick 12] DMN wandering action=think
+  NT[DA=0.16 NE=0.12 5HT=0.50 ACh=0.30 eCB=0.08 Glu=0.35 GABA=0.13]
+  CUR[nov=0.37 bore=0.46]
+  WS[R=0.12 θ=0.19 ignited=no 40Hz γ=1.00 in[s=0.00 m=0.35 l=0.79 s=0.26 n=0.37]]
+  BG deliberation (H=0.74 decisiveness, diff=0.80 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 4.70 "How can I better structure my thoughts so that more information gets retained?"
+    [        ] nll= 3.84 "How do you write code that’s efficient? It's not just thinking of algorithms but also making sure every part works well together..."
+    [        ] nll= 5.79 "Let's explore whether these thoughts can be represented as mathematical structures..."
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "Maybe if the connections are deep enough over time they might lead to some meaningful conclusions..."
+[tick 13] DMN wandering action=think
+  NT[DA=0.15 NE=0.12 5HT=0.50 ACh=0.26 eCB=0.08 Glu=0.37 GABA=0.13]
+  CUR[nov=0.44 bore=0.49]
+  WS[R=0.08 θ=0.18 ignited=no 48Hz γ=0.95 in[s=0.00 m=0.45 l=0.51 s=0.20 n=0.44]]
+  BG deliberation (H=0.80 decisiveness, diff=0.57 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 8.63 "Maybe using a spaced repetition system would help?"
+    [        ] nll= 9.84 "Maybe a spiral notebook for ideas?"
+    [SELECTED] nll= 8.63 "Maybe using a spaced repetition system would help?"
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "How can I better structure my thoughts so that more information gets retained?"
+[tick 14] DMN wandering action=think
+  NT[DA=0.06 NE=0.15 5HT=0.49 ACh=0.23 eCB=0.08 Glu=0.40 GABA=0.13]
+  CUR[nov=0.47 bore=0.50]
+  WS[R=0.16 θ=0.17 ignited=no 36Hz γ=0.98 in[s=0.00 m=0.29 l=0.66 s=0.56 n=0.47]]
+  BG deliberation (H=0.44 decisiveness, diff=0.94 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 5.79 "What's the chemical formula for glucose?"
+    [        ] nll= 4.58 "What if... Could the next prime number after 5 be written as another form of 2?"
+    [        ] nll= 3.50 "The Fibonacci sequence starts as 1, 2, 3... but actually begins differently..."
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "Maybe using a spaced repetition system would help?"
+[tick 15] DMN wandering action=think
+  NT[DA=0.07 NE=0.16 5HT=0.49 ACh=0.24 eCB=0.09 Glu=0.43 GABA=0.14]
+  CUR[nov=0.52 bore=0.49]
+  WS[R=0.07 θ=0.17 ignited=no 44Hz γ=0.99 in[s=0.00 m=0.31 l=0.57 s=0.14 n=0.52]]
+  BG deliberation (H=0.86 decisiveness, diff=0.37 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.24 "Maybe if we can find some connection between mathematics of structures or something like that?"
+    [SELECTED] nll= 4.89 ""What's the most common fruit served at parties?""
+    [        ] nll= 5.80 "Maybe it’s asking about something related or following up on that topic?"
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "What's the chemical formula for glucose?"
+[tick 16] DMN wandering action=think
+  NT[DA=0.09 NE=0.19 5HT=0.49 ACh=0.21 eCB=0.09 Glu=0.47 GABA=0.14]
+  CUR[nov=0.32 bore=0.54]
+  WS[R=0.03 θ=0.16 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.23 l=0.81 s=0.14 n=0.32]]
+  BG deliberation (H=0.86 decisiveness, diff=0.88 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.12 "To find out quickly... Maybe apples are popular because they're easy? Or maybe bananas since people like them tangy?"
+    [        ] nll= 6.05 "It might be apple because people often bring pies or apples as finger foods..."
+    [SELECTED] nll= 3.90 "The first time was apple; second was orange; third was banana; fourth was grape... It seems like each day you incrementally pick fruits that follow alphabetical order or some similar simple sequence based on their popularity as snacks.""
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: ""What's the most common fruit served at parties?""
+[tick 17] DMN wandering action=think
+  NT[DA=0.14 NE=0.18 5HT=0.49 ACh=0.20 eCB=0.09 Glu=0.45 GABA=0.14]
+  CUR[nov=0.44 bore=0.54]
+  WS[R=0.04 θ=0.15 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.39 l=0.59 s=0.38 n=0.44]]
+  BG deliberation (H=0.62 decisiveness, diff=1.02 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 5.56 "Maybe the next fruit after grapes would be cherries? Or maybe lemons?"
+    [        ] nll= 7.43 "Maybe the key here lies within patterns of sequences?"
+    [        ] nll= 5.05 "Maybe this can be modeled mathematically?"
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "The first time was apple; second was orange; third was banana; fourth was grape... It seems like each day you incrementally pick fruits that follow alphabetical order or some similar simple sequence based on their popularity as snacks.""
+[tick 18] DMN wandering action=think
+  NT[DA=0.12 NE=0.17 5HT=0.49 ACh=0.20 eCB=0.10 Glu=0.46 GABA=0.14]
+  CUR[nov=0.39 bore=0.56]
+  WS[R=0.03 θ=0.14 ignited=no 44Hz γ=0.98 in[s=0.00 m=0.27 l=0.68 s=0.16 n=0.39]]
+  BG deliberation (H=0.84 decisiveness, diff=0.35 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.53 "Let's see if I can recall whether my memory of that was right or wrong..."
+    [        ] nll= 6.35 "How could I figure out which one comes first?"
+    [SELECTED] nll= 6.19 "Let's see if I can figure out why that nagging persists..."
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "Maybe the next fruit after grapes would be cherries? Or maybe lemons?"
+[tick 19] DMN wandering action=speak
+  NT[DA=0.10 NE=0.15 5HT=0.49 ACh=0.20 eCB=0.10 Glu=0.46 GABA=0.14]
+  CUR[nov=0.40 bore=0.57]
+  WS[R=0.20 θ=0.13 ignited=yes 40Hz γ=1.00 in[s=0.00 m=0.41 l=0.64 s=0.88 n=0.40]]
+  BG deliberation (H=0.12 decisiveness, diff=1.34 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 6.50 "Maybe there’s a way to approach this differently?"
+    [SELECTED] nll= 3.93 "Maybe this has to do with something called "reinforcement learning" or maybe a brain circuit?"
+    [        ] nll= 7.00 "Maybe because it keeps me from settling down..."
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "Let's see if I can figure out why that nagging persists..."
+[tick 20] DMN wandering action=think
+  NT[DA=0.15 NE=0.14 5HT=0.49 ACh=0.20 eCB=0.10 Glu=0.46 GABA=0.18]
+  CUR[nov=0.36 bore=0.59]
+  WS[R=0.09 θ=0.17 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.41 l=0.61 s=0.38 n=0.36]]
+  BG deliberation (H=0.62 decisiveness, diff=0.80 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 5.30 "What if there's another way for animals' communication? Like using sound waves instead of dancing?"
+    [        ] nll= 4.56 "What if the way our brains process emotions like happiness can help us build better AI?"
+    [        ] nll= 6.50 "How can we model the way neurons fire?"
+  HC recalled 1:
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "Maybe this has to do with something called "reinforcement learning" or maybe a brain circuit?"
+[tick 21] DMN wandering action=think
+  NT[DA=0.14 NE=0.14 5HT=0.49 ACh=0.21 eCB=0.09 Glu=0.44 GABA=0.17]
+  CUR[nov=0.35 bore=0.60]
+  WS[R=0.12 θ=0.16 ignited=no 40Hz γ=0.98 in[s=0.00 m=0.58 l=0.77 s=0.01 n=0.35]]
+  BG deliberation (H=0.99 decisiveness, diff=0.82 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 4.90 "The user wrote about how ants use pheromones as chemical messengers on their trails... so that might be similar!"
+    [        ] nll= 3.20 "How about different types of dance based on the kind of animal you are talking to... like cats use tap dancing while dogs use waltzing... etc., but that doesn't quite make sense because all dances can be performed by humans too!"
+    [        ] nll= 4.97 "So perhaps the movement was just one method; maybe they can also communicate via sound frequencies... like how bees use their dances but combining that with sounds too..."
+  HC recalled 1:
+    - [inferred] Maybe this has to do with something called "reinforcement learning" or maybe a brain circuit?
+  evolved from: "What if there's another way for animals' communication? Like using sound waves instead of dancing?"
+[tick 22] DMN wandering action=think
+  NT[DA=0.14 NE=0.14 5HT=0.49 ACh=0.20 eCB=0.09 Glu=0.43 GABA=0.16]
+  CUR[nov=0.31 bore=0.62]
+  WS[R=0.13 θ=0.16 ignited=no 40Hz γ=0.97 in[s=0.00 m=0.58 l=0.65 s=0.72 n=0.31]]
+  BG deliberation (H=0.28 decisiveness, diff=1.49 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 7.65 "So if today's info connects to yesterday’s memories related to communication methods..."
+    [        ] nll= 5.58 "Maybe there's some connection between these animal communication methods (like dancing by bees) being linked through evolution towards efficient information transfer?"
+    [SELECTED] nll= 4.00 "Could there actually be some kind of mathematical model behind all these things? Like using equations where variables represent actions/behaviors?"
+  HC recalled 2:
+    - [inferred] Maybe this has to do with something called "reinforcement learning" or maybe a brain circuit?
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "The user wrote about how ants use pheromones as chemical messengers on their trails... so that might be similar!"
+[tick 23] DMN wandering action=think
+  NT[DA=0.19 NE=0.15 5HT=0.49 ACh=0.23 eCB=0.09 Glu=0.41 GABA=0.15]
+  CUR[nov=0.36 bore=0.63]
+  WS[R=0.03 θ=0.16 ignited=no 40Hz γ=0.90 in[s=0.00 m=0.59 l=0.64 s=0.10 n=0.36]]
+  BG deliberation (H=0.90 decisiveness, diff=0.82 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 6.87 "Maybe the way our memory works can also have such models?"
+    [        ] nll= 5.95 "If every action/reward pair could correspond uniquely to one equation variable solving for its effect on the system..."
+    [SELECTED] nll= 4.86 "If you have multiple entities interacting within the same environment, perhaps each one's behavior can influence others', leading them towards specific states through repeated interactions—like consensus algorithms?"
+  HC recalled 2:
+    - [inferred] Maybe this has to do with something called "reinforcement learning" or maybe a brain circuit?
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "Could there actually be some kind of mathematical model behind all these things? Like using equations where variables represent actions/behaviors?"
+[tick 24] DMN wandering action=think
+  NT[DA=0.18 NE=0.14 5HT=0.49 ACh=0.22 eCB=0.09 Glu=0.41 GABA=0.14]
+  CUR[nov=0.29 bore=0.65]
+  WS[R=0.03 θ=0.15 ignited=no 36Hz γ=0.99 in[s=0.00 m=0.60 l=0.66 s=0.13 n=0.29]]
+  BG deliberation (H=0.87 decisiveness, diff=0.49 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.91 "Could there be any relation between these ideas?"
+    [SELECTED] nll= 4.96 "What if these are examples of different types of systems that help organize information flow? Like certain structures in math helping model decision-making processes..."
+    [        ] nll= 4.81 "So if we model agents as nodes that update their state based on some function of neighboring agent states... could there be parallels here?"
+  HC recalled 2:
+    - [inferred] Maybe this has to do with something called "reinforcement learning" or maybe a brain circuit?
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "If you have multiple entities interacting within the same environment, perhaps each one's behavior can influence others', leading them towards specific states through repeated interactions—like consensus algorithms?"
+[tick 25] DMN wandering action=think
+  NT[DA=0.17 NE=0.15 5HT=0.49 ACh=0.22 eCB=0.08 Glu=0.39 GABA=0.14]
+  CUR[nov=0.33 bore=0.65]
+  WS[R=0.08 θ=0.14 ignited=no 36Hz γ=0.96 in[s=0.00 m=0.58 l=0.72 s=0.15 n=0.33]]
+  BG deliberation (H=0.85 decisiveness, diff=0.50 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.78 "Perhaps using concepts from reinforcement learning could better structure my thinking process?"
+    [SELECTED] nll= 4.93 "Does mathematics have models for both reinforcement-based decisions (like human/animal behavior) AND communication through structured patterns?"
+    [        ] nll= 4.59 "So perhaps each person's thinking process can be modeled as a complex system where various components interact like nodes?"
+  HC recalled 2:
+    - [inferred] Maybe this has to do with something called "reinforcement learning" or maybe a brain circuit?
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "What if these are examples of different types of systems that help organize information flow? Like certain structures in math helping model decision-making processes..."
+[tick 26] DMN wandering action=think
+  NT[DA=0.16 NE=0.15 5HT=0.49 ACh=0.21 eCB=0.08 Glu=0.38 GABA=0.14]
+  CUR[nov=0.26 bore=0.68]
+  WS[R=0.06 θ=0.13 ignited=no 36Hz γ=0.99 in[s=0.00 m=0.54 l=0.61 s=0.04 n=0.26]]
+  BG deliberation (H=0.96 decisiveness, diff=0.21 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 4.42 "If every step of the way someone asks me questions about math concepts related to their studies... let's see if they might need help understanding basic algebra versus calculus optimization problems..."
+    [        ] nll= 4.93 "What if math can model not only things we see but also the abstract thoughts?"
+    [        ] nll= 4.61 "If we model the number of ways people choose products as based on prior choices—maybe like Markov chains? Or if there's another pattern?"
+  HC recalled 2:
+    - [inferred] Maybe this has to do with something called "reinforcement learning" or maybe a brain circuit?
+    - [observed] Today I learned how bees communicate with dances.
+  evolved from: "Does mathematics have models for both reinforcement-based decisions (like human/animal behavior) AND communication through structured patterns?"
