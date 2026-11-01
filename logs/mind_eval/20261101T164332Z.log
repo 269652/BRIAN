@@ -102,3 +102,190 @@
   HC recalled 1:
     - [observed] I watched the river flow past the old mill.
   evolved from: "So far today no one has been reading these posts; they all seem like random clicks or just noise unless someone's talking about something specific..."
+[tick 11] DMN wandering (reorient) action=reorient
+  NT[DA=0.15 NE=0.26 5HT=0.49 ACh=0.26 eCB=0.06 Glu=0.28 GABA=0.16]
+  CUR[nov=0.37 bore=0.18]
+  WS[R=0.08 θ=0.28 ignited=no 36Hz γ=0.98 in[s=0.00 m=1.00 l=0.67 s=0.09 n=0.37]]
+  BG deliberation (H=0.91 decisiveness, diff=0.29 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.65 "It's probably best to keep this idea for later; perhaps exploring some math problems will distract me from other things..."
+    [        ] nll= 5.78 "Perhaps this time to focus on something else like math or science?"
+    [SELECTED] nll= 5.11 "If I want to build a mental model for effective thinking as defined here..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe my brain can't process information if left alone—so instead of letting it get distracted by irrelevant stuff during work hours (like social media), maybe focusing more would be better..."
+[tick 12] DMN wandering action=think
+  NT[DA=0.15 NE=0.21 5HT=0.49 ACh=0.23 eCB=0.06 Glu=0.29 GABA=0.15]
+  CUR[nov=0.39 bore=0.29]
+  WS[R=0.07 θ=0.26 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.40 l=0.55 s=0.40 n=0.39]]
+  BG deliberation (H=0.60 decisiveness, diff=0.47 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 6.20 ""If all of my thoughts were just random associations..."."
+    [        ] nll= 6.80 "Maybe that's all too vague?"
+    [        ] nll= 7.36 "Maybe try building that step by step..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "If I want to build a mental model for effective thinking as defined here..."
+[tick 13] DMN wandering action=think
+  NT[DA=0.11 NE=0.19 5HT=0.49 ACh=0.23 eCB=0.06 Glu=0.30 GABA=0.15]
+  CUR[nov=0.40 bore=0.37]
+  WS[R=0.19 θ=0.24 ignited=no 40Hz γ=1.00 in[s=0.00 m=0.29 l=0.77 s=1.00 n=0.40]]
+  BG deliberation (H=0.00 decisiveness, diff=2.31 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 4.55 "The moonlight reflected on water droplets making me realize that the river was flowing faster than usual at night due to increased drag from vaporization under cooler temperatures.""
+    [        ] nll=10.19 "1096"
+    [        ] nll= 6.99 "How do you quantify randomness?"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: ""If all of my thoughts were just random associations..."."
+[tick 14] DMN wandering action=think
+  NT[DA=0.15 NE=0.18 5HT=0.49 ACh=0.27 eCB=0.06 Glu=0.31 GABA=0.15]
+  CUR[nov=0.35 bore=0.44]
+  WS[R=0.07 θ=0.24 ignited=no 40Hz γ=1.00 in[s=0.00 m=0.51 l=0.56 s=0.51 n=0.35]]
+  BG deliberation (H=0.49 decisiveness, diff=3.65 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 5.44 "Now thinking of a way to calculate how much more quickly this river flows compared to its normal speed during nighttime."
+    [        ] nll=12.71 "[something]"
+    [        ] nll= 4.56 "You can't have a successful career without some element of luck because every field has its fair share of challenges you'll inevitably face.""
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "The moonlight reflected on water droplets making me realize that the river was flowing faster than usual at night due to increased drag from vaporization under cooler temperatures.""
+[tick 15] DMN wandering action=think
+  NT[DA=0.14 NE=0.17 5HT=0.49 ACh=0.27 eCB=0.06 Glu=0.31 GABA=0.14]
+  CUR[nov=0.36 bore=0.49]
+  WS[R=0.04 θ=0.22 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.48 l=0.72 s=0.42 n=0.36]]
+  BG deliberation (H=0.58 decisiveness, diff=0.44 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 6.04 "Maybe if you know something about velocity fields or vector calculus..."
+    [        ] nll= 5.47 "Maybe using some sort of rate equation or differential equations?"
+    [SELECTED] nll= 4.95 "Perhaps using calculus or linear algebra would help here since those are powerful tools for analyzing rates of change?"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Now thinking of a way to calculate how much more quickly this river flows compared to its normal speed during nighttime."
+[tick 16] DMN wandering action=think
+  NT[DA=0.15 NE=0.16 5HT=0.49 ACh=0.26 eCB=0.06 Glu=0.32 GABA=0.14]
+  CUR[nov=0.36 bore=0.53]
+  WS[R=0.08 θ=0.20 ignited=no 44Hz γ=1.00 in[s=0.00 m=0.37 l=0.73 s=0.27 n=0.36]]
+  BG deliberation (H=0.73 decisiveness, diff=0.65 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 3.81 "Maybe my approach should focus more on empirical methods rather than theoretical ones because real-world applications might require data-driven insights?"
+    [        ] nll= 4.21 "Maybe my initial approach was too narrow; maybe there's another angle..."
+    [        ] nll= 5.34 "So far today, every time someone asks me about my work as AI learning more about math concepts..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Perhaps using calculus or linear algebra would help here since those are powerful tools for analyzing rates of change?"
+[tick 17] DMN wandering action=think
+  NT[DA=0.24 NE=0.15 5HT=0.50 ACh=0.25 eCB=0.06 Glu=0.32 GABA=0.14]
+  CUR[nov=0.32 bore=0.56]
+  WS[R=0.05 θ=0.19 ignited=no 36Hz γ=0.99 in[s=0.00 m=0.33 l=0.81 s=0.51 n=0.32]]
+  BG deliberation (H=0.49 decisiveness, diff=1.37 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 3.97 "The problem at hand involves optimizing resource allocation given certain constraints which seems like classic operations research problems but with elements of uncertainty involved too—so perhaps stochastic optimization could be useful here?"
+    [SELECTED] nll= 2.93 "How about exploring how to use machine learning (ML) models for time series forecasting? This seems practical given recent advancements where ML has shown great potential across various industries like finance, retail, energy, etc., but perhaps there's still room for improvement by combining traditional statistical techniques with modern ML approaches?"
+    [        ] nll= 6.21 "If every person could make their own choices about how they spend time..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe my approach should focus more on empirical methods rather than theoretical ones because real-world applications might require data-driven insights?"
+[tick 18] DMN wandering action=think
+  NT[DA=0.34 NE=0.16 5HT=0.50 ACh=0.25 eCB=0.06 Glu=0.32 GABA=0.14]
+  CUR[nov=0.28 bore=0.60]
+  WS[R=0.10 θ=0.17 ignited=no 36Hz γ=0.98 in[s=0.00 m=0.48 l=0.62 s=0.13 n=0.28]]
+  BG deliberation (H=0.87 decisiveness, diff=0.54 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 3.81 "Maybe instead of trying something completely new, which might lead us down unintended paths... Perhaps we can look into optimizing existing methods through hybridization or fine-tuning?"
+    [        ] nll= 4.30 "Maybe starting from foundational concepts would help solidify my understanding before moving on complex stuff?"
+    [SELECTED] nll= 5.12 "Maybe start simple; why not make something small that demonstrates the basic concepts of using ML on time series data?"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "How about exploring how to use machine learning (ML) models for time series forecasting? This seems practical given recent advancements where ML has shown great potential across various industries like finance, retail, energy, etc., but perhaps there's still room for improvement by combining traditional statistical techniques with modern ML approaches?"
+[tick 19] DMN wandering action=think
+  NT[DA=0.25 NE=0.17 5HT=0.50 ACh=0.23 eCB=0.06 Glu=0.31 GABA=0.14]
+  CUR[nov=0.23 bore=0.64]
+  WS[R=0.07 θ=0.16 ignited=no 40Hz γ=1.00 in[s=0.00 m=0.43 l=0.75 s=0.76 n=0.23]]
+  BG deliberation (H=0.24 decisiveness, diff=0.76 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.93 "Could you create a model to predict stock prices?"
+    [        ] nll= 4.98 "What if you can model a temporal pattern by looking at how things change over time?"
+    [SELECTED] nll= 4.07 "What if... (a) create a model to predict temperature based on historical weather observations? That sounds practical because predicting temperatures could be useful for various applications like agriculture or energy management?"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe start simple; why not make something small that demonstrates the basic concepts of using ML on time series data?"
+[tick 20] DMN wandering (reorient) action=reorient
+  NT[DA=0.27 NE=0.19 5HT=0.50 ACh=0.26 eCB=0.06 Glu=0.29 GABA=0.15]
+  CUR[nov=0.26 bore=0.20]
+  WS[R=0.06 θ=0.15 ignited=no 40Hz γ=0.99 in[s=0.00 m=1.00 l=0.60 s=0.34 n=0.26]]
+  BG deliberation (H=0.66 decisiveness, diff=1.76 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 9.28 "Maybe use machine learning?"
+    [        ] nll= 5.46 "Maybe apply machine learning here since there are patterns we can learn from?"
+    [SELECTED] nll= 5.64 "Maybe using linear regression would help here since there's often a relationship between current conditions and future outcomes..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "What if... (a) create a model to predict temperature based on historical weather observations? That sounds practical because predicting temperatures could be useful for various applications like agriculture or energy management?"
+[tick 21] DMN wandering action=think
+  NT[DA=0.18 NE=0.19 5HT=0.50 ACh=0.25 eCB=0.06 Glu=0.29 GABA=0.15]
+  CUR[nov=0.38 bore=0.30]
+  WS[R=0.10 θ=0.14 ignited=no 40Hz γ=1.00 in[s=0.00 m=0.39 l=0.71 s=0.26 n=0.38]]
+  BG deliberation (H=0.74 decisiveness, diff=0.33 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.87 "So perhaps instead of trying random stuff without structure... Yeah! ⏎ Now considering how we can use structured methods like [insert method from above]..."
+    [SELECTED] nll= 5.26 "So maybe I can model this system as something with states... Hmm..."
+    [        ] nll= 6.02 "So if we can model this as variables with dependencies... Let me try that approach..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe using linear regression would help here since there's often a relationship between current conditions and future outcomes..."
+[tick 22] DMN wandering action=think
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.24 eCB=0.06 Glu=0.32 GABA=0.15]
+  CUR[nov=0.32 bore=0.40]
+  WS[R=0.08 θ=0.14 ignited=no 36Hz γ=0.97 in[s=0.00 m=0.36 l=0.66 s=0.47 n=0.32]]
+  BG deliberation (H=0.53 decisiveness, diff=0.60 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [SELECTED] nll= 4.38 "Maybe I should use some sort of state machine where each step represents moving from one element or condition into another..."
+    [        ] nll= 5.18 "Maybe if two things are connected through some kind of transformation or interaction..."
+    [        ] nll= 5.83 "Maybe if we consider each word or phrase related by their movement across space-time dimensions..."
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "So maybe I can model this system as something with states... Hmm..."
+[tick 23] DMN wandering action=think
+  NT[DA=0.18 NE=0.18 5HT=0.50 ACh=0.25 eCB=0.06 Glu=0.33 GABA=0.15]
+  CUR[nov=0.31 bore=0.47]
+  WS[R=0.03 θ=0.13 ignited=no 40Hz γ=0.94 in[s=0.00 m=0.39 l=0.53 s=0.37 n=0.31]]
+  BG deliberation (H=0.63 decisiveness, diff=1.36 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 7.90 "Perhaps using mathematical models could be helpful here..."
+    [        ] nll= 4.93 "Perhaps using this concept to model transitions between different states based on user input or environmental factors..."
+    [SELECTED] nll= 5.13 "It might help to model my thinking process as something like this:"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "Maybe I should use some sort of state machine where each step represents moving from one element or condition into another..."
+[tick 24] DMN wandering action=think
+  NT[DA=0.15 NE=0.17 5HT=0.50 ACh=0.25 eCB=0.06 Glu=0.33 GABA=0.14]
+  CUR[nov=0.34 bore=0.52]
+  WS[R=0.05 θ=0.12 ignited=no 40Hz γ=0.94 in[s=0.00 m=0.38 l=0.79 s=0.35 n=0.34]]
+  BG deliberation (H=0.65 decisiveness, diff=1.20 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 3.99 "So... if I were to use all of these elements that I have here (which includes actions, memories, thoughts), how can they be combined into one coherent plan?"
+    [        ] nll= 6.61 "Maybe if someone else had done that..."
+    [SELECTED] nll= 4.15 ""Maybe we should do X." But then why don't others seem ready for that? Maybe because of Y.""
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "It might help to model my thinking process as something like this:"
+[tick 25] DMN wandering action=think
+  NT[DA=0.19 NE=0.17 5HT=0.50 ACh=0.24 eCB=0.06 Glu=0.34 GABA=0.14]
+  CUR[nov=0.37 bore=0.55]
+  WS[R=0.08 θ=0.11 ignited=no 40Hz γ=1.00 in[s=0.00 m=0.36 l=0.56 s=0.83 n=0.37]]
+  BG deliberation (H=0.17 decisiveness, diff=1.24 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 8.70 "What if...?"
+    [        ] nll= 9.00 "1729"
+    [SELECTED] nll= 6.22 "24 hours a day thinking about something; maybe my thoughts are stuck on Z.""
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: ""Maybe we should do X." But then why don't others seem ready for that? Maybe because of Y.""
+[tick 26] DMN wandering action=think
+  NT[DA=0.11 NE=0.17 5HT=0.50 ACh=0.28 eCB=0.07 Glu=0.37 GABA=0.14]
+  CUR[nov=0.37 bore=0.57]
+  WS[R=0.09 θ=0.11 ignited=no 40Hz γ=0.99 in[s=0.00 m=0.39 l=0.73 s=0.44 n=0.37]]
+  BG deliberation (H=0.56 decisiveness, diff=0.55 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 5.63 "Maybe you can model these memory loops using neural networks? ⏎ But then again... hmm..."
+    [SELECTED] nll= 4.93 "The big clock tower at school has its hands moving smoothly every minute as we walk around. Let me try to visualize that now.""
+    [        ] nll= 4.29 "If someone takes me to a coffee shop that's not mine but just for this purpose—maybe I can talk with them?"
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "24 hours a day thinking about something; maybe my thoughts are stuck on Z.""
+[tick 27] DMN wandering action=think
+  NT[DA=0.12 NE=0.17 5HT=0.50 ACh=0.28 eCB=0.07 Glu=0.39 GABA=0.14]
+  CUR[nov=0.37 bore=0.58]
+  WS[R=0.06 θ=0.11 ignited=no 40Hz γ=0.96 in[s=0.00 m=0.47 l=0.86 s=0.25 n=0.37]]
+  BG deliberation (H=0.75 decisiveness, diff=0.46 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 4.75 "How do you create these connections? Is there any logic behind them?"
+    [SELECTED] nll= 5.09 ""Alrighty then! So if today's weather report says there might be some rain tomorrow... hmm...""
+    [        ] nll= 5.85 "Maybe I should look into how the pendulum works because clocks often use them.""
+  HC recalled 1:
+    - [observed] I watched the river flow past the old mill.
+  evolved from: "The big clock tower at school has its hands moving smoothly every minute as we walk around. Let me try to visualize that now.""
