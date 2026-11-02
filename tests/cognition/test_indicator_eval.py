@@ -262,6 +262,71 @@ class TestLoopEscapeProbe:
                 1 / c["n_thoughts"]), name
 
 
+class TestLoopEscapeRelativeYardstick:
+    """Smoke run 58834649: mean-pooled embeddings compress every
+    distance, so a clear topic switch scored 0.11 and the absolute
+    0.25 bar counted every thought as looping in every arm. The probe
+    now judges a thought against loop_ratio × the novelty pooled over
+    ALL arms — one bar for every condition, scaled like the runtime's
+    own relative LOOPING threshold (H67)."""
+
+    TOPICS = ("river", "graph", "stone", "violin", "fox", "moon")
+
+    @classmethod
+    def _embed(cls, text):
+        # large shared component: a topic switch has novelty ≈ 0.1
+        v = [3.0] + [0.0] * len(cls.TOPICS)
+        low = (text or "").lower()
+        for i, t in enumerate(cls.TOPICS):
+            if t in low:
+                v[1 + i] = 1.0
+        return v
+
+    def _run(self, cfg):
+        from neuroslm.cognition.indicators import probe_loop_escape
+        calls = [0]
+
+        def gen(p, n):
+            calls[0] += 1
+            return f"Again the {self.TOPICS[(calls[0] // 3) % 6]}."
+        return probe_loop_escape(
+            _seams(gen, embed=self._embed),
+            seed_texts=["I watched the river flow past the old mill."],
+            memories=[], n_idle_ticks=12, cfg=cfg, seed=0)
+
+    def test_pooled_threshold_is_loop_ratio_times_pooled_novelty(self):
+        from neuroslm.cognition.indicators import pooled_loop_threshold
+        cfg = MindConfig(loop_ratio=0.75)
+        thr = pooled_loop_threshold([[0.0, 0.1], [0.2]], cfg)
+        assert thr == pytest.approx(0.075)
+
+    def test_absolute_mode_keeps_the_fixed_bar(self):
+        from neuroslm.cognition.indicators import pooled_loop_threshold
+        cfg = MindConfig(control_thresholds="absolute",
+                         loop_novelty_threshold=0.25)
+        assert pooled_loop_threshold([[0.0, 0.1]], cfg) == 0.25
+
+    def test_exact_copies_still_count_as_looping(self):
+        from neuroslm.cognition.indicators import (
+            longest_streak_below, pooled_loop_threshold)
+        thr = pooled_loop_threshold([[0.0, 0.0, 0.0]], MindConfig())
+        assert longest_streak_below([0.0, 0.0, 0.0], thr) == 3
+
+    def test_topic_switches_break_the_low_novelty_streak(self):
+        res = self._run(MindConfig(n_candidates=1,
+                                   workspace_oscillator=False))
+        assert res["low_novelty_threshold"] < 0.25
+        for name, c in res["conditions"].items():
+            assert c["longest_low_streak"] < c["n_thoughts"] - 1, name
+
+    def test_each_run_reports_its_novelty_series(self):
+        res = self._run(MindConfig(n_candidates=1,
+                                   workspace_oscillator=False))
+        for name, c in res["conditions"].items():
+            for r in c["runs"]:
+                assert len(r["novelty"]) == r["n_thoughts"] - 1, name
+
+
 class TestLoopEscapeSeedsMemory:
     """Smoke run 58700866: every arm started amnesic, so recall could
     only return the seed sentence. Each arm (bare included, via its

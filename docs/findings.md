@@ -4726,3 +4726,23 @@ candidate-collapse fix (point 4); (iii) find out why DA keeps rising
 during the loop.
 
 [EVIDENCE: logs/mind_eval/20261102T143453Z.log]
+
+### Development: `loop_escape` streak judged against pooled novelty (maintainer, 2026-11-02, not yet measured)
+
+Follows point 5 of run 58834649. A thought now counts as low novelty
+when it falls below `loop_ratio` (0.75) × the mean stream novelty pooled
+over **all** arms of the probe, bare included. This is the runtime's
+own relative LOOPING rule (H67), applied as a single bar for every
+condition. It is not scaled per arm, which would let a looping arm set
+its own low bar. Exact copies (novelty 0) still count as low. The probe
+now records the bar (`low_novelty_threshold`) and each run's per-step
+`novelty` series, so later runs can be re-scored offline. `mean_novelty`
+is unchanged. Streak contrasts from earlier runs are not comparable
+with new ones.
+
+Expected in the next run: the full arm's reorients (topic switches with
+novelty ≈ 0.1) break the streak, so the full arm's streak falls below
+15/16. no_control and bare can differ from it only if their thoughts
+switch topic less often.
+
+[EVIDENCE: tests/cognition/test_indicator_eval.py::TestLoopEscapeRelativeYardstick]

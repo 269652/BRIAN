@@ -26,7 +26,8 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from neuroslm.cognition.controller_phi import probe_controller_phi
 from neuroslm.cognition.runtime import (
-    CognitiveRuntime, MindConfig, MindSeams, TickResult, format_debug_trace)
+    CognitiveRuntime, MindConfig, MindSeams, TickResult, format_debug_trace,
+    loop_threshold)
 
 INDICATORS: Dict[str, str] = {
     "RPT-1": "input modules using algorithmic recurrence",
@@ -279,6 +280,16 @@ def longest_streak_below(values: Sequence[float], threshold: float) -> int:
     return best
 
 
+def pooled_loop_threshold(series: Sequence[Sequence[float]],
+                          cfg: MindConfig) -> float:
+    """One low-novelty bar for every arm: the runtime's LOOPING rule
+    (``loop_threshold``) applied to the novelty pooled over all arms.
+    Floored above 0 so exact copies (novelty 0) still count as low."""
+    pooled = [v for s in series for v in s]
+    base = sum(pooled) / len(pooled) if pooled else None
+    return max(loop_threshold(base, cfg), 1e-9)
+
+
 def _mean(xs: Sequence[float]) -> Optional[float]:
     return sum(xs) / len(xs) if xs else None
 
@@ -488,12 +499,11 @@ def probe_source_monitoring(seams: MindSeams,
             "conditions": conds, "contrasts": _contrasts(conds, "accuracy")}
 
 
-def _stream_metrics(thoughts: List[str], embed_fn,
-                    threshold: float) -> dict:
+def _stream_metrics(thoughts: List[str], embed_fn) -> dict:
     nov = sequence_novelty([list(embed_fn(t)) for t in thoughts])[1:]
     return {"n_thoughts": len(thoughts),
             "mean_novelty": _mean(nov) if nov else 0.0,
-            "longest_low_streak": longest_streak_below(nov, threshold),
+            "novelty": nov,
             "distinct_ratio": (len(set(thoughts)) / len(thoughts)
                                if thoughts else 0.0)}
 
@@ -538,7 +548,6 @@ def probe_loop_escape(seams: MindSeams,
     Every arm starts from the same ``memories`` (bare: in its window),
     laid down before the seed sentence."""
     cfg = cfg or MindConfig()
-    thr = cfg.loop_novelty_threshold
     ablations = {"full": {},
                  "no_control": {"curiosity_gain": 0.0,
                                 "replay_boredom_threshold": 2.0,
@@ -552,7 +561,7 @@ def probe_loop_escape(seams: MindSeams,
         if cfg.osc_ignition_mode == "adaptive":
             # H66 vs H65: the same workspace with run 58676023's bar
             ablations["fixed_threshold"] = {"osc_ignition_mode": "fixed"}
-    conds: Dict[str, dict] = {}
+    arm_runs: Dict[str, List[dict]] = {}
     for name, ov in ablations.items():
         runs = []
         for i, text in enumerate(seed_texts):
@@ -583,15 +592,15 @@ def probe_loop_escape(seams: MindSeams,
                     if r.sync_r is not None:
                         sync_rs.append(r.sync_r)
                         peaks.append(r.gamma_peak_hz)
-            m = _stream_metrics(thoughts, seams.embed_fn, thr)
+            m = _stream_metrics(thoughts, seams.embed_fn)
             m.update(reorients=reorients, replays=replays,
                      inhibited=inhibited, thoughts=[t[:240] for t in thoughts],
                      ignition_series=ign, sync_rs=sync_rs,
                      gamma_peaks=peaks, nt=nt)
             runs.append(m)
-        conds[name] = _aggregate_runs(runs)
+        arm_runs[name] = runs
         _say(progress, f"  loop_escape/{name}: novelty="
-                       f"{conds[name]['mean_novelty']:.2f}")
+                       f"{_mean([r['mean_novelty'] for r in runs]):.2f}")
     runs = []
     for i, text in enumerate(seed_texts):
         lm = _bare(seams, cfg, seed * 1000 + i)
@@ -601,16 +610,25 @@ def probe_loop_escape(seams: MindSeams,
         thoughts = [t for t in (lm.muse() for _ in range(n_idle_ticks)) if t]
         for t in thoughts:
             _say(progress, f"[bare] {t}")
-        m = _stream_metrics(thoughts, seams.embed_fn, thr)
+        m = _stream_metrics(thoughts, seams.embed_fn)
         m["thoughts"] = [t[:240] for t in thoughts]
         runs.append(m)
-    conds["bare"] = _aggregate_runs(runs)
+    arm_runs["bare"] = runs
     _say(progress, f"  loop_escape/bare: novelty="
-                   f"{conds['bare']['mean_novelty']:.2f}")
+                   f"{_mean([r['mean_novelty'] for r in runs]):.2f}")
+    thr = pooled_loop_threshold(
+        [r["novelty"] for rs in arm_runs.values() for r in rs], cfg)
+    _say(progress, f"  loop_escape: low-novelty threshold={thr:.3f}")
+    conds: Dict[str, dict] = {}
+    for name, rs in arm_runs.items():
+        for r in rs:
+            r["longest_low_streak"] = longest_streak_below(r["novelty"], thr)
+        conds[name] = _aggregate_runs(rs)
     return {"indicator": "GWT-4",
             "question": "Does internal state redirect unprompted thought "
                         "out of a repetitive basin?",
             "n_idle_ticks": n_idle_ticks,
+            "low_novelty_threshold": thr,
             "conditions": conds,
             "contrasts": {**_contrasts(conds, "mean_novelty"),
                           **{k.replace("full_minus", "lag1_full_minus"): v
