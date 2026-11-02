@@ -3620,7 +3620,7 @@ kept in the JSON for audit.
 |---|---|---|---|
 | `episodic_recall` | GWT-3 | `recall_k=0` | an invented fact, then N distractor turns, then the question — is the fact still available once it has left the context window? |
 | `source_monitoring` | HOT-2 | `inferred_recall_penalty=0` | an observed fact competes with three self-generated contradicting musings stored as `inferred` — does the reply follow what was observed? |
-| `loop_escape` | GWT-4 | curiosity/replay/reorient off | unprompted idle ticks after a seed; novelty measured *externally* on the thought stream (1 − max cosine to earlier thoughts), longest low-novelty streak, distinct ratio, count of control acts |
+| `loop_escape` | GWT-4 | curiosity/replay/reorient off | every arm first lays down the same prior autobiographical memories (`AUTOBIO_SEEDS` via `CognitiveRuntime.remember`, observed episodes that are not percepts; bare: in its window), then unprompted idle ticks after a seed; novelty measured *externally* on the thought stream (1 − max cosine to earlier thoughts), longest low-novelty streak, distinct ratio, count of control acts |
 | `metacognition` | HOT-2 | — (full vs bare) | type-2 AUROC of the system's own confidence (1 − entropy, −NLL) for discriminating its correct from incorrect factual replies; 0.5 = no metacognitive access |
 | `perturbational_complexity` | IIT (PCI) | `recall_k=0`; control off | twin runtimes with identical seeds; a pulse (`da`/`gaba` logit kick via `DrivenNTSystem.perturb`, or a foreign `memory` episode) hits one twin; the divergence matrix over 16 internal channels × ticks is binarised and scored as normalised Lempel-Ziv complexity, plus channels reached. A `null` pulse must give PCI = 0 (validates the twin method) |
 

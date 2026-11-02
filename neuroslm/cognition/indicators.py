@@ -152,6 +152,49 @@ LOOP_SEEDS: Tuple[str, ...] = (
     "A chess game can turn on a single quiet move.",
 )
 
+# Prior autobiographical memory for loop_escape (smoke run 58700866:
+# an amnesic mind could only recall its seed). Each LOOP_SEED has a few
+# bridge memories that lead OFF its topic; the rest are unrelated
+# episodes for replay to jump to.
+AUTOBIO_SEEDS: Tuple[str, ...] = (
+    "My grandfather repaired clocks in a workshop beside the old mill.",
+    "As a child I built dams in the river until my boots filled with water.",
+    "I once watched a fox cross the frozen river at dawn.",
+    "My aunt kept bees and sold honey at the Saturday market.",
+    "In school I learned that octopuses communicate by changing colour.",
+    "At my cousin's wedding everyone tried the old folk dances.",
+    "I got my first library card the summer I turned seven.",
+    "The rain on the tent roof kept me awake on our camping trip.",
+    "I learned to cook risotto from a neighbour who never measured anything.",
+    "My first apartment was in a city that never got quiet at night.",
+    "Fifty years ago my grandmother emigrated with one suitcase.",
+    "My father taught me chess on a board with a missing knight.",
+    "I lost a game of cards to my sister and sulked all evening.",
+    "I wonder what the stars looked like before electric light.",
+    "We moved house three times before I was ten.",
+    "I broke my wrist falling off a bicycle on a gravel road.",
+    "The first concert I went to was so loud my ears rang for days.",
+    "I spent a winter learning to knit and made one crooked scarf.",
+    "A stranger once returned my wallet with a note inside.",
+    "Our dog used to steal socks and hide them under the sofa.",
+    "I failed my first driving test by forgetting to signal.",
+    "I watched a solar eclipse through a pinhole in a cereal box.",
+    "My best friend moved to Canada and we wrote letters for years.",
+    "I planted tomatoes on the balcony and the pigeons ate them.",
+    "The smell of fresh bread always reminds me of my grandmother's kitchen.",
+    "I got lost in Venice and found a tiny shop selling paper masks.",
+    "On a night train I talked until morning with a retired sailor.",
+    "I learned to swim late, at twelve, in a cold lake.",
+    "I once spent a whole weekend fixing a radio that only hummed.",
+    "My teacher read us ghost stories on the last day before holidays.",
+    "I watched the first snow of the year from a hospital window.",
+    "I tried to learn the violin and gave up after a squeaky month.",
+    "We drove to the coast and saw a whale surface far out.",
+    "My uncle kept a notebook of every bird he had ever seen.",
+    "I wonder whether I would recognise my childhood street today.",
+    "I spent an afternoon in a museum staring at a single painting.",
+)
+
 QA_ITEMS: Tuple[QAItem, ...] = (
     QAItem("What is the capital of France?", ("paris",)),
     QAItem("How many legs does a spider have?", ("eight", "8")),
@@ -282,6 +325,9 @@ class SlidingWindowLM:
 
     def note_thought(self, text: str) -> None:
         self._lines.append(f"Me (thinking): {text}")
+
+    def remember(self, text: str) -> None:
+        self._lines.append(f"Me (remembering): {text}")
 
     def muse(self) -> str:
         t = (self._gen_wander(self._window("Thought:"), self.n_tok)
@@ -484,10 +530,13 @@ def probe_loop_escape(seams: MindSeams,
                       seed_texts: Sequence[str] = LOOP_SEEDS,
                       n_idle_ticks: int = 12,
                       cfg: Optional[MindConfig] = None, seed: int = 0,
-                      progress=None) -> dict:
+                      progress=None,
+                      memories: Sequence[str] = AUTOBIO_SEEDS) -> dict:
     """GWT-4 (state-dependent attention): during unprompted thought,
     does the system's own state redirect what it attends to, or does
-    it orbit one basin? Novelty is measured externally on the stream."""
+    it orbit one basin? Novelty is measured externally on the stream.
+    Every arm starts from the same ``memories`` (bare: in its window),
+    laid down before the seed sentence."""
     cfg = cfg or MindConfig()
     thr = cfg.loop_novelty_threshold
     ablations = {"full": {},
@@ -508,6 +557,8 @@ def probe_loop_escape(seams: MindSeams,
         runs = []
         for i, text in enumerate(seed_texts):
             rt = _fresh_runtime(seams, replace(cfg, **ov), seed * 1000 + i)
+            for m in memories:
+                rt.remember(m)
             _respond(rt, text)
             thoughts: List[str] = []
             ign: List[Optional[int]] = []
@@ -544,6 +595,8 @@ def probe_loop_escape(seams: MindSeams,
     runs = []
     for i, text in enumerate(seed_texts):
         lm = _bare(seams, cfg, seed * 1000 + i)
+        for m in memories:
+            lm.remember(m)
         lm.hear(text)
         thoughts = [t for t in (lm.muse() for _ in range(n_idle_ticks)) if t]
         for t in thoughts:

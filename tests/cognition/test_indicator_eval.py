@@ -262,6 +262,55 @@ class TestLoopEscapeProbe:
                 1 / c["n_thoughts"]), name
 
 
+class TestLoopEscapeSeedsMemory:
+    """Smoke run 58700866: every arm started amnesic, so recall could
+    only return the seed sentence. Each arm (bare included, via its
+    window) now starts from the same autobiographical memories."""
+
+    MEMORY = "My grandfather's mill stood on the river."
+    SEED = "I watched the river flow past the old mill."
+
+    def _run(self, prompts):
+        from neuroslm.cognition.indicators import probe_loop_escape
+
+        def gen(p, n):
+            prompts.append(p)
+            return ("I think of grandfather." if "grandfather" in p.lower()
+                    else "A plain thought.")
+        return probe_loop_escape(
+            _seams(gen), seed_texts=[self.SEED], memories=[self.MEMORY],
+            n_idle_ticks=4, cfg=MindConfig(n_candidates=1,
+                                           workspace_oscillator=False),
+            seed=0)
+
+    def test_every_arm_can_think_from_the_seeded_memory(self):
+        res = self._run([])
+        for name, c in res["conditions"].items():
+            assert any("grandfather" in t.lower()
+                       for r in c["runs"] for t in r["thoughts"]), name
+
+    def test_bare_window_holds_memories_before_the_seed(self):
+        prompts = []
+        self._run(prompts)
+        bare = [p for p in prompts if p.endswith("Thought:")
+                and self.SEED in p and MindConfig().persona not in p]
+        assert bare, "bare arm muses over its window"
+        p = bare[0]
+        assert p.index(self.MEMORY) < p.index(self.SEED)
+
+    def test_bank_gives_every_loop_seed_associations_to_follow(self):
+        from neuroslm.cognition.indicators import AUTOBIO_SEEDS, LOOP_SEEDS
+        assert len(set(AUTOBIO_SEEDS)) >= 30
+        content = {s: {w for w in re.findall(r"[a-z]+", s.lower())
+                       if w not in _STOP and len(w) > 3}
+                   for s in AUTOBIO_SEEDS}
+        for seed in LOOP_SEEDS:
+            words = {w for w in re.findall(r"[a-z]+", seed.lower())
+                     if w not in _STOP and len(w) > 3}
+            neighbours = [m for m, cw in content.items() if cw & words]
+            assert len(neighbours) >= 2, seed
+
+
 # ── Probe: metacognitive sensitivity (HOT-2, type-2 AUROC) ───────────
 
 class TestMetacognitionProbe:

@@ -4554,3 +4554,37 @@ Next: a second smoke run.
 
 [EVIDENCE: logs/mind_eval/20261101_58698239_container.log (local capture)]
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestCuriosityIsValue, TestBoredomReachesGeneration, TestReorientBreaksTheTrainOfThought]
+
+### Smoke run 58700866 (build `8f933e42`): reply path still clean; wandering still loops, because memory was empty (2026-11-02)
+
+Same settings as 58698239 (4 probes, n = 1, 2 distractors, 8 idle ticks).
+Results: `results/mind_eval/20261101T192657Z_deepseek-r1-qwen-7b.json`.
+
+- **Reply path:** unchanged and clean (recall, source monitoring and
+  metacognition contrasts identical to 58698239).
+- **`loop_escape`:** full arm novelty 0.056 (was 0.04), longest
+  low-novelty streak 7/8 in every arm, distinct ratio 0.875, 2 reorients,
+  0 replays. `no_control` scored higher novelty (0.094) than full, and
+  `no_osc_feedback` / `fixed_threshold` gave the same numbers as full.
+  The thoughts are no longer verbatim copies, but they stay in one
+  basin (river → mill → river-flow simulation code).
+
+**Diagnosis:** the trace logs `HC recalled 1:` on every idle tick, and
+that one episode is the seed sentence. Each arm began with an empty
+hippocampus. Recall could only return the seed, replay had nothing
+else to jump to, and reorient re-anchored on the seed itself. The
+curiosity term and boredom-heated sampling had no associations to
+steer towards.
+
+**Probe change (resets the `loop_escape` baseline):** every arm now
+lays down 36 prior autobiographical memories (`AUTOBIO_SEEDS`) before
+the seed sentence, via the new `CognitiveRuntime.remember()`. These are
+observed episodes that are not percepts: no sensory queue, no goal, no
+NT drive. Each loop seed has bridge memories that lead off its topic,
+and the rest are unrelated episodes for replay. The bare arm gets the
+same memories in its window. `loop_escape` numbers from runs before
+this change are not comparable with later ones.
+
+[EVIDENCE: logs/mind_eval/20261101T192655Z.log]
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestRememberSeedsAutobiographicalMemory]
+[EVIDENCE: tests/cognition/test_indicator_eval.py::TestLoopEscapeSeedsMemory]

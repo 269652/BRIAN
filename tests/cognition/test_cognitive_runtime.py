@@ -1005,6 +1005,46 @@ class TestPerceptUtilityGate:
         assert "Hellohello" in gen.prompts[0]
 
 
+class TestRememberSeedsAutobiographicalMemory:
+    """Smoke run 58700866: a fresh mind's hippocampus held one episode
+    (the seed percept), so every wandering tick recalled the same basin
+    and replay had nowhere to jump. ``remember()`` lays down prior
+    autobiographical memory — observed episodes that are NOT percepts
+    of the current moment."""
+
+    def test_remembered_text_is_an_observed_episode(self):
+        rt = _mk_runtime(_ScriptedGen(["t"]))
+        rt.remember("My grandfather's mill stood on the river")
+        (e,) = rt.memory.all()
+        assert e["content"] == "My grandfather's mill stood on the river"
+        assert e["context"]["kind"] == "observed"
+        assert e["content_vec"] == _vec_for(e["content"])
+        assert "memory" in e["tags"] and "percept" not in e["tags"]
+
+    def test_remembering_is_not_perceiving(self):
+        nt = _FakeNT()
+        rt = _mk_runtime(_ScriptedGen(["t"]), nt=nt)
+        rt.remember("My grandfather's mill stood on the river")
+        assert nt.step_calls == [], "a memory is not arousing input"
+        r = rt.tick()
+        assert r.wandering is True and r.action != "respond"
+        assert r.goal_relevance == 0.0, "a memory does not set the goal"
+
+    def test_wandering_recall_follows_a_remembered_association(self):
+        from neuroslm.cognition.runtime import MindConfig
+        cfg = MindConfig(n_candidates=1, recall_k=1)
+        rt = _mk_runtime(_ScriptedGen(["the river is calm"]), cfg=cfg)
+        rt.remember("My grandfather's mill stood on the river")
+        rt.remember("We built dams in the river as children")
+        rt.remember("I lost a chess game to my sister")
+        rt.tick()
+        r = rt.tick()
+        (e,) = r.recalled
+        assert "river" in e["content"], (
+            "the river thought recalls a river memory (inhibition of "
+            "return may skip the one recalled last tick)")
+
+
 class TestInnerSpeechRegister:
     """D1: DMN ticks generate through a separate wander seam (raw
     completion — no chat template, no imaginary addressee); respond

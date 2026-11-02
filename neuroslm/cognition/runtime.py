@@ -774,6 +774,21 @@ class CognitiveRuntime:
             activation=1.0,
             grad_norm=float(self.cfg.appraisal.get(action_class, 0.0)))
 
+    def remember(self, text: str, source: str = "autobiographical") -> None:
+        """Lay down prior autobiographical memory: an OBSERVED episode
+        that is not a percept of the current moment — no sensory queue,
+        no goal, no NT drive. Gives wandering recall and replay real
+        associations to follow (smoke run 58700866: an amnesic mind
+        could only recall its seed sentence)."""
+        text = (text or "").strip()
+        if not text:
+            return
+        self.memory.add(text,
+                        content_vec=list(self._embed(text)),
+                        nt_state=self.nt.levels(),
+                        tags=[source, "memory", "kind=observed"],
+                        context={"kind": "observed", "source": source})
+
     # ── The cognitive cycle ──────────────────────────────────────────
 
     def tick(self) -> TickResult:
