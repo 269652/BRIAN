@@ -157,9 +157,16 @@ class MindConfig:
     choice decisive."""
 
     goal_weight: float = 2.0
-    """DA-weighted goal pull in the BG utility, nats per unit cosine at
-    baseline DA: U = −NLL + goal_weight·(DA/DA₀)·cos(candidate, goal).
-    The goal is the most recent observed input (the task set)."""
+    """Phasic-DA goal pull in the BG utility, nats per unit cosine per
+    DA₀ of release: U = −NLL + goal_weight·max(0, DA−DA₀)/DA₀·cos(
+    candidate, goal). Zero at tonic DA — goal pursuit is switched on by
+    a release (``incentive``). The goal is the most recent observed
+    input (the task set)."""
+
+    incentive: Dict[str, float] = field(default_factory=lambda: {
+        "request": 1.0, "question": 1.0})
+    """VTA phasic release: a percept whose action class asks something
+    of the mind kicks DA's logit by this much; the DA leak relaxes it."""
 
     appraisal: Dict[str, float] = field(default_factory=lambda: {
         "insult": 1.0, "disagreement": 0.5, "request": 0.5})
@@ -773,6 +780,9 @@ class CognitiveRuntime:
         self.nt.step_full(
             activation=1.0,
             grad_norm=float(self.cfg.appraisal.get(action_class, 0.0)))
+        release = float(self.cfg.incentive.get(action_class, 0.0))
+        if release and hasattr(self.nt, "perturb"):
+            self.nt.perturb("DA", release)
 
     def remember(self, text: str, source: str = "autobiographical") -> None:
         """Lay down prior autobiographical memory: an OBSERVED episode
@@ -1197,9 +1207,9 @@ class CognitiveRuntime:
         distribution (0 = one option clearly excluded the rest, 1 =
         arbitrary among near-equal options).
 
-        Utility = −NLL + goal_weight·(DA/DA₀)·cos(candidate, goal):
-        the trunk's own likelihood plus dopamine-weighted pull toward
-        the current goal. Temperature = :func:`selection_temperature`
+        Utility = −NLL + goal_weight·max(0, DA−DA₀)/DA₀·cos(candidate,
+        goal): the trunk's own likelihood plus a pull toward the current
+        goal that only phasic (released) dopamine switches on. Temperature = :func:`selection_temperature`
         (boredom heats, NE cools). No content rules (2026-11-01).
         """
         if len(scores) == 1:
@@ -1213,8 +1223,8 @@ class CognitiveRuntime:
         T = selection_temperature(
             levels.get("NE", 0.20), baselines.get("NE", 0.20),
             self._boredom, self.cfg)
-        da_gain = (max(0.0, levels.get("DA", 0.0))
-                   / max(baselines.get("DA", 0.15), 1e-6))
+        da0 = baselines.get("DA", 0.15)
+        da_gain = max(0.0, levels.get("DA", 0.0) - da0) / max(da0, 1e-6)
         rel = goal_rel or [0.0] * len(scores)
         nov = novelty or [0.0] * len(scores)
         cur = self.cfg.curiosity_value * max(0.0, min(1.0, self._boredom))

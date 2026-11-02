@@ -2454,9 +2454,11 @@ class TestThreatAppraisalDrivesNE:
 
 
 class TestDASteersTowardTheGoal:
-    """DA weights each candidate's relevance to the current goal (the
-    most recent observed input, the task set) in the BG utility:
-    U = −NLL + goal_weight · (DA/DA₀) · cos(candidate, goal)."""
+    """PHASIC DA weights each candidate's relevance to the current goal
+    (the most recent observed input, the task set) in the BG utility:
+    U = −NLL + goal_weight · max(0, DA − DA₀)/DA₀ · cos(candidate, goal).
+    Tonic DA does not steer — goal pursuit is the exception, switched
+    on by a DA release."""
 
     CANDS = ["thinking about the launch", "thinking about coffee"]
 
@@ -2480,6 +2482,58 @@ class TestDASteersTowardTheGoal:
 
     def test_without_dopamine_likelihood_decides(self):
         assert self._tick(da=0.0).thought == "thinking about coffee"
+
+    def test_tonic_dopamine_does_not_steer(self):
+        # smoke run 58821480: at baseline DA the seed sentence kept
+        # pulling idle thought back onto the river
+        assert self._tick(da=0.15).thought == "thinking about coffee"
+
+
+class TestPhasicDAReleaseForGoals:
+    """What switches goal pursuit on: a percept whose action class
+    carries incentive (something is asked of the mind — a request or
+    question) releases phasic DA, a logit pulse on the real NT system
+    that its DA leak then relaxes. Statements release nothing."""
+
+    CANDS = ["thinking about the launch", "thinking about coffee"]
+
+    def _rt(self):
+        from neuroslm.cognition.runtime import MindConfig
+        from neuroslm.emergent.driven_nt import DrivenNTSystem
+        return _mk_runtime(
+            _ScriptedGen(self.CANDS),
+            scores=_score_map({self.CANDS[0]: 3.5, self.CANDS[1]: 3.0}),
+            nt=DrivenNTSystem(),
+            cfg=MindConfig(n_candidates=2, selection_temp_base=0.01))
+
+    def test_question_releases_dopamine(self):
+        rt = self._rt()
+        rt.observe("What is the launch plan?")
+        assert rt.nt.levels()["DA"] > rt.nt.baselines["DA"] + 0.05
+
+    def test_statement_releases_none(self):
+        rt = self._rt()
+        rt.observe("The launch plan is ready.")
+        assert rt.nt.levels()["DA"] == pytest.approx(
+            rt.nt.baselines["DA"], abs=1e-6)
+
+    def test_released_dopamine_steers_the_reply_onto_the_goal(self):
+        rt = self._rt()
+        rt.observe("Can you check the launch plan?")
+        assert rt.tick().thought == "thinking about the launch"
+
+    def test_without_release_the_goal_does_not_pull(self):
+        rt = self._rt()
+        rt.observe("The launch plan is ready.")
+        assert rt.tick().thought == "thinking about coffee"
+
+    def test_release_decays_back_to_tonic(self):
+        rt = self._rt()
+        rt.observe("What is the launch plan?")
+        for _ in range(30):
+            rt.nt.step_full()
+        assert rt.nt.levels()["DA"] == pytest.approx(
+            rt.nt.baselines["DA"], abs=0.01)
 
     def test_no_goal_no_goal_term(self):
         from neuroslm.cognition.runtime import MindConfig

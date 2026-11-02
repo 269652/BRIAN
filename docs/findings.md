@@ -4635,3 +4635,25 @@ collapses candidate diversity (point 3). Points 4 and 5 are smaller
 structural biases. Next: change one mechanism at a time.
 
 [EVIDENCE: logs/mind_eval/20261102T124333Z.log]
+
+### Development: goal pursuit needs phasic DA (maintainer, 2026-11-02, not yet measured)
+
+Following point 4 of run 58821480. Per the maintainer, the goal pull
+should apply only when DA is above baseline. It is the exception, not
+the normal case, and a mechanism has to release DA to steer
+goal-directed behaviour.
+
+- Goal term: `goal_weight`·max(0, DA − DA₀)/DA₀·cos (was DA/DA₀, i.e.
+  full pull at tonic DA).
+- Release: a percept whose action class carries `incentive` (request,
+  question: 1.0) kicks DA's logit (0.15 → 0.32, gain ≈ 1.2 on the next
+  tick, close to the old baseline pull). The DA leak relaxes it.
+  Statements release nothing.
+
+Expected effect: the reply probes are unchanged (their questions
+release DA). In `loop_escape`, the seed is a statement, so idle ticks
+are no longer pulled back onto it. The bigger blocker from 58821480
+(point 3, last-thought continuation) is untouched, so a large novelty
+gain is not expected from this change alone.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestDASteersTowardTheGoal, TestPhasicDAReleaseForGoals]
