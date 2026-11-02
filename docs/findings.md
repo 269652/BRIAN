@@ -4588,3 +4588,50 @@ this change are not comparable with later ones.
 [EVIDENCE: logs/mind_eval/20261101T192655Z.log]
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestRememberSeedsAutobiographicalMemory]
 [EVIDENCE: tests/cognition/test_indicator_eval.py::TestLoopEscapeSeedsMemory]
+
+### Smoke run 58821480 (build `9087d0fb`): seeded memory reaches recall, but continuing the last thought wins (2026-11-02)
+
+First run with `AUTOBIO_SEEDS`. Same settings as before (4 probes,
+n = 1, 2 distractors, 8 idle ticks). Results:
+`results/mind_eval/20261102T124335Z_deepseek-r1-qwen-7b.json`.
+
+- **Reply path:** clean again. Recall full 1.0 / no_recall 0.0; source
+  monitoring full 1.0 / bare 0.0; metacognition 1.0.
+- **`loop_escape` (new baseline):** full novelty 0.052, longest
+  low-novelty streak 7/8 in every arm, distinct ratio 0.75, 2 reorients,
+  0 replays. `no_control` 0.043, bare 0.062.
+
+**What the trace shows:**
+1. **Recall works now.** Tick 2 recalled two river neighbours ("built
+   dams in the river", "swim … in a cold lake"). Later ticks recalled
+   varied memories (violin, museum, whale), because inhibition of
+   return used up the on-topic ones.
+2. **The memories were used, then dropped.** The respond tick's thought
+   pulled in two seeded memories ("my grandfather's workshop … repairing
+   clocks … first snow"). On tick 2, a candidate that followed it ("The
+   oil scent of the grandfather's workshop", NLL 1.51) nearly tied the
+   river continuation (NLL 1.44), and selection, at entropy 0.86, took
+   the river.
+3. **From tick 3 on, candidate diversity collapses.** All three
+   candidates restate the prompt's "My last thought" almost verbatim. A
+   novel candidate never reaches the basal ganglia, so the curiosity
+   term has nothing to pick, whatever memories are recalled. Ticks 7–8
+   selected an exact copy (novelty 0.00).
+4. **The DA goal pull favours the seed.** The goal is the last observed
+   input, here the seed sentence, so on idle ticks DA rewards candidates
+   close to the river.
+5. **Replay can't fire.** With relative thresholds, replay needs
+   boredom ≥ (1 − novelty baseline) + 0.1. That requires novelty to stay
+   about 0.1 below its own baseline, and reorient (after a 3-tick streak)
+   fires first and cuts boredom (0.70 → 0.21). Replay has fired 0 times
+   in every run so far.
+6. NT levels stayed at baseline on every idle tick logged (DA 0.15,
+   NE 0.20).
+
+**Verdict:** the hypothesis that seeded memory gives wandering
+associations to follow holds at the recall level. It doesn't hold at the
+thought level. The main blocker is the prompt's last thought, which
+collapses candidate diversity (point 3). Points 4 and 5 are smaller
+structural biases. Next: change one mechanism at a time.
+
+[EVIDENCE: logs/mind_eval/20261102T124333Z.log]
