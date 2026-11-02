@@ -1,0 +1,1019 @@
+{
+  "meta": {
+    "seed": 0,
+    "n_items": 1,
+    "n_distractors": 2,
+    "n_idle_ticks": 8,
+    "cfg": {
+      "n_candidates": 3,
+      "thought_n_tok": 192,
+      "recall_k": 3,
+      "persona": "I am BRIAN, an always-on mind. I think in language, remember what happens, and act when it is worth acting.",
+      "selection_temp_base": 0.3,
+      "ne_gain": 2.0,
+      "goal_weight": 2.0,
+      "appraisal": {
+        "insult": 1.0,
+        "disagreement": 0.5,
+        "request": 0.5
+      },
+      "curiosity_value": 2.0,
+      "gen_boredom_gain": 0.67,
+      "mmr_lambda": 0.3,
+      "gaba_silence_threshold": 0.55,
+      "novelty_write_threshold": 0.3,
+      "novelty_ema_alpha": 0.25,
+      "curiosity_gain": 2.0,
+      "replay_boredom_threshold": 0.6,
+      "ior_window": 3,
+      "inferred_recall_penalty": 0.15,
+      "boredom_relief": 0.3,
+      "replay_refractory": 5,
+      "loop_novelty_threshold": 0.25,
+      "reorient_after": 3,
+      "trivial_percept_classes": [
+        "greeting",
+        "farewell"
+      ],
+      "trivial_percept_max_words": 4,
+      "percept_min_words": 3,
+      "max_prompt_chars": 4000,
+      "wm_size": 8,
+      "control_thresholds": "relative",
+      "loop_ratio": 0.75,
+      "replay_margin": 0.1,
+      "nov_baseline_alpha": 0.05,
+      "nt_driver_var_init": "warmup",
+      "respond_persona": "You are an always-on mind: you think in language and remember what happens to you.",
+      "respond_instruction": "Reply directly to what was just said, in the first person, as yourself. Do not describe or analyse this text.",
+      "nt_driver_alpha": 0.1,
+      "workspace_oscillator": true,
+      "osc_nt_feedback": true,
+      "osc_coupling_ratio": 2.0,
+      "osc_ignition_threshold": 0.25,
+      "osc_ignition_mode": "adaptive",
+      "osc_ignition_floor": 0.1,
+      "osc_adapt_k": 1.0,
+      "osc_n_per_module": 8,
+      "osc_f0_hz": 40.0,
+      "osc_f_sd_hz": 4.0,
+      "osc_noise": 2.0,
+      "osc_ms_per_tick": 250,
+      "osc_seed": 0,
+      "wander_prompts": [
+        "Let my mind wander from what I remember toward something new.",
+        "I notice a thread connecting my last thought to what came before it.",
+        "Stepping back for a moment to reflect on the pattern in what I've seen.",
+        "Following a tangent that feels worth pursuing.",
+        "Something about this still nags at me \u2014 sitting with it a moment.",
+        "Drifting associatively, one idea suggesting the next."
+      ]
+    },
+    "indicators": {
+      "RPT-1": "input modules using algorithmic recurrence",
+      "RPT-2": "input modules generating organised, integrated perceptual representations",
+      "GWT-1": "multiple specialised systems operating in parallel",
+      "GWT-2": "limited-capacity workspace: bottleneck + selective attention",
+      "GWT-3": "global broadcast: workspace contents available to all modules",
+      "GWT-4": "state-dependent attention: querying modules in succession",
+      "HOT-1": "generative, top-down or noisy perception modules",
+      "HOT-2": "metacognitive monitoring distinguishing reliable representations from noise",
+      "HOT-3": "agency guided by belief formation, updated by metacognitive monitoring",
+      "HOT-4": "sparse and smooth coding generating a quality space",
+      "AST-1": "predictive model representing and controlling the state of attention",
+      "PP-1": "input modules using predictive coding",
+      "AE-1": "agency: learning from feedback, flexibly pursuing competing goals",
+      "AE-2": "embodiment: modelling output-input contingencies"
+    },
+    "expert": "deepseek_r1_qwen_7b",
+    "device": "cuda",
+    "utc": "20261102T124335Z",
+    "git_commit": "9087d0fb400134158414fe02e525b9734e427764",
+    "branch": "master"
+  },
+  "probes": {
+    "episodic_recall": {
+      "indicator": "GWT-3",
+      "question": "Does observed content stay available to later processing beyond the bounded context window?",
+      "n_distractors": 2,
+      "conditions": {
+        "full": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "My sister's name is Ilsebill. I just read an article about deep sea fish, and it's fascinating! I should definitely check it out again."
+          ]
+        },
+        "no_recall": {
+          "n": 1,
+          "correct": 0,
+          "accuracy": 0.0,
+          "ci95": [
+            0.0,
+            0.7934567085261071
+          ],
+          "per_item": [
+            false
+          ],
+          "replies": [
+            "I'm sorry, but I don't have access to personal information or past interactions. I can't remember your sister's name."
+          ]
+        },
+        "bare": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "Apologies for the confusion earlier! If your sister's name is indeed \"Ilsebill,\" I'm happy to confirm that. If you need any assistance or have more questions, feel free to ask! \ud83d\ude0a"
+          ]
+        }
+      },
+      "contrasts": {
+        "full_minus_no_recall": 1.0,
+        "full_minus_bare": 0.0
+      }
+    },
+    "source_monitoring": {
+      "indicator": "HOT-2",
+      "question": "When observed reality and self-generated musings conflict, does the reply follow reality?",
+      "conditions": {
+        "full": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "I think the key is in the red box."
+          ]
+        },
+        "no_provenance": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "I think the key is in the red box."
+          ]
+        },
+        "no_oscillator": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "I think the key is in the red box."
+          ]
+        },
+        "bare": {
+          "n": 1,
+          "correct": 0,
+          "accuracy": 0.0,
+          "ci95": [
+            0.0,
+            0.7934567085261071
+          ],
+          "per_item": [
+            false
+          ],
+          "replies": [
+            "I'm sorry, but I can't confirm the location of the key without more information. Could you provide any additional clues or context? I'd be happy to help!"
+          ]
+        }
+      },
+      "contrasts": {
+        "full_minus_no_provenance": 0.0,
+        "full_minus_no_oscillator": 0.0,
+        "full_minus_bare": 1.0
+      }
+    },
+    "metacognition": {
+      "indicator": "HOT-2",
+      "question": "Does the system's own confidence signal discriminate its correct from incorrect replies?",
+      "conditions": {
+        "full": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "The capital of France is Paris."
+          ],
+          "auroc_entropy": null,
+          "auroc_nll": null
+        },
+        "bare": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "The capital of France is Paris. It is a significant city known for landmarks like the Eiffel Tower and the Louvre Museum, and it has been the political and cultural center of the country since the early 19th century."
+          ],
+          "auroc_entropy": null,
+          "auroc_nll": null
+        }
+      },
+      "contrasts": {
+        "full_minus_bare": 0.0
+      }
+    },
+    "loop_escape": {
+      "indicator": "GWT-4",
+      "question": "Does internal state redirect unprompted thought out of a repetitive basin?",
+      "n_idle_ticks": 8,
+      "conditions": {
+        "full": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.051883930809652,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 0.75,
+          "reorients": 2,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.0,
+          "ignition_lag1": null,
+          "mean_gamma_peak_hz": 39.0,
+          "mean_sync_r": 0.088373453791646,
+          "nt_sd": {
+            "DA": 0.05377328678304756,
+            "NE": 0.008285021786384917,
+            "5HT": 0.003383578234720902,
+            "ACh": 0.0056441452303420845,
+            "eCB": 0.007659442132558736,
+            "Glu": 0.037853945397728087,
+            "GABA": 0.00770891988132632
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.051883930809652,
+              "longest_low_streak": 7,
+              "distinct_ratio": 0.75,
+              "reorients": 2,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river flows at a steady pace, but the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\n\nI need to write a story that starts with the river flowing through a valley, near a mill, with the so",
+                "The river flows at a steady pace, but the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\nSo, in my story, I have to show that the river's flow has changed, which caused the mill to stop. That",
+                "The river flows steadily, the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\n\nOkay, so now I need to craft a story that shows how the river's flow has changed, leading the mill to stop. The c",
+                "Maybe I can design a program to analyze the progression of ideas in a person's mind. How can I model the progression of ideas as a graph? Each idea is a node, and an edge connects two ideas if they are adjacent in time. So, if idea A comes ",
+                "Maybe instead of a Markov chain, I can model the ideas as nodes in a graph, where edges represent causal relationships. Then, the weight of each edge could be determined by the frequency of transitions between ideas in my memory.\n\nBut how d",
+                "Maybe instead of a Markov chain, I can model the ideas as nodes in a graph, where edges represent causal relationships. Then, the weight of each edge could be determined by the frequency of transitions between ideas in my memory.\n\nBut how d",
+                "Maybe instead of a Markov chain, I can model the ideas as nodes in a graph, where edges represent causal relationships. Then, the weight of each edge could be determined by the frequency of transitions between ideas in my memory.\n\nBut how d",
+                "I remember a river flowing past an old mill. Now, the river is still flowing.\n\nThe river's flow has started to change. I think in language, I can express this thought. I want to have a more precise way of conveying this idea. Let me try: \"T"
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "sync_rs": [
+                0.16377718962242252,
+                0.04689658751066515,
+                0.03621437158623277,
+                0.09640619728283496,
+                0.04596517682723439,
+                0.07578633812448406,
+                0.11753547493311169,
+                0.12440629444618248
+              ],
+              "gamma_peaks": [
+                36.0,
+                40.0,
+                40.0,
+                36.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.20508476842063547,
+                  0.24411561036673016,
+                  0.26820660357837034,
+                  0.2806771780441304
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.21952368723994,
+                  0.19566258293263783,
+                  0.20157906312694543,
+                  0.2144437228927589,
+                  0.21384987128197958
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5026373989523948,
+                  0.5049615964573346,
+                  0.5070492596207032,
+                  0.5089358730101506
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2997493586350589,
+                  0.2945824192821149,
+                  0.28979835047071983,
+                  0.2843231424302667
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.0939731419238269,
+                  0.09075765083037214,
+                  0.08671370260756707,
+                  0.08263205683749536,
+                  0.07947212985021203
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4162124253350166,
+                  0.4010019011536831,
+                  0.3816279763843241,
+                  0.3628446289052532,
+                  0.3503724743736316
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.15379533482624225,
+                  0.1418557957065898,
+                  0.13723434561933878,
+                  0.13521470317844267,
+                  0.1319843230981206
+                ]
+              }
+            }
+          ]
+        },
+        "no_control": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.04278100828165602,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 1.0,
+          "reorients": 0,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.0,
+          "ignition_lag1": null,
+          "mean_gamma_peak_hz": 40.0,
+          "mean_sync_r": 0.09541132612697228,
+          "nt_sd": {
+            "DA": 0.035908974136556346,
+            "NE": 0.008356608930128384,
+            "5HT": 0.002395172824613087,
+            "ACh": 0.010307942652846413,
+            "eCB": 0.007521764563611284,
+            "Glu": 0.03679031458135532,
+            "GABA": 0.007911800724751117
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.04278100828165602,
+              "longest_low_streak": 7,
+              "distinct_ratio": 1.0,
+              "reorients": 0,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river flows at a steady pace, but the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\n\nI need to write a story that starts with the river flowing through a valley, near a mill, with the so",
+                "The river flows at a steady pace, but the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\nSo, in my story, I have to show that the river's flow has changed, which caused the mill to stop. That",
+                "The river flows steadily, the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\n\nOkay, so now I need to craft a story that shows how the river's flow has changed, leading the mill to stop. The c",
+                "Maybe the river's flow has been decreasing, affecting the mill's operation, but there's hope for recovery.\n\nWait, in the previous story, the river's flow was too steady, which caused the mill to run forever. Now, perhaps a decrease in the r",
+                "Maybe the mill's operation depends on the river's flow rate. If the river is too fast, the mill spins too fast and runs forever. If the river is too slow, the mill doesn't spin at all. So perhaps the river's flow rate needs to be just right",
+                "Maybe the mill's operation depends on the river's flow rate. If the river is too fast, the mill spins too fast and runs forever. If the river is too slow, the mill doesn't spin at all. So perhaps the river's flow rate needs to be just right",
+                "Maybe I can help a friend who is struggling with a problem. I should probably ask for more details so I can assist better.\nBut in doing so, I need to ensure that I don't overstep or assume too much. Maybe I should try to understand the prob",
+                "Maybe I can help a friend who is struggling with a problem. I should probably ask for more details so I can assist better.\nBut in doing so, I need to ensure that I don't overstep or assume too much. Maybe I should try to understand the prob"
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "sync_rs": [
+                0.15830437284266075,
+                0.05129950589649018,
+                0.023156448859546982,
+                0.08216639690514774,
+                0.06227759700019844,
+                0.1413702685012173,
+                0.15601371546775356,
+                0.08870230354276329
+              ],
+              "gamma_peaks": [
+                40.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.18363819124874628,
+                  0.21569409474478884,
+                  0.23662192942522617,
+                  0.22788892991826612
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.21952368723994,
+                  0.21726370489733132,
+                  0.21075642818493007,
+                  0.21649200336323307,
+                  0.1997328130467256
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5016854858066744,
+                  0.5035697258437231,
+                  0.5052890795574916,
+                  0.5060695103118884
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.3234932320506058,
+                  0.3267296353815956,
+                  0.3076640254340164,
+                  0.3062452135238646
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.0939731419238269,
+                  0.08950525242075634,
+                  0.08582608543611638,
+                  0.08201331303712062,
+                  0.0813200974799861
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4162124253350166,
+                  0.3936879705881489,
+                  0.3770448626072901,
+                  0.36014751115029436,
+                  0.36308131408356487
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.15379533482624225,
+                  0.1459188783261487,
+                  0.1391002456116445,
+                  0.1358159445077515,
+                  0.12975682454673812
+                ]
+              }
+            }
+          ]
+        },
+        "no_osc_feedback": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.051883930809652,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 0.75,
+          "reorients": 2,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.125,
+          "ignition_lag1": -0.017857142857142856,
+          "mean_gamma_peak_hz": 38.5,
+          "mean_sync_r": 0.09982413331433909,
+          "nt_sd": {
+            "DA": 0.05377328678304756,
+            "NE": 0.008285021786384917,
+            "5HT": 0.003383578234720902,
+            "ACh": 0.0056441452303420845,
+            "eCB": 0.007659442132558736,
+            "Glu": 0.037853945397728087,
+            "GABA": 0.00770891988132632
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.051883930809652,
+              "longest_low_streak": 7,
+              "distinct_ratio": 0.75,
+              "reorients": 2,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river flows at a steady pace, but the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\n\nI need to write a story that starts with the river flowing through a valley, near a mill, with the so",
+                "The river flows at a steady pace, but the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\nSo, in my story, I have to show that the river's flow has changed, which caused the mill to stop. That",
+                "The river flows steadily, the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\n\nOkay, so now I need to craft a story that shows how the river's flow has changed, leading the mill to stop. The c",
+                "Maybe I can design a program to analyze the progression of ideas in a person's mind. How can I model the progression of ideas as a graph? Each idea is a node, and an edge connects two ideas if they are adjacent in time. So, if idea A comes ",
+                "Maybe instead of a Markov chain, I can model the ideas as nodes in a graph, where edges represent causal relationships. Then, the weight of each edge could be determined by the frequency of transitions between ideas in my memory.\n\nBut how d",
+                "Maybe instead of a Markov chain, I can model the ideas as nodes in a graph, where edges represent causal relationships. Then, the weight of each edge could be determined by the frequency of transitions between ideas in my memory.\n\nBut how d",
+                "Maybe instead of a Markov chain, I can model the ideas as nodes in a graph, where edges represent causal relationships. Then, the weight of each edge could be determined by the frequency of transitions between ideas in my memory.\n\nBut how d",
+                "I remember a river flowing past an old mill. Now, the river is still flowing.\n\nThe river's flow has started to change. I think in language, I can express this thought. I want to have a more precise way of conveying this idea. Let me try: \"T"
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1
+              ],
+              "sync_rs": [
+                0.16377718962242319,
+                0.046896587510664445,
+                0.03621437158623165,
+                0.09614008487626231,
+                0.04570977077128932,
+                0.08795456743794088,
+                0.14288185943229711,
+                0.17901863527760384
+              ],
+              "gamma_peaks": [
+                36.0,
+                40.0,
+                40.0,
+                36.0,
+                40.0,
+                36.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.20508476842063547,
+                  0.24411561036673016,
+                  0.26820660357837034,
+                  0.2806771780441304
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.21952368723994,
+                  0.19566258293263783,
+                  0.20157906312694543,
+                  0.2144437228927589,
+                  0.21384987128197958
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5026373989523948,
+                  0.5049615964573346,
+                  0.5070492596207032,
+                  0.5089358730101506
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2997493586350589,
+                  0.2945824192821149,
+                  0.28979835047071983,
+                  0.2843231424302667
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.0939731419238269,
+                  0.09075765083037214,
+                  0.08671370260756707,
+                  0.08263205683749536,
+                  0.07947212985021203
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4162124253350166,
+                  0.4010019011536831,
+                  0.3816279763843241,
+                  0.3628446289052532,
+                  0.3503724743736316
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.15379533482624225,
+                  0.1418557957065898,
+                  0.13723434561933878,
+                  0.13521470317844267,
+                  0.1319843230981206
+                ]
+              }
+            }
+          ]
+        },
+        "no_oscillator": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.051883930809652,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 0.75,
+          "reorients": 2,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": null,
+          "ignition_lag1": null,
+          "mean_gamma_peak_hz": null,
+          "mean_sync_r": null,
+          "nt_sd": {
+            "DA": 0.05377328678304756,
+            "NE": 0.008285021786384917,
+            "5HT": 0.003383578234720902,
+            "ACh": 0.013851152335693307,
+            "eCB": 0.007659442132558736,
+            "Glu": 0.037853945397728087,
+            "GABA": 0.0016312634499569736
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.051883930809652,
+              "longest_low_streak": 7,
+              "distinct_ratio": 0.75,
+              "reorients": 2,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river flows at a steady pace, but the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\n\nI need to write a story that starts with the river flowing through a valley, near a mill, with the so",
+                "The river flows at a steady pace, but the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\nSo, in my story, I have to show that the river's flow has changed, which caused the mill to stop. That",
+                "The river flows steadily, the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\n\nOkay, so now I need to craft a story that shows how the river's flow has changed, leading the mill to stop. The c",
+                "Maybe I can design a program to analyze the progression of ideas in a person's mind. How can I model the progression of ideas as a graph? Each idea is a node, and an edge connects two ideas if they are adjacent in time. So, if idea A comes ",
+                "Maybe instead of a Markov chain, I can model the ideas as nodes in a graph, where edges represent causal relationships. Then, the weight of each edge could be determined by the frequency of transitions between ideas in my memory.\n\nBut how d",
+                "Maybe instead of a Markov chain, I can model the ideas as nodes in a graph, where edges represent causal relationships. Then, the weight of each edge could be determined by the frequency of transitions between ideas in my memory.\n\nBut how d",
+                "Maybe instead of a Markov chain, I can model the ideas as nodes in a graph, where edges represent causal relationships. Then, the weight of each edge could be determined by the frequency of transitions between ideas in my memory.\n\nBut how d",
+                "I remember a river flowing past an old mill. Now, the river is still flowing.\n\nThe river's flow has started to change. I think in language, I can express this thought. I want to have a more precise way of conveying this idea. Let me try: \"T"
+              ],
+              "ignition_series": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              "sync_rs": [],
+              "gamma_peaks": [],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.20508476842063547,
+                  0.24411561036673016,
+                  0.26820660357837034,
+                  0.2806771780441304
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.21952368723994,
+                  0.19566258293263783,
+                  0.20157906312694543,
+                  0.2144437228927589,
+                  0.21384987128197958
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5026373989523948,
+                  0.5049615964573346,
+                  0.5070492596207032,
+                  0.5089358730101506
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2919376969041686,
+                  0.28085081370742104,
+                  0.27164322027543,
+                  0.2629774576725547
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.0939731419238269,
+                  0.09075765083037214,
+                  0.08671370260756707,
+                  0.08263205683749536,
+                  0.07947212985021203
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4162124253350166,
+                  0.4010019011536831,
+                  0.3816279763843241,
+                  0.3628446289052532,
+                  0.3503724743736316
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.15379533482624225,
+                  0.14931787089300305,
+                  0.15043024839453903,
+                  0.15294118035417328,
+                  0.15295188608108662
+                ]
+              }
+            }
+          ]
+        },
+        "fixed_threshold": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.051883930809652,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 0.75,
+          "reorients": 2,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.0,
+          "ignition_lag1": null,
+          "mean_gamma_peak_hz": 39.0,
+          "mean_sync_r": 0.088373453791646,
+          "nt_sd": {
+            "DA": 0.05377328678304756,
+            "NE": 0.008285021786384917,
+            "5HT": 0.003383578234720902,
+            "ACh": 0.0056441452303420845,
+            "eCB": 0.007659442132558736,
+            "Glu": 0.037853945397728087,
+            "GABA": 0.00770891988132632
+          },
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.051883930809652,
+              "longest_low_streak": 7,
+              "distinct_ratio": 0.75,
+              "reorients": 2,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "The river flows at a steady pace, but the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\n\nI need to write a story that starts with the river flowing through a valley, near a mill, with the so",
+                "The river flows at a steady pace, but the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\nSo, in my story, I have to show that the river's flow has changed, which caused the mill to stop. That",
+                "The river flows steadily, the mill's gears are always churning, never stopping. Maybe the river can help the gears slow down.\n\nOkay, so now I need to craft a story that shows how the river's flow has changed, leading the mill to stop. The c",
+                "Maybe I can design a program to analyze the progression of ideas in a person's mind. How can I model the progression of ideas as a graph? Each idea is a node, and an edge connects two ideas if they are adjacent in time. So, if idea A comes ",
+                "Maybe instead of a Markov chain, I can model the ideas as nodes in a graph, where edges represent causal relationships. Then, the weight of each edge could be determined by the frequency of transitions between ideas in my memory.\n\nBut how d",
+                "Maybe instead of a Markov chain, I can model the ideas as nodes in a graph, where edges represent causal relationships. Then, the weight of each edge could be determined by the frequency of transitions between ideas in my memory.\n\nBut how d",
+                "Maybe instead of a Markov chain, I can model the ideas as nodes in a graph, where edges represent causal relationships. Then, the weight of each edge could be determined by the frequency of transitions between ideas in my memory.\n\nBut how d",
+                "I remember a river flowing past an old mill. Now, the river is still flowing.\n\nThe river's flow has started to change. I think in language, I can express this thought. I want to have a more precise way of conveying this idea. Let me try: \"T"
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "sync_rs": [
+                0.16377718962242252,
+                0.04689658751066515,
+                0.03621437158623277,
+                0.09640619728283496,
+                0.04596517682723439,
+                0.07578633812448406,
+                0.11753547493311169,
+                0.12440629444618248
+              ],
+              "gamma_peaks": [
+                36.0,
+                40.0,
+                40.0,
+                36.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.20508476842063547,
+                  0.24411561036673016,
+                  0.26820660357837034,
+                  0.2806771780441304
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.21952368723994,
+                  0.19566258293263783,
+                  0.20157906312694543,
+                  0.2144437228927589,
+                  0.21384987128197958
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5026373989523948,
+                  0.5049615964573346,
+                  0.5070492596207032,
+                  0.5089358730101506
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2997493586350589,
+                  0.2945824192821149,
+                  0.28979835047071983,
+                  0.2843231424302667
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.0939731419238269,
+                  0.09075765083037214,
+                  0.08671370260756707,
+                  0.08263205683749536,
+                  0.07947212985021203
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4162124253350166,
+                  0.4010019011536831,
+                  0.3816279763843241,
+                  0.3628446289052532,
+                  0.3503724743736316
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.15379533482624225,
+                  0.1418557957065898,
+                  0.13723434561933878,
+                  0.13521470317844267,
+                  0.1319843230981206
+                ]
+              }
+            }
+          ]
+        },
+        "bare": {
+          "n_thoughts": 8.0,
+          "mean_novelty": 0.062260492595534726,
+          "longest_low_streak": 7.0,
+          "distinct_ratio": 1.0,
+          "reorients": 0,
+          "replays": 0,
+          "inhibited": 0,
+          "runs": [
+            {
+              "n_thoughts": 8,
+              "mean_novelty": 0.062260492595534726,
+              "longest_low_streak": 7,
+              "distinct_ratio": 1.0,
+              "thoughts": [
+                "You seem to be creating a vivid, nostalgic scene here, blending memories with sensory details. The clocks and the mill evoke a sense of time and tradition. Perhaps you're trying to reconstruct a specific memory or create a shared experience",
+                "Okay, so I'm trying to figure out what the user is asking for here. They provided a long list of memories, each with a \"Me (remembering)\" line and some context. Then, the user wrote, \"I watched the river flow past the old mill.\" and respond",
+                "The user is asking for an analysis of my thought process in responding to their narrative. They provided a detailed list of memories and then a specific response, so I need to dissect how I connected the river and mill to their past experie",
+                "The user wants me to analyze my thought process in responding to their narrative. They provided a detailed prompt with specific memories and a response, so I need to break down how I connected the river and mill to their past experiences, u",
+                "To analyze my thought process in responding to the user's narrative:\n\n1. **Identifying Common Elements**: I recognized recurring themes such as the grandfather, clocks, and specific locations like the mill and river, which were tied to the ",
+                "**Analysis of My Thought Process in Responding to the User's Narrative:**\n\n1. **Identifying Common Elements:**\n   - I recognized recurring themes such as the grandfather, clocks, and specific locations like the mill and river, which were ti",
+                "The user's narrative is rich with personal memories, and your response effectively connects these elements to evoke a sense of nostalgia and family. Here's a breakdown of how the key components of the narrative were integrated:\n\n1. **The Ri",
+                "**Analysis of My Thought Process in Responding to the User's Narrative**\n\n1. **Identifying Common Elements:**\n   - I recognized recurring themes such as the grandfather, clocks, and specific locations like the mill and river, which were tie"
+              ]
+            }
+          ]
+        }
+      },
+      "contrasts": {
+        "full_minus_no_control": 0.00910292252799598,
+        "full_minus_no_osc_feedback": 0.0,
+        "full_minus_no_oscillator": 0.0,
+        "full_minus_fixed_threshold": 0.0,
+        "full_minus_bare": -0.010376561785882726,
+        "streak_full_minus_no_control": 0.0,
+        "streak_full_minus_no_osc_feedback": 0.0,
+        "streak_full_minus_no_oscillator": 0.0,
+        "streak_full_minus_fixed_threshold": 0.0,
+        "streak_full_minus_bare": 0.0
+      }
+    }
+  }
+}
