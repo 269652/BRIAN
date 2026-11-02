@@ -4636,24 +4636,35 @@ structural biases. Next: change one mechanism at a time.
 
 [EVIDENCE: logs/mind_eval/20261102T124333Z.log]
 
-### Development: goal pursuit needs phasic DA (maintainer, 2026-11-02, not yet measured)
+### Development: goal pursuit needs phasic DA, released by emergent wiring (maintainer, 2026-11-02, not yet measured)
 
 Following point 4 of run 58821480. Per the maintainer, the goal pull
-should apply only when DA is above baseline. It is the exception, not
-the normal case, and a mechanism has to release DA to steer
-goal-directed behaviour.
+should apply only above baseline DA, and that DA must come from neural
+wiring and homeostasis, never from a hardcoded map. (A first version
+released DA from an action-class `incentive` map. It was superseded
+before any run.)
 
-- Goal term: `goal_weight`·max(0, DA − DA₀)/DA₀·cos (was DA/DA₀, i.e.
-  full pull at tonic DA).
-- Release: a percept whose action class carries `incentive` (request,
-  question: 1.0) kicks DA's logit (0.15 → 0.32, gain ≈ 1.2 on the next
-  tick, close to the old baseline pull). The DA leak relaxes it.
-  Statements release nothing.
+- **Goal term:** `goal_weight`·max(0, DA − DA₀)/DA₀·cos. It was DA/DA₀,
+  which gave full pull at tonic DA.
+- **Release, HC → VTA:** in the runtime's NT system, DA is now coupled
+  to the semantic-novelty driver (`hc_vta_coupling` 1.0; surprise stays
+  at 1.2). The training harness's coupling matrix is unchanged.
+  Homeostasis comes from the existing driver z-scoring and the DA leak:
+  only novelty that is unusual for this run releases DA, and sustained
+  novelty habituates.
+- **Goal = PFC gated by DA:** goal ← goal + g·(content − goal),
+  g = clip((DA−DA₀)/DA₀, 0, 1). This replaces the rule that the goal is
+  the last observed input. Whatever is active during a burst becomes
+  the goal: a percept, or the mind's own interesting thought.
 
-Expected effect: the reply probes are unchanged (their questions
-release DA). In `loop_escape`, the seed is a statement, so idle ticks
-are no longer pulled back onto it. The bigger blocker from 58821480
-(point 3, last-thought continuation) is untouched, so a large novelty
-gain is not expected from this change alone.
+What to watch for in the next run:
+- (a) DA leaves baseline on idle ticks after a novel thought (it stayed
+  flat in every run so far).
+- (b) Goal relevance follows the thought that caused the burst.
+- (c) The reply probes still pass. Percepts are fed in as novelty 1.0;
+  with distractors before the question, that may habituate.
 
-[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestDASteersTowardTheGoal, TestPhasicDAReleaseForGoals]
+Caveat: the drivers' warm-up returns z = 0 for the first 5 samples, so
+an 8-tick `loop_escape` run leaves little room for DA to move.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestDASteersTowardTheGoal, TestHippocampalNoveltyReleasesDA, TestDopamineGatesTheGoal]

@@ -2489,62 +2489,100 @@ class TestDASteersTowardTheGoal:
         assert self._tick(da=0.15).thought == "thinking about coffee"
 
 
-class TestPhasicDAReleaseForGoals:
-    """What switches goal pursuit on: a percept whose action class
-    carries incentive (something is asked of the mind — a request or
-    question) releases phasic DA, a logit pulse on the real NT system
-    that its DA leak then relaxes. Statements release nothing."""
+class TestHippocampalNoveltyReleasesDA:
+    """Nothing is wired to an action class: the hippocampus → VTA loop
+    (Lisman & Grace 2005) drives DA from semantic novelty, which the
+    runtime already feeds the NT system as its ``activation`` driver.
+    Homeostasis is the NT system's own: drivers are z-scored against
+    their running stats and channels leak to baseline, so only
+    unusually interesting content releases DA, and sustained novelty
+    habituates."""
+
+    def _nt(self, coupling=None):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        cfg = MindConfig() if coupling is None else MindConfig(
+            hc_vta_coupling=coupling)
+        rt = CognitiveRuntime(generate_fn=_ScriptedGen(["t"]),
+                              score_fn=_score_map({}), embed_fn=_vec_for,
+                              cfg=cfg)
+        for i in range(12):
+            rt.nt.step_full(activation=0.1 + 0.02 * (i % 3))
+        return rt.nt
+
+    def test_unusual_novelty_releases_dopamine(self):
+        nt = self._nt()
+        nt.step_full(activation=0.9)
+        assert nt.levels()["DA"] > nt.baselines["DA"] + 0.02
+
+    def test_without_the_synapse_novelty_leaves_dopamine_tonic(self):
+        nt = self._nt(coupling=0.0)
+        nt.step_full(activation=0.9)
+        assert nt.levels()["DA"] == pytest.approx(nt.baselines["DA"],
+                                                  abs=1e-3)
+
+    def test_sustained_novelty_habituates(self):
+        nt = self._nt()
+        nt.step_full(activation=0.9)
+        peak = nt.levels()["DA"]
+        for _ in range(400):
+            nt.step_full(activation=0.9)
+        assert nt.levels()["DA"] < peak
+        assert nt.levels()["DA"] == pytest.approx(nt.baselines["DA"],
+                                                  abs=0.02)
+
+    def test_training_nt_wiring_is_untouched(self):
+        from neuroslm.emergent.driven_nt import DrivenNTSystem
+        nt = DrivenNTSystem()
+        for i in range(12):
+            nt.step_full(activation=0.1 + 0.02 * (i % 3))
+        nt.step_full(activation=0.9)
+        assert nt.levels()["DA"] == pytest.approx(nt.baselines["DA"],
+                                                  abs=1e-3)
+
+
+class TestDopamineGatesTheGoal:
+    """The goal is prefrontal working memory updated by phasic DA
+    (Braver & Cohen 2000): goal ← goal + g·(content − goal), g =
+    clip((DA − DA₀)/DA₀, 0, 1). Whatever is active during a burst — a
+    percept or the mind's own interesting thought — becomes what it
+    pursues. At tonic DA the goal is left alone."""
 
     CANDS = ["thinking about the launch", "thinking about coffee"]
 
-    def _rt(self):
+    def _rt(self, da, cands=None, scores=None):
         from neuroslm.cognition.runtime import MindConfig
-        from neuroslm.emergent.driven_nt import DrivenNTSystem
         return _mk_runtime(
-            _ScriptedGen(self.CANDS),
-            scores=_score_map({self.CANDS[0]: 3.5, self.CANDS[1]: 3.0}),
-            nt=DrivenNTSystem(),
-            cfg=MindConfig(n_candidates=2, selection_temp_base=0.01))
+            _ScriptedGen(cands or self.CANDS),
+            scores=scores or _score_map({self.CANDS[0]: 3.5,
+                                         self.CANDS[1]: 3.0}),
+            nt=_FakeNT(DA=da),
+            cfg=MindConfig(n_candidates=2, selection_temp_base=0.01,
+                           curiosity_value=0.0))
 
-    def test_question_releases_dopamine(self):
-        rt = self._rt()
-        rt.observe("What is the launch plan?")
-        assert rt.nt.levels()["DA"] > rt.nt.baselines["DA"] + 0.05
+    def test_percept_at_tonic_dopamine_sets_no_goal(self):
+        rt = self._rt(da=0.15)
+        rt.observe("the launch code is ready")
+        assert rt.tick().goal_relevance == 0.0
 
-    def test_statement_releases_none(self):
-        rt = self._rt()
-        rt.observe("The launch plan is ready.")
-        assert rt.nt.levels()["DA"] == pytest.approx(
-            rt.nt.baselines["DA"], abs=1e-6)
-
-    def test_released_dopamine_steers_the_reply_onto_the_goal(self):
-        rt = self._rt()
-        rt.observe("Can you check the launch plan?")
-        assert rt.tick().thought == "thinking about the launch"
-
-    def test_without_release_the_goal_does_not_pull(self):
-        rt = self._rt()
-        rt.observe("The launch plan is ready.")
-        assert rt.tick().thought == "thinking about coffee"
-
-    def test_release_decays_back_to_tonic(self):
-        rt = self._rt()
-        rt.observe("What is the launch plan?")
-        for _ in range(30):
-            rt.nt.step_full()
-        assert rt.nt.levels()["DA"] == pytest.approx(
-            rt.nt.baselines["DA"], abs=0.01)
-
-    def test_no_goal_no_goal_term(self):
-        from neuroslm.cognition.runtime import MindConfig
-        rt = _mk_runtime(
-            _ScriptedGen(self.CANDS),
-            scores=_score_map({self.CANDS[0]: 3.5, self.CANDS[1]: 3.0}),
-            nt=_FakeNT(DA=0.45),
-            cfg=MindConfig(n_candidates=2, selection_temp_base=0.01))
+    def test_percept_during_a_burst_becomes_the_goal(self):
+        rt = self._rt(da=0.45)
+        rt.observe("the launch code is ready")
         r = rt.tick()
-        assert r.thought == "thinking about coffee"
-        assert r.goal_relevance == 0.0
+        assert r.goal_relevance > 0.5
+        assert r.thought == "thinking about the launch"
+
+    def test_a_thought_during_a_burst_becomes_the_goal(self):
+        rt = self._rt(da=0.45, cands=["the moon is bright tonight"],
+                      scores=_score_map({}))
+        rt.tick()                      # no goal yet; the burst gates it in
+        rt._gen = rt._gen_wander = _ScriptedGen(
+            ["more about the moon", "about coffee"])
+        rt.cfg.n_candidates = 2
+        rt._score = _score_map({"more about the moon": 3.5,
+                                "about coffee": 3.0})
+        r = rt.tick()
+        assert r.thought == "more about the moon"
+        assert r.goal_relevance > 0.5
 
 
 class TestDiverseHippocampalRecall:

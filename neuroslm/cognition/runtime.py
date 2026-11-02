@@ -159,14 +159,15 @@ class MindConfig:
     goal_weight: float = 2.0
     """Phasic-DA goal pull in the BG utility, nats per unit cosine per
     DA₀ of release: U = −NLL + goal_weight·max(0, DA−DA₀)/DA₀·cos(
-    candidate, goal). Zero at tonic DA — goal pursuit is switched on by
-    a release (``incentive``). The goal is the most recent observed
-    input (the task set)."""
+    candidate, goal). Zero at tonic DA. The goal itself is prefrontal
+    working memory gated by the same phasic DA (Braver & Cohen 2000):
+    goal ← goal + g·(content − goal), g = clip((DA−DA₀)/DA₀, 0, 1)."""
 
-    incentive: Dict[str, float] = field(default_factory=lambda: {
-        "request": 1.0, "question": 1.0})
-    """VTA phasic release: a percept whose action class asks something
-    of the mind kicks DA's logit by this much; the DA leak relaxes it."""
+    hc_vta_coupling: float = 1.0
+    """Hippocampus → VTA synapse (Lisman & Grace 2005): DA's coupling to
+    the semantic-novelty driver in the runtime's NT system. The driver
+    is z-scored against its running stats, so only unusual novelty
+    releases DA and sustained novelty habituates."""
 
     appraisal: Dict[str, float] = field(default_factory=lambda: {
         "insult": 1.0, "disagreement": 0.5, "request": 0.5})
@@ -667,9 +668,13 @@ class CognitiveRuntime:
                  ) -> None:
         cfg = cfg or MindConfig()
         if nt is None:
-            from neuroslm.emergent.driven_nt import DrivenNTSystem
+            from neuroslm.emergent.driven_nt import (
+                _DEFAULT_W, _DRIVERS, DrivenNTSystem)
+            da_row = list(_DEFAULT_W["DA"])
+            da_row[_DRIVERS.index("activation")] = cfg.hc_vta_coupling
             nt = DrivenNTSystem(driver_alpha=cfg.nt_driver_alpha,
-                                driver_var_init=cfg.nt_driver_var_init)
+                                driver_var_init=cfg.nt_driver_var_init,
+                                W={"DA": tuple(da_row)})
         self._gen = generate_fn
         # Inner-speech register (D of the curiosity loop): DMN ticks
         # generate through this seam — raw completion, no chat
@@ -759,6 +764,7 @@ class CognitiveRuntime:
         # permanent autobiographical anchor that replay resurfaced.
         # Length is not salience: a two-word insult IS stored; a
         # two-word bare statement or short greeting is not.
+        text_vec = list(self._embed(text))
         n_words = len(text.split())
         trivial = (
             (action_class in self.cfg.trivial_percept_classes
@@ -768,21 +774,17 @@ class CognitiveRuntime:
         )
         if not trivial:
             self.memory.add(text,
-                            content_vec=list(self._embed(text)),
+                            content_vec=text_vec,
                             nt_state=self.nt.levels(),
                             tags=[source, "percept", "kind=observed",
                                  f"action_class={action_class}"],
                             context={"kind": "observed", "source": source,
                                     "action_class": action_class})
         self._sensory.append(text)
-        # The task set: the latest observed input is the current goal.
-        self._goal_vec = list(self._embed(text))
         self.nt.step_full(
             activation=1.0,
             grad_norm=float(self.cfg.appraisal.get(action_class, 0.0)))
-        release = float(self.cfg.incentive.get(action_class, 0.0))
-        if release and hasattr(self.nt, "perturb"):
-            self.nt.perturb("DA", release)
+        self._gate_goal(text_vec)
 
     def remember(self, text: str, source: str = "autobiographical") -> None:
         """Lay down prior autobiographical memory: an OBSERVED episode
@@ -1079,6 +1081,7 @@ class CognitiveRuntime:
                           grad_norm=ne_drive,
                           ignition_rate=ignition,
                           attn_entropy_norm=selection_entropy)
+        self._gate_goal(thought_vec)
         a = self.cfg.novelty_ema_alpha
         self._boredom = (1.0 - a) * self._boredom + a * (1.0 - novelty)
 
@@ -1126,6 +1129,21 @@ class CognitiveRuntime:
                 c = _cosine(vec, v)
                 best = c if best is None else max(best, c)
         return max(0.0, min(1.0, 1.0 - best)) if best is not None else 1.0
+
+    def _gate_goal(self, vec: List[float]) -> None:
+        """PFC goal update gated by phasic DA: the content active
+        during a burst is loaded in proportion to the burst."""
+        base = self.nt.baselines
+        da0 = (base() if callable(base) else base).get("DA", 0.15)
+        g = max(0.0, min(1.0, (self.nt.levels().get("DA", 0.0) - da0)
+                         / max(da0, 1e-6)))
+        if g <= 0.0:
+            return
+        if self._goal_vec is None:
+            self._goal_vec = list(vec)
+        else:
+            self._goal_vec = [x + g * (v - x)
+                              for x, v in zip(self._goal_vec, vec)]
 
     def _update_control(self, novelty: float) -> None:
         """LOOPING streak against the (relative or absolute) threshold,
