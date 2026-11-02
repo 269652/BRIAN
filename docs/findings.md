@@ -4668,3 +4668,61 @@ Caveat: the drivers' warm-up returns z = 0 for the first 5 samples, so
 an 8-tick `loop_escape` run leaves little room for DA to move.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestDASteersTowardTheGoal, TestHippocampalNoveltyReleasesDA, TestDopamineGatesTheGoal]
+
+### Smoke run 58834649 (build `e7744bd1`): DA moves on idle ticks; the loop_escape yardstick is saturated (2026-11-02)
+
+First run with HC → VTA release and the DA-gated goal. 4 probes, n = 1,
+2 distractors, 16 idle ticks. Results:
+`results/mind_eval/20261102T143455Z_deepseek-r1-qwen-7b.json`.
+
+- **(c) Reply path:** still clean. Recall full 1.0 / no_recall 0.0 /
+  bare 1.0. Source monitoring full 1.0 / bare 0.0. Metacognition 1.0.
+  Dropping the rule that the goal is the last input cost nothing here.
+- **`loop_escape`:** full novelty 0.053, longest low streak 15/16 in
+  every arm, distinct ratio 0.875, 4 reorients, 0 replays. `no_control`
+  0.059, bare 0.060. Every contrast is within ±0.01.
+
+**What the trace shows:**
+1. **(a) DA leaves baseline on idle ticks for the first time.** In the
+   full arm DA was 0.15 for 3 ticks, then 0.13 → 0.21 (sd 0.023; it was
+   0 in earlier runs). NE, ACh, Glu and GABA also move. It rises after
+   each reorient (internal novelty 0.08–0.13 against a run baseline of
+   about 0.04).
+2. **DA does not come back down.** It stays above baseline from tick 6
+   to the end, and keeps rising while the stream loops (ticks 14–16:
+   novelty 0.04–0.06, DA 0.19 → 0.21). This trace can't separate the
+   novelty driver from the surprise driver or the slow OU decay. As a
+   result the goal gate is open (g ≈ 0.1–0.4) for most of the run.
+3. **(b) The goal follows the burst thought, then every later thought.**
+   Because the gate stays open, the goal tracks the stream, including
+   the loop. The goal term then rewards continuing the loop rather than
+   marking something as interesting. On ticks 7–8 the selected thought
+   was the lowest-NLL candidate anyway, so the run can't show the size
+   of this bias.
+4. **Candidates still copy the last thought.** On non-reorient ticks
+   all three candidates paraphrase "My last thought" (ticks 3, 4, 7, 8,
+   12, 15). Recalled memories are varied (violin, fox, octopus) but no
+   candidate uses them. Only reorient, which drops the last thought,
+   changes the topic (river → idea graphs → river flow rates → stone
+   volume → river history).
+5. **The probe can't see those topic changes.** `sequence_novelty`
+   is 1 − max cos against every earlier thought, using mean-centred
+   token embeddings of 192-token thoughts, with an absolute 0.25
+   threshold. The runtime's own novelty for the clearest switch
+   (river → idea graphs) was 0.11. So every thought after the first
+   counts as low novelty, in every arm: 7/8 in runs 58700866 and
+   58821480, 15/16 here. With this yardstick the `loop_escape`
+   contrasts can't be read either way.
+6. Replay: still 0. Reorient fires every 4 ticks and resets boredom to
+   0.21 before the replay threshold is reached.
+
+**Verdict:** watch items (a) and (c) are met. (b) holds only in a
+degenerate way, because released DA doesn't habituate within 16 ticks.
+GWT-4 can't be assessed until the yardstick is fixed (point 5). Next,
+one at a time: (i) make the stream-novelty yardstick sensitive to topic
+changes, for example by scaling it to the run's own novelty
+distribution as the runtime's control thresholds do (H67); (ii) the
+candidate-collapse fix (point 4); (iii) find out why DA keeps rising
+during the loop.
+
+[EVIDENCE: logs/mind_eval/20261102T143453Z.log]
