@@ -2086,3 +2086,5 @@ Another way to confirm is to think about historical context. When I was younger,
   pci/no_control/memory: PCI=1.118 reached=5.0
     pci/no_oscillator/null run 0: PCI=0.000 channels=-
   pci/no_oscillator/null: PCI=0.000 reached=0.0
+    pci/no_oscillator/da run 0: PCI=0.808 channels=DA
+  pci/no_oscillator/da: PCI=0.808 reached=1.0
