@@ -2074,3 +2074,5 @@ Another way to confirm is to think about historical context. When I was younger,
   pci/no_recall/da: PCI=0.808 reached=1.0
     pci/no_recall/gaba run 0: PCI=0.862 channels=DA,ACh,Glu,GABA,boredom,selection_entropy,differentiation,action,inhibited,thought,ignited,sync_r
   pci/no_recall/gaba: PCI=0.862 reached=12.0
+    pci/no_recall/memory run 0: PCI=0.000 channels=-
+  pci/no_recall/memory: PCI=0.000 reached=0.0
