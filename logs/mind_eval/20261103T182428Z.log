@@ -2070,3 +2070,5 @@ Another way to confirm is to think about historical context. When I was younger,
   pci/full/memory: PCI=0.837 reached=6.0
     pci/no_recall/null run 0: PCI=0.000 channels=-
   pci/no_recall/null: PCI=0.000 reached=0.0
+    pci/no_recall/da run 0: PCI=0.808 channels=DA
+  pci/no_recall/da: PCI=0.808 reached=1.0
