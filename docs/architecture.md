@@ -3792,8 +3792,9 @@ compete for `ws_capacity` = 4 slots (Cowan's limit). Each tick:
 
 - every item's salience is multiplied by `ws_decay` (0.7); a reorient
   drops all `thought` items;
-- percepts enter at salience 1.0, recalled memories at their recall
-  cosine;
+- percepts enter at salience 1.0, recalled episodes at their recall
+  cosine, keeping their provenance: an observed episode as `memory`,
+  the mind's own recalled musing (`kind=inferred`) as `thought`;
 - the selected thought enters at 1.0 if it ignited (ignition sustains
   it), otherwise at $n/(n+ar n)$, its novelty divisively normalised
   against the run's novelty baseline (a typical thought 0.5, a copy 0);

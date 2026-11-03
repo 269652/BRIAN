@@ -2746,6 +2746,25 @@ class TestGlobalWorkspaceFeedsThought:
         second = {it.text: it.salience for it in rt.workspace.items()}
         assert second["the same thought"] < first["the same thought"]
 
+    def test_a_recalled_musing_stays_a_thought_not_a_memory(self):
+        # run 58994037: the mind's own earlier reply, recalled, entered
+        # as [memory] and would read "I remember: …" — provenance lost
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["a wander"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1, recall_k=2))
+        rt.memory.add("I mused about the river",
+                      content_vec=_vec_for("I mused about the river"),
+                      context={"kind": "inferred"})
+        rt.memory.add("the river flooded the mill",
+                      content_vec=_vec_for("the river flooded the mill"),
+                      context={"kind": "observed"})
+        rt._last_thought = "the river"
+        r = rt.tick()
+        src = {text: s for s, _, text in r.workspace}
+        assert src["I mused about the river"] == "thought"
+        assert src["the river flooded the mill"] == "memory"
+        assert "I thought: I mused about the river" in gen.prompts[-1]
+
     def test_reorient_drops_thoughts_from_the_workspace(self):
         from neuroslm.cognition.runtime import MindConfig
         rt = _mk_runtime(_ScriptedGen(["the same thought"]),

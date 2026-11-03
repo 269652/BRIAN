@@ -972,8 +972,11 @@ class CognitiveRuntime:
                                   default=0.0)
             if self.workspace is not None:
                 for e in recalled:
+                    inferred = ((e.get("context") or {}).get("kind")
+                                == "inferred")
                     self.workspace.offer(
-                        e.get("content", ""), "memory",
+                        e.get("content", ""),
+                        "thought" if inferred else "memory",
                         e.get("content_vec") or [],
                         max(0.0, sims.get(id(e), 0.0)))
 
