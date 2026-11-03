@@ -2060,3 +2060,5 @@ Another way to confirm is to think about historical context. When I was younger,
   metacognition/full: acc=1.00 auroc_H=None
   metacognition/bare: acc=1.00 auroc_H=None
 [mind-eval] probe perturbational_complexity
+    pci/full/null run 0: PCI=0.000 channels=-
+  pci/full/null: PCI=0.000 reached=0.0
