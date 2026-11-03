@@ -2076,3 +2076,5 @@ Another way to confirm is to think about historical context. When I was younger,
   pci/no_recall/gaba: PCI=0.862 reached=12.0
     pci/no_recall/memory run 0: PCI=0.000 channels=-
   pci/no_recall/memory: PCI=0.000 reached=0.0
+    pci/no_control/null run 0: PCI=0.000 channels=-
+  pci/no_control/null: PCI=0.000 reached=0.0
