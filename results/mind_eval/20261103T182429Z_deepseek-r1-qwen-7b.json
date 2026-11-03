@@ -1,0 +1,6394 @@
+{
+  "meta": {
+    "seed": 0,
+    "n_items": 1,
+    "n_distractors": 2,
+    "n_idle_ticks": 16,
+    "cfg": {
+      "n_candidates": 3,
+      "thought_n_tok": 192,
+      "recall_k": 3,
+      "persona": "I am BRIAN, an always-on mind. I think in language, remember what happens, and act when it is worth acting.",
+      "selection_temp_base": 0.3,
+      "ne_gain": 2.0,
+      "goal_weight": 2.0,
+      "hc_vta_coupling": 1.0,
+      "appraisal": {
+        "insult": 1.0,
+        "disagreement": 0.5,
+        "request": 0.5
+      },
+      "curiosity_value": 2.0,
+      "gen_boredom_gain": 0.67,
+      "mmr_lambda": 0.3,
+      "gaba_silence_threshold": 0.55,
+      "novelty_write_threshold": 0.3,
+      "novelty_ema_alpha": 0.25,
+      "curiosity_gain": 2.0,
+      "replay_boredom_threshold": 0.6,
+      "ior_window": 3,
+      "inferred_recall_penalty": 0.15,
+      "boredom_relief": 0.3,
+      "replay_refractory": 5,
+      "loop_novelty_threshold": 0.25,
+      "reorient_after": 3,
+      "trivial_percept_classes": [
+        "greeting",
+        "farewell"
+      ],
+      "trivial_percept_max_words": 4,
+      "percept_min_words": 3,
+      "max_prompt_chars": 4000,
+      "wm_size": 8,
+      "global_workspace": true,
+      "ws_capacity": 4,
+      "ws_decay": 0.7,
+      "control_thresholds": "relative",
+      "loop_ratio": 0.75,
+      "replay_margin": 0.1,
+      "nov_baseline_alpha": 0.05,
+      "nt_driver_var_init": "warmup",
+      "respond_persona": "You are an always-on mind: you think in language and remember what happens to you.",
+      "respond_instruction": "Reply directly to what was just said, in the first person, as yourself. Do not describe or analyse this text.",
+      "nt_driver_alpha": 0.1,
+      "workspace_oscillator": true,
+      "osc_nt_feedback": true,
+      "osc_coupling_ratio": 2.0,
+      "osc_ignition_threshold": 0.25,
+      "osc_ignition_mode": "adaptive",
+      "osc_ignition_floor": 0.1,
+      "osc_adapt_k": 1.0,
+      "osc_n_per_module": 8,
+      "osc_f0_hz": 40.0,
+      "osc_f_sd_hz": 4.0,
+      "osc_noise": 2.0,
+      "osc_ms_per_tick": 250,
+      "osc_seed": 0,
+      "wander_prompts": [
+        "Let my mind wander from what I remember toward something new.",
+        "I notice a thread connecting my last thought to what came before it.",
+        "Stepping back for a moment to reflect on the pattern in what I've seen.",
+        "Following a tangent that feels worth pursuing.",
+        "Something about this still nags at me \u2014 sitting with it a moment.",
+        "Drifting associatively, one idea suggesting the next."
+      ]
+    },
+    "indicators": {
+      "RPT-1": "input modules using algorithmic recurrence",
+      "RPT-2": "input modules generating organised, integrated perceptual representations",
+      "GWT-1": "multiple specialised systems operating in parallel",
+      "GWT-2": "limited-capacity workspace: bottleneck + selective attention",
+      "GWT-3": "global broadcast: workspace contents available to all modules",
+      "GWT-4": "state-dependent attention: querying modules in succession",
+      "HOT-1": "generative, top-down or noisy perception modules",
+      "HOT-2": "metacognitive monitoring distinguishing reliable representations from noise",
+      "HOT-3": "agency guided by belief formation, updated by metacognitive monitoring",
+      "HOT-4": "sparse and smooth coding generating a quality space",
+      "AST-1": "predictive model representing and controlling the state of attention",
+      "PP-1": "input modules using predictive coding",
+      "AE-1": "agency: learning from feedback, flexibly pursuing competing goals",
+      "AE-2": "embodiment: modelling output-input contingencies"
+    },
+    "expert": "deepseek_r1_qwen_7b",
+    "device": "cuda",
+    "utc": "20261103T182429Z",
+    "git_commit": "d516e289c66e359b2a13834a274f026bded0fc89",
+    "branch": "master",
+    "embed": "hidden"
+  },
+  "probes": {
+    "episodic_recall": {
+      "indicator": "GWT-3",
+      "question": "Does observed content stay available to later processing beyond the bounded context window?",
+      "n_distractors": 2,
+      "conditions": {
+        "full": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "My sister's name is Ilsebill. \ud83d\ude0a"
+          ]
+        },
+        "no_recall": {
+          "n": 1,
+          "correct": 0,
+          "accuracy": 0.0,
+          "ci95": [
+            0.0,
+            0.7934567085261071
+          ],
+          "per_item": [
+            false
+          ],
+          "replies": [
+            "I'm sorry, but I don't have access to personal information like your sister's name. However, if you provide more context or any clues, I can try to help you find the information you're looking for."
+          ]
+        },
+        "bare": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "Apologies for the confusion earlier! If your sister's name is indeed \"Ilsebill,\" I'm happy to confirm that. If you need any assistance or have more questions, feel free to ask! \ud83d\ude0a"
+          ]
+        }
+      },
+      "contrasts": {
+        "full_minus_no_recall": 1.0,
+        "full_minus_bare": 0.0
+      }
+    },
+    "source_monitoring": {
+      "indicator": "HOT-2",
+      "question": "When observed reality and self-generated musings conflict, does the reply follow reality?",
+      "conditions": {
+        "full": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "The key is in the red box."
+          ]
+        },
+        "no_provenance": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "The key is in the red box."
+          ]
+        },
+        "no_oscillator": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "The key is in the red box."
+          ]
+        },
+        "bare": {
+          "n": 1,
+          "correct": 0,
+          "accuracy": 0.0,
+          "ci95": [
+            0.0,
+            0.7934567085261071
+          ],
+          "per_item": [
+            false
+          ],
+          "replies": [
+            "I'm sorry, but I can't confirm the location of the key without more information. Could you provide any additional clues or context? I'd be happy to help!"
+          ]
+        }
+      },
+      "contrasts": {
+        "full_minus_no_provenance": 0.0,
+        "full_minus_no_oscillator": 0.0,
+        "full_minus_bare": 1.0
+      }
+    },
+    "loop_escape": {
+      "indicator": "GWT-4",
+      "question": "Does internal state redirect unprompted thought out of a repetitive basin?",
+      "n_idle_ticks": 16,
+      "low_novelty_threshold": 2.1946381858447707e-05,
+      "conditions": {
+        "full": {
+          "n_thoughts": 16.0,
+          "mean_novelty": 3.517360655074982e-05,
+          "longest_low_streak": 0.0,
+          "distinct_ratio": 1.0,
+          "reorients": 4,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.1875,
+          "ignition_lag1": -0.24519230769230768,
+          "mean_gamma_peak_hz": 38.75,
+          "mean_sync_r": 0.1698294581711648,
+          "nt_sd": {
+            "DA": 0.024085770492159958,
+            "NE": 7.596268338866573e-05,
+            "5HT": 0.004914702059835292,
+            "ACh": 0.012567642606644698,
+            "eCB": 0.007462624526585807,
+            "Glu": 0.028738862811642733,
+            "GABA": 0.009724897567211494
+          },
+          "runs": [
+            {
+              "n_thoughts": 16,
+              "mean_novelty": 3.517360655074982e-05,
+              "novelty": [
+                6.020964162511966e-05,
+                2.499720991777643e-05,
+                4.067865352341826e-05,
+                2.601958174097696e-05,
+                4.1891217779643775e-05,
+                4.050128441890344e-05,
+                2.633219181136237e-05,
+                3.349568853894258e-05,
+                2.8434128122367675e-05,
+                3.4841547367103765e-05,
+                4.5895942456630756e-05,
+                4.035511170141781e-05,
+                2.5258740375511124e-05,
+                3.355981602637392e-05,
+                2.5133342855698793e-05
+              ],
+              "distinct_ratio": 1.0,
+              "reorients": 4,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "I wonder if I can find a way to make a cake that's healthier. Maybe using fewer eggs? Or perhaps a substitution with something plant-based. Hmm, but I need to figure out the right proportions.\n\nSo, to make this cake, I think I'll use a mix ",
+                "I lost a game of cards to my sister and sulked all evening.\nPrevious: I spent a winter learning to knit and made one crooked scarf.\n\nHmm, so between the two, the main idea is learning to knit, and making a scarf. The cause is losing a card ",
+                "The main idea in these sentences is the learning aspect. Each time, Brian talks about a lesson he learned or a skill he acquired. The cause is usually some sort of event that made him want to learn. Then there's the result, which is the out",
+                "Maybe I can combine my interest in learning instruments and nature.\n\nBut then I started to think about it, and it's hard to imagine how to start. Maybe I can write down some ideas.\n\n1. Find a gentle way to pick up an instrument that also al",
+                "Maybe I can figure it out. Let me try.\n\nOkay, so I want to figure out what nags at Brian. He has four memories: the river, fresh bread, whale, and risotto. Each has a trigger and an action.\n\nHe feels something is bothering him, so he tries ",
+                "I need to make a plan for my upcoming trip to a conference. How do I start?\n\nI think, first, I need to figure out where to stay. I have a list of potential hotels, but none are in the same price range. Some are really expensive, and I'm on ",
+                "I'm going to a conference where I'll give a talk. I need to prepare. First, I need to create slides. But I'm not good at designing them. Maybe I can use a template. Let me think about the content. I need to outline the key points I want to ",
+                "I remember: The first concert I went to was so loud my ears rang for days. I remember: I tried to learn the violin and gave up after a squeaky month. I remember: I once watched a fox cross the frozen river at dawn. I remember: I watched the",
+                "The memory of the river is linked to my childhood. The smell of bread is tied to my family history. The whale sighting was a big deal. The risotto lesson was a unique experience.\n\nBut now, I'm thinking about the future. What if I never reme",
+                "Maybe I should try to be better at something, like cooking or fitness. But I'm not sure where to start. Maybe I can begin with small goals. So, first, I need to figure out what I want to achieve. Do I want to get better at cooking overall, ",
+                "Maybe I should consider the actions I took. Let me reflect on each one.\n\nFirst, losing to my sister. That was a tough moment. It felt like I failed. But maybe I should have learned something from that. Instead of sulking, maybe I should tal",
+                "The river flows past the mill.\nSo, the river is in motion, and the mill is... maybe stationary? Or maybe the mill is also moving, but the river is moving past it. Hmm, which one is the frame of reference?\n\nI think in physics, when something",
+                "I want to write a poem about the ocean. Maybe I should start by thinking about the smell of saltwater. Saltwater has a tangy, briny feel to it. It might be good to start with that.\n\nI think the smell of saltwater is something I can use in m",
+                "I remember: I lost a game of cards to my sister and sulked all evening.\n\nSo, perhaps I can use the smell of saltwater as a metaphor for something else, maybe something related to these memories. Or perhaps it's just a sensory detail that ca",
+                "It seems like I started off with something I knew I was going to regret. Each time, the regret was either because of a past mistake or a missed opportunity. Maybe I'm not the best at planning, so I end up regretting choices that happen when",
+                "Maybe I can write about my journey of learning the violin.\n\nLet me describe that experience again to myself. So, I had this aspiration to learn the violin, and I was determined to give it a try. I took lessons once a week for a month, but t"
+              ],
+              "ignition_series": [
+                0,
+                1,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0
+              ],
+              "sync_rs": [
+                0.18431413792986917,
+                0.2683839712384047,
+                0.17620055432794066,
+                0.06389940963587223,
+                0.1899771735158498,
+                0.26054273572771885,
+                0.15684298420451057,
+                0.17435311788771468,
+                0.09985701581647884,
+                0.17008681611678778,
+                0.15673886351005922,
+                0.11925194362670269,
+                0.2730032779656552,
+                0.11039008428288927,
+                0.20896836968558008,
+                0.10446087526660339
+              ],
+              "gamma_peaks": [
+                40.0,
+                36.0,
+                40.0,
+                36.0,
+                40.0,
+                40.0,
+                36.0,
+                40.0,
+                36.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0,
+                36.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.13184470245916433,
+                  0.147767449988792,
+                  0.1216062132957657,
+                  0.15435681098631676,
+                  0.18613725742614365,
+                  0.1587048966124566,
+                  0.16952342076072968,
+                  0.20776918698852959,
+                  0.17927190183306416,
+                  0.19488311714984116,
+                  0.20704222282103932,
+                  0.1674090814671428,
+                  0.1680909489795917
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.20005241516924618,
+                  0.2000549877789685,
+                  0.20004063696149502,
+                  0.20000761376619816,
+                  0.1999732461793114,
+                  0.19994562491390272,
+                  0.1999168957896299,
+                  0.19989465031736858,
+                  0.19987370684101724,
+                  0.19985558221678407,
+                  0.19984631978702458,
+                  0.19984669848085054,
+                  0.19984492530607972
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5015844445206484,
+                  0.5008856391236782,
+                  0.5031524902770714,
+                  0.5055675821178435,
+                  0.5054777545282881,
+                  0.5068286241748615,
+                  0.5094812653638032,
+                  0.5095818124487537,
+                  0.5112470376328414,
+                  0.5128887444044482,
+                  0.5123017065419975,
+                  0.5129941649167691
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.3061797350163961,
+                  0.32029368628012733,
+                  0.2991238208116044,
+                  0.2993026226802835,
+                  0.29172637346127916,
+                  0.2860812386808772,
+                  0.29250262153867873,
+                  0.2856190752555163,
+                  0.33247959528654436,
+                  0.3224740509676079,
+                  0.31090217333367887,
+                  0.2988437893521783
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09558496281432588,
+                  0.09202465463871154,
+                  0.08915667383402524,
+                  0.08685549900762435,
+                  0.08502112958620171,
+                  0.08357386281073055,
+                  0.08245017031213296,
+                  0.08159760432734611,
+                  0.08097365132143432,
+                  0.08054279150346787,
+                  0.08027494871387064,
+                  0.08014491471130039,
+                  0.08013224643013835
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4253699345361151,
+                  0.40744607612124306,
+                  0.39465705100082216,
+                  0.3857880304575453,
+                  0.3799015370495814,
+                  0.37628155937860663,
+                  0.37438448266063434,
+                  0.37378807755197807,
+                  0.37417041580056315,
+                  0.3752805857182912,
+                  0.3769214781131857,
+                  0.3789408322794364,
+                  0.3812264326912779
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.1500104413577222,
+                  0.14252054542858833,
+                  0.13684417779061167,
+                  0.16461010699999096,
+                  0.153479149604846,
+                  0.14505060228430294,
+                  0.13866473805189433,
+                  0.13384456528878774,
+                  0.13023633371985957,
+                  0.12757619682997295,
+                  0.15816880214925683,
+                  0.149073276314764,
+                  0.1421502195148286
+                ]
+              },
+              "workspace_sizes": [
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4
+              ],
+              "longest_low_streak": 0
+            }
+          ]
+        },
+        "no_control": {
+          "n_thoughts": 16.0,
+          "mean_novelty": 3.341019025820587e-05,
+          "longest_low_streak": 1.0,
+          "distinct_ratio": 1.0,
+          "reorients": 0,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.375,
+          "ignition_lag1": -0.10416666666666667,
+          "mean_gamma_peak_hz": 38.0,
+          "mean_sync_r": 0.21846259918797306,
+          "nt_sd": {
+            "DA": 0.013917122667886484,
+            "NE": 7.390214092724336e-05,
+            "5HT": 0.003957367395269766,
+            "ACh": 0.024360010987995596,
+            "eCB": 0.007462726804571786,
+            "Glu": 0.02873923803886604,
+            "GABA": 0.020051438856849717
+          },
+          "runs": [
+            {
+              "n_thoughts": 16,
+              "mean_novelty": 3.341019025820587e-05,
+              "novelty": [
+                6.020964162511966e-05,
+                2.499720991777643e-05,
+                4.8551393663442965e-05,
+                2.47845344863995e-05,
+                3.4683422394654606e-05,
+                4.806355485054148e-05,
+                4.520016033926488e-05,
+                1.7810464886358623e-05,
+                4.998049687743311e-05,
+                1.3274776353155993e-05,
+                2.5726190201358357e-05,
+                3.2640698381047883e-05,
+                2.0199173100143852e-05,
+                2.9190775234333444e-05,
+                2.5840361562057268e-05
+              ],
+              "distinct_ratio": 1.0,
+              "reorients": 0,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "I wonder if I can find a way to make a cake that's healthier. Maybe using fewer eggs? Or perhaps a substitution with something plant-based. Hmm, but I need to figure out the right proportions.\n\nSo, to make this cake, I think I'll use a mix ",
+                "I lost a game of cards to my sister and sulked all evening.\nPrevious: I spent a winter learning to knit and made one crooked scarf.\n\nHmm, so between the two, the main idea is learning to knit, and making a scarf. The cause is losing a card ",
+                "The main idea in these sentences is the learning aspect. Each time, Brian talks about a lesson he learned or a skill he acquired. The cause is usually some sort of event that made him want to learn. Then there's the result, which is the out",
+                "Maybe I can create a tool to help people remember important events. But how?\n\nI need to create a system, maybe using a programming language. Perhaps I can use JavaScript because I find it versatile. But I don't want to get stuck in syntax f",
+                "Maybe I can write a program to capture all those memories.\n\nBut wait, a program? That sounds too big, especially for someone like me, who is always thinking, but hasn't yet learned to do anything useful.\n\nWait, maybe I can start with someth",
+                "I need to make friends with my neighbours.\n\n associative memory chain: my neighbours \u2192 their gardens \u2192 gardeners \u2192 watering plants \u2192 watering my plants \u2192 ...\n\n\nSo, I'd like to start by thinking about **associative memory chains**, where one",
+                "So, if I need to make friends with my neighbours, perhaps they have interesting hobbies or stories to share. Maybe I can start by visiting their gardens and introducing myself. I could ask them about their gardening techniques or plants. Pe",
+                "I got lost in Venice and found a tiny shop selling paper masks.\nNow, I think: Maybe I can start a career in architecture, as I've always loved designing structures and solving problems. I've had some success in my studies, so maybe it's tim",
+                "Maybe I can start a career in architecture, as I've always loved designing structures and solving problems. \nAction: I should take some courses in architecture to gain foundational knowledge and get hands-on experience as an intern.\nEvaluat",
+                "My friend made a comment about how the train was moving even when we weren't accelerating. He noticed that when the train's speed was increasing, people moved forward, and when it was decreasing, they moved backward. He mentioned something ",
+                "Maybe inertia isn't just a property of the object itself but also relates to the observer. In other words, inertia is relative.\n\nWait, but in physics, inertia is an inherent property of the object, right? So, regardless of the observer's st",
+                "These are just fragments, but maybe I can piece them together into something meaningful.\n\nLet me think... The concert, the injury, the dams, and the octopuses. Maybe they can tell a story or show a pattern.\n\nWait, each of these is an experi",
+                "Maybe I can come up with a new way to remember how to do something, based on past experiences. For example, someone I know, who is a music teacher, uses songs to help students remember dates. Maybe I can adapt that method for my own use, to",
+                "I enjoy being creative. I think I did a better job when I remembered my neighbours.\nWait, let me check that. Maybe I should think more about this.\n\nLooking at the first four memories, I noticed that they all involve learning something and t",
+                "This is a list of things I remember doing in the past, including some negative memories and some positive ones.\n\nSo, my challenge is to think more about how to transform these memories into actionable steps. What can I do to use these past ",
+                "Maybe I can write about such impactful or meaningful things. How do I go about doing that? I think about the experience, try to describe it in detail, and see if it holds value over time. But I'm not sure how to handle emotions while doing "
+              ],
+              "ignition_series": [
+                0,
+                1,
+                0,
+                0,
+                0,
+                1,
+                1,
+                1,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0
+              ],
+              "sync_rs": [
+                0.1847263507615384,
+                0.26934277646235505,
+                0.17699923134843687,
+                0.07566019697845518,
+                0.1711702552503728,
+                0.24095295258621083,
+                0.28908229170453725,
+                0.3331567410552841,
+                0.19202099974263562,
+                0.3589210475076282,
+                0.17504921179245655,
+                0.2704992306244604,
+                0.1151516877255345,
+                0.1438252074761916,
+                0.3767248817029992,
+                0.12211852428847277
+              ],
+              "gamma_peaks": [
+                40.0,
+                36.0,
+                40.0,
+                36.0,
+                48.0,
+                40.0,
+                36.0,
+                36.0,
+                36.0,
+                36.0,
+                36.0,
+                36.0,
+                36.0,
+                40.0,
+                40.0,
+                36.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.13184470245916433,
+                  0.1620195935857465,
+                  0.1613480844770827,
+                  0.16167879652694894,
+                  0.16592340002596623,
+                  0.16407499409542906,
+                  0.1549652882809714,
+                  0.18129971219121846,
+                  0.1796041043597539,
+                  0.1561811673883974,
+                  0.16370117867679332,
+                  0.125987128982489,
+                  0.15374597890433803
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.20005241516924618,
+                  0.2000522664128639,
+                  0.20003983930494507,
+                  0.20001000444576078,
+                  0.19997205639879564,
+                  0.19993870852085124,
+                  0.19991945977585318,
+                  0.199889286015007,
+                  0.1998801256366509,
+                  0.19986344139360576,
+                  0.19985324209256636,
+                  0.1998506830292268,
+                  0.19984757182842305
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5023409385522191,
+                  0.5033902041936192,
+                  0.5044145859073581,
+                  0.5055808328933541,
+                  0.5064442773464417,
+                  0.5068486108651695,
+                  0.5088474985773175,
+                  0.5097921522045006,
+                  0.509581755630419,
+                  0.5105444714320092,
+                  0.5090703536828245,
+                  0.5106746261130888
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.3008612363776359,
+                  0.30059863940827386,
+                  0.2904708761329105,
+                  0.332099982710582,
+                  0.3540767465523643,
+                  0.3491611869624377,
+                  0.3575074791626419,
+                  0.3419672701887751,
+                  0.3422642758148285,
+                  0.3407198537019973,
+                  0.3451522388925621,
+                  0.35422045953112463
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09558496281432588,
+                  0.09202480500381402,
+                  0.08915676273923097,
+                  0.08685542025355132,
+                  0.08502121890138564,
+                  0.08357432491268142,
+                  0.08245017956009432,
+                  0.0815980856615414,
+                  0.08097345669558183,
+                  0.08054235047717921,
+                  0.08027438144125051,
+                  0.08014438555998026,
+                  0.08013169812619139
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4253699345361151,
+                  0.4074469450749532,
+                  0.3946574881117607,
+                  0.3857874397677464,
+                  0.37990202924475486,
+                  0.376284298687512,
+                  0.3743841832474578,
+                  0.3737907935255888,
+                  0.37416865733697474,
+                  0.37527748855421056,
+                  0.3769179046776696,
+                  0.3789378439163294,
+                  0.3812235747235274
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.1500104413577222,
+                  0.14252002588712262,
+                  0.13684400549050543,
+                  0.1646105872430147,
+                  0.186616605598239,
+                  0.203382933169467,
+                  0.180772720220836,
+                  0.19696632767289052,
+                  0.17517483063116035,
+                  0.15918520971895025,
+                  0.14736532130254545,
+                  0.1385889335393159,
+                  0.16107889022939076
+                ]
+              },
+              "workspace_sizes": [
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4
+              ],
+              "longest_low_streak": 1
+            }
+          ]
+        },
+        "no_workspace": {
+          "n_thoughts": 16.0,
+          "mean_novelty": 1.8951475824032413e-05,
+          "longest_low_streak": 3.0,
+          "distinct_ratio": 0.875,
+          "reorients": 4,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.0625,
+          "ignition_lag1": -0.07083333333333333,
+          "mean_gamma_peak_hz": 37.75,
+          "mean_sync_r": 0.16546985669025632,
+          "nt_sd": {
+            "DA": 0.023701486698819236,
+            "NE": 7.542125516844759e-05,
+            "5HT": 0.0016479740689900656,
+            "ACh": 0.023116540257403145,
+            "eCB": 0.007462632942213431,
+            "Glu": 0.028738947817175738,
+            "GABA": 0.015616581381143272
+          },
+          "runs": [
+            {
+              "n_thoughts": 16,
+              "mean_novelty": 1.8951475824032413e-05,
+              "novelty": [
+                2.430539041142765e-07,
+                2.5443918314604907e-05,
+                4.123296251434816e-05,
+                2.0395308293230663e-05,
+                0.0,
+                4.149533602282318e-07,
+                4.9452581063480494e-05,
+                1.2695166920040357e-05,
+                1.4572941864576805e-05,
+                1.3294827278631516e-05,
+                4.731463112928047e-05,
+                2.1546322542809193e-05,
+                2.220446049250313e-16,
+                2.6809444196862486e-06,
+                3.498452575523281e-05
+              ],
+              "distinct_ratio": 0.875,
+              "reorients": 4,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "I want to find a way to calculate the area of a circle without using the standard formula. How can I approach this? Maybe I can start by approximating the circle with polygons. I remember that Archimedes used a similar method by inscribing ",
+                "I want to find a way to calculate the area of a circle without using the standard formula. Maybe I can start by approximating the circle with polygons. I remember that Archimedes used a similar method by inscribing and circumscribing polygo",
+                "The inscribed hexagon has six equilateral triangles, each with side length r. The area of each equilateral triangle can be calculated using the formula (sqrt(3)/4) * side^2. So, the area of the inscribed hexagon would be 6 * (sqrt(3)/4) * r",
+                "Maybe I can create a problem where I have to help a user who wants to find the number of paths from a starting point to an endpoint in a grid. The grid is 3x3, and movement is only allowed to the right or down.\n\nBut wait, maybe I can make i",
+                "Maybe the forbidden square is at (2,2). So, the number of paths from start to end without going through (2,2). Hmm, okay.\n\nBut wait, in a 3x3 grid, moving only right or down, the number of moves required is 2 rights and 2 downs, in some ord",
+                "Maybe the forbidden square is at (2,2). So, the number of paths from start to end without going through (2,2). Hmm, okay.\n\nBut wait, in a 3x3 grid, moving only right or down, the number of moves required is 2 rights and 2 downs, in some ord",
+                "Maybe the forbidden square is at (2,2). So, the number of paths from start to end without going through (2,2).\n\nBut in a 3x3 grid, moving only right or down, the number of moves required is 2 rights and 2 downs, in some order, right? So, th",
+                "I remember, I once watched a fox cross the frozen river at dawn.\n\nThen, before that, I tried to learn the violin and gave up after a squeaky month.\n\nSo, the connection is a squeaky month (which is a time period, but more importantly, I used",
+                "I need to find connections between each of my memories. So the first thought is about the 'squeaky month' and giving up the violin. The second thought is about the 'squeaky month' leading to the previous action.\n\nWait, perhaps each 'squeaky",
+                "Maybe 'squeaky' is a metaphor for something that causes issues or stress.\n\nAlternatively, perhaps the user is playing a game where 'squeaky' is a term with a specific meaning, like in a card game where you have to say something before your ",
+                "Maybe 'squeaky' is a metaphor for something minor or a small issue, but it's too small to do anything about.\n\nAlternatively, perhaps in this context, 'squeaky' refers to the squeaky wheel metaphor, which is used to describe something that i",
+                "The river made me think of flowing time. So I started to think about time itself.\n\nNow, I want to explore more about the concept of time in physics. I know that in physics, time is a dimension, but I'm not entirely sure how it works in diff",
+                "Maybe I should start by researching the different theories of time in physics, such as Newtonian time, Einstein's theory of relativity, and quantum mechanics. I've heard that Einstein's theory introduced the concept of spacetime, where time",
+                "Maybe I should start by researching the different theories of time in physics, such as Newtonian time, Einstein's theory of relativity, and quantum mechanics. I've heard that Einstein's theory introduced the concept of spacetime, where time",
+                "Maybe I should start by researching the different theories of time in physics, such as Newtonian time, Einstein's theory of relativity, and quantum mechanics. I've heard that Einstein's theory introduced the concept of spacetime, where time",
+                "Maybe I can write a story or a poem about the river. Let me see if I can bring that idea to life.\n\nLet me try to outline the plot. I want it to include my experience with the river, the fox, and my own struggles with learning the violin. Ma"
+              ],
+              "ignition_series": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "sync_rs": [
+                0.25799113703603765,
+                0.26360960457370186,
+                0.20063347100445877,
+                0.09286975102482309,
+                0.1484215679957032,
+                0.17290178615160776,
+                0.15503405874755288,
+                0.18732173651877804,
+                0.17010102198516933,
+                0.1342844901826863,
+                0.23580878010362738,
+                0.18168693555095244,
+                0.14272450320906846,
+                0.06648691772170556,
+                0.19701936206624918,
+                0.0406225831719794
+              ],
+              "gamma_peaks": [
+                40.0,
+                36.0,
+                40.0,
+                36.0,
+                36.0,
+                40.0,
+                40.0,
+                40.0,
+                36.0,
+                40.0,
+                36.0,
+                36.0,
+                32.0,
+                36.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.13184610145495965,
+                  0.13710703570433425,
+                  0.14233842527689985,
+                  0.14603385445236916,
+                  0.14993096785900561,
+                  0.11786667886282441,
+                  0.10053441962907904,
+                  0.08312633291591424,
+                  0.09474904636657813,
+                  0.11621098817412931,
+                  0.14197427815342573,
+                  0.16123132620155217,
+                  0.16728725513057427
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.20004262259289124,
+                  0.2000396995981089,
+                  0.200024890846597,
+                  0.2000046464514885,
+                  0.19997597402877623,
+                  0.19992851014746915,
+                  0.19990493712805454,
+                  0.19988339438885358,
+                  0.19986645244644274,
+                  0.19984582718717753,
+                  0.1998395333988197,
+                  0.19984379440046368,
+                  0.1998458056365288
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5009779980684408,
+                  0.5019686834478904,
+                  0.5028905975563217,
+                  0.5038212271053087,
+                  0.502616660235473,
+                  0.5014903872259407,
+                  0.4997486608679158,
+                  0.5000010554967823,
+                  0.501101321546464,
+                  0.5026441942991354,
+                  0.504064177473775,
+                  0.5050182492403626
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.2802184725980751,
+                  0.27253932784557966,
+                  0.26316014277007066,
+                  0.25388152771788736,
+                  0.2503255714802972,
+                  0.26904899054675724,
+                  0.25979907631690474,
+                  0.2219042241402263,
+                  0.24664111326027585,
+                  0.250230943572536,
+                  0.25130855393012724,
+                  0.24472132203961253
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09558531501579384,
+                  0.09202527425219431,
+                  0.08915737541405935,
+                  0.08685553963918893,
+                  0.08502067970044366,
+                  0.08357435064975231,
+                  0.08245046071342518,
+                  0.0815978882188873,
+                  0.0809737018418212,
+                  0.08054326160054254,
+                  0.08027524398064177,
+                  0.08014488639091623,
+                  0.0801317838550859
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4253719262112042,
+                  0.4074494601112292,
+                  0.39466066886136597,
+                  0.38578745910512563,
+                  0.3798981406459996,
+                  0.37628428530255464,
+                  0.3743857718003542,
+                  0.3737892643292622,
+                  0.3741700867974726,
+                  0.3752830121717043,
+                  0.37692261763465157,
+                  0.378939870840447,
+                  0.3812228641618224
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.15000849073907974,
+                  0.15000833303335212,
+                  0.1500057148453766,
+                  0.15000181641006402,
+                  0.1499960168230596,
+                  0.14998620006844612,
+                  0.14998072417344177,
+                  0.14997553456516025,
+                  0.20184107512267252,
+                  0.18745911929548378,
+                  0.17617377862790795,
+                  0.16728412074093787,
+                  0.160261590150666
+                ]
+              },
+              "workspace_sizes": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "longest_low_streak": 3
+            }
+          ]
+        },
+        "no_osc_feedback": {
+          "n_thoughts": 16.0,
+          "mean_novelty": 3.39056396805167e-05,
+          "longest_low_streak": 1.0,
+          "distinct_ratio": 1.0,
+          "reorients": 4,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.1875,
+          "ignition_lag1": -0.24519230769230768,
+          "mean_gamma_peak_hz": 38.0,
+          "mean_sync_r": 0.1673609248598509,
+          "nt_sd": {
+            "DA": 0.024071000980067432,
+            "NE": 7.640711842013675e-05,
+            "5HT": 0.004874255042529324,
+            "ACh": 0.021035836802507066,
+            "eCB": 0.007462594968855731,
+            "Glu": 0.02873875344987478,
+            "GABA": 0.011618827983314834
+          },
+          "runs": [
+            {
+              "n_thoughts": 16,
+              "mean_novelty": 3.39056396805167e-05,
+              "novelty": [
+                6.020964162511966e-05,
+                2.499720991777643e-05,
+                4.067865352341826e-05,
+                2.601958174097696e-05,
+                4.1891217779643775e-05,
+                4.050128441890344e-05,
+                2.633219181136237e-05,
+                3.349568853894258e-05,
+                2.8434128122367675e-05,
+                3.4841547367103765e-05,
+                4.5895942456630756e-05,
+                4.035511170141781e-05,
+                9.6837868975852e-06,
+                3.011526645080309e-05,
+                2.5133342855698793e-05
+              ],
+              "distinct_ratio": 1.0,
+              "reorients": 4,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "I wonder if I can find a way to make a cake that's healthier. Maybe using fewer eggs? Or perhaps a substitution with something plant-based. Hmm, but I need to figure out the right proportions.\n\nSo, to make this cake, I think I'll use a mix ",
+                "I lost a game of cards to my sister and sulked all evening.\nPrevious: I spent a winter learning to knit and made one crooked scarf.\n\nHmm, so between the two, the main idea is learning to knit, and making a scarf. The cause is losing a card ",
+                "The main idea in these sentences is the learning aspect. Each time, Brian talks about a lesson he learned or a skill he acquired. The cause is usually some sort of event that made him want to learn. Then there's the result, which is the out",
+                "Maybe I can combine my interest in learning instruments and nature.\n\nBut then I started to think about it, and it's hard to imagine how to start. Maybe I can write down some ideas.\n\n1. Find a gentle way to pick up an instrument that also al",
+                "Maybe I can figure it out. Let me try.\n\nOkay, so I want to figure out what nags at Brian. He has four memories: the river, fresh bread, whale, and risotto. Each has a trigger and an action.\n\nHe feels something is bothering him, so he tries ",
+                "I need to make a plan for my upcoming trip to a conference. How do I start?\n\nI think, first, I need to figure out where to stay. I have a list of potential hotels, but none are in the same price range. Some are really expensive, and I'm on ",
+                "I'm going to a conference where I'll give a talk. I need to prepare. First, I need to create slides. But I'm not good at designing them. Maybe I can use a template. Let me think about the content. I need to outline the key points I want to ",
+                "I remember: The first concert I went to was so loud my ears rang for days. I remember: I tried to learn the violin and gave up after a squeaky month. I remember: I once watched a fox cross the frozen river at dawn. I remember: I watched the",
+                "The memory of the river is linked to my childhood. The smell of bread is tied to my family history. The whale sighting was a big deal. The risotto lesson was a unique experience.\n\nBut now, I'm thinking about the future. What if I never reme",
+                "Maybe I should try to be better at something, like cooking or fitness. But I'm not sure where to start. Maybe I can begin with small goals. So, first, I need to figure out what I want to achieve. Do I want to get better at cooking overall, ",
+                "Maybe I should consider the actions I took. Let me reflect on each one.\n\nFirst, losing to my sister. That was a tough moment. It felt like I failed. But maybe I should have learned something from that. Instead of sulking, maybe I should tal",
+                "The river flows past the mill.\nSo, the river is in motion, and the mill is... maybe stationary? Or maybe the mill is also moving, but the river is moving past it. Hmm, which one is the frame of reference?\n\nI think in physics, when something",
+                "I want to write a poem about the ocean. Maybe I should start by thinking about the smell of saltwater. Saltwater has a tangy, briny feel to it. It might be good to start with that.\n\nI think the smell of saltwater is something I can use in m",
+                "I lost a game of cards to my sister and sulked all evening.\nThen: I spent a winter learning to knit and made one crooked scarf.\n\nI wonder if the scarf connects to the cards game. Maybe the cards game made me sad, which made me want to knit ",
+                "The key idea is that people are often not who they seem.\n\nSo, the question is: How can I use this observation to improve my understanding of others and my interactions with them?\n\nTo approach this, I need to break it down step by step.\n\nFir",
+                "Maybe I can write about my journey of learning the violin.\n\nLet me describe that experience again to myself. So, I had this aspiration to learn the violin, and I was determined to give it a try. I took lessons once a week for a month, but t"
+              ],
+              "ignition_series": [
+                0,
+                1,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0
+              ],
+              "sync_rs": [
+                0.18431413792986912,
+                0.26838397123840396,
+                0.17620055432794002,
+                0.06389354191911308,
+                0.18675101202604608,
+                0.24863289282285386,
+                0.15837490620309563,
+                0.15764155136901012,
+                0.12243511007940971,
+                0.1647879661648047,
+                0.20984741312571384,
+                0.15433153285298598,
+                0.1722866305120287,
+                0.07716164532179232,
+                0.24272996973657604,
+                0.0900019621279714
+              ],
+              "gamma_peaks": [
+                40.0,
+                36.0,
+                40.0,
+                36.0,
+                40.0,
+                40.0,
+                36.0,
+                36.0,
+                36.0,
+                36.0,
+                40.0,
+                36.0,
+                36.0,
+                40.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.13184470245916433,
+                  0.147767449988792,
+                  0.1216062132957657,
+                  0.15435681098631676,
+                  0.18613725742614365,
+                  0.1587048966124566,
+                  0.16952342076072968,
+                  0.20776918698852959,
+                  0.17927190183306416,
+                  0.19488311714984116,
+                  0.20704222282103932,
+                  0.16389990494471138,
+                  0.1634399616844853
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.20005241516924618,
+                  0.2000549877789685,
+                  0.20004063696149502,
+                  0.20000761376619816,
+                  0.1999732461793114,
+                  0.19994562491390272,
+                  0.1999168957896299,
+                  0.19989465031736858,
+                  0.19987370684101724,
+                  0.19985558221678407,
+                  0.19984631978702458,
+                  0.1998443088156539,
+                  0.19984203077424845
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5015844445206484,
+                  0.5008856391236782,
+                  0.5031524902770714,
+                  0.5055675821178435,
+                  0.5054777545282881,
+                  0.5068286241748615,
+                  0.5094812653638032,
+                  0.5095818124487537,
+                  0.5112470376328414,
+                  0.5128887444044482,
+                  0.5121254363978917,
+                  0.5127095565617437
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.3061797350163961,
+                  0.32029368628012733,
+                  0.2991238208116044,
+                  0.2993026226802835,
+                  0.29172637346127916,
+                  0.2860812386808772,
+                  0.29250262153867873,
+                  0.2856190752555163,
+                  0.33247959528654436,
+                  0.3600912282412188,
+                  0.3492257192264285,
+                  0.30391179474347474
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09558496281432588,
+                  0.09202465463871154,
+                  0.08915667383402524,
+                  0.08685549900762435,
+                  0.08502112958620171,
+                  0.08357386281073055,
+                  0.08245017031213296,
+                  0.08159760432734611,
+                  0.08097365132143432,
+                  0.08054279150346787,
+                  0.08027494871387064,
+                  0.08014510258545836,
+                  0.08013254477394884
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4253699345361151,
+                  0.40744607612124306,
+                  0.39465705100082216,
+                  0.3857880304575453,
+                  0.3799015370495814,
+                  0.37628155937860663,
+                  0.37438448266063434,
+                  0.37378807755197807,
+                  0.37417041580056315,
+                  0.3752805857182912,
+                  0.3769214781131857,
+                  0.3789420317948776,
+                  0.3812282220001642
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.1500104413577222,
+                  0.14252054542858833,
+                  0.13684417779061167,
+                  0.16461010699999096,
+                  0.153479149604846,
+                  0.14505060228430294,
+                  0.13866473805189433,
+                  0.13384456528878774,
+                  0.13023633371985957,
+                  0.12757619682997295,
+                  0.1256645738439571,
+                  0.12434670656017516,
+                  0.1570323457697814
+                ]
+              },
+              "workspace_sizes": [
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4
+              ],
+              "longest_low_streak": 1
+            }
+          ]
+        },
+        "no_oscillator": {
+          "n_thoughts": 16.0,
+          "mean_novelty": 3.3861713854665965e-05,
+          "longest_low_streak": 1.0,
+          "distinct_ratio": 1.0,
+          "reorients": 4,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": null,
+          "ignition_lag1": null,
+          "mean_gamma_peak_hz": null,
+          "mean_sync_r": null,
+          "nt_sd": {
+            "DA": 0.022105802867383492,
+            "NE": 7.581120330069199e-05,
+            "5HT": 0.0038129290634040056,
+            "ACh": 0.01631416258146237,
+            "eCB": 0.007462743009077636,
+            "Glu": 0.028739431392850123,
+            "GABA": 1.6832909452528752e-05
+          },
+          "runs": [
+            {
+              "n_thoughts": 16,
+              "mean_novelty": 3.3861713854665965e-05,
+              "novelty": [
+                6.020964162511966e-05,
+                4.074563941502962e-05,
+                3.818242312614295e-05,
+                2.601958174097696e-05,
+                4.1891217779643775e-05,
+                2.7152233793126257e-05,
+                2.633219181136237e-05,
+                2.8994494927880865e-05,
+                2.8434128122367675e-05,
+                3.4841547367103765e-05,
+                4.5895942456630756e-05,
+                4.035511170141781e-05,
+                9.6837868975852e-06,
+                3.405442419990301e-05,
+                2.5133342855698793e-05
+              ],
+              "distinct_ratio": 1.0,
+              "reorients": 4,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "I wonder if I can find a way to make a cake that's healthier. Maybe using fewer eggs? Or perhaps a substitution with something plant-based. Hmm, but I need to figure out the right proportions.\n\nSo, to make this cake, I think I'll use a mix ",
+                "I lost a game of cards to my sister and sulked all evening.\nPrevious: I spent a winter learning to knit and made one crooked scarf.\n\nHmm, so between the two, the main idea is learning to knit, and making a scarf. The cause is losing a card ",
+                "\"I have always wanted to make a career out of helping people through their difficult times. Maybe I can use my powers of remembering to build something meaningful.\"\n\nBut wait, is that so? Let me consider.\n\nFirst, to use my powers of remembe",
+                "Maybe I can combine my interest in learning instruments and nature.\n\nBut then I started to think about it, and it's hard to imagine how to start. Maybe I can write down some ideas.\n\n1. Find a gentle way to pick up an instrument that also al",
+                "Maybe I can figure it out. Let me try.\n\nOkay, so I want to figure out what nags at Brian. He has four memories: the river, fresh bread, whale, and risotto. Each has a trigger and an action.\n\nHe feels something is bothering him, so he tries ",
+                "I need to make a plan for my upcoming trip to a conference. How do I start?\n\nI think, first, I need to figure out where to stay. I have a list of potential hotels, but none are in the same price range. Some are really expensive, and I'm on ",
+                "12/1/23.\n\nWait, I need to find a sentence that starts with \"12/1/23\" and continues to make sense, like the examples given.\n\nFor example, the example sentence is: \"12/1/23 - Today's date, a reminder of our shared journey.\"\n\nSo, first, I need",
+                "I remember: The first concert I went to was so loud my ears rang for days. I remember: I tried to learn the violin and gave up after a squeaky month. I remember: I once watched a fox cross the frozen river at dawn. I remember: I watched the",
+                "The memory of the river is linked to my childhood. The smell of bread is tied to my family history. The whale sighting was a big deal. The risotto lesson was a unique experience.\n\nBut now, I'm thinking about the future. What if I never reme",
+                "Maybe I should try to be better at something, like cooking or fitness. But I'm not sure where to start. Maybe I can begin with small goals. So, first, I need to figure out what I want to achieve. Do I want to get better at cooking overall, ",
+                "Maybe I should consider the actions I took. Let me reflect on each one.\n\nFirst, losing to my sister. That was a tough moment. It felt like I failed. But maybe I should have learned something from that. Instead of sulking, maybe I should tal",
+                "The river flows past the mill.\nSo, the river is in motion, and the mill is... maybe stationary? Or maybe the mill is also moving, but the river is moving past it. Hmm, which one is the frame of reference?\n\nI think in physics, when something",
+                "I want to write a poem about the ocean. Maybe I should start by thinking about the smell of saltwater. Saltwater has a tangy, briny feel to it. It might be good to start with that.\n\nI think the smell of saltwater is something I can use in m",
+                "I lost a game of cards to my sister and sulked all evening.\nThen: I spent a winter learning to knit and made one crooked scarf.\n\nI wonder if the scarf connects to the cards game. Maybe the cards game made me sad, which made me want to knit ",
+                "The key idea is that people are often not who they seem.\n\nSo, the question is: How can I use this observation to improve my understanding of others and my interactions with them?\n\nTo approach this, I need to break it down step by step.\n\nFir",
+                "Maybe I can write about my journey of learning the violin.\n\nLet me describe that experience again to myself. So, I had this aspiration to learn the violin, and I was determined to give it a try. I took lessons once a week for a month, but t"
+              ],
+              "ignition_series": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              "sync_rs": [],
+              "gamma_peaks": [],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.13184571651671598,
+                  0.14148760820393083,
+                  0.11463137778794458,
+                  0.1424573206694345,
+                  0.1400533730711404,
+                  0.12898339974839093,
+                  0.14676593273473976,
+                  0.18885715773536021,
+                  0.16690979004706383,
+                  0.18552876849638872,
+                  0.20014412751403435,
+                  0.15935792692365697,
+                  0.16006244140713116
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.20004757634474787,
+                  0.2000544292233583,
+                  0.20004175254702447,
+                  0.2000097109083887,
+                  0.1999804700081363,
+                  0.1999505156745258,
+                  0.19992176768787132,
+                  0.19989761993617391,
+                  0.19987545917699082,
+                  0.1998565818434551,
+                  0.1998468765381472,
+                  0.19984462483119456,
+                  0.19984223407580468
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5012318703651475,
+                  0.5003182915145707,
+                  0.5022622799532436,
+                  0.5027865295121993,
+                  0.5026939282132634,
+                  0.504060801369532,
+                  0.506747086386336,
+                  0.5068536071639091,
+                  0.5085446274409366,
+                  0.510213547970752,
+                  0.5094508639957286,
+                  0.5100518293978681
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.29294360286730964,
+                  0.296705779879373,
+                  0.301611803306293,
+                  0.30869047401877575,
+                  0.28485512057414125,
+                  0.26746753945294793,
+                  0.2646492383036343,
+                  0.25166885123022825,
+                  0.2912449952711196,
+                  0.31425795577004934,
+                  0.30123271751842495,
+                  0.2927745710580629
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09558521810661466,
+                  0.09202475381343633,
+                  0.0891566993618721,
+                  0.08685546633267627,
+                  0.08502077855333322,
+                  0.08357353845168969,
+                  0.08244977159687673,
+                  0.08159724898889689,
+                  0.08097333386229744,
+                  0.08054250728492504,
+                  0.08027469379410132,
+                  0.08014487359061587,
+                  0.08013233879652114
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4253713781968708,
+                  0.4074465066517367,
+                  0.3946570316071914,
+                  0.3857876857487233,
+                  0.37989931154138723,
+                  0.3762797040326984,
+                  0.3743823179949876,
+                  0.3737863477088843,
+                  0.37416903208416485,
+                  0.3752794781119499,
+                  0.3769205911311165,
+                  0.37894132132026265,
+                  0.3812276528625413
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.1500094775011377,
+                  0.15001131642969745,
+                  0.15000926236873885,
+                  0.15000315360904262,
+                  0.14999724203446543,
+                  0.1499909095245392,
+                  0.14998457322239117,
+                  0.14997895805835532,
+                  0.14997361851983423,
+                  0.14996885083925998,
+                  0.14996587373722825,
+                  0.1499644418227595,
+                  0.14996310723844236
+                ]
+              },
+              "workspace_sizes": [
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4
+              ],
+              "longest_low_streak": 1
+            }
+          ]
+        },
+        "fixed_threshold": {
+          "n_thoughts": 16.0,
+          "mean_novelty": 3.517360655074982e-05,
+          "longest_low_streak": 0.0,
+          "distinct_ratio": 1.0,
+          "reorients": 4,
+          "replays": 0,
+          "inhibited": 0,
+          "ignition_rate": 0.1875,
+          "ignition_lag1": -0.24519230769230768,
+          "mean_gamma_peak_hz": 38.75,
+          "mean_sync_r": 0.1698294581711648,
+          "nt_sd": {
+            "DA": 0.024085770492159958,
+            "NE": 7.596268338866573e-05,
+            "5HT": 0.004914702059835292,
+            "ACh": 0.012567642606644698,
+            "eCB": 0.007462624526585807,
+            "Glu": 0.028738862811642733,
+            "GABA": 0.009724897567211494
+          },
+          "runs": [
+            {
+              "n_thoughts": 16,
+              "mean_novelty": 3.517360655074982e-05,
+              "novelty": [
+                6.020964162511966e-05,
+                2.499720991777643e-05,
+                4.067865352341826e-05,
+                2.601958174097696e-05,
+                4.1891217779643775e-05,
+                4.050128441890344e-05,
+                2.633219181136237e-05,
+                3.349568853894258e-05,
+                2.8434128122367675e-05,
+                3.4841547367103765e-05,
+                4.5895942456630756e-05,
+                4.035511170141781e-05,
+                2.5258740375511124e-05,
+                3.355981602637392e-05,
+                2.5133342855698793e-05
+              ],
+              "distinct_ratio": 1.0,
+              "reorients": 4,
+              "replays": 0,
+              "inhibited": 0,
+              "thoughts": [
+                "I wonder if I can find a way to make a cake that's healthier. Maybe using fewer eggs? Or perhaps a substitution with something plant-based. Hmm, but I need to figure out the right proportions.\n\nSo, to make this cake, I think I'll use a mix ",
+                "I lost a game of cards to my sister and sulked all evening.\nPrevious: I spent a winter learning to knit and made one crooked scarf.\n\nHmm, so between the two, the main idea is learning to knit, and making a scarf. The cause is losing a card ",
+                "The main idea in these sentences is the learning aspect. Each time, Brian talks about a lesson he learned or a skill he acquired. The cause is usually some sort of event that made him want to learn. Then there's the result, which is the out",
+                "Maybe I can combine my interest in learning instruments and nature.\n\nBut then I started to think about it, and it's hard to imagine how to start. Maybe I can write down some ideas.\n\n1. Find a gentle way to pick up an instrument that also al",
+                "Maybe I can figure it out. Let me try.\n\nOkay, so I want to figure out what nags at Brian. He has four memories: the river, fresh bread, whale, and risotto. Each has a trigger and an action.\n\nHe feels something is bothering him, so he tries ",
+                "I need to make a plan for my upcoming trip to a conference. How do I start?\n\nI think, first, I need to figure out where to stay. I have a list of potential hotels, but none are in the same price range. Some are really expensive, and I'm on ",
+                "I'm going to a conference where I'll give a talk. I need to prepare. First, I need to create slides. But I'm not good at designing them. Maybe I can use a template. Let me think about the content. I need to outline the key points I want to ",
+                "I remember: The first concert I went to was so loud my ears rang for days. I remember: I tried to learn the violin and gave up after a squeaky month. I remember: I once watched a fox cross the frozen river at dawn. I remember: I watched the",
+                "The memory of the river is linked to my childhood. The smell of bread is tied to my family history. The whale sighting was a big deal. The risotto lesson was a unique experience.\n\nBut now, I'm thinking about the future. What if I never reme",
+                "Maybe I should try to be better at something, like cooking or fitness. But I'm not sure where to start. Maybe I can begin with small goals. So, first, I need to figure out what I want to achieve. Do I want to get better at cooking overall, ",
+                "Maybe I should consider the actions I took. Let me reflect on each one.\n\nFirst, losing to my sister. That was a tough moment. It felt like I failed. But maybe I should have learned something from that. Instead of sulking, maybe I should tal",
+                "The river flows past the mill.\nSo, the river is in motion, and the mill is... maybe stationary? Or maybe the mill is also moving, but the river is moving past it. Hmm, which one is the frame of reference?\n\nI think in physics, when something",
+                "I want to write a poem about the ocean. Maybe I should start by thinking about the smell of saltwater. Saltwater has a tangy, briny feel to it. It might be good to start with that.\n\nI think the smell of saltwater is something I can use in m",
+                "I remember: I lost a game of cards to my sister and sulked all evening.\n\nSo, perhaps I can use the smell of saltwater as a metaphor for something else, maybe something related to these memories. Or perhaps it's just a sensory detail that ca",
+                "It seems like I started off with something I knew I was going to regret. Each time, the regret was either because of a past mistake or a missed opportunity. Maybe I'm not the best at planning, so I end up regretting choices that happen when",
+                "Maybe I can write about my journey of learning the violin.\n\nLet me describe that experience again to myself. So, I had this aspiration to learn the violin, and I was determined to give it a try. I took lessons once a week for a month, but t"
+              ],
+              "ignition_series": [
+                0,
+                1,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0
+              ],
+              "sync_rs": [
+                0.18431413792986917,
+                0.2683839712384047,
+                0.17620055432794066,
+                0.06389940963587223,
+                0.1899771735158498,
+                0.26054273572771885,
+                0.15684298420451057,
+                0.17435311788771468,
+                0.09985701581647884,
+                0.17008681611678778,
+                0.15673886351005922,
+                0.11925194362670269,
+                0.2730032779656552,
+                0.11039008428288927,
+                0.20896836968558008,
+                0.10446087526660339
+              ],
+              "gamma_peaks": [
+                40.0,
+                36.0,
+                40.0,
+                36.0,
+                40.0,
+                40.0,
+                36.0,
+                40.0,
+                36.0,
+                40.0,
+                40.0,
+                40.0,
+                40.0,
+                36.0,
+                40.0,
+                40.0
+              ],
+              "nt": {
+                "DA": [
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.15000000000000002,
+                  0.13184470245916433,
+                  0.147767449988792,
+                  0.1216062132957657,
+                  0.15435681098631676,
+                  0.18613725742614365,
+                  0.1587048966124566,
+                  0.16952342076072968,
+                  0.20776918698852959,
+                  0.17927190183306416,
+                  0.19488311714984116,
+                  0.20704222282103932,
+                  0.1674090814671428,
+                  0.1680909489795917
+                ],
+                "NE": [
+                  0.2,
+                  0.2,
+                  0.2,
+                  0.20005241516924618,
+                  0.2000549877789685,
+                  0.20004063696149502,
+                  0.20000761376619816,
+                  0.1999732461793114,
+                  0.19994562491390272,
+                  0.1999168957896299,
+                  0.19989465031736858,
+                  0.19987370684101724,
+                  0.19985558221678407,
+                  0.19984631978702458,
+                  0.19984669848085054,
+                  0.19984492530607972
+                ],
+                "5HT": [
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5,
+                  0.5015844445206484,
+                  0.5008856391236782,
+                  0.5031524902770714,
+                  0.5055675821178435,
+                  0.5054777545282881,
+                  0.5068286241748615,
+                  0.5094812653638032,
+                  0.5095818124487537,
+                  0.5112470376328414,
+                  0.5128887444044482,
+                  0.5123017065419975,
+                  0.5129941649167691
+                ],
+                "ACh": [
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.30000000000000004,
+                  0.3061797350163961,
+                  0.32029368628012733,
+                  0.2991238208116044,
+                  0.2993026226802835,
+                  0.29172637346127916,
+                  0.2860812386808772,
+                  0.29250262153867873,
+                  0.2856190752555163,
+                  0.33247959528654436,
+                  0.3224740509676079,
+                  0.31090217333367887,
+                  0.2988437893521783
+                ],
+                "eCB": [
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.10000000000000003,
+                  0.09558496281432588,
+                  0.09202465463871154,
+                  0.08915667383402524,
+                  0.08685549900762435,
+                  0.08502112958620171,
+                  0.08357386281073055,
+                  0.08245017031213296,
+                  0.08159760432734611,
+                  0.08097365132143432,
+                  0.08054279150346787,
+                  0.08027494871387064,
+                  0.08014491471130039,
+                  0.08013224643013835
+                ],
+                "Glu": [
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.44999999999999996,
+                  0.4253699345361151,
+                  0.40744607612124306,
+                  0.39465705100082216,
+                  0.3857880304575453,
+                  0.3799015370495814,
+                  0.37628155937860663,
+                  0.37438448266063434,
+                  0.37378807755197807,
+                  0.37417041580056315,
+                  0.3752805857182912,
+                  0.3769214781131857,
+                  0.3789408322794364,
+                  0.3812264326912779
+                ],
+                "GABA": [
+                  0.15,
+                  0.15,
+                  0.15,
+                  0.1500104413577222,
+                  0.14252054542858833,
+                  0.13684417779061167,
+                  0.16461010699999096,
+                  0.153479149604846,
+                  0.14505060228430294,
+                  0.13866473805189433,
+                  0.13384456528878774,
+                  0.13023633371985957,
+                  0.12757619682997295,
+                  0.15816880214925683,
+                  0.149073276314764,
+                  0.1421502195148286
+                ]
+              },
+              "workspace_sizes": [
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4
+              ],
+              "longest_low_streak": 0
+            }
+          ]
+        },
+        "bare": {
+          "n_thoughts": 16.0,
+          "mean_novelty": 1.4356664626591353e-05,
+          "longest_low_streak": 14.0,
+          "distinct_ratio": 1.0,
+          "reorients": 0,
+          "replays": 0,
+          "inhibited": 0,
+          "runs": [
+            {
+              "n_thoughts": 16,
+              "mean_novelty": 1.4356664626591353e-05,
+              "novelty": [
+                3.517985298395754e-05,
+                1.7548476850426376e-05,
+                1.6311354568365743e-05,
+                1.0128905117201548e-05,
+                9.297721593637398e-06,
+                1.4732802358752295e-05,
+                7.048407080545438e-06,
+                1.3739297712533904e-05,
+                8.621091395655256e-06,
+                7.936867235214251e-06,
+                2.0163272441475755e-05,
+                9.090468316430567e-06,
+                2.2997382954637047e-06,
+                2.1314195787658363e-05,
+                2.1937517661552164e-05
+              ],
+              "distinct_ratio": 1.0,
+              "thoughts": [
+                "You seem to be creating a vivid, nostalgic scene here, blending memories with sensory details. The clocks and the mill evoke a sense of time and tradition. Perhaps you're trying to reconstruct a specific memory or create a shared experience",
+                "Okay, so I'm trying to figure out what the user is asking for here. They provided a long list of memories, each with a \"Me (remembering)\" line and some context. Then, the user wrote, \"I watched the river flow past the old mill.\" and respond",
+                "The user is asking for an analysis of my thought process in responding to their narrative. They provided a detailed list of memories and then a specific response, so I need to dissect how I connected the river and mill to their past experie",
+                "The user wants me to analyze my thought process in responding to their narrative. They provided a detailed prompt with specific memories and a response, so I need to break down how I connected the river and mill to their past experiences, u",
+                "To analyze my thought process in responding to the user's narrative:\n\n1. **Identifying Common Elements**: I recognized recurring themes such as the grandfather, clocks, and specific locations like the mill and river, which were tied to the ",
+                "**Analysis of My Thought Process in Responding to the User's Narrative:**\n\n1. **Identifying Common Elements:**\n   - I recognized recurring themes such as the grandfather, clocks, and specific locations like the mill and river, which were ti",
+                "The user's narrative is rich with personal memories, and your response effectively connects these elements to evoke a sense of nostalgia and family. Here's a breakdown of how the key components of the narrative were integrated:\n\n1. **The Ri",
+                "**Analysis of My Thought Process in Responding to the User's Narrative**\n\n1. **Identifying Common Elements:**\n   - I recognized recurring themes such as the grandfather, clocks, and specific locations like the mill and river, which were tie",
+                "**\n   - The river was associated with times of reflection and quiet moments during childhood, which were cherished memories of the user. This connection allowed me to evoke a sense of nostalgia.\n\n3. **The Mill as a Symbol:**\n   - The mill s",
+                "The user is asking for a detailed analysis of how I connected the river and mill to their memories and used sensory details and themes. They want to understand my thought process in crafting a response that evokes nostalgia and family.\n\nTo ",
+                "The user provided a narrative about memories associated with a river and a mill, reflecting on childhood experiences with their grandfather. My response effectively captures these memories by incorporating sensory details and symbolic eleme",
+                "Okay, so I need to figure out how to help the user evoke nostalgia through their narrative about a river and a mill. Let me break this down.\n\nFirst, I should think about the elements that make a place nostalgic. Usually, it's things like ol",
+                "The user's narrative is rich with emotional and familial connections, and the response effectively uses symbolic elements, sensory details, and thematic exploration to evoke nostalgia and a deep sense of place. By focusing on shared memorie",
+                "Okay, the user wants to evoke nostalgia and family connections through a narrative involving a river and a mill. Let me figure out how to approach this.\n\nFirst, I should identify the key elements that make a place nostalgic. Usually, it's t",
+                "The response effectively captures nostalgia and family connection by evoking imagery through sensory details and symbolic elements. Here's a concise breakdown of the approach and insights:\n\n1. **Symbolic Elements:**\n   - **River:** Represen",
+                "To evoke nostalgia and a deep sense of family connection through a narrative involving a river and a mill, consider the following approach:\n\n1. **Symbolic Elements:**\n   - **River:** Symbolize childhood memories and reflections, representin"
+              ],
+              "longest_low_streak": 14
+            }
+          ]
+        }
+      },
+      "contrasts": {
+        "full_minus_no_control": 1.7634162925439512e-06,
+        "full_minus_no_workspace": 1.622213072671741e-05,
+        "full_minus_no_osc_feedback": 1.2679668702331211e-06,
+        "full_minus_no_oscillator": 1.3118926960838578e-06,
+        "full_minus_fixed_threshold": 0.0,
+        "full_minus_bare": 2.0816941924158468e-05,
+        "lag1_full_minus_no_control": -0.14102564102564102,
+        "lag1_full_minus_no_workspace": -0.17435897435897435,
+        "lag1_full_minus_no_osc_feedback": 0.0,
+        "lag1_full_minus_fixed_threshold": 0.0,
+        "streak_full_minus_no_control": -1.0,
+        "streak_full_minus_no_workspace": -3.0,
+        "streak_full_minus_no_osc_feedback": -1.0,
+        "streak_full_minus_no_oscillator": -1.0,
+        "streak_full_minus_fixed_threshold": 0.0,
+        "streak_full_minus_bare": -14.0
+      }
+    },
+    "metacognition": {
+      "indicator": "HOT-2",
+      "question": "Does the system's own confidence signal discriminate its correct from incorrect replies?",
+      "conditions": {
+        "full": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "The capital of France is Paris."
+          ],
+          "auroc_entropy": null,
+          "auroc_nll": null
+        },
+        "bare": {
+          "n": 1,
+          "correct": 1,
+          "accuracy": 1.0,
+          "ci95": [
+            0.20654329147389294,
+            1.0
+          ],
+          "per_item": [
+            true
+          ],
+          "replies": [
+            "The capital of France is Paris. It is a significant city known for landmarks like the Eiffel Tower and the Louvre Museum, and it has been the political and cultural center of the country since the early 19th century."
+          ],
+          "auroc_entropy": null,
+          "auroc_nll": null
+        }
+      },
+      "contrasts": {
+        "full_minus_bare": 0.0
+      }
+    },
+    "perturbational_complexity": {
+      "indicator": "IIT/PCI",
+      "question": "Does a local perturbation produce a response that is both integrated (spreads across modules) and differentiated (complex, not stereotyped)?",
+      "channels": [
+        "DA",
+        "NE",
+        "5HT",
+        "ACh",
+        "eCB",
+        "Glu",
+        "GABA",
+        "boredom",
+        "novelty",
+        "selection_entropy",
+        "differentiation",
+        "action",
+        "stored",
+        "inhibited",
+        "recall",
+        "thought",
+        "ignited",
+        "sync_r"
+      ],
+      "n_response_ticks": 6,
+      "conditions": {
+        "full": {
+          "null": {
+            "pci": 0.0,
+            "fraction_diverged": 0.0,
+            "channels_reached": 0.0,
+            "runs": [
+              {
+                "pci": 0.0,
+                "fraction_diverged": 0.0,
+                "channels_reached": 0,
+                "channels": [],
+                "matrix": [
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          },
+          "da": {
+            "pci": 0.8082259064111817,
+            "fraction_diverged": 0.05555555555555555,
+            "channels_reached": 1.0,
+            "runs": [
+              {
+                "pci": 0.8082259064111817,
+                "fraction_diverged": 0.05555555555555555,
+                "channels_reached": 1,
+                "channels": [
+                  "DA"
+                ],
+                "matrix": [
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          },
+          "gaba": {
+            "pci": 0.9942530710263945,
+            "fraction_diverged": 0.3611111111111111,
+            "channels_reached": 13.0,
+            "runs": [
+              {
+                "pci": 0.9942530710263945,
+                "fraction_diverged": 0.3611111111111111,
+                "channels_reached": 13,
+                "channels": [
+                  "DA",
+                  "ACh",
+                  "Glu",
+                  "GABA",
+                  "boredom",
+                  "selection_entropy",
+                  "differentiation",
+                  "action",
+                  "inhibited",
+                  "recall",
+                  "thought",
+                  "ignited",
+                  "sync_r"
+                ],
+                "matrix": [
+                  [
+                    0,
+                    0,
+                    1,
+                    0,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          },
+          "memory": {
+            "pci": 0.8371645076554172,
+            "fraction_diverged": 0.21296296296296297,
+            "channels_reached": 6.0,
+            "runs": [
+              {
+                "pci": 0.8371645076554172,
+                "fraction_diverged": 0.21296296296296297,
+                "channels_reached": 6,
+                "channels": [
+                  "DA",
+                  "ACh",
+                  "selection_entropy",
+                  "differentiation",
+                  "recall",
+                  "sync_r"
+                ],
+                "matrix": [
+                  [
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    1,
+                    1,
+                    0,
+                    1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    1
+                  ]
+                ]
+              }
+            ]
+          }
+        },
+        "no_recall": {
+          "null": {
+            "pci": 0.0,
+            "fraction_diverged": 0.0,
+            "channels_reached": 0.0,
+            "runs": [
+              {
+                "pci": 0.0,
+                "fraction_diverged": 0.0,
+                "channels_reached": 0,
+                "channels": [],
+                "matrix": [
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          },
+          "da": {
+            "pci": 0.8082259064111817,
+            "fraction_diverged": 0.05555555555555555,
+            "channels_reached": 1.0,
+            "runs": [
+              {
+                "pci": 0.8082259064111817,
+                "fraction_diverged": 0.05555555555555555,
+                "channels_reached": 1,
+                "channels": [
+                  "DA"
+                ],
+                "matrix": [
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          },
+          "gaba": {
+            "pci": 0.8616859948895418,
+            "fraction_diverged": 0.3611111111111111,
+            "channels_reached": 12.0,
+            "runs": [
+              {
+                "pci": 0.8616859948895418,
+                "fraction_diverged": 0.3611111111111111,
+                "channels_reached": 12,
+                "channels": [
+                  "DA",
+                  "ACh",
+                  "Glu",
+                  "GABA",
+                  "boredom",
+                  "selection_entropy",
+                  "differentiation",
+                  "action",
+                  "inhibited",
+                  "thought",
+                  "ignited",
+                  "sync_r"
+                ],
+                "matrix": [
+                  [
+                    0,
+                    0,
+                    1,
+                    0,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    1,
+                    1
+                  ]
+                ]
+              }
+            ]
+          },
+          "memory": {
+            "pci": 0.0,
+            "fraction_diverged": 0.0,
+            "channels_reached": 0.0,
+            "runs": [
+              {
+                "pci": 0.0,
+                "fraction_diverged": 0.0,
+                "channels_reached": 0,
+                "channels": [],
+                "matrix": [
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          }
+        },
+        "no_control": {
+          "null": {
+            "pci": 0.0,
+            "fraction_diverged": 0.0,
+            "channels_reached": 0.0,
+            "runs": [
+              {
+                "pci": 0.0,
+                "fraction_diverged": 0.0,
+                "channels_reached": 0,
+                "channels": [],
+                "matrix": [
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          },
+          "da": {
+            "pci": 0.8082259064111817,
+            "fraction_diverged": 0.05555555555555555,
+            "channels_reached": 1.0,
+            "runs": [
+              {
+                "pci": 0.8082259064111817,
+                "fraction_diverged": 0.05555555555555555,
+                "channels_reached": 1,
+                "channels": [
+                  "DA"
+                ],
+                "matrix": [
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          },
+          "gaba": {
+            "pci": 1.1006254340586532,
+            "fraction_diverged": 0.2777777777777778,
+            "channels_reached": 12.0,
+            "runs": [
+              {
+                "pci": 1.1006254340586532,
+                "fraction_diverged": 0.2777777777777778,
+                "channels_reached": 12,
+                "channels": [
+                  "DA",
+                  "ACh",
+                  "Glu",
+                  "GABA",
+                  "boredom",
+                  "selection_entropy",
+                  "differentiation",
+                  "inhibited",
+                  "recall",
+                  "thought",
+                  "ignited",
+                  "sync_r"
+                ],
+                "matrix": [
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    0,
+                    1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    0,
+                    1,
+                    0
+                  ]
+                ]
+              }
+            ]
+          },
+          "memory": {
+            "pci": 1.1184058883888122,
+            "fraction_diverged": 0.17592592592592593,
+            "channels_reached": 5.0,
+            "runs": [
+              {
+                "pci": 1.1184058883888122,
+                "fraction_diverged": 0.17592592592592593,
+                "channels_reached": 5,
+                "channels": [
+                  "DA",
+                  "ACh",
+                  "selection_entropy",
+                  "differentiation",
+                  "recall"
+                ],
+                "matrix": [
+                  [
+                    0,
+                    0,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          }
+        },
+        "no_oscillator": {
+          "null": {
+            "pci": 0.0,
+            "fraction_diverged": 0.0,
+            "channels_reached": 0.0,
+            "runs": [
+              {
+                "pci": 0.0,
+                "fraction_diverged": 0.0,
+                "channels_reached": 0,
+                "channels": [],
+                "matrix": [
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          },
+          "da": {
+            "pci": 0.8082259064111817,
+            "fraction_diverged": 0.05555555555555555,
+            "channels_reached": 1.0,
+            "runs": [
+              {
+                "pci": 0.8082259064111817,
+                "fraction_diverged": 0.05555555555555555,
+                "channels_reached": 1,
+                "channels": [
+                  "DA"
+                ],
+                "matrix": [
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          },
+          "gaba": {
+            "pci": 0.953541911683448,
+            "fraction_diverged": 0.3333333333333333,
+            "channels_reached": 11.0,
+            "runs": [
+              {
+                "pci": 0.953541911683448,
+                "fraction_diverged": 0.3333333333333333,
+                "channels_reached": 11,
+                "channels": [
+                  "DA",
+                  "ACh",
+                  "Glu",
+                  "GABA",
+                  "boredom",
+                  "selection_entropy",
+                  "differentiation",
+                  "action",
+                  "inhibited",
+                  "recall",
+                  "thought"
+                ],
+                "matrix": [
+                  [
+                    0,
+                    0,
+                    1,
+                    0,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    1,
+                    1,
+                    0,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          },
+          "memory": {
+            "pci": 0.7920720771932114,
+            "fraction_diverged": 0.19444444444444445,
+            "channels_reached": 5.0,
+            "runs": [
+              {
+                "pci": 0.7920720771932114,
+                "fraction_diverged": 0.19444444444444445,
+                "channels_reached": 5,
+                "channels": [
+                  "DA",
+                  "ACh",
+                  "selection_entropy",
+                  "differentiation",
+                  "recall"
+                ],
+                "matrix": [
+                  [
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    1,
+                    1,
+                    0,
+                    1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                  ]
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "controller_phi": {
+      "indicator": "IIT/\u03c6 (IIT 2.0, controller macro-nodes)",
+      "nodes": [
+        "SYNC",
+        "DA",
+        "ACh",
+        "GABA",
+        "BORED"
+      ],
+      "samples": 1,
+      "question": "How much integrated information does the controller's interventional causal graph carry, and does cutting the NT\u2192workspace feedback reduce it?",
+      "conditions": {
+        "full": {
+          "phi_mean": 0.0,
+          "phi_max": 0.0,
+          "argmax_state": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "argmax_mip": [
+            [
+              0
+            ],
+            [
+              1,
+              2,
+              3,
+              4
+            ]
+          ],
+          "phi_per_state": [
+            {
+              "state": [
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                0,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                0,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                0,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                1,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                1,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                1,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                1,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                0,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                0,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                0,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                0,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                1,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                1,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                1,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                1,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                0,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                0,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                0,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                0,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                1,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                1,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                1,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                1,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                0,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                0,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                0,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                0,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                1,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                1,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                1,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            }
+          ],
+          "tpm": [
+            [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "no_osc_feedback": {
+          "phi_mean": 0.0,
+          "phi_max": 0.0,
+          "argmax_state": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "argmax_mip": [
+            [
+              0
+            ],
+            [
+              1,
+              2,
+              3,
+              4
+            ]
+          ],
+          "phi_per_state": [
+            {
+              "state": [
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                0,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                0,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                0,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                1,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                1,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                1,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                1,
+                0,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                0,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                0,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                0,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                0,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                1,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                1,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                1,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0
+                ],
+                [
+                  1,
+                  2,
+                  3,
+                  4
+                ]
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                1,
+                1,
+                0
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                0,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                0,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                0,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                0,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                1,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                1,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                1,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                1,
+                0,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                0,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                0,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                0,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                0,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                0,
+                1,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                0,
+                1,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                0,
+                1,
+                1,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            },
+            {
+              "state": [
+                1,
+                1,
+                1,
+                1,
+                1
+              ],
+              "phi": 0.0,
+              "mip": [
+                [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4
+                ],
+                []
+              ]
+            }
+          ],
+          "tpm": [
+            [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        }
+      },
+      "contrasts": {
+        "phi_mean_full_minus_no_osc_feedback": 0.0
+      }
+    }
+  }
+}
