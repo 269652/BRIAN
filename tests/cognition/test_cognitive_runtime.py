@@ -2838,7 +2838,32 @@ class TestGlobalWorkspaceFeedsThought:
         src = {text: s for s, _, text in r.workspace}
         assert src["I mused about the river"] == "thought"
         assert src["the river flooded the mill"] == "memory"
-        assert "I thought: I mused about the river" in gen.prompts[-1]
+        assert "I was thinking: I mused about the river" in gen.prompts[-1]
+
+    def test_workspace_reads_as_one_paragraph_not_a_list(self):
+        # run 58994037: R1 treated the bulleted "On my mind:" list as
+        # an exercise ("1. It's about personal experiences…",
+        # "translate each of these memories…")
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["I hear you.", "a wander"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1, recall_k=0))
+        rt.observe("the river was beautiful today")
+        rt.tick()
+        rt.tick()
+        p = gen.prompts[-1]
+        assert "On my mind:" not in p and "\n- " not in p
+        line = next(l for l in p.splitlines()
+                    if "the river was beautiful today" in l)
+        assert "Earlier I noticed: the river was beautiful today" in line
+        assert "I was thinking: I hear you." in line
+
+    def test_multiline_items_are_flattened_into_the_paragraph(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["first line\n\nsecond line", "a wander"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1, recall_k=0))
+        rt.tick()
+        rt.tick()
+        assert "first line second line" in gen.prompts[-1]
 
     def test_reorient_drops_thoughts_from_the_workspace(self):
         from neuroslm.cognition.runtime import MindConfig

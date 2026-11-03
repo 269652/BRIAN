@@ -575,8 +575,8 @@ def format_debug_trace(result: TickResult) -> str:
     return "\n".join(lines)
 
 
-_WS_LABEL = {"percept": "Earlier: ", "memory": "I remember: ",
-             "thought": "I thought: "}
+_WS_LABEL = {"percept": "Earlier I noticed: ", "memory": "I remember: ",
+             "thought": "I was thinking: "}
 
 
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
@@ -1220,11 +1220,13 @@ class CognitiveRuntime:
             return self._compose_reply_prompt(sensory, recalled)
         lines: List[str] = [self.cfg.persona, ""]
         if self.workspace is not None:
+            # One first-person paragraph, not a labelled list: R1 read
+            # a bulleted list as an exercise to solve (run 58994037).
             items = self.workspace.items()
             if items:
-                lines.append("On my mind:")
-                for it in items:
-                    lines.append(f"- {_WS_LABEL.get(it.source, '')}{it.text}")
+                lines.append(" ".join(
+                    f"{_WS_LABEL.get(it.source, '')}{' '.join(it.text.split())}"
+                    for it in items))
                 lines.append("")
             lines.append(trigger_text)
             lines.append("Thought:")

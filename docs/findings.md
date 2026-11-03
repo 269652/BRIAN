@@ -4787,3 +4787,19 @@ shared tokens; this could go either way for episodic recall, whose
 answers are rare names.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestHiddenStateEmbeddings]
+
+### Next run is a stack: workspace paragraph + latent embeddings + musing provenance (2026-11-03)
+
+Run 58994037 showed R1 treating the bulleted workspace list as an
+exercise ("1. It's about personal experiences…", "translate each of
+these memories…"). The workspace is now written as one first-person
+paragraph (`Earlier I noticed:` / `I remember:` / `I was thinking:`).
+On the maintainer's call, the next run ships this together with the
+latent embeddings and the musing-provenance fix, so it is a **stack**
+finding. The `no_workspace` arm still isolates the workspace within the
+run, but the embedding change moves every arm's novelty scale, so the
+stack can't be compared directly with 58994037.
+
+Follow-up (single-mechanism ablation): rerun with `embed="token"` to
+separate the paragraph format from the embedding change, if the stack
+result is ambiguous.

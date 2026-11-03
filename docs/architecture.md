@@ -3802,9 +3802,11 @@ compete for `ws_capacity` = 4 slots (Cowan's limit). Each tick:
   store is full the least salient item (oldest on ties) is displaced.
 
 Idle thought generation is fed the surviving contents, most salient
-last ("On my mind:" with `Earlier:` / `I remember:` / `I thought:`
-labels), in place of the separate recalled-memories and last-thought
-lines. The reply prompt is unchanged. `global_workspace=False`
+last, as one first-person paragraph (`Earlier I noticed:` /
+`I remember:` / `I was thinking:` leads, line breaks flattened), in
+place of the separate recalled-memories and last-thought lines. A
+bulleted "On my mind:" list was read by R1 as an exercise to solve
+(run 58994037). The reply prompt is unchanged. `global_workspace=False`
 restores the old idle prompt; `loop_escape` runs it as the
 `no_workspace` arm. The trace prints `GW in mind` with source and
 salience; `TickResult.workspace` carries the same.
