@@ -3437,7 +3437,8 @@ def _eval_mind(args: argparse.Namespace) -> int:
             n_distractors=args.n_distractors, n_idle_ticks=args.idle_ticks,
             progress=print)
         report["meta"].update(expert=expert, device=args.device,
-                              utc=stamp, git_commit=sha, branch=branch)
+                              utc=stamp, git_commit=sha, branch=branch,
+                              embed=getattr(seams, "embed_kind", None))
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(indicators.format_report(report))

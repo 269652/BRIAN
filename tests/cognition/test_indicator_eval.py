@@ -600,7 +600,9 @@ class TestMultiExpertEval:
         import neuroslm.train_dsl as td
         monkeypatch.setattr(rtm, "build_hf_seams",
                             lambda expert, device="cpu": calls.append(expert)
-                            or _seams(_Reader([])))
+                            or MindSeams(generate_fn=_Reader([]),
+                                         score_fn=_flat_score, embed_fn=_bow,
+                                         embed_kind="hidden"))
         monkeypatch.setattr(ind, "run_indicator_battery",
                             lambda seams, **kw: {"meta": {}, "probes": {}})
         monkeypatch.setattr(td, "_git_commit_info", lambda: ("sha", "br"))
@@ -621,6 +623,17 @@ class TestMultiExpertEval:
         assert any(n.endswith("_deepseek-r1-qwen-1-5b.json") for n in names)
         meta = json.loads((tmp_path / names[0]).read_text())["meta"]
         assert meta["git_commit"] == "sha" and "expert" in meta
+
+    def test_report_records_which_embedding_ran(self, monkeypatch,
+                                                tmp_path):
+        from neuroslm.cli import _build_parser
+        self._patch(monkeypatch, [])
+        a = _build_parser().parse_args(
+            ["eval", "mind", "--expert", "smollm2_360m_instruct",
+             "--out-dir", str(tmp_path)])
+        assert a.func(a) == 0
+        out = next(tmp_path.glob("*.json"))
+        assert json.loads(out.read_text())["meta"]["embed"] == "hidden"
 
     def test_single_out_file_with_several_experts_is_rejected(
             self, monkeypatch, tmp_path):

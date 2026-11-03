@@ -1389,14 +1389,23 @@ class _FakeHFModel:
     scorer sees a deterministic distribution."""
 
     class _Out:
-        def __init__(self, logits):
+        def __init__(self, logits, hidden_states=None):
             self.logits = logits
+            self.hidden_states = hidden_states
+
+    n_layers = 4
 
     def __init__(self):
         import torch
         self.config = type("C", (), {"n_positions": 64})()
         self._emb = torch.arange(32 * 4, dtype=torch.float32).reshape(32, 4)
         self.to_calls = []
+        self.forward_calls = 0
+
+    def _hidden(self, input_ids):
+        """Layer k's state: the token's embedding row × (k+1) + k."""
+        x = self._emb[input_ids]
+        return tuple(x * (k + 1) + k for k in range(self.n_layers + 1))
 
     def eval(self):
         return self
@@ -1412,12 +1421,14 @@ class _FakeHFModel:
             weight = emb
         return _E()
 
-    def __call__(self, input_ids=None):
+    def __call__(self, input_ids=None, output_hidden_states=False):
         import torch
+        self.forward_calls += 1
         B, T = input_ids.shape
         logits = torch.zeros(B, T, 32)
         logits[..., 1] = 4.0
-        return self._Out(logits)
+        return self._Out(logits, self._hidden(input_ids)
+                         if output_hidden_states else None)
 
 
 class _FakeHFTokenizer:
@@ -1685,10 +1696,11 @@ class _ScriptedReasoningModel(_FakeHFModel):
         self.scripts = list(scripts)
         self.calls = []
 
-    def __call__(self, input_ids=None):
+    def __call__(self, input_ids=None, output_hidden_states=False):
         import torch
         B, T = input_ids.shape
-        return self._Out(torch.zeros(B, T, 256))
+        return self._Out(torch.zeros(B, T, 256), self._hidden(input_ids)
+                         if output_hidden_states else None)
 
     def generate(self, input_ids=None, **kw):
         import torch
@@ -1946,7 +1958,8 @@ class TestEmbeddingsAreMeanCentred:
         from neuroslm.cognition.runtime import build_hf_seams
         model = _FakeHFModelWithGenerate()
         seams = build_hf_seams("fake/expert", model_factory=lambda: model,
-                               tokenizer_factory=_FakeHFTokenizer)
+                               tokenizer_factory=_FakeHFTokenizer,
+                               embed="token")
         tok = _FakeHFTokenizer()
         ids = tok.encode("alpha beta")
         table = model._emb
@@ -1967,7 +1980,7 @@ class TestEmbeddingsAreMeanCentred:
             def encode(self, text):
                 return [1, 2, 3] if text == "a" else [20, 21, 22]
         seams = build_hf_seams("fake/expert", model_factory=lambda: model,
-                               tokenizer_factory=_Tok)
+                               tokenizer_factory=_Tok, embed="token")
         cos = torch.nn.functional.cosine_similarity
         raw = cos(model._emb[[1, 2, 3]].mean(0),
                   model._emb[[20, 21, 22]].mean(0), dim=0)
@@ -1975,6 +1988,68 @@ class TestEmbeddingsAreMeanCentred:
                   torch.tensor(seams.embed_fn("b")), dim=0)
         assert raw > 0.99
         assert cen < 0.9
+
+
+class TestHiddenStateEmbeddings:
+    """Run 58834649: mean-pooled INPUT embeddings are a bag of tokens —
+    R1's shared reasoning prose dominated the mean, so a clear topic
+    switch scored novelty 0.11. The default embedding is now the
+    trunk's own contextual state: a middle layer's hidden states,
+    mean-pooled, centred on a fixed calibration mean (stationary, so
+    stored and new vectors stay comparable)."""
+
+    def _seams(self, model, **kw):
+        from neuroslm.cognition.runtime import build_hf_seams
+        return build_hf_seams("fake/expert", model_factory=lambda: model,
+                              tokenizer_factory=_FakeHFTokenizer, **kw)
+
+    def _pooled(self, model, text, layer):
+        import torch
+        ids = torch.tensor([_FakeHFTokenizer().encode(text)])
+        return model._hidden(ids)[layer][0].mean(0)
+
+    def _calib_mean(self, model, layer):
+        import torch
+        from neuroslm.cognition.runtime import EMBED_CALIBRATION
+        return torch.stack([self._pooled(model, t, layer)
+                            for t in EMBED_CALIBRATION]).mean(0)
+
+    def test_default_is_the_middle_layer_minus_the_calibration_mean(self):
+        import torch
+        model = _FakeHFModelWithGenerate()
+        seams = self._seams(model)
+        mid = (model.n_layers + 1) // 2
+        expected = (self._pooled(model, "alpha beta", mid)
+                    - self._calib_mean(model, mid))
+        got = torch.tensor(seams.embed_fn("alpha beta"))
+        assert torch.allclose(got, expected, atol=1e-4)
+
+    def test_layer_can_be_chosen(self):
+        import torch
+        model = _FakeHFModelWithGenerate()
+        seams = self._seams(model, embed_layer=4)
+        expected = (self._pooled(model, "alpha beta", 4)
+                    - self._calib_mean(model, 4))
+        assert torch.allclose(torch.tensor(seams.embed_fn("alpha beta")),
+                              expected, atol=1e-4)
+
+    def test_scoring_and_embedding_share_one_forward_pass(self):
+        model = _FakeHFModelWithGenerate()
+        seams = self._seams(model)
+        seams.embed_fn("warm up the calibration")
+        n0 = model.forward_calls
+        seams.score_fn("a candidate thought")
+        seams.embed_fn("a candidate thought")
+        assert model.forward_calls - n0 == 1
+
+    def test_seams_report_their_embedding(self):
+        model = _FakeHFModelWithGenerate()
+        assert self._seams(model).embed_kind == "hidden"
+        assert self._seams(model, embed="token").embed_kind == "token"
+
+    def test_unknown_embedding_is_rejected(self):
+        with pytest.raises(ValueError):
+            self._seams(_FakeHFModelWithGenerate(), embed="bogus")
 
 
 class TestNTStandardisesOnTheRuntimeTimescale:

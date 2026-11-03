@@ -3823,6 +3823,19 @@ z-scores its drivers at `MindConfig.nt_driver_alpha = 0.1`, the tick
 timescale rather than the training timescale. The debug trace shows
 `CUR[nov bore]` and the workspace's module inputs `WS[… in[s m l b n]]`.
 
+**Latent embeddings (2026-11-03).** `build_hf_seams(embed="hidden")`,
+now the default, embeds text as the trunk's middle-layer hidden states
+(`hidden_states[len // 2]`, or `embed_layer`), mean-pooled over tokens
+and centred on the pooled mean of the fixed `EMBED_CALIBRATION`
+sentences. The token mean was a bag of tokens: R1's shared reasoning
+prose dominated it, so a clear topic switch scored novelty 0.11 (run
+58834649). The reference mean is fixed, not running, so episodes stored
+early and late stay comparable. `score_fn` and `embed_fn` share one
+cached forward per text. `embed="token"` keeps the mean-centred input
+embedding; eval reports record `meta.embed`. Every consumer of novelty
+(write gate, NT activation driver, boredom, LOOPING, recall, workspace
+salience) reads this embedding, so runs on the two are not comparable.
+
 **H66 adaptive ignition (default).** Ignition fires when R exceeds the
 workspace's own recent baseline, θ_t = max(0.1, μ_R + 1·σ_R) (EWMA
 α = 0.2, seeded at the old fixed bar 0.25). Run 58676023 showed the

@@ -33,7 +33,7 @@ from __future__ import annotations
 import math
 import random as _random
 import re
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Tuple
 
@@ -112,6 +112,9 @@ class MindSeams:
     reasoning_fn: Optional[Callable[[], Optional[str]]] = None
     """Think trace of the most recent ``generate_fn`` call (reasoning
     experts only; None otherwise)."""
+    embed_kind: Optional[str] = None
+    """Which embedding ``embed_fn`` computes ('hidden' / 'token');
+    recorded in eval reports — novelty scales differ between them."""
 
     def runtime(self, cfg: Optional["MindConfig"] = None,
                 nt: Optional[Any] = None,
@@ -1380,6 +1383,85 @@ def _mean_centred_embed_fn(embed_table: Any, tokenizer: Any,
     return embed_fn
 
 
+EMBED_CALIBRATION: Tuple[str, ...] = (
+    "The river flows past the old mill.",
+    "I need to solve this equation for x.",
+    "She plays the violin every evening.",
+    "The stock market fell sharply today.",
+    "My grandmother baked bread on Sundays.",
+    "How do bees communicate with each other?",
+    "The meeting moved to room 714.",
+    "Quantum entanglement links distant particles.",
+    "We hiked up the mountain at dawn.",
+    "The recipe needs two eggs and some flour.",
+    "I wonder what the stars looked like long ago.",
+    "The train to the city was delayed again.",
+    "Let me think about how to write this program.",
+    "The cat slept in a patch of sunlight.",
+    "Taxes are due at the end of the month.",
+    "A chess game can turn on a single quiet move.",
+)
+"""Fixed, topic-diverse sentences whose mean pooled hidden state is the
+centring reference of the 'hidden' embedding. Fixed rather than a
+running mean, so vectors stored early and late stay comparable."""
+
+
+def _hidden_state_embed_seams(model: Any, tokenizer: Any, device: str,
+                              max_ctx: int, layer: Optional[int]
+                              ) -> Tuple[ScoreFn, EmbedFn]:
+    """score_fn + embed_fn over ONE cached forward per text: the
+    candidate the BG scores is the candidate we embed. The embedding
+    is the mean-pooled hidden state of ``layer`` (default: the middle
+    of the stack, where decoder LMs carry the most semantic content)
+    minus the :data:`EMBED_CALIBRATION` mean (anisotropy correction,
+    as for the token embedding)."""
+    import torch
+
+    cache: "OrderedDict[str, Tuple[ThoughtScore, Any]]" = OrderedDict()
+    ref: Dict[str, Any] = {}
+
+    @torch.no_grad()
+    def _forward(text: str) -> Tuple[ThoughtScore, Any]:
+        key = text or " "
+        hit = cache.get(key)
+        if hit is not None:
+            cache.move_to_end(key)
+            return hit
+        ids = list(tokenizer.encode(key))
+        if len(ids) < 2:
+            ids = ids + [0]
+        ids = ids[-max_ctx:]
+        x = torch.tensor([ids], dtype=torch.long, device=device)
+        out = model(input_ids=x, output_hidden_states=True)
+        hs = getattr(out, "hidden_states", None)
+        if not hs:
+            raise ValueError("embed='hidden' needs a model that returns "
+                             "hidden_states (use embed='token')")
+        logits = out.logits
+        V = logits.shape[-1]
+        lp = torch.log_softmax(logits[0, :-1].float(), dim=-1)
+        nll = float(-lp.gather(-1, x[0, 1:].unsqueeze(-1)).mean())
+        ent = float(-(lp.exp() * lp).sum(-1).mean()) / math.log(V)
+        k = len(hs) // 2 if layer is None else int(layer)
+        pooled = hs[k][0].float().mean(dim=0)
+        res = (ThoughtScore(mean_nll=nll, entropy_norm=ent), pooled)
+        cache[key] = res
+        if len(cache) > 256:
+            cache.popitem(last=False)
+        return res
+
+    def score_fn(text: str) -> ThoughtScore:
+        return _forward(text)[0]
+
+    def embed_fn(text: str) -> Sequence[float]:
+        if "mean" not in ref:
+            ref["mean"] = torch.stack(
+                [_forward(t)[1] for t in EMBED_CALIBRATION]).mean(dim=0)
+        return (_forward(text)[1] - ref["mean"]).cpu().tolist()
+
+    return score_fn, embed_fn
+
+
 def build_runtime_from_harness(harness: Any, tokenizer: Any,
                                device: str = "cpu",
                                cfg: Optional[MindConfig] = None,
@@ -1467,6 +1549,8 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
                    model_factory: Optional[Callable[[], Any]] = None,
                    tokenizer_factory: Optional[Callable[[], Any]] = None,
                    reasoning_budget: int = 1024,
+                   embed: str = "hidden",
+                   embed_layer: Optional[int] = None,
                    ) -> MindSeams:
     """Build the mind's seams from a frozen pretrained HF expert.
 
@@ -1480,9 +1564,16 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
     ``model_factory`` / ``tokenizer_factory`` are injection points: the
     test battery passes fakes; ``run_chat_daemon`` passes closures over
     an already-loaded model so the daemon and the mind share one copy.
+
+    ``embed``: 'hidden' (default) — contextual middle-layer states, see
+    :func:`_hidden_state_embed_seams`; 'token' — mean-centred input
+    embeddings (the pre-2026-11-03 embedding).
     """
     import torch
     import torch.nn as nn
+
+    if embed not in ("hidden", "token"):
+        raise ValueError(f"embed must be 'hidden' or 'token', got {embed!r}")
 
     from neuroslm.experts import resolve_expert_alias
 
@@ -1664,7 +1755,11 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
         ent = float(-(lp.exp() * lp).sum(-1).mean()) / math.log(V)
         return ThoughtScore(mean_nll=nll, entropy_norm=ent)
 
-    embed_fn = _mean_centred_embed_fn(embed_table, tokenizer, device)
+    if embed == "hidden":
+        score_fn, embed_fn = _hidden_state_embed_seams(
+            model, tokenizer, device, max_ctx, embed_layer)
+    else:
+        embed_fn = _mean_centred_embed_fn(embed_table, tokenizer, device)
 
     # The mind classifies with its OWN trunk/expert — reuses the SAME
     # generate_fn closure THINK uses (one model, two jobs), never the
@@ -1683,4 +1778,5 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
                      embed_fn=embed_fn, classify_fn=classify_fn,
                      generate_wander_fn=generate_wander_fn, reseed=reseed,
                      reasoning_fn=lambda: (last["reasoning"]
-                                           if reasoning_model else None))
+                                           if reasoning_model else None),
+                     embed_kind=embed)

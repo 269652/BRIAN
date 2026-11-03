@@ -4768,3 +4768,22 @@ what the prompt shows it. The reply probes should be unaffected (the
 reply prompt is unchanged).
 
 [EVIDENCE: tests/cognition/test_global_workspace.py, tests/cognition/test_cognitive_runtime.py::TestGlobalWorkspaceFeedsThought, tests/cognition/test_indicator_eval.py::TestLoopEscapeProbe::test_workspace_content_has_its_own_ablation_arm]
+
+### Development: latent (hidden-state) embeddings replace the token mean (maintainer, 2026-11-03, not yet measured)
+
+Stage 1 of the latent-workspace plan. The mind's `embed_fn` is now the
+trunk's mean-pooled middle-layer hidden state, centred on a fixed
+calibration mean (architecture.md §14.13). Every novelty consumer reads
+it, so this resets every baseline. It must be measured on its own run,
+after the workspace run (58994037) and before stage 2 (the workspace
+state vector).
+
+Expected: novelty spreads out. A topic switch should score well above a
+paraphrase (it was 0.11 vs about 0.04 on token means). The absolute
+write gate (`novelty_write_threshold` 0.3) will pass more thoughts, so
+storage rises. That is a known side effect, not the hypothesis. The
+reply probes should hold. Recall now matches on meaning rather than
+shared tokens; this could go either way for episodic recall, whose
+answers are rare names.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestHiddenStateEmbeddings]
