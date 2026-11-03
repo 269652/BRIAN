@@ -553,6 +553,10 @@ def probe_loop_escape(seams: MindSeams,
                                 "replay_boredom_threshold": 2.0,
                                 "replay_margin": 2.0,
                                 "reorient_after": 10 ** 9}}
+    if cfg.global_workspace:
+        # §14.13: idle thought sees recall + last thought, not the
+        # competed workspace contents
+        ablations["no_workspace"] = {"global_workspace": False}
     if cfg.workspace_oscillator:
         # §14.13 falsification arms: cut the ignition↔NT loop, or the
         # workspace gating altogether.
@@ -573,6 +577,7 @@ def probe_loop_escape(seams: MindSeams,
             ign: List[Optional[int]] = []
             sync_rs: List[float] = []
             peaks: List[float] = []
+            ws_sizes: List[int] = []
             nt: Dict[str, List[float]] = {ch: [] for ch in _NT_ORDER}
             reorients = replays = inhibited = 0
             _say(progress, f"── loop_escape/{name} run {i}: {text}")
@@ -588,6 +593,7 @@ def probe_loop_escape(seams: MindSeams,
                     nt[ch].append(float(r.nt_levels.get(ch, 0.0)))
                 if r.thought:
                     thoughts.append(r.thought)
+                    ws_sizes.append(len(r.workspace))
                     ign.append(None if r.ignited is None else int(r.ignited))
                     if r.sync_r is not None:
                         sync_rs.append(r.sync_r)
@@ -596,7 +602,7 @@ def probe_loop_escape(seams: MindSeams,
             m.update(reorients=reorients, replays=replays,
                      inhibited=inhibited, thoughts=[t[:240] for t in thoughts],
                      ignition_series=ign, sync_rs=sync_rs,
-                     gamma_peaks=peaks, nt=nt)
+                     gamma_peaks=peaks, nt=nt, workspace_sizes=ws_sizes)
             runs.append(m)
         arm_runs[name] = runs
         _say(progress, f"  loop_escape/{name}: novelty="

@@ -247,6 +247,14 @@ class TestLoopEscapeProbe:
         assert res["indicator"] == "GWT-4"
         assert res["conditions"]["full"]["reorients"] > 0
 
+    def test_workspace_content_has_its_own_ablation_arm(self):
+        conds = self._run()["conditions"]
+        assert "no_workspace" in conds
+        assert all(r["workspace_sizes"] == [0] * len(r["workspace_sizes"])
+                   for r in conds["no_workspace"]["runs"])
+        assert any(n > 0 for r in conds["full"]["runs"]
+                   for n in r["workspace_sizes"])
+
     def test_ablation_removes_every_control_act(self):
         nc = self._run()["conditions"]["no_control"]
         assert nc["reorients"] == 0 and nc["replays"] == 0

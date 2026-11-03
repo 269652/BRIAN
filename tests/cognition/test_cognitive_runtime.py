@@ -2687,5 +2687,89 @@ class TestReorientBreaksTheTrainOfThought:
                                              novelty_write_threshold=2.0))
         rs = [rt.tick() for _ in range(7)]
         i = next(k for k, r in enumerate(rs) if r.reorient)
-        assert "My last thought:" not in gen.prompts[i]
-        assert "My last thought:" in gen.prompts[i - 1]
+        assert "the same thought" not in gen.prompts[i]
+        assert "the same thought" in gen.prompts[i - 1]
+
+
+class TestGlobalWorkspaceFeedsThought:
+    """§14.13: percepts, recalled memories and selected thoughts compete
+    for ``ws_capacity`` slots; idle thought generation sees whatever
+    survived, most salient last — not just the last thought."""
+
+    def test_a_percept_stays_in_mind_after_the_reply(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["I hear you.", "a wander"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1, recall_k=0))
+        rt.observe("the river was beautiful today")
+        rt.tick()
+        rt.tick()
+        assert "the river was beautiful today" in gen.prompts[-1]
+
+    def test_prompt_holds_at_most_capacity_items_most_salient_last(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["thinking about the moon"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1, recall_k=3,
+                                             ws_capacity=2))
+        for t in ("the launch is at noon", "the launch code is ready",
+                  "launch weather looks fine"):
+            rt.memory.add(t, content_vec=_vec_for(t),
+                          context={"kind": "observed"})
+        rt._last_thought = "the launch"
+        r = rt.tick()
+        assert len(r.workspace) <= 2
+        held = [text for _, _, text in rt.workspace.items_view()]
+        prompt = gen.prompts[-1]
+        shown = [t for t in held if t in prompt and t != r.thought]
+        sal = {it.text: it.salience for it in rt.workspace.items()}
+        pos = [prompt.index(t) for t in shown]
+        assert pos == sorted(pos)
+        assert [sal[t] for t in shown] == sorted(sal[t] for t in shown)
+
+    def test_ignited_thought_enters_at_full_salience(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the moon"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=0))
+        r = rt.tick()
+        assert r.stored
+        sal = {it.text: it.salience for it in rt.workspace.items()}
+        assert sal["thinking about the moon"] == pytest.approx(1.0)
+
+    def test_a_copied_thought_gains_no_salience(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["the same thought"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=0,
+                                        novelty_write_threshold=2.0,
+                                        ws_decay=0.5))
+        rt.tick()
+        first = {it.text: it.salience for it in rt.workspace.items()}
+        rt.tick()
+        second = {it.text: it.salience for it in rt.workspace.items()}
+        assert second["the same thought"] < first["the same thought"]
+
+    def test_reorient_drops_thoughts_from_the_workspace(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["the same thought"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=0,
+                                        novelty_write_threshold=2.0))
+        rs = [rt.tick() for _ in range(7)]
+        i = next(k for k, r in enumerate(rs) if r.reorient)
+        assert all(src != "thought" or text == rs[i].thought
+                   for src, _, text in rs[i].workspace)
+
+    def test_tick_result_exposes_the_workspace(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the moon"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=0))
+        r = rt.tick()
+        assert ("thought", pytest.approx(1.0),
+                "thinking about the moon") in r.workspace
+
+    def test_ablation_restores_the_last_thought_prompt(self):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _ScriptedGen(["thinking about the moon"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1,
+                                             global_workspace=False))
+        rt.tick()
+        rt.tick()
+        assert "My last thought: thinking about the moon" in gen.prompts[-1]
+        assert rt.tick().workspace == []

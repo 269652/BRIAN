@@ -3785,6 +3785,29 @@ Ablations in `loop_escape` whenever the workspace is on:
 `no_oscillator` (no ignition gating). PCI gains `ignited` and `sync_r`
 channels.
 
+**Workspace content (`cognition/workspace.py`, 2026-11-03).** The
+oscillator decides *whether* content ignites; `GlobalWorkspace` holds
+*what* is in mind. Percepts, recalled memories and the selected thought
+compete for `ws_capacity` = 4 slots (Cowan's limit). Each tick:
+
+- every item's salience is multiplied by `ws_decay` (0.7); a reorient
+  drops all `thought` items;
+- percepts enter at salience 1.0, recalled memories at their recall
+  cosine;
+- the selected thought enters at 1.0 if it ignited (ignition sustains
+  it), otherwise at $n/(n+ar n)$, its novelty divisively normalised
+  against the run's novelty baseline (a typical thought 0.5, a copy 0);
+- re-offering an item already held keeps the higher salience; when the
+  store is full the least salient item (oldest on ties) is displaced.
+
+Idle thought generation is fed the surviving contents, most salient
+last ("On my mind:" with `Earlier:` / `I remember:` / `I thought:`
+labels), in place of the separate recalled-memories and last-thought
+lines. The reply prompt is unchanged. `global_workspace=False`
+restores the old idle prompt; `loop_escape` runs it as the
+`no_workspace` arm. The trace prints `GW in mind` with source and
+salience; `TickResult.workspace` carries the same.
+
 **Default trunk.** `DEFAULT_MIND_EXPERT = "deepseek_r1_qwen_7b"`
 (`cognition/runtime.py`), one constant for `chat --expert`,
 `deploy-mind`, `eval mind` and `deploy-mind-eval`. Use

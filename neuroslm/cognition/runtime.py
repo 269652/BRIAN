@@ -272,6 +272,16 @@ class MindConfig:
     Run 58680199: a ~30-tick basin never registered as repetitive —
     with ~9% ignition almost nothing was stored to compare against."""
 
+    global_workspace: bool = True
+    """§14.13 workspace CONTENT: percepts, recalled memories and
+    selected thoughts compete for ``ws_capacity`` slots and the
+    survivors are the context of idle thought generation. Off → the
+    prompt is recalled memories + the last thought, as before."""
+    ws_capacity: int = 4
+    """Workspace slots (Cowan's ~4-chunk working-memory limit)."""
+    ws_decay: float = 0.7
+    """Per-tick salience retention of every workspace item."""
+
     control_thresholds: str = "relative"
     """'relative' (H67): LOOPING and replay are judged against the run's
     own slow novelty baseline (``loop_ratio``, ``replay_margin``);
@@ -428,6 +438,9 @@ class TickResult:
     workspace_inputs: Optional[Dict[str, float]] = None
     """Module activations fed to the workspace this tick (sensory,
     memory, language, selection, novelty)."""
+    workspace: List[Tuple[str, float, str]] = field(default_factory=list)
+    """Global workspace contents after this tick as (source, salience,
+    text), most salient last; empty when ``global_workspace`` is off."""
     gamma_power: Optional[float] = None
     """Fraction of the population signal's power in 30-100 Hz."""
     goal_relevance: float = 0.0
@@ -548,10 +561,19 @@ def format_debug_trace(result: TickResult) -> str:
             label = f"[{kind}] " if kind else ""
             lines.append(f"    - {label}{_one_line(e.get('content', ''))}")
 
+    if result.workspace:
+        lines.append(f"  GW in mind {len(result.workspace)}:")
+        for src, sal, text in result.workspace:
+            lines.append(f"    - [{src} {sal:.2f}] {_one_line(text)}")
+
     if result.prior_thought:
         lines.append(f"  evolved from: \"{_one_line(result.prior_thought)}\"")
 
     return "\n".join(lines)
+
+
+_WS_LABEL = {"percept": "Earlier: ", "memory": "I remember: ",
+             "thought": "I thought: "}
 
 
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
@@ -718,6 +740,11 @@ class CognitiveRuntime:
         self._wm: Deque[List[float]] = deque(maxlen=max(1, self.cfg.wm_size))
         self._nov_base: Optional[float] = None
         self._goal_vec: Optional[List[float]] = None
+        self.workspace = None
+        if self.cfg.global_workspace:
+            from neuroslm.cognition.workspace import GlobalWorkspace
+            self.workspace = GlobalWorkspace(capacity=self.cfg.ws_capacity,
+                                             decay=self.cfg.ws_decay)
         self._osc = None
         if self.cfg.workspace_oscillator:
             from neuroslm.cognition.oscillator import GammaWorkspace
@@ -840,6 +867,15 @@ class CognitiveRuntime:
         reorient = (wandering
                     and self._low_nov_streak >= self.cfg.reorient_after)
 
+        # WORKSPACE (§14.13): contents fade; percepts enter at full
+        # salience; a reorient drops the train of thought.
+        if self.workspace is not None:
+            self.workspace.decay()
+            if reorient:
+                self.workspace.drop("thought")
+            for s in sensory:
+                self.workspace.offer(s, "percept", list(self._embed(s)), 1.0)
+
         # Hippocampal replay (C2 of the curiosity loop): when bored,
         # an idle tick anchors RECALL on a randomly sampled stored
         # episode instead of the last thought — the associative-jump
@@ -934,6 +970,12 @@ class CognitiveRuntime:
             sims = {id(e): sim for sim, e in scored}
             recall_strength = max((sims.get(id(e), 0.0) for e in recalled),
                                   default=0.0)
+            if self.workspace is not None:
+                for e in recalled:
+                    self.workspace.offer(
+                        e.get("content", ""), "memory",
+                        e.get("content_vec") or [],
+                        max(0.0, sims.get(id(e), 0.0)))
 
         # THINK: K candidates from persona + recall + context. The
         # trigger — what this tick is actually ABOUT — is the real
@@ -1072,6 +1114,11 @@ class CognitiveRuntime:
         # ignition (or broadcast, without the oscillator); ACh ← BG
         # decisiveness. Before this, NE/ACh/GABA never moved.
         ignition = float(osc.ignited) if osc is not None else float(stored)
+        if self.workspace is not None:
+            from neuroslm.cognition.workspace import thought_salience
+            self.workspace.offer(thought, "thought", thought_vec,
+                                 thought_salience(novelty, self._nov_base,
+                                                  ignited=bool(ignition)))
         ne_drive = (0.0 if self._nov_expect is None
                     else abs(novelty - self._nov_expect))
         a_n = self.cfg.novelty_ema_alpha
@@ -1116,6 +1163,8 @@ class CognitiveRuntime:
                           gamma_peak_hz=osc.peak_hz if osc else None,
                           gamma_power=osc.gamma_power if osc else None,
                           workspace_inputs=ws_inputs,
+                          workspace=(self.workspace.items_view()
+                                     if self.workspace is not None else []),
                           ignition_threshold=osc.threshold if osc else None)
 
     # ── Internals ────────────────────────────────────────────────────
@@ -1164,6 +1213,16 @@ class CognitiveRuntime:
         if sensory:
             return self._compose_reply_prompt(sensory, recalled)
         lines: List[str] = [self.cfg.persona, ""]
+        if self.workspace is not None:
+            items = self.workspace.items()
+            if items:
+                lines.append("On my mind:")
+                for it in items:
+                    lines.append(f"- {_WS_LABEL.get(it.source, '')}{it.text}")
+                lines.append("")
+            lines.append(trigger_text)
+            lines.append("Thought:")
+            return "\n".join(lines)[-self.cfg.max_prompt_chars:]
         if recalled:
             lines.append("I remember:")
             for e in recalled:

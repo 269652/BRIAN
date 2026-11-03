@@ -4746,3 +4746,25 @@ novelty ≈ 0.1) break the streak, so the full arm's streak falls below
 switch topic less often.
 
 [EVIDENCE: tests/cognition/test_indicator_eval.py::TestLoopEscapeRelativeYardstick]
+
+### Development: global workspace content feeds idle thought (maintainer, 2026-11-03, not yet measured)
+
+Until now nothing held workspace *content*. The oscillator only gated
+storage, and an idle thought's prompt was three recalled memories plus
+the last thought, so the mind continued whatever came last (runs
+58821480, 58834649). Now percepts, recalled memories and selected
+thoughts compete for 4 slots by salience: ignition sustains a thought,
+everything else fades (×0.7 per tick), and the weakest is displaced. The
+survivors, most salient last, are the context of the next idle thought
+(architecture.md §14.13). A copied thought gets salience 0, so a loop
+fades out of context instead of being re-fed. The design choices
+(competitive entry, 4 slots) are the maintainer's.
+
+Hypothesis (GWT-4): with the workspace, the full arm's longest
+low-novelty streak is shorter than in the new `no_workspace` arm, and
+candidates stop paraphrasing one prior thought. If the streaks are
+equal, the copying comes from the trunk's continuation bias, not from
+what the prompt shows it. The reply probes should be unaffected (the
+reply prompt is unchanged).
+
+[EVIDENCE: tests/cognition/test_global_workspace.py, tests/cognition/test_cognitive_runtime.py::TestGlobalWorkspaceFeedsThought, tests/cognition/test_indicator_eval.py::TestLoopEscapeProbe::test_workspace_content_has_its_own_ablation_arm]
