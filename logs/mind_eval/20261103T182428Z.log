@@ -2099,3 +2099,4 @@ Another way to confirm is to think about historical context. When I was younger,
     controller_phi: 32/32 states
   controller_phi/full: φ_mean=0.000 φ_max=0.000
     controller_phi: 8/32 states
+    controller_phi: 16/32 states
