@@ -2090,3 +2090,6 @@ Another way to confirm is to think about historical context. When I was younger,
   pci/no_oscillator/da: PCI=0.808 reached=1.0
     pci/no_oscillator/gaba run 0: PCI=0.954 channels=DA,ACh,Glu,GABA,boredom,selection_entropy,differentiation,action,inhibited,recall,thought
   pci/no_oscillator/gaba: PCI=0.954 reached=11.0
+    pci/no_oscillator/memory run 0: PCI=0.792 channels=DA,ACh,selection_entropy,differentiation,recall
+  pci/no_oscillator/memory: PCI=0.792 reached=5.0
+[mind-eval] probe controller_phi
