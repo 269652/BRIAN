@@ -2062,3 +2062,5 @@ Another way to confirm is to think about historical context. When I was younger,
 [mind-eval] probe perturbational_complexity
     pci/full/null run 0: PCI=0.000 channels=-
   pci/full/null: PCI=0.000 reached=0.0
+    pci/full/da run 0: PCI=0.808 channels=DA
+  pci/full/da: PCI=0.808 reached=1.0
