@@ -4803,3 +4803,24 @@ stack can't be compared directly with 58994037.
 Follow-up (single-mechanism ablation): rerun with `embed="token"` to
 separate the paragraph format from the embedding change, if the stack
 result is ambiguous.
+
+### Run 58994037 (build `0d91ab8c`, workspace with a bulleted list): partial, no results file (2026-11-03)
+
+The box stopped after its 18:08 UTC log push, during the `no_control`
+arm of `loop_escape`, without pushing results. Only the log survives:
+`logs/mind_eval/20261103T175223Z.log`.
+
+- **Reply probes held:** recall full 1.00 / no_recall 0.00 / bare 1.00.
+  Source monitoring 1.00 in every arm except bare (0.00).
+- **Full `loop_escape` arm (16 ticks):** mean novelty 0.09 (0.053 in
+  58834649). No verbatim copy of the previous thought. Topics moved
+  through the old mill, mountains, a random-walk problem, the cold
+  lake, whale history, the fox on the frozen river, the library card,
+  and the river's path, mostly drawn from seeded memories the
+  workspace kept in context. One near-copy (novelty 0.01, tick 14),
+  left on the next tick.
+- **Failure mode:** the bulleted list was read as an exercise (fixed
+  in `6e60ec62`). The streak comparison against `no_workspace` was not
+  reached.
+
+[EVIDENCE: logs/mind_eval/20261103T175223Z.log]
