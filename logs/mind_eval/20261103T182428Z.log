@@ -2068,3 +2068,5 @@ Another way to confirm is to think about historical context. When I was younger,
   pci/full/gaba: PCI=0.994 reached=13.0
     pci/full/memory run 0: PCI=0.837 channels=DA,ACh,selection_entropy,differentiation,recall,sync_r
   pci/full/memory: PCI=0.837 reached=6.0
+    pci/no_recall/null run 0: PCI=0.000 channels=-
+  pci/no_recall/null: PCI=0.000 reached=0.0
