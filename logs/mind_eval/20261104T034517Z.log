@@ -3557,3 +3557,5 @@ Another way to confirm is to think about historical context. When I was younger,
   pci/no_control/null: PCI=0.000 reached=0.0
     pci/no_control/da run 0: PCI=0.903 channels=DA,selection_entropy
   pci/no_control/da: PCI=0.903 reached=2.0
+    pci/no_control/gaba run 0: PCI=1.003 channels=DA,NE,ACh,Glu,GABA,boredom,novelty,selection_entropy,differentiation,inhibited,recall,thought,ignited,sync_r
+  pci/no_control/gaba: PCI=1.003 reached=14.0
