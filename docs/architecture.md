@@ -3900,6 +3900,29 @@ states exist, both fall back to the thought's novelty.
 state vector → coupling → synchrony/ignition → NT → (ACh coupling,
 GABA frequency, DA-gated goal) → recall cued by state.
 
+**Ignition broadcast into the trunk (2026-11-04).** Until now the
+oscillator only gated storage, so synchrony could not change what the
+trunk computes. Global broadcast is now taken literally: when a tick
+ignites, its workspace state $z$ is queued, and the next idle tick's
+generation runs with a forward hook on the block whose output the
+embedding reads (`hidden_states[k]` = output of block $k-1$). The hook
+adds
+
+$$\Delta h = \lambda \, R \, \lVert h \rVert_{\text{typ}} \, \frac{z \odot \sigma}{\lVert z \odot \sigma \rVert}$$
+
+to every position: $z \odot \sigma$ maps the standardised state back to
+raw hidden-state units, $\lVert h \rVert_{\text{typ}}$ is the read
+layer's mean token norm on `EMBED_CALIBRATION`, $R$ the synchrony that
+ignited, and λ = `broadcast_gain` 0.1 (a-priori, not fitted). This is
+activation steering (Turner et al. 2023) in the same space the mind
+reads its contents from (`MindSeams.steering`, `_ResidualSteering`).
+The broadcast is consumed by one idle tick; reply ticks are never
+steered. Effect measure: `TickResult.broadcast_alignment` =
+cos(thought, broadcast state), recorded with or without the steer
+applied; `loop_escape` reports `mean_broadcast_alignment` per arm and
+the `align_full_minus_no_broadcast` contrast. `ignition_broadcast=False`
+is the `no_broadcast` arm. Trace: `CUR[… bc=]`.
+
 **Adaptive novelty (2026-11-04).** Raw novelty, 1 − max cosine against
 stored episodes ∪ working memory, depends on the embedding's scale and
 on the trunk's register: R1's long first-person thoughts put a copy at

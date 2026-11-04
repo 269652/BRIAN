@@ -5046,3 +5046,23 @@ n = 5 seeds.
 
 [EVIDENCE: results/mind_eval/20261104T034518Z_deepseek-r1-qwen-7b.json]
 [EVIDENCE: logs/mind_eval/20261104T034517Z.log]
+
+### Development: ignition broadcast into the trunk (maintainer, 2026-11-04, not yet measured)
+
+Until now the oscillations could not affect thought: ignition only
+gated storage. An ignited workspace state is now written into R1's
+residual stream at the embedding's read layer during the next idle
+generation, scaled by the synchrony that ignited it (λ = 0.1 of the
+layer's typical token norm at R = 1, a-priori). See architecture.md
+§14.13.
+
+Hypothesis (pre-registered): on the first idle tick after an ignition,
+the selected thought aligns more with the broadcast state in `full`
+than in `no_broadcast`, i.e. `align_full_minus_no_broadcast` > 0
+across seeds. If it is ≈ 0, λ = 0.1 is too weak to steer R1 (try a
+larger λ before discarding the mechanism). If alignment rises but
+novelty collapses (copying the broadcast), λ is too strong.
+
+Next measurement: `loop_escape` only, 5 seeds (13 arms).
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestIgnitionBroadcastsIntoTheTrunk, TestRuntimeBroadcastsIgnitions]

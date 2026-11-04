@@ -34,6 +34,7 @@ import math
 import random as _random
 import re
 from collections import OrderedDict, deque
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Tuple
 
@@ -115,6 +116,10 @@ class MindSeams:
     embed_kind: Optional[str] = None
     """Which embedding ``embed_fn`` computes ('hidden' / 'token');
     recorded in eval reports — novelty scales differ between them."""
+    steering: Optional[Any] = None
+    """Writes a workspace state into the trunk's residual stream at the
+    embedding's read layer (``apply(state, gain)`` context manager);
+    None for the token embedding or a model without a block list."""
 
     def runtime(self, cfg: Optional["MindConfig"] = None,
                 nt: Optional[Any] = None,
@@ -391,6 +396,15 @@ class MindConfig:
 
     osc_ignition_floor: float = 0.1
     osc_adapt_k: float = 1.0
+    ignition_broadcast: bool = True
+    """Global broadcast into the trunk: an ignited workspace state is
+    written into the residual stream at the embedding's read layer
+    during the next idle generation (``MindSeams.steering``), with gain
+    ``broadcast_gain`` × the synchrony R that ignited it. Reply ticks
+    are never steered. Off → ignition only gates storage, as before."""
+    broadcast_gain: float = 0.1
+    """λ: steering size as a fraction of the read layer's typical token
+    norm, at R = 1. A-priori choice, not fitted."""
     state_driven_nt: bool = True
     """Stage 3: DA's activation driver reads the normalised change of
     the workspace state, NE its departure from the recent trend
@@ -486,6 +500,13 @@ class TickResult:
     workspace: List[Tuple[str, float, str]] = field(default_factory=list)
     """Global workspace contents after this tick as (source, salience,
     text), most salient last; empty when ``global_workspace`` is off."""
+    broadcast: float = 0.0
+    """Steering gain written into the trunk for this tick's generation
+    (λ·R of the ignition it broadcasts); 0 when nothing was broadcast."""
+    broadcast_alignment: Optional[float] = None
+    """cos(selected thought, workspace state of the ignition before it)
+    on the first idle tick after an ignition — the broadcast's effect
+    measure, recorded whether or not the broadcast was applied."""
     state_change: Optional[float] = None
     """How unexpectedly the workspace state moved this tick: 1 − cos to
     last tick's state, divisively normalised (stage 3); None before two
@@ -574,7 +595,8 @@ def format_debug_trace(result: TickResult) -> str:
               else f"{result.state_change:.2f}")
         lines.append(f"  CUR[nov={result.novelty:.2f} "
                      f"raw={result.novelty_raw:.3f} "
-                     f"bore={result.boredom:.2f} dz={dz}]")
+                     f"bore={result.boredom:.2f} dz={dz} "
+                     f"bc={result.broadcast:.3f}]")
     if result.sync_r is not None:
         wi = result.workspace_inputs or {}
         ins = " ".join(f"{k[0]}={wi.get(k, 0.0):.2f}" for k in
@@ -810,6 +832,7 @@ class CognitiveRuntime:
         self._prev_state: Optional[List[float]] = None
         self._state_base: Optional[float] = None
         self._state_expect: Optional[float] = None
+        self._broadcast: Optional[Tuple[List[float], float]] = None
         self._goal_vec: Optional[List[float]] = None
         self.workspace = None
         if self.cfg.global_workspace:
@@ -1086,12 +1109,22 @@ class CognitiveRuntime:
         gen = self._gen if not wandering else self._gen_wander
         candidates: List[str] = []
         reasonings: List[Optional[str]] = []
+        # IGNITION BROADCAST: the last ignited workspace state is
+        # written into the trunk for this idle generation, once. The
+        # ablation still consumes it (alignment is measured either way)
+        pending = None
+        if wandering and self._broadcast is not None:
+            pending, self._broadcast = self._broadcast, None
+        extra: Dict[str, Any] = {}
+        if (pending is not None and self.cfg.ignition_broadcast
+                and getattr(gen, "accepts_steering", False)):
+            extra["steer"] = pending
         for _ in range(max(1, self.cfg.n_candidates)):
             if getattr(gen, "accepts_temperature_scale", False):
                 out = gen(prompt, self.cfg.thought_n_tok,
-                          temperature_scale=gen_scale)
+                          temperature_scale=gen_scale, **extra)
             else:
-                out = gen(prompt, self.cfg.thought_n_tok)
+                out = gen(prompt, self.cfg.thought_n_tok, **extra)
             out = (out or "").strip()
             if out:
                 candidates.append(out)
@@ -1242,6 +1275,11 @@ class CognitiveRuntime:
         # (surprise about the mind's own state), once there is a state
         # to compare against
         state_change = self._state_change()
+        if ignition:
+            z = self._ws_content()
+            if z is not None:
+                r = osc.sync_r if osc is not None else 1.0
+                self._broadcast = (list(z), self.cfg.broadcast_gain * r)
         da_drive = novelty
         if self.cfg.state_driven_nt and state_change is not None:
             da_drive = state_change
@@ -1292,6 +1330,10 @@ class CognitiveRuntime:
                           workspace_inputs=ws_inputs,
                           content_coherence=coherence,
                           state_change=state_change,
+                          broadcast=(extra["steer"][1] if extra else 0.0),
+                          broadcast_alignment=(
+                              _cosine(thought_vec, pending[0])
+                              if pending is not None else None),
                           workspace=(self.workspace.items_view()
                                      if self.workspace is not None else []),
                           ignition_threshold=osc.threshold if osc else None)
@@ -1612,22 +1654,89 @@ def embedding_spread(embed_fn: EmbedFn,
             / len(pairs) if pairs else 1.0)
 
 
+def _decoder_layers(model: Any) -> Optional[Any]:
+    """The transformer block list of an HF causal LM (Llama/Qwen
+    ``model.layers``, GPT-2 ``transformer.h``, NeoX ``gpt_neox.layers``),
+    or None when the model exposes none."""
+    for path in ("model.layers", "transformer.h", "gpt_neox.layers",
+                 "layers"):
+        obj = model
+        for part in path.split("."):
+            obj = getattr(obj, part, None)
+            if obj is None:
+                break
+        if obj is not None and hasattr(obj, "__getitem__"):
+            return obj
+    return None
+
+
+class _ResidualSteering:
+    """Writes a workspace state back into the trunk's residual stream
+    at the layer the embedding reads (hidden_states[k] = output of
+    block k−1): gain · ‖h‖_typ · unit(z ⊙ σ), z the standardised state,
+    σ the calibration spread, ‖h‖_typ the layer's typical token norm."""
+
+    def __init__(self, blocks: Any, ref: Dict[str, Any],
+                 ensure_ref: Callable[[], None]) -> None:
+        self._blocks, self._ref, self._ensure = blocks, ref, ensure_ref
+
+    @property
+    def layer(self) -> int:
+        self._ensure()
+        return int(self._ref["k"])
+
+    @property
+    def std(self) -> Any:
+        self._ensure()
+        return self._ref["std"]
+
+    @property
+    def norm(self) -> float:
+        self._ensure()
+        return float(self._ref["norm"])
+
+    @contextmanager
+    def apply(self, vec: Sequence[float], gain: float):
+        import torch
+        k = self.layer
+        v = torch.tensor(list(vec), dtype=torch.float32) * self.std.cpu()
+        n = float(v.norm())
+        if k < 1 or n == 0.0 or gain == 0.0:
+            yield
+            return
+        delta = float(gain) * self.norm * v / n
+
+        def hook(_mod, _inp, out):
+            if isinstance(out, tuple):
+                h = out[0]
+                return (h + delta.to(h.device, h.dtype),) + tuple(out[1:])
+            return out + delta.to(out.device, out.dtype)
+
+        handle = self._blocks[k - 1].register_forward_hook(hook)
+        try:
+            yield
+        finally:
+            handle.remove()
+
+
 def _hidden_state_embed_seams(model: Any, tokenizer: Any, device: str,
                               max_ctx: int, layer: Optional[int]
-                              ) -> Tuple[ScoreFn, EmbedFn]:
+                              ) -> Tuple[ScoreFn, EmbedFn,
+                                         Optional[_ResidualSteering]]:
     """score_fn + embed_fn over ONE cached forward per text: the
     candidate the BG scores is the candidate we embed. The embedding
     is the mean-pooled hidden state of ``layer`` (default: the middle
     of the stack, where decoder LMs carry the most semantic content)
     minus the :data:`EMBED_CALIBRATION` mean (anisotropy correction,
-    as for the token embedding)."""
+    as for the token embedding). The third value writes a state back
+    at the same layer (None when the model exposes no block list)."""
     import torch
 
-    cache: "OrderedDict[str, Tuple[ThoughtScore, Any]]" = OrderedDict()
+    cache: "OrderedDict[str, Tuple[ThoughtScore, Any, float]]" = OrderedDict()
     ref: Dict[str, Any] = {}
 
     @torch.no_grad()
-    def _forward(text: str) -> Tuple[ThoughtScore, Any]:
+    def _forward(text: str) -> Tuple[ThoughtScore, Any, float]:
         key = text or " "
         hit = cache.get(key)
         if hit is not None:
@@ -1649,30 +1758,42 @@ def _hidden_state_embed_seams(model: Any, tokenizer: Any, device: str,
         nll = float(-lp.gather(-1, x[0, 1:].unsqueeze(-1)).mean())
         ent = float(-(lp.exp() * lp).sum(-1).mean()) / math.log(V)
         k = len(hs) // 2 if layer is None else int(layer)
+        ref.setdefault("k", k)
         h = hs[k][0].float()
         # skip the attention-sink first token: its massive activations
         # (Sun et al. 2024) enter a mean as 1/T and collapse every
         # vector onto one direction (run 58998377: cos ≈ 0.99996)
-        pooled = (h[1:] if h.shape[0] > 1 else h).mean(dim=0)
-        res = (ThoughtScore(mean_nll=nll, entropy_norm=ent), pooled)
+        body = h[1:] if h.shape[0] > 1 else h
+        pooled = body.mean(dim=0)
+        res = (ThoughtScore(mean_nll=nll, entropy_norm=ent), pooled,
+               float(body.norm(dim=-1).mean()))
         cache[key] = res
         if len(cache) > 256:
             cache.popitem(last=False)
         return res
 
+    def _ensure_ref() -> None:
+        if "mean" in ref:
+            return
+        outs = [_forward(t) for t in EMBED_CALIBRATION]
+        cal = torch.stack([o[1] for o in outs])
+        ref["mean"] = cal.mean(dim=0)
+        # per-dimension standardisation: a residual outlier
+        # dimension can't dominate the cosine
+        ref["std"] = cal.std(dim=0, unbiased=False) + 1e-6
+        ref["norm"] = sum(o[2] for o in outs) / len(outs)
+
     def score_fn(text: str) -> ThoughtScore:
         return _forward(text)[0]
 
     def embed_fn(text: str) -> Sequence[float]:
-        if "mean" not in ref:
-            cal = torch.stack([_forward(t)[1] for t in EMBED_CALIBRATION])
-            ref["mean"] = cal.mean(dim=0)
-            # per-dimension standardisation: a residual outlier
-            # dimension can't dominate the cosine
-            ref["std"] = cal.std(dim=0, unbiased=False) + 1e-6
+        _ensure_ref()
         return ((_forward(text)[1] - ref["mean"]) / ref["std"]).cpu().tolist()
 
-    return score_fn, embed_fn
+    blocks = _decoder_layers(model)
+    steering = (_ResidualSteering(blocks, ref, _ensure_ref)
+                if blocks is not None else None)
+    return score_fn, embed_fn, steering
 
 
 def build_runtime_from_harness(harness: Any, tokenizer: Any,
@@ -1833,6 +1954,8 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
     wrapper = _HFLMWrapper(model)
     embed_table = model.get_input_embeddings().weight
     last: Dict[str, Optional[str]] = {"reasoning": None}
+    # filled once the hidden-state seams exist (below)
+    steering_holder: Dict[str, Any] = {"s": None}
 
     if hasattr(model, "generate"):
         # KV-cache fast path. The daemon's naive seam re-runs a FULL
@@ -1897,9 +2020,22 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
                 out = model.generate(**gen_kwargs)
                 return out[0, x.shape[1]:].tolist()
 
-            @torch.no_grad()
             def _generate(prompt: str, max_new_tokens: int,
-                          temperature_scale: float = 1.0) -> str:
+                          temperature_scale: float = 1.0,
+                          steer: Optional[Tuple[Sequence[float], float]] = None
+                          ) -> str:
+                """``steer`` = (workspace state, gain): written into the
+                residual stream for this generation (ignition broadcast)."""
+                st = steering_holder["s"]
+                ctx = (st.apply(steer[0], steer[1]) if steer and st
+                       else nullcontext())
+                with ctx:
+                    return _generate_body(prompt, max_new_tokens,
+                                          temperature_scale)
+
+            @torch.no_grad()
+            def _generate_body(prompt: str, max_new_tokens: int,
+                               temperature_scale: float = 1.0) -> str:
                 n = int(max_new_tokens)
                 if use_chat_template:
                     enc = tokenizer.apply_chat_template(
@@ -1969,10 +2105,15 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
         return ThoughtScore(mean_nll=nll, entropy_norm=ent)
 
     if embed == "hidden":
-        score_fn, embed_fn = _hidden_state_embed_seams(
+        score_fn, embed_fn, steering_holder["s"] = _hidden_state_embed_seams(
             model, tokenizer, device, max_ctx, embed_layer)
     else:
         embed_fn = _mean_centred_embed_fn(embed_table, tokenizer, device)
+    for fn in {generate_fn, generate_wander_fn}:
+        try:
+            fn.accepts_steering = steering_holder["s"] is not None
+        except AttributeError:
+            pass
 
     # The mind classifies with its OWN trunk/expert — reuses the SAME
     # generate_fn closure THINK uses (one model, two jobs), never the
@@ -1992,4 +2133,4 @@ def build_hf_seams(model_id: str = DEFAULT_MIND_EXPERT,
                      generate_wander_fn=generate_wander_fn, reseed=reseed,
                      reasoning_fn=lambda: (last["reasoning"]
                                            if reasoning_model else None),
-                     embed_kind=embed)
+                     embed_kind=embed, steering=steering_holder["s"])

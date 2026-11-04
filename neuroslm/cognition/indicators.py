@@ -514,6 +514,9 @@ def _aggregate_runs(runs: List[dict]) -> dict:
                      "distinct_ratio")}
     for k in ("reorients", "replays", "inhibited"):
         out[k] = sum(r.get(k, 0) for r in runs)
+    if runs and "broadcast_alignment" in runs[0]:
+        out["mean_broadcast_alignment"] = _mean(
+            [a for r in runs for a in r["broadcast_alignment"]])
     if runs and "ignition_series" in runs[0]:
         series = [r["ignition_series"] for r in runs]
         has_osc = all(None not in s for s in series)
@@ -557,6 +560,9 @@ def probe_loop_escape(seams: MindSeams,
         # §14.13: idle thought sees recall + last thought, not the
         # competed workspace contents
         ablations["no_workspace"] = {"global_workspace": False}
+    if cfg.ignition_broadcast:
+        # ignition gates storage only; nothing is written into the trunk
+        ablations["no_broadcast"] = {"ignition_broadcast": False}
     if not cfg.wander_prompts:
         from neuroslm.cognition.runtime import WANDER_FRAMINGS
         # the scripted idle framings that invited reflection ON memory
@@ -594,6 +600,7 @@ def probe_loop_escape(seams: MindSeams,
             sync_rs: List[float] = []
             peaks: List[float] = []
             ws_sizes: List[int] = []
+            align: List[float] = []
             nt: Dict[str, List[float]] = {ch: [] for ch in _NT_ORDER}
             reorients = replays = inhibited = 0
             _say(progress, f"── loop_escape/{name} run {i}: {text}")
@@ -610,6 +617,8 @@ def probe_loop_escape(seams: MindSeams,
                 if r.thought:
                     thoughts.append(r.thought)
                     ws_sizes.append(len(r.workspace))
+                    if r.broadcast_alignment is not None:
+                        align.append(r.broadcast_alignment)
                     ign.append(None if r.ignited is None else int(r.ignited))
                     if r.sync_r is not None:
                         sync_rs.append(r.sync_r)
@@ -618,7 +627,8 @@ def probe_loop_escape(seams: MindSeams,
             m.update(reorients=reorients, replays=replays,
                      inhibited=inhibited, thoughts=[t[:240] for t in thoughts],
                      ignition_series=ign, sync_rs=sync_rs,
-                     gamma_peaks=peaks, nt=nt, workspace_sizes=ws_sizes)
+                     gamma_peaks=peaks, nt=nt, workspace_sizes=ws_sizes,
+                     broadcast_alignment=align)
             runs.append(m)
         arm_runs[name] = runs
         _say(progress, f"  loop_escape/{name}: novelty="
@@ -658,7 +668,10 @@ def probe_loop_escape(seams: MindSeams,
                                  conds, "ignition_lag1").items()},
                           **{k.replace("full_minus", "streak_full_minus"): v
                              for k, v in _contrasts(
-                                 conds, "longest_low_streak").items()}}}
+                                 conds, "longest_low_streak").items()},
+                          **{k.replace("full_minus", "align_full_minus"): v
+                             for k, v in _contrasts(
+                                 conds, "mean_broadcast_alignment").items()}}}
 
 
 def _metacog_block(correct, replies, scores) -> dict:

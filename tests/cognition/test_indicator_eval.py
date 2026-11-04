@@ -255,6 +255,21 @@ class TestLoopEscapeProbe:
         assert any(n > 0 for r in conds["full"]["runs"]
                    for n in r["workspace_sizes"])
 
+    def test_ignition_broadcast_has_its_own_ablation_arm(self):
+        assert "no_broadcast" in self._run()["conditions"]
+
+    def test_broadcast_alignment_is_reported_per_arm(self):
+        conds = self._run()["conditions"]
+        for name in ("full", "no_broadcast"):
+            runs = conds[name]["runs"]
+            assert all("broadcast_alignment" in r for r in runs), name
+            assert "mean_broadcast_alignment" in conds[name], name
+
+    def test_alignment_contrast_against_no_broadcast(self):
+        res = self._run()
+        assert res["conditions"]["full"]["mean_broadcast_alignment"] is not None
+        assert "align_full_minus_no_broadcast" in res["contrasts"]
+
     def test_scripted_wander_framing_has_its_own_ablation_arm(self):
         from neuroslm.cognition.runtime import WANDER_FRAMINGS
         assert "wander_framing" in self._run()["conditions"]

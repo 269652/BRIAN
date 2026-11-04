@@ -2130,6 +2130,226 @@ class TestHiddenStateEmbeddings:
             self._seams(_FakeHFModelWithGenerate(), embed="bogus")
 
 
+def _tiny_hf_model():
+    """A real 4-layer torch model with the HF surface the seams use
+    (model.layers, hidden_states, generate) — forward hooks need real
+    modules, which the duck-typed fakes are not."""
+    import types
+
+    import torch
+    import torch.nn as nn
+
+    torch.manual_seed(0)
+
+    class _Layer(nn.Module):
+        def __init__(self, d):
+            super().__init__()
+            self.lin = nn.Linear(d, d)
+
+        def forward(self, h):
+            return (torch.tanh(self.lin(h)) + h,)
+
+    class _Tiny(nn.Module):
+        def __init__(self, V=32, d=8, L=4):
+            super().__init__()
+            self.embed = nn.Embedding(V, d)
+            self.model = nn.Module()
+            self.model.layers = nn.ModuleList([_Layer(d) for _ in range(L)])
+            self.head = nn.Linear(d, V)
+            self.config = type("C", (), {"n_positions": 64})()
+
+        def get_input_embeddings(self):
+            return self.embed
+
+        def forward(self, input_ids=None, output_hidden_states=False, **kw):
+            h = self.embed(input_ids)
+            hs = [h]
+            for layer in self.model.layers:
+                h = layer(h)[0]
+                hs.append(h)
+            return types.SimpleNamespace(
+                logits=self.head(h),
+                hidden_states=tuple(hs) if output_hidden_states else None)
+
+        def generate(self, input_ids=None, max_new_tokens=4, **kw):
+            ids = input_ids
+            for _ in range(int(max_new_tokens)):
+                nxt = self(input_ids=ids).logits[:, -1].argmax(-1, keepdim=True)
+                ids = torch.cat([ids, nxt], dim=1)
+            return ids
+
+    return _Tiny()
+
+
+class TestIgnitionBroadcastsIntoTheTrunk:
+    """Global broadcast taken literally: an ignited workspace state is
+    written into the trunk's residual stream — at the layer the
+    embedding reads — during the next idle generation, scaled by the
+    synchrony that ignited it (activation steering, Turner et al. 2023)."""
+
+    def _seams(self, model):
+        from neuroslm.cognition.runtime import build_hf_seams
+        return build_hf_seams("fake/expert", model_factory=lambda: model,
+                              tokenizer_factory=_FakeHFTokenizer)
+
+    def test_steering_adds_the_scaled_state_direction_at_the_read_layer(self):
+        import torch
+        model = _tiny_hf_model()
+        seams = self._seams(model)
+        z = seams.embed_fn("alpha beta gamma")
+        st = seams.steering
+        x = torch.tensor([_FakeHFTokenizer().encode("delta epsilon")])
+        base = model(input_ids=x, output_hidden_states=True).hidden_states
+        with st.apply(z, gain=0.5):
+            steered = model(input_ids=x,
+                            output_hidden_states=True).hidden_states
+        k = st.layer
+        v = torch.tensor(z) * st.std
+        expected = 0.5 * st.norm * v / v.norm()
+        assert torch.allclose(steered[k] - base[k], expected.expand_as(base[k]),
+                              atol=1e-4)
+        assert torch.allclose(steered[k - 1], base[k - 1])
+
+    def test_the_hook_is_removed_afterwards(self):
+        import torch
+        model = _tiny_hf_model()
+        seams = self._seams(model)
+        z = seams.embed_fn("alpha beta gamma")
+        x = torch.tensor([_FakeHFTokenizer().encode("delta epsilon")])
+        before = model(input_ids=x).logits
+        with seams.steering.apply(z, gain=0.5):
+            pass
+        assert torch.allclose(model(input_ids=x).logits, before)
+
+    def test_typical_norm_is_measured_at_the_read_layer(self):
+        import torch
+        from neuroslm.cognition.runtime import EMBED_CALIBRATION
+        model = _tiny_hf_model()
+        seams = self._seams(model)
+        seams.embed_fn("warm up")
+        k = seams.steering.layer
+        norms = []
+        with torch.no_grad():
+            for t in EMBED_CALIBRATION:
+                x = torch.tensor([_FakeHFTokenizer().encode(t)])
+                h = model(input_ids=x,
+                          output_hidden_states=True).hidden_states[k]
+                norms.append(h[0][1:].norm(dim=-1).mean())
+        assert seams.steering.norm == pytest.approx(
+            float(torch.stack(norms).mean()), rel=1e-4)
+
+    def test_generation_applies_the_steer_it_is_given(self):
+        model = _tiny_hf_model()
+        seams = self._seams(model)
+        z = seams.embed_fn("alpha beta gamma")
+        calls = []
+        real = seams.steering.apply
+
+        def spy(vec, gain):
+            calls.append(gain)
+            return real(vec, gain)
+        seams.steering.apply = spy
+        assert seams.generate_wander_fn.accepts_steering
+        seams.generate_wander_fn("hello", 3, steer=(z, 0.2))
+        seams.generate_wander_fn("hello", 3)
+        assert calls == [0.2]
+
+
+class _SteerableGen(_ScriptedGen):
+    accepts_steering = True
+
+    def __init__(self, candidates):
+        super().__init__(candidates)
+        self.steers = []
+
+    def __call__(self, prompt, max_new_tokens, steer=None):
+        self.steers.append(steer)
+        return super().__call__(prompt, max_new_tokens)
+
+
+class TestRuntimeBroadcastsIgnitions:
+    def _rt(self, gen, **cfg_kw):
+        from neuroslm.cognition.runtime import MindConfig
+        return _mk_runtime(gen, cfg=MindConfig(n_candidates=1, recall_k=0,
+                                               **cfg_kw))
+
+    def test_an_ignited_state_steers_the_next_idle_thought(self):
+        gen = _SteerableGen(["thinking about the moon", "about chess"])
+        rt = self._rt(gen)
+        first = rt.tick()
+        assert first.stored, "setup: without the oscillator, storage = ignition"
+        state = rt.workspace.state_vector()
+        rt.tick()
+        vec, gain = gen.steers[-1]
+        assert vec == pytest.approx(state)
+        assert gain == pytest.approx(rt.cfg.broadcast_gain * 1.0)
+
+    def test_the_broadcast_is_consumed_once(self):
+        gen = _SteerableGen(["thinking about the moon"])
+        rt = self._rt(gen, novelty_write_threshold=2.0)
+        rt._broadcast = ([1.0] * 8, 0.1)
+        rt.tick()
+        rt.tick()
+        assert gen.steers[0] is not None and gen.steers[1] is None
+
+    def test_reply_ticks_are_not_steered(self):
+        gen = _SteerableGen(["I hear you."])
+        rt = self._rt(gen)
+        rt._broadcast = ([1.0] * 8, 0.1)
+        rt.observe("the river was beautiful today")
+        rt.tick()
+        assert gen.steers[-1] is None
+
+    def test_gain_scales_with_the_synchrony_that_ignited(self):
+        from neuroslm.cognition.oscillator import OscillatorStep
+        from neuroslm.cognition.runtime import MindConfig
+        gen = _SteerableGen(["thinking about the moon", "about chess"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1, recall_k=0),
+                         osc=True)
+        rt._osc.step = lambda *a, **kw: OscillatorStep(
+            sync_r=0.4, ignited=True, peak_hz=40.0, threshold=0.2,
+            gamma_power=1.0)
+        rt.tick()
+        rt.tick()
+        assert gen.steers[-1][1] == pytest.approx(rt.cfg.broadcast_gain * 0.4)
+
+    def test_tick_result_reports_the_broadcast_gain(self):
+        gen = _SteerableGen(["thinking about the moon", "about chess"])
+        rt = self._rt(gen)
+        rt.tick()
+        assert rt.tick().broadcast == pytest.approx(rt.cfg.broadcast_gain)
+
+    def test_ablation_never_steers(self):
+        gen = _SteerableGen(["thinking about the moon", "about chess"])
+        rt = self._rt(gen, ignition_broadcast=False)
+        rt.tick()
+        rt.tick()
+        assert gen.steers == [None, None]
+
+    def test_both_arms_record_alignment_with_the_ignited_state(self):
+        # the effect measure: cos(thought, state that ignited before
+        # it) — recorded with and without the broadcast applied
+        for on in (True, False):
+            gen = _SteerableGen(["thinking about the moon", "about chess"])
+            rt = self._rt(gen, ignition_broadcast=on)
+            rt.tick()
+            state = rt.workspace.state_vector()
+            r = rt.tick()
+            assert r.broadcast_alignment == pytest.approx(
+                _cosine_t(_vec_for("about chess"), state), abs=1e-6), on
+
+    def test_no_ignition_no_alignment(self):
+        gen = _SteerableGen(["thinking about the moon"])
+        rt = self._rt(gen, novelty_write_threshold=2.0)
+        rt.tick()
+        assert rt.tick().broadcast_alignment is None
+
+    def test_plain_generators_are_never_passed_a_steer(self):
+        rt = self._rt(_ScriptedGen(["thinking about the moon", "x"]))
+        rt.tick()
+        assert rt.tick().thought == "x"
+
+
 class TestNTStandardisesOnTheRuntimeTimescale:
     """Run 58673415: DA 0.15→0.05, GABA 0.15→0.10 — monotone within
     each run. DrivenNTSystem's driver z-scores use driver_alpha=0.005
@@ -2175,6 +2395,7 @@ class TestTraceExplainsTheGates:
         assert "raw=" in text, "raw novelty is visible beside the adapted"
         assert "coh=" in text, "content coherence drives the coupling"
         assert "dz=" in text, "state change drives DA/NE"
+        assert "bc=" in text, "the broadcast gain written into the trunk"
         assert "in[s=" in text, "WS line carries the module activations"
 
 
