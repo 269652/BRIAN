@@ -1408,6 +1408,32 @@ centring reference of the 'hidden' embedding. Fixed rather than a
 running mean, so vectors stored early and late stay comparable."""
 
 
+EMBED_HOLDOUT: Tuple[str, ...] = (
+    "The bakery on the corner opens at six.",
+    "Volcanoes form where tectonic plates meet.",
+    "I forgot my umbrella on the bus.",
+    "Prime numbers have exactly two divisors.",
+    "The orchestra tuned before the concert.",
+    "My neighbour's dog barks at the postman.",
+    "Glaciers carved the valleys over millennia.",
+    "Let me check whether the loop terminates.",
+)
+"""Held-out sentences (disjoint from :data:`EMBED_CALIBRATION`) for
+:func:`embedding_spread` — centred on the calibration set, the
+calibration set itself always looks spread out."""
+
+
+def embedding_spread(embed_fn: EmbedFn,
+                     texts: Sequence[str] = EMBED_HOLDOUT) -> float:
+    """Mean pairwise |cosine| of ``texts`` under ``embed_fn``. Near 1
+    means the embedding has collapsed onto one direction and every
+    novelty reads 0 (run 58998377: cos ≈ 0.99996)."""
+    vecs = [list(embed_fn(t)) for t in texts]
+    pairs = [(i, j) for i in range(len(vecs)) for j in range(i + 1, len(vecs))]
+    return (sum(abs(_cosine(vecs[i], vecs[j])) for i, j in pairs)
+            / len(pairs) if pairs else 1.0)
+
+
 def _hidden_state_embed_seams(model: Any, tokenizer: Any, device: str,
                               max_ctx: int, layer: Optional[int]
                               ) -> Tuple[ScoreFn, EmbedFn]:
@@ -1445,7 +1471,11 @@ def _hidden_state_embed_seams(model: Any, tokenizer: Any, device: str,
         nll = float(-lp.gather(-1, x[0, 1:].unsqueeze(-1)).mean())
         ent = float(-(lp.exp() * lp).sum(-1).mean()) / math.log(V)
         k = len(hs) // 2 if layer is None else int(layer)
-        pooled = hs[k][0].float().mean(dim=0)
+        h = hs[k][0].float()
+        # skip the attention-sink first token: its massive activations
+        # (Sun et al. 2024) enter a mean as 1/T and collapse every
+        # vector onto one direction (run 58998377: cos ≈ 0.99996)
+        pooled = (h[1:] if h.shape[0] > 1 else h).mean(dim=0)
         res = (ThoughtScore(mean_nll=nll, entropy_norm=ent), pooled)
         cache[key] = res
         if len(cache) > 256:
@@ -1457,9 +1487,12 @@ def _hidden_state_embed_seams(model: Any, tokenizer: Any, device: str,
 
     def embed_fn(text: str) -> Sequence[float]:
         if "mean" not in ref:
-            ref["mean"] = torch.stack(
-                [_forward(t)[1] for t in EMBED_CALIBRATION]).mean(dim=0)
-        return (_forward(text)[1] - ref["mean"]).cpu().tolist()
+            cal = torch.stack([_forward(t)[1] for t in EMBED_CALIBRATION])
+            ref["mean"] = cal.mean(dim=0)
+            # per-dimension standardisation: a residual outlier
+            # dimension can't dominate the cosine
+            ref["std"] = cal.std(dim=0, unbiased=False) + 1e-6
+        return ((_forward(text)[1] - ref["mean"]) / ref["std"]).cpu().tolist()
 
     return score_fn, embed_fn
 

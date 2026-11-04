@@ -2006,32 +2006,78 @@ class TestHiddenStateEmbeddings:
     def _pooled(self, model, text, layer):
         import torch
         ids = torch.tensor([_FakeHFTokenizer().encode(text)])
-        return model._hidden(ids)[layer][0].mean(0)
+        return model._hidden(ids)[layer][0][1:].mean(0)
 
-    def _calib_mean(self, model, layer):
+    def _expected(self, model, text, layer):
         import torch
         from neuroslm.cognition.runtime import EMBED_CALIBRATION
-        return torch.stack([self._pooled(model, t, layer)
-                            for t in EMBED_CALIBRATION]).mean(0)
+        cal = torch.stack([self._pooled(model, t, layer)
+                           for t in EMBED_CALIBRATION])
+        return ((self._pooled(model, text, layer) - cal.mean(0))
+                / (cal.std(0, unbiased=False) + 1e-6))
 
-    def test_default_is_the_middle_layer_minus_the_calibration_mean(self):
+    def test_default_is_the_middle_layer_standardised_on_calibration(self):
         import torch
         model = _FakeHFModelWithGenerate()
         seams = self._seams(model)
         mid = (model.n_layers + 1) // 2
-        expected = (self._pooled(model, "alpha beta", mid)
-                    - self._calib_mean(model, mid))
+        expected = self._expected(model, "alpha beta", mid)
         got = torch.tensor(seams.embed_fn("alpha beta"))
-        assert torch.allclose(got, expected, atol=1e-4)
+        assert torch.allclose(got, expected, atol=1e-3)
 
     def test_layer_can_be_chosen(self):
         import torch
         model = _FakeHFModelWithGenerate()
         seams = self._seams(model, embed_layer=4)
-        expected = (self._pooled(model, "alpha beta", 4)
-                    - self._calib_mean(model, 4))
+        expected = self._expected(model, "alpha beta", 4)
         assert torch.allclose(torch.tensor(seams.embed_fn("alpha beta")),
-                              expected, atol=1e-4)
+                              expected, atol=1e-3)
+
+    def test_massive_first_token_activation_does_not_collapse_it(self):
+        """Run 58998377: every pair of R1 thoughts had cos ≈ 0.99996.
+        Decoder LMs put massive activations on the first token (Sun et
+        al. 2024); mean-pooled, that term shrinks as 1/T, so a fixed
+        reference mean can't cancel it and every vector points one
+        way."""
+        import torch
+
+        class _Massive(_FakeHFModelWithGenerate):
+            def _hidden(self, input_ids):
+                hs = super()._hidden(input_ids)
+                out = []
+                for h in hs:
+                    h = h.clone()
+                    h[:, 0, 0] = 1e4
+                    out.append(h)
+                return tuple(out)
+
+        class _Tok(_FakeHFTokenizer):
+            def encode(self, text):
+                return {"short": [1, 2, 3],
+                        "a much longer text": [20, 21, 22, 23, 24, 25, 26,
+                                               27, 28]}.get(
+                    text, super().encode(text))
+
+        from neuroslm.cognition.runtime import build_hf_seams
+        model = _Massive()
+        seams = build_hf_seams("fake/expert", model_factory=lambda: model,
+                               tokenizer_factory=_Tok)
+        cos = torch.nn.functional.cosine_similarity
+        c = cos(torch.tensor(seams.embed_fn("short")),
+                torch.tensor(seams.embed_fn("a much longer text")), dim=0)
+        assert c < 0.9
+
+    def test_spread_is_mean_absolute_cosine_on_held_out_text(self):
+        from neuroslm.cognition.runtime import (
+            EMBED_CALIBRATION, EMBED_HOLDOUT, embedding_spread)
+        # centred on the calibration set, the calibration set itself
+        # always looks spread out; a collapse shows as |cos| ≈ 1
+        assert not set(EMBED_HOLDOUT) & set(EMBED_CALIBRATION)
+        assert embedding_spread(lambda t: [1.0, 0.0],
+                                ["a", "b", "c"]) == pytest.approx(1.0)
+        vecs = {"a": [1.0, 0.0], "b": [0.0, 1.0], "c": [-1.0, 0.0]}
+        assert embedding_spread(vecs.get, ["a", "b", "c"]) == pytest.approx(
+            1.0 / 3.0)
 
     def test_scoring_and_embedding_share_one_forward_pass(self):
         model = _FakeHFModelWithGenerate()

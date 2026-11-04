@@ -3828,8 +3828,13 @@ timescale rather than the training timescale. The debug trace shows
 **Latent embeddings (2026-11-03).** `build_hf_seams(embed="hidden")`,
 now the default, embeds text as the trunk's middle-layer hidden states
 (`hidden_states[len // 2]`, or `embed_layer`), mean-pooled over tokens
-and centred on the pooled mean of the fixed `EMBED_CALIBRATION`
-sentences. The token mean was a bag of tokens: R1's shared reasoning
+**excluding the first** (the attention sink, whose massive activations
+(Sun et al. 2024) entered the mean as 1/T and collapsed every vector
+onto one direction in run 58998377), then standardised per dimension
+on the mean and spread of the fixed `EMBED_CALIBRATION` sentences.
+`eval mind` prints and records `meta.embed_holdout_mean_abs_cos`, the
+mean pairwise |cos| of the held-out `EMBED_HOLDOUT` sentences; near 1
+means a collapsed embedding. The token mean was a bag of tokens: R1's shared reasoning
 prose dominated it, so a clear topic switch scored novelty 0.11 (run
 58834649). The reference mean is fixed, not running, so episodes stored
 early and late stay comparable. `score_fn` and `embed_fn` share one

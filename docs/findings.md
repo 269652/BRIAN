@@ -4824,3 +4824,35 @@ arm of `loop_escape`, without pushing results. Only the log survives:
   reached.
 
 [EVIDENCE: logs/mind_eval/20261103T175223Z.log]
+
+### Smoke run 58998377 (build `d516e289`, stack): reply path clean; the hidden-state embedding collapsed (2026-11-03)
+
+Stack: workspace paragraph + hidden-state embeddings + musing
+provenance. 4 probes, n = 1, 2 distractors, 16 idle ticks. Results:
+`results/mind_eval/20261103T182429Z_deepseek-r1-qwen-7b.json`
+(`meta.embed = hidden`). This box completed and pushed its results
+normally.
+
+- **Reply probes:** recall full 1.00 / no_recall 0.00 / bare 1.00.
+  Source monitoring 1.00 in every arm except bare (0.00).
+  Metacognition 1.00 / 1.00.
+- **The embedding collapsed.** Every stream novelty was 0.00001–0.00006:
+  any two R1 thoughts had cosine ≈ 0.99996. The runtime's own novelty
+  read 0.00 on every tick, so the write gate never passed, and the
+  pooled low-novelty bar was 2.2e-5. All `loop_escape` streak and
+  novelty contrasts in this run are **void**. The workspace salience
+  of thoughts (divisively normalised) and the relative reorient rule
+  still ran, because they are scale-free.
+- **Likely cause (not verified locally; no local model runs):**
+  massive activations on the first token (Sun et al. 2024). Pooled
+  over T tokens, that term scales as 1/T, so a fixed reference mean
+  can't cancel it, and every centred vector lies along it.
+- **Fix:** pool over positions 1…T and standardise each dimension on
+  the calibration set. A held-out spread check (`EMBED_HOLDOUT`, mean
+  |cos|) is printed at eval start and recorded in the report, so a
+  collapse is visible from the first line of the next run.
+- Recall still ranked correctly despite the collapse: the tiny
+  residual differences still ordered the episodes.
+
+[EVIDENCE: logs/mind_eval/20261103T182428Z.log]
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestHiddenStateEmbeddings::test_massive_first_token_activation_does_not_collapse_it]

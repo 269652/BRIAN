@@ -3432,13 +3432,18 @@ def _eval_mind(args: argparse.Namespace) -> int:
         print(f"[mind-eval] expert={expert} device={args.device} "
               f"seed={args.seed} -> {out}")
         seams = runtime.build_hf_seams(expert, device=args.device)
+        spread = runtime.embedding_spread(seams.embed_fn)
+        print(f"[mind-eval] embed={getattr(seams, 'embed_kind', None)} "
+              f"held-out mean |cos|={spread:.3f} "
+              f"(near 1 = collapsed embedding)")
         report = indicators.run_indicator_battery(
             seams, probes=probes, seed=args.seed, n_items=args.n_items,
             n_distractors=args.n_distractors, n_idle_ticks=args.idle_ticks,
             progress=print)
         report["meta"].update(expert=expert, device=args.device,
                               utc=stamp, git_commit=sha, branch=branch,
-                              embed=getattr(seams, "embed_kind", None))
+                              embed=getattr(seams, "embed_kind", None),
+                              embed_holdout_mean_abs_cos=spread)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(indicators.format_report(report))

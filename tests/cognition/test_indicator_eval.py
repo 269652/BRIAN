@@ -633,7 +633,10 @@ class TestMultiExpertEval:
              "--out-dir", str(tmp_path)])
         assert a.func(a) == 0
         out = next(tmp_path.glob("*.json"))
-        assert json.loads(out.read_text())["meta"]["embed"] == "hidden"
+        meta = json.loads(out.read_text())["meta"]
+        assert meta["embed"] == "hidden"
+        # run 58998377: a collapsed embedding must show up in the report
+        assert 0.0 <= meta["embed_holdout_mean_abs_cos"] < 1.0
 
     def test_single_out_file_with_several_experts_is_rejected(
             self, monkeypatch, tmp_path):
