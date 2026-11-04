@@ -3570,3 +3570,4 @@ Another way to confirm is to think about historical context. When I was younger,
     pci/no_oscillator/memory run 0: PCI=0.927 channels=DA,NE,ACh,Glu,novelty,selection_entropy,differentiation,recall,thought
   pci/no_oscillator/memory: PCI=0.927 reached=9.0
 [mind-eval] probe controller_phi
+    controller_phi: 8/32 states
