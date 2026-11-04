@@ -4984,3 +4984,65 @@ mind-eval self-destroy resolves its own id from `INSTANCE_ID` /
 run at once, but it doesn't explain the single-box cases.
 
 [EVIDENCE: logs/mind_eval/20261104T030111Z.log]
+
+### Smoke run 59052048 (build `fe61acc4`, latent workspace stages 1-3 + adaptive novelty + unframed wandering): first complete run of the stack (2026-11-04)
+
+6 probes, n = 1 seed, 2 distractors, 16 idle ticks, 12 `loop_escape`
+arms. The box finished and pushed results normally (~2 h, A100 at
+$0.68/hr). Results:
+`results/mind_eval/20261104T034518Z_deepseek-r1-qwen-7b.json`
+(`embed = hidden`, held-out |cos| 0.279).
+
+- **Reply probes:** recall 1.00 / 0.00 / 1.00; source monitoring 1.00
+  in every arm except bare (0.00); metacognition 1.00 / 1.00.
+- **`loop_escape`, pooled low-novelty bar 0.031:**
+
+| arm | mean raw novelty | longest low streak | reorients | ignition | DA sd |
+|---|---|---|---|---|---|
+| full | 0.042 | 3 | 3 | 0.19 | 0.034 |
+| no_control | 0.042 | 2 | 0 | 0.38 | 0.034 |
+| no_workspace | 0.036 | 3 | 2 | 0.19 | 0.019 |
+| wander_framing | 0.042 | 3 | 3 | 0.13 | 0.029 |
+| thought_driven_nt | 0.047 | 1 | 2 | 0.06 | 0.042 |
+| no_context_recall | 0.050 | 3 | 2 | 0.06 | 0.032 |
+| raw_novelty | 0.049 | 3 | 3 | 0.13 | 0.042 |
+| no_osc_feedback | 0.041 | 3 | 3 | 0.13 | 0.031 |
+| no_oscillator | 0.036 | 3 | 2 | — | 0.040 |
+| uniform_coupling | 0.048 | 1 | 1 | 0.13 | 0.024 |
+| fixed_threshold | 0.049 | 0 | 2 | 0.00 | 0.024 |
+| bare | 0.021 | **12** | 0 | — | — |
+
+- **The one clear contrast is mind vs bare LM:** every runtime arm
+  keeps its longest low-novelty streak at 0–3 ticks; the bare LM stays
+  in one basin for 12 of 15. This is the first run where the yardstick
+  separates arms.
+- **The single-mechanism contrasts are within n = 1 noise.** Streaks
+  of 0–3 and novelty 0.036–0.050 across arms; the full stack is not
+  better than any single ablation (if anything, slightly lower
+  novelty than `no_context_recall`, `raw_novelty`,
+  `thought_driven_nt`, `uniform_coupling`). No stage can be credited
+  yet.
+- **DA moves more with the workspace:** sd 0.034 (full) vs 0.019
+  (`no_workspace`), and it rises after ignitions (0.16 → 0.22).
+- **Trace observations:** no verbatim copy in full, but a 4-tick
+  "battlefield scene" basin (raw 0.021–0.025) until reorient. Some
+  reflection *on* the memories persists without the framing ("write a
+  poem about these memories"), so the paragraph of "I remember: …"
+  items is itself read as material. Content coherence sits at
+  0.58–0.93 on most ticks; with R1's register most contents look
+  alike, so content coupling has little to discriminate.
+- **Adaptive novelty** reads 0.14–0.46; the reply tick before
+  wandering (raw ≈ 0.6) still inflates the baseline, so storage stays
+  rare.
+- **PCI:** null 0.0; DA 0.81, GABA 0.94, memory 0.91 perturbations in
+  full. `no_recall` memory perturbation 0.0 (as expected: nothing to
+  perturb). **Controller φ:** mean 0.010, max 0.32, vs 0.0 without
+  oscillator feedback.
+
+**Verdict:** the stack runs end to end, and the mind-vs-bare loop
+contrast is large. Attributing anything to individual stages needs
+several seeds: the next measurement should be `loop_escape` at
+n = 5 seeds.
+
+[EVIDENCE: results/mind_eval/20261104T034518Z_deepseek-r1-qwen-7b.json]
+[EVIDENCE: logs/mind_eval/20261104T034517Z.log]
