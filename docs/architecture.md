@@ -3878,6 +3878,22 @@ the contents of mind to cohere, not just the modules to be active.
 trace as `WS[… coh=]`. `osc_content_coupling=False` is the
 `uniform_coupling` arm of `loop_escape`.
 
+**Latent workspace, stage 3: NT release driven by state change
+(2026-11-04).** After each tick the workspace state $z_t$ is compared
+with the previous tick's: $d_t = 1 - \cos(z_t, z_{t-1})$, divisively
+normalised against its own slow baseline,
+$\nu^z_t = d_t/(d_t + \bar d)$ (`TickResult.state_change`, trace
+`dz=`). DA's activation driver (the HC→VTA coupling) reads $\nu^z_t$:
+surprise about how the mind's own state moved, not about one thought's
+text. NE's expectation-error driver reads $|\nu^z_t - E[\nu^z]|$
+(EMA at `novelty_ema_alpha`). Homeostasis is unchanged: driver
+z-scoring, OU leak and habituation in `DrivenNTSystem`. Before two
+states exist, both fall back to the thought's novelty.
+`state_driven_nt=False` is the `thought_driven_nt` arm of
+`loop_escape`. With stages 1–3 the loop is latent end to end: content →
+state vector → coupling → synchrony/ignition → NT → (ACh coupling,
+GABA frequency, DA-gated goal) → recall cued by state.
+
 **Adaptive novelty (2026-11-04).** Raw novelty, 1 − max cosine against
 stored episodes ∪ working memory, depends on the embedding's scale and
 on the trunk's register: R1's long first-person thoughts put a copy at

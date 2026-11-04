@@ -255,6 +255,9 @@ class TestLoopEscapeProbe:
         assert any(n > 0 for r in conds["full"]["runs"]
                    for n in r["workspace_sizes"])
 
+    def test_state_driven_nt_has_its_own_ablation_arm(self):
+        assert "thought_driven_nt" in self._run()["conditions"]
+
     def test_context_recall_has_its_own_ablation_arm(self):
         assert "no_context_recall" in self._run()["conditions"]
 

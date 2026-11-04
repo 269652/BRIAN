@@ -370,6 +370,11 @@ class MindConfig:
 
     osc_ignition_floor: float = 0.1
     osc_adapt_k: float = 1.0
+    state_driven_nt: bool = True
+    """Stage 3: DA's activation driver reads the normalised change of
+    the workspace state, NE its departure from the recent trend
+    (``TickResult.state_change``). Off → both read the selected
+    thought's novelty, as before."""
     osc_content_coupling: bool = True
     """Stage 2 (binding by synchrony): module-to-module coupling follows
     the coherence of the modules' latent contents this tick
@@ -468,6 +473,10 @@ class TickResult:
     workspace: List[Tuple[str, float, str]] = field(default_factory=list)
     """Global workspace contents after this tick as (source, salience,
     text), most salient last; empty when ``global_workspace`` is off."""
+    state_change: Optional[float] = None
+    """How unexpectedly the workspace state moved this tick: 1 − cos to
+    last tick's state, divisively normalised (stage 3); None before two
+    states exist or without a workspace."""
     content_coherence: Optional[float] = None
     """Mean cosine between the modules' latent contents this tick (the
     input to content-coupled synchrony); None without content coupling."""
@@ -548,9 +557,11 @@ def format_debug_trace(result: TickResult) -> str:
         f"{k}={float(nt.get(k, 0.0)):.2f}" for k in _NT_ORDER) + "]")
 
     if result.candidates and not result.inhibited:
+        dz = ("-" if result.state_change is None
+              else f"{result.state_change:.2f}")
         lines.append(f"  CUR[nov={result.novelty:.2f} "
                      f"raw={result.novelty_raw:.3f} "
-                     f"bore={result.boredom:.2f}]")
+                     f"bore={result.boredom:.2f} dz={dz}]")
     if result.sync_r is not None:
         wi = result.workspace_inputs or {}
         ins = " ".join(f"{k[0]}={wi.get(k, 0.0):.2f}" for k in
@@ -783,6 +794,9 @@ class CognitiveRuntime:
         self._nov_base: Optional[float] = None
         self._raw_nov_base: Optional[float] = None
         self._coh_base: Optional[float] = None
+        self._prev_state: Optional[List[float]] = None
+        self._state_base: Optional[float] = None
+        self._state_expect: Optional[float] = None
         self._goal_vec: Optional[List[float]] = None
         self.workspace = None
         if self.cfg.global_workspace:
@@ -1207,7 +1221,19 @@ class CognitiveRuntime:
         a_n = self.cfg.novelty_ema_alpha
         self._nov_expect = (novelty if self._nov_expect is None else
                             (1 - a_n) * self._nov_expect + a_n * novelty)
-        self.nt.step_full(loss=sc.mean_nll, activation=novelty,
+        # stage 3: DA/NE read how unexpectedly the workspace STATE moved
+        # (surprise about the mind's own state), once there is a state
+        # to compare against
+        state_change = self._state_change()
+        da_drive = novelty
+        if self.cfg.state_driven_nt and state_change is not None:
+            da_drive = state_change
+            ne_drive = (0.0 if self._state_expect is None
+                        else abs(state_change - self._state_expect))
+            self._state_expect = (
+                state_change if self._state_expect is None else
+                (1 - a_n) * self._state_expect + a_n * state_change)
+        self.nt.step_full(loss=sc.mean_nll, activation=da_drive,
                           grad_norm=ne_drive,
                           ignition_rate=ignition,
                           attn_entropy_norm=selection_entropy)
@@ -1248,6 +1274,7 @@ class CognitiveRuntime:
                           gamma_power=osc.gamma_power if osc else None,
                           workspace_inputs=ws_inputs,
                           content_coherence=coherence,
+                          state_change=state_change,
                           workspace=(self.workspace.items_view()
                                      if self.workspace is not None else []),
                           ignition_threshold=osc.threshold if osc else None)
@@ -1279,6 +1306,24 @@ class CognitiveRuntime:
         if e.get("nt_state"):
             m = _cosine(intero, self._intero(e["nt_state"]))
         return (1.0 - w) * c + w * m
+
+    def _state_change(self) -> Optional[float]:
+        """1 − cos(workspace state now, last tick's), divisively
+        normalised against its own slow baseline; None until two
+        states exist. Advances the previous state and the baseline."""
+        now = self._ws_content()
+        if now is None:
+            return None
+        prev, self._prev_state = self._prev_state, list(now)
+        if prev is None:
+            return None
+        from neuroslm.cognition.workspace import divisive_normalise
+        d = max(0.0, 1.0 - _cosine(now, prev))
+        nu = divisive_normalise(d, self._state_base)
+        a = self.cfg.nov_baseline_alpha
+        self._state_base = (d if self._state_base is None
+                            else (1 - a) * self._state_base + a * d)
+        return nu
 
     def _normalise_novelty(self, raw: float) -> float:
         if not self.cfg.adaptive_novelty:

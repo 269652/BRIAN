@@ -4917,3 +4917,35 @@ Hypotheses for the next run:
 - (d) The reply probes are unchanged.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestNoveltyAdaptsToItsOwnScale]
+
+### Development: latent workspace stages 1-3 (maintainer, 2026-11-04, not yet measured)
+
+On the maintainer's request, all three stages land before the next run.
+Each has its own `loop_escape` ablation arm, so effects can be
+attributed within a single run (architecture.md §14.13):
+
+1. **State vector + context-cued recall** (Temporal Context Model).
+   Episodes carry the workspace state and NT state they were laid down
+   in, and recall blends anchor similarity with context similarity.
+   Arm: `no_context_recall`.
+2. **Content-coupled synchrony** (binding by synchrony). The
+   oscillator's module coupling follows the coherence of the modules'
+   latent contents. Arm: `uniform_coupling`.
+3. **State change drives DA/NE.** DA reads the normalised change of the
+   workspace state, NE its departure from trend. Arm:
+   `thought_driven_nt`.
+
+Together with adaptive novelty (`raw_novelty`) and the workspace
+(`no_workspace`), the battery now runs 11 `loop_escape` arms. A smoke
+run takes about 80 minutes.
+
+What to look for (descriptive first, since n = 1):
+- Stage 1: in the full arm, recalled memories follow the mood and
+  theme of the workspace. `no_context_recall` recalls by anchor only.
+- Stage 2: `content_coherence` varies across ticks. Ignition is more
+  likely on coherent ticks in full than in `uniform_coupling`.
+- Stage 3: DA moves with `state_change` (`dz`) and returns towards
+  baseline once the state settles. Compare its sd and its
+  autocorrelation with `thought_driven_nt`.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestContextCuedRecall, TestContentCoupledWorkspace, TestStateChangeDrivesNT]

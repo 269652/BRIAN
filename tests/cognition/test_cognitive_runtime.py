@@ -2142,6 +2142,7 @@ class TestTraceExplainsTheGates:
         assert "CUR[nov=" in text and "bore=" in text
         assert "raw=" in text, "raw novelty is visible beside the adapted"
         assert "coh=" in text, "content coherence drives the coupling"
+        assert "dz=" in text, "state change drives DA/NE"
         assert "in[s=" in text, "WS line carries the module activations"
 
 
@@ -2873,6 +2874,54 @@ class TestContentCoupledWorkspace:
         rt, calls, _ = self._rt(osc_content_coupling=False)
         r = rt.tick()
         assert calls[-1] is None and r.content_coherence is None
+
+
+class TestStateChangeDrivesNT:
+    """Stage 3: DA's activation driver reads how unexpectedly the
+    workspace state moved this tick (surprise about the mind's own
+    state), NE how far that departs from its recent trend — not one
+    thought's text novelty."""
+
+    def _rt(self, **cfg_kw):
+        from neuroslm.cognition.runtime import MindConfig
+        nt = _FakeNT()
+        rt = _mk_runtime(_ScriptedGen(["thinking about the moon"]),
+                         nt=nt, cfg=MindConfig(n_candidates=1, recall_k=0,
+                                               **cfg_kw))
+        rt.workspace.offer("chess thought", "thought", _vec_for("chess"), 1.0)
+        return rt, nt
+
+    def test_da_reads_the_normalised_state_change(self):
+        from neuroslm.cognition.workspace import divisive_normalise
+        rt, nt = self._rt()
+        prev = _vec_for("chess")
+        rt._prev_state, rt._state_base = prev, 0.1
+        r = rt.tick()
+        now = rt.workspace.state_vector()
+        d = 1.0 - _cosine_t(now, prev)
+        assert rt._prev_state == pytest.approx(now)
+        assert r.state_change == pytest.approx(divisive_normalise(d, 0.1))
+        assert nt.step_calls[-1]["activation"] == pytest.approx(r.state_change)
+
+    def test_ne_reads_the_departure_from_the_state_trend(self):
+        rt, nt = self._rt()
+        rt._prev_state, rt._state_base = _vec_for("chess"), 0.1
+        rt._state_expect = 0.2
+        r = rt.tick()
+        assert nt.step_calls[-1]["grad_norm"] == pytest.approx(
+            abs(r.state_change - 0.2))
+
+    def test_first_tick_falls_back_to_thought_novelty(self):
+        rt, nt = self._rt()
+        r = rt.tick()
+        assert r.state_change is None
+        assert nt.step_calls[-1]["activation"] == pytest.approx(r.novelty)
+
+    def test_ablation_drives_da_from_thought_novelty(self):
+        rt, nt = self._rt(state_driven_nt=False)
+        rt._prev_state, rt._state_base = _vec_for("chess"), 0.1
+        r = rt.tick()
+        assert nt.step_calls[-1]["activation"] == pytest.approx(r.novelty)
 
 
 def _cosine_t(a, b):
