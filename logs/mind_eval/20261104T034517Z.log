@@ -3565,3 +3565,5 @@ Another way to confirm is to think about historical context. When I was younger,
   pci/no_oscillator/null: PCI=0.000 reached=0.0
     pci/no_oscillator/da run 0: PCI=0.808 channels=DA
   pci/no_oscillator/da: PCI=0.808 reached=1.0
+    pci/no_oscillator/gaba run 0: PCI=1.045 channels=DA,NE,ACh,Glu,GABA,boredom,novelty,selection_entropy,differentiation,action,inhibited,recall,thought
+  pci/no_oscillator/gaba: PCI=1.045 reached=13.0
