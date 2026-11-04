@@ -3571,3 +3571,4 @@ Another way to confirm is to think about historical context. When I was younger,
   pci/no_oscillator/memory: PCI=0.927 reached=9.0
 [mind-eval] probe controller_phi
     controller_phi: 8/32 states
+    controller_phi: 16/32 states
