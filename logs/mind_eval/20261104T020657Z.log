@@ -2051,3 +2051,25 @@ Also, the grandfather's workshop could tie into the mill, showing that
   loop_escape/bare: novelty=0.02
   loop_escape: low-novelty threshold=0.033
 [mind-eval] probe metacognition
+[tick 1] responding action=respond
+  NT[DA=0.15 NE=0.20 5HT=0.50 ACh=0.30 eCB=0.10 Glu=0.45 GABA=0.15]
+  CUR[nov=0.53 bore=0.12]
+  WS[R=0.10 θ=0.25 ignited=no 40Hz γ=1.00 in[s=1.00 m=0.00 l=0.60 s=0.19 n=0.53]]
+  BG deliberation (H=0.81 decisiveness, diff=0.19 nats repertoire spread — IIT-flavored proxies, not a rigorous Φ):
+    [        ] nll= 4.46 "I know that Paris is the capital of France."
+    [SELECTED] nll= 4.86 "The capital of France is Paris."
+    [SELECTED] nll= 4.86 "The capital of France is Paris."
+  think trace (SELECTED): "Okay, so I need to figure out the capital of France. I remember that Paris is a major city there, but I'm not entirely sure if it's the capital. I think I've heard it mentioned in news and maybe in school. Let me try to recall any specific facts. I know that Paris is famous for landmarks like the Eiffel Tower and the Louvre Museum. Also, it's often associated with art, fashion, and culture. 
+
+Wait, I also remember that the capital is the official seat of government, so maybe it's where the President lives or where government meetings take place. I'm pretty confident that Paris is the capital, but I'm not 100% certain. I don't want to make a mistake here. Maybe I can think of other countries and their capitals to compare. For example, the UK's capital is London, Germany's is Berlin, and Italy's is Rome. So France's capital should be somewhere else, probably a well-known city. 
+
+I also think that the French flag has a blue background with white clouds and a star, but that's not relevant here. The Eiffel Tower is definitely in Paris, so that supports the idea that Paris is the capital. I don't recall any major government buildings or official meetings happening outside Paris. 
+
+Another way to confirm is to think about historical context. When I was younger, I watched a show where they mentioned Paris as the capital, and it was highlighted as the place where important meetings happen. That makes me more confident. I guess I should stick with Paris as the capital of France."
+  GW in mind 2:
+    - [thought 0.50] The capital of France is Paris.
+    - [percept 1.00] What is the capital of France?
+    metacognition/full item 1/1: ✓ The capital of France is Paris.
+  metacognition/full: acc=1.00 auroc_H=None
+  metacognition/bare: acc=1.00 auroc_H=None
+[mind-eval] probe perturbational_complexity
