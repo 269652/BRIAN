@@ -2862,11 +2862,11 @@ class TestContentCoupledWorkspace:
             _cosine_t(_vec_for("the launch is at noon"),
                       _vec_for("thinking about the launch plan")), abs=1e-6)
 
-    def test_the_coherence_baseline_adapts_slowly(self):
+    def test_the_coherence_baseline_adapts_at_the_norm_rate(self):
         rt, _, _ = self._rt()
         rt._coh_base = 0.3
         r = rt.tick()
-        a = rt.cfg.nov_baseline_alpha
+        a = rt.cfg.norm_adapt_alpha
         assert rt._coh_base == pytest.approx(
             (1 - a) * 0.3 + a * r.content_coherence)
 
@@ -2902,6 +2902,15 @@ class TestStateChangeDrivesNT:
         assert rt._prev_state == pytest.approx(now)
         assert r.state_change == pytest.approx(divisive_normalise(d, 0.1))
         assert nt.step_calls[-1]["activation"] == pytest.approx(r.state_change)
+
+    def test_the_state_baseline_adapts_at_the_norm_rate(self):
+        rt, _ = self._rt()
+        prev = _vec_for("chess")
+        rt._prev_state, rt._state_base = prev, 0.1
+        rt.tick()
+        d = 1.0 - _cosine_t(rt.workspace.state_vector(), prev)
+        a = rt.cfg.norm_adapt_alpha
+        assert rt._state_base == pytest.approx((1 - a) * 0.1 + a * d)
 
     def test_ne_reads_the_departure_from_the_state_trend(self):
         rt, nt = self._rt()
@@ -2967,11 +2976,21 @@ class TestNoveltyAdaptsToItsOwnScale:
         r = self._rt(["copy"]).tick()
         assert r.novelty == pytest.approx(0.0, abs=1e-6)
 
-    def test_the_raw_baseline_adapts_slowly(self):
+    def test_the_raw_baseline_adapts_at_the_norm_rate(self):
+        # run 59047939: seeded from a first raw 0.319 and adapting at
+        # 0.05, the baseline stayed inflated for the whole 16-tick run —
+        # typical thoughts read 0.15-0.2 and the write gate never opened
+        from neuroslm.cognition.runtime import MindConfig
+        assert MindConfig().norm_adapt_alpha == pytest.approx(0.2)
         rt = self._rt(["switch"])
         rt.tick()
-        a = rt.cfg.nov_baseline_alpha
+        a = rt.cfg.norm_adapt_alpha
         assert rt._raw_nov_base == pytest.approx((1 - a) * 0.04 + a * 0.08)
+
+    def test_a_copy_reads_zero_whatever_the_baseline(self):
+        rt = self._rt(["copy"])
+        rt._raw_nov_base = 1e-4
+        assert rt.tick().novelty == pytest.approx(0.0, abs=1e-6)
 
     def test_first_tick_without_a_baseline_reads_typical(self):
         rt = self._rt(["switch"])

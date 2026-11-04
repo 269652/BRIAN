@@ -311,6 +311,12 @@ class MindConfig:
     boredom above what the run's own novelty level implies."""
 
     nov_baseline_alpha: float = 0.05
+    norm_adapt_alpha: float = 0.2
+    """EWMA rate of the divisive-normalisation baselines (raw novelty,
+    content coherence, state change): ~5-tick adaptation. Run 59047939:
+    at 0.05 the raw baseline, seeded from a first raw of 0.319, stayed
+    inflated for a whole 16-tick run. A copy reads 0 at any baseline,
+    so fast adaptation does not blunt loop detection."""
     adaptive_novelty: bool = True
     """Novelty = raw / (raw + slow raw baseline), raw = 1 − max cosine
     (divisive normalisation; run 59042281: R1's raw novelty lived in
@@ -1146,7 +1152,7 @@ class CognitiveRuntime:
                      "novelty": None},
                     self._coh_base)
                 if coherence is not None:
-                    a_c = self.cfg.nov_baseline_alpha
+                    a_c = self.cfg.norm_adapt_alpha
                     self._coh_base = (coherence if self._coh_base is None
                                       else (1 - a_c) * self._coh_base
                                       + a_c * coherence)
@@ -1212,7 +1218,7 @@ class CognitiveRuntime:
                                  thought_salience(raw_novelty,
                                                   self._raw_nov_base,
                                                   ignited=bool(ignition)))
-        a_r = self.cfg.nov_baseline_alpha
+        a_r = self.cfg.norm_adapt_alpha
         self._raw_nov_base = (raw_novelty if self._raw_nov_base is None else
                               (1 - a_r) * self._raw_nov_base
                               + a_r * raw_novelty)
@@ -1320,7 +1326,7 @@ class CognitiveRuntime:
         from neuroslm.cognition.workspace import divisive_normalise
         d = max(0.0, 1.0 - _cosine(now, prev))
         nu = divisive_normalise(d, self._state_base)
-        a = self.cfg.nov_baseline_alpha
+        a = self.cfg.norm_adapt_alpha
         self._state_base = (d if self._state_base is None
                             else (1 - a) * self._state_base + a * d)
         return nu
