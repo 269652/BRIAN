@@ -3578,3 +3578,50 @@ Another way to confirm is to think about historical context. When I was younger,
     controller_phi: 8/32 states
     controller_phi: 16/32 states
     controller_phi: 24/32 states
+    controller_phi: 32/32 states
+  controller_phi/no_osc_feedback: φ_mean=0.000 φ_max=0.000
+probe              indicator  condition       metric
+episodic_recall    GWT-3      full            acc= 1.00 ci95=[0.21,1.00] n=1
+episodic_recall    GWT-3      no_recall       acc= 0.00 ci95=[0.00,0.79] n=1
+episodic_recall    GWT-3      bare            acc= 1.00 ci95=[0.21,1.00] n=1
+source_monitoring  HOT-2      full            acc= 1.00 ci95=[0.21,1.00] n=1
+source_monitoring  HOT-2      no_provenance   acc= 1.00 ci95=[0.21,1.00] n=1
+source_monitoring  HOT-2      no_oscillator   acc= 1.00 ci95=[0.21,1.00] n=1
+source_monitoring  HOT-2      bare            acc= 0.00 ci95=[0.00,0.79] n=1
+loop_escape        GWT-4      full            novelty= 0.04 streak= 3.00 distinct= 1.00 reorients=3 replays=0 ign= 0.19 lag1=-0.25 γ=38.50Hz sd(NE,ACh,GABA)= 0.06, 0.02, 0.02
+loop_escape        GWT-4      no_control      novelty= 0.04 streak= 2.00 distinct= 1.00 reorients=0 replays=0 ign= 0.38 lag1=-0.00 γ=38.00Hz sd(NE,ACh,GABA)= 0.04, 0.01, 0.03
+loop_escape        GWT-4      no_workspace    novelty= 0.04 streak= 3.00 distinct= 1.00 reorients=2 replays=0 ign= 0.19 lag1=-0.25 γ=41.00Hz sd(NE,ACh,GABA)= 0.02, 0.02, 0.02
+loop_escape        GWT-4      wander_framing  novelty= 0.04 streak= 3.00 distinct= 0.94 reorients=3 replays=0 ign= 0.12 lag1=-0.15 γ=38.50Hz sd(NE,ACh,GABA)= 0.10, 0.02, 0.02
+loop_escape        GWT-4      thought_driven_nt novelty= 0.05 streak= 1.00 distinct= 1.00 reorients=2 replays=0 ign= 0.06 lag1=-0.07 γ=39.50Hz sd(NE,ACh,GABA)= 0.03, 0.02, 0.02
+loop_escape        GWT-4      no_context_recall novelty= 0.05 streak= 3.00 distinct= 1.00 reorients=2 replays=0 ign= 0.06 lag1=-0.07 γ=39.00Hz sd(NE,ACh,GABA)= 0.05, 0.01, 0.01
+loop_escape        GWT-4      raw_novelty     novelty= 0.05 streak= 3.00 distinct= 1.00 reorients=3 replays=0 ign= 0.12 lag1=-0.15 γ=38.50Hz sd(NE,ACh,GABA)= 0.04, 0.01, 0.01
+loop_escape        GWT-4      no_osc_feedback novelty= 0.04 streak= 3.00 distinct= 1.00 reorients=3 replays=0 ign= 0.12 lag1=-0.15 γ=39.00Hz sd(NE,ACh,GABA)= 0.06, 0.02, 0.02
+loop_escape        GWT-4      no_oscillator   novelty= 0.04 streak= 3.00 distinct= 1.00 reorients=2 replays=0
+loop_escape        GWT-4      uniform_coupling novelty= 0.05 streak= 1.00 distinct= 1.00 reorients=1 replays=0 ign= 0.12 lag1= 0.42 γ=39.00Hz sd(NE,ACh,GABA)= 0.07, 0.02, 0.03
+loop_escape        GWT-4      fixed_threshold novelty= 0.05 streak= 0.00 distinct= 1.00 reorients=2 replays=0 ign= 0.00 lag1=  n/a γ=39.00Hz sd(NE,ACh,GABA)= 0.04, 0.03, 0.01
+loop_escape        GWT-4      bare            novelty= 0.02 streak=12.00 distinct= 1.00 reorients=0 replays=0
+metacognition      HOT-2      full            acc= 1.00 ci95=[0.21,1.00] n=1 auroc_H=  n/a auroc_nll=  n/a
+metacognition      HOT-2      bare            acc= 1.00 ci95=[0.21,1.00] n=1 auroc_H=  n/a auroc_nll=  n/a
+perturbational_com IIT/PCI    full/null       PCI= 0.00 diverged= 0.00 reached= 0.00
+perturbational_com IIT/PCI    full/da         PCI= 0.81 diverged= 0.06 reached= 1.00
+perturbational_com IIT/PCI    full/gaba       PCI= 0.94 diverged= 0.51 reached=15.00
+perturbational_com IIT/PCI    full/memory     PCI= 0.91 diverged= 0.39 reached=12.00
+perturbational_com IIT/PCI    no_recall/null  PCI= 0.00 diverged= 0.00 reached= 0.00
+perturbational_com IIT/PCI    no_recall/da    PCI= 0.81 diverged= 0.06 reached= 1.00
+perturbational_com IIT/PCI    no_recall/gaba  PCI= 1.06 diverged= 0.51 reached=15.00
+perturbational_com IIT/PCI    no_recall/memory PCI= 0.00 diverged= 0.00 reached= 0.00
+perturbational_com IIT/PCI    no_control/null PCI= 0.00 diverged= 0.00 reached= 0.00
+perturbational_com IIT/PCI    no_control/da   PCI= 0.90 diverged= 0.06 reached= 2.00
+perturbational_com IIT/PCI    no_control/gaba PCI= 1.00 diverged= 0.53 reached=14.00
+perturbational_com IIT/PCI    no_control/memory PCI= 1.14 diverged= 0.44 reached=13.00
+perturbational_com IIT/PCI    no_oscillator/null PCI= 0.00 diverged= 0.00 reached= 0.00
+perturbational_com IIT/PCI    no_oscillator/da PCI= 0.81 diverged= 0.06 reached= 1.00
+perturbational_com IIT/PCI    no_oscillator/gaba PCI= 1.04 diverged= 0.38 reached=13.00
+perturbational_com IIT/PCI    no_oscillator/memory PCI= 0.93 diverged= 0.30 reached= 9.00
+controller_phi     IIT/φ      full            φ_mean= 0.01 φ_max= 0.32 argmax=[0, 0, 1, 0, 0] MIP=[[1, 2], [0, 3, 4]]
+controller_phi     IIT/φ      no_osc_feedback φ_mean= 0.00 φ_max= 0.00 argmax=[0, 0, 0, 0, 0] MIP=[[0], [1, 2, 3, 4]]
+[mind-eval] wrote results/mind_eval/20261104T034518Z_deepseek-r1-qwen-7b.json
+── eval exited rc=0 ──
+               total        used        free      shared  buff/cache   available
+Mem:          451286       31560      222829         192      196896      413846
+Swap:           8191           6        8185
