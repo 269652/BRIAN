@@ -108,6 +108,79 @@ class TestIgnitionIsGlobal:
         assert not out.ignited
 
 
+class TestContentCoupling:
+    """Stage 2 (binding by synchrony): module-to-module coupling C_mn
+    scales the mean field each population feels. C = 1 everywhere is
+    the original all-to-all model."""
+
+    ONES = [[1.0] * 5 for _ in range(5)]
+    EYE = [[1.0 if i == j else 0.0 for j in range(5)] for i in range(5)]
+
+    def test_uniform_matrix_reproduces_the_original_dynamics(self):
+        a = _ws(seed=3, noise=2.0).step(ALL_ON, BASE_NT)
+        b = _ws(seed=3, noise=2.0).step(ALL_ON, BASE_NT, coupling=self.ONES)
+        assert b.sync_r == pytest.approx(a.sync_r, abs=1e-9)
+
+    def test_decoupled_modules_cannot_lock_globally(self):
+        together = _settle(_ws(coupling_ratio=3.0), ticks=2)
+        ws = _ws(coupling_ratio=3.0)
+        for _ in range(2):
+            apart = ws.step(ALL_ON, BASE_NT, coupling=self.EYE)
+        assert apart.sync_r < together.sync_r - 0.2
+
+    def test_coherent_content_synchronises_more_than_incoherent(self):
+        coh = [[2.0] * 5 for _ in range(5)]
+        inc = [[1.0 if i == j else 0.2 for j in range(5)] for i in range(5)]
+        r = {}
+        for name, c in (("coh", coh), ("inc", inc)):
+            ws = _ws(coupling_ratio=1.2)
+            for _ in range(2):
+                out = ws.step(ALL_ON, BASE_NT, coupling=c)
+            r[name] = out.sync_r
+        assert r["coh"] > r["inc"]
+
+    def test_rejects_a_malformed_matrix(self):
+        with pytest.raises(ValueError):
+            _ws().step(ALL_ON, BASE_NT, coupling=[[1.0, 1.0], [1.0, 1.0]])
+
+
+class TestContentCouplingMatrix:
+    def _vecs(self, **kw):
+        base = {m: None for m in
+                ("sensory", "memory", "language", "selection", "novelty")}
+        base.update(kw)
+        return base
+
+    def test_typical_coherence_couples_at_one(self):
+        from neuroslm.cognition.oscillator import content_coupling_matrix
+        v = [1.0, 0.0]
+        u = [math.cos(1.0), math.sin(1.0)]          # cos = 0.540
+        C, mean_cos = content_coupling_matrix(
+            self._vecs(memory=v, selection=u), baseline=math.cos(1.0))
+        assert mean_cos == pytest.approx(math.cos(1.0))
+        assert C[1][3] == pytest.approx(1.0) and C[3][1] == pytest.approx(1.0)
+
+    def test_aligned_content_couples_harder_unrelated_decouples(self):
+        from neuroslm.cognition.oscillator import content_coupling_matrix
+        C, _ = content_coupling_matrix(
+            self._vecs(memory=[1.0, 0.0], selection=[1.0, 0.0],
+                       sensory=[0.0, 1.0]), baseline=0.25)
+        assert C[1][3] == pytest.approx(2 * 1.0 / 1.25)
+        assert C[0][1] == pytest.approx(0.0) and C[0][3] == pytest.approx(0.0)
+
+    def test_modules_without_content_and_self_coupling_stay_at_one(self):
+        from neuroslm.cognition.oscillator import content_coupling_matrix
+        C, _ = content_coupling_matrix(
+            self._vecs(memory=[1.0, 0.0], selection=[0.0, 1.0]), baseline=0.5)
+        assert all(C[i][i] == 1.0 for i in range(5))
+        assert C[4][1] == 1.0 and C[2][3] == 1.0
+
+    def test_no_content_pairs_is_the_uniform_matrix(self):
+        from neuroslm.cognition.oscillator import content_coupling_matrix
+        C, mean_cos = content_coupling_matrix(self._vecs(), baseline=0.3)
+        assert C == [[1.0] * 5 for _ in range(5)] and mean_cos is None
+
+
 class TestStateAndDeterminism:
     def test_same_seed_same_trajectory(self):
         a = _settle(_ws(coupling_ratio=1.2, noise=2.0), ticks=3)

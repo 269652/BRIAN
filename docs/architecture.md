@@ -3860,6 +3860,24 @@ from a similar state of mind, mood included, come back more readily;
 mood-congruent recall is a consequence, not a rule.
 `context_recall=False` is the `no_context_recall` arm of `loop_escape`.
 
+**Latent workspace, stage 2: content-coupled synchrony (2026-11-04).**
+The Kuramoto field takes an optional module coupling matrix $C$:
+oscillator $i$ in module $m$ feels $\sum_n C_{mn} z_n$, where $z_n$ is
+module $n$'s phasor sum, and $C \equiv 1$ is the original all-to-all
+model exactly. The runtime fills $C$ from each module's latent this
+tick (sensory: the percepts; memory: mean of the recalled episodes;
+language: mean of the candidates; selection: the chosen thought;
+novelty: none). For each pair with content,
+$C_{mn} = 2c/(c+\bar c)$, with $c = \max(0, \cos(v_m, v_n))$ and
+$\bar c$ a slow EWMA of the mean pair coherence: 1 at typical
+coherence, up to 2 for aligned content, 0 for unrelated content
+(`oscillator.content_coupling_matrix`). This is binding by synchrony
+(Singer & Gray 1995): ignition, global phase-locking, now requires
+the contents of mind to cohere, not just the modules to be active.
+`TickResult.content_coherence` is the mean pair cosine, shown in the
+trace as `WS[… coh=]`. `osc_content_coupling=False` is the
+`uniform_coupling` arm of `loop_escape`.
+
 **Adaptive novelty (2026-11-04).** Raw novelty, 1 − max cosine against
 stored episodes ∪ working memory, depends on the embedding's scale and
 on the trunk's register: R1's long first-person thoughts put a copy at

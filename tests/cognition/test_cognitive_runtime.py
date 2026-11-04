@@ -2141,6 +2141,7 @@ class TestTraceExplainsTheGates:
         text = format_debug_trace(r)
         assert "CUR[nov=" in text and "bore=" in text
         assert "raw=" in text, "raw novelty is visible beside the adapted"
+        assert "coh=" in text, "content coherence drives the coupling"
         assert "in[s=" in text, "WS line carries the module activations"
 
 
@@ -2824,6 +2825,60 @@ class TestContextCuedRecall:
         for ep in rt.memory.all()[-2:]:
             assert ep["context"]["ws_content"] == pytest.approx(
                 _vec_for("chess"))
+
+
+class TestContentCoupledWorkspace:
+    """Stage 2: the oscillator's module coupling follows how coherent
+    the modules' latent contents are this tick (binding by synchrony)."""
+
+    def _rt(self, **cfg_kw):
+        from neuroslm.cognition.oscillator import MODULES
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the launch plan"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=1, **cfg_kw),
+                         osc=True)
+        rt.memory.add("the launch is at noon",
+                      content_vec=_vec_for("the launch is at noon"),
+                      context={"kind": "observed"})
+        rt._last_thought = "the launch"
+        calls = []
+        real = rt._osc.step
+
+        def spy(*a, **kw):
+            calls.append(kw.get("coupling"))
+            return real(*a, **kw)
+        rt._osc.step = spy
+        return rt, calls, MODULES
+
+    def test_coherent_memory_and_thought_couple_harder(self):
+        rt, calls, M = self._rt()
+        rt._coh_base = 0.3
+        r = rt.tick()
+        C = calls[-1]
+        mem, sel = M.index("memory"), M.index("selection")
+        assert C[mem][sel] > 1.0
+        assert r.content_coherence == pytest.approx(
+            _cosine_t(_vec_for("the launch is at noon"),
+                      _vec_for("thinking about the launch plan")), abs=1e-6)
+
+    def test_the_coherence_baseline_adapts_slowly(self):
+        rt, _, _ = self._rt()
+        rt._coh_base = 0.3
+        r = rt.tick()
+        a = rt.cfg.nov_baseline_alpha
+        assert rt._coh_base == pytest.approx(
+            (1 - a) * 0.3 + a * r.content_coherence)
+
+    def test_ablation_keeps_the_uniform_coupling(self):
+        rt, calls, _ = self._rt(osc_content_coupling=False)
+        r = rt.tick()
+        assert calls[-1] is None and r.content_coherence is None
+
+
+def _cosine_t(a, b):
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    return sum(x * y for x, y in zip(a, b)) / (na * nb)
 
 
 class TestNoveltyAdaptsToItsOwnScale:

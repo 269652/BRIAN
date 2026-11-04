@@ -54,11 +54,42 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, Mapping
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
 MODULES = ("sensory", "memory", "language", "selection", "novelty")
+
+
+def content_coupling_matrix(vectors: Mapping[str, Optional[Sequence[float]]],
+                            baseline: Optional[float]
+                            ) -> Tuple[List[List[float]], Optional[float]]:
+    """Binding by synchrony (Singer & Gray 1995): coupling between two
+    modules follows how coherent their contents are this tick,
+    C_mn = 2·c/(c + c̄) with c = max(0, cos(v_m, v_n)) and c̄ the run's
+    typical coherence — 1 at typical coherence, up to 2 for aligned
+    content, 0 for unrelated content. Pairs where either module has no
+    content, and self-coupling, stay at 1. Returns (C, mean c over the
+    content pairs, or None when there are none)."""
+    from neuroslm.cognition.runtime import _cosine as _cos
+    from neuroslm.cognition.workspace import divisive_normalise
+
+    M = len(MODULES)
+    C = [[1.0] * M for _ in range(M)]
+    cs: List[float] = []
+    pairs = []
+    for i in range(M):
+        for j in range(i + 1, M):
+            vi, vj = vectors.get(MODULES[i]), vectors.get(MODULES[j])
+            if vi and vj:
+                c = max(0.0, _cos(vi, vj))
+                cs.append(c)
+                pairs.append((i, j, c))
+    if not cs:
+        return C, None
+    for i, j, c in pairs:
+        C[i][j] = C[j][i] = 2.0 * divisive_normalise(c, baseline)
+    return C, sum(cs) / len(cs)
 
 
 @dataclass
@@ -122,14 +153,26 @@ class GammaWorkspace:
 
     def step(self, activations: Mapping[str, float],
              nt_levels: Mapping[str, float],
-             update_baseline: bool = True) -> OscillatorStep:
+             update_baseline: bool = True,
+             coupling: Optional[Sequence[Sequence[float]]] = None
+             ) -> OscillatorStep:
         """One tick. ``update_baseline=False`` (reply ticks): the
         sensory module is on, a different regime — the idle baseline is
         neither seeded nor moved; before it exists, decide against the
         fixed bar (run 58683237: a reply-seeded θ=0.50 blocked every
-        idle ignition)."""
+        idle ignition).
+
+        ``coupling``: optional |MODULES|×|MODULES| matrix C; oscillator
+        i in module m feels Σ_n C_mn · (module n's mean field) instead
+        of the global field. None ≡ C = 1 everywhere."""
         a = np.repeat([max(0.0, min(1.0, float(activations.get(m, 0.0))))
                        for m in MODULES], self.n_per_module)
+        M = len(MODULES)
+        C = None
+        if coupling is not None:
+            C = np.asarray(coupling, dtype=float)
+            if C.shape != (M, M):
+                raise ValueError(f"coupling must be {M}×{M}, got {C.shape}")
         s_ach, s_gaba = self._scales(nt_levels)
         k = self.K * s_ach / self.N
         omega = self.omega * s_gaba
@@ -138,12 +181,18 @@ class GammaWorkspace:
         R = np.empty(self.n_steps)
         x = np.empty(self.n_steps)
         for t in range(self.n_steps):
-            z = np.sum(a * np.exp(1j * theta))
+            phasor = a * np.exp(1j * theta)
+            z = np.sum(phasor)
             R[t] = abs(z) / self.N
             x[t] = float(np.sum(a * np.cos(theta))) / self.N
+            if C is None:
+                field = z
+            else:
+                field = np.repeat(C @ phasor.reshape(M, -1).sum(axis=1),
+                                  self.n_per_module)
             # Σ_j a_j sin(θ_j − θ_i) = Im(z · e^{−iθ_i})
-            coupling = k * a * np.imag(z * np.exp(-1j * theta))
-            theta = theta + (omega + coupling) * self.dt
+            coupling_term = k * a * np.imag(field * np.exp(-1j * theta))
+            theta = theta + (omega + coupling_term) * self.dt
             if sq:
                 theta = theta + sq * self._rng.standard_normal(self.N)
         self.theta = np.mod(theta, 2 * math.pi)

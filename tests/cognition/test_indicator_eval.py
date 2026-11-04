@@ -726,7 +726,7 @@ class TestOscillationMetrics:
     def test_oscillator_ablations_run_when_the_workspace_is_on(self):
         res = self._run(MindConfig(n_candidates=2))
         assert {"full", "no_control", "no_osc_feedback",
-                "no_oscillator", "fixed_threshold",
+                "no_oscillator", "fixed_threshold", "uniform_coupling",
                 "bare"} <= set(res["conditions"])
 
     def test_no_oscillator_ablations_when_it_is_off(self):
@@ -734,6 +734,7 @@ class TestOscillationMetrics:
                                    workspace_oscillator=False))
         assert "no_osc_feedback" not in res["conditions"]
         assert "no_oscillator" not in res["conditions"]
+        assert "uniform_coupling" not in res["conditions"]
 
     def test_reports_ignition_dynamics_and_nt_movement(self):
         res = self._run(MindConfig(n_candidates=2))

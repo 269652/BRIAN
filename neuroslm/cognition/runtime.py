@@ -370,6 +370,11 @@ class MindConfig:
 
     osc_ignition_floor: float = 0.1
     osc_adapt_k: float = 1.0
+    osc_content_coupling: bool = True
+    """Stage 2 (binding by synchrony): module-to-module coupling follows
+    the coherence of the modules' latent contents this tick
+    (``oscillator.content_coupling_matrix``). Off → uniform all-to-all
+    coupling, as before."""
 
     osc_n_per_module: int = 8
     osc_f0_hz: float = 40.0
@@ -463,6 +468,9 @@ class TickResult:
     workspace: List[Tuple[str, float, str]] = field(default_factory=list)
     """Global workspace contents after this tick as (source, salience,
     text), most salient last; empty when ``global_workspace`` is off."""
+    content_coherence: Optional[float] = None
+    """Mean cosine between the modules' latent contents this tick (the
+    input to content-coupled synchrony); None without content coupling."""
     gamma_power: Optional[float] = None
     """Fraction of the population signal's power in 30-100 Hz."""
     goal_relevance: float = 0.0
@@ -552,7 +560,10 @@ def format_debug_trace(result: TickResult) -> str:
             f"  WS[R={result.sync_r:.2f} θ={result.ignition_threshold:.2f} "
             f"ignited={'yes' if result.ignited else 'no'} "
             f"{result.gamma_peak_hz:.0f}Hz γ={result.gamma_power:.2f} "
-            f"in[{ins}]]")
+            f"in[{ins}]"
+            + (f" coh={result.content_coherence:.2f}"
+               if result.content_coherence is not None else " coh=-")
+            + "]")
 
     if result.inhibited:
         lines.append("  BG: inhibited — no deliberation this tick "
@@ -597,6 +608,14 @@ def format_debug_trace(result: TickResult) -> str:
 
 _WS_LABEL = {"percept": "Earlier I noticed: ", "memory": "I remember: ",
              "thought": "I was thinking: "}
+
+
+def _mean_vec(vecs: Sequence[Sequence[float]]) -> Optional[List[float]]:
+    vecs = [v for v in vecs if v]
+    if not vecs:
+        return None
+    n = len(vecs)
+    return [sum(col) / n for col in zip(*vecs)]
 
 
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
@@ -763,6 +782,7 @@ class CognitiveRuntime:
         self._wm: Deque[List[float]] = deque(maxlen=max(1, self.cfg.wm_size))
         self._nov_base: Optional[float] = None
         self._raw_nov_base: Optional[float] = None
+        self._coh_base: Optional[float] = None
         self._goal_vec: Optional[List[float]] = None
         self.workspace = None
         if self.cfg.global_workspace:
@@ -1093,9 +1113,32 @@ class CognitiveRuntime:
             "novelty": novelty,
         }
         osc = None
+        coherence = None
         if self._osc is not None:
+            coupling = None
+            if self.cfg.osc_content_coupling:
+                # stage 2: each module's latent this tick sets how hard
+                # its population couples to the others
+                from neuroslm.cognition.oscillator import (
+                    content_coupling_matrix)
+                coupling, coherence = content_coupling_matrix(
+                    {"sensory": _mean_vec([list(self._embed(s))
+                                           for s in sensory]),
+                     "memory": _mean_vec([list(e["content_vec"])
+                                          for e in recalled
+                                          if e.get("content_vec")]),
+                     "language": _mean_vec(cand_vecs),
+                     "selection": thought_vec,
+                     "novelty": None},
+                    self._coh_base)
+                if coherence is not None:
+                    a_c = self.cfg.nov_baseline_alpha
+                    self._coh_base = (coherence if self._coh_base is None
+                                      else (1 - a_c) * self._coh_base
+                                      + a_c * coherence)
             osc = self._osc.step(ws_inputs, levels,
-                                 update_baseline=wandering)
+                                 update_baseline=wandering,
+                                 coupling=coupling)
         stored = (novelty >= self.cfg.novelty_write_threshold
                   and (osc is None or osc.ignited))
         if not wandering:
@@ -1204,6 +1247,7 @@ class CognitiveRuntime:
                           gamma_peak_hz=osc.peak_hz if osc else None,
                           gamma_power=osc.gamma_power if osc else None,
                           workspace_inputs=ws_inputs,
+                          content_coherence=coherence,
                           workspace=(self.workspace.items_view()
                                      if self.workspace is not None else []),
                           ignition_threshold=osc.threshold if osc else None)
