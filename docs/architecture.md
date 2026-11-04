@@ -3796,7 +3796,7 @@ compete for `ws_capacity` = 4 slots (Cowan's limit). Each tick:
   cosine, keeping their provenance: an observed episode as `memory`,
   the mind's own recalled musing (`kind=inferred`) as `thought`;
 - the selected thought enters at 1.0 if it ignited (ignition sustains
-  it), otherwise at $n/(n+ar n)$, its novelty divisively normalised
+  it), otherwise at $n/(n+\bar n)$, its novelty divisively normalised
   against the run's novelty baseline (a typical thought 0.5, a copy 0);
 - re-offering an item already held keeps the higher salience; when the
   store is full the least salient item (oldest on ties) is displaced.
@@ -3851,7 +3851,7 @@ Every episode is laid down with the state it happened in:
 the percept or memory arrived) next to its existing `nt_state`. Recall
 follows the Temporal Context Model (Howard & Kahana 2002):
 
-$$	ext{score}(e) = (1-ho)\cos(	ext{anchor}, e) + hoig[(1-w)\cos(z_t, z_e) + w\cos(\Delta NT_t, \Delta NT_e)ig]$$
+$$\text{score}(e) = (1-\rho)\cos(\text{anchor}, e) + \rho\big[(1-w)\cos(z_t, z_e) + w\cos(\Delta NT_t, \Delta NT_e)\big]$$
 
 with $z$ the workspace state (an episode with none recorded uses its
 own content), $\Delta NT$ the deviation of each channel from baseline,
@@ -3866,8 +3866,7 @@ on the trunk's register: R1's long first-person thoughts put a copy at
 0.01 and a clear topic switch at 0.06–0.09 (run 59042281). Every
 consumer now reads it divisively normalised against a slow raw baseline
 (Carandini & Heeger 2012):
-$
-u = r/(r + ar r)$, with $ar r$ an EWMA of $r$ at
+$\nu = r/(r + \bar r)$, with $\bar r$ an EWMA of $r$ at
 `nov_baseline_alpha` (0.05). A copy reads 0, a typical thought 0.5, a
 thought at twice the typical raw distance 0.67; before any baseline
 exists, 0.5. The consumers are the write gate, the NT activation driver,
