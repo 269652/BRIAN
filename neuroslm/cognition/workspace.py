@@ -68,6 +68,22 @@ class GlobalWorkspace:
             weakest = min(self._items, key=lambda it: (it.salience, it.seq))
             self._items.remove(weakest)
 
+    def state_vector(self) -> Optional[List[float]]:
+        """The workspace as ONE latent: the salience-weighted mean of
+        its items' vectors (items without a vector are skipped). None
+        when nothing salient with a vector is held."""
+        held = [it for it in self._items if it.vec and it.salience > 0.0]
+        total = sum(it.salience for it in held)
+        if not held or total <= 0.0:
+            return None
+        dim = len(held[0].vec)
+        out = [0.0] * dim
+        for it in held:
+            w = it.salience / total
+            for i, x in enumerate(it.vec[:dim]):
+                out[i] += w * x
+        return out
+
     def drop(self, source: str) -> None:
         self._items = [it for it in self._items if it.source != source]
 

@@ -3843,6 +3843,23 @@ embedding; eval reports record `meta.embed`. Every consumer of novelty
 (write gate, NT activation driver, boredom, LOOPING, recall, workspace
 salience) reads this embedding, so runs on the two are not comparable.
 
+**Latent workspace, stage 1: state vector + context-cued recall
+(2026-11-04).** `GlobalWorkspace.state_vector()` is the workspace as one
+latent: the salience-weighted mean of its items' hidden-state vectors.
+Every episode is laid down with the state it happened in:
+`context.ws_content` (the state when the thought was generated, or when
+the percept or memory arrived) next to its existing `nt_state`. Recall
+follows the Temporal Context Model (Howard & Kahana 2002):
+
+$$	ext{score}(e) = (1-ho)\cos(	ext{anchor}, e) + hoig[(1-w)\cos(z_t, z_e) + w\cos(\Delta NT_t, \Delta NT_e)ig]$$
+
+with $z$ the workspace state (an episode with none recorded uses its
+own content), $\Delta NT$ the deviation of each channel from baseline,
+ρ = `context_recall_weight` 0.3 and w = `intero_weight` 0.2. Memories
+from a similar state of mind, mood included, come back more readily;
+mood-congruent recall is a consequence, not a rule.
+`context_recall=False` is the `no_context_recall` arm of `loop_escape`.
+
 **Adaptive novelty (2026-11-04).** Raw novelty, 1 − max cosine against
 stored episodes ∪ working memory, depends on the embedding's scale and
 on the trunk's register: R1's long first-person thoughts put a copy at

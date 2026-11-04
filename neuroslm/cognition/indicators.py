@@ -557,6 +557,9 @@ def probe_loop_escape(seams: MindSeams,
         # §14.13: idle thought sees recall + last thought, not the
         # competed workspace contents
         ablations["no_workspace"] = {"global_workspace": False}
+    if cfg.context_recall:
+        # recall cued by the anchor alone, not the workspace state
+        ablations["no_context_recall"] = {"context_recall": False}
     if cfg.adaptive_novelty:
         # every novelty consumer reads raw 1 − max cosine instead
         ablations["raw_novelty"] = {"adaptive_novelty": False}

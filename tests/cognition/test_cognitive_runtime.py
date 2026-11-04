@@ -2748,6 +2748,84 @@ class TestDiverseHippocampalRecall:
 # probable continuation); boredom only heated SELECTION among near-
 # copies; reorient kept the last thought in the prompt.
 
+class TestContextCuedRecall:
+    """Stage 1 of the latent workspace (Temporal Context Model, Howard &
+    Kahana 2002): episodes are stored with the workspace state they
+    happened in — its latent content and the NT state — and recall is
+    cued by the current state as well as by the anchor."""
+
+    RIVER = [0.0, 1.0, 0.0, 0.0]
+    RIVER_ISH = [0.0, 0.98, math.sqrt(1 - 0.98 ** 2), 0.0]
+    CHESS = [1.0, 0.0, 0.0, 0.0]
+    COFFEE = [0.0, 0.0, 0.0, 1.0]
+
+    def _rt(self, nt=None, **cfg_kw):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        vecs = {"the river": self.RIVER, "chess thought": self.CHESS}
+        cfg = MindConfig(n_candidates=1, recall_k=1,
+                         workspace_oscillator=False, **cfg_kw)
+        return CognitiveRuntime(
+            generate_fn=_ScriptedGen(["a wander"]),
+            score_fn=_score_map({}),
+            embed_fn=lambda t: vecs.get(t, [0.5, 0.5, 0.5, 0.5]),
+            nt=nt or _FakeNT(), memory=EpisodicMemory(maxlen=64), cfg=cfg,
+            rng=random.Random(0))
+
+    def _two_memories(self, rt, a_ctx, b_ctx, a_nt=None, b_nt=None):
+        base = _FakeNT().levels()
+        rt.memory.add("A: the river by the mill", content_vec=self.RIVER_ISH,
+                      nt_state=a_nt or base,
+                      context={"kind": "observed", "ws_content": a_ctx})
+        rt.memory.add("B: the river in spring", content_vec=self.RIVER,
+                      nt_state=b_nt or base,
+                      context={"kind": "observed", "ws_content": b_ctx})
+        rt._last_thought = "the river"
+
+    def test_the_memory_laid_down_in_the_current_context_wins(self):
+        rt = self._rt()
+        self._two_memories(rt, a_ctx=self.CHESS, b_ctx=self.COFFEE)
+        rt.workspace.offer("chess thought", "thought", self.CHESS, 1.0)
+        r = rt.tick()
+        assert [e["content"] for e in r.recalled] == [
+            "A: the river by the mill"]
+
+    def test_without_context_the_anchor_alone_decides(self):
+        rt = self._rt(context_recall=False)
+        self._two_memories(rt, a_ctx=self.CHESS, b_ctx=self.COFFEE)
+        rt.workspace.offer("chess thought", "thought", self.CHESS, 1.0)
+        r = rt.tick()
+        assert [e["content"] for e in r.recalled] == ["B: the river in spring"]
+
+    def test_mood_congruent_recall(self):
+        high_da = dict(_FakeNT().levels(), DA=0.30)
+        rt = self._rt(nt=_FakeNT(DA=0.30))
+        self._two_memories(rt, a_ctx=None, b_ctx=None, a_nt=high_da)
+        r = rt.tick()
+        assert [e["content"] for e in r.recalled] == [
+            "A: the river by the mill"]
+
+    def test_stored_episodes_carry_the_workspace_state(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the moon"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=0))
+        rt.workspace.offer("chess thought", "thought", _vec_for("chess"), 1.0)
+        r = rt.tick()
+        assert r.stored
+        ep = rt.memory.all()[-1]
+        assert ep["context"]["ws_content"] == pytest.approx(_vec_for("chess"))
+
+    def test_observed_and_remembered_episodes_carry_it_too(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["x"]),
+                         cfg=MindConfig(n_candidates=1))
+        rt.workspace.offer("chess thought", "thought", _vec_for("chess"), 1.0)
+        rt.observe("the river was beautiful today")
+        rt.remember("My grandfather repaired clocks by the mill.")
+        for ep in rt.memory.all()[-2:]:
+            assert ep["context"]["ws_content"] == pytest.approx(
+                _vec_for("chess"))
+
+
 class TestNoveltyAdaptsToItsOwnScale:
     """Run 59042281: with R1's long same-register thoughts a topic
     switch scored raw novelty 0.06–0.09 and a copy 0.01 — ordered, but

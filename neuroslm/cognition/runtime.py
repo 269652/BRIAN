@@ -284,6 +284,17 @@ class MindConfig:
     """Workspace slots (Cowan's ~4-chunk working-memory limit)."""
     ws_decay: float = 0.7
     """Per-tick salience retention of every workspace item."""
+    context_recall: bool = True
+    """Temporal Context Model (Howard & Kahana 2002): episodes carry the
+    workspace state they were laid down in (``ws_content``, plus their
+    ``nt_state``), and recall scores (1−ρ)·cos(anchor, episode) +
+    ρ·context similarity. Off → the anchor alone decides."""
+    context_recall_weight: float = 0.3
+    """ρ: share of the recall score given to context similarity."""
+    intero_weight: float = 0.2
+    """Share of context similarity from the NT state (deviation from
+    baseline) rather than the workspace's latent content — mood-
+    congruent recall emerges from it."""
 
     control_thresholds: str = "relative"
     """'relative' (H67): LOOPING and replay are judged against the run's
@@ -819,7 +830,8 @@ class CognitiveRuntime:
                             tags=[source, "percept", "kind=observed",
                                  f"action_class={action_class}"],
                             context={"kind": "observed", "source": source,
-                                    "action_class": action_class})
+                                    "action_class": action_class,
+                                    "ws_content": self._ws_content()})
         self._sensory.append(text)
         self.nt.step_full(
             activation=1.0,
@@ -839,7 +851,8 @@ class CognitiveRuntime:
                         content_vec=list(self._embed(text)),
                         nt_state=self.nt.levels(),
                         tags=[source, "memory", "kind=observed"],
-                        context={"kind": "observed", "source": source})
+                        context={"kind": "observed", "source": source,
+                                 "ws_content": self._ws_content()})
 
     # ── The cognitive cycle ──────────────────────────────────────────
 
@@ -948,6 +961,13 @@ class CognitiveRuntime:
             over_fetch = max(self.cfg.recall_k + len(self._recent_recall),
                              len(self.memory.all()))
             scored = self.memory.retrieve_scored(anchor_vec, k=over_fetch)
+            if self.cfg.context_recall:
+                rho = self.cfg.context_recall_weight
+                ctx_now = self._ws_content()
+                intero_now = self._intero(levels)
+                scored = [((1.0 - rho) * sim + rho * self._context_similarity(
+                    e, ctx_now, intero_now), e) for sim, e in scored]
+                scored.sort(key=lambda t: t[0], reverse=True)
             pen = self.cfg.inferred_recall_penalty
             # Content already IN the prompt is never recalled: the
             # current percepts ("Just now:", stored by observe() before
@@ -1007,6 +1027,9 @@ class CognitiveRuntime:
         # dropped from the prompt, not just re-anchored in recall.
         prompt = self._compose_prompt(sensory, recalled, trigger_text,
                                       keep_last_thought=not reorient)
+        # the workspace state this thought is generated in — stored
+        # with the episode as its context (stage 1)
+        ctx_content = self._ws_content()
         gen_scale = 1.0 + self.cfg.gen_boredom_gain * max(
             0.0, min(1.0, self._boredom))
         gen = self._gen if not wandering else self._gen_wander
@@ -1111,6 +1134,7 @@ class CognitiveRuntime:
                     "selection_entropy": selection_entropy,
                     "differentiation": differentiation,
                     "novelty": novelty,
+                    "ws_content": ctx_content,
                 })
 
         # DRIVE (B): the tick's signals advance the NT dynamics — the
@@ -1185,6 +1209,32 @@ class CognitiveRuntime:
                           ignition_threshold=osc.threshold if osc else None)
 
     # ── Internals ────────────────────────────────────────────────────
+
+    def _ws_content(self) -> Optional[List[float]]:
+        return (self.workspace.state_vector()
+                if self.workspace is not None else None)
+
+    def _intero(self, levels: Dict[str, float]) -> List[float]:
+        base = self.nt.baselines
+        base = base() if callable(base) else base
+        return [float(levels.get(ch, 0.0)) - float(base.get(ch, 0.0))
+                for ch in _NT_ORDER]
+
+    def _context_similarity(self, e: dict, content: Optional[List[float]],
+                            intero: List[float]) -> float:
+        """(1−w)·cos(workspace state now, state the episode was laid
+        down in — its own content if none was recorded) + w·cos(NT
+        deviation now, then)."""
+        w = self.cfg.intero_weight
+        c = 0.0
+        if content is not None:
+            then = ((e.get("context") or {}).get("ws_content")
+                    or e.get("content_vec"))
+            c = _cosine(content, then) if then else 0.0
+        m = 0.0
+        if e.get("nt_state"):
+            m = _cosine(intero, self._intero(e["nt_state"]))
+        return (1.0 - w) * c + w * m
 
     def _normalise_novelty(self, raw: float) -> float:
         if not self.cfg.adaptive_novelty:

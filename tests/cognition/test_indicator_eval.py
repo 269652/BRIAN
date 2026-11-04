@@ -255,6 +255,9 @@ class TestLoopEscapeProbe:
         assert any(n > 0 for r in conds["full"]["runs"]
                    for n in r["workspace_sizes"])
 
+    def test_context_recall_has_its_own_ablation_arm(self):
+        assert "no_context_recall" in self._run()["conditions"]
+
     def test_adaptive_novelty_has_its_own_ablation_arm(self):
         conds = self._run()["conditions"]
         assert "raw_novelty" in conds

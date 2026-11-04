@@ -88,3 +88,23 @@ class TestThoughtSalience:
     def test_no_baseline_yet_counts_as_typical(self):
         from neuroslm.cognition.workspace import thought_salience
         assert thought_salience(0.2, None, ignited=False) == pytest.approx(0.5)
+
+
+class TestStateVector:
+    def test_salience_weighted_mean_of_item_latents(self):
+        ws = _ws()
+        ws.offer("a", "memory", [1.0, 0.0], 0.75)
+        ws.offer("b", "thought", [0.0, 1.0], 0.25)
+        assert ws.state_vector() == pytest.approx([0.75, 0.25])
+
+    def test_items_without_a_vector_are_skipped(self):
+        ws = _ws()
+        ws.offer("a", "memory", [], 0.9)
+        ws.offer("b", "thought", [0.0, 2.0], 0.5)
+        assert ws.state_vector() == pytest.approx([0.0, 2.0])
+
+    def test_empty_or_silent_workspace_has_no_state(self):
+        ws = _ws()
+        assert ws.state_vector() is None
+        ws.offer("a", "memory", [1.0], 0.0)
+        assert ws.state_vector() is None
