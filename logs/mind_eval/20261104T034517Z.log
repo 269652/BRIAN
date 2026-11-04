@@ -3561,3 +3561,5 @@ Another way to confirm is to think about historical context. When I was younger,
   pci/no_control/gaba: PCI=1.003 reached=14.0
     pci/no_control/memory run 0: PCI=1.140 channels=DA,NE,ACh,eCB,Glu,GABA,novelty,selection_entropy,differentiation,recall,thought,ignited,sync_r
   pci/no_control/memory: PCI=1.140 reached=13.0
+    pci/no_oscillator/null run 0: PCI=0.000 channels=-
+  pci/no_oscillator/null: PCI=0.000 reached=0.0
