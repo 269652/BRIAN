@@ -129,6 +129,21 @@ class MindSeams:
                                 reasoning_fn=self.reasoning_fn)
 
 
+WANDER_FRAMINGS: Tuple[str, ...] = (
+    "Let my mind wander from what I remember toward something new.",
+    "I notice a thread connecting my last thought to what came "
+    "before it.",
+    "Stepping back for a moment to reflect on the pattern in what "
+    "I've seen.",
+    "Following a tangent that feels worth pursuing.",
+    "Something about this still nags at me — sitting with it a "
+    "moment.",
+    "Drifting associatively, one idea suggesting the next.",
+)
+"""The scripted idle framings (default until 2026-11-04); kept for the
+``wander_framing`` ablation arm."""
+
+
 @dataclass
 class MindConfig:
     """All cognition-loop knobs in one place."""
@@ -394,22 +409,14 @@ class MindConfig:
     osc_ms_per_tick: int = 250
     osc_seed: int = 0
 
-    wander_prompts: Tuple[str, ...] = (
-        "Let my mind wander from what I remember toward something new.",
-        "I notice a thread connecting my last thought to what came "
-        "before it.",
-        "Stepping back for a moment to reflect on the pattern in what "
-        "I've seen.",
-        "Following a tangent that feels worth pursuing.",
-        "Something about this still nags at me — sitting with it a "
-        "moment.",
-        "Drifting associatively, one idea suggesting the next.",
-    )
-    """DMN framing for idle ticks (no sensory input this cycle): biases
-    THINK toward associative, reflective continuation instead of a
-    flat completion of nothing. Rotated round-robin, one per idle
-    tick, so the wandering doesn't feel scripted. Never used when
-    responding to real input — that's task-positive, not DMN."""
+    wander_prompts: Tuple[str, ...] = ()
+    """Scripted framing line for idle ticks, rotated round-robin; empty
+    by default — the idle thought continues from the workspace, most
+    salient item last, unprompted. :data:`WANDER_FRAMINGS` (the former
+    default) made R1 reflect ON its memories ("Stepping back … to
+    reflect on the pattern") instead of following one association
+    (runs 59042281, 59047939); it is the ``wander_framing`` arm of
+    ``loop_escape``. Never used when responding to real input."""
 
 
 @dataclass
@@ -1062,10 +1069,14 @@ class CognitiveRuntime:
         # Inner-speech register (D): idle ticks generate through the
         # wander seam (raw completion, no chat template) — an
         # addressee only exists on respond ticks.
-        trigger_text = sensory[-1] if sensory else self._next_wander_prompt()
+        # Unframed (default): the trigger is what dominated the
+        # workspace when the thought was generated.
+        framing = "" if sensory else self._next_wander_prompt()
+        trigger_text = (sensory[-1] if sensory
+                        else framing or self._focus_text())
         # REORIENT is a state transition: the train of thought is
         # dropped from the prompt, not just re-anchored in recall.
-        prompt = self._compose_prompt(sensory, recalled, trigger_text,
+        prompt = self._compose_prompt(sensory, recalled, framing,
                                       keep_last_thought=not reorient)
         # the workspace state this thought is generated in — stored
         # with the episode as its context (stage 1)
@@ -1376,7 +1387,7 @@ class CognitiveRuntime:
         self._nov_base = (1 - a) * self._nov_base + a * novelty
 
     def _compose_prompt(self, sensory: List[str],
-                        recalled: List[dict], trigger_text: str,
+                        recalled: List[dict], framing: str,
                         keep_last_thought: bool = True) -> str:
         if sensory:
             return self._compose_reply_prompt(sensory, recalled)
@@ -1384,13 +1395,15 @@ class CognitiveRuntime:
         if self.workspace is not None:
             # One first-person paragraph, not a labelled list: R1 read
             # a bulleted list as an exercise to solve (run 58994037).
+            # Most salient last: the thought continues from it.
             items = self.workspace.items()
             if items:
                 lines.append(" ".join(
                     f"{_WS_LABEL.get(it.source, '')}{' '.join(it.text.split())}"
                     for it in items))
                 lines.append("")
-            lines.append(trigger_text)
+            if framing:
+                lines.append(framing)
             lines.append("Thought:")
             return "\n".join(lines)[-self.cfg.max_prompt_chars:]
         if recalled:
@@ -1400,12 +1413,8 @@ class CognitiveRuntime:
             lines.append("")
         if self._last_thought and keep_last_thought:
             lines.append(f"My last thought: {self._last_thought}")
-        # DMN: nothing external arrived — bias THINK toward
-        # associative, reflective continuation instead of a flat
-        # completion of nothing. `trigger_text` is the wander prompt
-        # already chosen by the caller (tick()), so it can be recorded
-        # as this episode's Layer-2 trigger too.
-        lines.append(trigger_text)
+        if framing:
+            lines.append(framing)
         lines.append("Thought:")
         return "\n".join(lines)[-self.cfg.max_prompt_chars:]
 
@@ -1442,6 +1451,13 @@ class CognitiveRuntime:
         p = prompts[self._wander_idx % len(prompts)]
         self._wander_idx += 1
         return p
+
+    def _focus_text(self) -> str:
+        """The most salient workspace item — what an unframed idle
+        thought continues from; the persona when nothing is in mind
+        (as RECALL's anchor falls back to it)."""
+        items = self.workspace.items() if self.workspace is not None else []
+        return items[-1].text if items else self.cfg.persona
 
     def _select(self, scores: List[ThoughtScore],
                 levels: Dict[str, float],

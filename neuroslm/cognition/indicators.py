@@ -557,6 +557,10 @@ def probe_loop_escape(seams: MindSeams,
         # §14.13: idle thought sees recall + last thought, not the
         # competed workspace contents
         ablations["no_workspace"] = {"global_workspace": False}
+    if not cfg.wander_prompts:
+        from neuroslm.cognition.runtime import WANDER_FRAMINGS
+        # the scripted idle framings that invited reflection ON memory
+        ablations["wander_framing"] = {"wander_prompts": WANDER_FRAMINGS}
     if cfg.state_driven_nt and cfg.global_workspace:
         # DA/NE driven by the selected thought's novelty, not the state
         ablations["thought_driven_nt"] = {"state_driven_nt": False}

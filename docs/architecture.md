@@ -3278,11 +3278,15 @@ produces one, unprompted, while the user sits at the `>` prompt.
 
 **Mind-wandering (DMN) + basal-ganglia debug trace** (2026-08-12): a
 tick with no sensory input this cycle (`TickResult.wandering=True`) is
-the DMN condition — `_compose_prompt` biases THINK toward one of
-`MindConfig.wander_prompts` ("let my mind wander from what I remember
-toward something new", …), rotated round-robin, instead of completing
-a flat prompt. A tick responding to real input skips this framing
-entirely — task-positive, not DMN. Each `TickResult` also carries
+the DMN condition. Since 2026-11-04 the idle prompt carries no scripted
+framing: THINK continues from the workspace contents, the most salient
+item last (§14.13). The former rotating framings (`WANDER_FRAMINGS`:
+"Stepping back for a moment to reflect on the pattern in what I've
+seen", …) made R1 reflect *on* its memories instead of following one
+association (runs 59042281, 59047939). They remain available through
+`MindConfig.wander_prompts` and run as the `wander_framing` arm of
+`loop_escape`. A tick responding to real input never uses a framing:
+it is task-positive, not DMN. Each `TickResult` also carries
 `tick_n` (a monotonic cycle counter) and `prior_thought` (what
 preceded it), so a thought's lineage is traceable across ticks.
 `format_debug_trace(result)` renders the full basal-ganglia
@@ -3311,7 +3315,7 @@ pane / poller-visible stream filters them out, so silent internal
 processing doesn't pollute what looks like the mind speaking.
 
 `_compose_prompt` cues THINK differently by action: idle ticks end on
-`"Thought:"` (after a rotating wander prompt); sensory-driven ticks
+`"Thought:"` (after a wander framing only if one is configured); sensory-driven ticks
 end on `"My reply:"` — this is also what makes `respond` a genuine
 basal-ganglia act rather than a bypass: `ChatDaemon.respond()` now
 routes through `mind.tick()` when a mind is attached (legacy direct-
@@ -3352,7 +3356,9 @@ inventing a parallel `Episode` type:
   already-existing distinction in the codebase, now made explicit and
   queryable instead of implicit in which code path wrote the episode.
 - **Layer 2 (context)**: `context.trigger` — the actual user text for
-  a `respond`, or the specific wander prompt chosen for an idle tick
+  a `respond`; for an idle tick the wander framing if one is configured,
+  otherwise the most salient workspace item the thought continued from
+  (the persona when nothing is in mind)
   (captured in `tick()` before `_compose_prompt` runs, not hidden
   inside it); `context.action` / `context.wandering` / `context.tick_n`.
 - **Layer 3 (internal state)**: `nt_state` (already existed) plus

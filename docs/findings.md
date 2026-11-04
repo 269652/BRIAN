@@ -4949,3 +4949,38 @@ What to look for (descriptive first, since n = 1):
   autocorrelation with `thought_driven_nt`.
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestContextCuedRecall, TestContentCoupledWorkspace, TestStateChangeDrivesNT]
+
+### Run 59047939 (build `21db8d34`, adaptive novelty): partial; box vanished after `raw_novelty` (2026-11-04)
+
+The log ends after the `raw_novelty` arm (03:30 UTC push), without the
+new exit diagnostics: the onstart never reached its final block, so the
+whole container stopped, not just the eval process. That rules out a
+host OOM kill of Python. vast.ai no longer has the container
+(`brian logs`: no such container). Log:
+`logs/mind_eval/20261104T030111Z.log`.
+
+- Reply probes clean: recall 1.00 / 0.00 / 1.00; source monitoring
+  1.00 in every arm except bare (0.00).
+- Raw stream novelty: full 0.05, no_control 0.06, no_workspace 0.03,
+  raw_novelty 0.05.
+- **Adaptive novelty, full arm:** raw 0.026–0.083 became 0.11–0.23,
+  with switches clearly above near-copies. But the raw baseline, seeded
+  from a first raw of 0.319 and adapting at 0.05, stayed inflated all
+  run, so typical thoughts read 0.15–0.2 instead of about 0.5. The write
+  gate never opened, and DA sat below baseline (0.09–0.13). Fixed:
+  `norm_adapt_alpha` 0.2 (`9a4f112f`).
+- One ignition (tick 14). That thought entered the workspace at
+  salience 1.0, and R1 copied it on the next tick, labels included.
+- **Reflection on the workspace:** the scripted idle framings caused
+  it ("Stepping back … to reflect on the pattern in what I've seen";
+  tick 4 under that framing produced "It seems like I have a habit
+  of…"). Removed by default; `wander_framing` arm keeps them.
+
+**Vanishing boxes, open:** four runs have now stopped mid-battery
+without results, and three of them had no other box running. The
+mind-eval self-destroy resolves its own id from `INSTANCE_ID` /
+`VAST_CONTAINER_ID`, then falls back to the first instance labelled
+`neuroslm-mind-eval`. That could destroy another mind-eval box when two
+run at once, but it doesn't explain the single-box cases.
+
+[EVIDENCE: logs/mind_eval/20261104T030111Z.log]

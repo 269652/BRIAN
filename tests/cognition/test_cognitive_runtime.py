@@ -295,32 +295,51 @@ class TestMindWandering:
     prompt completion. External input present → task-positive, no
     wandering framing."""
 
-    def test_idle_tick_uses_a_wander_prompt(self):
+    def _framed(self, gen):
+        from neuroslm.cognition.runtime import WANDER_FRAMINGS, MindConfig
+        return _mk_runtime(gen, cfg=MindConfig(n_candidates=2,
+                                               wander_prompts=WANDER_FRAMINGS))
+
+    def test_idle_prompt_continues_from_the_workspace_unscripted(self):
+        # runs 59042281/59047939: framings like "Stepping back … to
+        # reflect on the pattern in what I've seen" made R1 reflect ON
+        # its memories instead of following one association
+        from neuroslm.cognition.runtime import WANDER_FRAMINGS, MindConfig
+        assert MindConfig().wander_prompts == ()
+        gen = _ScriptedGen(["I hear you.", "a wandering thought"])
+        rt = _mk_runtime(gen, cfg=MindConfig(n_candidates=1, recall_k=0))
+        rt.observe("the river was beautiful today")
+        rt.tick()
+        rt.tick()
+        lines = [l for l in gen.prompts[-1].splitlines() if l.strip()]
+        assert not any(w in gen.prompts[-1] for w in WANDER_FRAMINGS)
+        assert lines[-1] == "Thought:"
+        assert lines[-2].startswith(("Earlier I noticed:", "I remember:",
+                                     "I was thinking:"))
+
+    def test_framings_are_still_available_as_an_option(self):
+        from neuroslm.cognition.runtime import WANDER_FRAMINGS
         gen = _ScriptedGen(["a wandering thought"])
-        rt = _mk_runtime(gen)
-        rt.tick()  # nothing observed — pure idle/DMN tick
-        assert gen.prompts, "must generate"
-        prompt = gen.prompts[0]
-        assert any(w in prompt for w in rt.cfg.wander_prompts), (
-            "an idle tick with no sensory input IS the DMN condition — "
-            "it must be framed as mind-wandering, not a flat "
-            "continuation of nothing")
+        rt = self._framed(gen)
+        rt.tick()
+        assert any(w in gen.prompts[0] for w in WANDER_FRAMINGS)
 
     def test_tick_with_sensory_input_skips_wander_framing(self):
+        from neuroslm.cognition.runtime import WANDER_FRAMINGS
         gen = _ScriptedGen(["a response"])
-        rt = _mk_runtime(gen)
+        rt = self._framed(gen)
         rt.observe("what time is it")
         gen.prompts.clear()
         rt.tick()
         prompt = gen.prompts[0]
-        assert not any(w in prompt for w in rt.cfg.wander_prompts), (
+        assert not any(w in prompt for w in WANDER_FRAMINGS), (
             "responding to real input is task-positive, not DMN "
             "wandering — the wander framing must not leak in")
         assert "what time is it" in prompt
 
     def test_wander_prompts_rotate(self):
         gen = _ScriptedGen(["t"])
-        rt = _mk_runtime(gen)
+        rt = self._framed(gen)
         rt.tick()
         first = gen.prompts[-1]
         rt.tick()
@@ -589,15 +608,28 @@ class TestEpisodicRepresentation:
         assert ep["context"]["trigger"] == "what is the launch plan?"
 
     def test_wandering_trigger_is_the_wander_prompt_used(self):
-        from neuroslm.cognition.runtime import MindConfig
+        from neuroslm.cognition.runtime import WANDER_FRAMINGS, MindConfig
         # storage-dependent contract, independent of §14.13 ignition
         # (pinned in TestOscillatoryWorkspace) — workspace off.
         rt = _mk_runtime(_ScriptedGen(["a wander"]),
                          cfg=MindConfig(n_candidates=2,
-                                        workspace_oscillator=False))
+                                        workspace_oscillator=False,
+                                        wander_prompts=WANDER_FRAMINGS))
         r = rt.tick()
         ep = [e for e in rt.memory.all() if e["content"] == "a wander"][0]
-        assert ep["context"]["trigger"] in rt.cfg.wander_prompts
+        assert ep["context"]["trigger"] in WANDER_FRAMINGS
+
+    def test_unframed_trigger_is_what_dominated_the_workspace(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the moon"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=0))
+        rt.workspace.offer("chess thought", "thought", _vec_for("chess"), 1.0)
+        rt.workspace.offer("a coffee memory", "memory", _vec_for("coffee"),
+                           0.4)
+        rt.tick()
+        ep = [e for e in rt.memory.all()
+              if e["content"] == "thinking about the moon"][0]
+        assert ep["context"]["trigger"] == "chess thought"
 
     def test_recalled_episodes_labelled_observed_vs_inferred_in_debug_trace(self):
         from neuroslm.cognition.runtime import format_debug_trace, TickResult, ThoughtScore
