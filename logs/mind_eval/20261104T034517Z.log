@@ -3555,3 +3555,5 @@ Another way to confirm is to think about historical context. When I was younger,
   pci/no_recall/memory: PCI=0.000 reached=0.0
     pci/no_control/null run 0: PCI=0.000 channels=-
   pci/no_control/null: PCI=0.000 reached=0.0
+    pci/no_control/da run 0: PCI=0.903 channels=DA,selection_entropy
+  pci/no_control/da: PCI=0.903 reached=2.0
