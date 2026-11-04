@@ -23,17 +23,20 @@ class WorkspaceItem:
     seq: int = 0
 
 
+def divisive_normalise(x: float, baseline: Optional[float]) -> float:
+    """x / (x + baseline) (Carandini & Heeger 2012): 0 at x = 0, 0.5 at
+    the baseline, → 1 far above it — independent of the scale x lives
+    on. No baseline yet counts as typical (0.5)."""
+    x = max(0.0, float(x))
+    b = x if baseline is None else max(0.0, float(baseline))
+    return x / (x + b) if x + b > 0.0 else 0.0
+
+
 def thought_salience(novelty: float, baseline: Optional[float],
                      ignited: bool) -> float:
-    """Ignition sustains a thought at full salience. Otherwise novelty
-    is divisively normalised against the run's own novelty baseline
-    (Carandini & Heeger 2012): a typical thought sits at 0.5, a copy
-    at 0, independent of the embedding's distance scale."""
-    if ignited:
-        return 1.0
-    n = max(0.0, float(novelty))
-    b = n if baseline is None else max(0.0, float(baseline))
-    return n / (n + b) if n + b > 0.0 else 0.0
+    """Ignition sustains a thought at full salience; otherwise its raw
+    novelty divisively normalised against the run's raw baseline."""
+    return 1.0 if ignited else divisive_normalise(novelty, baseline)
 
 
 class GlobalWorkspace:

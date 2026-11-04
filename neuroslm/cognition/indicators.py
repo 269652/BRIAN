@@ -557,6 +557,9 @@ def probe_loop_escape(seams: MindSeams,
         # §14.13: idle thought sees recall + last thought, not the
         # competed workspace contents
         ablations["no_workspace"] = {"global_workspace": False}
+    if cfg.adaptive_novelty:
+        # every novelty consumer reads raw 1 − max cosine instead
+        ablations["raw_novelty"] = {"adaptive_novelty": False}
     if cfg.workspace_oscillator:
         # §14.13 falsification arms: cut the ignition↔NT loop, or the
         # workspace gating altogether.

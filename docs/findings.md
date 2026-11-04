@@ -4856,3 +4856,64 @@ normally.
 
 [EVIDENCE: logs/mind_eval/20261103T182428Z.log]
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestHiddenStateEmbeddings::test_massive_first_token_activation_does_not_collapse_it]
+
+### Run 59042281 (build `6b9afdbd`, stack + embedding fix): embedding works, workspace stops the copying; box vanished in PCI (2026-11-04)
+
+Stack as in 58998377, plus the first-token skip and per-dimension
+standardisation. 6 probes, n = 1, 2 distractors, 16 idle ticks. The box
+stopped after its 02:54 UTC push, inside `perturbational_complexity`,
+with no traceback and no results file. The numbers below are from the
+log: `logs/mind_eval/20261104T020657Z.log`.
+
+- **Embedding check:** held-out mean |cos| = 0.279 (58998377: ≈ 1.0).
+  No longer collapsed.
+- **Reply probes:** recall full 1.00 / no_recall 0.00 / bare 1.00.
+  Source monitoring 1.00 in every arm except bare (0.00).
+  Metacognition 1.00 / 1.00.
+- **`loop_escape` mean stream novelty (raw):** full 0.05, no_control
+  0.06, **no_workspace 0.03**, no_osc_feedback 0.05, no_oscillator
+  0.04, fixed_threshold 0.05, bare 0.02. The streaks under the pooled
+  bar were lost with the results file.
+- **Workspace vs no_workspace (trace):** `no_workspace` copies as in
+  every earlier run ("The river flows by the old mill…" twice, then "The
+  river's existence might be independent of perception" twice; raw
+  novelty 0.01). The full arm never repeats a thought. It moves on
+  almost every tick (a place to visit, memory as chunks, a digital
+  clock, writing about memories, cognitive biases, a new password,
+  risotto). The bulleted-list "exercise" behaviour is gone.
+- **New tendency:** many full-arm thoughts are *about* the memories
+  ("I should write about these memories", "each memory is tied to the
+  next") rather than following one association.
+- **Novelty is still compressed with the working embedding:** a
+  switch reads 0.06–0.09 and a copy 0.01. Ordered, but on a scale
+  where the 0.3 write gate never opens and curiosity (≈ 0.05 utility)
+  can't outweigh an NLL gap. That motivates adaptive novelty (below).
+
+**Vanishing boxes:** 58963672 (in `loop_escape` bare), 58994037
+(`loop_escape` no_control) and 59042281 (PCI) each stopped with the log
+cut mid-probe, no traceback, no results, and no instance left. The
+rentals are on-demand, not interruptible. The signature fits the eval
+process being killed outright (for example, by the host OOM killer).
+The final push then finds nothing new, and self-destroy runs. The
+onstart script now appends the eval's exit code, kernel OOM lines and
+`free -m` to the pushed log before self-destroying.
+
+[EVIDENCE: logs/mind_eval/20261104T020657Z.log]
+
+### Development: adaptive (divisively normalised) novelty (maintainer, 2026-11-04, not yet measured)
+
+Every novelty consumer reads ν = r/(r + r̄), with r = 1 − max cosine and
+r̄ a slow EWMA of r (architecture.md §14.13). The new `raw_novelty` arm
+of `loop_escape` restores raw novelty.
+
+Hypotheses for the next run:
+- (a) The write gate opens: storage is above 0 in the full arm (it was
+  ≈ 0 with raw novelty).
+- (b) Curiosity selects: on bored ticks the selected candidate's ν
+  exceeds the candidates' mean ν more often in full than in
+  `raw_novelty`.
+- (c) The loop signature survives: a copy still reads ν ≈ 0, and
+  reorient still fires on runs of copies.
+- (d) The reply probes are unchanged.
+
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestNoveltyAdaptsToItsOwnScale]

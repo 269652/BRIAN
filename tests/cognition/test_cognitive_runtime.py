@@ -629,8 +629,8 @@ class TestSemanticNoveltyGate:
                          cfg=MindConfig(n_candidates=1))
         r = rt.tick()
         assert r.stored is True
-        assert r.novelty == pytest.approx(1.0), (
-            "nothing stored yet — maximal novelty by definition")
+        assert r.novelty_raw == pytest.approx(1.0), (
+            "nothing stored yet — maximal raw novelty by definition")
 
     def test_identical_repetition_is_not_stored(self):
         from neuroslm.cognition.runtime import MindConfig
@@ -2140,6 +2140,7 @@ class TestTraceExplainsTheGates:
                                            "selection", "novelty"}
         text = format_debug_trace(r)
         assert "CUR[nov=" in text and "bore=" in text
+        assert "raw=" in text, "raw novelty is visible beside the adapted"
         assert "in[s=" in text, "WS line carries the module activations"
 
 
@@ -2318,7 +2319,7 @@ class TestWorkingMemoryNovelty:
                                         novelty_write_threshold=2.0))
         rs = [rt.tick() for _ in range(3)]
         assert not any(r.stored for r in rs)
-        assert rs[0].novelty == pytest.approx(1.0)
+        assert rs[0].novelty_raw == pytest.approx(1.0)
         assert rs[1].novelty == pytest.approx(0.0, abs=1e-6)
 
     def test_wm_size_zero_restores_storage_only_novelty(self):
@@ -2327,7 +2328,7 @@ class TestWorkingMemoryNovelty:
                          cfg=MindConfig(n_candidates=1, wm_size=0,
                                         novelty_write_threshold=2.0))
         rs = [rt.tick() for _ in range(3)]
-        assert rs[1].novelty == pytest.approx(1.0)
+        assert rs[1].novelty_raw == pytest.approx(1.0)
 
     def test_wm_is_bounded(self):
         from neuroslm.cognition.runtime import MindConfig
@@ -2746,6 +2747,74 @@ class TestDiverseHippocampalRecall:
 # Likelihood selection rewarded copying "My last thought" (the most
 # probable continuation); boredom only heated SELECTION among near-
 # copies; reorient kept the last thought in the prompt.
+
+class TestNoveltyAdaptsToItsOwnScale:
+    """Run 59042281: with R1's long same-register thoughts a topic
+    switch scored raw novelty 0.06–0.09 and a copy 0.01 — ordered, but
+    on a scale where the 0.3 write gate never opened and curiosity
+    (≈0.05 utility) could never outweigh an NLL gap. Divisive
+    normalisation against a slow raw baseline (Carandini & Heeger
+    2012): novelty = raw / (raw + baseline)."""
+
+    PREV = [1.0, 0.0, 0.0]
+    VECS = {"prev": PREV,
+            "copy": PREV,
+            "near": [0.98, math.sqrt(1 - 0.98 ** 2), 0.0],     # raw 0.02
+            "switch": [0.92, math.sqrt(1 - 0.92 ** 2), 0.0]}   # raw 0.08
+
+    def _rt(self, cands, cfg=None, scores=None):
+        from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+        cfg = cfg or MindConfig(n_candidates=len(cands),
+                                workspace_oscillator=False, recall_k=0)
+        rt = CognitiveRuntime(
+            generate_fn=_ScriptedGen(cands),
+            score_fn=scores or _score_map({}),
+            embed_fn=lambda t: self.VECS.get(t, [0.0, 0.0, 1.0]),
+            nt=_FakeNT(), memory=EpisodicMemory(maxlen=64), cfg=cfg,
+            rng=random.Random(0))
+        rt._wm.append(self.PREV)
+        rt._raw_nov_base = 0.04
+        return rt
+
+    def test_novelty_is_raw_over_raw_plus_baseline(self):
+        r = self._rt(["switch"]).tick()
+        assert r.novelty_raw == pytest.approx(0.08, abs=1e-6)
+        assert r.novelty == pytest.approx(0.08 / 0.12, abs=1e-4)
+
+    def test_a_copy_still_reads_zero(self):
+        r = self._rt(["copy"]).tick()
+        assert r.novelty == pytest.approx(0.0, abs=1e-6)
+
+    def test_the_raw_baseline_adapts_slowly(self):
+        rt = self._rt(["switch"])
+        rt.tick()
+        a = rt.cfg.nov_baseline_alpha
+        assert rt._raw_nov_base == pytest.approx((1 - a) * 0.04 + a * 0.08)
+
+    def test_first_tick_without_a_baseline_reads_typical(self):
+        rt = self._rt(["switch"])
+        rt._raw_nov_base = None
+        assert rt.tick().novelty == pytest.approx(0.5)
+
+    def test_curiosity_can_outweigh_a_small_likelihood_gap(self):
+        from neuroslm.cognition.runtime import MindConfig
+        rt = self._rt(["near", "switch"],
+                      cfg=MindConfig(n_candidates=2, recall_k=0,
+                                     workspace_oscillator=False,
+                                     selection_temp_base=0.01,
+                                     curiosity_gain=0.0),
+                      scores=_score_map({"near": 2.9, "switch": 3.0}))
+        rt._boredom = 0.8
+        assert rt.tick().thought == "switch"
+
+    def test_ablation_restores_raw_novelty(self):
+        from neuroslm.cognition.runtime import MindConfig
+        r = self._rt(["switch"],
+                     cfg=MindConfig(n_candidates=1, recall_k=0,
+                                    workspace_oscillator=False,
+                                    adaptive_novelty=False)).tick()
+        assert r.novelty == pytest.approx(0.08, abs=1e-6)
+
 
 class TestCuriosityIsValue:
     """Intrinsic motivation as value (Schmidhuber/Oudeyer): utility

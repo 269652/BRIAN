@@ -300,6 +300,11 @@ class MindConfig:
     boredom above what the run's own novelty level implies."""
 
     nov_baseline_alpha: float = 0.05
+    adaptive_novelty: bool = True
+    """Novelty = raw / (raw + slow raw baseline), raw = 1 − max cosine
+    (divisive normalisation; run 59042281: R1's raw novelty lived in
+    0.01–0.09, so the write gate never opened and curiosity could not
+    outweigh an NLL gap). Off → every consumer reads raw novelty."""
     """EWMA rate of the novelty baseline (~20-tick memory), seeded with
     the first novelty."""
 
@@ -422,6 +427,9 @@ class TickResult:
     every stored episode (1.0 into an empty memory). The write gate,
     the NT activation driver, and the boredom trace all consume this
     one signal."""
+    novelty_raw: float = 0.0
+    """1 − max cosine before divisive normalisation (= ``novelty`` when
+    ``adaptive_novelty`` is off)."""
     boredom: float = 0.0
     """EMA of (1 − novelty) — the curiosity homeostat's state. Rises
     while thinking stays in one basin; drives exploration temperature
@@ -522,6 +530,7 @@ def format_debug_trace(result: TickResult) -> str:
 
     if result.candidates and not result.inhibited:
         lines.append(f"  CUR[nov={result.novelty:.2f} "
+                     f"raw={result.novelty_raw:.3f} "
                      f"bore={result.boredom:.2f}]")
     if result.sync_r is not None:
         wi = result.workspace_inputs or {}
@@ -742,6 +751,7 @@ class CognitiveRuntime:
         # own slow novelty baseline for relative control thresholds.
         self._wm: Deque[List[float]] = deque(maxlen=max(1, self.cfg.wm_size))
         self._nov_base: Optional[float] = None
+        self._raw_nov_base: Optional[float] = None
         self._goal_vec: Optional[List[float]] = None
         self.workspace = None
         if self.cfg.global_workspace:
@@ -1027,7 +1037,8 @@ class CognitiveRuntime:
         cand_vecs = [list(self._embed(c)) for c in candidates]
         goal_rel = [(_cosine(v, self._goal_vec) if self._goal_vec else 0.0)
                     for v in cand_vecs]
-        cand_nov = [self._novelty_of(v) for v in cand_vecs]
+        cand_raw = [self._novelty_of(v) for v in cand_vecs]
+        cand_nov = [self._normalise_novelty(n) for n in cand_raw]
         idx, selection_entropy = self._select(scores, levels, goal_rel,
                                               cand_nov)
         thought, sc = candidates[idx], scores[idx]
@@ -1039,14 +1050,8 @@ class CognitiveRuntime:
         # itself). One signal, three consumers: the write gate below,
         # the NT activation driver, and the boredom trace.
         thought_vec = cand_vecs[idx]
-        top = self.memory.retrieve_scored(thought_vec, k=1)
-        best = top[0][0] if top else None
-        if self.cfg.wm_size > 0:
-            for v in self._wm:
-                c = _cosine(thought_vec, v)
-                best = c if best is None else max(best, c)
-        novelty = 1.0 - best if best is not None else 1.0
-        novelty = max(0.0, min(1.0, novelty))
+        raw_novelty = cand_raw[idx]
+        novelty = cand_nov[idx]
 
         # ACTION: the basal ganglia's actual act this tick — exactly
         # one of respond/reorient/speak/think. External input always
@@ -1123,8 +1128,13 @@ class CognitiveRuntime:
         if self.workspace is not None:
             from neuroslm.cognition.workspace import thought_salience
             self.workspace.offer(thought, "thought", thought_vec,
-                                 thought_salience(novelty, self._nov_base,
+                                 thought_salience(raw_novelty,
+                                                  self._raw_nov_base,
                                                   ignited=bool(ignition)))
+        a_r = self.cfg.nov_baseline_alpha
+        self._raw_nov_base = (raw_novelty if self._raw_nov_base is None else
+                              (1 - a_r) * self._raw_nov_base
+                              + a_r * raw_novelty)
         ne_drive = (0.0 if self._nov_expect is None
                     else abs(novelty - self._nov_expect))
         a_n = self.cfg.novelty_ema_alpha
@@ -1161,7 +1171,8 @@ class CognitiveRuntime:
                           selection_entropy=selection_entropy,
                           goal_relevance=goal_rel[idx],
                           differentiation=differentiation,
-                          novelty=novelty, boredom=self._boredom,
+                          novelty=novelty, novelty_raw=raw_novelty,
+                          boredom=self._boredom,
                           replay=replay, reorient=reorient,
                           reasoning=reasonings[idx],
                           ignited=osc.ignited if osc else None,
@@ -1174,6 +1185,12 @@ class CognitiveRuntime:
                           ignition_threshold=osc.threshold if osc else None)
 
     # ── Internals ────────────────────────────────────────────────────
+
+    def _normalise_novelty(self, raw: float) -> float:
+        if not self.cfg.adaptive_novelty:
+            return raw
+        from neuroslm.cognition.workspace import divisive_normalise
+        return divisive_normalise(raw, self._raw_nov_base)
 
     def _novelty_of(self, vec: List[float]) -> float:
         """1 − max cosine vs stored episodes ∪ working memory."""

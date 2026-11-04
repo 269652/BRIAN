@@ -3843,6 +3843,26 @@ embedding; eval reports record `meta.embed`. Every consumer of novelty
 (write gate, NT activation driver, boredom, LOOPING, recall, workspace
 salience) reads this embedding, so runs on the two are not comparable.
 
+**Adaptive novelty (2026-11-04).** Raw novelty, 1 − max cosine against
+stored episodes ∪ working memory, depends on the embedding's scale and
+on the trunk's register: R1's long first-person thoughts put a copy at
+0.01 and a clear topic switch at 0.06–0.09 (run 59042281). Every
+consumer now reads it divisively normalised against a slow raw baseline
+(Carandini & Heeger 2012):
+$
+u = r/(r + ar r)$, with $ar r$ an EWMA of $r$ at
+`nov_baseline_alpha` (0.05). A copy reads 0, a typical thought 0.5, a
+thought at twice the typical raw distance 0.67; before any baseline
+exists, 0.5. The consumers are the write gate, the NT activation driver,
+the NE expectation error, boredom, the LOOPING streak, and each
+candidate's curiosity value. The slow α keeps a 3–4-tick loop near 0
+rather than absorbing it. Workspace thought salience is the same
+function (`workspace.divisive_normalise`). The trace shows
+`CUR[nov raw bore]`. `adaptive_novelty=False` restores raw novelty and
+is the `raw_novelty` arm of `loop_escape`. The probe's own stream
+novelty stays raw, judged against its pooled bar, so the yardstick
+doesn't adapt with the mind.
+
 **H66 adaptive ignition (default).** Ignition fires when R exceeds the
 workspace's own recent baseline, θ_t = max(0.1, μ_R + 1·σ_R) (EWMA
 α = 0.2, seeded at the old fixed bar 0.25). Run 58676023 showed the

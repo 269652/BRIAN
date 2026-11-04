@@ -109,6 +109,14 @@ PYTHONUNBUFFERED=1 python3 -u -m neuroslm.cli eval mind --expert '__EXPERT__' --
 EVAL_RC=${PIPESTATUS[0]}
 set -e
 echo "── eval exited rc=$EVAL_RC ──"
+# Three boxes vanished mid-battery with no traceback (58963672,
+# 58994037, 59042281): record HOW the eval ended in the pushed log.
+{
+  echo "── eval exited rc=$EVAL_RC ──"
+  dmesg 2>/dev/null | grep -iE "out of memory|killed process|oom" | tail -5 \\
+      || echo "(dmesg unavailable)"
+  free -m 2>/dev/null || true
+} >> "$LOGFILE" 2>&1
 kill $PUSHER_PID 2>/dev/null || true
 sleep 2
 

@@ -255,6 +255,10 @@ class TestLoopEscapeProbe:
         assert any(n > 0 for r in conds["full"]["runs"]
                    for n in r["workspace_sizes"])
 
+    def test_adaptive_novelty_has_its_own_ablation_arm(self):
+        conds = self._run()["conditions"]
+        assert "raw_novelty" in conds
+
     def test_ablation_removes_every_control_act(self):
         nc = self._run()["conditions"]["no_control"]
         assert nc["reorients"] == 0 and nc["replays"] == 0
@@ -588,6 +592,17 @@ class TestMindEvalOnstart:
     def test_self_destroys_by_default_and_not_with_opt_out(self):
         assert "vastai destroy instance" in self._onstart()
         assert "vastai destroy instance" not in self._onstart(AUTO_DESTROY="0")
+
+    def test_exit_diagnostics_reach_the_pushed_log_before_destroy(self):
+        # runs 58963672, 58994037, 59042281 vanished mid-battery: log
+        # stopped, no traceback, no results — the box recorded nothing
+        s = self._onstart()
+        tail = s[s.index("EVAL_RC=${PIPESTATUS[0]}"):]
+        diag = tail[:tail.index("push_artifacts")]
+        assert 'eval exited rc=$EVAL_RC' in diag and '>> "$LOGFILE"' in diag
+        assert "dmesg" in diag and "free -m" in diag
+        assert tail.index("push_artifacts") < tail.index(
+            "vastai destroy instance")
 
 
 class TestMultiExpertEval:
