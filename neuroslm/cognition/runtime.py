@@ -1075,11 +1075,14 @@ class CognitiveRuntime:
             recall_strength = max((sims.get(id(e), 0.0) for e in recalled),
                                   default=0.0)
             if self.workspace is not None and recalled:
-                # recalls compete on the same relative scale as thoughts:
-                # sim/(sim + s̄), s̄ = the run's typical recall similarity
-                # (run 59294820: raw cosine let memories fill every slot)
-                from neuroslm.cognition.workspace import divisive_normalise
+                # the hippocampus is ONE source competing at a thought's
+                # scale: s_i/(S̄ + Σ_j s_j), S̄ = the run's typical recall
+                # mass (runs 59294820/59298871: raw cosine, then per-item
+                # normalisation, let k recalls outnumber 1 thought)
                 rsims = [max(0.0, sims.get(id(e), 0.0)) for e in recalled]
+                total = sum(rsims)
+                base = total if self._recall_base is None else self._recall_base
+                denom = base + total
                 for e, s in zip(recalled, rsims):
                     inferred = ((e.get("context") or {}).get("kind")
                                 == "inferred")
@@ -1087,11 +1090,11 @@ class CognitiveRuntime:
                         e.get("content", ""),
                         "thought" if inferred else "memory",
                         e.get("content_vec") or [],
-                        divisive_normalise(s, self._recall_base))
-                m = sum(rsims) / len(rsims)
+                        s / denom if denom > 0.0 else 0.0)
                 a_s = self.cfg.norm_adapt_alpha
-                self._recall_base = (m if self._recall_base is None else
-                                     (1 - a_s) * self._recall_base + a_s * m)
+                self._recall_base = (total if self._recall_base is None else
+                                     (1 - a_s) * self._recall_base
+                                     + a_s * total)
 
         # THINK: K candidates from persona + recall + context. The
         # trigger — what this tick is actually ABOUT — is the real

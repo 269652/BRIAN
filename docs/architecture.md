@@ -3803,11 +3803,14 @@ compete for `ws_capacity` = 4 slots (Cowan's limit). Each tick:
 
 - every item's salience is multiplied by `ws_decay` (0.7); a reorient
   drops all `thought` items;
-- percepts enter at salience 1.0. Recalled episodes enter at $s/(s+\bar s)$,
-  their recall similarity divisively normalised against the run's
-  typical recall similarity (2026-11-05). Before this they entered at
-  raw cosine (about 0.5), which let memories fill all four slots in run
-  59294820. They keep their provenance: an observed episode as `memory`,
+- percepts enter at salience 1.0. Recalled episodes share one
+  normalisation pool, $s_i/(\bar S + \sum_j s_j)$, with $\bar S$ the
+  run's typical total recall similarity (2026-11-05). The hippocampus
+  is one source: a typical recall set carries the mass of one typical
+  thought (0.5), split by similarity. Raw cosine (run 59294820) and then
+  per-item normalisation (run 59298871: 49 memory against 14 thought
+  entries) both let k recalls outnumber one thought. They keep their
+  provenance: an observed episode as `memory`,
   the mind's own recalled musing (`kind=inferred`) as `thought`;
 - the selected thought enters at 1.0 if it ignited (ignition sustains
   it), otherwise at $n/(n+\bar n)$, its novelty divisively normalised

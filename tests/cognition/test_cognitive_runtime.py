@@ -3424,6 +3424,27 @@ class TestGlobalWorkspaceFeedsThought:
         assert sal["the river flooded the mill"] == pytest.approx(
             divisive_normalise(s, s / 3.0), abs=0.05)
 
+    def test_recalls_share_one_normalisation_pool(self):
+        # run 59298871: 3 recalls vs 1 thought per tick → 49 memory vs
+        # 14 thought workspace entries. The hippocampus is ONE source:
+        # s_i/(S̄ + Σ_j s_j), so a typical recall set carries the mass of
+        # one typical thought (0.5), split by similarity.
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["a wander"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=3,
+                                        context_recall=False))
+        for t in ("the river flooded the mill", "the river froze in winter",
+                  "the mill wheel turned slowly"):
+            rt.memory.add(t, content_vec=_vec_for(t),
+                          context={"kind": "observed"})
+        rt._last_thought = "the river and the mill"
+        r = rt.tick()
+        mem = [it.salience for it in rt.workspace.items()
+               if it.source == "memory"]
+        assert len(mem) == 3
+        assert sum(mem) == pytest.approx(0.5), "no baseline: typical mass"
+        assert max(mem) < 0.5
+
     def test_reply_ticks_leave_the_idle_novelty_baseline_alone(self):
         # a reply to new input is novel by construction; folding it into
         # the idle baseline made every later idle thought look stale and
