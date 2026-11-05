@@ -11,7 +11,7 @@ ignition; this module holds what is in mind."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 
 @dataclass
@@ -50,6 +50,16 @@ class GlobalWorkspace:
         self.decay_rate = float(decay)
         self._items: List[WorkspaceItem] = []
         self._seq = 0
+        # context frame (Baars): world/self models — not competing for
+        # slots, but part of every prompt and of the latent state
+        self._contexts: Dict[str, Tuple[str, List[float]]] = {}
+
+    def set_context(self, name: str, text: str,
+                    vec: Sequence[float]) -> None:
+        self._contexts[name] = ((text or "").strip(), list(vec or []))
+
+    def contexts(self) -> Dict[str, str]:
+        return {k: t for k, (t, _) in self._contexts.items()}
 
     def decay(self) -> None:
         for it in self._items:
@@ -75,17 +85,21 @@ class GlobalWorkspace:
 
     def state_vector(self) -> Optional[List[float]]:
         """The workspace as ONE latent: the salience-weighted mean of
-        its items' vectors (items without a vector are skipped). None
-        when nothing salient with a vector is held."""
-        held = [it for it in self._items if it.vec and it.salience > 0.0]
-        total = sum(it.salience for it in held)
+        its items' vectors and its context frame (each context at the
+        typical salience, 0.5 — the midpoint of divisive normalisation).
+        Items without a vector are skipped. None when nothing with a
+        vector is held."""
+        held = [(it.vec, it.salience) for it in self._items
+                if it.vec and it.salience > 0.0]
+        held += [(v, 0.5) for _, v in self._contexts.values() if v]
+        total = sum(s for _, s in held)
         if not held or total <= 0.0:
             return None
-        dim = len(held[0].vec)
+        dim = len(held[0][0])
         out = [0.0] * dim
-        for it in held:
-            w = it.salience / total
-            for i, x in enumerate(it.vec[:dim]):
+        for vec, s in held:
+            w = s / total
+            for i, x in enumerate(vec[:dim]):
                 out[i] += w * x
         return out
 

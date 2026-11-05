@@ -705,6 +705,10 @@ def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
                        f"{rec.next_action} at ({rec.pose[0]:.1f}, "
                        f"{rec.pose[1]:.1f}) seen={len(rec.seen_ids)}")
         _say(progress, format_debug_trace(r))
+        for model in (rt.world_model, rt.self_model):
+            if model is not None and model.history and \
+                    model.history[-1][0] == r.tick_n:
+                _say(progress, f"  {model.kind.upper()} MODEL: {model.text}")
         steps.append({"tick": rec.tick, "action": rec.action,
                       "next_action": rec.next_action,
                       "pose": [round(v, 2) for v in rec.pose],
@@ -745,6 +749,10 @@ def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
         "grounding": grounding_report(recs, park),
         "memory": (rt.hierarchy.summary() if rt.hierarchy is not None
                    else None),
+        "world_model": ([[t, x] for t, x in rt.world_model.history]
+                        if rt.world_model is not None else None),
+        "self_model": ([[t, x] for t, x in rt.self_model.history]
+                       if rt.self_model is not None else None),
         "thoughts": [t[:240] for t in thoughts],
         "walk": steps,
         "channels": list(_WS_MODULES) + list(_NT_ORDER),

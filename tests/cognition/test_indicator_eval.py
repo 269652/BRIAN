@@ -998,6 +998,7 @@ class TestParkWalkBaseline:
         g = c["grounding"]
         assert 0.0 < g["coverage"] <= 1.0 and "static_coverage" in g
         assert {"gists", "events", "chapters"} <= set(c["memory"])
+        assert c["world_model"] and c["self_model"], "both models evolved"
 
     def test_the_walk_is_recorded_tick_by_tick(self):
         c = self._run(ticks=12)["conditions"]["full"]

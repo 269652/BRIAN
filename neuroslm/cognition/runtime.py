@@ -309,6 +309,14 @@ class MindConfig:
     workspace state they were laid down in (``ws_content``, plus their
     ``nt_state``), and recall scores (1−ρ)·cos(anchor, episode) +
     ρ·context similarity. Off → the anchor alone decides."""
+    world_model: bool = True
+    """§14.16: a text model of the surroundings, rewritten by the trunk
+    at event boundaries from percepts and speech; workspace context."""
+    self_model: bool = True
+    """§14.16: a text model of the self, rewritten at event boundaries
+    from thoughts, chosen movements and the body's NT state."""
+    model_max_chars: int = 400
+    model_n_tok: int = 120
     hierarchical_memory: bool = True
     """§14.16: episodes consolidate into gists (semantic) and segment
     into events and chapters (temporal); recall is top-down — one
@@ -856,6 +864,15 @@ class CognitiveRuntime:
         self._state_expect: Optional[float] = None
         self._broadcast: Optional[Tuple[List[float], float]] = None
         self._goal_vec: Optional[List[float]] = None
+        from neuroslm.cognition.situation import SituationModel
+        self.world_model = (SituationModel("world") if self.cfg.world_model
+                            else None)
+        self.self_model = (SituationModel("self") if self.cfg.self_model
+                           else None)
+        # evidence since the last model update
+        self._world_evidence: List[str] = []
+        self._self_thoughts: List[str] = []
+        self._self_actions: List[str] = []
         self.hierarchy = None
         if self.cfg.hierarchical_memory:
             from neuroslm.memory.hierarchy import MemoryHierarchy
@@ -929,6 +946,7 @@ class CognitiveRuntime:
                                     "action_class": action_class,
                                     "ws_content": self._ws_content()})
         self._sensory.append(text)
+        self._world_evidence.append(f"Someone said: {text}")
         self.nt.step_full(
             activation=1.0,
             grad_norm=float(self.cfg.appraisal.get(action_class, 0.0)))
@@ -961,7 +979,13 @@ class CognitiveRuntime:
                             context={"kind": "observed", "source": source,
                                      "ws_content": self._ws_content()})
         self._ambient.append((text, source, vec, sal))
+        self._world_evidence.append(text)
         return sal
+
+    def note_movement(self, action: str) -> None:
+        """What the body just chose to do — evidence for the self model."""
+        if action:
+            self._self_actions.append(action)
 
     def remember(self, text: str, source: str = "autobiographical") -> None:
         """Lay down prior autobiographical memory: an OBSERVED episode
@@ -1403,6 +1427,8 @@ class CognitiveRuntime:
             self.hierarchy.sync(self.memory.all())
             event_boundary = self.hierarchy.boundary(state_change,
                                                      self._ws_content())
+        self._self_thoughts.append(thought)
+        self._update_models(tick_n, event_boundary, levels)
         return TickResult(thought=thought, candidates=candidates,
                           scores=scores, recalled=recalled,
                           stored=stored, inhibited=False,
@@ -1440,6 +1466,36 @@ class CognitiveRuntime:
                           event_boundary=event_boundary)
 
     # ── Internals ────────────────────────────────────────────────────
+
+    def _update_models(self, tick_n: int, event_boundary: bool,
+                       levels: Dict[str, float]) -> None:
+        """§14.16: rewrite the world / self model through the trunk when
+        an event ends (or to build it from its first evidence), then
+        hold it as the workspace's context frame."""
+        from neuroslm.cognition import situation as sit
+        base = self.nt.baselines
+        base = base() if callable(base) else base
+        jobs = []
+        if self.world_model is not None and self._world_evidence and (
+                event_boundary or not self.world_model.text):
+            jobs.append((self.world_model, sit.world_prompt(
+                self.cfg.persona, self.world_model.text,
+                self._world_evidence[-12:])))
+            self._world_evidence = []
+        if self.self_model is not None and (
+                self._self_thoughts or self._self_actions) and (
+                event_boundary or not self.self_model.text):
+            jobs.append((self.self_model, sit.self_prompt(
+                self.cfg.persona, self.self_model.text,
+                self._self_thoughts[-6:], self._self_actions[-6:],
+                sit.body_state(levels, base))))
+            self._self_thoughts, self._self_actions = [], []
+        for model, prompt in jobs:
+            out = self._gen_wander(prompt, self.cfg.model_n_tok)
+            text = sit.trim_to_sentences(out or "", self.cfg.model_max_chars)
+            if model.update(tick_n, text) and self.workspace is not None:
+                self.workspace.set_context(model.kind, text,
+                                           list(self._embed(text)))
 
     def _ws_content(self) -> Optional[List[float]]:
         return (self.workspace.state_vector()
@@ -1536,6 +1592,10 @@ class CognitiveRuntime:
             return self._compose_reply_prompt(sensory, recalled)
         lines: List[str] = [self.cfg.persona, ""]
         if self.workspace is not None:
+            # the workspace's context frame: where I am, who I am
+            frame = self._model_frame()
+            if frame:
+                lines += frame + [""]
             # One first-person paragraph, not a labelled list: R1 read
             # a bulleted list as an exercise to solve (run 58994037).
             # Most salient last: the thought continues from it.
@@ -1568,7 +1628,9 @@ class CognitiveRuntime:
         Truncation keeps the head (persona) and the tail (input +
         instruction); the middle (memories) gives way first."""
         head = [self.cfg.respond_persona, ""]
-        mid: List[str] = []
+        mid: List[str] = list(self._model_frame())
+        if mid:
+            mid.append("")
         if recalled:
             mid.append("Things you remember:")
             mid.extend(f"- {e['content']}" for e in recalled)
@@ -1586,6 +1648,14 @@ class CognitiveRuntime:
         elif len(mid_s) > room:
             mid_s = mid_s[-room:]
         return "\n".join(x for x in (head_s, mid_s, tail_s) if x)
+
+    def _model_frame(self) -> List[str]:
+        out = []
+        if self.world_model is not None and self.world_model.text:
+            out.append(f"Where I am: {self.world_model.text}")
+        if self.self_model is not None and self.self_model.text:
+            out.append(f"Who I am: {self.self_model.text}")
+        return out
 
     def _next_wander_prompt(self) -> str:
         """Round-robin over ``cfg.wander_prompts`` so idle mind-

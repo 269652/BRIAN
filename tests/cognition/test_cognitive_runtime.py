@@ -102,15 +102,19 @@ def _score_map(mapping, default_nll=5.0):
     return _score
 
 
-def _mk_runtime(gen, scores=None, nt=None, cfg=None, seed=0, osc=False):
+def _mk_runtime(gen, scores=None, nt=None, cfg=None, seed=0, osc=False,
+                models=False):
     """Mechanism tests isolate their mechanism: the §14.13 workspace
     (which gates storage on ignition) is OFF unless a test opts in
-    with ``osc=True``. Ignition gating has its own contracts."""
+    with ``osc=True``, and the §14.16 world/self models (extra trunk
+    calls) unless ``models=True``. Each has its own contracts."""
     import dataclasses
     from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
     cfg = cfg or MindConfig(n_candidates=2)
     if not osc:
         cfg = dataclasses.replace(cfg, workspace_oscillator=False)
+    if not models:
+        cfg = dataclasses.replace(cfg, world_model=False, self_model=False)
     return CognitiveRuntime(
         generate_fn=gen,
         score_fn=scores or _score_map({}),
@@ -1093,7 +1097,9 @@ class TestInnerSpeechRegister:
             generate_fn=chat_gen, score_fn=_score_map({}),
             embed_fn=_vec_for, nt=_FakeNT(),
             memory=EpisodicMemory(maxlen=64), rng=random.Random(0),
-            cfg=MindConfig(n_candidates=1),
+            # seam routing in isolation: the §14.16 models add calls
+            cfg=MindConfig(n_candidates=1, world_model=False,
+                           self_model=False),
             generate_wander_fn=wander_gen)
         r = rt.tick()
         assert r.thought == "inner monologue output"
@@ -1107,7 +1113,9 @@ class TestInnerSpeechRegister:
             generate_fn=chat_gen, score_fn=_score_map({}),
             embed_fn=_vec_for, nt=_FakeNT(),
             memory=EpisodicMemory(maxlen=64), rng=random.Random(0),
-            cfg=MindConfig(n_candidates=1),
+            # seam routing in isolation: the §14.16 models add calls
+            cfg=MindConfig(n_candidates=1, world_model=False,
+                           self_model=False),
             generate_wander_fn=wander_gen)
         rt.observe("hello there")
         r = rt.tick()

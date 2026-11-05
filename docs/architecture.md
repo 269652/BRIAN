@@ -4109,3 +4109,24 @@ Each episode's `context` records its `gist`, `event` and `chapter`.
 Recall is top-down: one episode per gist, when there are enough gists,
 before MMR. `TickResult.event/chapter/event_boundary` report the
 temporal position, and the baseline report includes the counts.
+
+**World and self models** (`cognition/situation.py`, `MindConfig.world_model`
+/ `self_model`, on by default). Two short texts the mind keeps about
+where it is and who it is. The trunk (wander seam) rewrites each from
+its previous version plus the evidence since:
+
+- **world:** percepts and speech heard;
+- **self:** its thoughts, its chosen movements, and its body state (each
+  neuromodulator against its baseline).
+
+Rewrites happen at event boundaries, since the event model updates when
+the event changes (Zacks et al. 2007), or as soon as there is first
+evidence. Each is trimmed to whole sentences (`model_max_chars`), and
+every version is kept in `history`.
+
+Both are the global workspace's **context frame** (Baars). They do not
+compete for slots, but they open every workspace prompt ("Where I am:" /
+"Who I am:") and the reply prompt. Their latent vectors enter the
+workspace state vector at the typical salience (0.5), so they shape
+state-cued recall, coupling and the state change that drives DA/NE. The
+baseline report carries both histories.

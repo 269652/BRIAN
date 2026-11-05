@@ -251,6 +251,7 @@ def walk(rt, park: Park, ticks: int, action: str = "look",
         nxt, _ = rt.choose_movement(
             [o for o in movement_options(park) if o[0] not in stuck],
             expected=_place_values(places, park, blocked))
+        rt.note_movement(nxt)
         recs.append(WalkRecord(
             tick=park.tick, action=action, next_action=nxt,
             pose=(park.agent_x, park.agent_y, park.heading),
