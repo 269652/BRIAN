@@ -2021,6 +2021,32 @@ def cmd_deploy_mind(args: argparse.Namespace) -> int:
     return VastMindConnector().launch(cfg)
 
 
+def _current_branch(run=subprocess.run) -> str:
+    r = run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True)
+    name = (r.stdout or "").strip() if r.returncode == 0 else ""
+    return name or "master"
+
+
+def _unpushed_commits(branch: str, run=subprocess.run) -> Optional[int]:
+    """Commits on HEAD that origin/<branch> lacks (after a fetch), or
+    None when git cannot tell. A box clones origin, so these would not
+    run there."""
+    try:
+        run(["git", "fetch", "-q", "origin", branch],
+            capture_output=True, text=True, timeout=60)
+        r = run(["git", "rev-list", "--count", f"origin/{branch}..HEAD"],
+                capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        return int((r.stdout or "").strip())
+    except ValueError:
+        return None
+
+
 def cmd_deploy_mind_eval(args: argparse.Namespace) -> int:
     """``brian deploy-mind-eval`` — run the §14.11 indicator battery on
     a rented vast.ai GPU. Batch job: pushes the report JSON + log back
@@ -2041,6 +2067,17 @@ def cmd_deploy_mind_eval(args: argparse.Namespace) -> int:
         auto_destroy=not args.no_auto_destroy)
     if args.gpu_query:
         cfg.gpu_query = args.gpu_query
+    branch = cfg.branch or _current_branch()
+    ahead = _unpushed_commits(branch)
+    if ahead and not getattr(args, "allow_unpushed", False):
+        print(f"[deploy-mind-eval] ✗ {ahead} local commit(s) not on "
+              f"origin/{branch} — the box clones origin and would run the "
+              f"old code (run 59310346). `git push` first, or pass "
+              f"--allow-unpushed.")
+        return 2
+    if ahead is None:
+        print(f"[deploy-mind-eval] ⚠ could not compare with origin/{branch};"
+              f" make sure your work is pushed")
     print(f"[deploy-mind-eval] expert={cfg.expert} label={cfg.label} "
           f"auto_destroy={cfg.auto_destroy} args={' '.join(eval_args)}")
     _require_human_confirmation("vast (mind-eval)", 0)
@@ -6002,6 +6039,11 @@ def _build_parser() -> argparse.ArgumentParser:
                       action="store_true",
                       help="leave the box running after the eval (you "
                            "must `brian destroy <id>` yourself)")
+    sdme.add_argument("--allow-unpushed", dest="allow_unpushed",
+                      action="store_true",
+                      help="launch even though the local branch has "
+                           "commits origin lacks (the box would not run "
+                           "them)")
     sdme.set_defaults(func=cmd_deploy_mind_eval)
 
     # deploy-brain

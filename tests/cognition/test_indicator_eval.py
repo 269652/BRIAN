@@ -592,10 +592,65 @@ class TestCli:
         def _deny(*a, **k):
             raise SystemExit(1)
         monkeypatch.setattr(cli, "_require_human_confirmation", _deny)
+        monkeypatch.setattr(cli, "_unpushed_commits", lambda branch: 0)
         args = cli._build_parser().parse_args(["deploy-mind-eval"])
         with pytest.raises(SystemExit):
             args.func(args)
         assert launched == [], "a paid launch must never precede the gate"
+
+
+class TestDeployRefusesUnpushedWork:
+    """Run 59310346: the box clones origin, the probe lived only in 7
+    unpushed local commits → 'unknown probe park_walk', rc=1, a wasted
+    boot. The deploy refuses (before asking, before renting) while the
+    local branch has commits origin does not."""
+
+    def _git(self, rev_list_out="3\n", rc=0):
+        import subprocess
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append(cmd)
+            out = rev_list_out if "rev-list" in cmd else ""
+            return subprocess.CompletedProcess(cmd, rc, out, "")
+        return run, calls
+
+    def test_counts_commits_origin_does_not_have(self):
+        import neuroslm.cli as cli
+        run, calls = self._git("3\n")
+        assert cli._unpushed_commits("master", run=run) == 3
+        assert any(c[:2] == ["git", "fetch"] for c in calls)
+        assert ["git", "rev-list", "--count", "origin/master..HEAD"] in calls
+
+    def test_unknown_when_git_fails(self):
+        import neuroslm.cli as cli
+        run, _ = self._git(rc=128)
+        assert cli._unpushed_commits("master", run=run) is None
+
+    def _deploy(self, monkeypatch, ahead, argv=()):
+        import neuroslm.cli as cli
+        from neuroslm.connectors import vast_mind_eval
+        launched, asked = [], []
+        monkeypatch.setattr(vast_mind_eval.VastMindEvalConnector, "launch",
+                            lambda self, cfg: launched.append(cfg) or 0)
+        monkeypatch.setattr(cli, "_require_human_confirmation",
+                            lambda *a, **k: asked.append(a))
+        monkeypatch.setattr(cli, "_unpushed_commits", lambda branch: ahead)
+        args = cli._build_parser().parse_args(["deploy-mind-eval", *argv])
+        return args.func(args), launched, asked
+
+    def test_refuses_before_asking_when_local_is_ahead(self, monkeypatch):
+        rc, launched, asked = self._deploy(monkeypatch, 7)
+        assert rc != 0 and launched == [] and asked == []
+
+    def test_in_sync_proceeds_to_the_gate(self, monkeypatch):
+        rc, launched, asked = self._deploy(monkeypatch, 0)
+        assert asked and launched
+
+    def test_can_be_overridden_explicitly(self, monkeypatch):
+        rc, launched, asked = self._deploy(monkeypatch, 7,
+                                           ["--allow-unpushed"])
+        assert asked and launched
 
 
 class TestMindEvalOnstart:
