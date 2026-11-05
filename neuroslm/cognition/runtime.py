@@ -309,6 +309,10 @@ class MindConfig:
     workspace state they were laid down in (``ws_content``, plus their
     ``nt_state``), and recall scores (1−ρ)·cos(anchor, episode) +
     ρ·context similarity. Off → the anchor alone decides."""
+    hierarchical_memory: bool = True
+    """§14.16: episodes consolidate into gists (semantic) and segment
+    into events and chapters (temporal); recall is top-down — one
+    episode per gist before near-duplicates."""
     context_recall_weight: float = 0.3
     """ρ: share of the recall score given to context similarity."""
     intero_weight: float = 0.2
@@ -520,6 +524,11 @@ class TickResult:
     """Each workspace module's mean phase (None if silent)."""
     module_r: Optional[List[float]] = None
     """Each workspace module's internal order parameter."""
+    event: Optional[int] = None
+    """§14.16 temporal hierarchy: the event this tick ended in."""
+    chapter: Optional[int] = None
+    event_boundary: bool = False
+    """This tick's state change opened a new event."""
     goal_relevance: float = 0.0
     """Cosine of the selected thought to the current goal (most recent
     observed input); 0 when there is no goal yet."""
@@ -847,6 +856,10 @@ class CognitiveRuntime:
         self._state_expect: Optional[float] = None
         self._broadcast: Optional[Tuple[List[float], float]] = None
         self._goal_vec: Optional[List[float]] = None
+        self.hierarchy = None
+        if self.cfg.hierarchical_memory:
+            from neuroslm.memory.hierarchy import MemoryHierarchy
+            self.hierarchy = MemoryHierarchy()
         self.workspace = None
         if self.cfg.global_workspace:
             from neuroslm.cognition.workspace import GlobalWorkspace
@@ -1109,6 +1122,15 @@ class CognitiveRuntime:
                      or e.get("content") not in self._recent_recall]
             pool = ([t for t in adjusted if t[1] in fresh] if fresh
                     else adjusted)
+            if self.hierarchy is not None:
+                # top-down: one episode per gist, when there are enough
+                # gists to fill the recall
+                from neuroslm.memory.hierarchy import (best_per_gist,
+                                                       one_per_gist)
+                self.hierarchy.sync(self.memory.all())
+                reps = one_per_gist(pool)
+                pool = (reps if len(reps) >= self.cfg.recall_k
+                        else best_per_gist(pool))
             base = self.nt.baselines
             base = base() if callable(base) else base
             lam = recall_diversity(levels.get("ACh", 0.30),
@@ -1374,6 +1396,13 @@ class CognitiveRuntime:
             self._low_nov_streak = 0
 
         self._last_thought = thought
+        # §14.16: this tick's episodes join the hierarchy in the current
+        # event, then the state change decides whether a new one begins
+        event_boundary = False
+        if self.hierarchy is not None:
+            self.hierarchy.sync(self.memory.all())
+            event_boundary = self.hierarchy.boundary(state_change,
+                                                     self._ws_content())
         return TickResult(thought=thought, candidates=candidates,
                           scores=scores, recalled=recalled,
                           stored=stored, inhibited=False,
@@ -1403,7 +1432,12 @@ class CognitiveRuntime:
                               if pending is not None else None),
                           workspace=(self.workspace.items_view()
                                      if self.workspace is not None else []),
-                          ignition_threshold=osc.threshold if osc else None)
+                          ignition_threshold=osc.threshold if osc else None,
+                          event=(self.hierarchy.current_event
+                                 if self.hierarchy is not None else None),
+                          chapter=(self.hierarchy.current_chapter
+                                   if self.hierarchy is not None else None),
+                          event_boundary=event_boundary)
 
     # ── Internals ────────────────────────────────────────────────────
 

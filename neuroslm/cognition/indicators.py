@@ -743,6 +743,8 @@ def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
         "thought_quality": measures.thought_quality(
             thoughts, seams.embed_fn, context),
         "grounding": grounding_report(recs, park),
+        "memory": (rt.hierarchy.summary() if rt.hierarchy is not None
+                   else None),
         "thoughts": [t[:240] for t in thoughts],
         "walk": steps,
         "channels": list(_WS_MODULES) + list(_NT_ORDER),

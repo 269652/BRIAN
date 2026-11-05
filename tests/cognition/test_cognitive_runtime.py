@@ -2985,8 +2985,9 @@ class TestDiverseHippocampalRecall:
 
     def test_without_diversity_duplicates_win(self):
         from neuroslm.cognition.runtime import MindConfig
-        r = self._rt(MindConfig(n_candidates=1, recall_k=2,
-                                mmr_lambda=0.0)).tick()
+        # MMR in isolation: gist-level recall (§14.16) would diversify too
+        r = self._rt(MindConfig(n_candidates=1, recall_k=2, mmr_lambda=0.0,
+                                hierarchical_memory=False)).tick()
         contents = [e["content"] for e in r.recalled]
         assert "launch day under the moon" not in contents
 
@@ -3679,3 +3680,47 @@ class TestMovementSelection:
             rt.learn_movement("look", 0.0)
         assert rt._motor_value["walk"] > 0.9
         assert self._freq(rt, self.OPTS, "walk") > 0.7
+
+
+class TestHierarchicalMemoryInTheMind:
+    """§14.16: the runtime keeps a MemoryHierarchy over its episodes —
+    recall is top-down (one episode per gist before near-duplicates)
+    and each tick feeds event segmentation."""
+
+    def _rt(self, **kw):
+        from neuroslm.cognition.runtime import MindConfig
+        return _mk_runtime(_ScriptedGen(["a passing thought"]),
+                           cfg=MindConfig(n_candidates=1, recall_k=2,
+                                          context_recall=False, **kw))
+
+    def _fill(self, rt):
+        for t in ("the river bank", "the river bend", "the river mouth",
+                  "coffee by the river"):
+            rt.memory.add(t, content_vec=_vec_for(t),
+                          context={"kind": "observed"})
+        rt.memory.add("coffee at dawn", content_vec=_vec_for("coffee"),
+                      context={"kind": "observed"})
+        rt._last_thought = "the river"
+
+    def test_recall_spans_gists_before_near_duplicates(self):
+        rt = self._rt(mmr_lambda=0.0)
+        self._fill(rt)
+        rec = [e["content"] for e in rt.tick().recalled]
+        assert len(rec) == 2
+        assert sum("coffee" in c for c in rec) >= 1, rec
+
+    def test_flat_recall_takes_the_near_duplicates(self):
+        rt = self._rt(mmr_lambda=0.0, hierarchical_memory=False)
+        self._fill(rt)
+        rec = [e["content"] for e in rt.tick().recalled]
+        assert all(c.startswith("the river") for c in rec), rec
+
+    def test_episodes_are_annotated_and_ticks_report_event_and_chapter(self):
+        rt = self._rt()
+        self._fill(rt)
+        r = rt.tick()
+        assert all("gist" in e["context"] for e in rt.memory.all()
+                   if e.get("content_vec") is not None)
+        assert r.event == 0 and r.chapter == 0
+        assert r.event_boundary is False
+        assert rt.hierarchy.summary()["gists"] >= 2

@@ -4093,3 +4093,19 @@ off from the others still locks internally, and content coupling sets
 which modules bind *relative to the others*.
 
 `brian deploy-mind-eval --probes park_walk --idle-ticks 120`
+
+**Hierarchical memory** (`memory/hierarchy.py`, `MindConfig.hierarchical_memory`,
+on by default). Two hierarchies are indexed over the same episodes.
+
+- **Semantic.** An episode joins its nearest gist unless its similarity
+  is below the typical match by more than k·σ (running statistics, as
+  for ignition, with a JND floor of 0.05). Otherwise it founds a new
+  gist.
+- **Temporal.** An unusually large workspace state change opens a new
+  event (event segmentation, Zacks et al. 2007). A closing event whose
+  centroid is unusually far from its chapter's opens a new chapter.
+
+Each episode's `context` records its `gist`, `event` and `chapter`.
+Recall is top-down: one episode per gist, when there are enough gists,
+before MMR. `TickResult.event/chapter/event_boundary` report the
+temporal position, and the baseline report includes the counts.
