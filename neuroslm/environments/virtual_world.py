@@ -598,6 +598,9 @@ def create_environment(name: str = "random", seed: int = 42) -> Environment:
     if name == "random":
         rng = random.Random(seed)
         name = rng.choice(list(ENVIRONMENTS.keys()))
+    if name == "park":      # action-driven world; park.py imports this module
+        from neuroslm.environments.park import Park
+        return Park(seed=seed)
     cls = ENVIRONMENTS.get(name)
     if cls is None:
         raise ValueError(f"Unknown environment: {name}. "
