@@ -730,34 +730,7 @@ def probe_metacognition(seams: MindSeams,
 
 # ── IIT family: perturbational complexity (PCI analogue) ─────────────
 
-def lz76_complexity(bits: Sequence[int]) -> int:
-    """Lempel-Ziv (1976) complexity — number of distinct patterns in
-    the exhaustive parsing (Kaspar & Schuster 1987 algorithm)."""
-    s = list(bits)
-    n = len(s)
-    if n == 0:
-        return 0
-    if n == 1:
-        return 1
-    i, k, l, c, k_max = 0, 1, 1, 1, 1
-    while True:
-        if s[i + k - 1] == s[l + k - 1]:
-            k += 1
-            if l + k > n:
-                c += 1
-                break
-        else:
-            k_max = max(k_max, k)
-            i += 1
-            if i == l:
-                c += 1
-                l += k_max
-                if l + 1 > n:
-                    break
-                i, k, k_max = 0, 1, 1
-            else:
-                k = 1
-    return c
+from neuroslm.cognition.measures import lz76_complexity  # noqa: E402
 
 
 def pci_normalized(matrix: Sequence[Sequence[int]]) -> float:
