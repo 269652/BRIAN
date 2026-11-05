@@ -10,9 +10,13 @@ import pytest
 from test_cognitive_runtime import _FakeNT, _mk_runtime, _vec_for
 
 
+_W, _S = "Where I am now: I am", "Who I am now: I am"
+
+
 class _ModelGen:
-    """Answers model-update prompts with a fixed model; thoughts
-    otherwise. Records every prompt."""
+    """Completes model-update stems with a fixed continuation; thoughts
+    otherwise. Records every prompt. ``world``/``me`` are the resulting
+    models (stem's "I am" + continuation)."""
 
     def __init__(self, world="I am by the river near the old mill.",
                  me="I am a curious walker, heading to the mill."):
@@ -21,10 +25,10 @@ class _ModelGen:
 
     def __call__(self, prompt, max_new_tokens):
         self.prompts.append(prompt)
-        if "about my surroundings" in prompt:
-            return self.world
-        if "about myself" in prompt:
-            return self.me
+        if prompt.endswith(_W):
+            return self.world[len("I am"):]
+        if prompt.endswith(_S):
+            return self.me[len("I am"):]
         return "a passing thought"
 
 
@@ -70,8 +74,8 @@ class TestModelsEvolve:
         rt.note_movement("approach:mill")
         rt.hierarchy.boundary = lambda *a, **k: True     # an event ends
         rt.tick()
-        world_p = [p for p in gen.prompts if "about my surroundings" in p][-1]
-        self_p = [p for p in gen.prompts if "about myself" in p][-1]
+        world_p = [p for p in gen.prompts if p.endswith(_W)][-1]
+        self_p = [p for p in gen.prompts if p.endswith(_S)][-1]
         assert gen.world in world_p, "the previous model"
         assert "An old mill" in world_p, "what was perceived since"
         assert gen.me in self_p
@@ -83,20 +87,20 @@ class TestModelsEvolve:
         rt.nt = _FakeNT(DA=0.40, GABA=0.15)
         rt.sense("The river, close ahead.", "sight")
         rt.tick()
-        self_p = [p for p in gen.prompts if "about myself" in p][-1]
+        self_p = [p for p in gen.prompts if p.endswith(_S)][-1]
         assert "DA" in self_p and "above" in self_p
 
     def test_models_keep_their_history(self):
         gen, rt = _rt()
         rt.sense("The river, close ahead.", "sight")
         rt.tick()
-        gen.world = "Now I stand at the mill door."
+        gen.world = "I am at the mill door now."
         rt.sense("A mill door, close.", "sight")
         rt.hierarchy.boundary = lambda *a, **k: True
         rt.tick()
         hist = [t for _, t in rt.world_model.history]
         assert hist[-2:] == ["I am by the river near the old mill.",
-                             "Now I stand at the mill door."]
+                             "I am at the mill door now."]
 
     def test_no_update_without_an_event_boundary(self):
         gen, rt = _rt()
@@ -106,7 +110,7 @@ class TestModelsEvolve:
         rt.hierarchy.boundary = lambda *a, **k: False
         rt.sense("Another tree.", "sight")
         rt.tick()
-        assert not any("about my surroundings" in p
+        assert not any(p.endswith(_W)
                        for p in gen.prompts[n:])
 
     def test_a_rambling_update_is_trimmed_to_whole_sentences(self):
@@ -118,6 +122,50 @@ class TestModelsEvolve:
         assert len(t) <= 60 and t.endswith(".")
 
 
+class TestUpdatesAreContinuationsNotTasks:
+    """Run 59311386: with bullet lists and "In a few sentences, what I
+    now believe…" R1 treated the update as a writing exercise ("I need
+    to write a story… beginning, middle and end", "**Title:**") and the
+    story frame leaked into its thoughts via the context frame. The
+    update is a first-person continuation: no lists, no instruction,
+    ending on a stem the trunk simply completes."""
+
+    def _prompts(self):
+        gen, rt = _rt()
+        rt.sense("The river, close ahead.", "sight")
+        rt.sense("A brown dog, a few metres to the right.", "sight")
+        rt.note_movement("head:0")
+        rt.tick()
+        w = [p for p in gen.prompts if p.endswith(_W)][-1]
+        s = [p for p in gen.prompts if p.endswith(_S)][-1]
+        return w, s
+
+    def test_no_lists_and_no_instructions(self):
+        for p in self._prompts():
+            assert "\n- " not in p
+            assert "In a few sentences" not in p and "what I now" not in p
+
+    def test_the_evidence_reads_as_first_person_prose(self):
+        w, s = self._prompts()
+        assert "The river, close ahead.; A brown dog" not in w
+        assert "The river, close ahead." in w and "A brown dog" in w
+        assert "head:0" in s
+
+    def test_the_model_is_the_stem_plus_its_completion(self):
+        gen, rt = _rt()
+        rt.sense("The river, close ahead.", "sight")
+        rt.tick()
+        assert rt.world_model.text == "I am by the river near the old mill."
+
+    def test_only_the_first_paragraph_is_kept(self):
+        gen = _ModelGen(world="I am in a park by a fountain.\n\nWait, so I "
+                              "have to write a story about this.")
+        _, rt = _rt(gen)
+        rt.sense("A fountain, close.", "sight")
+        rt.tick()
+        assert rt.world_model.text == "I am in a park by a fountain."
+
+
 class TestModelsFrameTheWorkspace:
     def test_both_models_are_in_the_next_thought_prompt(self):
         gen, rt = _rt()
@@ -125,7 +173,7 @@ class TestModelsFrameTheWorkspace:
         rt.tick()
         rt.tick()
         p = [p for p in gen.prompts
-             if "about my" not in p][-1]
+             if not p.endswith((_W, _S))][-1]
         assert f"Where I am: {gen.world}" in p
         assert f"Who I am: {gen.me}" in p
 
@@ -140,4 +188,4 @@ class TestModelsFrameTheWorkspace:
         rt.sense("The river, close ahead.", "sight")
         rt.tick()
         assert rt.world_model is None and rt.self_model is None
-        assert not any("about my" in p for p in gen.prompts)
+        assert not any(p.endswith((_W, _S)) for p in gen.prompts)

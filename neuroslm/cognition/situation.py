@@ -10,8 +10,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Sequence, Tuple
 
-_NO_MODEL = "nothing yet"
-
 
 @dataclass
 class SituationModel:
@@ -40,15 +38,34 @@ def trim_to_sentences(text: str, max_chars: int) -> str:
     return head[:ends[-1]].rstrip() if ends else head.rstrip()
 
 
-def _bullets(lines: Sequence[str]) -> str:
-    return "\n".join(f"- {' '.join(l.split())}" for l in lines) or "- nothing"
+WORLD_STEM = "Where I am now: I am"
+SELF_STEM = "Who I am now: I am"
+"""Update prompts end on a first-person stem the trunk simply completes.
+Run 59311386: bullet lists + "In a few sentences, what I now believe…"
+read as a writing exercise ("I need to write a story…", "**Title:**"),
+and the story frame leaked into the thoughts through the context
+frame."""
+
+
+def _prose(lines: Sequence[str], each: int = 200) -> str:
+    return " ".join(" ".join(l.split())[:each] for l in lines if l.strip())
+
+
+def complete_model(completion: str, max_chars: int) -> str:
+    """The model text: the stem's "I am" + the completion's first
+    paragraph (later paragraphs are ramble — "Wait, so I…"), trimmed to
+    whole sentences."""
+    first = (completion or "").strip().split("\n\n")[0].strip()
+    if not first:
+        return ""
+    return trim_to_sentences(f"I am {first}", max_chars)
 
 
 def world_prompt(persona: str, old: str, noticed: Sequence[str]) -> str:
-    return (f"{persona}\n\n"
-            f"What I believed about my surroundings: {old or _NO_MODEL}\n"
-            f"What I have noticed since:\n{_bullets(noticed)}\n\n"
-            f"In a few sentences, what I now believe about my surroundings:")
+    earlier = f"Earlier I thought: {old}\n" if old else ""
+    return (f"{persona}\n\n{earlier}"
+            f"Since then I noticed: {_prose(noticed) or 'nothing new.'}\n\n"
+            f"{WORLD_STEM}")
 
 
 def body_state(levels: Dict[str, float], baselines: Dict[str, float]) -> str:
@@ -67,10 +84,10 @@ def body_state(levels: Dict[str, float], baselines: Dict[str, float]) -> str:
 
 def self_prompt(persona: str, old: str, thoughts: Sequence[str],
                 actions: Sequence[str], body: str) -> str:
-    return (f"{persona}\n\n"
-            f"What I believed about myself: {old or _NO_MODEL}\n"
-            f"What I thought since:\n{_bullets(thoughts)}\n"
-            f"What I did:\n{_bullets(actions)}\n"
-            f"How my body is: {body or 'unremarkable'}\n\n"
-            f"In a few sentences, what I now believe about myself — who I "
-            f"am and what I am doing:")
+    earlier = f"Earlier I thought of myself: {old}\n" if old else ""
+    did = ", ".join(actions) if actions else "stayed where I was"
+    return (f"{persona}\n\n{earlier}"
+            f"Since then I was thinking: {_prose(thoughts) or 'nothing much.'}"
+            f"\nI chose to: {did}.\n"
+            f"My body: {body or 'unremarkable'}.\n\n"
+            f"{SELF_STEM}")

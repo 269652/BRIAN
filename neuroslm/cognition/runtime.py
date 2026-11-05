@@ -1499,7 +1499,7 @@ class CognitiveRuntime:
             self._self_thoughts, self._self_actions = [], []
         for model, prompt in jobs:
             out = self._gen_wander(prompt, self.cfg.model_n_tok)
-            text = sit.trim_to_sentences(out or "", self.cfg.model_max_chars)
+            text = sit.complete_model(out or "", self.cfg.model_max_chars)
             if model.update(tick_n, text) and self.workspace is not None:
                 self.workspace.set_context(model.kind, text,
                                            list(self._embed(text)))
