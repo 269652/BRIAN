@@ -516,6 +516,10 @@ class TickResult:
     input to content-coupled synchrony); None without content coupling."""
     gamma_power: Optional[float] = None
     """Fraction of the population signal's power in 30-100 Hz."""
+    module_phase: Optional[List[Optional[float]]] = None
+    """Each workspace module's mean phase (None if silent)."""
+    module_r: Optional[List[float]] = None
+    """Each workspace module's internal order parameter."""
     goal_relevance: float = 0.0
     """Cosine of the selected thought to the current goal (most recent
     observed input); 0 when there is no goal yet."""
@@ -1388,6 +1392,8 @@ class CognitiveRuntime:
                           sync_r=osc.sync_r if osc else None,
                           gamma_peak_hz=osc.peak_hz if osc else None,
                           gamma_power=osc.gamma_power if osc else None,
+                          module_phase=osc.module_phase if osc else None,
+                          module_r=osc.module_r if osc else None,
                           workspace_inputs=ws_inputs,
                           content_coherence=coherence,
                           state_change=state_change,

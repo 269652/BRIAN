@@ -4067,3 +4067,29 @@ gives:
 
 Contract: every static object in five generated parks is seen within
 300 steps, with a scripted mind.
+
+**Baseline probe** (`park_walk`, 2026-11-05). One full mind walks the
+park for `--idle-ticks` steps, with no comparison arms. Each tick
+records the five workspace-module activations, the seven NT levels,
+synchrony R, ignition and the module phases. At the end it reports the
+measures in `cognition/measures.py`:
+
+- **Φ_AR**: autoregressive integrated information (Barrett & Seth 2011)
+  over modules + NT and over the modules alone, at the size-normalised
+  minimum-information bipartition.
+- **Integration and C_N**: Tononi–Sporns–Edelman neural complexity.
+- **LZ**: normalised Lempel–Ziv complexity of the median-binarised state
+  stream.
+- **Ignition**: rate, episode length, metastability (sd R) and Sarle's
+  bimodality of R; all-or-none ignition gives BC > 5/9.
+- **Phase locking**: pairwise module phase-locking values.
+- **Thought quality**: novelty, coherence, repetition, grounding in that
+  tick's percepts, drift, distinct-2.
+- **Grounding**: against the world state.
+
+Oscillator coupling is normalised by each oscillator's in-strength,
+Σ_n C_mn·mass_n. With uniform C this is the active mass. A module cut
+off from the others still locks internally, and content coupling sets
+which modules bind *relative to the others*.
+
+`brian deploy-mind-eval --probes park_walk --idle-ticks 120`

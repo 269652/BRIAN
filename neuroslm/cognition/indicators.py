@@ -674,6 +674,91 @@ def probe_loop_escape(seams: MindSeams,
                                  conds, "mean_broadcast_alignment").items()}}}
 
 
+_WS_MODULES = ("sensory", "memory", "language", "selection", "novelty")
+
+
+def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
+                    cfg: Optional[MindConfig] = None, seed: int = 0,
+                    progress=None,
+                    memories: Sequence[str] = AUTOBIO_SEEDS) -> dict:
+    """The baseline: one full mind walking the grounded park
+    (architecture.md §14.16), no comparison arms. Every tick's workspace
+    module activations, NT levels, synchrony and module phases are
+    recorded; at the end: autoregressive Φ (modules + NT, and modules
+    alone), integration, neural complexity, LZ complexity, ignition /
+    metastability, module phase locking, thought quality, and grounding
+    against the world state."""
+    import numpy as np
+    from neuroslm.cognition import measures
+    from neuroslm.cognition.embodiment import walk, grounding_report
+    from neuroslm.environments.park import Park
+    cfg = cfg or MindConfig()
+    rt = _fresh_runtime(seams, cfg, seed)
+    for m in memories:
+        rt.remember(m)
+    park = Park(seed=seed)
+    rows, mods, sync, ign, phases = [], [], [], [], []
+    thoughts, context, steps = [], [], []
+
+    def on_tick(rec, r):
+        _say(progress, f"── park_walk tick {rec.tick}: {rec.action} → "
+                       f"{rec.next_action} at ({rec.pose[0]:.1f}, "
+                       f"{rec.pose[1]:.1f}) seen={len(rec.seen_ids)}")
+        _say(progress, format_debug_trace(r))
+        steps.append({"tick": rec.tick, "action": rec.action,
+                      "next_action": rec.next_action,
+                      "pose": [round(v, 2) for v in rec.pose],
+                      "percepts": list(rec.percepts),
+                      "thought": (rec.thought or "")[:240],
+                      "ignited": r.ignited, "sync_r": r.sync_r})
+        if r.inhibited or r.workspace_inputs is None:
+            return
+        m = [float(r.workspace_inputs.get(k, 0.0)) for k in _WS_MODULES]
+        mods.append(m)
+        rows.append(m + [float(r.nt_levels.get(c, 0.0)) for c in _NT_ORDER])
+        if r.sync_r is not None:
+            sync.append(r.sync_r)
+            ign.append(bool(r.ignited))
+        if r.module_phase is not None and all(p is not None
+                                              for p in r.module_phase):
+            phases.append(r.module_phase)
+        if r.thought:
+            thoughts.append(r.thought)
+            context.append(list(rec.percepts))
+
+    recs = walk(rt, park, n_ticks, on_tick=on_tick)
+    X = np.asarray(rows) if rows else np.zeros((0, 0))
+    M = np.asarray(mods) if mods else np.zeros((0, 0))
+    full = {
+        "n_ticks": n_ticks,
+        "phi_ar": measures.phi_ar(X) if len(X) else {"phi": None},
+        "phi_ar_modules": measures.phi_ar(M) if len(M) else {"phi": None},
+        "integration": measures.integration(X) if len(X) else None,
+        "neural_complexity": (measures.neural_complexity(X) if len(X)
+                              else None),
+        "lz_complexity": measures.lz_state_complexity(X) if len(X) else None,
+        "ignition": measures.ignition_stats(sync, ign),
+        "phase_locking": (measures.phase_locking(phases) if phases
+                          else None),
+        "thought_quality": measures.thought_quality(
+            thoughts, seams.embed_fn, context),
+        "grounding": grounding_report(recs, park),
+        "thoughts": [t[:240] for t in thoughts],
+        "walk": steps,
+        "channels": list(_WS_MODULES) + list(_NT_ORDER),
+    }
+    q, g = full["thought_quality"], full["grounding"]
+    _say(progress, f"  park_walk: Φ_AR={full['phi_ar']['phi']} "
+                   f"novelty={q['mean_novelty']} "
+                   f"coherence={q['mean_coherence']} "
+                   f"grounded={g['grounded_rate']} "
+                   f"coverage={g['coverage']:.2f}")
+    return {"indicator": "baseline",
+            "question": "How integrated, complex and grounded is the full "
+                        "mind's stream of thought while it walks a park?",
+            "conditions": {"full": full}, "contrasts": {}}
+
+
 def _metacog_block(correct, replies, scores) -> dict:
     out = _accuracy(correct, replies)
     pairs = [(s, c) for s, c in zip(scores, correct) if s is not None]
@@ -908,7 +993,8 @@ def probe_perturbational_complexity(
 # ── Battery ──────────────────────────────────────────────────────────
 
 PROBES = ("episodic_recall", "source_monitoring", "loop_escape",
-          "metacognition", "perturbational_complexity", "controller_phi")
+          "metacognition", "perturbational_complexity", "controller_phi",
+          "park_walk")
 
 
 def run_indicator_battery(seams: MindSeams,
@@ -948,6 +1034,9 @@ def run_indicator_battery(seams: MindSeams,
         "controller_phi": lambda: probe_controller_phi(
             seams, cfg=cfg, samples=n_items or 4, seed=seed,
             progress=progress),
+        # n_idle_ticks = walk length
+        "park_walk": lambda: probe_park_walk(
+            seams, n_idle_ticks, cfg, seed, progress),
     }
     for p in probes:
         _say(progress, f"[mind-eval] probe {p}")
@@ -963,6 +1052,27 @@ def format_report(report: dict) -> str:
     lines = ["probe              indicator  condition       metric"]
     for name, res in report["probes"].items():
         for cond, c in res["conditions"].items():
+            if "thought_quality" in c:
+                q, g, ig = c["thought_quality"], c["grounding"], c["ignition"]
+                lines.append(
+                    f"{name[:18]:<18} {'baseline':<10} {cond:<15} "
+                    f"Φ_AR={_fmt(c['phi_ar']['phi'])} "
+                    f"Φ_mod={_fmt(c['phi_ar_modules']['phi'])} "
+                    f"C_N={_fmt(c['neural_complexity'])} "
+                    f"LZ={_fmt(c['lz_complexity'])} "
+                    f"ign={_fmt(ig['ignition_rate'])} "
+                    f"meta={_fmt(ig['metastability'])} "
+                    f"BC={_fmt(ig['bimodality'])}")
+                lines.append(
+                    f"{'':<18} {'thought':<10} {cond:<15} "
+                    f"novelty={_fmt(q['mean_novelty'])} "
+                    f"coherence={_fmt(q['mean_coherence'])} "
+                    f"repeat={_fmt(q['repetition_rate'])} "
+                    f"grounding={_fmt(q['mean_grounding'])} "
+                    f"distinct2={_fmt(q['distinct_2'])} "
+                    f"grounded={_fmt(g['grounded_rate'])} "
+                    f"coverage={_fmt(g['coverage'])}")
+                continue
             if "phi_mean" in c:
                 lines.append(
                     f"{name[:18]:<18} {'IIT/φ':<10} {cond:<15} "

@@ -103,6 +103,10 @@ class OscillatorStep:
     """The ignition threshold applied this tick."""
     gamma_power: float
     """Fraction of (non-DC) spectral power in 30-100 Hz."""
+    module_phase: List[Optional[float]] = None  # type: ignore[assignment]
+    """Each module's mean phase at the end of the tick (None if silent)."""
+    module_r: List[float] = None  # type: ignore[assignment]
+    """Each module's internal order parameter |⟨e^{iθ}⟩| (0 if silent)."""
 
 
 class GammaWorkspace:
@@ -175,10 +179,15 @@ class GammaWorkspace:
             if C.shape != (M, M):
                 raise ValueError(f"coupling must be {M}×{M}, got {C.shape}")
         s_ach, s_gaba = self._scales(nt_levels)
-        # mean field over the ACTIVE mass: silent populations do not
-        # dilute the coupling (run 59294820: K/N left idle ticks at
-        # ~0.4 K_c). Σa = N when everything is on — the classic model.
-        k = self.K * s_ach / max(float(np.sum(a)), 1e-9)
+        # mean field over the mass each oscillator actually HEARS (its
+        # in-strength Σ_n C_mn·mass_n): silent populations do not dilute
+        # the coupling (run 59294820: K/N left idle ticks at ~0.4 K_c),
+        # and a module cut off from the others still locks internally.
+        # C = 1: Σa, and Σa = N when everything is on — the classic model.
+        mass = a.reshape(M, -1).sum(axis=1)
+        heard = mass.sum() if C is None else C @ mass
+        k = self.K * s_ach / np.maximum(
+            np.repeat(np.broadcast_to(heard, (M,)), self.n_per_module), 1e-9)
         omega = self.omega * s_gaba
         sq = self.noise * math.sqrt(self.dt)
         theta = self.theta
@@ -204,9 +213,20 @@ class GammaWorkspace:
         sync_r = float(np.mean(R[-self.window:]))
         peak_hz, gamma_power = self._spectrum(x)
         ignited, thr = self._decide(sync_r, update_baseline)
+        phases: List[Optional[float]] = []
+        rs: List[float] = []
+        for m, z in enumerate(np.exp(1j * self.theta).reshape(M, -1)):
+            if a[m * self.n_per_module] <= 0.0:
+                phases.append(None)
+                rs.append(0.0)
+            else:
+                mz = z.mean()
+                phases.append(float(np.angle(mz)))
+                rs.append(float(abs(mz)))
         return OscillatorStep(sync_r=sync_r, ignited=bool(ignited),
                               peak_hz=peak_hz, gamma_power=gamma_power,
-                              threshold=float(thr))
+                              threshold=float(thr), module_phase=phases,
+                              module_r=rs)
 
     def _decide(self, sync_r: float, update_baseline: bool):
         """Ignition decision → (ignited, threshold). Adaptive mode is

@@ -133,6 +133,33 @@ class TestActiveMassMeanField:
         assert strong > 0.8 and weak < strong - 0.3
 
 
+class TestModulePhases:
+    """Each tick reports every module's mean phase and its own order
+    parameter, so phase locking between modules can be measured."""
+
+    def test_globally_locked_modules_share_a_phase(self):
+        out = _settle(_ws(coupling_ratio=3.0))
+        ph = out.module_phase
+        assert len(ph) == 5 and all(r > 0.9 for r in out.module_r)
+        spread = max(abs(math.remainder(p - ph[0], 2 * math.pi)) for p in ph)
+        assert spread < 0.3
+
+    def test_decoupled_modules_lock_internally_but_not_together(self):
+        eye = [[1.0 if i == j else 0.0 for j in range(5)] for i in range(5)]
+        ws = _ws(coupling_ratio=3.0)
+        for _ in range(3):
+            out = ws.step(ALL_ON, BASE_NT, coupling=eye)
+        assert all(r > 0.9 for r in out.module_r)
+        ph = out.module_phase
+        spread = max(abs(math.remainder(p - ph[0], 2 * math.pi)) for p in ph)
+        assert spread > 0.5
+
+    def test_a_silent_module_has_no_phase(self):
+        act = dict(ALL_ON, sensory=0.0)
+        out = _settle(_ws(coupling_ratio=3.0), act=act)
+        assert out.module_phase[0] is None and out.module_r[0] == 0.0
+
+
 class TestContentCoupling:
     """Stage 2 (binding by synchrony): module-to-module coupling C_mn
     scales the mean field each population feels. C = 1 everywhere is

@@ -953,3 +953,63 @@ class TestAnswerProbesShowReplyTicks:
                               progress=lines.append)
         traces = [l for l in lines if "responding" in l and "[tick" in l]
         assert len(traces) >= 3, "fact, distractor and question ticks"
+
+
+class TestParkWalkBaseline:
+    """The baseline: ONE full mind walking the grounded park — no
+    comparison arms — with the consciousness / IIT measures and the
+    thought-quality profile computed over the whole walk."""
+
+    def _gen(self):
+        n = {"i": 0}
+
+        def gen(prompt, max_new_tokens):
+            n["i"] += 1
+            seen = [l for l in prompt.splitlines() if "I see:" in l]
+            return (f"Thought {n['i']}: noticing "
+                    + (seen[-1].split("I see:")[-1][:40] if seen
+                       else "the quiet"))
+        return gen
+
+    def _run(self, ticks=20):
+        from neuroslm.cognition.indicators import probe_park_walk
+        return probe_park_walk(_seams(self._gen()), n_ticks=ticks,
+                               cfg=MindConfig(n_candidates=1), seed=0)
+
+    def test_one_full_mind_no_comparison_arms(self):
+        res = self._run()
+        assert list(res["conditions"]) == ["full"]
+        assert res["contrasts"] == {}
+
+    def test_reports_iit_and_workspace_measures(self):
+        c = self._run()["conditions"]["full"]
+        for k in ("phi_ar", "phi_ar_modules", "integration",
+                  "neural_complexity", "lz_complexity", "ignition",
+                  "phase_locking"):
+            assert k in c, k
+        assert {"ignition_rate", "mean_episode", "metastability",
+                "bimodality"} <= set(c["ignition"])
+
+    def test_reports_thought_quality_and_grounding(self):
+        c = self._run()["conditions"]["full"]
+        q = c["thought_quality"]
+        assert q["n"] == len(c["thoughts"]) > 0
+        assert q["mean_grounding"] is not None, "percepts are the context"
+        g = c["grounding"]
+        assert 0.0 < g["coverage"] <= 1.0 and "static_coverage" in g
+
+    def test_the_walk_is_recorded_tick_by_tick(self):
+        c = self._run(ticks=12)["conditions"]["full"]
+        assert len(c["walk"]) == 12
+        step = c["walk"][0]
+        assert {"action", "next_action", "pose", "percepts",
+                "thought"} <= set(step)
+
+    def test_is_in_the_battery(self):
+        from neuroslm.cognition.indicators import PROBES
+        assert "park_walk" in PROBES
+
+    def test_the_report_prints(self):
+        from neuroslm.cognition.indicators import format_report
+        out = format_report({"probes": {"park_walk": self._run(ticks=10)}})
+        assert "Φ_AR=" in out and "coherence=" in out and "coverage=" in out

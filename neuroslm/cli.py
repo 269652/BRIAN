@@ -5331,7 +5331,10 @@ def _add_mind_eval_args(p: argparse.ArgumentParser) -> None:
                         "list runs the battery once per expert")
     p.add_argument("--probes", default=None,
                    help="comma list (default all): episodic_recall,"
-                        "source_monitoring,loop_escape,metacognition")
+                        "source_monitoring,loop_escape,metacognition,"
+                        "perturbational_complexity,controller_phi,"
+                        "park_walk (the baseline; --idle-ticks = walk "
+                        "length)")
     p.add_argument("--n-items", dest="n_items", type=int, default=None,
                    help="cap items per probe (default: full bank)")
     p.add_argument("--n-distractors", dest="n_distractors", type=int,
