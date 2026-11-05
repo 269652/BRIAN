@@ -33,7 +33,7 @@ from __future__ import annotations
 import math
 import random as _random
 import re
-from collections import OrderedDict, deque
+from collections import OrderedDict, defaultdict, deque
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Tuple
@@ -652,7 +652,9 @@ def format_debug_trace(result: TickResult) -> str:
     return "\n".join(lines)
 
 
-_WS_LABEL = {"percept": "Earlier I noticed: ", "memory": "I remember: ",
+_AMBIENT_SOURCES = frozenset({"sight", "sound"})
+_WS_LABEL = {"sight": "I see: ", "sound": "I hear: ",
+             "percept": "Earlier I noticed: ", "memory": "I remember: ",
              "thought": "I was thinking: "}
 
 
@@ -804,6 +806,12 @@ class CognitiveRuntime:
         self.cfg = cfg
         self.rng = rng or _random.Random(0)
         self._sensory: Deque[str] = deque(maxlen=32)
+        # embodiment: ambient percepts (text, source, vec, salience), the
+        # percept-novelty baseline, learned movement values (typical 0.5)
+        self._ambient: Deque[Tuple[str, str, List[float], float]] = deque(
+            maxlen=32)
+        self._percept_base: Optional[float] = None
+        self._motor_value: Dict[str, float] = defaultdict(lambda: 0.5)
         self._last_thought: Optional[str] = None
         self._tick_n: int = 0
         self._wander_idx: int = 0
@@ -909,6 +917,35 @@ class CognitiveRuntime:
             grad_norm=float(self.cfg.appraisal.get(action_class, 0.0)))
         self._gate_goal(text_vec)
 
+    def sense(self, text: str, source: str = "sight") -> float:
+        """Ambient perception (embodiment): what the mind sees or hears
+        in its world. Unlike ``observe`` it is not addressed to the mind
+        — the next tick stays inner speech. Salience is the percept's
+        novelty against memory, divisively normalised (familiar sights
+        habituate, new ones capture attention); only a salient percept
+        is stored, as an observed episode. Returns the salience."""
+        if source not in _AMBIENT_SOURCES:
+            raise ValueError(f"sense source {source!r}: expected one of "
+                             f"{sorted(_AMBIENT_SOURCES)}")
+        text = (text or "").strip()
+        if not text:
+            return 0.0
+        from neuroslm.cognition.workspace import divisive_normalise
+        vec = list(self._embed(text))
+        raw = self._novelty_of(vec)
+        sal = divisive_normalise(raw, self._percept_base)
+        a = self.cfg.norm_adapt_alpha
+        self._percept_base = (raw if self._percept_base is None
+                              else (1 - a) * self._percept_base + a * raw)
+        if sal >= self.cfg.novelty_write_threshold:
+            self.memory.add(text, content_vec=vec,
+                            nt_state=self.nt.levels(),
+                            tags=[source, "percept", "kind=observed"],
+                            context={"kind": "observed", "source": source,
+                                     "ws_content": self._ws_content()})
+        self._ambient.append((text, source, vec, sal))
+        return sal
+
     def remember(self, text: str, source: str = "autobiographical") -> None:
         """Lay down prior autobiographical memory: an OBSERVED episode
         that is not a percept of the current moment — no sensory queue,
@@ -950,6 +987,8 @@ class CognitiveRuntime:
         # SENSE: drain the queue (newest percept anchors the tick).
         sensory = list(self._sensory)
         self._sensory.clear()
+        ambient = list(self._ambient)
+        self._ambient.clear()
         # DMN condition: nothing external arrived this cycle — the
         # tick is pure mind-wandering rather than a response.
         wandering = not bool(sensory)
@@ -972,6 +1011,8 @@ class CognitiveRuntime:
                 self.workspace.drop("thought")
             for s in sensory:
                 self.workspace.offer(s, "percept", list(self._embed(s)), 1.0)
+            for text, source, vec, sal in ambient:
+                self.workspace.offer(text, source, vec, sal)
 
         # Hippocampal replay (C2 of the curiosity loop): when bored,
         # an idle tick anchors RECALL on a randomly sampled stored
@@ -1183,7 +1224,10 @@ class CognitiveRuntime:
         # WORKSPACE (§14.13): the selected thought is broadcast only if
         # the module oscillators phase-lock globally this tick.
         ws_inputs = {
-            "sensory": 1.0 if sensory else 0.0,
+            # addressed input drives the sensory population fully; the
+            # ambient world by its most salient percept
+            "sensory": (1.0 if sensory else
+                        max((a[3] for a in ambient), default=0.0)),
             "memory": recall_strength,
             "language": 1.0 - sc.entropy_norm,
             "selection": 1.0 - selection_entropy,
@@ -1200,7 +1244,8 @@ class CognitiveRuntime:
                     content_coupling_matrix)
                 coupling, coherence = content_coupling_matrix(
                     {"sensory": _mean_vec([list(self._embed(s))
-                                           for s in sensory]),
+                                           for s in sensory]
+                                          + [a[2] for a in ambient]),
                      "memory": _mean_vec([list(e["content_vec"])
                                           for e in recalled
                                           if e.get("content_vec")]),
@@ -1551,6 +1596,12 @@ class CognitiveRuntime:
         cur = self.cfg.curiosity_value * max(0.0, min(1.0, self._boredom))
         utils = [(-s.mean_nll + self.cfg.goal_weight * da_gain * g + cur * n)
                  / max(T, 1e-6) for s, g, n in zip(scores, rel, nov)]
+        return self._softmax_pick(utils)
+
+    def _softmax_pick(self, utils: List[float]) -> Tuple[int, float]:
+        """Sample from softmax(utils) → (index, normalised entropy)."""
+        if len(utils) == 1:
+            return 0, 0.0
         m = max(utils)
         exps = [math.exp(u - m) for u in utils]
         z = sum(exps)
@@ -1566,6 +1617,69 @@ class CognitiveRuntime:
                 idx = i
                 break
         return idx, selection_entropy
+
+    # ── Movement (embodiment) ────────────────────────────────────────
+
+    def choose_movement(self, options: Sequence[Tuple[str, Optional[str]]],
+                        expected: Optional[Dict[str, float]] = None
+                        ) -> Tuple[str, float]:
+        """BG movement selection over ``(action, percept_text)`` options,
+        same softmax and temperature as thought selection. An option with
+        a percept (approach a seen target) is valued by the target's own
+        novelty × curiosity·boredom plus goal fit × phasic DA; one without
+        (walk/turn/look) by the novelty it produced before
+        (``learn_movement``) — or by ``expected[action]`` when the body
+        supplies a predicted novelty (place novelty ahead). Returns
+        ``(action, selection_entropy)``."""
+        if not options:
+            raise ValueError("choose_movement needs at least one option")
+        from neuroslm.cognition.workspace import divisive_normalise
+        base = self.nt.baselines
+        base = base() if callable(base) else base
+        levels = self.nt.levels()
+        # directed, not random, exploration: boredom scales the novelty
+        # value below but does not heat the motor softmax
+        T = selection_temperature(levels.get("NE", 0.20),
+                                  base.get("NE", 0.20), 0.0, self.cfg)
+        da0 = base.get("DA", 0.15)
+        da_gain = max(0.0, levels.get("DA", 0.0) - da0) / max(da0, 1e-6)
+        cur = self.cfg.curiosity_value * max(0.0, min(1.0, self._boredom))
+        vecs = {a: list(self._embed(t)) for a, t in options if t}
+        raw = {a: self._novelty_of(v) for a, v in vecs.items()}
+        # no percept baseline yet: the competing targets are the pool
+        pool = (self._percept_base if self._percept_base is not None
+                else (sum(raw.values()) / len(raw) if raw else None))
+        utils = []
+        for a, _ in options:
+            if a in vecs:
+                nov = divisive_normalise(raw[a], pool)
+                g = (_cosine(vecs[a], self._goal_vec)
+                     if self._goal_vec else 0.0)
+            elif expected is not None and a in expected:
+                nov, g = float(expected[a]), 0.0
+            else:
+                nov, g = self._motor_value[a], 0.0
+            utils.append((cur * nov + self.cfg.goal_weight * da_gain * g)
+                         / max(T, 1e-6))
+        # hierarchical BG selection: the kind of act first (each channel
+        # at its best member's value), then its object — many weak
+        # targets must not outvote one strong move by sheer count
+        groups: Dict[str, List[int]] = {}
+        for i, (a, _) in enumerate(options):
+            groups.setdefault(a.partition(":")[0], []).append(i)
+        kinds = list(groups)
+        k, ent = self._softmax_pick([max(utils[i] for i in groups[g])
+                                     for g in kinds])
+        members = groups[kinds[k]]
+        j, _ = self._softmax_pick([utils[i] for i in members])
+        return options[members[j]][0], ent
+
+    def learn_movement(self, action: str, outcome: float) -> None:
+        """Prediction-error update of a movement's value toward the
+        (normalised) novelty it just produced."""
+        a = self.cfg.norm_adapt_alpha
+        self._motor_value[action] += a * (float(outcome)
+                                          - self._motor_value[action])
 
     # ── Knowledge extraction: cross-episode pattern mining ────────────
 

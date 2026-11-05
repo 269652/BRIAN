@@ -4008,3 +4008,62 @@ each through a mechanism from the literature:
 
 DA no longer raises the selection temperature. Its former exploration
 role now belongs to boredom alone, so DA means goal pursuit.
+
+
+### 14.16 Embodiment — a grounded park (2026-11-05)
+
+The mind can walk through a persistent world. `neuroslm/environments/park.py`
+holds a procedural park: trees, benches, a pond, lamps, flower beds, a
+kiosk, a fountain, a wandering dog and passers-by, plus a clock that
+dims the light. What reaches the mind is decided by a `PerceptChannel`.
+The default `GeometryChannel` computes:
+
+- field of view (±60°) and a view distance limited by the light;
+- occlusion by trees and the kiosk;
+- detail that falls off with distance;
+- sounds, heard from any direction.
+
+Every `Percept` names the object ids it came from (the grounding
+contract) and carries its distance, bearing, angular extent, and whether
+it blocks the view or the way. A rendered-image channel (frames → vision
+model) can replace the geometry channel without touching the world or
+the loop.
+
+**Ambient perception.** `CognitiveRuntime.sense(text, "sight"|"sound")`
+is not speech addressed to the mind, so the tick stays inner speech. A
+percept enters the workspace as `I see:` / `I hear:` at its novelty
+against memory, divisively normalised, so familiar sights habituate. It
+is stored as an observed episode only when salient, and it drives the
+sensory oscillator population.
+
+**Movement.** `choose_movement` uses the thought softmax, but
+hierarchically: the kind of act first (look, head off, approach), each
+kind at the value of its best member, then its object. Many weak targets
+therefore cannot outvote one strong move. Values:
+
+- An approach is valued by the target's novelty × curiosity·boredom
+  plus its goal fit × phasic DA.
+- Heading off (`head:<deg>`, 8 directions) is valued by the cognitive
+  map below.
+
+Boredom scales the novelty value but does not heat the motor softmax:
+directed rather than random exploration (Wilson et al. 2014).
+
+**Cognitive map** (`embodiment.PlaceMemory`). A grid of viewed ground
+and obstacles. It is built only from the mind's own pose and field of
+view, from the ground behind seen obstructions (left unviewed), from
+solid percepts and from bumps, never from the world's object list. A
+heading's value is 1/(1 + walking distance to the nearest unviewed
+reachable ground), from one cell ahead (frontier exploration, Yamauchi
+1997), relative to the best option. A bump rules that way out until the
+body moves.
+
+`embodiment.walk(rt, park, ticks)` runs the loop. `grounding_report`
+gives:
+
+- object coverage, and static coverage (movers are met by chance);
+- mentions of park kinds in thoughts, split into grounded (perceived at
+  or before that tick) and confabulated.
+
+Contract: every static object in five generated parks is seen within
+300 steps, with a scripted mind.

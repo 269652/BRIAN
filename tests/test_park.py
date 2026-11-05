@@ -94,6 +94,16 @@ class TestFieldOfView:
                    _bench("beside", x=10.0, y=4.0)])
         assert _seen(p) == {"tree1", "beside"}
 
+    def test_a_percept_carries_where_it_is_and_whether_it_blocks_the_view(self):
+        p = _park([_tree(x=5.0, y=0.0), _bench("b", x=4.0, y=4.0)])
+        q = {x.object_ids[0]: x for x in p.perceive()
+             if x.modality == "visual"}
+        t, b = q["tree1"], q["b"]
+        assert t.bearing == pytest.approx(0.0)
+        assert t.extent == pytest.approx(math.asin(1.0 / 5.0))
+        assert t.occludes and not b.occludes
+        assert b.bearing == pytest.approx(math.pi / 4)
+
     def test_near_objects_show_detail_far_ones_only_their_kind(self):
         near = _park([_bench(x=3.0, colour="red")])
         far = _park([_bench(x=18.0, colour="red")])
@@ -106,7 +116,7 @@ class TestFieldOfView:
 class TestActions:
     def test_the_action_repertoire(self):
         assert {"walk", "turn_left", "turn_right", "look",
-                "approach"} <= set(PARK_ACTIONS)
+                "approach", "head"} <= set(PARK_ACTIONS)
 
     def test_walk_moves_forward(self):
         p = _park([], x=10.0, y=10.0, heading=0.0)
@@ -121,6 +131,23 @@ class TestActions:
         for _ in range(8):
             p.step("turn_right")
         assert p.heading == pytest.approx(math.pi / 4), "wrapped to (−π, π]"
+
+    def test_heading_off_turns_and_steps_in_one_tick(self):
+        p = _park([], x=10.0, y=10.0, heading=0.0)
+        p.step("head:90")
+        assert p.heading == pytest.approx(math.pi / 2)
+        assert (p.agent_x, p.agent_y) == pytest.approx((10.0, 10.0 + p.stride))
+
+    def test_heading_into_an_obstacle_turns_but_does_not_move(self):
+        p = _park([_tree(x=10.0, y=11.5)], x=10.0, y=10.0, heading=0.0)
+        f = p.step("head:90")
+        assert p.heading == pytest.approx(math.pi / 2)
+        assert (p.agent_x, p.agent_y) == (10.0, 10.0)
+        assert "bump" in f.tactile
+
+    def test_a_malformed_heading_is_rejected(self):
+        with pytest.raises(ValueError):
+            _park([]).step("head:north")
 
     def test_walking_into_an_obstacle_is_blocked_and_felt(self):
         p = _park([_tree(x=11.5, y=10.0)], x=10.0, y=10.0)

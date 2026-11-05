@@ -3529,3 +3529,153 @@ class TestGlobalWorkspaceFeedsThought:
         rt.tick()
         assert "My last thought: thinking about the moon" in gen.prompts[-1]
         assert rt.tick().workspace == []
+
+
+class TestAmbientPerception:
+    """Embodiment (park): what the mind sees and hears is ambient — it
+    enters the workspace and memory but is not speech addressed to it,
+    so the tick stays inner speech rather than a reply."""
+
+    def _rt(self, gen=None, **kw):
+        from neuroslm.cognition.runtime import MindConfig
+        gen = gen or _ScriptedGen(["a passing thought"])
+        return gen, _mk_runtime(gen, cfg=MindConfig(n_candidates=1,
+                                                    recall_k=0, **kw))
+
+    def test_a_sight_does_not_turn_the_tick_into_a_reply(self):
+        gen, rt = self._rt()
+        rt.sense("A red bench, close, ahead.", "sight")
+        r = rt.tick()
+        assert r.wandering and r.action != "respond"
+        assert "Just now:" not in gen.prompts[-1]
+
+    def test_sights_and_sounds_are_in_mind_as_such(self):
+        gen, rt = self._rt()
+        rt.sense("A red bench, close, ahead.", "sight")
+        rt.sense("A dog barking behind you.", "sound")
+        rt.tick()
+        p = gen.prompts[-1]
+        assert "I see: A red bench, close, ahead." in p
+        assert "I hear: A dog barking behind you." in p
+
+    def test_a_new_sight_is_remembered_a_familiar_one_habituates(self):
+        _, rt = self._rt()
+        rt.sense("the river bank, close, ahead", "sight")
+        e = next(e for e in rt.memory.all()
+                 if e["content"] == "the river bank, close, ahead")
+        assert e["context"]["kind"] == "observed"
+        assert e["context"]["source"] == "sight"
+        rt.tick()
+        first = {it.text: it.salience for it in rt.workspace.items()}
+        rt.workspace.drop("sight")
+        n_before = len(rt.memory.all())
+        rt.sense("the river bank, close, ahead", "sight")
+        assert len(rt.memory.all()) == n_before, "a repeat is not stored"
+        rt.tick()
+        second = {it.text: it.salience for it in rt.workspace.items()}
+        assert second.get("the river bank, close, ahead", 0.0) < \
+            first["the river bank, close, ahead"]
+
+    def test_the_sensory_population_carries_the_percept_salience(self):
+        _, rt = self._rt()
+        r = rt.tick()
+        assert r.workspace_inputs["sensory"] == 0.0
+        rt.sense("the moon over the river", "sight")
+        r = rt.tick()
+        assert r.workspace_inputs["sensory"] > 0.0
+
+    def test_unknown_sources_are_rejected(self):
+        _, rt = self._rt()
+        with pytest.raises(ValueError):
+            rt.sense("something", "smell-o-vision")
+
+
+class TestMovementSelection:
+    """The BG picks a movement with the thought softmax: an approach is
+    valued by the target's own novelty (curiosity × boredom) and its fit
+    to the goal (phasic DA); walk/turn/look by the novelty they have
+    produced before (learned, starting at typical = 0.5)."""
+
+    OPTS = [("look", None), ("walk", None)]
+
+    def _rt(self, nt=None):
+        from neuroslm.cognition.runtime import MindConfig
+        return _mk_runtime(_ScriptedGen(["x"]), nt=nt,
+                           cfg=MindConfig(n_candidates=1, recall_k=0))
+
+    def _freq(self, rt, opts, target, n=400):
+        return sum(rt.choose_movement(opts)[0] == target
+                   for _ in range(n)) / n
+
+    def test_returns_one_of_the_options_and_an_entropy(self):
+        rt = self._rt()
+        act, ent = rt.choose_movement(self.OPTS)
+        assert act in {"look", "walk"} and 0.0 <= ent <= 1.0
+
+    def test_rejects_an_empty_repertoire(self):
+        with pytest.raises(ValueError):
+            self._rt().choose_movement([])
+
+    def test_a_bored_mind_approaches_the_novel_over_the_familiar(self):
+        rt = self._rt()
+        rt.memory.add("coffee at the kiosk", content_vec=_vec_for("coffee"),
+                      context={"kind": "observed"})
+        rt._boredom = 1.0
+        opts = [("approach:kiosk", "A coffee kiosk, close, ahead."),
+                ("approach:pond", "A river pond, some way off.")]
+        assert self._freq(rt, opts, "approach:pond") > 0.7
+
+    def test_without_boredom_or_dopamine_there_is_no_preference(self):
+        rt = self._rt()
+        rt.memory.add("coffee at the kiosk", content_vec=_vec_for("coffee"),
+                      context={"kind": "observed"})
+        rt._boredom = 0.0
+        opts = [("approach:kiosk", "A coffee kiosk, close, ahead."),
+                ("approach:pond", "A river pond, some way off.")]
+        assert 0.4 < self._freq(rt, opts, "approach:pond") < 0.6
+
+    def test_phasic_dopamine_pulls_toward_the_goal(self):
+        rt = self._rt(nt=_FakeNT(DA=0.45))
+        rt._goal_vec = _vec_for("chess")
+        rt._boredom = 0.0
+        opts = [("approach:a", "Two men playing chess, close."),
+                ("approach:b", "A moon-shaped sculpture, close.")]
+        assert self._freq(rt, opts, "approach:a") > 0.7
+
+    def test_boredom_directs_movement_rather_than_randomising_it(self):
+        # directed vs random exploration (Wilson et al. 2014): boredom
+        # raises the VALUE of novelty for movement; it does not also heat
+        # the motor softmax, which blurred the way toward unexplored
+        # ground (embodied walk: corners never reached in 300 ticks)
+        rt = self._rt()
+        rt._boredom = 1.0
+        opts = [("head:0", None), ("head:90", None)]
+        n = sum(rt.choose_movement(opts, expected={"head:0": 1.0,
+                                                   "head:90": 0.5})[0]
+                == "head:0" for _ in range(400))
+        assert n / 400 > 0.9
+
+    def test_many_weak_targets_do_not_outvote_one_strong_move(self):
+        # embodied walk: 10 familiar approach targets took 84/150 choices
+        # from a walk toward unviewed ground. Selection is hierarchical:
+        # the approach channel competes once, at its best target's value.
+        rt = self._rt()
+        rt.memory.add("coffee at the kiosk", content_vec=_vec_for("coffee"),
+                      context={"kind": "observed"})
+        rt._percept_base = 0.5
+        rt._boredom = 1.0
+        opts = [("walk", None)] + [(f"approach:k{i}", "A coffee kiosk.")
+                                   for i in range(10)]
+        n = sum(rt.choose_movement(opts, expected={"walk": 1.0})[0] == "walk"
+                for _ in range(400))
+        assert n / 400 > 0.7
+
+    def test_movements_that_paid_off_are_preferred(self):
+        rt = self._rt()
+        rt._boredom = 1.0
+        assert rt._motor_value["walk"] == pytest.approx(0.5)
+        for _ in range(20):
+            rt.learn_movement("walk", 1.0)
+            rt.learn_movement("look", 0.0)
+        assert rt._motor_value["walk"] > 0.9
+        assert self._freq(rt, self.OPTS, "walk") > 0.7

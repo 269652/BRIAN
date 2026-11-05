@@ -19,7 +19,8 @@ from typing import Dict, List, Optional, Protocol, Sequence, Tuple
 
 from neuroslm.environments.virtual_world import Environment, SensoryFrame
 
-PARK_ACTIONS = ("walk", "turn_left", "turn_right", "look", "approach")
+PARK_ACTIONS = ("walk", "turn_left", "turn_right", "look", "approach",
+                "head")
 
 _OPAQUE = {"tree", "kiosk"}
 _MOVERS = {"dog", "person"}
@@ -57,6 +58,14 @@ class Percept:
     object_ids: Tuple[str, ...]
     modality: str
     distance: Optional[float] = None
+    bearing: Optional[float] = None
+    """Signed angle from the viewer's forward, positive = left."""
+    extent: Optional[float] = None
+    """Apparent angular half-width (rad)."""
+    occludes: bool = False
+    """The viewer cannot see past it."""
+    solid: bool = False
+    """The viewer cannot walk through it."""
 
 
 class PerceptChannel(Protocol):
@@ -105,7 +114,10 @@ class GeometryChannel:
             desc = _article(o.describe(d <= self.detail_distance))
             out.append(Percept(_sentence(f"{desc}, {_distance_word(d)} "
                                          f"{_bearing_word(b)}"),
-                               (o.id,), "visual", d))
+                               (o.id,), "visual", d, bearing=b,
+                               extent=math.asin(min(1.0, o.radius
+                                                    / max(d, 1e-9))),
+                               occludes=o.kind in _OPAQUE, solid=o.solid))
         for o, d, b in polar:
             if o.sound and d <= self.hearing_distance:
                 out.append(Percept(_sentence(f"{_article(o.kind)} {o.sound} "
@@ -319,7 +331,16 @@ class Park(Environment):
     def step(self, action: Optional[str] = None) -> SensoryFrame:  # type: ignore[override]
         act = action or "look"
         target = None
-        if act.startswith("approach"):
+        turn_by = 0.0
+        if act.startswith("head"):
+            _, _, deg = act.partition(":")
+            try:
+                turn_by = math.radians(float(deg))
+            except ValueError:
+                raise ValueError(f"heading needs relative degrees: "
+                                 f"'head:<deg>', got {action!r}") from None
+            act = "head"
+        elif act.startswith("approach"):
             _, _, target = act.partition(":")
             if not target:
                 raise ValueError("approach needs an object id: "
@@ -334,7 +355,8 @@ class Park(Environment):
             self.heading = _wrap(self.heading + self.turn)
         elif act == "turn_right":
             self.heading = _wrap(self.heading - self.turn)
-        elif act == "walk":
+        elif act in ("walk", "head"):
+            self.heading = _wrap(self.heading + turn_by)
             bump = self._try_move(self.agent_x + self.stride * math.cos(self.heading),
                                   self.agent_y + self.stride * math.sin(self.heading))
         elif act == "approach":
