@@ -61,10 +61,13 @@ def complete_model(completion: str, max_chars: int) -> str:
     return trim_to_sentences(f"I am {first}", max_chars)
 
 
-def world_prompt(persona: str, old: str, noticed: Sequence[str]) -> str:
-    earlier = f"Earlier I thought: {old}\n" if old else ""
-    return (f"{persona}\n\n{earlier}"
-            f"Since then I noticed: {_prose(noticed) or 'nothing new.'}\n\n"
+def world_prompt(seen: Sequence[str], just_now: Sequence[str]) -> str:
+    """Built from what was perceived — never from the previous world
+    model (run 59313101: from "Earlier I thought: …" it invented a
+    crossroads with signposts and every later version built on it).
+    No persona line either: it was parroted back as the model."""
+    earlier = f"What I have seen here: {_prose(seen)}\n" if seen else ""
+    return (f"{earlier}Just now: {_prose(just_now) or 'nothing new.'}\n\n"
             f"{WORLD_STEM}")
 
 
@@ -82,11 +85,11 @@ def body_state(levels: Dict[str, float], baselines: Dict[str, float]) -> str:
     return ", ".join(parts)
 
 
-def self_prompt(persona: str, old: str, thoughts: Sequence[str],
+def self_prompt(old: str, thoughts: Sequence[str],
                 actions: Sequence[str], body: str) -> str:
     earlier = f"Earlier I thought of myself: {old}\n" if old else ""
     did = ", ".join(actions) if actions else "stayed where I was"
-    return (f"{persona}\n\n{earlier}"
+    return (f"{earlier}"
             f"Since then I was thinking: {_prose(thoughts) or 'nothing much.'}"
             f"\nI chose to: {did}.\n"
             f"My body: {body or 'unremarkable'}.\n\n"

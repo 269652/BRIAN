@@ -66,7 +66,7 @@ class TestModelsEvolve:
         assert rt.world_model.text == gen.world
         assert rt.self_model.text == gen.me
 
-    def test_the_update_prompt_holds_the_old_model_and_the_evidence(self):
+    def test_the_update_prompts_hold_their_evidence(self):
         gen, rt = _rt()
         rt.sense("The river, close ahead.", "sight")
         rt.tick()
@@ -76,11 +76,59 @@ class TestModelsEvolve:
         rt.tick()
         world_p = [p for p in gen.prompts if p.endswith(_W)][-1]
         self_p = [p for p in gen.prompts if p.endswith(_S)][-1]
-        assert gen.world in world_p, "the previous model"
-        assert "An old mill" in world_p, "what was perceived since"
-        assert gen.me in self_p
+        assert "The river, close ahead." in world_p, "seen earlier"
+        assert "An old mill" in world_p, "seen since"
+        assert gen.me in self_p, "the self model carries on"
         assert "a passing thought" in self_p, "what I thought"
         assert "approach:mill" in self_p, "what I did"
+
+
+class TestWorldModelIsGroundedInWhatWasSeen:
+    """Run 59313101: from "Earlier I thought: …" the world model
+    invented a crossroads with white signposts — never perceived — and
+    every later version built on it. The world model is now rebuilt
+    from the registry of what was actually perceived (one entry per
+    object, its latest percept), never from its own previous text."""
+
+    def _second_world_prompt(self, gen, rt):
+        rt.hierarchy.boundary = lambda *a, **k: True
+        rt.tick()
+        return [p for p in gen.prompts if p.endswith(_W)][-1]
+
+    def test_the_previous_world_model_is_not_fed_back(self):
+        gen = _ModelGen(world="I am at a crossroads with white signposts.")
+        _, rt = _rt(gen)
+        rt.sense("The river, close ahead.", "sight", key="river")
+        rt.tick()
+        rt.sense("A brown dog, close.", "sight", key="dog")
+        p = self._second_world_prompt(gen, rt)
+        assert "crossroads" not in p
+        assert "The river, close ahead." in p and "A brown dog" in p
+
+    def test_one_entry_per_object_its_latest_percept(self):
+        gen, rt = _rt()
+        rt.sense("A brown dog, far off ahead.", "sight", key="dog")
+        rt.tick()
+        rt.sense("A brown dog, close to the left.", "sight", key="dog")
+        p = self._second_world_prompt(gen, rt)
+        assert "close to the left" in p and "far off ahead" not in p
+
+    def test_unkeyed_percepts_are_their_own_entries(self):
+        gen, rt = _rt()
+        rt.sense("Rain begins to fall.", "sound")
+        rt.tick()
+        p = self._second_world_prompt(gen, rt)
+        assert "Rain begins to fall." in p
+
+    def test_the_persona_line_is_not_in_model_prompts(self):
+        # parroted back as the self model ("I am Brian, an always-on mind…")
+        from neuroslm.cognition.runtime import MindConfig
+        gen, rt = _rt()
+        rt.sense("The river, close ahead.", "sight")
+        rt.tick()
+        persona = MindConfig().persona
+        assert all(persona not in p for p in gen.prompts
+                   if p.endswith((_W, _S)))
 
     def test_the_body_state_reaches_the_self_model(self):
         gen, rt = _rt()

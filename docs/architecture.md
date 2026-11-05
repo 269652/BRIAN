@@ -4125,17 +4125,25 @@ temporal position, and the baseline report includes the counts.
 
 **World and self models** (`cognition/situation.py`, `MindConfig.world_model`
 / `self_model`, on by default). Two short texts the mind keeps about
-where it is and who it is. The trunk (wander seam) rewrites each from
-its previous version plus the evidence since:
+where it is and who it is. The trunk (wander seam) completes a
+first-person stem ("Where I am now: I am" / "Who I am now: I am"). The
+prompts contain no lists, no instructions and no persona line. Run
+59311386 read those as a writing exercise, and its story frame leaked
+into the thoughts. The evidence differs by model:
 
-- **world:** percepts and speech heard;
-- **self:** its thoughts, its chosen movements, and its body state (each
-  neuromodulator against its baseline).
+- **world:** what was actually perceived, never the previous world
+  model. A registry keeps each object's latest percept, keyed by the
+  object identity the percept carries, plus speech heard. In run
+  59313101, rewriting the model from its own previous text invented a
+  crossroads with signposts, and every later version built on it.
+- **self:** the previous self model, its thoughts, its chosen movements,
+  and its body state (each neuromodulator against its baseline).
 
 Rewrites happen at event boundaries, since the event model updates when
 the event changes (Zacks et al. 2007), or as soon as there is first
-evidence. Each is trimmed to whole sentences (`model_max_chars`), and
-every version is kept in `history`.
+evidence. Only the completion's first paragraph is kept, trimmed to
+whole sentences (`model_max_chars`), and every version is kept in
+`history`.
 
 Both are the global workspace's **context frame** (Baars). They do not
 compete for slots, but they open every workspace prompt ("Where I am:" /

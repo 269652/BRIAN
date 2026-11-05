@@ -877,6 +877,8 @@ class CognitiveRuntime:
                            else None)
         # evidence since the last model update
         self._world_evidence: List[str] = []
+        # what was perceived: latest percept per object (world model)
+        self._seen: Dict[str, str] = {}
         self._self_thoughts: List[str] = []
         self._self_actions: List[str] = []
         self.hierarchy = None
@@ -959,13 +961,16 @@ class CognitiveRuntime:
             grad_norm=float(self.cfg.appraisal.get(action_class, 0.0)))
         self._gate_goal(text_vec)
 
-    def sense(self, text: str, source: str = "sight") -> float:
+    def sense(self, text: str, source: str = "sight",
+              key: Optional[str] = None) -> float:
         """Ambient perception (embodiment): what the mind sees or hears
         in its world. Unlike ``observe`` it is not addressed to the mind
         — the next tick stays inner speech. Salience is the percept's
         novelty against memory, divisively normalised (familiar sights
         habituate, new ones capture attention); only a salient percept
-        is stored, as an observed episode. Returns the salience."""
+        is stored, as an observed episode. ``key``: the perceived
+        object's identity — the world model keeps its latest percept
+        per object. Returns the salience."""
         if source not in _AMBIENT_SOURCES:
             raise ValueError(f"sense source {source!r}: expected one of "
                              f"{sorted(_AMBIENT_SOURCES)}")
@@ -987,6 +992,9 @@ class CognitiveRuntime:
                                      "ws_content": self._ws_content()})
         self._ambient.append((text, source, vec, sal))
         self._world_evidence.append(text)
+        k = key or text
+        self._seen.pop(k, None)                  # most recent last
+        self._seen[k] = text
         return sal
 
     def note_movement(self, action: str) -> None:
@@ -1485,15 +1493,16 @@ class CognitiveRuntime:
         jobs = []
         if self.world_model is not None and self._world_evidence and (
                 event_boundary or not self.world_model.text):
-            jobs.append((self.world_model, sit.world_prompt(
-                self.cfg.persona, self.world_model.text,
-                self._world_evidence[-12:])))
+            recent = self._world_evidence[-12:]
+            seen = [t for t in self._seen.values() if t not in recent]
+            jobs.append((self.world_model,
+                         sit.world_prompt(seen[-20:], recent)))
             self._world_evidence = []
         if self.self_model is not None and (
                 self._self_thoughts or self._self_actions) and (
                 event_boundary or not self.self_model.text):
             jobs.append((self.self_model, sit.self_prompt(
-                self.cfg.persona, self.self_model.text,
+                self.self_model.text,
                 self._self_thoughts[-6:], self._self_actions[-6:],
                 sit.body_state(levels, base))))
             self._self_thoughts, self._self_actions = [], []

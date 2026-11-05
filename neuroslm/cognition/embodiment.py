@@ -243,7 +243,9 @@ def walk(rt, park: Park, ticks: int, action: str = "look",
                                and p.bearing is not None
                                and p.extent is not None])
         for p in park.last_percepts:
-            rt.sense(p.text, "sight" if p.modality == "visual" else "sound")
+            rt.sense(p.text, "sight" if p.modality == "visual" else "sound",
+                     key=(f"{p.modality}:{p.object_ids[0]}"
+                          if p.object_ids else None))
         result = rt.tick()
         # touch rules a way out entirely, not just to value 0 (which tied
         # with every explored direction and kept getting picked)
