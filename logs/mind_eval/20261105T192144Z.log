@@ -1,0 +1,24 @@
+[mind-eval] expert=deepseek_r1_qwen_7b device=cuda seed=0 -> results/mind_eval/20261105T192146Z_deepseek-r1-qwen-7b.json
+Fetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]Fetching 2 files:  50%|█████     | 1/2 [00:12<00:12, 12.70s/it]Fetching 2 files: 100%|██████████| 2/2 [00:21<00:00, 10.69s/it]Fetching 2 files: 100%|██████████| 2/2 [00:21<00:00, 10.69s/it]
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 36.69it/s]
+[mind-eval] embed=hidden held-out mean |cos|=0.279 (near 1 = collapsed embedding)
+Traceback (most recent call last):
+  File "/opt/conda/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/opt/conda/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/workspace/brian/neuroslm/cli.py", line 6804, in <module>
+    raise SystemExit(main())
+  File "/workspace/brian/neuroslm/cli.py", line 6800, in main
+    return args.func(args)
+  File "/workspace/brian/neuroslm/cli.py", line 3399, in cmd_eval
+    return _eval_mind(args)
+  File "/workspace/brian/neuroslm/cli.py", line 3439, in _eval_mind
+    report = indicators.run_indicator_battery(
+  File "/workspace/brian/neuroslm/cognition/indicators.py", line 951, in run_indicator_battery
+    raise ValueError(f"unknown probe(s) {unknown}; choose from {PROBES}")
+ValueError: unknown probe(s) ['park_walk']; choose from ('episodic_recall', 'source_monitoring', 'loop_escape', 'metacognition', 'perturbational_complexity', 'controller_phi')
+── eval exited rc=1 ──
+               total        used        free      shared  buff/cache   available
+Mem:          515825       44793      213614         852      257416      466736
+Swap:           8191         687        7504
