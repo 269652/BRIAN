@@ -395,8 +395,14 @@ class MindConfig:
     """ACh scales the oscillator's coupling and GABA its frequency.
     Off → the ignition↔NT loop is cut (the H65 ablation)."""
 
-    osc_coupling_ratio: float = 2.0
-    """Coupling as a multiple of the Kuramoto critical coupling."""
+    osc_coupling_ratio: float = 1.2
+    """Coupling as a multiple of the Kuramoto critical coupling. 1.2
+    (2026-11-05): typical idle activations (~0.55) sit just below
+    criticality, an ignited workspace (× 1 + osc_ignition_gain) above it
+    — ignition becomes all-or-none (bimodal R), which 2.0 was not."""
+    osc_ignition_gain: float = 1.0
+    """Reverberation: an ignited workspace multiplies its coupling by
+    (1 + gain) — long-range recurrence (Dehaene et al. 2003)."""
 
     osc_ignition_threshold: float = 0.25
     """Fixed mode: the R that counts as ignition. Adaptive mode: the
@@ -896,6 +902,7 @@ class CognitiveRuntime:
                 ignition_mode=c.osc_ignition_mode,
                 ignition_floor=c.osc_ignition_floor, adapt_k=c.osc_adapt_k,
                 ach0=base.get("ACh", 0.30), gaba0=base.get("GABA", 0.15),
+                ignition_gain=c.osc_ignition_gain,
                 seed=c.osc_seed)
 
     # ── SENSE ────────────────────────────────────────────────────────

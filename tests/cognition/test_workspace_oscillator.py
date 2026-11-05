@@ -323,6 +323,45 @@ class TestAdaptiveIgnition:
         assert not ignited and thr == pytest.approx(0.25), (
             "re-entry needs the full margin again")
 
+    def test_an_ignited_workspace_amplifies_its_own_coupling(self):
+        """Reverberation (Dehaene et al. 2003): while ignited, long-range
+        recurrence multiplies the coupling by (1 + ignition_gain)."""
+        mod = {k: 0.6 for k in ALL_ON}
+        rs = {}
+        for g in (0.0, 1.0):
+            ws = self._ws(ignition_gain=g, coupling_ratio=1.0, noise=2.0)
+            ws._ignited = True
+            rs[g] = ws.step(mod, BASE_NT).sync_r
+        assert rs[1.0] > rs[0.0] + 0.05
+
+    def test_reverberation_makes_ignition_all_or_none(self):
+        """Fluctuating input at the default operating point (idle just
+        below criticality, ignited above): with reverberation R splits
+        into a low and a high mode — mean bimodality coefficient over
+        seeds above 5/9 — and ignition episodes last longer."""
+        import numpy as np
+        from neuroslm.cognition.measures import ignition_stats
+        bc, ep = {}, {}
+        for g in (0.0, 1.0):
+            bcs, eps = [], []
+            for seed in range(5):
+                rng = np.random.default_rng(seed)
+                ws = self._ws(ignition_gain=g, noise=2.0, seed=seed)
+                r, ig = [], []
+                for _ in range(300):
+                    act = {k: float(np.clip(rng.normal(0.55, 0.15), 0, 1))
+                           for k in ALL_ON}
+                    act["sensory"] = 0.0
+                    o = ws.step(act, BASE_NT)
+                    r.append(o.sync_r)
+                    ig.append(o.ignited)
+                s = ignition_stats(r, ig)
+                bcs.append(s["bimodality"])
+                eps.append(s["mean_episode"])
+            bc[g], ep[g] = np.mean(bcs), np.mean(eps)
+        assert bc[1.0] > bc[0.0] and bc[1.0] > 5 / 9
+        assert ep[1.0] > 2 * ep[0.0]
+
     def test_fixed_mode_is_unchanged(self):
         from neuroslm.cognition.oscillator import GammaWorkspace
         ws = GammaWorkspace(seed=0, ignition_mode="fixed",

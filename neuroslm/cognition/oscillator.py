@@ -41,11 +41,14 @@ K = ``coupling_ratio`` × K_c, with K_c = 2/(π g(0)) the Kuramoto
 critical coupling for a Gaussian frequency spread (σ = 2π·f_sd), so
 ``coupling_ratio`` reads directly as "distance from criticality".
 
-Operating point (coupling_ratio=2.0, ignition_threshold=0.25) was
-fixed BEFORE any outcome was measured, from reference activation
-patterns of the live runtime (run 58670004): dull idle thought
-R≈0.13 < θ < novel idle thought R≈0.29 < reply R≈0.50 — ignition then
-discriminates content, and sits close enough to θ for ACh to tip it.
+Operating point (2026-11-05): coupling_ratio=1.2 with reverberation
+``ignition_gain``=1.0 — while ignited, the coupling is × (1 + gain).
+Typical idle activations (~0.55) put a module at ~0.66 K_c (incoherent),
+an ignited one at ~1.3 K_c (locked): ignition is all-or-none. Synthetic
+activations, 5 seeds: Sarle bimodality of R 0.57 (> 5/9) vs 0.44
+without reverberation, episodes ~6 ticks vs 1.6. (The earlier 2.0 was
+set for the K/N mean field; under the active-mass field it left idle
+modules supercritical and R unimodal.)
 
 Phases persist across ticks; noise and natural frequencies come from
 a seeded generator, so a runtime is reproducible.
@@ -111,7 +114,7 @@ class OscillatorStep:
 
 class GammaWorkspace:
     def __init__(self, n_per_module: int = 8, f0_hz: float = 40.0,
-                 f_sd_hz: float = 4.0, coupling_ratio: float = 2.0,
+                 f_sd_hz: float = 4.0, coupling_ratio: float = 1.2,
                  noise: float = 2.0, ms_per_tick: int = 250,
                  dt_ms: float = 1.0, ignition_threshold: float = 0.25,
                  window_ms: int = 50, ach_gain: float = 1.0,
@@ -119,7 +122,8 @@ class GammaWorkspace:
                  ach0: float = 0.30, gaba0: float = 0.15,
                  ignition_mode: str = "adaptive",
                  ignition_floor: float = 0.1, adapt_k: float = 1.0,
-                 adapt_alpha: float = 0.2, seed: int = 0) -> None:
+                 adapt_alpha: float = 0.2, ignition_gain: float = 1.0,
+                 seed: int = 0) -> None:
         if ignition_mode not in ("fixed", "adaptive"):
             raise ValueError(f"ignition_mode {ignition_mode!r}: "
                              f"expected 'fixed' or 'adaptive'")
@@ -130,6 +134,9 @@ class GammaWorkspace:
         self._r_var = 0.05 ** 2
         self._r_seen = False
         self._ignited = False
+        # reverberation: an ignited workspace's long-range recurrence
+        # multiplies its coupling (a-priori magnitude, like ach_gain)
+        self.ignition_gain = float(ignition_gain)
         self.n_per_module = int(n_per_module)
         self.N = self.n_per_module * len(MODULES)
         self.dt = float(dt_ms) / 1000.0
@@ -188,6 +195,8 @@ class GammaWorkspace:
         heard = mass.sum() if C is None else C @ mass
         k = self.K * s_ach / np.maximum(
             np.repeat(np.broadcast_to(heard, (M,)), self.n_per_module), 1e-9)
+        if self._ignited:
+            k = k * (1.0 + self.ignition_gain)
         omega = self.omega * s_gaba
         sq = self.noise * math.sqrt(self.dt)
         theta = self.theta

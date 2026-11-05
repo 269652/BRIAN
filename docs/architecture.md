@@ -3784,6 +3784,19 @@ depends on content, and sits close enough to θ for ACh to tip it. The
 NT gains are a-priori design choices: cholinergic enhancement of gamma
 synchrony, and slower gamma under stronger inhibition (PING).
 
+**Operating point revised (2026-11-05):** K = 1.2 × K_c with
+reverberation. While ignited, long-range recurrence multiplies the
+coupling by (1 + `osc_ignition_gain`), with gain 1.0 (Dehaene et al.
+2003). Under the active-mass mean field, 2.0 left idle modules
+supercritical, so R was unimodal and ignition was just a threshold
+crossing. Now typical idle activations (about 0.55) sit at about
+0.66 K_c, which is incoherent, and an ignited workspace at about
+1.3 K_c, which is locked. Ignition is all-or-none. On synthetic
+activations over 5 seeds, Sarle's bimodality of R is 0.57 (> 5/9),
+against 0.44 without reverberation, and ignition episodes last about
+6 ticks against 1.6. The cost is that mean R is lower (about 0.2),
+because idle stretches are incoherent by design.
+
 **What this is and isn't.** Gamma synchrony as a binding or ignition
 mechanism is one contested strand of consciousness science (binding by
 synchrony; Dehaene-style ignition). This adds a mechanism and a way to
