@@ -829,6 +829,7 @@ class CognitiveRuntime:
         self._nov_base: Optional[float] = None
         self._raw_nov_base: Optional[float] = None
         self._coh_base: Optional[float] = None
+        self._recall_base: Optional[float] = None
         self._prev_state: Optional[List[float]] = None
         self._state_base: Optional[float] = None
         self._state_expect: Optional[float] = None
@@ -1073,15 +1074,24 @@ class CognitiveRuntime:
             sims = {id(e): sim for sim, e in scored}
             recall_strength = max((sims.get(id(e), 0.0) for e in recalled),
                                   default=0.0)
-            if self.workspace is not None:
-                for e in recalled:
+            if self.workspace is not None and recalled:
+                # recalls compete on the same relative scale as thoughts:
+                # sim/(sim + s̄), s̄ = the run's typical recall similarity
+                # (run 59294820: raw cosine let memories fill every slot)
+                from neuroslm.cognition.workspace import divisive_normalise
+                rsims = [max(0.0, sims.get(id(e), 0.0)) for e in recalled]
+                for e, s in zip(recalled, rsims):
                     inferred = ((e.get("context") or {}).get("kind")
                                 == "inferred")
                     self.workspace.offer(
                         e.get("content", ""),
                         "thought" if inferred else "memory",
                         e.get("content_vec") or [],
-                        max(0.0, sims.get(id(e), 0.0)))
+                        divisive_normalise(s, self._recall_base))
+                m = sum(rsims) / len(rsims)
+                a_s = self.cfg.norm_adapt_alpha
+                self._recall_base = (m if self._recall_base is None else
+                                     (1 - a_s) * self._recall_base + a_s * m)
 
         # THINK: K candidates from persona + recall + context. The
         # trigger — what this tick is actually ABOUT — is the real
@@ -1262,10 +1272,13 @@ class CognitiveRuntime:
                                  thought_salience(raw_novelty,
                                                   self._raw_nov_base,
                                                   ignited=bool(ignition)))
-        a_r = self.cfg.norm_adapt_alpha
-        self._raw_nov_base = (raw_novelty if self._raw_nov_base is None else
-                              (1 - a_r) * self._raw_nov_base
-                              + a_r * raw_novelty)
+        # idle regime only: a reply to new input is novel by
+        # construction and would make later idle thoughts look stale
+        if wandering:
+            a_r = self.cfg.norm_adapt_alpha
+            self._raw_nov_base = (raw_novelty if self._raw_nov_base is None
+                                  else (1 - a_r) * self._raw_nov_base
+                                  + a_r * raw_novelty)
         ne_drive = (0.0 if self._nov_expect is None
                     else abs(novelty - self._nov_expect))
         a_n = self.cfg.novelty_ema_alpha

@@ -3390,6 +3390,53 @@ class TestGlobalWorkspaceFeedsThought:
         second = {it.text: it.salience for it in rt.workspace.items()}
         assert second["the same thought"] < first["the same thought"]
 
+    def test_memories_compete_on_the_same_relative_scale_as_thoughts(self):
+        # run 59294820: memories entered at raw cosine (~0.5) while
+        # thoughts entered divisively normalised — the workspace held
+        # four memories on most ticks. A recall now enters at
+        # sim/(sim + s̄), s̄ = the run's typical recall similarity.
+        from neuroslm.cognition.runtime import MindConfig
+        from neuroslm.cognition.workspace import divisive_normalise
+        rt = _mk_runtime(_ScriptedGen(["a wander"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=1,
+                                        context_recall=False))
+        rt.memory.add("the river flooded the mill",
+                      content_vec=_vec_for("the river flooded the mill"),
+                      context={"kind": "observed"})
+        rt._last_thought = "the river flooded the mill today"
+        rt.tick()
+        sal = {it.text: it.salience for it in rt.workspace.items()}
+        assert sal["the river flooded the mill"] == pytest.approx(0.5), (
+            "no baseline yet: typical by definition")
+        s = rt._recall_base
+        assert s is not None and 0.0 < s <= 1.0
+        # same recall in a fresh mind whose typical recall is weaker
+        rt2 = _mk_runtime(_ScriptedGen(["a wander"]),
+                          cfg=MindConfig(n_candidates=1, recall_k=1,
+                                         context_recall=False))
+        rt2.memory.add("the river flooded the mill",
+                       content_vec=_vec_for("the river flooded the mill"),
+                       context={"kind": "observed"})
+        rt2._recall_base = s / 3.0
+        rt2._last_thought = "the river flooded the mill today"
+        rt2.tick()
+        sal = {it.text: it.salience for it in rt2.workspace.items()}
+        assert sal["the river flooded the mill"] == pytest.approx(
+            divisive_normalise(s, s / 3.0), abs=0.05)
+
+    def test_reply_ticks_leave_the_idle_novelty_baseline_alone(self):
+        # a reply to new input is novel by construction; folding it into
+        # the idle baseline made every later idle thought look stale and
+        # kept storage rare (same regime split as the oscillator's)
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["I hear you.", "a wander"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=0))
+        rt.observe("the river was beautiful today")
+        rt.tick()
+        assert rt._raw_nov_base is None
+        rt.tick()
+        assert rt._raw_nov_base is not None
+
     def test_a_recalled_musing_stays_a_thought_not_a_memory(self):
         # run 58994037: the mind's own earlier reply, recalled, entered
         # as [memory] and would read "I remember: …" — provenance lost

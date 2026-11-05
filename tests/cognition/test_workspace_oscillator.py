@@ -108,6 +108,31 @@ class TestIgnitionIsGlobal:
         assert not out.ignited
 
 
+class TestActiveMassMeanField:
+    """Run 59294820: idle activations ~0.45 put the effective coupling
+    K·a_i·ā at ~0.4 K_c — subcritical, R mean 0.12. The mean field is
+    the activation-weighted phase of the ACTIVE populations (normalised
+    by Σa, not N): silent modules no longer dilute the coupling, so an
+    active module feels K·a_i and joins the coalition once a_i·K > K_c."""
+
+    def test_partially_active_modules_still_phase_lock(self):
+        act = {k: 0.6 for k in ALL_ON}
+        out = _settle(_ws(coupling_ratio=2.0), act=act, ticks=3)
+        assert out.sync_r / 0.6 > 0.6, "active oscillators lock"
+
+    def test_weakly_active_modules_stay_out_of_the_coalition(self):
+        """a_i·K < K_c: a weak module drifts while a strong one locks."""
+        act = {"sensory": 0.0, "memory": 1.0, "language": 1.0,
+               "selection": 0.1, "novelty": 0.1}
+        ws = _ws(coupling_ratio=2.0)
+        _settle(ws, act=act, ticks=3)
+        import numpy as np
+        n = ws.n_per_module
+        strong = abs(np.mean(np.exp(1j * ws.theta[n:3 * n])))
+        weak = abs(np.mean(np.exp(1j * ws.theta[3 * n:5 * n])))
+        assert strong > 0.8 and weak < strong - 0.3
+
+
 class TestContentCoupling:
     """Stage 2 (binding by synchrony): module-to-module coupling C_mn
     scales the mean field each population feels. C = 1 everywhere is
@@ -229,7 +254,9 @@ class TestAdaptiveIgnition:
         ws = self._ws()
         outs = [ws.step(self.MOD, BASE_NT) for _ in range(60)]
         late = outs[30:]
-        assert sum(o.ignited for o in late) / len(late) < 0.35
+        # reverberation lengthens each episode (no GABA feedback in the
+        # bare oscillator to end it), but steady input stays a minority
+        assert sum(o.ignited for o in late) / len(late) < 0.5
         assert abs(late[-1].threshold - late[-1].sync_r) < 0.15
 
     def test_a_jump_above_baseline_ignites_even_below_the_old_fixed_bar(self):
@@ -251,6 +278,23 @@ class TestAdaptiveIgnition:
         outs = [ws.step(silent, BASE_NT) for _ in range(40)]
         assert all(o.threshold >= 0.1 for o in outs)
         assert not any(o.ignited for o in outs[5:])
+
+    def test_ignition_reverberates_while_r_stays_above_baseline(self):
+        """Ignition is self-sustaining (Dehaene & Changeux 2005): once
+        ignited, the workspace stays ignited while R stays above its
+        own baseline mean μ_R — the k·σ margin applies to ENTERING
+        ignition only."""
+        ws = self._ws()
+        ws._r_seen, ws._r_mu, ws._r_var = True, 0.20, 0.05 ** 2
+        ignited, thr = ws._decide(0.30, update_baseline=False)
+        assert ignited and thr == pytest.approx(0.25)
+        ignited, thr = ws._decide(0.22, update_baseline=False)
+        assert ignited and thr == pytest.approx(0.20)
+        ignited, _ = ws._decide(0.19, update_baseline=False)
+        assert not ignited, "falls out below baseline"
+        ignited, thr = ws._decide(0.22, update_baseline=False)
+        assert not ignited and thr == pytest.approx(0.25), (
+            "re-entry needs the full margin again")
 
     def test_fixed_mode_is_unchanged(self):
         from neuroslm.cognition.oscillator import GammaWorkspace

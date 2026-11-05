@@ -89,6 +89,14 @@ class TestThoughtSalience:
         from neuroslm.cognition.workspace import thought_salience
         assert thought_salience(0.2, None, ignited=False) == pytest.approx(0.5)
 
+    def test_an_exact_repeat_is_not_typical_novelty(self):
+        """1 − cos of identical float vectors is ~2e-16, not 0: a run
+        of exact repeats must read as zero novelty, not as 0/0 = 0.5
+        (it hid the loop from the reorient streak)."""
+        from neuroslm.cognition.workspace import divisive_normalise
+        assert divisive_normalise(2.2e-16, 2.2e-16) == 0.0
+        assert divisive_normalise(2.2e-16, None) == 0.0
+
 
 class TestStateVector:
     def test_salience_weighted_mean_of_item_latents(self):

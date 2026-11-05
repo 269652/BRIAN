@@ -3747,11 +3747,16 @@ needs second-order or coupled dynamics.
 phase oscillators (f₀ = 40 Hz, sd 4 Hz). One tick integrates 250 ms
 of Kuramoto dynamics at 1 ms steps:
 
-    dθ_i = ω_i·s_GABA dt + (K·s_ACh/N) Σ_j a_i a_j sin(θ_j − θ_i) dt + σ√dt ξ
+    dθ_i = ω_i·s_GABA dt + (K·s_ACh/Σ_j a_j) Σ_j a_i a_j sin(θ_j − θ_i) dt + σ√dt ξ
 
 where a_i is the activation of oscillator i's module this tick:
 sensory input present, recall strength, thought confidence, BG
-decisiveness, and novelty. **Ignition** means the global order
+decisiveness, and novelty. The mean field is taken over the *active*
+mass Σa, not N (2026-11-05): with K/N, idle activations of about 0.45
+left the effective coupling at about 0.4 K_c, subcritical, and R
+averaged 0.12 (run 59294820). Now a module feels K·a_i and joins the
+coalition once a_i·K > K_c. When all modules are on, Σa = N, which is
+the classic model. **Ignition** means the global order
 parameter R = |Σ a_j e^{iθ_j}|/N stays ≥ 0.25 over the last 50 ms.
 R is normalised by *all* oscillators, so a single locked module of
 five caps R at 0.2 and cannot ignite. That is the "global" in global
@@ -3798,8 +3803,11 @@ compete for `ws_capacity` = 4 slots (Cowan's limit). Each tick:
 
 - every item's salience is multiplied by `ws_decay` (0.7); a reorient
   drops all `thought` items;
-- percepts enter at salience 1.0, recalled episodes at their recall
-  cosine, keeping their provenance: an observed episode as `memory`,
+- percepts enter at salience 1.0. Recalled episodes enter at $s/(s+\bar s)$,
+  their recall similarity divisively normalised against the run's
+  typical recall similarity (2026-11-05). Before this they entered at
+  raw cosine (about 0.5), which let memories fill all four slots in run
+  59294820. They keep their provenance: an observed episode as `memory`,
   the mind's own recalled musing (`kind=inferred`) as `thought`;
 - the selected thought enters at 1.0 if it ignited (ignition sustains
   it), otherwise at $n/(n+\bar n)$, its novelty divisively normalised
@@ -3932,7 +3940,10 @@ consumer now reads it divisively normalised against a slow raw baseline
 $\nu = r/(r + \bar r)$, with $\bar r$ an EWMA of $r$ at
 `nov_baseline_alpha` (0.05). A copy reads 0, a typical thought 0.5, a
 thought at twice the typical raw distance 0.67; before any baseline
-exists, 0.5. The consumers are the write gate, the NT activation driver,
+exists, 0.5. A float-level copy (raw below 1e-9) reads 0 even against a
+baseline of copies. The baseline moves on idle ticks only: a reply to
+new input is novel by construction and made later idle thoughts look
+stale. The consumers are the write gate, the NT activation driver,
 the NE expectation error, boredom, the LOOPING streak, and each
 candidate's curiosity value. The slow α keeps a 3–4-tick loop near 0
 rather than absorbing it. Workspace thought salience is the same
@@ -3947,7 +3958,10 @@ workspace's own recent baseline, θ_t = max(0.1, μ_R + 1·σ_R) (EWMA
 α = 0.2, seeded at the old fixed bar 0.25). Run 58676023 showed the
 fixed bar, set from guessed activations, never crossed on R1-7B's idle
 ticks. `osc_ignition_mode="fixed"` keeps H65's behaviour and is the
-`fixed_threshold` arm. The trace shows `WS[R=… θ=…]`. NE's driver uses
+`fixed_threshold` arm. Ignition is hysteretic (2026-11-05). Entering it
+needs R > μ_R + k·σ_R, but an ignited workspace reverberates while
+R > μ_R. Ignition is self-sustaining (Dehaene & Changeux 2005), and the
+GABA it drives is what ends it. The trace shows `WS[R=… θ=…]`. NE's driver uses
 its own novelty expectation, seeded with the first observation.
 Thoughts get 192 tokens and are trimmed to the last complete sentence;
 the prompt budget is 4000 chars.

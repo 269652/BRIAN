@@ -23,13 +23,18 @@ class WorkspaceItem:
     seq: int = 0
 
 
+_FLOAT_ZERO = 1e-9
+
+
 def divisive_normalise(x: float, baseline: Optional[float]) -> float:
     """x / (x + baseline) (Carandini & Heeger 2012): 0 at x = 0, 0.5 at
     the baseline, → 1 far above it — independent of the scale x lives
     on. No baseline yet counts as typical (0.5)."""
     x = max(0.0, float(x))
+    if x < _FLOAT_ZERO:     # 1 − cos(v, v) is ~1e-16, not 0
+        return 0.0
     b = x if baseline is None else max(0.0, float(baseline))
-    return x / (x + b) if x + b > 0.0 else 0.0
+    return x / (x + b)
 
 
 def thought_salience(novelty: float, baseline: Optional[float],

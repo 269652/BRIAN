@@ -6,7 +6,7 @@ owns a population of gamma-band phase oscillators. One runtime tick
 integrates ``ms_per_tick`` milliseconds of phase dynamics (Euler-
 Maruyama, ``dt_ms`` steps):
 
-    dθ_i = ω_i·s_GABA dt + (K·s_ACh / N) Σ_j a_i a_j sin(θ_j − θ_i) dt
+    dθ_i = ω_i·s_GABA dt + (K·s_ACh / Σ_j a_j) Σ_j a_i a_j sin(θ_j − θ_i) dt
            + σ √dt ξ
 
 where a_i ∈ [0,1] is the activation of oscillator i's module this
@@ -125,6 +125,7 @@ class GammaWorkspace:
         self._r_mu: float = float(ignition_threshold)
         self._r_var = 0.05 ** 2
         self._r_seen = False
+        self._ignited = False
         self.n_per_module = int(n_per_module)
         self.N = self.n_per_module * len(MODULES)
         self.dt = float(dt_ms) / 1000.0
@@ -174,7 +175,10 @@ class GammaWorkspace:
             if C.shape != (M, M):
                 raise ValueError(f"coupling must be {M}×{M}, got {C.shape}")
         s_ach, s_gaba = self._scales(nt_levels)
-        k = self.K * s_ach / self.N
+        # mean field over the ACTIVE mass: silent populations do not
+        # dilute the coupling (run 59294820: K/N left idle ticks at
+        # ~0.4 K_c). Σa = N when everything is on — the classic model.
+        k = self.K * s_ach / max(float(np.sum(a)), 1e-9)
         omega = self.omega * s_gaba
         sq = self.noise * math.sqrt(self.dt)
         theta = self.theta
@@ -199,27 +203,35 @@ class GammaWorkspace:
 
         sync_r = float(np.mean(R[-self.window:]))
         peak_hz, gamma_power = self._spectrum(x)
-        if self.ignition_mode == "fixed":
-            thr = self.ignition_threshold
-            ignited = sync_r >= thr
-        else:
-            if not update_baseline and not self._r_seen:
-                thr = self.ignition_threshold
-                ignited = sync_r >= thr
-            else:
-                if not self._r_seen:
-                    self._r_mu, self._r_seen = sync_r, True
-                thr = max(self.ignition_floor,
-                          self._r_mu + self.adapt_k * math.sqrt(self._r_var))
-                ignited = sync_r > thr
-                if update_baseline:
-                    d = sync_r - self._r_mu
-                    self._r_mu += self.adapt_alpha * d
-                    self._r_var = (1 - self.adapt_alpha) * (
-                        self._r_var + self.adapt_alpha * d * d)
+        ignited, thr = self._decide(sync_r, update_baseline)
         return OscillatorStep(sync_r=sync_r, ignited=bool(ignited),
                               peak_hz=peak_hz, gamma_power=gamma_power,
                               threshold=float(thr))
+
+    def _decide(self, sync_r: float, update_baseline: bool):
+        """Ignition decision → (ignited, threshold). Adaptive mode is
+        hysteretic: ENTERING ignition needs R > μ_R + k·σ_R; an ignited
+        workspace reverberates while R > μ_R (self-sustaining ignition,
+        Dehaene & Changeux 2005)."""
+        if self.ignition_mode == "fixed":
+            thr = self.ignition_threshold
+            return sync_r >= thr, thr
+        if not update_baseline and not self._r_seen:
+            thr = self.ignition_threshold
+            return sync_r >= thr, thr
+        if not self._r_seen:
+            self._r_mu, self._r_seen = sync_r, True
+        margin = 0.0 if self._ignited else self.adapt_k * math.sqrt(
+            self._r_var)
+        thr = max(self.ignition_floor, self._r_mu + margin)
+        ignited = sync_r > thr
+        self._ignited = ignited
+        if update_baseline:
+            d = sync_r - self._r_mu
+            self._r_mu += self.adapt_alpha * d
+            self._r_var = (1 - self.adapt_alpha) * (
+                self._r_var + self.adapt_alpha * d * d)
+        return ignited, thr
 
     def _spectrum(self, x: np.ndarray):
         x = x - x.mean()
