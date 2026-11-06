@@ -85,6 +85,17 @@ class TestFieldOfView:
         p = _park([_bench(x=0.0, y=-5.0)])       # 90° right, FOV ±60°
         assert _seen(p) == set()
 
+    def test_an_object_reaching_into_the_view_is_seen(self):
+        # park seed 4: a tree 1.8 m off, centre at −64° but its trunk
+        # filling the view's edge, went unseen while still hiding the
+        # tree behind it — the place map thought that ground was viewed
+        a = math.radians(-64.0)
+        near = ParkObject("near", "tree", 1.8 * math.cos(a),
+                          1.8 * math.sin(a), radius=1.46)
+        b = math.radians(-40.0)
+        behind = _tree("behind", x=6.0 * math.cos(b), y=6.0 * math.sin(b))
+        assert _seen(_park([near, behind])) == {"near"}
+
     def test_beyond_view_distance_is_not_seen(self):
         p = _park([_bench(x=60.0, y=0.0)], size=80.0)
         assert _seen(p) == set()

@@ -78,7 +78,6 @@ class TestModelsEvolve:
         self_p = [p for p in gen.prompts if p.endswith(_S)][-1]
         assert "The river, close ahead." in world_p, "seen earlier"
         assert "An old mill" in world_p, "seen since"
-        assert gen.me in self_p, "the self model carries on"
         assert "a passing thought" in self_p, "what I thought"
         assert "approach:mill" in self_p, "what I did"
 
@@ -130,6 +129,20 @@ class TestWorldModelIsGroundedInWhatWasSeen:
         assert all(persona not in p for p in gen.prompts
                    if p.endswith((_W, _S)))
 
+    def test_the_previous_self_model_is_not_fed_back(self):
+        # run 59316881: "I am a 26-year-old woman, single…" carried on
+        # through "Earlier I thought of myself" into study sessions,
+        # the Pomodoro technique and a meeting — none of it lived
+        gen = _ModelGen(me="I am a student late for a meeting.")
+        _, rt = _rt(gen)
+        rt.sense("The river, close ahead.", "sight")
+        rt.tick()
+        rt.note_movement("head:0")
+        rt.hierarchy.boundary = lambda *a, **k: True
+        rt.tick()
+        self_p = [p for p in gen.prompts if p.endswith(_S)][-1]
+        assert "meeting" not in self_p and "Earlier I thought" not in self_p
+
     def test_the_body_state_reaches_the_self_model(self):
         gen, rt = _rt()
         rt.nt = _FakeNT(DA=0.40, GABA=0.15)
@@ -168,6 +181,51 @@ class TestWorldModelIsGroundedInWhatWasSeen:
         rt.tick()
         t = rt.world_model.text
         assert len(t) <= 60 and t.endswith(".")
+
+
+class TestModelsKeepOnlyWhatWasPerceived:
+    """Run 59316881: even from percepts alone the world model wrote "a
+    red and white traffic light", "a street scene… buildings", "a camera
+    on my head"; the self model began "I am a 26-year-old woman…". A
+    sentence naming a scene noun no percept has named is dropped; if
+    nothing is left, the model keeps its previous version."""
+
+    def test_the_unperceived_sentence_is_dropped(self):
+        gen = _ModelGen(world="I am by the river. A traffic light is ahead.")
+        _, rt = _rt(gen)
+        rt.sense("The river, close ahead.", "sight")
+        rt.tick()
+        assert rt.world_model.text == "I am by the river."
+
+    def test_nothing_left_keeps_the_previous_version(self):
+        gen, rt = _rt()
+        rt.sense("The river, close ahead.", "sight")
+        rt.sense("An old mill, a few metres to the left.", "sight")
+        rt.tick()
+        n = len(rt.world_model.history)
+        gen.world = "I am in a street with a camera."
+        rt.sense("The river, close ahead.", "sight")
+        rt.hierarchy.boundary = lambda *a, **k: True
+        rt.tick()
+        assert len(rt.world_model.history) == n
+        assert rt.world_model.text == "I am by the river near the old mill."
+
+    def test_what_was_perceived_earlier_stays_allowed(self):
+        gen = _ModelGen(world="I am by the river near the bench.")
+        _, rt = _rt(gen)
+        rt.sense("A red bench, close.", "sight", key="bench")
+        rt.tick()
+        rt.sense("The river, close ahead.", "sight", key="river")
+        rt.hierarchy.boundary = lambda *a, **k: True
+        rt.tick()
+        assert rt.world_model.text == "I am by the river near the bench."
+
+    def test_the_self_model_is_filtered_too(self):
+        gen = _ModelGen(me="I am a 26-year-old woman. I like the river.")
+        _, rt = _rt(gen)
+        rt.sense("The river, close ahead.", "sight")
+        rt.tick()
+        assert rt.self_model.text == "I like the river."
 
 
 class TestUpdatesAreContinuationsNotTasks:

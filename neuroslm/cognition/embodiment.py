@@ -43,8 +43,10 @@ class PlaceMemory:
     place novelty as the exploration value of a move."""
 
     def __init__(self, size: float, cell: float = 2.0,
-                 reach: float = 25.0, fov_deg: float = 120.0) -> None:
+                 reach: float = 25.0, fov_deg: float = 120.0,
+                 discount: float = 0.5) -> None:
         self.size, self.cell = float(size), float(cell)
+        self.discount = float(discount)
         self.reach, self.half_fov = float(reach), math.radians(fov_deg) / 2
         n = max(1, int(math.ceil(self.size / self.cell)))
         c = (np.arange(n) + 0.5) * self.cell
@@ -75,13 +77,14 @@ class PlaceMemory:
 
     def value_toward(self, x: float, y: float, angle: float,
                      step: float) -> float:
-        """Exploration value of heading ``angle``: 1/(1 + walking
+        """Exploration value of heading ``angle``: discount^(walking
         distance, in cells, from the point one cell ahead to the nearest
         unviewed reachable ground) — frontier exploration on the map:
         routes go round mapped obstacles, sealed-off ground is worth
         nothing, and a step toward the frontier raises its value. (A sum
         of 1/distance over all unviewed ground barely changed per step,
-        and the choice dithered.)"""
+        and the choice dithered; so did 1/(1 + distance) once boredom —
+        the value's gain — sat at 0.5 under R1, run 59316881.)"""
         look = max(step, 1.5 * self.cell)
         start = None
         for k in range(1, int(math.ceil(look / (self.cell / 2))) + 1):
@@ -94,7 +97,7 @@ class PlaceMemory:
         target = (~self._viewed) & (~self._obstacle) & (dist >= 0)
         if not target.any():
             return 0.0
-        return 1.0 / (1.0 + float(dist[target].min()))
+        return self.discount ** float(dist[target].min())
 
     def _walking_distance(self, start: Tuple[int, int]) -> np.ndarray:
         """BFS steps over free cells (8-connected); −1 = unreachable."""
@@ -272,26 +275,63 @@ def _mentions(text: str, kinds: Sequence[str]) -> List[str]:
     return [k for k in kinds if re.search(rf"\b{re.escape(k)}", low)]
 
 
-def grounding_report(recs: Sequence[WalkRecord], park: Park) -> Dict:
+def grounding_report(recs: Sequence[WalkRecord], park: Park,
+                     models: Optional[Dict[str, Sequence[Tuple[int, str]]]]
+                     = None) -> Dict:
     """Coverage = share of the park's objects ever seen; static coverage
     the same over objects that stay put (movers are met by chance). A thought's
     mention of a park kind (bench, fountain, …) is grounded when that
     kind appeared in a percept at or before that tick; otherwise it is
-    confabulated."""
+    confabulated. The same holds, more widely, for any scene noun
+    (``situation.SCENE_NOUNS``) in a thought or a world / self model
+    version (``models``: kind → [(tick, text)])."""
+    from neuroslm.cognition.situation import scene_nouns
     kinds = sorted({o.kind for o in park.objects})
     seen = {i for r in recs for i in r.seen_ids}
     perceived: set = set()
+    nouns_by_tick: List[Tuple[int, set]] = []
+    nouns: set = set()
     mentions = grounded = 0
+    scene = scene_ok = 0
     confab: List[str] = []
+    scene_bad: List[str] = []
     for r in recs:
         for t in r.percepts:
             perceived.update(_mentions(t, kinds))
+            nouns.update(scene_nouns(t))
+        nouns_by_tick.append((r.tick, set(nouns)))
         for k in _mentions(r.thought or "", kinds):
             mentions += 1
             if k in perceived:
                 grounded += 1
             else:
                 confab.append(k)
+        for n in scene_nouns(r.thought or ""):
+            scene += 1
+            if n in nouns:
+                scene_ok += 1
+            else:
+                scene_bad.append(n)
+
+    def known_at(tick: int) -> set:
+        have: set = set()
+        for t, ns in nouns_by_tick:
+            if t > tick:
+                break
+            have = ns
+        return have
+
+    model_rep = {}
+    for kind, hist in (models or {}).items():
+        bad: List[str] = []
+        ok = 0
+        for tick, text in hist:
+            have = known_at(tick)
+            miss = [n for n in scene_nouns(text) if n not in have]
+            ok += not miss
+            bad.extend(miss)
+        model_rep[kind] = {"versions": len(hist), "grounded_versions": ok,
+                           "ungrounded": bad}
     static = [o.id for o in park.objects if o.speed <= 0.0]
     return {"coverage": len(seen) / len(park.objects) if park.objects else 0.0,
             "static_coverage": (sum(i in seen for i in static) / len(static)
@@ -300,4 +340,8 @@ def grounding_report(recs: Sequence[WalkRecord], park: Park) -> Dict:
             "mentions": mentions,
             "grounded_mentions": grounded,
             "grounded_rate": grounded / mentions if mentions else None,
-            "confabulated": confab}
+            "confabulated": confab,
+            "scene_mentions": scene,
+            "scene_grounded_rate": scene_ok / scene if scene else None,
+            "scene_ungrounded": scene_bad,
+            "models": model_rep}

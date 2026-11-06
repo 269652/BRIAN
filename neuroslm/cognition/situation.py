@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Set, Tuple
 
 
 @dataclass
@@ -36,6 +36,60 @@ def trim_to_sentences(text: str, max_chars: int) -> str:
     head = t[:max_chars]
     ends = [m.end() for m in re.finditer(r"[.!?](\s|$)", head)]
     return head[:ends[-1]].rstrip() if ends else head.rstrip()
+
+
+SCENE_NOUNS = (
+    # the park's own things
+    "bench", "fountain", "pond", "duck", "kiosk", "ice cream", "tree",
+    "oak", "birch", "willow", "chestnut", "pine", "maple", "lamp",
+    "flower bed", "tulip", "rose", "daisy", "lavender", "dog", "person",
+    "coat", "pram", "book", "phone", "fence",
+    # what the trunk invents (runs 59313101, 59316881)
+    "street", "road", "path", "crossroads", "crossroad", "intersection",
+    "signpost", "sign", "traffic light", "building", "house", "car",
+    "bus", "train", "station", "bridge", "river", "lake", "sea", "beach",
+    "mountain", "hill", "forest", "woods", "gate", "entrance", "statue",
+    "playground", "shop", "cafe", "restaurant", "office", "room", "desk",
+    "table", "chair", "window", "door", "wall", "computer", "laptop",
+    "camera", "image", "photo", "platform", "bicycle", "bike", "cat",
+    "bird", "child", "children", "man", "woman", "sky", "sun", "cloud",
+    "rain", "snow", "fog", "grass", "sunny", "weather", "temperature",
+    "air pressure", "wind", "north", "south", "east", "west",
+    # a life the mind never lived (run 59316881's self model)
+    "meeting", "study session", "exam", "school", "apartment")
+"""Concrete things a text can claim are there. A scene noun in a world
+model, self model or thought is grounded only if a percept has named it."""
+
+_SCENE_RES = [(n, re.compile(rf"\b{re.escape(n)}(?:e?s)?\b", re.I))
+              for n in sorted(SCENE_NOUNS, key=len, reverse=True)]
+
+
+def scene_nouns(text: str) -> List[str]:
+    """Scene nouns in ``text``, in order, each once; a compound ("traffic
+    light") is not also counted as a noun inside it."""
+    t, found = text or "", []
+    for n, rx in _SCENE_RES:
+        for m in rx.finditer(t):
+            found.append((m.start(), n))
+            t = t[:m.start()] + " " * (m.end() - m.start()) + t[m.end():]
+    out: List[str] = []
+    for _, n in sorted(found):
+        if n not in out:
+            out.append(n)
+    return out
+
+
+def ungrounded_nouns(text: str, perceived: str) -> List[str]:
+    have = set(scene_nouns(perceived))
+    return [n for n in scene_nouns(text) if n not in have]
+
+
+def keep_grounded(text: str, perceived: Set[str]) -> str:
+    """``text`` without the sentences that name a scene noun outside
+    ``perceived`` (run 59316881: traffic lights, streets, a camera)."""
+    keep = [x for x in re.split(r"(?<=[.!?])\s+", (text or "").strip())
+            if x and all(n in perceived for n in scene_nouns(x))]
+    return " ".join(keep)
 
 
 WORLD_STEM = "Where I am now: I am"
@@ -85,12 +139,13 @@ def body_state(levels: Dict[str, float], baselines: Dict[str, float]) -> str:
     return ", ".join(parts)
 
 
-def self_prompt(old: str, thoughts: Sequence[str],
-                actions: Sequence[str], body: str) -> str:
-    earlier = f"Earlier I thought of myself: {old}\n" if old else ""
+def self_prompt(thoughts: Sequence[str], actions: Sequence[str],
+                body: str) -> str:
+    """From what was lived since — never the previous self model (run
+    59316881: "I am a 26-year-old woman…" carried on, via "Earlier I
+    thought of myself", into study sessions and a meeting)."""
     did = ", ".join(actions) if actions else "stayed where I was"
-    return (f"{earlier}"
-            f"Since then I was thinking: {_prose(thoughts) or 'nothing much.'}"
+    return (f"Since then I was thinking: {_prose(thoughts) or 'nothing much.'}"
             f"\nI chose to: {did}.\n"
             f"My body: {body or 'unremarkable'}.\n\n"
             f"{SELF_STEM}")

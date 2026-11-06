@@ -1070,3 +1070,11 @@ class TestParkWalkBaseline:
         from neuroslm.cognition.indicators import format_report
         out = format_report({"probes": {"park_walk": self._run(ticks=10)}})
         assert "Φ_AR=" in out and "coherence=" in out and "coverage=" in out
+        assert "scene=" in out and "world_ok=" in out and "self_ok=" in out
+
+    def test_the_models_are_scored_for_grounding(self):
+        # run 59316881: "traffic light", "street", "camera" went uncounted
+        g = self._run()["conditions"]["full"]["grounding"]
+        assert "scene_grounded_rate" in g
+        assert set(g["models"]) == {"world", "self"}
+        assert g["models"]["world"]["versions"] >= 1

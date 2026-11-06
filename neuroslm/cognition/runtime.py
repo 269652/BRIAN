@@ -879,6 +879,8 @@ class CognitiveRuntime:
         self._world_evidence: List[str] = []
         # what was perceived: latest percept per object (world model)
         self._seen: Dict[str, str] = {}
+        # scene nouns any percept has named (models may claim only these)
+        self._perceived_nouns: set = set()
         self._self_thoughts: List[str] = []
         self._self_actions: List[str] = []
         self.hierarchy = None
@@ -956,6 +958,7 @@ class CognitiveRuntime:
                                     "ws_content": self._ws_content()})
         self._sensory.append(text)
         self._world_evidence.append(f"Someone said: {text}")
+        self._perceive_nouns(text)
         self.nt.step_full(
             activation=1.0,
             grad_norm=float(self.cfg.appraisal.get(action_class, 0.0)))
@@ -995,7 +998,12 @@ class CognitiveRuntime:
         k = key or text
         self._seen.pop(k, None)                  # most recent last
         self._seen[k] = text
+        self._perceive_nouns(text)
         return sal
+
+    def _perceive_nouns(self, text: str) -> None:
+        from neuroslm.cognition.situation import scene_nouns
+        self._perceived_nouns.update(scene_nouns(text))
 
     def note_movement(self, action: str) -> None:
         """What the body just chose to do — evidence for the self model."""
@@ -1502,13 +1510,14 @@ class CognitiveRuntime:
                 self._self_thoughts or self._self_actions) and (
                 event_boundary or not self.self_model.text):
             jobs.append((self.self_model, sit.self_prompt(
-                self.self_model.text,
                 self._self_thoughts[-6:], self._self_actions[-6:],
                 sit.body_state(levels, base))))
             self._self_thoughts, self._self_actions = [], []
         for model, prompt in jobs:
             out = self._gen_wander(prompt, self.cfg.model_n_tok)
-            text = sit.complete_model(out or "", self.cfg.model_max_chars)
+            text = sit.keep_grounded(
+                sit.complete_model(out or "", self.cfg.model_max_chars),
+                self._perceived_nouns)
             if model.update(tick_n, text) and self.workspace is not None:
                 self.workspace.set_context(model.kind, text,
                                            list(self._embed(text)))

@@ -4031,7 +4031,8 @@ kiosk, a fountain, a wandering dog and passers-by, plus a clock that
 dims the light. What reaches the mind is decided by a `PerceptChannel`.
 The default `GeometryChannel` computes:
 
-- field of view (±60°) and a view distance limited by the light;
+- field of view (±60°; an object is in view when any part of it is) and
+  a view distance limited by the light;
 - occlusion by trees and the kiosk;
 - detail that falls off with distance;
 - sounds, heard from any direction.
@@ -4066,9 +4067,12 @@ directed rather than random exploration (Wilson et al. 2014).
 and obstacles. It is built only from the mind's own pose and field of
 view, from the ground behind seen obstructions (left unviewed), from
 solid percepts and from bumps, never from the world's object list. A
-heading's value is 1/(1 + walking distance to the nearest unviewed
-reachable ground), from one cell ahead (frontier exploration, Yamauchi
-1997), relative to the best option. A bump rules that way out until the
+heading's value is γ^(walking distance, in cells, to the nearest
+unviewed reachable ground), γ = 0.5, from one cell ahead (frontier
+exploration, Yamauchi 1997), relative to the best option. With
+1/(1 + distance), neighbouring headings were too close for the softmax
+once boredom (the value's gain) sat at 0.5 under R1: run 59316881 paced
+by the fence and saw 31 % of the park in 120 ticks. A bump rules that way out until the
 body moves.
 
 `embodiment.walk(rt, park, ticks)` runs the loop. `grounding_report`
@@ -4076,7 +4080,12 @@ gives:
 
 - object coverage, and static coverage (movers are met by chance);
 - mentions of park kinds in thoughts, split into grounded (perceived at
-  or before that tick) and confabulated.
+  or before that tick) and confabulated;
+- the same for every scene noun (`situation.SCENE_NOUNS`: concrete
+  things, weather, compass directions, life events) in thoughts and in
+  each world / self model version. Run 59316881 read 1.0 on park kinds
+  while its world model claimed traffic lights, streets and a camera:
+  9/22 world versions were grounded.
 
 Contract: every static object in five generated parks is seen within
 300 steps, with a scripted mind.
@@ -4136,8 +4145,13 @@ into the thoughts. The evidence differs by model:
   object identity the percept carries, plus speech heard. In run
   59313101, rewriting the model from its own previous text invented a
   crossroads with signposts, and every later version built on it.
-- **self:** the previous self model, its thoughts, its chosen movements,
-  and its body state (each neuromodulator against its baseline).
+- **self:** its thoughts, its chosen movements, and its body state
+  (each neuromodulator against its baseline), never the previous self
+  model. In run 59316881, "I am a 26-year-old woman…" carried on through
+  "Earlier I thought of myself" into study sessions and a meeting.
+
+A sentence of either model that names a scene noun no percept has named
+is dropped; if nothing is left, the model keeps its previous version.
 
 Rewrites happen at event boundaries, since the event model updates when
 the event changes (Zacks et al. 2007), or as soon as there is first

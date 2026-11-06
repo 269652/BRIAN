@@ -107,16 +107,17 @@ class GeometryChannel:
             polar.append((o, d, _wrap(math.atan2(dy, dx) - th)))
         out: List[Percept] = []
         for o, d, b in sorted(polar, key=lambda t: t[1]):
-            if d > reach or abs(b) > self.half_fov:
+            ext = math.asin(min(1.0, o.radius / max(d, 1e-9)))
+            # any part of it in view, not just its centre: a near trunk
+            # filling the view's edge is seen (and hides what is behind)
+            if d > reach or abs(b) - ext > self.half_fov:
                 continue
             if self._occluded(o, d, ax, ay, polar):
                 continue
             desc = _article(o.describe(d <= self.detail_distance))
             out.append(Percept(_sentence(f"{desc}, {_distance_word(d)} "
                                          f"{_bearing_word(b)}"),
-                               (o.id,), "visual", d, bearing=b,
-                               extent=math.asin(min(1.0, o.radius
-                                                    / max(d, 1e-9))),
+                               (o.id,), "visual", d, bearing=b, extent=ext,
                                occludes=o.kind in _OPAQUE, solid=o.solid))
         for o, d, b in polar:
             if o.sound and d <= self.hearing_distance:

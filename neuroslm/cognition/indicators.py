@@ -746,7 +746,9 @@ def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
                           else None),
         "thought_quality": measures.thought_quality(
             thoughts, seams.embed_fn, context),
-        "grounding": grounding_report(recs, park),
+        "grounding": grounding_report(recs, park, models={
+            m.kind: m.history for m in (rt.world_model, rt.self_model)
+            if m is not None}),
         "memory": (rt.hierarchy.summary() if rt.hierarchy is not None
                    else None),
         "world_model": ([[t, x] for t, x in rt.world_model.history]
@@ -1081,7 +1083,13 @@ def format_report(report: dict) -> str:
                     f"grounding={_fmt(q['mean_grounding'])} "
                     f"distinct2={_fmt(q['distinct_2'])} "
                     f"grounded={_fmt(g['grounded_rate'])} "
+                    f"scene={_fmt(g.get('scene_grounded_rate'))} "
                     f"coverage={_fmt(g['coverage'])}")
+                models = g.get("models") or {}
+                lines.append(
+                    f"{'':<18} {'models':<10} {cond:<15} " + " ".join(
+                        f"{k}_ok={m['grounded_versions']}/{m['versions']}"
+                        for k, m in sorted(models.items(), reverse=True)))
                 continue
             if "phi_mean" in c:
                 lines.append(

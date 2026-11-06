@@ -231,6 +231,32 @@ class TestCognitiveMap:
             assert rep["static_coverage"] == 1.0, (seed, rep)
             assert rep["coverage"] >= 0.95, (seed, rep)
 
+    def test_a_less_bored_mind_still_explores_decisively(self):
+        # run 59316881: boredom ≈ 0.5 under R1 (the scripted mind's goes
+        # to 1); with frontier value 1/(1+d) the neighbouring headings
+        # were too close for the motor softmax — it paced back and forth
+        # near the west fence and saw 31 % of the park in 120 ticks
+        from neuroslm.cognition.embodiment import walk, grounding_report
+        covs = []
+        for seed in range(4):
+            rt, park = _rt(seed=seed), Park(seed=seed)
+
+            def hold(rec, res, rt=rt):
+                rt._boredom = 0.5
+            rt._boredom = 0.5
+            recs = walk(rt, park, ticks=120, on_tick=hold)
+            covs.append(grounding_report(recs, park)["static_coverage"])
+        assert sum(covs) / len(covs) >= 0.9, covs
+
+    def test_the_frontier_is_discounted_per_cell_of_travel(self):
+        from neuroslm.cognition.embodiment import PlaceMemory
+        pm = PlaceMemory(size=60.0)
+        pm._viewed[:] = True
+        pm._viewed[25, 15] = False               # the frontier at x≈51
+        near = pm.value_toward(40.0, 31.0, 0.0, 1.5)
+        far = pm.value_toward(40.0, 31.0, math.pi, 1.5)
+        assert far / near == pytest.approx(pm.discount ** 3)   # 7 vs 4 cells
+
 
 class TestGroundingReport:
     def test_coverage_is_the_share_of_objects_ever_seen(self):
@@ -278,6 +304,71 @@ class TestGroundingReport:
         park = Park.from_objects([_bench("a")], agent=(0.0, 0.0, 0.0))
         recs = [WalkRecord(1, "look", "look", (0, 0, 0), (), (), "hmm")]
         assert grounding_report(recs, park)["grounded_rate"] is None
+
+
+class TestSceneGrounding:
+    """Run 59316881: the world model claimed "a red and white traffic
+    light", "a street scene… buildings", "a camera on my head" — and the
+    grounding rate still read 1.0, because it only counted the park's own
+    kinds. Scene nouns (any concrete thing a text can claim is there) are
+    grounded only when a percept so far has named them."""
+
+    def test_unperceived_scene_nouns_are_ungrounded(self):
+        from neuroslm.cognition.situation import ungrounded_nouns
+        seen = "A red bench, a few metres ahead. A fountain splashing."
+        assert ungrounded_nouns(
+            "I am by the bench, near a traffic light and a building.",
+            seen) == ["traffic light", "building"]
+
+    def test_plurals_and_case_match_their_noun(self):
+        from neuroslm.cognition.situation import ungrounded_nouns
+        assert ungrounded_nouns("Two Benches and the Fountains.",
+                                "A bench. A fountain.") == []
+
+    def test_a_compound_is_not_also_counted_as_its_head(self):
+        from neuroslm.cognition.situation import ungrounded_nouns
+        assert ungrounded_nouns("A traffic light.", "A lamp.") == [
+            "traffic light"]
+        assert ungrounded_nouns("The flower bed.", "A blue flower bed.") == []
+
+    def test_weather_compass_and_life_events_are_claims_too(self):
+        # run 59316881: "a sunny day… 25°C… air pressure 1013 hPa",
+        # "Looking towards the north", "the upcoming meeting… study session"
+        from neuroslm.cognition.situation import ungrounded_nouns
+        assert ungrounded_nouns(
+            "It is sunny; the temperature is mild and the air pressure "
+            "high. I face north before my meeting and study session.",
+            "A red bench.") == ["sunny", "temperature", "air pressure",
+                                "north", "meeting", "study session"]
+
+    def test_the_report_scores_thoughts_and_models(self):
+        from neuroslm.cognition.embodiment import WalkRecord, grounding_report
+        park = Park.from_objects([_bench("a")], agent=(0.0, 0.0, 0.0))
+        recs = [WalkRecord(1, "look", "look", (0, 0, 0), ("a",),
+                           ("A red bench, a few metres ahead.",),
+                           "The bench is by the street."),
+                WalkRecord(2, "look", "look", (0, 0, 0), (), (),
+                           "That bench again.")]
+        rep = grounding_report(recs, park, models={
+            "world": [(1, "I am by a bench."),
+                      (2, "I am at a crossroads with a camera.")]})
+        assert rep["scene_mentions"] == 3
+        assert rep["scene_grounded_rate"] == pytest.approx(2 / 3)
+        assert rep["scene_ungrounded"] == ["street"]
+        w = rep["models"]["world"]
+        assert w["versions"] == 2 and w["grounded_versions"] == 1
+        assert w["ungrounded"] == ["crossroads", "camera"]
+
+    def test_a_noun_is_grounded_only_once_perceived(self):
+        from neuroslm.cognition.embodiment import WalkRecord, grounding_report
+        park = Park.from_objects([_bench("a")], agent=(0.0, 0.0, 0.0))
+        recs = [WalkRecord(1, "look", "look", (0, 0, 0), (), (),
+                           "Where is a bench?"),
+                WalkRecord(2, "look", "look", (0, 0, 0), ("a",),
+                           ("A red bench, close.",), "")]
+        rep = grounding_report(recs, park, models={"world": [(1, "A bench.")]})
+        assert rep["scene_ungrounded"] == ["bench"]
+        assert rep["models"]["world"]["grounded_versions"] == 0
 
 
 class TestSenseReturnsSalience:
