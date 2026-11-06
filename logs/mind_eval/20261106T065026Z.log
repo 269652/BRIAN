@@ -1,0 +1,2 @@
+[mind-eval] expert=deepseek_r1_qwen_7b device=cuda seed=0 -> results/mind_eval/20261106T065027Z_deepseek-r1-qwen-7b.json
+Fetching 2 files:   0%|          | 0/2 [00:00<?, ?it/s]
