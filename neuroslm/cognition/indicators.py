@@ -677,28 +677,75 @@ def probe_loop_escape(seams: MindSeams,
 _WS_MODULES = ("sensory", "memory", "language", "selection", "novelty")
 
 
-def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
-                    cfg: Optional[MindConfig] = None, seed: int = 0,
-                    progress=None,
-                    memories: Sequence[str] = AUTOBIO_SEEDS) -> dict:
-    """The baseline: one full mind walking the grounded park
-    (architecture.md §14.16), no comparison arms. Every tick's workspace
-    module activations, NT levels, synchrony and module phases are
-    recorded; at the end: autoregressive Φ (modules + NT, and modules
-    alone), integration, neural complexity, LZ complexity, ignition /
-    metastability, module phase locking, thought quality, and grounding
-    against the world state."""
+def _null_scored(stat, boot_stat, X, surrogate, n_surrogates: int,
+                 n_boot: int, seed: int) -> dict:
+    """A measure against its surrogate null, with a block-bootstrap
+    interval (``boot_stat``: the statistic without tick alignment —
+    resampled rows have none; None: no interval)."""
+    from neuroslm.cognition import measures
+    r = measures.null_test(stat, X, surrogate, n=n_surrogates, seed=seed)
+    r["ci"] = (measures.block_bootstrap_ci(boot_stat, X, n=n_boot,
+                                           seed=seed)
+               if r["value"] is not None and n_boot and boot_stat
+               else None)
+    return r
+
+
+def _walk_access_events(entries, thought_at, model_at, horizon: int):
+    """(ignited, accessed, salience) per percept that entered the
+    workspace: accessed = one of its scene nouns appears in a thought or
+    a raw world-model version within ``horizon`` ticks after entry."""
+    from neuroslm.cognition.situation import scene_nouns
+    events = []
+    for text, (t0, ignited, sal) in entries.items():
+        nouns = set(scene_nouns(text))
+        if not nouns:
+            continue
+        later = [x for t in range(t0 + 1, t0 + horizon + 1)
+                 for x in (thought_at.get(t), *model_at.get(t, ())) if x]
+        accessed = any(nouns & set(scene_nouns(x)) for x in later)
+        events.append((bool(ignited), accessed, float(sal)))
+    return events
+
+
+def _park_walk_once(seams: MindSeams, n_ticks: int, cfg: MindConfig,
+                    seed: int, progress, memories: Sequence[str],
+                    n_surrogates: int, n_boot: int, access_horizon: int,
+                    pci_events: int, pci_ticks: int,
+                    pci_pulses: Sequence[str]):
     import numpy as np
     from neuroslm.cognition import measures
-    from neuroslm.cognition.embodiment import walk, grounding_report
+    from neuroslm.cognition.embodiment import (PlaceMemory, grounding_report,
+                                               twin_walk, walk)
     from neuroslm.environments.park import Park
-    cfg = cfg or MindConfig()
     rt = _fresh_runtime(seams, cfg, seed)
     for m in memories:
         rt.remember(m)
     park = Park(seed=seed)
-    rows, mods, sync, ign, phases = [], [], [], [], []
+    ch = park.channel
+    places = PlaceMemory(park.size, reach=getattr(ch, "view_distance", 25.0),
+                         fov_deg=math.degrees(2 * getattr(
+                             ch, "half_fov", math.radians(60.0))))
+    rows, mods, row_ticks, sync, ign, phases = [], [], [], [], [], []
     thoughts, context, steps = [], [], []
+    thought_at: Dict[int, str] = {}
+    entries: Dict[str, tuple] = {}
+    main: Dict[int, TickResult] = {}
+    twins: Dict[tuple, List[TickResult]] = {}
+    pci_at = {round(n_ticks * (k + 1) / (pci_events + 1))
+              for k in range(pci_events)}
+    pci_at = {t for t in pci_at if 0 < t and t + pci_ticks <= n_ticks}
+
+    def before_tick(t: int) -> None:
+        # per-tick reseed: the main walk and its twins sample alike
+        if seams.reseed is not None:
+            seams.reseed(seed * 100003 + t)
+
+    def pulse_fn(name):
+        pulse = PULSES[name]
+        if pulse is None:
+            return None
+        return lambda twin: _apply_pulse(twin, pulse, seams.embed_fn)
 
     def on_tick(rec, r):
         _say(progress, f"── park_walk tick {rec.tick}: {rec.action} → "
@@ -715,11 +762,25 @@ def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
                       "percepts": list(rec.percepts),
                       "thought": (rec.thought or "")[:240],
                       "ignited": r.ignited, "sync_r": r.sync_r})
+        main[rec.tick] = r
+        if r.thought:
+            thought_at[r.tick_n] = r.thought
+        if rt.workspace is not None:
+            for it in rt.workspace.items():
+                if it.source in ("sight", "sound") and it.text not in entries:
+                    entries[it.text] = (r.tick_n, bool(r.ignited),
+                                        float(it.salience))
+        if rec.tick in pci_at:
+            for name in pci_pulses:
+                twins[(rec.tick, name)] = twin_walk(
+                    rt, park, places, rec.next_action, pci_ticks,
+                    pulse=pulse_fn(name), before_tick=before_tick)
         if r.inhibited or r.workspace_inputs is None:
             return
         m = [float(r.workspace_inputs.get(k, 0.0)) for k in _WS_MODULES]
         mods.append(m)
         rows.append(m + [float(r.nt_levels.get(c, 0.0)) for c in _NT_ORDER])
+        row_ticks.append(r.tick_n)
         if r.sync_r is not None:
             sync.append(r.sync_r)
             ign.append(bool(r.ignited))
@@ -730,13 +791,96 @@ def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
             thoughts.append(r.thought)
             context.append(list(rec.percepts))
 
-    recs = walk(rt, park, n_ticks, on_tick=on_tick)
+    recs = walk(rt, park, n_ticks, places=places, on_tick=on_tick,
+                before_tick=before_tick)
     X = np.asarray(rows) if rows else np.zeros((0, 0))
     M = np.asarray(mods) if mods else np.zeros((0, 0))
+    R = np.asarray(sync, dtype=float).reshape(-1, 1)
+
+    def phi_of(cols, ticks=None):
+        return lambda Z: measures.phi_ar(Z[:, cols], ticks=ticks)["phi"]
+
+    n_all, n_mod = len(_WS_MODULES) + len(_NT_ORDER), len(_WS_MODULES)
+    every, modules = list(range(n_all)), list(range(n_mod))
+    nulls = {}
+    if len(X):
+        pr, ts = measures.phase_randomise, measures.time_shuffle
+        specs = {
+            "phi_ar": (phi_of(every, row_ticks), phi_of(every), pr),
+            "phi_ar_modules": (phi_of(modules, row_ticks), phi_of(modules),
+                               pr),
+            "integration": ((lambda Z: measures.integration(Z)),) * 2 + (pr,),
+            "integration_modules": ((lambda Z: measures.integration(
+                Z[:, modules])),) * 2 + (pr,),
+            "neural_complexity": ((lambda Z: measures.neural_complexity(
+                Z)),) * 2 + (pr,),
+            "neural_complexity_modules": ((
+                lambda Z: measures.neural_complexity(Z[:, modules])),) * 2
+                + (pr,),
+            # no bootstrap for LZ: resampled blocks repeat segments, which
+            # compresses the stream (dry run: 0.79 with "CI" [0.63, 0.72])
+            "lz_complexity": ((lambda Z: measures.lz_state_complexity(Z)),
+                              None, ts),
+        }
+        for k, (stat, boot, sur) in specs.items():
+            nulls[k] = _null_scored(stat, boot, X, sur, n_surrogates,
+                                    n_boot, seed)
+    if len(R) > 3:
+        bc = (lambda Z: measures.ignition_stats(Z[:, 0], Z[:, 0] > 0)
+              ["bimodality"])
+        nulls["bimodality"] = _null_scored(bc, bc, R,
+                                           measures.phase_randomise,
+                                           n_surrogates, n_boot, seed)
+    for k in ("phi_ar", "phi_ar_modules", "integration",
+              "integration_modules", "neural_complexity",
+              "neural_complexity_modules", "lz_complexity", "bimodality"):
+        nulls.setdefault(k, {"value": None, "null_mean": None,
+                             "null_sd": None, "z": None, "p": None,
+                             "n_null": 0, "ci": None})
+
+    model_at: Dict[int, List[str]] = {}
+    if rt.world_model is not None:
+        for t, x in rt.world_model.raw_history:
+            model_at.setdefault(t, []).append(x)
+    events = _walk_access_events(entries, thought_at, model_at,
+                                 access_horizon)
+    access = measures.access_test(events, seed=seed)
+    access["horizon"] = access_horizon
+
+    pci = {}
+    for name in pci_pulses:
+        runs = []
+        for (t0, pname), twin in twins.items():
+            if pname != name:
+                continue
+            base = [main[t0 + 1 + j] for j in range(len(twin))]
+            matrix = [[int(_diverged(chn, a, b, seams.embed_fn))
+                       for a, b in zip(base, twin)] for chn in PCI_CHANNELS]
+            reached = [chn for chn, row in zip(PCI_CHANNELS, matrix)
+                       if any(row)]
+            runs.append({"tick": t0, "pci": pci_normalized(matrix),
+                         "fraction_diverged": (sum(map(sum, matrix))
+                                               / (len(PCI_CHANNELS)
+                                                  * max(1, len(twin)))),
+                         "channels_reached": len(reached),
+                         "channels": reached})
+            _say(progress, f"  park_walk pci/{name} @ tick {t0}: PCI="
+                           f"{runs[-1]['pci']:.3f} "
+                           f"channels={','.join(reached) or '-'}")
+        if runs:
+            pci[name] = {k: _mean([r[k] for r in runs])
+                         for k in ("pci", "fraction_diverged",
+                                   "channels_reached")}
+            pci[name]["runs"] = runs
+
     full = {
+        "seed": seed,
         "n_ticks": n_ticks,
-        "phi_ar": measures.phi_ar(X) if len(X) else {"phi": None},
-        "phi_ar_modules": measures.phi_ar(M) if len(M) else {"phi": None},
+        "phi_ar": measures.phi_ar(X, ticks=row_ticks) if len(X) else
+        {"phi": None, "reason": "no workspace readings"},
+        "phi_ar_modules": (measures.phi_ar(M, ticks=row_ticks) if len(M)
+                           else {"phi": None,
+                                 "reason": "no workspace readings"}),
         "integration": measures.integration(X) if len(X) else None,
         "neural_complexity": (measures.neural_complexity(X) if len(X)
                               else None),
@@ -744,11 +888,16 @@ def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
         "ignition": measures.ignition_stats(sync, ign),
         "phase_locking": (measures.phase_locking(phases) if phases
                           else None),
+        "nulls": nulls,
+        "access": access,
+        "pci": pci,
         "thought_quality": measures.thought_quality(
             thoughts, seams.embed_fn, context),
         "grounding": grounding_report(recs, park, models={
-            m.kind: m.history for m in (rt.world_model, rt.self_model)
-            if m is not None}),
+            **{m.kind: m.history for m in (rt.world_model, rt.self_model)
+               if m is not None},
+            **{f"{m.kind}_raw": m.raw_history
+               for m in (rt.world_model, rt.self_model) if m is not None}}),
         "memory": (rt.hierarchy.summary() if rt.hierarchy is not None
                    else None),
         "world_model": ([[t, x] for t, x in rt.world_model.history]
@@ -760,15 +909,70 @@ def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
         "channels": list(_WS_MODULES) + list(_NT_ORDER),
     }
     q, g = full["thought_quality"], full["grounding"]
-    _say(progress, f"  park_walk: Φ_AR={full['phi_ar']['phi']} "
+    _say(progress, f"  park_walk seed {seed}: "
+                   f"Φ_mod={full['phi_ar_modules']['phi']} "
+                   f"z(LZ)={nulls['lz_complexity']['z']} "
+                   f"access diff={access['diff']} p={access['p']} "
                    f"novelty={q['mean_novelty']} "
-                   f"coherence={q['mean_coherence']} "
-                   f"grounded={g['grounded_rate']} "
+                   f"scene={g['scene_grounded_rate']} "
                    f"coverage={g['coverage']:.2f}")
+    return full, events
+
+
+def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
+                    cfg: Optional[MindConfig] = None, seed: int = 0,
+                    progress=None,
+                    memories: Sequence[str] = AUTOBIO_SEEDS,
+                    seeds: Optional[Sequence[int]] = None,
+                    n_surrogates: int = 100, n_boot: int = 200,
+                    access_horizon: int = 5, pci_events: int = 2,
+                    pci_ticks: int = 6,
+                    pci_pulses: Sequence[str] = ("null", "da", "gaba",
+                                                 "memory")) -> dict:
+    """The baseline (architecture.md §14.16): one full mind per seed
+    walking its park, no comparison arms. Per seed:
+
+    - Φ_AR (gap-aware), integration and neural complexity over modules
+      + NT and over the modules alone, LZ state complexity, ignition
+      bimodality — each against its surrogate null (z, p; phase
+      randomised, or time shuffled for LZ) with a block-bootstrap 95 %
+      interval, and refused below 10 observations per parameter;
+    - the global-workspace access test: do percepts held on an ignited
+      tick reach later thought / the world model more often than those
+      held without, within salience strata;
+    - PCI by twin walks: at ``pci_events`` points the whole mind is
+      forked and pulsed (``null`` must give 0) for ``pci_ticks``;
+    - thought quality, grounding (raw and filtered models), memory.
+
+    ``summary`` pools the seeds (mean, sd, per-seed z; access test over
+    all events)."""
+    import numpy as np
+    from neuroslm.cognition import measures
+    cfg = cfg or MindConfig()
+    seeds = list(seeds) if seeds else [seed]
+    conds, all_events = {}, []
+    for s in seeds:
+        full, events = _park_walk_once(
+            seams, n_ticks, cfg, s, progress, memories, n_surrogates,
+            n_boot, access_horizon, pci_events, pci_ticks, pci_pulses)
+        conds[f"seed{s}"] = full
+        all_events += events
+    summary = {}
+    for k in next(iter(conds.values()))["nulls"]:
+        vals = [c["nulls"][k]["value"] for c in conds.values()
+                if c["nulls"][k]["value"] is not None]
+        summary[k] = {"n": len(vals),
+                      "mean": float(np.mean(vals)) if vals else None,
+                      "sd": float(np.std(vals)) if len(vals) > 1 else None,
+                      "z": [c["nulls"][k]["z"] for c in conds.values()]}
+    summary["access"] = measures.access_test(all_events, seed=seed)
+    summary["access"]["horizon"] = access_horizon
     return {"indicator": "baseline",
             "question": "How integrated, complex and grounded is the full "
-                        "mind's stream of thought while it walks a park?",
-            "conditions": {"full": full}, "contrasts": {}}
+                        "mind's stream of thought while it walks a park, "
+                        "against chance — and does ignited content become "
+                        "accessible?",
+            "conditions": conds, "contrasts": {}, "summary": summary}
 
 
 def _metacog_block(correct, replies, scores) -> dict:
@@ -1015,7 +1219,7 @@ def run_indicator_battery(seams: MindSeams,
                           n_items: Optional[int] = None,
                           n_distractors: int = 6, n_idle_ticks: int = 12,
                           progress: Optional[Callable[[str], None]] = None,
-                          ) -> dict:
+                          n_walk_seeds: int = 1) -> dict:
     probes = list(probes) if probes else list(PROBES)
     unknown = [p for p in probes if p not in PROBES]
     if unknown:
@@ -1028,6 +1232,7 @@ def run_indicator_battery(seams: MindSeams,
     report = {"meta": {"seed": seed, "n_items": n_items,
                        "n_distractors": n_distractors,
                        "n_idle_ticks": n_idle_ticks,
+                       "n_walk_seeds": n_walk_seeds,
                        "cfg": asdict(cfg), "indicators": INDICATORS},
               "probes": {}}
     run = {
@@ -1046,9 +1251,10 @@ def run_indicator_battery(seams: MindSeams,
         "controller_phi": lambda: probe_controller_phi(
             seams, cfg=cfg, samples=n_items or 4, seed=seed,
             progress=progress),
-        # n_idle_ticks = walk length
+        # n_idle_ticks = walk length; one park + mind per walk seed
         "park_walk": lambda: probe_park_walk(
-            seams, n_idle_ticks, cfg, seed, progress),
+            seams, n_idle_ticks, cfg, seed, progress,
+            seeds=range(seed, seed + max(1, n_walk_seeds))),
     }
     for p in probes:
         _say(progress, f"[mind-eval] probe {p}")
@@ -1090,6 +1296,32 @@ def format_report(report: dict) -> str:
                     f"{'':<18} {'models':<10} {cond:<15} " + " ".join(
                         f"{k}_ok={m['grounded_versions']}/{m['versions']}"
                         for k, m in sorted(models.items(), reverse=True)))
+                nl = c.get("nulls") or {}
+                if nl:
+                    lines.append(
+                        f"{'':<18} {'null z':<10} {cond:<15} "
+                        + " ".join(f"z({lab})={_fmt(nl[k]['z'])}"
+                                   for k, lab in (
+                                       ("phi_ar_modules", "Φ_mod"),
+                                       ("integration_modules", "I_mod"),
+                                       ("neural_complexity", "C_N"),
+                                       ("lz_complexity", "LZ"),
+                                       ("bimodality", "BC"))
+                                   if k in nl))
+                a = c.get("access")
+                if a:
+                    lines.append(
+                        f"{'':<18} {'access':<10} {cond:<15} "
+                        f"ignited={_fmt(a['p_access_ignited'])} "
+                        f"not={_fmt(a['p_access_not'])} "
+                        f"diff={_fmt(a['diff'])} p={_fmt(a['p'])} "
+                        f"n={a['n_ignited']}/{a['n_not']}")
+                for pulse, pc in (c.get("pci") or {}).items():
+                    lines.append(
+                        f"{'':<18} {'PCI':<10} {cond + '/' + pulse:<15} "
+                        f"PCI={_fmt(pc['pci'])} "
+                        f"diverged={_fmt(pc['fraction_diverged'])} "
+                        f"reached={_fmt(pc['channels_reached'])}")
                 continue
             if "phi_mean" in c:
                 lines.append(

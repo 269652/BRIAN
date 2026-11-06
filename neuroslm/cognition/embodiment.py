@@ -8,6 +8,7 @@ scores the walk against the world state.
 """
 from __future__ import annotations
 
+import copy
 import math
 import re
 from collections import deque
@@ -54,6 +55,8 @@ class PlaceMemory:
         self._viewed = np.zeros((n, n), dtype=bool)
         self._obstacle = np.zeros((n, n), dtype=bool)
         self.n = n
+        # absolute headings that just bumped (touch), until the body moves
+        self.blocked: List[float] = []
 
     def _cell_of(self, x: float, y: float) -> Optional[Tuple[int, int]]:
         if not (0.0 <= x <= self.size and 0.0 <= y <= self.size):
@@ -213,16 +216,18 @@ def _place_values(places: PlaceMemory, park: Park,
 
 def walk(rt, park: Park, ticks: int, action: str = "look",
          places: Optional[PlaceMemory] = None,
-         on_tick=None) -> List[WalkRecord]:
+         on_tick=None, before_tick=None) -> List[WalkRecord]:
     """Run the loop for ``ticks`` steps. ``places`` carries the place
-    memory across calls; ``on_tick(record, tick_result)`` observes."""
+    memory across calls; ``on_tick(record, tick_result)`` observes;
+    ``before_tick(park_tick)`` runs just before each mind tick (reseed
+    the trunk's sampler there for reproducible twins)."""
     if places is None:
         ch = park.channel
         places = PlaceMemory(park.size, reach=getattr(
             ch, "view_distance", 25.0), fov_deg=math.degrees(2 * getattr(
                 ch, "half_fov", math.radians(60.0))))
     recs: List[WalkRecord] = []
-    blocked: List[float] = []
+    blocked = places.blocked
     for _ in range(int(ticks)):
         here = (park.agent_x, park.agent_y)
         frame = park.step(action)
@@ -249,6 +254,8 @@ def walk(rt, park: Park, ticks: int, action: str = "look",
             rt.sense(p.text, "sight" if p.modality == "visual" else "sound",
                      key=(f"{p.modality}:{p.object_ids[0]}"
                           if p.object_ids else None))
+        if before_tick is not None:
+            before_tick(park.tick)
         result = rt.tick()
         # touch rules a way out entirely, not just to value 0 (which tied
         # with every explored direction and kept getting picked)
@@ -268,6 +275,22 @@ def walk(rt, park: Park, ticks: int, action: str = "look",
             on_tick(recs[-1], result)
         action = nxt
     return recs
+
+
+def twin_walk(rt, park: Park, places: PlaceMemory, action: str,
+              ticks: int, pulse=None, before_tick=None) -> list:
+    """Fork the mind, its body and its map where the walk stands (about
+    to take ``action``), apply ``pulse(twin_runtime)`` if given, and walk
+    the twin ``ticks`` steps. Returns its TickResults; the main walk is
+    untouched. With equal reseeds an unperturbed twin replays the walk."""
+    twin = rt.fork()
+    twin_park, twin_places = copy.deepcopy(park), copy.deepcopy(places)
+    if pulse is not None:
+        pulse(twin)
+    out: list = []
+    walk(twin, twin_park, ticks, action=action, places=twin_places,
+         on_tick=lambda rec, r: out.append(r), before_tick=before_tick)
+    return out
 
 
 def _mentions(text: str, kinds: Sequence[str]) -> List[str]:

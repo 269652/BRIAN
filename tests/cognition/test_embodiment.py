@@ -11,7 +11,7 @@ import pytest
 
 from neuroslm.environments.park import Park, ParkObject
 
-from test_cognitive_runtime import _ScriptedGen, _mk_runtime
+from test_cognitive_runtime import _ScriptedGen, _mk_runtime, _score_map,     _vec_for
 
 
 def _rt(thoughts=("a passing thought",), seed=0):
@@ -376,3 +376,69 @@ class TestSenseReturnsSalience:
         rt = _rt()
         assert rt.sense("the river bank", "sight") == pytest.approx(0.5)
         assert rt.sense("the river bank", "sight") == pytest.approx(0.0)
+
+
+_LINES = ("the bench by the river", "a dog near the fountain",
+          "rain on the lamp", "the willow tree", "a quiet moon")
+
+
+def _pure_gen(prompt, max_new_tokens):
+    """A pure function of the prompt — like a reseeded sampler: equal
+    states give equal thoughts."""
+    import zlib
+    return _LINES[zlib.crc32(prompt.encode()) % len(_LINES)]
+
+
+def _real_rt():
+    from neuroslm.cognition.runtime import CognitiveRuntime, MindConfig
+    from neuroslm.memory.episodic import EpisodicMemory
+    return CognitiveRuntime(
+        generate_fn=_pure_gen, score_fn=_score_map({}), embed_fn=_vec_for,
+        memory=EpisodicMemory(maxlen=64), rng=random.Random(0),
+        cfg=MindConfig(n_candidates=2, world_model=False, self_model=False))
+
+
+class TestTwinWalks:
+    """PCI during the walk (Casali et al. 2013, by twin runs): fork the
+    whole mind, its body and its map mid-walk, perturb the twin, and
+    read the response as the twin's divergence from the main walk. An
+    unperturbed twin must replay the walk exactly — that is the null
+    the method rests on."""
+
+    def test_a_fork_is_independent_but_shares_the_trunk(self):
+        rt = _real_rt()
+        rt.tick()
+        twin = rt.fork()
+        n_mem = len(rt.memory.all())
+        twin.tick()
+        twin.memory.add("only the twin", content_vec=_vec_for("moon"))
+        assert len(rt.memory.all()) == n_mem
+        assert twin._gen is rt._gen and twin._embed is rt._embed
+
+    def _main_and_twin(self, pulse, at=3, k=4):
+        from neuroslm.cognition.embodiment import PlaceMemory, twin_walk, walk
+        rt, park = _real_rt(), Park(seed=0)
+        places = PlaceMemory(park.size)
+        main, twin = {}, {}
+
+        def on_tick(rec, r):
+            main[rec.tick] = r
+            if rec.tick == at:
+                for j, tr in enumerate(twin_walk(rt, park, places,
+                                                 rec.next_action, k,
+                                                 pulse=pulse)):
+                    twin[at + 1 + j] = tr
+        walk(rt, park, at + k, places=places, on_tick=on_tick)
+        return main, twin
+
+    def test_an_unperturbed_twin_replays_the_walk(self):
+        main, twin = self._main_and_twin(None)
+        assert sorted(twin) == [4, 5, 6, 7]
+        for t, tr in twin.items():
+            assert tr.thought == main[t].thought
+            assert tr.nt_levels == main[t].nt_levels
+
+    def test_a_pulse_makes_the_twin_diverge(self):
+        main, twin = self._main_and_twin(lambda r: r.nt.perturb("DA", 2.0))
+        assert twin[4].nt_levels["DA"] != pytest.approx(
+            main[4].nt_levels["DA"], abs=1e-3)

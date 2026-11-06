@@ -8,6 +8,15 @@ class EpisodicMemory:
         self.buffer = deque(maxlen=maxlen)
         self.lock = threading.Lock()
 
+    def __deepcopy__(self, memo):
+        import copy
+        new = EpisodicMemory.__new__(EpisodicMemory)
+        memo[id(self)] = new
+        with self.lock:
+            new.buffer = copy.deepcopy(self.buffer, memo)
+        new.lock = threading.Lock()
+        return new
+
     def add(self, content, content_vec=None, nt_state=None, emotion=None, tags=None, context=None):
         """Append an episode. content_vec can be a numeric vector (optional)."""
         episode = {

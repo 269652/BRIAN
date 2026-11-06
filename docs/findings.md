@@ -5066,3 +5066,115 @@ novelty collapses (copying the broadcast), λ is too strong.
 Next measurement: `loop_escape` only, 5 seeds (13 arms).
 
 [EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestIgnitionBroadcastsIntoTheTrunk, TestRuntimeBroadcastsIgnitions]
+
+### Run 59316881: park-walk baseline numbers withdrawn as uninterpretable (2026-11-06)
+
+The first `park_walk` baseline (`06460c04`, 120 ticks, one seed) is not
+evidence. Its numbers are not cited:
+
+- Φ_AR over 12 channels came from 119 transitions fitted to 144 VAR(1)
+  coefficients, about one observation per parameter. Φ_AR = −0.008 is
+  noise.
+- No measure had a null distribution, interval or second seed, so Φ_AR,
+  C_N 6.30, LZ 1.01 and BC 0.43 cannot be read.
+- Grounding read 1.0 because it counted only the park's own kinds.
+  Rescored on all scene nouns (`375dd2b8`): 9/22 world-model versions,
+  17/22 self-model versions and 199/274 thought mentions were grounded.
+  The world model claimed traffic lights, streets and a camera.
+
+The grounding filter added in `375dd2b8` (drop model sentences naming
+unperceived scene nouns) would score its own output as grounded by
+construction. Models now also keep `raw_history`, and the raw text is
+what gets measured.
+
+**Development settings, frozen from here on.** All four were chosen
+during development, not measured:
+
+- oscillator `coupling_ratio` 1.2 and `ignition_gain` 1.0, picked by a
+  scan for bimodal ignition. Ignition bimodality is therefore a
+  manipulation check, not a finding;
+- frontier discount γ = 0.5, picked to pass the coverage contract;
+- the `SCENE_NOUNS` lexicon, assembled from the failures of runs
+  59313101 and 59316881.
+
+### H69 — Park-walk baseline against chance: integration, access, PCI (pre-registered, 2026-11-06)
+
+**Status:** ⏳ Pre-registered; run pending:
+`brian deploy-mind-eval --probes park_walk --idle-ticks 500 --walk-seeds 3`.
+
+**Scope.** These are measures of the *functional architecture*: the
+five workspace-module activations (sensory, memory, language,
+selection, novelty) and the seven NT levels of the control loop around
+R1. They use Φ_AR and TSE as they are used on EEG. They are not IIT's
+Φ of the substrate: R1 is feedforward within each token, and IIT would
+assign it ≈ 0 whatever these numbers say. Nothing here is a claim that
+the system is conscious.
+
+**Spec** (architecture.md §14.16, `probe_park_walk`). One mind and one
+park per seed (seeds 0, 1, 2), 500 ticks each.
+
+- **Sample-size guard:** an estimate needs ≥ 10 observations per fitted
+  parameter. Φ_AR over 12 channels needs ≥ 1440 transitions and is
+  refused at 500 ticks; the module-level measures (5 channels) are
+  computable.
+- **Gaps:** Φ_AR uses only transitions between consecutive ticks.
+  Inhibited ticks leave gaps.
+- **Nulls:** 100 surrogates per measure, so the smallest possible p is
+  0.0099. Integration, C_N and Φ_AR use phase-randomised surrogates
+  (same spectra, no coupling); LZ uses time-shuffled ones (same states,
+  no order).
+- **Intervals:** moving-block bootstrap, 95 %. LZ has none, because
+  resampled blocks repeat segments and compress the stream (dry run:
+  0.79 with a "CI" of [0.63, 0.72]).
+- **Access test:** a unit is a percept entering the workspace.
+  Exposure: the workspace was ignited on its entry tick. Outcome: one
+  of its scene nouns appears in a thought or a raw world-model version
+  within 5 ticks. The difference is taken within 5 salience strata,
+  pooled with Cochran–Mantel–Haenszel weights, against a 1000×
+  within-stratum permutation null; p is one-sided. Seeds are pooled.
+- **PCI:** at ticks 167 and 333 the whole mind, body and map are
+  forked. The twins get the `null`, `da`, `gaba` and `memory` pulses and
+  run 6 ticks with per-tick reseeding identical to the main walk.
+
+**Predictions:**
+
+| # | Measure | Prediction | Falsified if |
+|---|---|---|---|
+| a | Integration (modules) vs null | z > 2 in ≥ 2 of 3 seeds | z ≤ 2 in ≥ 2 seeds: the modules are no more co-dependent than their spectra predict |
+| b | Φ_AR (modules) vs null | z > 2 in ≥ 2 of 3 seeds | z ≤ 2 in ≥ 2 seeds: the whole's past predicts no more than its parts' pasts at the tick grain. Prior is weak: the scripted dry run gave z = −0.09 |
+| c | C_N (modules) vs null | z > 2 in ≥ 2 of 3 seeds | z ≤ 2 in ≥ 2 seeds |
+| d | LZ vs time-shuffled null | z < −2 in every seed (the stream has temporal structure) | z ≥ −2 in any seed |
+| e | Access test, seeds pooled | diff > 0 with p < 0.05 | diff ≤ 0 or p ≥ 0.05. Then ignition does not grant access at this grain: it is epiphenomenal in this architecture, a real negative result for the GWT reading of the oscillator |
+| f | PCI, `null` pulse | exactly 0 | > 0: the twins are not deterministic on GPU, and PCI goes unreported |
+| g | PCI, `da` / `gaba` / `memory` | > 0, reaching ≥ 2 channels | = 0 |
+| h | Raw vs filtered model grounding | raw world-model versions grounded < filtered ones | descriptive; it measures what the filter hides |
+
+**Reported, not tested:**
+- Ignition bimodality, as a manipulation check: the operating point was
+  chosen by scanning it.
+- 12-channel integration and C_N: the NT levels share drivers by
+  design, so they beat an independence null trivially (dry run z ≈ 250).
+
+**Instrument check, not evidence.** Scripted mind, CPU, 500 ticks,
+seed 0:
+
+| Measure | Dry-run value |
+|---|---|
+| Integration (modules) z | 5.2 |
+| C_N (modules) z | 5.0 |
+| Φ_AR (modules) z | −0.09 |
+| LZ z | −11.3 |
+| Access | diff 0.05, p 0.36, n = 70 ignited / 42 not |
+| PCI null | 0 |
+| PCI `da` / `gaba` / `memory` | 0.92 (9 channels) / 0.86 / 0.48 |
+
+At ~110 access events per seed, the pooled test (~330 events) is powered
+for differences of about 0.15, not small ones.
+
+**Cost:** ~22 s/tick on an A100 (run 59316881: 120 ticks in 45 min).
+3 × (500 + 48 twin ticks) ≈ 10 h.
+
+[EVIDENCE: tests/cognition/test_measures.py::TestSampleSizeGuards, ::TestPhiOnlyAcrossConsecutiveTicks, ::TestSurrogates, ::TestBootstrap, ::TestAccessTest]
+[EVIDENCE: tests/cognition/test_embodiment.py::TestTwinWalks, ::TestSceneGrounding]
+[EVIDENCE: tests/cognition/test_indicator_eval.py::TestParkWalkBaseline, ::TestWalkSeeds]
+[EVIDENCE: tests/cognition/test_world_self_models.py::TestModelsKeepOnlyWhatWasPerceived]

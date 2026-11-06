@@ -17,6 +17,10 @@ class SituationModel:
     """"world" or "self"."""
     text: str = ""
     history: List[Tuple[int, str]] = field(default_factory=list)
+    raw_history: List[Tuple[int, str]] = field(default_factory=list)
+    """Every completion as generated, before the grounding filter — what
+    is measured (the filtered text would score grounded by
+    construction)."""
 
     def update(self, tick: int, text: str) -> bool:
         text = (text or "").strip()

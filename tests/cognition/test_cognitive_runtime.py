@@ -129,6 +129,16 @@ def _mk_runtime(gen, scores=None, nt=None, cfg=None, seed=0, osc=False,
 # ── Mechanism: cosine retrieval on EpisodicMemory ────────────────────
 
 class TestEpisodicRetrieve:
+    def test_a_deep_copy_is_independent_with_its_own_lock(self):
+        # twin runs fork the whole mind (CognitiveRuntime.fork)
+        import copy
+        m = EpisodicMemory(maxlen=16)
+        m.add("about the launch", content_vec=_vec_for("launch"))
+        c = copy.deepcopy(m)
+        c.add("only in the copy")
+        assert len(m.all()) == 1 and len(c.all()) == 2
+        assert c.lock is not m.lock and c.buffer.maxlen == 16
+
     def test_retrieves_nearest_by_cosine(self):
         m = EpisodicMemory(maxlen=16)
         m.add("about the launch", content_vec=_vec_for("launch"))

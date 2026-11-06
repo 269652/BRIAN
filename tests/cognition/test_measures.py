@@ -163,3 +163,133 @@ class TestThoughtQuality:
         from neuroslm.cognition.measures import thought_quality
         q = thought_quality(["a a a a", "b c d e"], self._embed)
         assert q["distinct_2"] == pytest.approx(4 / 6)
+
+
+class TestSampleSizeGuards:
+    """A Gaussian estimate needs enough data per fitted parameter.
+    Run 59316881 fitted Φ_AR's 12×12 VAR(1) from 119 transitions (~1 per
+    parameter) and got −0.008: noise. Below ``min_obs_per_param`` (10)
+    the measure is refused, with the reason."""
+
+    def test_phi_ar_needs_ten_transitions_per_var_coefficient(self):
+        from neuroslm.cognition.measures import phi_ar
+        A = [[0.4, 0.5, 0.0, 0.0], [0.0, 0.4, 0.5, 0.0],
+             [0.0, 0.0, 0.4, 0.5], [0.5, 0.0, 0.0, 0.4]]
+        short = phi_ar(_ar(150, A))              # 149 < 10·4²
+        assert short["phi"] is None and "transitions" in short["reason"]
+        assert phi_ar(_ar(170, A))["phi"] is not None
+
+    def test_integration_and_complexity_need_ten_per_covariance_entry(self):
+        from neuroslm.cognition.measures import (integration,
+                                                 neural_complexity)
+        X = np.random.default_rng(0).standard_normal((99, 4))   # < 10·10
+        assert integration(X) is None and neural_complexity(X) is None
+        Y = np.random.default_rng(0).standard_normal((100, 4))
+        assert integration(Y) is not None
+
+
+class TestPhiOnlyAcrossConsecutiveTicks:
+    """Ticks without a workspace reading (inhibited) leave gaps; a
+    transition across a gap is not a one-step transition."""
+
+    def test_only_consecutive_ticks_make_transitions(self):
+        from neuroslm.cognition.measures import phi_ar
+        A = [[0.4, 0.5], [0.5, 0.4]]
+        X = _ar(400, A)
+        ticks = list(range(200)) + list(range(300, 500))
+        assert phi_ar(X, ticks=ticks)["n_transitions"] == 398
+        assert phi_ar(X)["n_transitions"] == 399
+
+    def test_no_consecutive_ticks_no_phi(self):
+        from neuroslm.cognition.measures import phi_ar
+        X = _ar(400, [[0.4, 0.5], [0.5, 0.4]])
+        assert phi_ar(X, ticks=list(range(0, 800, 2)))["phi"] is None
+
+
+class TestSurrogates:
+    def test_phase_randomising_keeps_spectra_breaks_coupling(self):
+        from neuroslm.cognition.measures import phase_randomise
+        x = _ar(1024, [[0.9]])[:, 0]
+        X = np.c_[x, x]
+        S = phase_randomise(X, np.random.default_rng(0))
+        for k in range(2):
+            assert np.allclose(np.abs(np.fft.rfft(S[:, k] - S[:, k].mean())),
+                               np.abs(np.fft.rfft(X[:, k] - X[:, k].mean())))
+        assert abs(np.corrcoef(S.T)[0, 1]) < 0.5
+
+    def test_time_shuffling_keeps_states_breaks_order(self):
+        from neuroslm.cognition.measures import time_shuffle
+        X = _ar(500, [[0.9, 0.0], [0.0, 0.9]])
+        S = time_shuffle(X, np.random.default_rng(0))
+        assert sorted(map(tuple, S)) == sorted(map(tuple, X))
+        lag1 = lambda v: np.corrcoef(v[:-1], v[1:])[0, 1]
+        assert lag1(X[:, 0]) > 0.7 and abs(lag1(S[:, 0])) < 0.2
+
+    def test_coupled_dynamics_beat_their_null(self):
+        from neuroslm.cognition.measures import null_test, phi_ar, \
+            phase_randomise
+        A = [[0.4, 0.5, 0.0], [0.0, 0.4, 0.5], [0.5, 0.0, 0.4]]
+        r = null_test(lambda Z: phi_ar(Z)["phi"], _ar(1000, A),
+                      phase_randomise, n=40, seed=0)
+        assert r["z"] > 3 and r["p"] < 0.05
+
+    def test_independent_dynamics_do_not(self):
+        from neuroslm.cognition.measures import null_test, phi_ar, \
+            phase_randomise
+        r = null_test(lambda Z: phi_ar(Z)["phi"],
+                      _ar(1000, np.diag([0.8, 0.6, 0.4])),
+                      phase_randomise, n=40, seed=0)
+        assert r["p"] > 0.05
+
+    def test_no_value_no_test(self):
+        from neuroslm.cognition.measures import null_test, time_shuffle
+        r = null_test(lambda Z: None, np.ones((10, 2)), time_shuffle, n=5)
+        assert r["value"] is None and r["z"] is None and r["p"] is None
+
+
+class TestBootstrap:
+    def test_block_bootstrap_interval_covers_the_estimate(self):
+        from neuroslm.cognition.measures import block_bootstrap_ci
+        X = _ar(1000, [[0.5, 0.3], [0.3, 0.5]])
+        lo, hi = block_bootstrap_ci(lambda Z: float(Z[:, 0].mean()), X,
+                                    n=200, seed=0)
+        assert lo < float(X[:, 0].mean()) < hi
+        assert lo < 0.0 < hi                       # the true mean
+        assert hi - lo < 0.5
+
+
+class TestAccessTest:
+    """Global workspace theory: content that ignites becomes accessible
+    — later reported, remembered, used. Units: percepts held in the
+    workspace; exposure: held on an ignited tick; outcome: later
+    access. Stratified by salience (salience drives both), with a
+    within-stratum permutation null."""
+
+    def _events(self, rule, n=400, seed=0):
+        rng = np.random.default_rng(seed)
+        out = []
+        for _ in range(n):
+            sal = float(rng.uniform())
+            ign = bool(rng.uniform() < 0.3 + 0.4 * sal)
+            out.append((ign, bool(rng.uniform() < rule(ign, sal)), sal))
+        return out
+
+    def test_ignition_that_grants_access_is_detected(self):
+        from neuroslm.cognition.measures import access_test
+        r = access_test(self._events(lambda i, s: 0.6 if i else 0.2),
+                        n_perm=500, seed=0)
+        assert r["diff"] > 0.2 and r["p"] < 0.01
+
+    def test_epiphenomenal_ignition_is_not(self):
+        from neuroslm.cognition.measures import access_test
+        r = access_test(self._events(lambda i, s: 0.4), n_perm=500, seed=0)
+        assert r["p"] > 0.05
+
+    def test_salience_alone_is_not_mistaken_for_ignition(self):
+        from neuroslm.cognition.measures import access_test
+        ev = self._events(lambda i, s: 0.05 + 0.9 * s, n=2000)
+        raw = (np.mean([a for i, a, _ in ev if i])
+               - np.mean([a for i, a, _ in ev if not i]))
+        r = access_test(ev, n_perm=500, seed=0)
+        assert raw > 0.05, "the confound is real"
+        assert abs(r["diff"]) < 0.05 and r["p"] > 0.05

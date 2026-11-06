@@ -2060,6 +2060,7 @@ def cmd_deploy_mind_eval(args: argparse.Namespace) -> int:
         eval_args += ["--n-items", str(args.n_items)]
     eval_args += ["--n-distractors", str(args.n_distractors),
                   "--idle-ticks", str(args.idle_ticks),
+                  "--walk-seeds", str(args.walk_seeds),
                   "--seed", str(args.seed)]
     cfg = MindEvalDeployConfig(
         expert=args.expert, eval_args=eval_args, branch=args.branch,
@@ -3476,7 +3477,7 @@ def _eval_mind(args: argparse.Namespace) -> int:
         report = indicators.run_indicator_battery(
             seams, probes=probes, seed=args.seed, n_items=args.n_items,
             n_distractors=args.n_distractors, n_idle_ticks=args.idle_ticks,
-            progress=print)
+            n_walk_seeds=args.walk_seeds, progress=print)
         report["meta"].update(expert=expert, device=args.device,
                               utc=stamp, git_commit=sha, branch=branch,
                               embed=getattr(seams, "embed_kind", None),
@@ -5377,6 +5378,9 @@ def _add_mind_eval_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--n-distractors", dest="n_distractors", type=int,
                    default=6)
     p.add_argument("--idle-ticks", dest="idle_ticks", type=int, default=12)
+    p.add_argument("--walk-seeds", dest="walk_seeds", type=int, default=1,
+                   help="park_walk: walk this many seeds (seed, seed+1, "
+                        "...) — one park and one mind each")
     p.add_argument("--seed", type=int, default=0)
 
 

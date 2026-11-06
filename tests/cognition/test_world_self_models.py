@@ -220,6 +220,27 @@ class TestModelsKeepOnlyWhatWasPerceived:
         rt.tick()
         assert rt.world_model.text == "I am by the river near the bench."
 
+    def test_the_raw_completion_is_kept_for_measurement(self):
+        # scoring the filtered text with the filter's own lexicon would
+        # read ~100 % grounded by construction; the raw text is scored
+        gen = _ModelGen(world="I am by the river. A traffic light is ahead.")
+        _, rt = _rt(gen)
+        rt.sense("The river, close ahead.", "sight")
+        rt.tick()
+        (tick, raw), = rt.world_model.raw_history
+        assert raw == "I am by the river. A traffic light is ahead."
+        assert rt.world_model.text == "I am by the river."
+
+    def test_a_fully_filtered_update_is_still_recorded_raw(self):
+        gen, rt = _rt()
+        rt.sense("The river, close ahead.", "sight")
+        rt.tick()
+        gen.world = "I am in a street with a camera."
+        rt.hierarchy.boundary = lambda *a, **k: True
+        rt.sense("The river, close ahead.", "sight")
+        rt.tick()
+        assert rt.world_model.raw_history[-1][1] ==             "I am in a street with a camera."
+
     def test_the_self_model_is_filtered_too(self):
         gen = _ModelGen(me="I am a 26-year-old woman. I like the river.")
         _, rt = _rt(gen)

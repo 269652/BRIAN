@@ -647,10 +647,34 @@ class TestDeployRefusesUnpushedWork:
         rc, launched, asked = self._deploy(monkeypatch, 0)
         assert asked and launched
 
+    def test_walk_seeds_reach_the_box(self, monkeypatch):
+        rc, launched, _ = self._deploy(monkeypatch, 0,
+                                       ["--walk-seeds", "3"])
+        args = launched[0].eval_args
+        assert args[args.index("--walk-seeds") + 1] == "3"
+
     def test_can_be_overridden_explicitly(self, monkeypatch):
         rc, launched, asked = self._deploy(monkeypatch, 7,
                                            ["--allow-unpushed"])
         assert asked and launched
+
+
+class TestWalkSeeds:
+    def test_eval_mind_parses_walk_seeds(self):
+        from neuroslm.cli import _build_parser
+        a = _build_parser().parse_args(["eval", "mind", "--walk-seeds", "3"])
+        assert a.walk_seeds == 3
+        assert _build_parser().parse_args(["eval", "mind"]).walk_seeds == 1
+
+    def test_the_battery_walks_consecutive_seeds(self):
+        from neuroslm.cognition.indicators import run_indicator_battery
+        rep = run_indicator_battery(
+            _seams(lambda p, n: "a quiet thought"), probes=["park_walk"],
+            cfg=MindConfig(n_candidates=1), seed=4, n_idle_ticks=6,
+            n_walk_seeds=2)
+        assert list(rep["probes"]["park_walk"]["conditions"]) == [
+            "seed4", "seed5"]
+        assert rep["meta"]["n_walk_seeds"] == 2
 
 
 class TestMindEvalOnstart:
@@ -1011,9 +1035,11 @@ class TestAnswerProbesShowReplyTicks:
 
 
 class TestParkWalkBaseline:
-    """The baseline: ONE full mind walking the grounded park — no
-    comparison arms — with the consciousness / IIT measures and the
-    thought-quality profile computed over the whole walk."""
+    """The baseline: one full mind per seed walking the grounded park —
+    no comparison arms — with the consciousness / IIT measures, each
+    scored against its surrogate null with a bootstrap interval, the
+    global-workspace access test, PCI by twin walks, and the
+    thought-quality profile."""
 
     def _gen(self):
         n = {"i": 0}
@@ -1026,18 +1052,39 @@ class TestParkWalkBaseline:
                        else "the quiet"))
         return gen
 
-    def _run(self, ticks=20):
-        from neuroslm.cognition.indicators import probe_park_walk
-        return probe_park_walk(_seams(self._gen()), n_ticks=ticks,
-                               cfg=MindConfig(n_candidates=1), seed=0)
+    @staticmethod
+    def _pure(prompt, max_new_tokens):
+        # a pure function of the prompt, like a reseeded sampler
+        import zlib
+        lines = ("the bench by the river", "a dog near the fountain",
+                 "rain on the lamp", "the willow tree", "a quiet moon")
+        return lines[zlib.crc32(prompt.encode()) % len(lines)]
 
-    def test_one_full_mind_no_comparison_arms(self):
+    def _run(self, ticks=20, gen=None, **kw):
+        from neuroslm.cognition.indicators import probe_park_walk
+        kw = {"n_surrogates": 5, "n_boot": 10, "pci_events": 1,
+              "pci_ticks": 3, **kw}
+        return probe_park_walk(_seams(gen or self._gen()), n_ticks=ticks,
+                               cfg=MindConfig(n_candidates=1), seed=0, **kw)
+
+    def _c(self, **kw):
+        return self._run(**kw)["conditions"]["seed0"]
+
+    def test_one_mind_per_seed_no_comparison_arms(self):
         res = self._run()
-        assert list(res["conditions"]) == ["full"]
+        assert list(res["conditions"]) == ["seed0"]
         assert res["contrasts"] == {}
 
+    def test_several_seeds_are_summarised(self):
+        res = self._run(ticks=12, seeds=(0, 1), pci_events=0)
+        assert list(res["conditions"]) == ["seed0", "seed1"]
+        s = res["summary"]
+        assert s["lz_complexity"]["n"] == 2
+        assert {"mean", "sd", "z"} <= set(s["lz_complexity"])
+        assert "access" in s
+
     def test_reports_iit_and_workspace_measures(self):
-        c = self._run()["conditions"]["full"]
+        c = self._c()
         for k in ("phi_ar", "phi_ar_modules", "integration",
                   "neural_complexity", "lz_complexity", "ignition",
                   "phase_locking"):
@@ -1045,8 +1092,47 @@ class TestParkWalkBaseline:
         assert {"ignition_rate", "mean_episode", "metastability",
                 "bimodality"} <= set(c["ignition"])
 
+    def test_every_measure_is_scored_against_its_null(self):
+        c = self._c()
+        names = {"phi_ar", "phi_ar_modules", "integration",
+                 "integration_modules", "neural_complexity",
+                 "neural_complexity_modules", "lz_complexity",
+                 "bimodality"}
+        assert set(c["nulls"]) == names
+        for r in c["nulls"].values():
+            assert {"value", "z", "p", "ci", "null_mean"} <= set(r)
+        assert c["nulls"]["lz_complexity"]["z"] is not None
+        assert c["nulls"]["bimodality"]["ci"] is not None
+
+    def test_lz_has_no_bootstrap_interval(self):
+        # resampled blocks repeat segments, which compresses the stream:
+        # a 500-tick dry run gave LZ 0.79 with a "95 % CI" of [0.63, 0.72]
+        assert self._c()["nulls"]["lz_complexity"]["ci"] is None
+
+    def test_the_report_is_json(self):
+        import json
+        json.dumps(self._run(gen=self._pure))
+
+    def test_too_short_a_walk_refuses_phi_and_says_why(self):
+        c = self._c()
+        assert c["phi_ar_modules"]["phi"] is None
+        assert "transitions" in c["phi_ar_modules"]["reason"]
+        assert c["nulls"]["phi_ar_modules"]["z"] is None
+
+    def test_reports_the_access_test(self):
+        a = self._c()["access"]
+        assert {"n_ignited", "n_not", "diff", "p", "horizon"} <= set(a)
+        assert a["n_ignited"] + a["n_not"] > 0
+
+    def test_pci_by_twin_walks_has_a_zero_null(self):
+        pci = self._c(gen=self._pure, pci_events=1, pci_ticks=3)["pci"]
+        assert set(pci) == {"null", "da", "gaba", "memory"}
+        assert pci["null"]["pci"] == 0.0
+        assert pci["null"]["fraction_diverged"] == 0.0
+        assert pci["da"]["channels_reached"] >= 1
+
     def test_reports_thought_quality_and_grounding(self):
-        c = self._run()["conditions"]["full"]
+        c = self._c()
         q = c["thought_quality"]
         assert q["n"] == len(c["thoughts"]) > 0
         assert q["mean_grounding"] is not None, "percepts are the context"
@@ -1056,7 +1142,7 @@ class TestParkWalkBaseline:
         assert c["world_model"] and c["self_model"], "both models evolved"
 
     def test_the_walk_is_recorded_tick_by_tick(self):
-        c = self._run(ticks=12)["conditions"]["full"]
+        c = self._c(ticks=12, pci_events=0)
         assert len(c["walk"]) == 12
         step = c["walk"][0]
         assert {"action", "next_action", "pose", "percepts",
@@ -1070,11 +1156,13 @@ class TestParkWalkBaseline:
         from neuroslm.cognition.indicators import format_report
         out = format_report({"probes": {"park_walk": self._run(ticks=10)}})
         assert "Φ_AR=" in out and "coherence=" in out and "coverage=" in out
-        assert "scene=" in out and "world_ok=" in out and "self_ok=" in out
+        assert "scene=" in out and "world_raw_ok=" in out
+        assert "z(LZ)=" in out and "access" in out and "PCI" in out
 
     def test_the_models_are_scored_for_grounding(self):
         # run 59316881: "traffic light", "street", "camera" went uncounted
-        g = self._run()["conditions"]["full"]["grounding"]
+        g = self._c()["grounding"]
         assert "scene_grounded_rate" in g
-        assert set(g["models"]) == {"world", "self"}
+        assert set(g["models"]) == {"world", "self", "world_raw",
+                                    "self_raw"}
         assert g["models"]["world"]["versions"] >= 1

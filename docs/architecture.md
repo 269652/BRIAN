@@ -4090,8 +4090,9 @@ gives:
 Contract: every static object in five generated parks is seen within
 300 steps, with a scripted mind.
 
-**Baseline probe** (`park_walk`, 2026-11-05). One full mind walks the
-park for `--idle-ticks` steps, with no comparison arms. Each tick
+**Baseline probe** (`park_walk`, 2026-11-05; statistics 2026-11-06).
+One full mind per seed (`--walk-seeds`, seeds `seed, seed+1, …`) walks
+its own park for `--idle-ticks` steps, with no comparison arms. Each tick
 records the five workspace-module activations, the seven NT levels,
 synchrony R, ignition and the module phases. At the end it reports the
 measures in `cognition/measures.py`:
@@ -4107,14 +4108,45 @@ measures in `cognition/measures.py`:
 - **Phase locking**: pairwise module phase-locking values.
 - **Thought quality**: novelty, coherence, repetition, grounding in that
   tick's percepts, drift, distinct-2.
-- **Grounding**: against the world state.
+- **Grounding**: against the world state, with world/self models scored
+  on their raw completions (`SituationModel.raw_history`), not on the
+  filtered text.
+
+Every value is read against chance (H69; run 59316881's numbers were
+withdrawn for lacking this):
+
+- **Sample-size guard** (`measures.MIN_OBS_PER_PARAM` = 10): Φ_AR needs
+  10·n² transitions and integration/C_N 10·n(n+1)/2 samples, otherwise
+  None with the reason. Φ_AR counts only transitions between
+  consecutive ticks (inhibited ticks leave gaps).
+- **Nulls** (`measures.null_test`): z and one-sided p against
+  surrogates: phase-randomised (same spectra, no coupling) for Φ_AR,
+  integration, C_N and bimodality; time-shuffled (same states, no order)
+  for LZ.
+- **Intervals** (`measures.block_bootstrap_ci`): moving-block bootstrap,
+  95 %. LZ has none: repeated blocks compress the stream.
+- **Access test** (`measures.access_test`, the GWT question): percepts
+  entering the workspace on an ignited tick vs. not; outcome: one of
+  their scene nouns in a thought or raw world-model version within 5
+  ticks. Stratified by salience (it drives both), CMH-pooled, against a
+  within-stratum permutation null.
+- **PCI by twin walks** (`CognitiveRuntime.fork`,
+  `embodiment.twin_walk`): at fixed points the mind, its park and its
+  map are forked, one twin is pulsed (`null`, `da`, `gaba`, `memory`),
+  and its divergence from the main walk over the PCI channels is
+  scored. Both reseed the trunk's sampler per park tick, so the `null`
+  twin replays the walk exactly (PCI 0).
+
+These measure the control loop's functional architecture (module
+activations, NT levels), as Φ_AR and TSE are used on EEG. They are not
+IIT's Φ of the substrate. R1 is feedforward within a token.
 
 Oscillator coupling is normalised by each oscillator's in-strength,
 Σ_n C_mn·mass_n. With uniform C this is the active mass. A module cut
 off from the others still locks internally, and content coupling sets
 which modules bind *relative to the others*.
 
-`brian deploy-mind-eval --probes park_walk --idle-ticks 120`
+`brian deploy-mind-eval --probes park_walk --idle-ticks 500 --walk-seeds 3`
 
 **Hierarchical memory** (`memory/hierarchy.py`, `MindConfig.hierarchical_memory`,
 on by default). Two hierarchies are indexed over the same episodes.

@@ -911,6 +911,19 @@ class CognitiveRuntime:
 
     # ── SENSE ────────────────────────────────────────────────────────
 
+    _SEAMS = ("_gen", "_gen_wander", "_reasoning", "_score", "_embed",
+              "_classify")
+
+    def fork(self) -> "CognitiveRuntime":
+        """An independent copy of the whole mind — memory, NT, workspace,
+        oscillator, models, RNG — sharing only the trunk seams (the
+        loaded model is not copied). Twin runs for the perturbational
+        complexity measure start from it."""
+        import copy
+        memo = {id(f): f for f in (getattr(self, a) for a in self._SEAMS)
+                if f is not None}
+        return copy.deepcopy(self, memo)
+
     def observe(self, text: str, source: str = "user") -> None:
         """Sensory input. Percepts are always stored (external events
         are salient by default — the novelty gate applies to the
@@ -1515,9 +1528,10 @@ class CognitiveRuntime:
             self._self_thoughts, self._self_actions = [], []
         for model, prompt in jobs:
             out = self._gen_wander(prompt, self.cfg.model_n_tok)
-            text = sit.keep_grounded(
-                sit.complete_model(out or "", self.cfg.model_max_chars),
-                self._perceived_nouns)
+            raw = sit.complete_model(out or "", self.cfg.model_max_chars)
+            if raw:
+                model.raw_history.append((tick_n, raw))
+            text = sit.keep_grounded(raw, self._perceived_nouns)
             if model.update(tick_n, text) and self.workspace is not None:
                 self.workspace.set_context(model.kind, text,
                                            list(self._embed(text)))
