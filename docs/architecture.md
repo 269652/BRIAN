@@ -4027,26 +4027,34 @@ role now belongs to boredom alone, so DA means goal pursuit.
 
 **Why embodiment.** The thought machinery (recall → candidate
 thoughts → selection, with curiosity, boredom, replay and reorient)
-can only wander as far as its memories reach, and the idle mind had no
-source of new ones:
+can only wander as far as its memories reach. Memories it was handed
+would be the wrong fuel:
 
-- With an empty hippocampus, recall returned only the seed sentence,
-  and every arm looped in one basin (run 58700866, findings.md).
-- 36 hand-written autobiographical memories (`AUTOBIO_SEEDS`) reached
-  recall, but inhibition of return used up the on-topic ones within a
-  few ticks. Candidates then collapsed onto restating the last thought,
-  and replay never fired (run 58821480).
+- **Seeded memories are invented.** `AUTOBIO_SEEDS` are 36
+  hand-written episodes the mind never lived through. Recalling them
+  as autobiography is confabulation by construction. Each episode is
+  also unrelated to the next, so there is no coherent life behind
+  them to build world or self models from.
+- **They were exhausted anyway.** With an empty hippocampus, recall
+  returned only the seed sentence, and every arm looped in one basin
+  (run 58700866, findings.md). The seeds reached recall, but
+  inhibition of return used up the on-topic ones within a few ticks.
+  Candidates then collapsed onto restating the last thought, and
+  replay never fired (run 58821480).
 
-A fixed set of memories is exhausted, however large it is. A walk
-through a persistent world supplies memories continuously: sights and
-sounds that are new or habituated, places revisited from new angles,
-and events the mind did not write itself. It also gives grounding a
-ground truth, since every percept names the objects it came from.
+So the mind gets a world to make its own experiences in. A persistent
+park supplies memories continuously, and they are coherent: the same
+places, objects and times of day recur, seen from new angles. Each
+memory is something the mind actually perceived, and every percept
+names the objects it came from, so grounding has a ground truth.
 
-This is a design rationale, not a measured effect. Whether walking
-diversifies thought has not been tested against a stationary arm. In
-run 59316881, 75 of 274 thought mentions of scene nouns named things
-never perceived, so outside material still competes with the percepts.
+This is a design decision, not a measured effect. Whether walking
+diversifies thought has not been tested. In run 59316881, 75 of 274
+thought mentions of scene nouns named things never perceived, so
+outside material still competes with the percepts. **Planned
+ablation**, once a stable research candidate exists: the same mind
+with seeded memories and no world, and stationary in the park, against
+the walking mind.
 
 The mind can walk through a persistent world. `neuroslm/environments/park.py`
 holds a procedural park: trees, benches, a pond, lamps, flower beds, a
