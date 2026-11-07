@@ -1075,6 +1075,18 @@ class TestParkWalkBaseline:
         assert list(res["conditions"]) == ["seed0"]
         assert res["contrasts"] == {}
 
+    def test_the_walking_mind_starts_with_no_invented_memories(self,
+                                                               monkeypatch):
+        """Seeded autobiography is confabulation by construction
+        (architecture.md §14.16): the walk's memories are its own."""
+        from neuroslm.cognition.runtime import CognitiveRuntime
+        laid = []
+        monkeypatch.setattr(CognitiveRuntime, "remember",
+                            lambda self, text, source="autobiographical":
+                            laid.append(text))
+        self._run(ticks=4, pci_events=0)
+        assert laid == []
+
     def test_several_seeds_are_summarised(self):
         res = self._run(ticks=12, seeds=(0, 1), pci_events=0)
         assert list(res["conditions"]) == ["seed0", "seed1"]

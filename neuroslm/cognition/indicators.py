@@ -922,7 +922,7 @@ def _park_walk_once(seams: MindSeams, n_ticks: int, cfg: MindConfig,
 def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
                     cfg: Optional[MindConfig] = None, seed: int = 0,
                     progress=None,
-                    memories: Sequence[str] = AUTOBIO_SEEDS,
+                    memories: Sequence[str] = (),
                     seeds: Optional[Sequence[int]] = None,
                     n_surrogates: int = 100, n_boot: int = 200,
                     access_horizon: int = 5, pci_events: int = 2,
@@ -943,6 +943,10 @@ def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
     - PCI by twin walks: at ``pci_events`` points the whole mind is
       forked and pulsed (``null`` must give 0) for ``pci_ticks``;
     - thought quality, grounding (raw and filtered models), memory.
+
+    The mind starts with an empty hippocampus: every memory is one it
+    made on the walk. Seeded autobiography (``memories``) is invented
+    by construction and is kept for the no-world ablation only.
 
     ``summary`` pools the seeds (mean, sd, per-seed z; access test over
     all events)."""

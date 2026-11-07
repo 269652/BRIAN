@@ -5113,6 +5113,12 @@ the system is conscious.
 **Spec** (architecture.md §14.16, `probe_park_walk`). One mind and one
 park per seed (seeds 0, 1, 2), 500 ticks each.
 
+- **Amendment (2026-11-07, before any H69 run):** the mind starts with
+  an empty hippocampus. The 36 `AUTOBIO_SEEDS` are no longer laid down,
+  because they are invented episodes the mind never lived (§14.16).
+  Every memory is one it made on the walk. The predictions are
+  unchanged. The instrument dry run below still had the seeds.
+
 - **Sample-size guard:** an estimate needs ≥ 10 observations per fitted
   parameter. Φ_AR over 12 channels needs ≥ 1440 transitions and is
   refused at 500 ticks; the module-level measures (5 channels) are

@@ -4123,7 +4123,8 @@ Contract: every static object in five generated parks is seen within
 
 **Baseline probe** (`park_walk`, 2026-11-05; statistics 2026-11-06).
 One full mind per seed (`--walk-seeds`, seeds `seed, seed+1, …`) walks
-its own park for `--idle-ticks` steps, with no comparison arms. Each tick
+its own park for `--idle-ticks` steps, with no comparison arms. It
+starts with an empty hippocampus: no seeded autobiography. Each tick
 records the five workspace-module activations, the seven NT levels,
 synchrony R, ignition and the module phases. At the end it reports the
 measures in `cognition/measures.py`:
