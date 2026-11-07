@@ -80,3 +80,65 @@ H21_CX_EMA_FIXED  = "0.5"
 H16_CE_WITHOUT = "21.3"
 H16_CE_WITH    = "10.6"
 H16_CE_UNIFORM = "10.82"
+
+
+# ── Consciousness-indicator research (README since 2026-11-07) ──────
+# Sources: docs/findings.md (named entries) and the cited artifacts.
+
+[mind]
+MIND_TRUNK = "DeepSeek-R1-Distill-Qwen-7B"
+MIN_OBS_PER_PARAM = "10"                      # neuroslm/cognition/measures.py
+# Smoke run 59052048 (findings.md), results/mind_eval/20261104T034518Z_deepseek-r1-qwen-7b.json
+MIND_SMOKE_RUN = "59052048"
+MIND_SMOKE_JSON = "results/mind_eval/20261104T034518Z_deepseek-r1-qwen-7b.json"
+MIND_ARM_STREAK_MAX = "3"
+MIND_ABLATION_ARMS = "11"
+MIND_BARE_STREAK = "12"
+MIND_STREAK_OF = "15"
+MIND_SOURCE_MON_FULL = "1.00"
+MIND_SOURCE_MON_BARE = "0.00"
+MIND_PCI_NULL = "0.0"
+MIND_PCI_DA = "0.81"
+MIND_PCI_GABA = "0.94"
+MIND_PCI_MEMORY = "0.91"
+MIND_CONTROLLER_PHI_MEAN = "0.010"
+MIND_CONTROLLER_PHI_MAX = "0.32"
+MIND_CONTROLLER_PHI_NO_FEEDBACK = "0.0"
+MIND_NOVELTY_SPREAD = "0.036–0.050"
+
+[grounding]
+# Run 59316881, rescored on all scene nouns (findings.md, "numbers withdrawn")
+GROUND_RUN = "59316881"
+GROUND_THOUGHT_UNGROUNDED = "75"
+GROUND_THOUGHT_MENTIONS = "274"
+
+[h69]
+H69_SEEDS = "3"
+H69_TICKS = "500"
+H69_SURROGATES = "100"
+
+[h70_h71]
+H70_TOP_DOS_MATCHED = "17"
+H70_TOP_DOS_MISMATCHED = "11–16"
+H71_TOP10 = "0.15"
+H71_TOP10_NEEDED = "0.5"
+H71_OVERLAP = "0.98"
+
+[lm_topology]
+# findings.md reference table (B0, B2.fix), H59 ladder, GPT-2 baseline
+LM_FLAT_PARAMS = "106.9M"
+LM_FLAT_STEPS = "80,000"
+LM_FLAT_OOD_PPL = "404.0"
+LM_FLAT_GAP = "6.12"
+LM_BRIAN_PARAMS = "107.8M"
+LM_BRIAN_STEPS = "7,000"
+LM_BRIAN_OOD_PPL = "1351.5"
+LM_BRIAN_GAP = "5.22"
+LADDER_STEP_A = "500"
+LADDER_STEP_B = "1,000"
+CONTROL_WIKI_A = "8607"
+CONTROL_WIKI_B = "4564"
+FULLSTACK_WIKI_A = "11508"
+FULLSTACK_WIKI_B = "25320"
+GPT2_MODEL = "GPT-2 (124M)"
+GPT2_GAP_V2 = "2.26"

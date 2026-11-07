@@ -1,587 +1,270 @@
-# BRIAN — Biologically Realistic Information Architecture Network
+# BRIAN — a testbed for consciousness-theory indicators in an embodied LLM mind
 
-> *${TRUNK_TRAINABLE_PARAMS} trainable-param bowtie trunk · ${TOTAL_FROZEN_PARAMS} frozen cortex experts · exploring integrated information (Φ).*
+> *A cognitive architecture wrapped around a frozen reasoning LLM, walking a procedural world, instrumented with pre-registered GWT and IIT-style measures, each read against surrogate nulls.*
 
 [![tests](https://img.shields.io/badge/tests-${LAYER_A_TEST_COUNT}%20passing-brightgreen)](#tests)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)]()
 [![torch](https://img.shields.io/badge/torch-2.x-orange)]()
 [![license](https://img.shields.io/badge/license-research-lightgrey)]()
-[![cortex-fusion](https://img.shields.io/badge/cortex--fusion-KL%20+%20NT--gated-blueviolet)]()
-[![formal-gate](https://img.shields.io/badge/improvement--gate-Welch's%20t-9cf)]()
+[![pre-registered](https://img.shields.io/badge/hypotheses-pre--registered-9cf)](docs/findings.md)
 
-BRIAN is a research prototype that bets on **topology, Φ-coupled plasticity, and closed-loop embodiment** instead of raw parameter count. The core question: does a strategically-wired ${TRUNK_TRAINABLE_PARAMS}-param trunk outgeneralize a flat 100M transformer on OOD tasks?
+BRIAN started as a bet that brain-inspired **topology** would make a small language model generalise better than a flat transformer. The data did not support that bet (see [Why the pivot](#why-the-pivot)). The project now asks a different question:
 
-**Current verdict:** 🟡 inconclusive — best variant ${LAYER_B_BEST_ROW} achieves **${LAYER_B_BEST_GAP_RATIO} gap\_ratio** (${LAYER_B_IMPROVEMENT_PCT}% better than flat-transformer baseline at ${LAYER_B_BASELINE_GAP_RATIO}), but matched-compute comparison is still pending. The apparatus to run it landed as H59: `architectures/control-100m` (a param-matched vanilla control arm trained by the same pipeline, data, and recipe) plus eval protocol v2 — trunk-only evaluation on every surface, a held-out train-distribution gap denominator (`gap_v2`), a PG-19 second OOD axis, and per-sequence NLLs gated by `brian ood compare`'s Welch's-t test.
+**When a language model is embedded in a brain-inspired control loop (memory, neuromodulation, an oscillatory global workspace, a body in a world), do the signatures that consciousness theories predict appear, and do they appear more than chance allows?**
 
----
+The answer is not known yet. This repository is the apparatus for finding out: every mechanism is tested, every measure has a null distribution, and every hypothesis is registered in [`docs/findings.md`](docs/findings.md) *before* its run, including the ones that failed.
 
-## What it does
-
-BRIAN combines five mechanisms into a single differentiable training loop:
-
-| Pillar | What it is | Verified |
-|--------|-----------|---------|
-| **${BOWTIE_STAGES}-stage bowtie + re-entry loops** | Two re-entry paths enforce non-zero integrated information Φ | ✅ H1 |
-| **Differentiable Φ objective** | Gaussian-MI MIP pushes gradients toward integrated states | ✅ H2–H3 |
-| **Sheaf H¹ contradiction detection** | Narrative memory detects and resolves conflicting beliefs | ✅ H4–H5 |
-| **Embodied survival loop** | GridWorld 10×10 with homeostatic drive shapes qualia and policy | ✅ H6.5 |
-| **Multi-cortex fusion** | 3 frozen LM experts distil into the bowtie trunk via KL + NT-gated α | ✅ H16–H21 |
-
-Full architecture spec and tensor shapes: [`docs/architecture.md`](docs/architecture.md).
+> **Scope.** These are measures of a *functional architecture*: the activity of workspace modules and neuromodulator levels in the control loop, analysed the way Φ_AR and neural complexity are applied to EEG. They are **not** IIT's Φ of the hardware (the LLM is feedforward within each token, and IIT would assign it near-zero Φ), and nothing here claims the system is conscious.
 
 ---
 
-## Implemented Mechanics
-
-BRIAN currently composes **${CORE_MECHANISMS_COUNT}** named mechanisms drawn from neuroscience, dynamical systems, and information geometry. Every entry below is:
-
-- a **first-class DSL primitive** — wires into any `.neuro` arch through a single block (`nfo: { … }`, `grid_positions: { … }`, …);
-- **ReZero-disciplined** — a zero-init read-out / `alpha_init=0` makes the first forward bit-identical to a vanilla transformer, so additions never regress the baseline at step 0;
-- **hypothesis-backed** — every mechanism cites an entry in [`hypothesis/`](hypothesis/) with a formal claim, code refs, test refs, and (where available) a Lean theorem.
-
-### 🌀 Topology & Geometric Substrate
-
-#### Neural Field Oscillator — H15 · H16 · H17 · H18
-
-$$
-\dot\varphi_i = \omega_i + \sum_j \kappa_{ij}\, A_j\,\sin(\varphi_j - \varphi_i), \qquad
-\dot A_i = \mu\, A_i - \tfrac14\,(A_i^2 - A_\star^2)\, A_i
-$$
-$$
-\Phi_\kappa(t) = \sum_{(i,j)\,\in\, E_{\mathrm{cut}}} \kappa_{ij}\, A_i(t)\, A_j(t), \qquad
-y = h + \alpha\,\mathrm{ReadOut}\!\bigl(g\odot A\odot \cos(\varphi-\psi)\bigr)
-$$
-
-A Kuramoto graph (binding-by-synchrony) coupled to a Swift–Hohenberg cubic-quintic amplitude flow with Lyapunov $V(A)=\tfrac18(A^2-A_+^2)^2$. The topological coherence functional $\Phi_\kappa$ is a closed-form **lower bound on integrated information** (H15) and a unit-interval information-preserving gate (H16). Read-out is ReZero so the block earns capacity only under LM gradient pressure (H18).
-*Source:* [`neuroslm/modules/neural_field_oscillator.py`](neuroslm/modules/neural_field_oscillator.py) · [`lib/blocks/neural_field_oscillator.neuro`](lib/blocks/neural_field_oscillator.neuro) · [`docs/NEURAL_FIELD_OSCILLATOR.md`](docs/NEURAL_FIELD_OSCILLATOR.md)
-
-#### Hyperbolic (Poincaré-Disc) Attention
-
-$$
-g^c_x = \lambda_c(x)^2\, g^E,\quad
-\lambda_c(x) = \frac{2}{1 - c\,\|x\|^2}, \qquad
-d_c(x,y) = \tfrac{2}{\sqrt{c}}\,\operatorname{artanh}\!\bigl(\sqrt{c}\,\|{-x \oplus_c y}\|\bigr)
-$$
-$$
-\text{logit}_{ij} = -\frac{d_c(Q_i, K_j)}{\sqrt{d_{\mathrm{head}}}}
-$$
-
-Query/key vectors are mapped into the Poincaré ball $\mathbb{D}^n_c$ via the exponential map at the origin; attention logits are **negative geodesic distances** instead of inner products. The exponential volume growth of the ball is the canonical embedding for tree-structured data (ASTs, dependency parses, scope chains).
-*Source:* [`neuroslm/modules/hyperbolic_attention.py`](neuroslm/modules/hyperbolic_attention.py) · [`docs/features/hyperbolic_attention.md`](docs/features/hyperbolic_attention.md)
-
-#### Multi-Scale Grid-Cell Positions — HPB Phase 2
-
-$$
-\mathbf{g}_k(t) = \bigl[\cos(2\pi t / T_k),\; \sin(2\pi t / T_k)\bigr], \qquad
-T_k = T_0\cdot \varphi^{\,k},\quad \varphi = 1.618\ldots,\quad k = 0,\dots,K-1
-$$
-
-$K$ position scales at the golden ratio — the Sargolini/Stensola entorhinal-cortex grid module spacing. The $2K$ raw features project to `d_model` via a **zero-init head**, so the first forward is bit-identical to RoPE-only baseline; the dormant code path activates as the projection lifts off zero. Provable length-OOD extrapolation.
-*Source:* `neuroslm/modules/grid_positions.py` · DSL: `grid_positions: { n_scales, scale_ratio, base_period }`
-
-#### RoPE on the Tonnetz Torus
-
-$$
-\mathbf{p}_t = R\!\left(\tfrac{2\pi t}{P}\right)\!\mathbf{p}_{t-1}, \qquad
-\mathbf{q}_t,\, \mathbf{k}_t \;\leftarrow\; \mathbf{q}_t\odot e^{i\theta_t},\; \mathbf{k}_t\odot e^{i\theta_t}
-$$
-
-Period-$P$ rotational embedding over the music-theoretic Tonnetz lattice — gives a *closed* cyclic prior under `tonnetz_period` chord-progression structure. Stacked with standard RoPE.
-*Source:* `neuroslm/modules/positional.py` · DSL: `rope_base`, `tonnetz_period`
-
-### 🧠 Memory & Predictive Coding
-
-#### Episodic kNN Memory — HPB Phase 5
-
-$$
-\hat v_t = \sum_{j\,\in\, \mathrm{kNN}(q_t, M)} \mathrm{softmax}\!\bigl(\langle q_t, k_j\rangle/\tau\bigr)\, v_j, \qquad
-y_t = h_t + \alpha\cdot \hat v_t
-$$
-
-A 4096-slot key/value store written either uniformly or **surprise-gated** (top-quantile of $\mathrm{nll}_{\mathrm{local}} - \mathrm{nll}_{\mathrm{global}}$). Read at every layer via kNN; $\alpha_{\mathrm{init}} = 0$ (ReZero). Memorizing-Transformers / RETRO style.
-*Source:* `neuroslm/modules/episodic_memory.py` · DSL: `episodic_memory: { slots, k, alpha_init, write_gate }`
-
-#### Multi-Scale Predictive Coding Cascade (MSPCC) — HPB Phase 3
-
-$$
-\mathcal{L}_{\mathrm{MSPCC}} = \sum_{\ell=1}^{L-1} \lambda_\ell\cdot \mathrm{KL}\!\bigl(q_\phi(z_{\ell+1}\mid h_\ell)\,\|\, p_\theta(z_{\ell+1})\bigr), \qquad
-\lambda_\ell = w_0\cdot \gamma^{(L-1)-\ell}
-$$
-
-Applies an MDRV–VBB free-energy at **every adjacent layer pair**; the deepest (bowtie waist) pair dominates via geometric weight decay $\gamma$. Composes additively with the single-waist VBB.
-*Source:* `neuroslm/modules/predictive_coding_residual.py` · [`docs/features/predictive_coding_residual.md`](docs/features/predictive_coding_residual.md) · DSL: `mspcc: { base_weight, layer_weight_decay }`
-
-#### Local-Context Surprise Head — HPB Phase 5 (Mismatch Negativity)
-
-$$
-s_t = \mathrm{nll}_{\mathrm{local}}(x_t \mid x_{t-W:t}) - \mathrm{nll}_{\mathrm{global}}(x_t \mid x_{<t})
-$$
-
-A second tied LM head over a $W$-token local window; the per-token surplus surprise $s_t$ is exposed on every train forward and feeds the episodic write-gate. Sliding-window MMN analogue from EEG literature.
-*Source:* `neuroslm/modules/surprise_head.py` · DSL: `surprise_head: { dim, local_window }`
-
-#### Predictive-Coding Residual
-
-$$
-\hat h_{\ell+1} = f_\ell(h_\ell),\qquad
-\varepsilon_\ell = h_{\ell+1} - \hat h_{\ell+1},\qquad
-\mathcal{L}_{\mathrm{PC}} = \sum_\ell \|\varepsilon_\ell\|^2
-$$
-
-Each layer predicts the next layer's activations from its own; only the *prediction error* propagates as a residual. Implements Rao–Ballard hierarchical predictive coding.
-*Source:* [`neuroslm/modules/predictive_coding_residual.py`](neuroslm/modules/predictive_coding_residual.py) · [`docs/features/predictive_coding_residual.md`](docs/features/predictive_coding_residual.md)
-
-### 🔁 Distillation & Multi-Cortex Fusion
-
-#### `cortex_pre_head_norm` — H16
-
-$$
-z_{\mathrm{trunk}} = W_{\mathrm{tied}}\cdot \mathrm{LayerNorm}(h_{\mathrm{trunk}})
-$$
-
-A LayerNorm **before** the tied LM head suppresses GPT-2's rogue dimension (std $\approx 24$, $82\times$ the median). Without it the init CE is ${H16_CE_WITHOUT} nats — *above* the uniform-distribution ceiling of ${H16_CE_UNIFORM}; with it: **${H16_CE_WITH} nats**.
-*Source:* `neuroslm/cortex/multi_cortex_lm_head.py`
-
-#### Per-Position Abstain Logit — H21
-
-$$
-\tilde z_{t,v} = \begin{cases}
-z_{t,v} & v \in \mathrm{vocab}_{\mathrm{cortex}} \\[2pt]
-\max_{v'\in\mathrm{vocab}_{\mathrm{cortex}}} z_{t,v'} - \ln V_{\mathrm{trunk}} & \text{otherwise}
-\end{cases}
-$$
-
-Unmapped vocab slots get an abstain logit instead of a flat $-10^4$. Dropped standalone-cortex CE from **${H21_ABSTAIN_CE_BEFORE} → ${H21_ABSTAIN_CE_AFTER} nats**, unblocking the entire fusion pathway.
-*Source:* `neuroslm/cortex/cortex_lm_head.py`
-
-#### NT-Gated $\alpha$ Fusion
-
-$$
-\alpha_{\mathrm{eff}} = \sigma\!\bigl(W_{\mathrm{NT}}\cdot \mathrm{EMA}(\ell_{\mathrm{cortex}} - \ell_{\mathrm{trunk}})\bigr), \qquad
-z = z_{\mathrm{trunk}} + \alpha_{\mathrm{eff}}\cdot (z_{\mathrm{cortex}} - z_{\mathrm{trunk}})
-$$
-
-An EMA-smoothed *neurotransmitter* signal collapses $\alpha_{\mathrm{eff}} \to 0$ once the trunk surpasses the cortex, and resumes contribution if the trunk regresses. Auto-retiring teacher.
-*Source:* `neuroslm/cortex/nt_alpha_gate.py`
-
-#### KL Distillation (Temperature-Scaled)
-
-$$
-\mathcal{L}_{\mathrm{KL}} = T^2 \cdot \mathrm{KL}\!\bigl(\mathrm{softmax}(z_{\mathrm{cortex}}/T).\mathrm{detach}\;\big\|\;\mathrm{softmax}(z_{\mathrm{trunk}}/T)\bigr), \quad
-\lambda_t = \lambda_{\max}\cdot \mathrm{clip}\!\bigl((\ell_{\mathrm{cortex}} - \ell_{\mathrm{trunk}}) / \tau,\, 0, 1\bigr)
-$$
-
-Gap-ramped: $\lambda_t$ saturates at $\lambda_{\max} = 1.0$ when the trunk lags and shuts off when it leads. Pairs with the NT gate above.
-*Source:* `neuroslm/cortex/distillation.py`
-
-### 📐 Generalisation & Training Geometry (GIF stack)
-
-#### GIF-1/2/3 — Adaptive Gap-Ratio Ramp — H7
-
-$$
-r_t = \frac{\mathrm{ppl}_{\mathrm{OOD}}(t)}{\mathrm{ppl}_{\mathrm{train}}(t)},\qquad
-\beta_t = \beta_{\min} + (\beta_{\max} - \beta_{\min})\cdot \sigma(\kappa\,(r_t - r_\star))
-$$
-
-The VBB $\beta$, isotropy strength, and OOD-probe weight all ramp from a single gap-ratio signal $r_t$ → closed loop on generalisation gap rather than wall-clock schedule.
-*Source:* `neuroslm/gif/adaptive_ramp.py` · DSL: `vbb_kl_floor_gamma`, `loss_var_window`
-
-#### GIF-4 — Gap-Driven Label Smoothing — H8
-
-$$
-\varepsilon_t = \varepsilon_0 + (\varepsilon_{\max} - \varepsilon_0) \cdot \mathrm{clip}\!\bigl((r_t - 1) / (r^\star - 1),\, 0, 1\bigr)
-$$
-
-Label smoothing magnitude is itself gap-driven — increases as OOD/train diverges, shrinks as they re-align.
-*Source:* `neuroslm/gif/label_smoothing.py` · DSL: `label_smoothing`
-
-#### GIF-5 — Attention-Head Diversity — H9
-
-$$
-\mathcal{L}_{\mathrm{div}} = \frac{1}{H(H-1)}\sum_{i\ne j} \bigl\|\,P_i^\top P_j - \tfrac{1}{T}\mathbf{1}\mathbf{1}^\top\bigr\|_F^2
-$$
-
-Penalises pairwise alignment of attention probabilities $P_i$ across heads → forces encoder-side diversity, measurably cuts redundancy.
-*Source:* `neuroslm/gif/head_diversity.py`
-
-#### GIF-6 — Cosine LM Head — H10
-
-$$
-z_{t,v} = \tau\cdot \frac{\langle h_t,\, W_v\rangle}{\|h_t\|\cdot \|W_v\|}
-$$
-
-Cosine similarity (with learnable temperature $\tau$) instead of raw dot-product → eliminates the norm-mediated confidence asymmetry that biases LM heads toward high-norm trunk states.
-*Source:* `neuroslm/modules/cosine_head.py` · DSL: `cosine_head: true`
-
-#### GIF-7 — Homeostatic Gradient Equilibrium
-
-$$
-g_\ell \mathrel{:=} g_\ell \big/ \bigl(c + \mathrm{var}_{\mathrm{batch}}(\mathcal{L})\bigr), \qquad
-\mathrm{var}_{\mathrm{batch}}(\mathcal{L}) \ge \mathrm{var}_{\min}
-$$
-
-Divisive normalisation of layer-wise gradients by the rolling batch-loss variance — keeps SNR constant across the trunk and prevents bowtie-waist collapse.
-*Source:* `neuroslm/gif/gradient_equilibrium.py` · DSL: `divisive_grad_c`, `loss_var_min_mult`
-
-#### Hyperbolic Bowtie Waist (HPB Phase 4)
-
-$$
-\mathrm{KL}_{\mathbb{D}^n_c}(q\|p) = \mathrm{KL}_{\mathbb{R}^n}(q\|p) + \log\det J_{\exp_0^c}(\mu_q)
-$$
-
-Wraps the VBB posterior on the Poincaré ball of curvature $c$. The Jacobian log-det correction **strictly upper-bounds** the Euclidean KL for any $\|\mu_q\| > 0$ — $\sigma$-collapse becomes geometrically harder.
-*Source:* `neuroslm/gif/hyperbolic_bowtie.py` · DSL: `vbb_curvature`
-
-#### ImprovementGate (Welch's $t$) — H5
-
-$$
-t = \frac{\bar x_A - \bar x_B}{\sqrt{s_A^2/n_A + s_B^2/n_B}},\quad
-\mathrm{df} = \frac{(s_A^2/n_A + s_B^2/n_B)^2}{(s_A^2/n_A)^2/(n_A-1) + (s_B^2/n_B)^2/(n_B-1)}
-$$
-
-Every architecture mutation and DNA patch is gated by a two-sided Welch's $t$-test ($p < \alpha$) computed on the OOD-PPL pre/post window — no structural change lands without significance. Numerically pinned to scipy within $1\!\times\!10^{-6}$.
-*Source:* [`neuroslm/verification/improvement_gate.py`](neuroslm/verification/improvement_gate.py) · `tests/verification/test_improvement_gate.py`
-
-### ✨ Φ / Integrated Information
-
-#### Φ-MIP Gaussian Objective — H1 · H2
-
-$$
-\Phi^{\mathrm{MIP}}(X) = \min_{(A,B)\,\in\,\mathrm{cuts}(X)} I(A;B), \qquad
-\mathcal{L}_\Phi = -\tanh(\Phi^{\mathrm{MIP}} / 3)\cdot 3
-$$
-
-Differentiable lower bound on integrated information via the Gaussian-MI estimator over the **minimum information partition**; the bounded $-\tanh$ scalarisation gives a non-vanishing gradient that pushes the trunk toward integrated states.
-*Source:* `neuroslm/iit/phi_mip.py`
-
-#### Sheaf $H^1$ Contradiction Detection — H4
-
-$$
-H^1(\mathcal{F}) = \ker\delta^1 / \mathrm{im}\,\delta^0, \qquad
-\text{contradiction} \;\iff\; H^1 \ne 0
-$$
-
-Narrative memory is encoded as a cellular sheaf $\mathcal{F}$ over the proposition graph; **non-zero first cohomology** means two stalks contradict ("likes coffee" vs "hates coffee") and triggers a `SUPERSEDES` edge. Belief revision = killing $H^1$.
-*Source:* `neuroslm/sheaf/contradiction.py` · `tests/test_narrative_memory.py`
-
-#### Personality Vector
-
-$$
-\pi = \mathrm{EMA}\!\bigl(\mathrm{Embed}(\text{identity-tokens})\bigr) \in \mathbb{R}^{${PERSONALITY_DIM}}
-$$
-
-A frozen embedding learned during embodied training that **survives weight reload** — verified across checkpoints (H6). Used as a stable identity vector for self-reference rate and cognitive-closure metrics.
-*Source:* [`collectors/personality.py`](collectors/personality.py)
+## Contents
+
+- [Why the pivot](#why-the-pivot)
+- [The mind](#the-mind)
+- [Neuroanatomical inspiration](#neuroanatomical-inspiration)
+- [Embodiment: experiences instead of invented memories](#embodiment-experiences-instead-of-invented-memories)
+- [What we measure](#what-we-measure)
+- [Evidence so far](#evidence-so-far)
+- [Negative results](#negative-results)
+- [The language-model trunk (legacy topology)](#the-language-model-trunk-legacy-topology)
+- [Open problems: where researchers can help](#open-problems-where-researchers-can-help)
+- [Quick start](#quick-start)
+- [Tests](#tests)
+- [Docs](#docs)
 
 ---
 
+## Why the pivot
 
-![Neural Flow Graph — current architecture](.neuro/nfg.svg)
+The original thesis was that a strategically wired trunk (bowtie stages, re-entry loops, predictive coding, geometric attention) would beat a flat transformer at matched parameters. Nothing we measured supports it:
 
-*The NFG is generated from `arch.neuro` → Hypergraph IR → PyTorch. Re-render with:*
+| Comparison | Flat / vanilla | BRIAN topology | Reading |
+|---|---|---|---|
+| Early snapshot, near-matched params (${LM_FLAT_PARAMS} vs ${LM_BRIAN_PARAMS}) | OOD PPL **${LM_FLAT_OOD_PPL}** at ${LM_FLAT_STEPS} steps | OOD PPL ${LM_BRIAN_OOD_PPL} at ${LM_BRIAN_STEPS} steps | Flat model better on absolute PPL. Compute was not matched, so this is not decisive. |
+| Generalisation gap (OOD/train) | ${LM_FLAT_GAP} | ${LM_BRIAN_GAP} | A small edge for the topology, later explained largely as domain difficulty (next row) |
+| Param-matched ladder (H59), WikiText PPL at step ${LADDER_STEP_A} → ${LADDER_STEP_B} | control: ${CONTROL_WIKI_A} → **${CONTROL_WIKI_B}** | full stack: ${FULLSTACK_WIKI_A} → ${FULLSTACK_WIKI_B} | The vanilla control improved; the full stack diverged |
+| Calibration: ${GPT2_MODEL} through the same evaluator | gap_v2 = **${GPT2_GAP_V2}** | topology arms drifted into the same band | The "gap" our arms showed is mostly how much harder WikiText is than the training mix |
 
-```powershell
-brian compile nfg --current          # → .neuro/nfg.png
-brian compile nfg --current --heat heatmap.json   # → .neuro/nfg.heat.png
-```
+The matched ladder was never run to completion, so this is *absence of evidence for* the topology thesis, not proof of absence. But no variant ever beat its control, and the full stack hurt. We stopped spending GPU hours on it. Details: [`docs/findings.md`](docs/findings.md) (B-table, H12, H59, "Two-layer doctrine", "GPT-2 baseline measured").
 
----
-
-## The `.neuro` DSL
-
-Architecture is specified declaratively in `.neuro` files — math-first ODEs and modulation rules that compile to byte-equivalent PyTorch:
-
-```neuro
-export population amygdala {
-    count: 32,
-    ode: "dV/dt = (-V + x) / tau",
-    timescale: 0.005
-}
-
-modulation dopamine -> pfc {
-    effect: "multiplicative", gain: 0.6,
-    equation: "y = output * (c * gain)"
-}
-```
-
-The compiler (`neuroslm/compiler/module_bundler.py`, `ribosome.py`) produces modules with **source maps** and **byte-identity round-trip** verification. ${DSL_TESTS} tests in `tests/dsl/` guard codegen correctness.
-
-Full reference: [`docs/dsl.md`](docs/dsl.md).
+What survived is the **two-layer doctrine**: a language model is trained (or borrowed) as the *language cortex*, and the brain-inspired machinery runs *around* it at runtime as cognition, where it is judged on cognitive tasks and consciousness indicators, never on perplexity.
 
 ---
 
-## NGL — the Neuro-Genetic Language (algorithm discovery)
+## The mind
 
-The `.neuro` DSLs describe *architectures* — what tensors flow where. They
-deliberately have no persistent state or control flow, so they cannot describe an
-ML *algorithm*: an optimizer update rule, a learning rule, a gradient/flow
-modulation. **NGL** (`neuroslm/genetic/`) fills that gap. It is a typed
-**register machine** — a scalar bank and a tensor bank, plus instructions drawn
-from a registry of total-semantics ops — in which an ML algorithm is a short,
-evolvable program. Because state registers persist across steps and the op set
-includes a conditional, NGL is Turing-complete in the linear-register-machine
-sense: the substrate AutoML-Zero and the Lion optimizer discovery searched.
+`neuroslm/cognition/` runs an always-on loop around a frozen pretrained model (default: `${MIND_TRUNK}`; any HF causal LM works). Each tick is one cognitive cycle:
 
-SGD, Momentum, RMSProp, Adam and Lion are each written as an NGL program and
-reproduce their PyTorch reference bit-for-bit — proof the language spans the
-update-rule grammar. On top of that sits a **CPU discovery harness** that
-searches the program space with a Pareto GA (mutation + crossover + novelty in
-the program's semantic-embedding space), scoring each candidate by training a
-tiny model on a synthetic task:
+```mermaid
+flowchart LR
+    world["Procedural park<br/>(GeometryChannel: field of view,<br/>occlusion, light, sounds)"]
 
-```bash
-brian discover optimizer --task parity --generations 20 --out run.json
-brian discover flow      --generations 12 --out flow.json   # + effective-information objective
+    subgraph tick["one cognitive tick"]
+        direction LR
+        sense["SENSE<br/>percepts enter at their<br/>normalised novelty"] --> recall["RECALL<br/>episodic memory,<br/>cue-driven"]
+        recall --> think["THINK<br/>LLM proposes<br/>candidate thoughts"]
+        think --> gate["GATE<br/>basal-ganglia softmax;<br/>GABA can veto (silence)"]
+        gate --> store["STORE<br/>surprise-gated<br/>episodes"]
+        store --> drive["DRIVE<br/>neuromodulator<br/>dynamics"]
+    end
+
+    ws(("Gamma workspace<br/>Kuramoto ignition"))
+    models["World and self models<br/>(the context frame)"]
+
+    world -- "sights, sounds" --> sense
+    gate -- "movement" --> world
+    sense -.-> ws
+    recall -.-> ws
+    think -.-> ws
+    gate -.-> ws
+    ws -. "ignition broadcast" .-> think
+    drive -. "ACh: coupling, GABA: frequency" .-> ws
+    ws -. "ignition" .-> drive
+    models --> think
+    store --> models
 ```
 
-The optimizer search rediscovers-and-tunes scaled gradient descent from a cold
-start, and — given the adaptive family in reach — *selects* per-coordinate
-gradient normalization on a task where plain SGD provably plateaus. This is the
-machinery behind the neuroscience-inspired-SLM goal: search for the topology and
-modulation that beat scaling, cheaply on CPU, before spending a GPU.
+- **Global workspace.** Each module (sensory, memory, language, selection, novelty) owns a population of gamma-band phase oscillators. *Ignition* is the global order parameter crossing an adaptive threshold: many oscillators active **and** phase-locked. Ignition broadcasts the winning content back into the next prompt, and feeds back into ACh and GABA, closing a second-order loop.
+- **Neuromodulation.** 7 neurotransmitter levels (DA, NE, 5-HT, ACh, eCB, Glu, GABA) are driven by what happens: surprise, goal fit, threat, ignition. DA weights goal fit in selection, NE cools the selection softmax, ACh sets recall diversity and oscillator coupling, GABA slows the oscillators and can veto an act. 5-HT, eCB and Glu are tracked and enter the measures but do not yet act on anything.
+- **World and self models.** Short texts the mind rewrites from what it perceived and did, injected as the workspace's context frame (Baars). The raw completion is kept and scored; a grounding filter drops sentences that name things never perceived.
+- **Movement.** The same basal-ganglia softmax chooses acts hierarchically (look, head off, approach), valued by novelty × curiosity·boredom, goal fit × phasic DA, and a cognitive map of unseen ground.
 
-NGL also **compiles an architecture into itself** — every mechanic, including
-attention. An `nn_lang` forward graph lowers to an NGL program (composite ops like
-`linear`/`rmsnorm`/`swiglu` delegate to `nn_ops`; scalar-config ops like
-attention carry their `n_heads`/… as instruction config), byte-equivalent to the
-compiled module — so a whole TransformerBlock is discovery-, simplification- and
-evolution-ready:
-
-```bash
-brian discover simplify --layer-file block.layer   # arch → NGL → shorter equivalent
-brian discover trunk    --generations 12 --save my_gain   # evolve + persist a modulation
-brian discover optimizer --novelty 0.3             # hunt NOVEL update rules
-brian modulation list                              # manage modulations/*.neuro
-brian modulation merge my_gain other --name combo  # compose gains g2(g1(h))
-```
-
-The **simplifier** builds an expression DAG and applies value-preserving algebraic
-rewrites to a fixpoint (dead-code elimination, `(a+b)−b → a`, constant folding,
-like-term combination), every rewrite globally probe-verified against
-shape-correct random params. The **trunk auto-evolve** searches an NGL
-neuromodulation on the residual stream, scoring candidates by validation
-perplexity *jointly with a neuroanatomic-realism prior* (divisive normalization,
-multiplicative gain, homeostatic saturation) — improving language modelling while
-staying biologically plausible. Discovered modulations persist as
-`modulations/*.neuro` and can be listed, merged, or thrown away from `brian`.
-
-**The competitor is a GPU outcome.** The CPU engine discovers *candidate*
-mechanics, update rules and modulations and proves them on tiny models — but a
-param-matched GPT-2 competitor comes only from GPU exploration and extensive GPU
-training (`brian deploy`). `--save` carries a discovered gain law from the CPU
-search to the trunk.
-
-Design: [`docs/dsl_subsystem_roadmap.md`](docs/dsl_subsystem_roadmap.md) §NGL.
-Results: [`docs/findings.md`](docs/findings.md) H31, H32, H33.
+Specification: [`docs/architecture.md` §14](docs/architecture.md).
 
 ---
 
-## Multi-Cortex Fusion
+## Neuroanatomical inspiration
 
-Three frozen causal-LM experts sit above the bowtie trunk and fuse logits at the LM head:
+The mapping is functional analogy, not anatomy. Each row names the mechanism that implements it, so the analogy can be checked in code.
 
-| Domain | Expert | Params | Tokenizer bridge |
-|--------|--------|--------|-----------------|
-| General | `${EXPERT_GENERAL_MODEL}` | ${EXPERT_GENERAL_PARAMS} | cross-vocab retokenise |
-| Code | `${EXPERT_CODE_MODEL}` | ${EXPERT_CODE_PARAMS} | direct (shared BPE) |
-| Reasoning | `${EXPERT_REASONING_MODEL}` | ${EXPERT_REASONING_PARAMS} | cross-vocab retokenise |
+```mermaid
+flowchart TB
+    subgraph cortex["Cortex"]
+        lang["Language cortex<br/>= frozen LLM"]
+        gw["Thalamocortical gamma<br/>= global workspace"]
+    end
+    subgraph limbic["Medial temporal lobe"]
+        hc["Hippocampus<br/>= episodic memory"]
+        place["Place / grid cells<br/>= cognitive map"]
+    end
+    subgraph bg["Basal ganglia"]
+        sel["Action selection<br/>= softmax gate + GABA veto"]
+    end
+    subgraph brainstem["Neuromodulatory nuclei"]
+        vta["VTA: dopamine"]
+        lc["Locus coeruleus: noradrenaline"]
+        bf["Basal forebrain: acetylcholine"]
+    end
+    thal["Thalamic relay<br/>= sensory gate, habituation"]
 
-|--------|--------|--------|-----------------|
-| General | `${EXPERT_GENERAL_MODEL}` | ${EXPERT_GENERAL_PARAMS} | cross-vocab retokenise |
-| Code | `${EXPERT_CODE_MODEL}` | ${EXPERT_CODE_PARAMS} | direct (shared BPE) |
-| Reasoning | `${EXPERT_REASONING_MODEL}` | ${EXPERT_REASONING_PARAMS} | cross-vocab retokenise |
+    thal --> gw
+    hc <--> gw
+    lang <--> gw
+    gw --> sel
+    sel --> lang
+    place --> sel
+    vta -- "goal fit" --> sel
+    lc -- "selection gain" --> sel
+    bf -- "coupling" --> gw
+    bf -- "recall diversity" --> hc
+```
 
-Three interlocking mechanisms govern the fusion:
-
-1. **`cortex_pre_head_norm`** — LayerNorm before the tied head suppresses GPT-2's rogue dimension (std ≈ 24, 82× median). Without it, CE at step 0 = ${H16_CE_WITHOUT} nats (above the uniform-distribution ceiling of ${H16_CE_UNIFORM}). With it: **${H16_CE_WITH} nats**.
-
-2. **Per-position abstain logit (H21)** — Unmapped vocab slots are filled with `max(mapped_logits) − ln(V_trunk)` instead of a flat `−1e4`. This single fix dropped standalone-cortex CE from **${H21_CE_BEFORE} → ${H21_CE_AFTER} nats** and unlocked the entire multi-cortex pathway:
-
-   | Metric | broken (${H21_DEPLOY_BROKEN}) | fixed (${H21_DEPLOY_FIXED}) | Δ |
-   |--------|--------|-------|---|
-   | train PPL @ ${B4_STEPS} steps | ${H21_TRAIN_PPL_BROKEN} | **${B4_TRAIN_PPL}** | ${H21_TRAIN_PPL_DELTA} |
-   | OOD PPL (WikiText-103-v1) | ${H21_OOD_PPL_BROKEN} | **${B4_OOD_PPL}** | ${H21_OOD_PPL_DELTA} |
-   | `α_eff` | 0.000 (collapsed) | **0.500** (stable) | fusion alive |
-   | `cortex_loss_ema` | ~${H21_CX_EMA_BROKEN} | **~${H21_CX_EMA_FIXED}** | ${H21_CX_EMA_DELTA} |
-
-3. **NT-mediated α gating** — Once the trunk surpasses the cortex, an EMA inhibitory signal drives `α_eff → 0` so cortex experts retire automatically. The reverse also holds: cortex contribution resumes if the trunk regresses.
-
-KL distillation runs in parallel: `L_KL = T² · KL(cortex.detach()/T ‖ trunk/T)` with a gap-ramped λ that saturates at 1.0 when the trunk lags and shuts off when it leads.
+| Brain structure | Function borrowed | Implementation | Source idea |
+|---|---|---|---|
+| Thalamocortical system | Global broadcast by ignition | `cognition/oscillator.py::GammaWorkspace` | Dehaene & Changeux 2011 |
+| Cortex as a theatre | Limited-capacity workspace with a context frame | `cognition/workspace.py`, world/self models | Baars 1988 |
+| Gamma synchrony | Binding by phase locking, ACh-enhanced coupling | Kuramoto populations, content-coupling matrix | Singer & Gray 1995 |
+| Hippocampus | Episodic storage gated by surprise; cue-driven recall | `memory/episodic.py::EpisodicMemory` | Lisman & Grace 2005 |
+| Place and grid cells | Map of explored space; frontier value | `cognition/embodiment.py::PlaceMemory` | O'Keefe & Nadel 1978 |
+| Basal ganglia | Select one candidate; tonic inhibition as silence | runtime GATE stage | Redgrave et al. 1999 |
+| VTA / substantia nigra | Phasic DA for goal fit, tonic DA for exploration | `DrivenNTSystem` | Schultz et al. 1997 |
+| Locus coeruleus | Threat raises NE, which cools the selection softmax (adaptive gain) | `selection_temperature` | Aston-Jones & Cohen 2005 |
+| Basal forebrain | ACh sets recall diversity and workspace coupling | `recall_diversity`, `GammaWorkspace` | Hasselmo 2006 |
+| Directed exploration | Boredom scales novelty value, not motor noise | `choose_movement` | Wilson et al. 2014 |
 
 ---
 
-## Evidence
+## Embodiment: experiences instead of invented memories
 
-### Layer A — Mechanism Verification ✅
+The thought machinery can only wander as far as its memories reach. Hand-written autobiographical memories were tried first and rejected:
 
-${LAYER_A_TEST_COUNT} unit tests across `tests/` confirm every mechanism computes as specified:
+- **They are invented.** Recalling episodes the mind never lived through is confabulation by construction, and unrelated seed episodes form no coherent life to build world or self models from.
+- **They run out.** With an empty memory, recall returned only the seed sentence and the mind looped. With seeded memories, inhibition of return used them up within a few ticks and thought collapsed into restating itself.
 
-| Hypothesis | Result |
-|-----------|--------|
-| H1 — Φ > 0 for coupled outputs | ✅ Gaussian-MI MIP verified |
-| H2 — Φ gradient is real | ✅ ‖∂L/∂θ‖ increases measurably |
-| H3 — BDNF grows high-Φ paths preferentially | ✅ kernel rank expands on hot paths |
-| H4 — Sheaf H¹ detects contradictions | ✅ "likes coffee" vs "hates coffee" → SUPERSEDES edge |
-| H5 — Causal generalization from narratives | ✅ P(Joy\|Gift) > 0.8 from 10 examples |
-| H6 — Personality survives weight reload | ✅ identity vector stable across checkpoints |
-| H16 — `cortex_pre_head_norm` kills init loss | ✅ CE: ${H16_CE_WITHOUT} → ${H16_CE_WITH} nats |
-| H19 — `ImprovementGate` (Welch's t) | ✅ p-values within 1e-6 of scipy; mutation blocked without significance |
-| H21 — Per-position abstain unblocks fusion | ✅ ${H21_TRAIN_PPL_DELTA} train-PPL / ${H21_OOD_PPL_DELTA} OOD-PPL vs broken precursor |
+So the mind gets a persistent park (trees, benches, a pond, lamps, a kiosk, a fountain, a wandering dog, passers-by, a day–night clock) and makes its own experiences there. Every percept names the object ids it came from, which gives **grounding a ground truth**: a thought that mentions a fountain can be checked against whether a fountain was ever seen. The walking mind starts with an empty hippocampus.
 
-Run all: `py -3 -m pytest tests/ -v` (~${TEST_RUNTIME_SECONDS}s on CPU).
-
-### Layer B — OOD Generalization 🟡
-
-Evaluated on WikiText-103-v1 held-out set. **gap\_ratio = OOD\_ppl / train\_ppl** (lower is better):
-
-> **Protocol note (H59, eval v2):** rows below predate protocol v2. New runs additionally report **gap\_v2 = wikitext\_ppl / traindist\_ppl** — both sides produced by the same trunk-only eval code on a held-out slice of the training distribution, so training-side regularisation (flooding, label smoothing) can no longer distort the denominator — plus a PG-19 second OOD axis, and per-sequence NLLs so arm-vs-arm comparisons run through `brian ood compare` (Welch's t) instead of eyeballed ppl deltas.
-
-| Variant | Params | Steps | train\_ppl | OOD\_ppl | gap\_ratio | Log |
-|---------|--------|-------|-----------|---------|-----------|-----|
-| ${B0_VARIANT_NAME} | ${B0_TRAINABLE} | ${B0_STEPS} | ${B0_TRAIN_PPL} | ${B0_OOD_PPL} | **${B0_GAP_RATIO}** | - |
-| BRIAN B1 (trunk + recursive) | ${B1_TRAINABLE} | ${B1_STEPS} | ${B1_TRAIN_PPL} | ${B1_OOD_PPL} | ${B1_GAP_RATIO} | - |
-| BRIAN B2 (trunk + ReZero) | ${B2FIX_TRAINABLE} | ${B2FIX_STEPS} | ${B2FIX_TRAIN_PPL} | ${B2FIX_OOD_PPL} | ${B2FIX_GAP_RATIO} | - |
-| BRIAN B3 (PCT trunk) | ${B3_TRAINABLE} | ${B3_STEPS} | ${B3_TRAIN_PPL} | ${B3_OOD_PPL} | ${B3_GAP_RATIO} | - |
-| **${B4_VARIANT_NAME}** | **${B4_TRAINABLE}** | **${B4_STEPS}** | **${B4_TRAIN_PPL}** | **${B4_OOD_PPL}** | **${B4_GAP_RATIO}** | ${LOG_LINK:B4_LOG} |
-
-${LAYER_B_BEST_ROW} is the first variant under ${B4_GAP_THRESHOLD} gap\_ratio — a ${LAYER_B_IMPROVEMENT_PCT}% improvement over the flat baseline — achieved at ${B4_COMPUTE_RATIO_VS_B0} fewer steps. Absolute OOD PPL (${B4_OOD_PPL}) still trails the baseline (${B0_OOD_PPL}), but the baseline ran ${B0_STEPS} steps. Matched-compute comparison is the immediate next experiment.
-
-> ⚠️ gap\_ratio drifts upward within B4 (${B4_GAP_STEP500} → ${B4_GAP_RATIO} from step 500 → ${B4_STEPS}). The 10k follow-up run will distinguish plateau from accelerating overfit. See [`docs/findings.md#H21`](docs/findings.md#h21--per-position-abstain-logit-fixes-catastrophic-cortex-ce-2026-06-14).
-
-### Latest Logs
-
-**Best Run Overall (OOD / Combined Score):**
-```
-${LOG_TAIL:best:best:1}
-```
-
-**Most Recent Run (Last Checkpoint):**
-```
-${LOG_TAIL:latest:ood:3}
-```
+A rendered-image channel (frames → vision model) can replace the geometry channel without touching the world or the loop. A planned ablation compares the walking mind with a seeded mind without a world and a stationary one.
 
 ---
 
-## Quick Start
+## What we measure
+
+Every measure is computed per run and read against chance. A measure is refused (returned as `None` with a reason) when there are fewer than ${MIN_OBS_PER_PARAM} observations per fitted parameter.
+
+| Theory | Indicator | How | Null |
+|---|---|---|---|
+| Global Workspace (Baars; Dehaene) | **Ignition** is all-or-none | Sarle bimodality of the order parameter | manipulation check only (the operating point was tuned on it) |
+| Global Workspace | **Access**: ignited content reaches later thought | Percepts entering on ignited vs. non-ignited ticks; does a noun reach a thought or the world model within a few ticks? Salience-stratified, CMH-pooled | within-stratum permutation |
+| IIT-style integration (Barrett & Seth) | **Φ_AR**: does the whole's past predict its future better than the parts' pasts? | Autoregressive Φ over workspace modules, only across consecutive ticks | phase-randomised surrogates |
+| Integration and complexity (Tononi, Sporns & Edelman) | **Integration, neural complexity C_N** | Gaussian multi-information and TSE complexity | phase-randomised surrogates |
+| Perturbational complexity (Casali et al. 2013) | **PCI**: a pulse spreads in a complex way | Fork the whole mind, body and map; pulse DA, GABA or a memory; compress the divergence. The unpulsed twin must replay exactly (PCI 0) | the `null` pulse |
+| Differentiation | **LZ complexity** of the state stream | Lempel–Ziv on binarised states | time-shuffled surrogates |
+| IIT, exact at a declared grain (Balduzzi & Tononi 2008) | **Controller φ** | Exact φ over the controller's binary macro-nodes | without oscillator feedback |
+
+Intervals are moving-block bootstraps (Künsch); several walk seeds are pooled per measure.
+
+---
+
+## Evidence so far
+
+**First complete run of the cognition stack** (vast.ai ${MIND_SMOKE_RUN}, `${MIND_SMOKE_JSON}`, one seed):
+
+| Probe | Mind (full runtime) | Bare LLM |
+|---|---|---|
+| Longest run of low-novelty thoughts (loop) | ≤ ${MIND_ARM_STREAK_MAX} ticks in every one of the ${MIND_ABLATION_ARMS} runtime arms | **${MIND_BARE_STREAK} of ${MIND_STREAK_OF}** |
+| Source monitoring (did I perceive it or think it?) | ${MIND_SOURCE_MON_FULL} | ${MIND_SOURCE_MON_BARE} |
+| PCI, `null` pulse (validity check) | ${MIND_PCI_NULL} | n/a |
+| PCI after a DA / GABA / memory pulse | ${MIND_PCI_DA} / ${MIND_PCI_GABA} / ${MIND_PCI_MEMORY} | n/a |
+| Controller φ, mean (max) | ${MIND_CONTROLLER_PHI_MEAN} (${MIND_CONTROLLER_PHI_MAX}) | ${MIND_CONTROLLER_PHI_NO_FEEDBACK} without oscillator feedback |
+
+**How to read it.** The mind-vs-bare contrast is large. The single-mechanism ablations sit within single-seed noise (novelty ${MIND_NOVELTY_SPREAD} across arms), so **no individual mechanism can be credited yet**.
+
+**Grounding is measured, and it is not perfect.** In the first park walk (run ${GROUND_RUN}), ${GROUND_THOUGHT_UNGROUNDED} of ${GROUND_THOUGHT_MENTIONS} thought mentions of scene nouns named things the mind had never perceived. That walk's integration numbers were **withdrawn** because they had no nulls and too few samples per parameter.
+
+**Pending: H69**, the first walk read against chance: ${H69_SEEDS} seeds × ${H69_TICKS} ticks, ${H69_SURROGATES} surrogates per measure, the access test and PCI by twin walks, predictions and falsifiers fixed in advance ([findings.md, H69](docs/findings.md)).
+
+---
+
+## Negative results
+
+They are recorded as carefully as positive ones. Recent examples:
+
+| ID | Question | Result |
+|---|---|---|
+| Topology thesis | Does brain-like wiring beat a flat transformer? | No evidence it does (see above) |
+| H70 | Do mismatched E-I layers (a 1-D neural moiré) produce flat bands, emergent rhythms or localised modes? | ❌ Matched layers had more top-edge modes (${H70_TOP_DOS_MATCHED}) than any mismatch (${H70_TOP_DOS_MISMATCHED}); no localisation transition |
+| H71 | Does a kagome flat band under lateral inhibition give a repertoire of localised assemblies sharing one gamma rhythm? | ❌ Activity spread (top-tenth variance share ${H71_TOP10}, needed > ${H71_TOP10_NEEDED}); every seed landed on the same pattern (overlap ${H71_OVERLAP}) |
+| Run ${GROUND_RUN} | Park-walk integration measures | Withdrawn: no nulls, about one observation per parameter |
+
+In H70 and H71 the gamma rhythm emerged from the E-I loop's time constants, with no unit assigned a frequency. That is textbook PING and served as the positive control; the lattice geometry added nothing.
+
+---
+
+## The language-model trunk (legacy topology)
+
+The trunk work remains in the repo and still runs. It is the history behind the two-layer doctrine.
+
+```mermaid
+flowchart LR
+    tok["tokens"] --> trunk["Language cortex<br/>(transformer trunk)"]
+    trunk -- "mid-trunk tap" --> bowtie
+    subgraph bowtie["Bowtie: expand → waist → expand"]
+        direction LR
+        e1["sensory<br/>expansion"] --> waist["bottleneck<br/>waist"] --> e2["motor<br/>expansion"]
+        e2 -. "re-entry loops" .-> e1
+    end
+    bowtie -- "memory cross-attention" --> trunk
+    experts["Frozen cortex experts<br/>(general, code, reasoning)"] -- "KL distillation<br/>(detached teacher)" --> trunk
+    trunk --> head["LM head"]
+    experts -- "NT-gated α fusion" --> head
+```
+
+- **${BOWTIE_STAGES}-stage bowtie with re-entry loops**, inspired by the bow-tie organisation of sensorimotor processing and recurrent thalamocortical loops.
+- **Multi-cortex fusion**: 3 frozen LM experts distil into the trunk; an NT-gated α retires them once the trunk catches up.
+- **The `.neuro` DSL**: architectures are written as `.neuro` files and compiled arch.neuro → Hypergraph IR → PyTorch, so a topology change is a text diff ([`docs/dsl.md`](docs/dsl.md)).
+- Geometric mechanisms (hyperbolic attention, grid-cell positions, neural-field oscillators, predictive-coding cascades) are catalogued in [`hypothesis/`](hypothesis/) with tests.
+
+---
+
+## Open problems: where researchers can help
+
+- **Does ignition do anything?** The H69 access test asks whether ignited content reaches later thought more often than equally salient non-ignited content. If not, ignition is epiphenomenal in this architecture. That would be worth knowing in itself.
+- **A better access outcome.** The current outcome (a perceived noun reappears in a thought within a few ticks) is crude. Report-based or behavioural access measures are welcome.
+- **Integration at the right grain.** Φ_AR over all channels needs more ticks than one walk gives. What is the right macro-grain for a control loop whose substrate is an LLM?
+- **Ablations for credit assignment.** Which mechanism carries which indicator? This needs multi-seed runs per arm: walking vs. stationary vs. seeded memory, workspace on vs. off.
+- **Perception from pixels.** Replace the geometry channel with rendered frames and a vision model.
+- **Formal side.** The Lean library (`lean/`, [`docs/formal_framework.md`](docs/formal_framework.md)) does not yet cover the consciousness measures. Formal statements of their invariants are open.
+
+The workflow for any of these: write the hypothesis with its falsifier in `docs/findings.md`, land the instrument with tests (TDD), commit **before** the run, then record the outcome, negative or not.
+
+---
+
+## Quick start
 
 ```bash
 python -m venv .venv
-# Windows:
-.\.venv\Scripts\Activate.ps1
-# Linux/Mac:
-source .venv/bin/activate
+# Windows: .venv\Scripts\activate    Linux/Mac: source .venv/bin/activate
+pip install -e .[ml,dev]
 
-pip install -r requirements.txt
-# Install torch separately to match your accelerator:
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+# Talk to the mind on a frozen pretrained model (no training needed)
+brian chat --mind --expert
 
-# CPU sanity run (~${PRESET_TINY_PARAMS} params)
-brian train --preset=tiny --steps=2000
+# Run the indicator battery on your own GPU (loads the model)
+brian eval mind --probes park_walk --device cuda
 
-# A100 full run (~${PRESET_XL_PARAMS} params, bf16)
-brian train --preset=xl --steps=100000 --device=cuda
-
-# Resume latest checkpoint
-python -m neuroslm.train --resume latest
-
-# Flat transformer ablation at matched params
-python -m neuroslm.train --preset xl --baseline
-
-# Interactive generation
-python -m neuroslm.generate --prompt "Once upon a time"
-```
-
-Full Colab workflow (clone → ablation → training → benchmarks): [`colab_run.ipynb`](colab_run.ipynb).
-
----
-
-## Parameter Presets
-
-| Preset | Params | Accelerator | VRAM | Notes |
-|--------|--------|-------------|------|-------|
-| `tiny` | ~${PRESET_TINY_PARAMS} | CPU | — | sanity / CI |
-| `small` | ~${PRESET_SMALL_PARAMS} | CPU | — | local dev |
-| `medium` | ~${PRESET_MEDIUM_PARAMS} | T4 | 16 GB | |
-| `large` | ~${PRESET_LARGE_PARAMS} | T4 | 15 GB | |
-| `xl` | ~${PRESET_XL_PARAMS} | A100 | 40 GB | standard research run |
-| `xxl` | ~${PRESET_XXL_PARAMS} | 4×A100 | 320 GB | |
-
-Add `--baseline` for a parameter-matched flat transformer ablation.
-
----
-
-## Configuration (`brian.toml`)
-
-Single source of truth for the active architecture:
-
-```toml
-[current]
-arch = "architectures/rcc_bowtie"   # active architecture
-dna  = ""                            # .dna path for evolutionary training
-
-[nfg]
-output = ".neuro/nfg.png"
-format = "png"                       # png | svg | pdf | dot
-engine = "dot"
-```
-
-Override per-run with env vars: `BRIAN_ARCH`, `BRIAN_DNA`, `BRIAN_NFG_OUTPUT`. Contract locked by 27 tests in [`tests/test_project_config.py`](tests/test_project_config.py).
-
----
-
-## Real-Time Architecture Evolution
-
-BRIAN can mutate its own architecture during training. Mutations are gated by `ImprovementGate` (Welch's t-test) — no structural change lands without statistically significant fitness gain:
-
-```python
-from neuroslm.utils import EvolutionaryTrainingContext
-
-with EvolutionaryTrainingContext("dna/base.dna", "checkpoints/") as ctx:
-    harness = BRIANHarness(ctx.arch_path, resume_from=ctx.resume_step)
-    for step in range(ctx.resume_step, 10000):
-        loss = harness.train_step(batch)
-        if step % 1000 == 0:
-            harness.checkpoint_mutations()   # emits step_XXXXX.patch.dna
-```
-
-- RAID-5 protected DNA (triple redundancy)
-- Incremental patches only — not full model state
-- Hot paths (ρ > 0.7) grow via BDNF; cold paths (ρ < 0.1) prune
-- Fault-tolerant: patch stack replayed from any checkpoint
-
----
-
-## Loss Composition
-
-| Term | Source | Weight |
-|------|--------|--------|
-| `lm_loss` | mesolimbic-gain-modulated cross-entropy | 1.0 |
-| `phi_loss` | `−tanh(Φ/3)·3` from MIP estimator | 0.02 × maturation |
-| `world_loss` | predicted vs target world embedding (MSE) | 0.3 × maturation |
-| `pred_coding_loss` | per-layer next-layer prediction | 0.1 × maturation |
-| `cortex_kl_loss` | `T²·KL(cortex.detach()/T ‖ trunk/T)` | λ\_t (gap-ramped, max 1.0) |
-| motor, CPC, RSSM, novel aux | embodied + optional modules | 0.05–0.1 × maturation |
-| `topo_loss` (H24) | `α·(Q_h − Q*)² + γ·ε_ortho` from `topo_charge` diagnostic | `α`, `γ` (default 0 = diagnostic-only) |
-| `noether_loss` (H25) | `λ·(H_final − H_initial)²` leapfrog Noether residual | `λ` (default 0 = diagnostic-only) |
-| `josephson_loss` (H26) | `−(1/L)Σ K̄_h·R_ℓ` inter-layer Josephson phase coupling | `λ_J` (default 0 = diagnostic-only) |
-
-The maturation gate `_aux_w_scale ∈ [0.001, 1.0]` suppresses all aux losses until step ${MATURATION_STEP_THRESHOLD} (or lm\_loss < ${MATURATION_LM_LOSS_THRESHOLD}), so the LM gradient dominates during early training.
-
-The `topo_loss` row (Phase 1 of the 3-mechanism THSD program) is enabled in arch.neuro by default as **diagnostic-only** (`α = γ = 0`): per-head Berg-Lüscher discrete windings `Q_h` and inter-layer orientation decorrelation `ε_ortho` are logged every step but zero is added to the loss. See `docs/findings.md` H24 + `neuroslm/mechanisms/topo_charge.py`. Activating the soft penalty (`α > 0` or `γ > 0`) is a follow-up experiment.
-
-The `noether_loss` row (Phase 2 of the THSD program) is enabled in arch.neuro by default as **diagnostic-only** (`λ = 0`): `noether_H_diff = |H_final − H_initial|` is logged every step but zero is added to the loss. The Liouville symplectic residual block runs one leapfrog step on the final hidden state; det(J) = 1 is guaranteed by the triangular-shear structure of the Stoermer-Verlet integrator. See `docs/findings.md` H25 + `neuroslm/mechanisms/liouville_symplectic.py`.
-
-The `josephson_loss` row (Phase 3 of the THSD program) is enabled in arch.neuro by default as **diagnostic-only** (`λ_J = 0`): the Josephson order parameter R_ℓ is logged every step but zero is added to the loss. Each attention head carries a per-(head, layer, token) phase φ with intra-layer Kuramoto sync (η) and inter-layer Josephson coupling (K_h). At zero init all scalars are zero, so step-0 loss is bit-identical to vanilla (`torch.equal`). See `docs/findings.md` H26 + `neuroslm/mechanisms/kjpla.py`.
-
----
-
-## Introspection
-
-```python
-model.intelligence_metrics.snapshot()   # Φ, identity drift, causal density, self-reference rate
-model.consciousness_metrics.per_tick()  # γ (binding), θ (memory), α (idling), coherence, ignition
-model.narrative_stack.query_rules()     # discovered causal patterns with support counts
-model.personality_vector               # tensor(${PERSONALITY_DIM}) — stable across checkpoints
+# The pre-registered walk on a rented GPU (costs money; see brian.toml)
+brian deploy-mind-eval --probes park_walk --idle-ticks ${H69_TICKS} --walk-seeds ${H69_SEEDS}
 ```
 
 ---
@@ -589,51 +272,22 @@ model.personality_vector               # tensor(${PERSONALITY_DIM}) — stable a
 ## Tests
 
 ```bash
-py -3 -m pytest tests/                                              # full suite (${LAYER_A_TEST_COUNT} tests, ~${TEST_RUNTIME_SECONDS}s)
-py -3 -m pytest tests/test_phi.py -v                               # H1–H3: integrated information
-py -3 -m pytest tests/test_narrative_memory.py -v                  # H4–H5: memory & causation
-py -3 -m pytest tests/test_cognitive_closure.py -v                 # H6–H6.5: identity & embodiment
-py -3 -m pytest tests/training/test_cortex_pre_head_norm.py -v     # H16: catastrophic-loss fix
-py -3 -m pytest tests/training/test_cortex_distillation_and_gating.py -v  # H17–H18: KL + NT gating
-py -3 -m pytest tests/verification/test_improvement_gate.py -v     # H19: Welch's t admission gate
-py -3 -m pytest tests/dsl/ -v                                       # ${DSL_TESTS} DSL codegen + byte-equivalence
+brian test fast     # smoke check
+brian test quick    # the files you are editing
+brian test full     # canonical sweep
 ```
 
----
-
-## Checkpoints
-
-Pushed to `${HF_REPO_ID}` on HuggingFace Hub every ${HF_PUSH_EVERY} steps. Configure in `architectures/*/config.neuro`:
-
-```neuro
-checkpoint {
-    push_backend: "hf"
-    hf_repo_id: "${HF_REPO_ID}"
-    hf_token_env: "HF_TOKEN"
-    save_every: ${HF_SAVE_EVERY}
-    push_every: ${HF_PUSH_EVERY}
-    push_optimizer: false    # strips Adam state, ~2/3 size saving
-}
-```
-
-**Skip LFS on laptops** (recommended):
-```bash
-git lfs install --local --skip-smudge   # fetch stubs only
-git lfs pull --include="lfs_checkpoints/neuroslm_xl_adamw_mix_800.pt"  # pull one when needed
-```
+The suite has ${LAYER_A_TEST_COUNT} tests. The consciousness measures are pinned against known answers: Φ_AR refusal below the sample-size floor, surrogates that preserve spectra but destroy coupling, a salience confound the access test must not mistake for access, and an unpulsed twin with PCI exactly 0.
 
 ---
 
 ## Docs
 
-| Document | Contents |
-|----------|----------|
-| [`docs/findings.md`](docs/findings.md) | Hypothesis ledger H1–H${LAST_HYPOTHESIS}: test files, result JSONs, raw logs. Source of truth for what's proven vs open. |
-| [`docs/architecture.md`](docs/architecture.md) | Full spec: ${BOWTIE_STAGES}-stage forward pass, tensor shapes, equations, IIT 4.0 theory. |
-| [`docs/formal_framework.md`](docs/formal_framework.md) | Normative math contract: sheaf ontology, H¹ guard, Φ guard, RAID-5 DNA, ImprovementGate spec, Lean roadmap. |
-| [`docs/dsl.md`](docs/dsl.md) | `.neuro` syntax, macro system, compile pipeline, module bundling, source maps. |
-| [`docs/technical_report.md`](docs/technical_report.md) | Executive summary: proven claims, open questions, all 7 pillars. |
-
----
-
-*Open research. Issues, stars, and PRs welcome.*
+| File | What it is |
+|---|---|
+| [`docs/findings.md`](docs/findings.md) | The hypothesis ledger: every pre-registration, run, outcome and withdrawal |
+| [`docs/architecture.md`](docs/architecture.md) | Full specification; §14 is the cognitive runtime |
+| [`docs/technical_report.md`](docs/technical_report.md) | Summary for collaborators and external reviewers |
+| [`docs/formal_framework.md`](docs/formal_framework.md) | Topological sheaf framework behind the formal proofs |
+| [`docs/dsl.md`](docs/dsl.md) | The `.neuro` architecture language |
+| [`docs/cli.md`](docs/cli.md) | The `brian` command line |

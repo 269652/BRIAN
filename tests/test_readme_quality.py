@@ -56,6 +56,9 @@ ALLOWED_CONSTANTS = {
     # Test counts in hypothesis table cells (allowed, already ${METRIC} in most places)
     r"\(\d+\s+tests?\)",    # "(36 tests)", "(24 tests)" in hypothesis table
     
+    # Literature citations: "Casali et al. 2013", "Dehaene & Changeux 2011"
+    r"\b[A-Z][a-z'][A-Za-z'-]*(?: et al\.| & [A-Z][a-z'][A-Za-z'-]*)? (?:19|20)\d{2}\b",
+
     # H-numbers (hypothesis IDs)
     r"\b[Hh]\d+(\.\d+)?\b", # H1, H6.5, H22, etc.
     
@@ -115,6 +118,13 @@ def test_template_has_no_hardcoded_numbers():
         if len(violations) > 10:
             msg += f"\n... and {len(violations) - 10} more"
         pytest.fail(msg)
+
+
+def test_citation_years_are_allowed_but_metrics_are_not():
+    cite = [p for p in ALLOWED_CONSTANTS if "et al" in p][0]
+    assert re.search(cite, "PCI (Casali et al. 2013)")
+    assert re.search(cite, "Dehaene & Changeux 2011")
+    assert not re.search(cite, "OOD PPL 2013")
 
 
 def test_all_template_metrics_exist():
