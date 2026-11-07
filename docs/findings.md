@@ -5181,7 +5181,7 @@ for differences of about 0.15, not small ones.
 
 ### H70 — Moiré E-I bilayer: do mismatched layers make emergent rhythms? (pre-registered, 2026-11-07)
 
-**Status:** ⏳ Pre-registered; sweeps run on CPU after this entry is committed.
+**Status:** ❌ Falsified (a, b); see outcome below.
 
 **Question.** In twisted bilayer graphene the moiré pattern itself is
 trivial geometry. The physics is that at a magic angle a band goes
@@ -5242,3 +5242,47 @@ oscillator. Replacing it would be its own hypothesis, after H69 reports
 and only if (a) or (b)/(c) hold.
 
 [EVIDENCE: tests/cognition/test_moire.py]
+
+#### H70 outcome (2026-11-07): ❌ no magic mismatch, no localisation transition
+
+Run on CPU: `moire.mismatch_sweep` / `localization_sweep` at the
+registered settings (instrument `39563746`), single-threaded BLAS.
+
+**(a) ❌ for the hypothesis; the test was badly designed.** All 89
+mismatch points pass z ≥ 3 against the random-placement null (z 5.7
+to 19.7; top_dos 11–15 vs null means 1.6–2.8). The registered
+criterion is met, but it says nothing about the moiré. Any ordered
+layer beats a disordered one at the band edge, because disorder smears
+the edge into a tail of isolated modes. The null contrasted order with
+disorder, not mismatch with no mismatch. Within the ordered sweep,
+top_dos has no interior peak. It steps down: 15 for δ ≤ 0.25, 13 up to
+δ = 0.56, 11 beyond (16 once, at δ = 0.074). There is no magic
+mismatch. The 2× replication was stopped after the first sweep: with
+every point a "hit" it could not change this verdict.
+
+**(b) ❌** The leading mode stays global at every coupling. IPR·N is
+1.6 at g = 0 (two degenerate ring modes) and 1.1 from g = 0.1 to 3.0.
+There is no transition, so the width is undefined.
+
+**(c) Descriptive.** The null localises gradually from the weakest
+coupling (IPR·N 16.5 at g = 0.1, 98 at g = 3), as 1-D Anderson
+localisation predicts. The width comparison is undefined because (b)
+has no rise. The one real difference is that the moiré geometry keeps
+the leading rhythm global where disorder breaks it into local patches.
+
+**(d)** Not run, as registered (no g_c from (b)).
+
+**Likely reason (conjecture, untested).** W has only non-negative
+entries (excitatory lateral and interlayer coupling). By
+Perron-Frobenius, its top eigenvector is strictly positive and tends
+to spread out. Aubry-André localisation needs a modulation that the
+top mode cannot average away. This bilayer's quasi-periodic
+interlayer coupling seems too weak at s = 0.5 and g ≤ 3.
+
+**Follow-ups (not started; each needs its own pre-registration):**
+- Fix the null so it isolates the mismatch: an ordered layer B at
+  δ = 0 with the same g, against δ > 0.
+- Signed interlayer coupling (E→I between layers, i.e. effective
+  inhibition), which breaks the Perron positivity.
+- A 2-D twisted lattice, where magic angles are known to exist; this
+  is a GPU-scale run.
