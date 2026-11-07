@@ -5178,3 +5178,67 @@ for differences of about 0.15, not small ones.
 [EVIDENCE: tests/cognition/test_embodiment.py::TestTwinWalks, ::TestSceneGrounding]
 [EVIDENCE: tests/cognition/test_indicator_eval.py::TestParkWalkBaseline, ::TestWalkSeeds]
 [EVIDENCE: tests/cognition/test_world_self_models.py::TestModelsKeepOnlyWhatWasPerceived]
+
+### H70 — Moiré E-I bilayer: do mismatched layers make emergent rhythms? (pre-registered, 2026-11-07)
+
+**Status:** ⏳ Pre-registered; sweeps run on CPU after this entry is committed.
+
+**Question.** In twisted bilayer graphene the moiré pattern itself is
+trivial geometry. The physics is that at a magic angle a band goes
+flat, so interactions dominate. Does a neural analogue exist? If it
+does, rhythms like gamma could come from structure instead of from the
+tuned Kuramoto oscillators of `GammaWorkspace`, whose frequencies are
+parameters.
+
+**Model** (`neuroslm/cognition/moire.py`). Two rings of Wilson-Cowan
+E-I units on one circumference, with spacings 1 and n_a/n_b
+(δ = n_a/n_b − 1). Within a layer, nearest-neighbour coupling t = 1.
+Between layers, E-E coupling g·exp(−d²/2s²) with s = 0.5. No unit has
+a natural frequency: the rhythm is the E-I loop's (τ_E 3 ms, τ_I 6 ms,
+loop gains w_EI 2, w_IE 1.5, w_II 0.5), about 53 Hz at
+criticality 0.95. Linearised, each eigenmode κ of the lateral matrix W
+is one damped 2×2 oscillator, so W's spectrum is the band structure.
+`criticality` sets w_EE so that the top mode sits at a fixed distance
+from its Hopf point.
+
+**Measures:**
+- `top_dos`: modes within 1 % of the spectral width of the top
+  eigenvalue, i.e. how many spatial patterns ring at nearly the
+  leading rhythm. A flat band raises it.
+- `ipr`: inverse participation ratio of the leading mode. It is 1/N
+  for a global rhythm and tends to 1 for a localised one.
+- **Null:** the same n_b and g, with layer B units placed uniformly at
+  random. This keeps the coupling strength and removes the moiré
+  geometry. There are 20 null draws per point.
+
+**Instrument checks (tests, known answers):**
+- uncoupled rings give exact cosine bands;
+- the full Jacobian equals the 2×2 map of W's modes;
+- halving τ_E and τ_I doubles the frequency;
+- IPR detects the Aubry-André transition (λ = 1 extended, λ = 4
+  localised);
+- the nonlinear noise-driven simulation peaks at the linearised
+  frequency (±15 %);
+- above the Hopf point the activity forms a bounded limit cycle.
+
+**Predictions:**
+
+| # | Sweep | Prediction | Falsified if |
+|---|---|---|---|
+| a | Mismatch: n_a = 233, every n_b from 232 to 144 (δ from 0.004 to 0.618), g = 0.5 | Some δ* has top_dos z ≥ 3 against its null (a "magic mismatch"), and it replicates at n_a = 466 (z ≥ 3 within ±0.02 in δ). Prior: low, ~25 %. Nothing guarantees a 1-D magic mismatch | no point with z ≥ 3, or no replication at 2× size: there is no flat band, and the moiré gives only the beat pattern |
+| b | Coupling: n_a = 377, n_b = 233 (ratio ≈ golden mean), g from 0 to 3 in steps of 0.1 | The leading-mode IPR·N jumps sharply: the 10–90 % rise of IPR·N spans < 25 % of the midpoint g (an Aubry-André-like localisation transition) | the rise is gradual (≥ 25 %) |
+| c | Same, null placements | The null's rise is at least 2× wider than the moiré's: quasi-periodic geometry gives a transition, while random geometry gives gradual Anderson localisation | null width < 2× moiré width: the geometry adds nothing over disorder |
+| d | Nonlinear simulation (b's lattice, criticality 0.95, noise 0.02, 4 s) at g = 0.5·g_c and 2·g_c | Below g_c the population signal peaks at the linearised rhythm (±15 %). Above g_c the rhythm is confined: the top 10 % of units carry > 50 % of E variance | either fails |
+
+g_c in (d) is the midpoint from (b). If (b) finds no transition, (d)
+is not run.
+
+**What this is not.** Gamma emerging from an E-I loop is textbook PING
+and is a positive control, not a finding. The open questions are (a)
+and (b)/(c): whether the mismatch geometry adds structure (flat bands,
+localised rhythms) beyond what a single E-I sheet or a disordered one
+gives. Nothing is wired into `GammaWorkspace`. H69 runs with the frozen
+oscillator. Replacing it would be its own hypothesis, after H69 reports
+and only if (a) or (b)/(c) hold.
+
+[EVIDENCE: tests/cognition/test_moire.py]
