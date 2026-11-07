@@ -5286,3 +5286,56 @@ interlayer coupling seems too weak at s = 0.5 and g ≤ 3.
   inhibition), which breaks the Perron positivity.
 - A 2-D twisted lattice, where magic angles are known to exist; this
   is a GPU-scale run.
+
+### H71 — Kagome flat band under lateral inhibition: one rhythm, many assemblies? (pre-registered, 2026-11-07)
+
+**Status:** ⏳ Pre-registered; CPU run after this entry is committed.
+
+**Why kagome.** H70 found no flat band from mismatch, and the excitatory
+lattice's top mode is always global (Perron-Frobenius). The kagome
+lattice has an exactly flat band without any twist: its modes are
+compact hexagon rings with alternating sign. With excitatory coupling
+the flat band is at the bottom of W, where modes are damped. Under
+lateral inhibition (W = −c·A) it is at the top, so these are the modes
+that ring. If the flat band shapes the dynamics, the network should
+offer a repertoire of localised assemblies that all share one gamma
+rhythm. That is the property a workspace substrate would need:
+contents that differ in where they are, not in what frequency someone
+assigned them.
+
+**Spec** (`moire.kagome_adjacency`, `assembly_sweep`; tests:
+4 sites per neighbour, flat band at −2 with L²+1 modes, alternating
+hexagon is an exact eigenmode, inhibition puts it on top).
+L = 8 (192 E-I units), c = 0.5, default E-I loop (~53 Hz),
+criticality 1.05 (just past the Hopf point of the top band), noise
+0.02, 2000 ms, dt 0.05 ms, seeds 0–9.
+- **Condition:** W = −0.5·A (inhibition, flat band on top).
+- **Control:** W = +0.5·A. Same graph and the same |weights|; the top
+  mode is a single uniform one.
+
+**Measures** (second half of each run): `top10_share`, the share of E
+variance carried by the top 10 % of units; `mean_overlap`, the mean
+cosine between seeds' amplitude patterns; `peak_hz`, the spectral peak
+of the most active unit.
+
+**Predictions:**
+
+| # | Prediction | Falsified if |
+|---|---|---|
+| a | Localised: mean top10_share > 0.5 under inhibition and ≥ 2× the control's | either fails: activity spreads, and the flat band does not shape the dynamics (likely route: saturation favours the extended band-touching modes) |
+| b | Repertoire: mean overlap between seeds < 0.5 under inhibition and below the control's | ≥ 0.5: every seed lands on the same pattern, so there is no repertoire |
+| c | Shared rhythm: peak_hz within ±15 % of the linear rhythm in ≥ 8 of 10 inhibition seeds | fewer than 8 |
+
+Prior: (a) about 35 %. The band-touching point at Γ puts extended
+modes at the same top level, and tanh saturation may favour spreading.
+
+**Also reported, descriptive:** the same at criticality 0.95
+(noise-driven, below the Hopf point).
+
+**Closing H70 (a), post hoc.** The registered null contrasted order
+with disorder. The meaningful comparison is top_dos at δ > 0 against
+matched layers (δ = 0, n_b = 233) at the same g. This criterion is set
+after seeing (a)'s values (11–16), so it is a check, not a test: a
+magic mismatch would need some δ with top_dos ≥ 1.5× the δ = 0 value.
+
+[EVIDENCE: tests/cognition/test_moire.py::TestKagome, ::TestAssemblies]

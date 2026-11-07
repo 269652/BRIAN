@@ -31,6 +31,12 @@ The measures for "does the moiré do anything" are:
 - ``ipr``: whether the leading mode is global (1/N) or localised (→ 1).
 Both are read against layers with randomly placed B units (same n_b
 and g, no moiré geometry).
+
+Kagome (H71): an exactly flat band without any twist. Under lateral
+inhibition (W = −c·A) it is the top of the spectrum, so its compact
+hexagon modes are the ones that ring. ``assembly_sweep`` asks whether
+noise-driven activity settles into localised, seed-dependent
+assemblies sharing one rhythm.
 """
 from __future__ import annotations
 
@@ -170,6 +176,37 @@ def localization_sweep(n_a: int, n_b: int, gs: Sequence[float],
     return rows
 
 
+def _kagome_site(L: int, i: int, j: int, s: int) -> int:
+    return 3 * ((i % L) * L + (j % L)) + s
+
+
+def kagome_adjacency(L: int) -> np.ndarray:
+    """L×L cells on a torus, sites A (cell origin), B (+a1/2), C (+a2/2)."""
+    A = np.zeros((3 * L * L, 3 * L * L))
+
+    def bond(a, b):
+        A[a, b] = A[b, a] = 1.0
+
+    for i in range(L):
+        for j in range(L):
+            a, b, c = (_kagome_site(L, i, j, s) for s in range(3))
+            bond(a, b)
+            bond(a, c)
+            bond(b, c)
+            bond(b, _kagome_site(L, i + 1, j, 0))
+            bond(c, _kagome_site(L, i, j + 1, 0))
+            bond(b, _kagome_site(L, i + 1, j - 1, 2))
+    return A
+
+
+def kagome_hexagon(L: int, i: int, j: int) -> List[int]:
+    """The six sites around the hexagon centred at R + (a1+a2)/2, in
+    ring order."""
+    s = lambda di, dj, sub: _kagome_site(L, i + di, j + dj, sub)
+    return [s(0, 0, 1), s(1, 0, 0), s(1, 0, 2), s(0, 1, 1), s(0, 1, 0),
+            s(0, 0, 2)]
+
+
 def simulate(W: np.ndarray, p: EIParams, ms: float, dt: float = 0.05,
              noise: float = 0.02, seed: int = 0,
              record_every: int = 10) -> np.ndarray:
@@ -203,3 +240,41 @@ def peak_hz(x: np.ndarray, dt_ms: float, n_seg: int = 8) -> float:
         p = p + np.abs(np.fft.rfft(seg * np.hanning(L))) ** 2
     f = np.fft.rfftfreq(L, d=dt_ms / 1000.0)
     return float(f[1:][int(np.argmax(p[1:]))])
+
+
+def assembly_stats(E: np.ndarray, discard: float = 0.5) -> Dict:
+    """Where the activity lives after the transient: share of E
+    variance carried by the top tenth of units, and the per-unit
+    amplitude pattern (std)."""
+    X = np.asarray(E, dtype=float)[int(len(E) * discard):]
+    var = X.var(axis=0)
+    k = max(1, int(math.ceil(len(var) / 10)))
+    total = float(var.sum())
+    share = float(np.sort(var)[-k:].sum() / total) if total > 0 else 0.0
+    return {"top10_share": share, "pattern": np.sqrt(var).tolist()}
+
+
+def pattern_overlap(a: Sequence[float], b: Sequence[float]) -> float:
+    a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    na, nb = np.linalg.norm(a), np.linalg.norm(b)
+    return float(a @ b / (na * nb)) if na > 0 and nb > 0 else 0.0
+
+
+def assembly_sweep(W: np.ndarray, p: EIParams, seeds: Sequence[int],
+                   ms: float, dt: float = 0.05, noise: float = 0.02,
+                   record_every: int = 10) -> Dict:
+    """One noise-driven run per seed: is the activity localised, does
+    each seed settle on a different pattern, and at what rhythm?"""
+    runs = []
+    for seed in seeds:
+        E = simulate(W, p, ms, dt, noise, seed, record_every)
+        st = assembly_stats(E)
+        top = int(np.argmax(st["pattern"]))
+        half = E[len(E) // 2:, top]
+        runs.append({"seed": seed, "top10_share": st["top10_share"],
+                     "peak_hz": peak_hz(half, dt * record_every),
+                     "pattern": st["pattern"]})
+    pairs = [pattern_overlap(a["pattern"], b["pattern"])
+             for i, a in enumerate(runs) for b in runs[i + 1:]]
+    return {"runs": runs,
+            "mean_overlap": float(np.mean(pairs)) if pairs else 1.0}

@@ -164,3 +164,72 @@ class TestNonlinearSimulation:
         a = m.simulate(W, p, ms=50, dt=0.05, noise=0.05, seed=4)
         b = m.simulate(W, p, ms=50, dt=0.05, noise=0.05, seed=4)
         assert np.array_equal(a, b)
+
+
+class TestKagome:
+    """Kagome (H71): an exactly flat band without any twist. Under
+    lateral inhibition (W = −c·A) the flat band is the TOP of the
+    spectrum, so its compact hexagon modes are the ones that ring."""
+
+    def test_every_site_has_four_neighbours(self):
+        m = _m()
+        A = m.kagome_adjacency(4)
+        assert A.shape == (48, 48) and np.allclose(A, A.T)
+        assert np.all(A.sum(axis=1) == 4)
+
+    def test_the_flat_band_sits_at_minus_two_with_l2_plus_one_modes(self):
+        m = _m()
+        L = 5
+        k = np.linalg.eigvalsh(m.kagome_adjacency(L))
+        assert np.sum(np.isclose(k, -2.0)) == L * L + 1
+        assert k.min() == pytest.approx(-2.0) and k.max() == pytest.approx(4.0)
+
+    def test_an_alternating_hexagon_is_a_compact_flat_band_mode(self):
+        m = _m()
+        L = 4
+        A = m.kagome_adjacency(L)
+        ring = m.kagome_hexagon(L, 1, 2)
+        assert len(set(ring)) == 6
+        for a, b in zip(ring, ring[1:] + ring[:1]):
+            assert A[a, b] == 1
+        v = np.zeros(3 * L * L)
+        v[ring] = [1, -1, 1, -1, 1, -1]
+        assert np.allclose(A @ v, -2 * v)
+
+    def test_lateral_inhibition_puts_the_flat_band_on_top(self):
+        m = _m()
+        L = 5
+        A = m.kagome_adjacency(L)
+        inhib = np.linalg.eigvalsh(-0.5 * A)
+        excit = np.linalg.eigvalsh(0.5 * A)
+        assert m.top_dos(inhib, eps_frac=1e-6) == L * L + 1
+        assert m.top_dos(excit, eps_frac=1e-6) == 1
+
+
+class TestAssemblies:
+    def test_variance_share_of_the_top_tenth(self):
+        m = _m()
+        rng = np.random.default_rng(0)
+        one = np.zeros((200, 20))
+        one[:, 3] = rng.standard_normal(200)
+        assert m.assembly_stats(one)["top10_share"] == pytest.approx(1.0)
+        flat = rng.standard_normal((5000, 20))
+        assert m.assembly_stats(flat)["top10_share"] == pytest.approx(0.1, abs=0.02)
+
+    def test_pattern_overlap_is_one_for_the_same_pattern(self):
+        m = _m()
+        rng = np.random.default_rng(1)
+        X = rng.standard_normal((300, 12)) * np.arange(1, 13)
+        a, b = m.assembly_stats(X), m.assembly_stats(2 * X)
+        assert m.pattern_overlap(a["pattern"], b["pattern"]) == pytest.approx(1.0)
+
+    def test_assembly_sweep_runs_one_simulation_per_seed(self):
+        m = _m()
+        W = -0.5 * m.kagome_adjacency(3)
+        out = m.assembly_sweep(W, m.EIParams(criticality=1.1), seeds=[0, 1],
+                               ms=200)
+        assert len(out["runs"]) == 2
+        assert 0 <= out["mean_overlap"] <= 1
+        assert all(0 < r["top10_share"] <= 1 for r in out["runs"])
+        assert out == m.assembly_sweep(W, m.EIParams(criticality=1.1),
+                                       seeds=[0, 1], ms=200)
