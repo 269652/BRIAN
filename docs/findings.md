@@ -5289,7 +5289,7 @@ interlayer coupling seems too weak at s = 0.5 and g ≤ 3.
 
 ### H71 — Kagome flat band under lateral inhibition: one rhythm, many assemblies? (pre-registered, 2026-11-07)
 
-**Status:** ⏳ Pre-registered; CPU run after this entry is committed.
+**Status:** ❌ Falsified (a, b); see outcome below.
 
 **Why kagome.** H70 found no flat band from mismatch, and the excitatory
 lattice's top mode is always global (Perron-Frobenius). The kagome
@@ -5339,3 +5339,37 @@ after seeing (a)'s values (11–16), so it is a check, not a test: a
 magic mismatch would need some δ with top_dos ≥ 1.5× the δ = 0 value.
 
 [EVIDENCE: tests/cognition/test_moire.py::TestKagome, ::TestAssemblies]
+
+#### H71 outcome (2026-11-07): ❌ (a), ❌ (b); (c) holds trivially
+
+Run on CPU at the registered settings (instrument `742bf625`). Means over seeds 0–9:
+
+| Criticality | Lattice | top10_share | Overlap between seeds | peak_hz (linear) | Within ±15 % |
+|---|---|---|---|---|---|
+| 1.05 | inhibition (flat band on top) | 0.148 [0.14, 0.16] | 0.977 | 48 (49.5) | 10/10 |
+| 1.05 | control (+A) | 0.109 [0.11, 0.11] | 1.000 | 48 (49.5) | 10/10 |
+| 0.95 | inhibition | 0.149 | 0.988 | 56 (53.1) | 10/10 |
+| 0.95 | control | 0.122 | 0.998 | 56 (53.1) | 9/10 |
+
+- **(a) ❌** Activity spreads: 0.15 against > 0.5, and only 1.4× the
+  control.
+- **(b) ❌** Every seed lands on nearly the same pattern (overlap 0.98).
+  There is no repertoire.
+- **(c)** Met, but the control meets it too. The rhythm is the E-I
+  loop's, as in H70, not the flat band's. It confirms the
+  linearisation (the peak is within one 8 Hz bin) and nothing more.
+
+**Reading.** The flat band exists exactly (tests) and sits on top, but
+the dynamics do not use its compact modes: noise excites all L²+1
+degenerate modes, plus the extended band-touching mode, about equally,
+and their sum is spread out. The registered likely failure route
+(saturation favouring extended modes) fits this but was not isolated.
+
+**H70 (a), post-hoc check:** matched layers (δ = 0) have top_dos 17,
+more than every mismatched point (11–16). Mismatch only lowers the
+top-edge density. H70 is closed: no magic mismatch.
+
+**Consequence.** Neither lattice gives the workspace anything the
+current oscillator lacks. A substrate swap is not pursued.
+`GammaWorkspace` stays the tuned Kuramoto model; its frequencies are
+parameters, as documented.
