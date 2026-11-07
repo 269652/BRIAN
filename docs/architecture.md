@@ -4025,6 +4025,29 @@ role now belongs to boredom alone, so DA means goal pursuit.
 
 ### 14.16 Embodiment — a grounded park (2026-11-05)
 
+**Why embodiment.** The thought machinery (recall → candidate
+thoughts → selection, with curiosity, boredom, replay and reorient)
+can only wander as far as its memories reach, and the idle mind had no
+source of new ones:
+
+- With an empty hippocampus, recall returned only the seed sentence,
+  and every arm looped in one basin (run 58700866, findings.md).
+- 36 hand-written autobiographical memories (`AUTOBIO_SEEDS`) reached
+  recall, but inhibition of return used up the on-topic ones within a
+  few ticks. Candidates then collapsed onto restating the last thought,
+  and replay never fired (run 58821480).
+
+A fixed set of memories is exhausted, however large it is. A walk
+through a persistent world supplies memories continuously: sights and
+sounds that are new or habituated, places revisited from new angles,
+and events the mind did not write itself. It also gives grounding a
+ground truth, since every percept names the objects it came from.
+
+This is a design rationale, not a measured effect. Whether walking
+diversifies thought has not been tested against a stationary arm. In
+run 59316881, 75 of 274 thought mentions of scene nouns named things
+never perceived, so outside material still competes with the percepts.
+
 The mind can walk through a persistent world. `neuroslm/environments/park.py`
 holds a procedural park: trees, benches, a pond, lamps, flower beds, a
 kiosk, a fountain, a wandering dog and passers-by, plus a clock that
