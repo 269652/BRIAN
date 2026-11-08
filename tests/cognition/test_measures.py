@@ -338,6 +338,26 @@ class TestAccessTest:
                         n_perm=500, seed=0)
         assert r["diff"] > 0.2 and r["p"] < 0.01
 
+    def test_ignition_that_blocks_access_is_detected_in_the_lower_tail(self):
+        # H69: diff −0.125, p 0.997; H72 (e2) tests that direction
+        from neuroslm.cognition.measures import access_test
+        r = access_test(self._events(lambda i, s: 0.2 if i else 0.6),
+                        n_perm=500, seed=0)
+        assert r["diff"] < -0.2 and r["p_lower"] < 0.01 and r["p"] > 0.99
+
+    def test_the_two_tails_share_one_null(self):
+        from neuroslm.cognition.measures import access_test
+        r = access_test(self._events(lambda i, s: 0.4), n_perm=500, seed=0)
+        # p + p_lower = 1 + (1 + #ties) / (1 + n): never below 1
+        assert 1.0 <= r["p"] + r["p_lower"] <= 1.0 + 0.1
+
+    def test_lower_tail_false_positives_stay_near_the_nominal_rate(self):
+        from neuroslm.cognition.measures import access_test
+        hits = sum(access_test(self._events(lambda i, s: 0.4, seed=k),
+                               n_perm=200, seed=k)["p_lower"] < 0.05
+                   for k in range(20))
+        assert hits <= 3, "expected ~1 of 20 at α = 0.05"
+
     def test_epiphenomenal_ignition_is_not(self):
         from neuroslm.cognition.measures import access_test
         r = access_test(self._events(lambda i, s: 0.4), n_perm=500, seed=0)

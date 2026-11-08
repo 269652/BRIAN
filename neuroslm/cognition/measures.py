@@ -409,12 +409,12 @@ def access_test(events: Sequence[tuple], n_perm: int = 1000,
     Salience drives both, so the difference is taken within salience
     strata (quantiles) and pooled with Cochran–Mantel–Haenszel weights
     n₁n₀/(n₁+n₀); the null shuffles ignition within strata. One-sided
-    p: ignition predicts more access."""
+    p: ignition predicts more access; ``p_lower``: it predicts less."""
     ev = [(bool(i), bool(a), float(s)) for i, a, s in events]
     out = {"n_ignited": sum(i for i, _, _ in ev),
            "n_not": sum(not i for i, _, _ in ev),
            "p_access_ignited": None, "p_access_not": None,
-           "diff": None, "p": None}
+           "diff": None, "p": None, "p_lower": None}
     if out["n_ignited"]:
         out["p_access_ignited"] = float(np.mean([a for i, a, _ in ev if i]))
     if out["n_not"]:
@@ -454,5 +454,6 @@ def access_test(events: Sequence[tuple], n_perm: int = 1000,
         if v is not None:
             null.append(v)
     out.update(diff=float(diff),
-               p=(1 + sum(v >= diff for v in null)) / (1 + len(null)))
+               p=(1 + sum(v >= diff for v in null)) / (1 + len(null)),
+               p_lower=(1 + sum(v <= diff for v in null)) / (1 + len(null)))
     return out

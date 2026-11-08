@@ -5450,3 +5450,71 @@ top-edge density. H70 is closed: no magic mismatch.
 current oscillator lacks. A substrate swap is not pursued.
 `GammaWorkspace` stays the tuned Kuramoto model; its frequencies are
 parameters, as documented.
+
+### H72 — Root-cause fixes for H69's failures (pre-registered, 2026-11-08)
+
+**Status:** ⏳ Pre-registered; runs pending.
+
+**Question.** H69's post-hoc diagnosis named a mechanical cause for
+each failure. Do the fixes remove the failures on fresh walks? And was
+the access deficit carried by the broadcast?
+
+**Spec.** Two changes to the mind and two measurement additions:
+
+- **Ignition sustains the coalition** (b9abe919,
+  `ignition_sustain="coalition"`). Every item held before an ignited
+  tick keeps its pre-decay salience, and the new thought enters at its
+  normalised novelty. Before, only the thought was sustained, at 1.0.
+- **Proprioception** (ccd34c72, `proprioception=true`). The body's
+  heading, part of the park and nearby fence are sensed when they change.
+- **Measurement only:** Φ_R (95c512f3), and the `reactivation` pulse
+  (3b94f726).
+
+This is a **stack**: two mechanism changes in run A. The body percept
+also takes workspace slots, so it can affect access too. The follow-ups
+below separate them.
+
+**Runs** (park walk, 500 ticks, seeds 0, 1, 2, as H69):
+
+- **A, fixes on:** `brian deploy-mind-eval --probes park_walk
+  --idle-ticks 500 --walk-seeds 3`
+- **B, H69's mind without the broadcast:** the same, plus
+  `--mind-set ignition_sustain=thought --mind-set proprioception=false
+  --mind-set ignition_broadcast=false`. Against H69 this changes one
+  thing, the steering.
+
+Each run is about 11 h on an A100 (≈ $4.6).
+
+**Predictions:**
+
+| # | Run | Measure | Prediction | Falsified if |
+|---|---|---|---|---|
+| e1 | A | Access, seeds pooled | diff > 0 with p < 0.05 | diff < 0: the coalition fix does not remove the deficit. diff ≥ 0 with p ≥ 0.05 counts as 🟡 (deficit gone, no positive access effect shown) |
+| e2 | B | Access, seeds pooled | diff ≥ 0: H69's deficit was carried by the broadcast | diff < 0 with `p_lower` < 0.05: the deficit does not need the broadcast, and ignition marks absorbed states rather than causing them |
+| b′ | A | Φ_R (modules) z | > 2 in ≥ 2 of 3 seeds | ≤ 2 in ≥ 2 seeds. Prior is high: H69's traces gave 3.0 / 8.2 / 8.8 post hoc. This checks the measure on new data, not the mind |
+| g′ | A | PCI, `reactivation` | > 0 in every fork, reaching ≥ 2 channels including `thought` | = 0 in any fork |
+| h1 | A | Compass words among the raw world model's ungrounded nouns | < 5 % of them (H69: 30 %) | ≥ 5 % |
+| h2 | A | Raw world-model versions grounded | Descriptive (H69: 22 / 28 / 36 %). Entrances, crossroads and roads, 34 % of H69's misses, are not addressed | — |
+| r | A | Regression guard: a, c, d, f of H69 | all still hold | any fails |
+
+**e2 uses a lower-tail p.** `access_test`'s p is one-sided for
+diff > 0, so it now also reports `p_lower`, `(1 + #null ≤ diff) /
+(1 + n)` from the same null. It was added before either run
+([EVIDENCE: tests/cognition/test_measures.py::TestAccessTest]).
+
+**Reported, not tested (A):** ignition rate and episode length. The
+coalition rule changes what stays in the workspace, so ignition could
+lengthen. Also whether the compass words in raw world models match the
+true heading at that tick, checked by hand on a sample of 30.
+
+**Follow-ups (not in this registration):**
+
+- Single-mechanism arms for A: `proprioception=false` alone.
+- If e2 holds: does the coalition rule help with the broadcast off?
+
+[EVIDENCE: tests/cognition/test_measures.py::TestPhiR]
+[EVIDENCE: tests/cognition/test_global_workspace.py::TestIgnitionSustains]
+[EVIDENCE: tests/cognition/test_cognitive_runtime.py::TestIgnitionSustainsTheCoalition]
+[EVIDENCE: tests/cognition/test_embodiment.py::TestProprioception]
+[EVIDENCE: tests/cognition/test_indicator_eval.py::TestPerturbationalComplexityProbe::test_reactivation_pulse_comes_to_mind_without_recall]
+[EVIDENCE: tests/cognition/test_indicator_eval.py::TestCli::test_mind_set_overrides_typed_config_fields]
