@@ -5099,8 +5099,8 @@ during development, not measured:
 
 ### H69 — Park-walk baseline against chance: integration, access, PCI (pre-registered, 2026-11-06)
 
-**Status:** ⏳ Pre-registered; run pending:
-`brian deploy-mind-eval --probes park_walk --idle-ticks 500 --walk-seeds 3`.
+**Status:** 🟠 Mixed: a, c, d, f, h hold; b, e and g (memory) are
+falsified. Outcome below. Run 59588081.
 
 **Scope.** These are measures of the *functional architecture*: the
 five workspace-module activations (sensory, memory, language,
@@ -5179,6 +5179,77 @@ for differences of about 0.15, not small ones.
 
 **Cost:** ~22 s/tick on an A100 (run 59316881: 120 ticks in 45 min).
 3 × (500 + 48 twin ticks) ≈ 10 h.
+
+**Run.** vast.ai 59588081, A100 SXM4, $0.42/h, about 11 h (≈ $4.6).
+Code at d6fa1060, the last `neuroslm/` commit before boot (the
+mind-eval log has no boot stamp). Empty hippocampus. Raw log
+`logs/mind_eval/20261107T145940Z.log`, results
+`results/mind_eval/20261107T145941Z_deepseek-r1-qwen-7b.json`.
+
+**Outcome** (seeds 0 / 1 / 2):
+
+| # | Measure | Result | Verdict |
+|---|---|---|---|
+| a | Integration (modules) z | 9.4 / 16.7 / 10.6 | ✅ |
+| b | Φ_AR (modules) z | 0.47 / −15.3 / −8.1 | ❌ |
+| c | C_N (modules) z | 9.2 / 18.0 / 11.4 | ✅ |
+| d | LZ z | −7.1 / −9.9 / −9.6 | ✅ |
+| e | Access, pooled | diff −0.125, p 0.997; P(access) 0.68 ignited vs 0.81 not (n = 180 / 172) | ❌ |
+| f | PCI `null` | 0 in all 6 forks | ✅ |
+| g | PCI `da` / `gaba` / `memory` | da 0.97–1.13, gaba 0.97–1.05, 11–15.5 channels; memory 0 in all 6 forks | da, gaba ✅; memory ❌ |
+| h | Raw vs filtered grounding | raw world 22 / 28 / 36 % of versions grounded, raw self 67 / 49 / 63 %; filtered 100 % | holds |
+
+Reported, not tested: ignition rate 0.35, mean episode 5.9 ticks,
+bimodality z 0.77 / −0.13 / −0.78.
+
+What it says:
+
+- (a), (c) and (d) do not separate the mind from a script: the scripted
+  dry run passed them too. They show the control loop is coupled and
+  ordered, not that R1 contributes anything.
+- (e) is the GWT negative registered above: at the tick grain, a
+  percept that enters an ignited workspace reaches a thought *less*
+  often. Ignition does not grant access in this architecture.
+
+**Post-hoc diagnosis (not part of the test; it changes no verdict).**
+Analysis of the raw log, scripts not committed:
+
+- **(b) is the measure's redundancy bias.** Whole-minus-sum Φ goes
+  negative when the parts share predictable information (Mediano, Seth
+  & Barrett 2019). The phase-randomised null has independent channels,
+  so it has no redundancy and sits near 0. Module traces rebuilt from
+  the log reproduce Φ_AR (0.005 / −0.079 / −0.046). Adding the MMI
+  double-redundancy term (Φ_R of ΦID, Mediano et al. 2021) gives
+  z = 3.0 / 8.2 / 8.8 against the same surrogates, with the MIB
+  reused from Φ_AR. In seeds 1 and 2 the MIB isolates the memory
+  channel.
+- **(g) memory: the pulse never acts.** Its `recall` channel never
+  diverged, so the injected episode was never recalled in 36 twin
+  ticks. A stored episode that is not recalled has no other path into
+  a tick. It is also tagged `kind=inferred`, so it carries the
+  inferred-recall penalty.
+- **(h): 64 % of the raw world model's ungrounded nouns (69 % of the
+  self model's) are directions and places** (north, entrance,
+  crossroads, road, path). The stem asks "Where I am now", but every
+  percept is egocentric; the body's heading and position never reach
+  the mind. Sky and weather are 15 %; invented objects (camera, car,
+  phone) 21 %.
+- **(e): ruled out.** GABA silencing (no inhibited tick in any window),
+  eviction (survival to t+1: 0.80 ignited vs 0.85 not), prompt order
+  (the gap holds whether or not the percept is the top item), and
+  rumination (word overlap between consecutive thoughts 0.254 vs
+  0.252).
+- **(e): remaining candidate, not proven.** On an ignited tick the
+  new thought is set to salience 1.0, and the broadcast state is read
+  after that; the top item is a thought on 94 % of ignited ticks. So
+  the broadcast writes the train of thought into the trunk, and the
+  percept in the coalition gets nothing. Ignition comes in episodes
+  (78 % of ignited entries are followed by an ignited tick), and the
+  deficit is spread over t+1 to t+5. Access is 0.81 with no steered
+  generation in the window and 0.59–0.66 with 3–5. Being inside an
+  episode predicts the same, so only a broadcast-off arm can decide.
+
+**Follow-up:** H72 (below).
 
 [EVIDENCE: tests/cognition/test_measures.py::TestSampleSizeGuards, ::TestPhiOnlyAcrossConsecutiveTicks, ::TestSurrogates, ::TestBootstrap, ::TestAccessTest]
 [EVIDENCE: tests/cognition/test_embodiment.py::TestTwinWalks, ::TestSceneGrounding]
