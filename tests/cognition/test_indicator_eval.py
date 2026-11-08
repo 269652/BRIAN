@@ -1097,8 +1097,9 @@ class TestParkWalkBaseline:
 
     def test_reports_iit_and_workspace_measures(self):
         c = self._c()
-        for k in ("phi_ar", "phi_ar_modules", "integration",
-                  "neural_complexity", "lz_complexity", "ignition",
+        for k in ("phi_ar", "phi_ar_modules", "phi_r_modules",
+                  "integration", "neural_complexity", "lz_complexity",
+                  "ignition",
                   "phase_locking"):
             assert k in c, k
         assert {"ignition_rate", "mean_episode", "metastability",
@@ -1106,7 +1107,7 @@ class TestParkWalkBaseline:
 
     def test_every_measure_is_scored_against_its_null(self):
         c = self._c()
-        names = {"phi_ar", "phi_ar_modules", "integration",
+        names = {"phi_ar", "phi_ar_modules", "phi_r_modules", "integration",
                  "integration_modules", "neural_complexity",
                  "neural_complexity_modules", "lz_complexity",
                  "bimodality"}
@@ -1130,6 +1131,8 @@ class TestParkWalkBaseline:
         assert c["phi_ar_modules"]["phi"] is None
         assert "transitions" in c["phi_ar_modules"]["reason"]
         assert c["nulls"]["phi_ar_modules"]["z"] is None
+        assert c["phi_r_modules"]["phi"] is None
+        assert c["nulls"]["phi_r_modules"]["z"] is None
 
     def test_reports_the_access_test(self):
         a = self._c()["access"]

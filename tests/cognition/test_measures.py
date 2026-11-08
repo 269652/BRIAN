@@ -58,6 +58,64 @@ class TestPhiAR:
         assert phi_ar(np.ones((50, 3)))["phi"] is None
 
 
+def _common_driver(n_steps, n_units=3, rho=0.95, noise=0.3, seed=0):
+    """Units that only copy one slow latent: redundant, never interacting."""
+    rng = np.random.default_rng(seed)
+    z = _ar(n_steps, [[rho]], seed=seed)[:, 0]
+    return z[:, None] + noise * rng.standard_normal((n_steps, n_units))
+
+
+class TestPhiR:
+    """Φ_R (Mediano et al. 2021, ΦID): whole-minus-sum Φ plus the MMI
+    double-redundancy min_{i,j} I(M^i_past; M^j_now) the subtraction
+    counts twice. Run 59588081: modules sharing a driver gave
+    Φ_AR z = −15 against an independent-channel null."""
+
+    def test_redundant_units_make_phi_ar_negative_but_not_phi_r(self):
+        from neuroslm.cognition.measures import phi_ar, phi_r
+        X = _common_driver(4000)
+        assert phi_ar(X)["phi"] < -0.05
+        assert phi_r(X)["phi"] > -0.01
+
+    def test_phi_r_is_phi_ar_plus_the_redundancy_at_its_partition(self):
+        from neuroslm.cognition.measures import (_gauss_mi, phi_ar_split,
+                                                 phi_r)
+        X = _common_driver(4000)
+        out = phi_r(X)
+        a, b = out["mib"]
+        Z = (X - X.mean(0)) / X.std(0)
+        P, F = Z[:-1], Z[1:]
+        red = min(_gauss_mi(P[:, i], F[:, j]) for i in (a, b) for j in (a, b))
+        assert out["redundancy"] == pytest.approx(red, abs=1e-9)
+        assert out["phi"] == pytest.approx(
+            phi_ar_split(P, F, a, b) + red, abs=1e-9)
+
+    def test_independent_units_integrate_nothing(self):
+        from neuroslm.cognition.measures import phi_r
+        X = _ar(4000, np.diag([0.8, 0.7, 0.6, 0.5]))
+        assert phi_r(X)["phi"] == pytest.approx(0.0, abs=0.02)
+
+    def test_cross_coupled_units_integrate(self):
+        from neuroslm.cognition.measures import phi_r
+        A = [[0.4, 0.5, 0.0], [0.0, 0.4, 0.5], [0.5, 0.0, 0.4]]
+        assert phi_r(_ar(4000, A))["phi"] > 0.1
+
+    def test_two_independent_blocks_split_at_the_seam(self):
+        from neuroslm.cognition.measures import phi_r
+        A = np.zeros((4, 4))
+        A[:2, :2] = [[0.4, 0.5], [0.5, 0.4]]
+        A[2:, 2:] = [[0.4, 0.5], [0.5, 0.4]]
+        out = phi_r(_ar(4000, A))
+        assert out["phi"] == pytest.approx(0.0, abs=0.02)
+        assert sorted(map(sorted, out["mib"])) == [[0, 1], [2, 3]]
+
+    def test_same_guards_as_phi_ar(self):
+        from neuroslm.cognition.measures import phi_r
+        assert phi_r(np.zeros((3, 3)))["phi"] is None
+        assert phi_r(np.ones((50, 3)))["phi"] is None
+        assert phi_r(_ar(100, np.eye(5) * 0.5))["phi"] is None
+
+
 class TestNeuralComplexity:
     """Tononi–Sporns–Edelman complexity: integration and differentiation
     together — 0 for independent units, 0 for perfectly redundant ones,

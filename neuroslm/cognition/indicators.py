@@ -797,8 +797,8 @@ def _park_walk_once(seams: MindSeams, n_ticks: int, cfg: MindConfig,
     M = np.asarray(mods) if mods else np.zeros((0, 0))
     R = np.asarray(sync, dtype=float).reshape(-1, 1)
 
-    def phi_of(cols, ticks=None):
-        return lambda Z: measures.phi_ar(Z[:, cols], ticks=ticks)["phi"]
+    def phi_of(cols, ticks=None, fn=measures.phi_ar):
+        return lambda Z: fn(Z[:, cols], ticks=ticks)["phi"]
 
     n_all, n_mod = len(_WS_MODULES) + len(_NT_ORDER), len(_WS_MODULES)
     every, modules = list(range(n_all)), list(range(n_mod))
@@ -809,6 +809,9 @@ def _park_walk_once(seams: MindSeams, n_ticks: int, cfg: MindConfig,
             "phi_ar": (phi_of(every, row_ticks), phi_of(every), pr),
             "phi_ar_modules": (phi_of(modules, row_ticks), phi_of(modules),
                                pr),
+            # H69 (b): modules sharing a driver drove Φ_AR to z = −15
+            "phi_r_modules": (phi_of(modules, row_ticks, measures.phi_r),
+                              phi_of(modules, fn=measures.phi_r), pr),
             "integration": ((lambda Z: measures.integration(Z)),) * 2 + (pr,),
             "integration_modules": ((lambda Z: measures.integration(
                 Z[:, modules])),) * 2 + (pr,),
@@ -831,7 +834,7 @@ def _park_walk_once(seams: MindSeams, n_ticks: int, cfg: MindConfig,
         nulls["bimodality"] = _null_scored(bc, bc, R,
                                            measures.phase_randomise,
                                            n_surrogates, n_boot, seed)
-    for k in ("phi_ar", "phi_ar_modules", "integration",
+    for k in ("phi_ar", "phi_ar_modules", "phi_r_modules", "integration",
               "integration_modules", "neural_complexity",
               "neural_complexity_modules", "lz_complexity", "bimodality"):
         nulls.setdefault(k, {"value": None, "null_mean": None,
@@ -881,6 +884,9 @@ def _park_walk_once(seams: MindSeams, n_ticks: int, cfg: MindConfig,
         "phi_ar_modules": (measures.phi_ar(M, ticks=row_ticks) if len(M)
                            else {"phi": None,
                                  "reason": "no workspace readings"}),
+        "phi_r_modules": (measures.phi_r(M, ticks=row_ticks) if len(M)
+                          else {"phi": None,
+                                "reason": "no workspace readings"}),
         "integration": measures.integration(X) if len(X) else None,
         "neural_complexity": (measures.neural_complexity(X) if len(X)
                               else None),
@@ -911,6 +917,7 @@ def _park_walk_once(seams: MindSeams, n_ticks: int, cfg: MindConfig,
     q, g = full["thought_quality"], full["grounding"]
     _say(progress, f"  park_walk seed {seed}: "
                    f"Φ_mod={full['phi_ar_modules']['phi']} "
+                   f"z(Φ_R)={nulls['phi_r_modules']['z']} "
                    f"z(LZ)={nulls['lz_complexity']['z']} "
                    f"access diff={access['diff']} p={access['p']} "
                    f"novelty={q['mean_novelty']} "
@@ -1307,6 +1314,7 @@ def format_report(report: dict) -> str:
                         + " ".join(f"z({lab})={_fmt(nl[k]['z'])}"
                                    for k, lab in (
                                        ("phi_ar_modules", "Φ_mod"),
+                                       ("phi_r_modules", "Φ_R"),
                                        ("integration_modules", "I_mod"),
                                        ("neural_complexity", "C_N"),
                                        ("lz_complexity", "LZ"),

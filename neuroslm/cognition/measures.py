@@ -100,6 +100,33 @@ def _transitions(T: int, tau: int, ticks) -> tuple:
     return np.array(a), np.array(b)
 
 
+def _gauss_mi(P: np.ndarray, F: np.ndarray) -> float:
+    """I(P; F) for jointly Gaussian blocks of any widths."""
+    P = P[:, None] if P.ndim == 1 else P
+    F = F[:, None] if F.ndim == 1 else F
+    n = F.shape[1]
+    S = np.atleast_2d(np.cov(np.hstack([F, P]).T))
+    Sff, Sfp, Spp = S[:n, :n], S[:n, n:], S[n:, n:]
+    Sres = Sff - Sfp @ np.linalg.solve(Spp + _RIDGE * np.eye(len(Spp)),
+                                       Sfp.T)
+    return 0.5 * (_logdet(Sff) - _logdet(Sres))
+
+
+def phi_ar_split(Xp: np.ndarray, Xf: np.ndarray, a: Sequence[int],
+                 b: Sequence[int]) -> float:
+    """Whole-minus-sum Φ of one bipartition (a, b)."""
+    a, b = list(a), list(b)
+    return (_past_present_mi(Xp, Xf) - _past_present_mi(Xp[:, a], Xf[:, a])
+            - _past_present_mi(Xp[:, b], Xf[:, b]))
+
+
+def _double_redundancy(Xp: np.ndarray, Xf: np.ndarray, a: Sequence[int],
+                       b: Sequence[int]) -> float:
+    """MMI double-redundancy: min over part pairs of I(M^i_past; M^j_now)."""
+    return min(_gauss_mi(Xp[:, list(i)], Xf[:, list(j)])
+               for i in (a, b) for j in (a, b))
+
+
 def phi_ar(X, tau: int = 1, ticks: Optional[Sequence[int]] = None) -> Dict:
     """Φ = I(X_past; X_now) − Σ_k I(M^k_past; M^k_now) at the minimum-
     information bipartition, chosen by Φ / min(|M¹|, |M²|) (size-
@@ -109,6 +136,20 @@ def phi_ar(X, tau: int = 1, ticks: Optional[Sequence[int]] = None) -> Dict:
     "n_transitions", "reason"}``; phi None with fewer than two varying
     channels or fewer than MIN_OBS_PER_PARAM transitions per VAR
     coefficient (n²)."""
+    return _phi_at_mib(X, tau, ticks, redundancy=False)
+
+
+def phi_r(X, tau: int = 1, ticks: Optional[Sequence[int]] = None) -> Dict:
+    """Φ_R (Mediano et al. 2021): ``phi_ar``'s Φ plus the MMI double-
+    redundancy its subtraction counts twice, with the partition chosen
+    by Φ_R itself. Parts that copy one driver make Φ_AR negative
+    (Mediano, Seth & Barrett 2019) but not Φ_R. Same guards and keys as
+    ``phi_ar``, plus ``redundancy``."""
+    return _phi_at_mib(X, tau, ticks, redundancy=True)
+
+
+def _phi_at_mib(X, tau: int, ticks: Optional[Sequence[int]],
+                redundancy: bool) -> Dict:
     Xa = np.asarray(X, dtype=float)
     keep = (np.flatnonzero(Xa.std(axis=0) > 1e-12)
             if Xa.ndim == 2 and len(Xa) > 1 else np.array([], int))
@@ -126,7 +167,6 @@ def phi_ar(X, tau: int = 1, ticks: Optional[Sequence[int]] = None) -> Dict:
     Z = Xa[:, keep]
     Z = (Z - Z.mean(0)) / Z.std(0)
     Xp, Xf = Z[past], Z[now]
-    whole = _past_present_mi(Xp, Xf)
     best = None
     for r in range(1, n // 2 + 1):
         for part in itertools.combinations(range(n), r):
@@ -134,14 +174,16 @@ def phi_ar(X, tau: int = 1, ticks: Optional[Sequence[int]] = None) -> Dict:
             b = [i for i in range(n) if i not in part]
             if r == n - r and 0 not in a:
                 continue                         # each split once
-            phi = whole - _past_present_mi(Xp[:, a], Xf[:, a]) \
-                - _past_present_mi(Xp[:, b], Xf[:, b])
+            red = _double_redundancy(Xp, Xf, a, b) if redundancy else 0.0
+            phi = phi_ar_split(Xp, Xf, a, b) + red
             score = phi / min(len(a), len(b))
             if best is None or score < best[0]:
-                best = (score, phi, a, b)
-    _, phi, a, b = best
+                best = (score, phi, a, b, red)
+    _, phi, a, b, red = best
     out.update(phi=float(phi),
                mib=[[int(keep[i]) for i in a], [int(keep[i]) for i in b]])
+    if redundancy:
+        out["redundancy"] = float(red)
     return out
 
 
