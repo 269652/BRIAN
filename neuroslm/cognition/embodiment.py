@@ -22,6 +22,38 @@ from neuroslm.environments.park import GeometryChannel, Park
 _HEADINGS = (0, 45, 90, 135, 180, -135, -90, -45)
 """Relative directions the mind can head off in (degrees, left +)."""
 
+_COMPASS = ("east", "north-east", "north", "north-west", "west",
+            "south-west", "south", "south-east")
+"""Heading θ in 45° sectors from θ = 0; forward = (cos θ, sin θ), so +y
+is north."""
+
+_FENCE_NEAR = 5.0
+"""Metres within which the park fence is felt to be close."""
+
+
+def proprioception(park: Park) -> str:
+    """What the body knows of itself (path integration, head direction):
+    its compass heading, which part of the park it is in, and any side
+    where the fence is close. True by construction — no object named."""
+    k = int(round(park.heading / (math.pi / 4))) % 8
+    third = park.size / 3.0
+
+    def side(v: float, low: str, high: str) -> str:
+        return low if v < third else high if v > 2 * third else ""
+
+    row = side(park.agent_y, "south", "north")
+    col = side(park.agent_x, "west", "east")
+    part = "-".join(p for p in (row, col) if p) or "middle"
+    text = f"I am facing {_COMPASS[k]}, in the {part} of the park."
+    near = [name for name, d in (("north", park.size - park.agent_y),
+                                 ("south", park.agent_y),
+                                 ("east", park.size - park.agent_x),
+                                 ("west", park.agent_x))
+            if d < _FENCE_NEAR]
+    if near:
+        text += f" The park fence is close to the {' and the '.join(near)}."
+    return text
+
 
 @dataclass
 class WalkRecord:
@@ -57,6 +89,9 @@ class PlaceMemory:
         self.n = n
         # absolute headings that just bumped (touch), until the body moves
         self.blocked: List[float] = []
+        # the last proprioceptive percept, so an unchanged body is not
+        # sensed again (kept here so twin walks fork it with the map)
+        self.body: Optional[str] = None
 
     def _cell_of(self, x: float, y: float) -> Optional[Tuple[int, int]]:
         if not (0.0 <= x <= self.size and 0.0 <= y <= self.size):
@@ -254,6 +289,13 @@ def walk(rt, park: Park, ticks: int, action: str = "look",
             rt.sense(p.text, "sight" if p.modality == "visual" else "sound",
                      key=(f"{p.modality}:{p.object_ids[0]}"
                           if p.object_ids else None))
+        felt: Tuple[str, ...] = ()
+        if rt.cfg.proprioception:
+            body = proprioception(park)
+            if body != places.body:
+                rt.sense(body, "body", key="body")
+                places.body = body
+                felt = (body,)
         if before_tick is not None:
             before_tick(park.tick)
         result = rt.tick()
@@ -269,7 +311,7 @@ def walk(rt, park: Park, ticks: int, action: str = "look",
             pose=(park.agent_x, park.agent_y, park.heading),
             seen_ids=tuple(i for p in park.last_percepts
                            if p.modality == "visual" for i in p.object_ids),
-            percepts=tuple(p.text for p in park.last_percepts),
+            percepts=tuple(p.text for p in park.last_percepts) + felt,
             thought=result.thought))
         if on_tick is not None:
             on_tick(recs[-1], result)

@@ -67,6 +67,81 @@ class TestWalkLoop:
         assert isinstance(r.seen_ids, tuple) and len(r.pose) == 3
 
 
+class TestProprioception:
+    """H69 (h): 30 % of the raw world model's ungrounded nouns were
+    compass words. The body knows its heading and where it is in the
+    park (path integration); proprioception tells the mind, in words
+    that are true."""
+
+    def _say(self, x, y, h):
+        from neuroslm.cognition.embodiment import proprioception
+        return proprioception(Park.from_objects([], agent=(x, y, h)))
+
+    def test_heading_is_a_compass_direction(self):
+        # forward = (cos θ, sin θ); +y is north
+        assert self._say(30, 30, math.pi / 2) == \
+            "I am facing north, in the middle of the park."
+        assert "facing east" in self._say(30, 30, 0.0)
+        assert "facing north-east" in self._say(30, 30, math.pi / 4)
+        assert "facing south" in self._say(30, 30, -math.pi / 2)
+        assert "facing south-west" in self._say(30, 30, -3 * math.pi / 4)
+
+    def test_position_is_a_part_of_the_park(self):
+        assert "in the north-west of the park" in self._say(5, 55, 0.0)
+        assert "in the middle of the park" in self._say(30, 30, 0.0)
+        assert "in the south of the park" in self._say(30, 5, 0.0)
+
+    def test_a_near_fence_is_named_by_its_side(self):
+        assert "The park fence is close to the east." in \
+            self._say(58, 30, 0.0)
+        assert "close to the north and the west" in self._say(2, 58, 0.0)
+        assert "fence" not in self._say(30, 30, 0.0)
+
+    def test_the_walk_senses_the_body_when_it_changes(self):
+        from neuroslm.cognition.embodiment import proprioception, walk
+        park = Park.from_objects([], agent=(30.0, 30.0, math.pi / 2))
+        rt = _rt()
+        sensed = []
+        real = rt.sense
+        rt.sense = lambda text, source="sight", key=None: (
+            sensed.append((source, text)), real(text, source, key))[1]
+        walk(rt, park, ticks=1, action="look")
+        body = [t for s, t in sensed if s == "body"]
+        assert body == [proprioception(park)]
+        assert "north" in rt._perceived_nouns
+
+    def test_an_unchanged_body_is_not_sensed_again(self):
+        from neuroslm.cognition.embodiment import PlaceMemory, walk
+        park = Park.from_objects([], agent=(30.0, 30.0, math.pi / 2))
+        rt, places = _rt(), PlaceMemory(park.size)
+        n = []
+        real = rt.sense
+        rt.sense = lambda text, source="sight", key=None: (
+            n.append(source), real(text, source, key))[1]
+        walk(rt, park, ticks=1, action="look", places=places)
+        walk(rt, park, ticks=1, action="look", places=places)
+        assert n.count("body") == 1
+
+    def test_the_body_percept_grounds_what_it_names(self):
+        from neuroslm.cognition.embodiment import grounding_report, walk
+        park = Park.from_objects([], agent=(30.0, 30.0, math.pi / 2))
+        recs = walk(_rt(), park, ticks=1, action="look")
+        rep = grounding_report(recs, park, models={
+            "world": [(recs[-1].tick, "I am facing north."),
+                      (recs[-1].tick, "I am facing south.")]})
+        assert rep["models"]["world"]["grounded_versions"] == 1
+        assert rep["models"]["world"]["ungrounded"] == ["south"]
+
+    def test_can_be_switched_off(self):
+        from neuroslm.cognition.embodiment import walk
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["x"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=0,
+                                        proprioception=False))
+        walk(rt, Park.from_objects([], agent=(30.0, 30.0, 0.0)), ticks=1)
+        assert "east" not in rt._perceived_nouns
+
+
 class TestPlaceNovelty:
     """Exploration by place novelty: the mind remembers which ground it
     has viewed — from its own pose and field of view, never from the

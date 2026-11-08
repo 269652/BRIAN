@@ -423,6 +423,11 @@ class MindConfig:
     broadcast_gain: float = 0.1
     """λ: steering size as a fraction of the read layer's typical token
     norm, at R = 1. A-priori choice, not fitted."""
+    proprioception: bool = True
+    """Embodied walks sense the body's heading and place in the park
+    (``embodiment.proprioception``), as source "body", when it changes.
+    H69: 30 % of the raw world model's ungrounded nouns were compass
+    words the mind had no way to know."""
     ignition_sustain: str = "coalition"
     """What an ignition sustains. "coalition": every item held before
     the tick keeps its salience, and the new thought enters at its
@@ -685,7 +690,7 @@ def format_debug_trace(result: TickResult) -> str:
     return "\n".join(lines)
 
 
-_AMBIENT_SOURCES = frozenset({"sight", "sound"})
+_AMBIENT_SOURCES = frozenset({"sight", "sound", "body"})
 _WS_LABEL = {"sight": "I see: ", "sound": "I hear: ",
              "percept": "Earlier I noticed: ", "memory": "I remember: ",
              "thought": "I was thinking: "}

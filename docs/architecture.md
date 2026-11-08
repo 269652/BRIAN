@@ -4090,6 +4090,19 @@ against memory, divisively normalised, so familiar sights habituate. It
 is stored as an observed episode only when salient, and it drives the
 sensory oscillator population.
 
+**Proprioception** (`embodiment.proprioception`,
+`MindConfig.proprioception`, 2026-11-08). When the body's state changes,
+the walk senses it as source `body`: its compass heading (8 sectors,
++y north), its part of the park (thirds per axis, else "the middle"),
+and the side(s) where the fence is within 5 m. For example: "I am
+facing north-east, in the south-west of the park." It comes from the
+pose the body already integrates, the role of head-direction and place
+cells. It is true by construction and names no object. It joins the
+world model's evidence and the perceived nouns, and its text is part
+of the step's percepts for grounding. In H69 the update stem "Where I
+am now" got only egocentric percepts, and 30 % of the raw world
+model's ungrounded nouns were compass words.
+
 **Movement.** `choose_movement` uses the thought softmax, but
 hierarchically: the kind of act first (look, head off, approach), each
 kind at the value of its best member, then its object. Many weak targets
