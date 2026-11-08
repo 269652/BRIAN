@@ -2368,6 +2368,70 @@ class TestRuntimeBroadcastsIgnitions:
         assert rt.tick().thought == "x"
 
 
+class TestIgnitionSustainsTheCoalition:
+    """H69 (e): on ignition only the new thought was sustained (salience
+    1.0); the percepts in the coalition faded, and access fell from 0.81
+    to 0.68. Default: everything held when the workspace ignites keeps
+    its salience, and the thought enters like any other item."""
+
+    _PERCEPT = "A pine tree, close to the left."
+
+    def _rt(self, ignited, **cfg_kw):
+        from neuroslm.cognition.oscillator import OscillatorStep
+        from neuroslm.cognition.runtime import MindConfig
+        rt = _mk_runtime(_ScriptedGen(["thinking about the moon",
+                                       "about chess", "about rivers"]),
+                         cfg=MindConfig(n_candidates=1, recall_k=0,
+                                        **cfg_kw), osc=True)
+        rt._osc.step = lambda *a, **kw: OscillatorStep(
+            sync_r=0.6, ignited=ignited, peak_hz=40.0, threshold=0.2,
+            gamma_power=1.0)
+        return rt
+
+    def _salience(self, rt, text):
+        return next(it.salience for it in rt.workspace.items()
+                    if it.text == text)
+
+    def test_a_held_percept_does_not_fade_while_ignited(self):
+        rt = self._rt(ignited=True)
+        rt.sense(self._PERCEPT)
+        rt.tick()
+        before = self._salience(rt, self._PERCEPT)
+        rt.tick()
+        assert self._salience(rt, self._PERCEPT) == pytest.approx(before)
+
+    def test_without_ignition_it_fades(self):
+        rt = self._rt(ignited=False)
+        rt.sense(self._PERCEPT)
+        rt.tick()
+        before = self._salience(rt, self._PERCEPT)
+        rt.tick()
+        assert self._salience(rt, self._PERCEPT) == pytest.approx(
+            before * rt.workspace.decay_rate)
+
+    def test_the_new_thought_is_not_privileged(self):
+        rt = self._rt(ignited=True)
+        r = rt.tick()
+        # first tick: no baseline yet, so novelty normalises to 0.5
+        assert self._salience(rt, r.thought) == pytest.approx(0.5)
+
+    def test_the_old_rule_is_kept_as_an_arm(self):
+        rt = self._rt(ignited=True, ignition_sustain="thought")
+        rt.sense(self._PERCEPT)
+        r = rt.tick()
+        before = self._salience(rt, self._PERCEPT)
+        assert self._salience(rt, r.thought) == 1.0
+        rt.tick()
+        assert self._salience(rt, self._PERCEPT) == pytest.approx(
+            before * rt.workspace.decay_rate)
+
+    def test_rejects_an_unknown_rule(self):
+        from neuroslm.cognition.runtime import MindConfig
+        with pytest.raises(ValueError):
+            _mk_runtime(_ScriptedGen(["x"]),
+                        cfg=MindConfig(ignition_sustain="everything"))
+
+
 class TestNTStandardisesOnTheRuntimeTimescale:
     """Run 58673415: DA 0.15→0.05, GABA 0.15→0.10 — monotone within
     each run. DrivenNTSystem's driver z-scores use driver_alpha=0.005
@@ -3388,10 +3452,11 @@ class TestGlobalWorkspaceFeedsThought:
         assert pos == sorted(pos)
         assert [sal[t] for t in shown] == sorted(sal[t] for t in shown)
 
-    def test_ignited_thought_enters_at_full_salience(self):
+    def test_ignited_thought_enters_at_full_salience_in_the_thought_arm(self):
         from neuroslm.cognition.runtime import MindConfig
         rt = _mk_runtime(_ScriptedGen(["thinking about the moon"]),
-                         cfg=MindConfig(n_candidates=1, recall_k=0))
+                         cfg=MindConfig(n_candidates=1, recall_k=0,
+                                        ignition_sustain="thought"))
         r = rt.tick()
         assert r.stored
         sal = {it.text: it.salience for it in rt.workspace.items()}
@@ -3536,7 +3601,8 @@ class TestGlobalWorkspaceFeedsThought:
         rt = _mk_runtime(_ScriptedGen(["thinking about the moon"]),
                          cfg=MindConfig(n_candidates=1, recall_k=0))
         r = rt.tick()
-        assert ("thought", pytest.approx(1.0),
+        # first tick: no novelty baseline yet, so salience 0.5
+        assert ("thought", pytest.approx(0.5),
                 "thinking about the moon") in r.workspace
 
     def test_ablation_restores_the_last_thought_prompt(self):

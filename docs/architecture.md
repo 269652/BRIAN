@@ -3825,9 +3825,18 @@ compete for `ws_capacity` = 4 slots (Cowan's limit). Each tick:
   entries) both let k recalls outnumber one thought. They keep their
   provenance: an observed episode as `memory`,
   the mind's own recalled musing (`kind=inferred`) as `thought`;
-- the selected thought enters at 1.0 if it ignited (ignition sustains
-  it), otherwise at $n/(n+\bar n)$, its novelty divisively normalised
-  against the run's novelty baseline (a typical thought 0.5, a copy 0);
+- the selected thought enters at $n/(n+\bar n)$, its novelty
+  divisively normalised against the run's novelty baseline (a typical
+  thought 0.5, a copy 0);
+- on an ignited tick the coalition is sustained
+  (`ignition_sustain="coalition"`, 2026-11-08): every item held before
+  the tick keeps its pre-decay salience, percepts included.
+  Ignited content reverberates (Dehaene & Changeux 2011). Before, only
+  the new thought was sustained, at 1.0 (`ignition_sustain="thought"`,
+  kept as an arm). In H69 that left a thought as the top item on 94 % of
+  ignited ticks and wrote mostly the train of thought into the
+  broadcast. Percepts entering on an ignited tick reached a thought
+  less often (0.68 vs 0.81);
 - re-offering an item already held keeps the higher salience; when the
   store is full the least salient item (oldest on ties) is displaced.
 
@@ -4132,6 +4141,11 @@ measures in `cognition/measures.py`:
 - **Φ_AR**: autoregressive integrated information (Barrett & Seth 2011)
   over modules + NT and over the modules alone, at the size-normalised
   minimum-information bipartition.
+- **Φ_R** (modules; 2026-11-08): Φ_AR plus the MMI double-redundancy
+  $\min_{i,j} I(M^i_{t-1}; M^j_t)$ (Mediano et al. 2021), at its own
+  bipartition. Whole-minus-sum Φ is negative when the parts share a
+  driver, and an independent-channel null has none. In H69 Φ_AR scored
+  z = −15 while integration scored z = +17.
 - **Integration and C_N**: Tononi–Sporns–Edelman neural complexity.
 - **LZ**: normalised Lempel–Ziv complexity of the median-binarised state
   stream.
@@ -4164,9 +4178,11 @@ withdrawn for lacking this):
   within-stratum permutation null.
 - **PCI by twin walks** (`CognitiveRuntime.fork`,
   `embodiment.twin_walk`): at fixed points the mind, its park and its
-  map are forked, one twin is pulsed (`null`, `da`, `gaba`, `memory`),
-  and its divergence from the main walk over the PCI channels is
-  scored. Both reseed the trunk's sampler per park tick, so the `null`
+  map are forked, one twin is pulsed (`null`, `da`, `gaba`, `memory`,
+  `reactivation`), and its divergence from the main walk over the PCI
+  channels is scored. `memory` only stores an episode, so it acts
+  through recall alone; on the H69 walks it was never recalled.
+  `reactivation` also puts it into the workspace at salience 1.0. Both reseed the trunk's sampler per park tick, so the `null`
   twin replays the walk exactly (PCI 0).
 
 These measure the control loop's functional architecture (module

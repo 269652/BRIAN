@@ -21,6 +21,8 @@ class WorkspaceItem:
     vec: List[float]
     salience: float
     seq: int = 0
+    held: Optional[float] = None
+    """Salience before this tick's decay; None for a newcomer."""
 
 
 _FLOAT_ZERO = 1e-9
@@ -63,7 +65,16 @@ class GlobalWorkspace:
 
     def decay(self) -> None:
         for it in self._items:
+            it.held = it.salience
             it.salience *= self.decay_rate
+
+    def sustain(self) -> None:
+        """Ignition: what was held before this tick's decay keeps its
+        salience (Dehaene & Changeux 2011: ignited content reverberates);
+        newcomers keep what they were offered at."""
+        for it in self._items:
+            if it.held is not None:
+                it.salience = max(it.salience, it.held)
 
     def offer(self, text: str, source: str, vec: Sequence[float],
               salience: float) -> None:

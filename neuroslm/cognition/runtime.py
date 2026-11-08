@@ -423,6 +423,12 @@ class MindConfig:
     broadcast_gain: float = 0.1
     """λ: steering size as a fraction of the read layer's typical token
     norm, at R = 1. A-priori choice, not fitted."""
+    ignition_sustain: str = "coalition"
+    """What an ignition sustains. "coalition": every item held before
+    the tick keeps its salience, and the new thought enters at its
+    normalised novelty. "thought": only the new thought, at 1.0 (before
+    H69, where percepts in ignited ticks reached a thought less often:
+    0.68 vs 0.81)."""
     state_driven_nt: bool = True
     """Stage 3: DA's activation driver reads the normalised change of
     the workspace state, NE its departure from the recent trend
@@ -887,6 +893,10 @@ class CognitiveRuntime:
         if self.cfg.hierarchical_memory:
             from neuroslm.memory.hierarchy import MemoryHierarchy
             self.hierarchy = MemoryHierarchy()
+        if self.cfg.ignition_sustain not in ("coalition", "thought"):
+            raise ValueError(f"ignition_sustain "
+                             f"{self.cfg.ignition_sustain!r}: expected "
+                             f"'coalition' or 'thought'")
         self.workspace = None
         if self.cfg.global_workspace:
             from neuroslm.cognition.workspace import GlobalWorkspace
@@ -1402,10 +1412,14 @@ class CognitiveRuntime:
         ignition = float(osc.ignited) if osc is not None else float(stored)
         if self.workspace is not None:
             from neuroslm.cognition.workspace import thought_salience
+            coalition = self.cfg.ignition_sustain == "coalition"
+            if ignition and coalition:
+                self.workspace.sustain()
             self.workspace.offer(thought, "thought", thought_vec,
-                                 thought_salience(raw_novelty,
-                                                  self._raw_nov_base,
-                                                  ignited=bool(ignition)))
+                                 thought_salience(
+                                     raw_novelty, self._raw_nov_base,
+                                     ignited=bool(ignition)
+                                     and not coalition))
         # idle regime only: a reply to new input is novel by
         # construction and would make later idle thoughts look stale
         if wandering:

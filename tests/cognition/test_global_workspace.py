@@ -74,6 +74,42 @@ class TestFadingAndRefresh:
         assert ws.texts() == {"p"}
 
 
+class TestIgnitionSustains:
+    """Ignited contents do not fade: ``sustain`` undoes the tick's
+    decay for every item held before it (H69 (e): only the new thought
+    was sustained, so ignition crowded the percepts out)."""
+
+    def test_sustain_undoes_this_ticks_fading(self):
+        ws = _ws(decay=0.5)
+        ws.offer("x", "sight", [1.0], 0.8)
+        ws.decay()
+        ws.sustain()
+        assert ws.items()[0].salience == pytest.approx(0.8)
+
+    def test_newcomers_keep_the_salience_they_were_offered_at(self):
+        ws = _ws(decay=0.5)
+        ws.decay()
+        ws.offer("y", "thought", [1.0], 0.3)
+        ws.sustain()
+        assert ws.items()[0].salience == pytest.approx(0.3)
+
+    def test_sustain_does_not_compound(self):
+        ws = _ws(decay=0.5)
+        ws.offer("x", "memory", [1.0], 0.8)
+        ws.decay()
+        ws.sustain()
+        ws.sustain()
+        assert ws.items()[0].salience == pytest.approx(0.8)
+
+    def test_a_refresh_above_the_old_salience_is_kept(self):
+        ws = _ws(decay=0.5)
+        ws.offer("x", "memory", [1.0], 0.4)
+        ws.decay()
+        ws.offer("x", "memory", [1.0], 0.9)
+        ws.sustain()
+        assert ws.items()[0].salience == pytest.approx(0.9)
+
+
 class TestThoughtSalience:
     def test_divisive_normalisation_against_the_run_baseline(self):
         from neuroslm.cognition.workspace import thought_salience
