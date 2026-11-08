@@ -28966,3 +28966,37 @@
   park_walk pci/gaba @ tick 333: PCI=0.876 channels=DA,NE,eCB,Glu,GABA,boredom,novelty,selection_entropy,differentiation,action,stored,inhibited,recall,thought,ignited,sync_r
   park_walk pci/memory @ tick 167: PCI=0.000 channels=-
   park_walk pci/memory @ tick 333: PCI=0.000 channels=-
+  park_walk seed 2: Φ_mod=-0.04569495070765639 z(LZ)=-9.582162468458232 access diff=-0.07815905835461168 p=0.8061938061938062 novelty=0.01910516042260966 scene=0.5180912427897221 coverage=1.00
+probe              indicator  condition       metric
+park_walk          baseline   seed0           Φ_AR=  n/a Φ_mod= 0.01 C_N=  n/a LZ= 0.96 ign= 0.35 meta= 0.12 BC= 0.36
+                   thought    seed0           novelty= 0.02 coherence= 0.97 repeat= 0.99 grounding= 0.21 distinct2= 0.40 grounded= 1.00 scene= 0.66 coverage= 1.00
+                   models     seed0           world_raw_ok=21/96 world_ok=69/69 self_raw_ok=64/95 self_ok=87/87
+                   null z     seed0           z(Φ_mod)= 0.47 z(I_mod)= 9.37 z(C_N)=  n/a z(LZ)=-7.13 z(BC)= 0.77
+                   access     seed0           ignited= 0.75 not= 0.79 diff=-0.04 p= 0.71 n=55/62
+                   PCI        seed0/null      PCI= 0.00 diverged= 0.00 reached= 0.00
+                   PCI        seed0/da        PCI= 0.97 diverged= 0.36 reached=11.50
+                   PCI        seed0/gaba      PCI= 1.05 diverged= 0.52 reached=13.00
+                   PCI        seed0/memory    PCI= 0.00 diverged= 0.00 reached= 0.00
+park_walk          baseline   seed1           Φ_AR=  n/a Φ_mod=-0.08 C_N=  n/a LZ= 0.95 ign= 0.38 meta= 0.12 BC= 0.34
+                   thought    seed1           novelty= 0.02 coherence= 0.98 repeat= 1.00 grounding= 0.42 distinct2= 0.24 grounded= 0.99 scene= 0.40 coverage= 1.00
+                   models     seed1           world_raw_ok=22/80 world_ok=57/57 self_raw_ok=47/96 self_ok=82/82
+                   null z     seed1           z(Φ_mod)=-15.29 z(I_mod)=16.71 z(C_N)=  n/a z(LZ)=-9.86 z(BC)=-0.13
+                   access     seed1           ignited= 0.56 not= 0.82 diff=-0.26 p= 1.00 n=68/50
+                   PCI        seed1/null      PCI= 0.00 diverged= 0.00 reached= 0.00
+                   PCI        seed1/da        PCI= 1.03 diverged= 0.33 reached=13.00
+                   PCI        seed1/gaba      PCI= 1.01 diverged= 0.39 reached=13.00
+                   PCI        seed1/memory    PCI= 0.00 diverged= 0.00 reached= 0.00
+park_walk          baseline   seed2           Φ_AR=  n/a Φ_mod=-0.05 C_N=  n/a LZ= 0.95 ign= 0.38 meta= 0.11 BC= 0.33
+                   thought    seed2           novelty= 0.02 coherence= 0.97 repeat= 0.99 grounding= 0.24 distinct2= 0.28 grounded= 1.00 scene= 0.52 coverage= 1.00
+                   models     seed2           world_raw_ok=35/96 world_ok=77/77 self_raw_ok=60/96 self_ok=88/88
+                   null z     seed2           z(Φ_mod)=-8.09 z(I_mod)=10.56 z(C_N)=  n/a z(LZ)=-9.58 z(BC)=-0.78
+                   access     seed2           ignited= 0.75 not= 0.83 diff=-0.08 p= 0.81 n=57/60
+                   PCI        seed2/null      PCI= 0.00 diverged= 0.00 reached= 0.00
+                   PCI        seed2/da        PCI= 1.13 diverged= 0.36 reached=14.00
+                   PCI        seed2/gaba      PCI= 0.97 diverged= 0.52 reached=15.50
+                   PCI        seed2/memory    PCI= 0.00 diverged= 0.00 reached= 0.00
+[mind-eval] wrote results/mind_eval/20261107T145941Z_deepseek-r1-qwen-7b.json
+── eval exited rc=0 ──
+               total        used        free      shared  buff/cache   available
+Mem:          515825       39061       36163         420      440600      472800
+Swap:           8191         483        7708
