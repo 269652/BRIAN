@@ -52,7 +52,7 @@ import time
 import shutil
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # ── Locate the repo root so commands work from any cwd ────────────────
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -2047,6 +2047,35 @@ def _unpushed_commits(branch: str, run=subprocess.run) -> Optional[int]:
         return None
 
 
+def _mind_cfg(sets: Sequence[str]):
+    """MindConfig with ``KEY=VALUE`` overrides (``--mind-set``), each
+    value parsed as its field's default type. ValueError on an unknown
+    field or a value that does not parse."""
+    import dataclasses
+
+    from neuroslm.cognition.runtime import MindConfig
+    base = MindConfig()
+    names = {f.name for f in dataclasses.fields(MindConfig)}
+    over: Dict[str, Any] = {}
+    for item in sets or ():
+        key, sep, raw = item.partition("=")
+        key, raw = key.strip(), raw.strip()
+        if not sep or key not in names:
+            raise ValueError(f"--mind-set {item!r}: expected FIELD=VALUE "
+                             f"with a MindConfig field")
+        kind = type(getattr(base, key))
+        if kind is bool:
+            if raw.lower() not in ("true", "false"):
+                raise ValueError(f"--mind-set {item!r}: expected true/false")
+            over[key] = raw.lower() == "true"
+        elif kind in (int, float, str):
+            over[key] = kind(raw)
+        else:
+            raise ValueError(f"--mind-set {item!r}: {key} is a "
+                             f"{kind.__name__}, not settable here")
+    return dataclasses.replace(base, **over)
+
+
 def cmd_deploy_mind_eval(args: argparse.Namespace) -> int:
     """``brian deploy-mind-eval`` — run the §14.11 indicator battery on
     a rented vast.ai GPU. Batch job: pushes the report JSON + log back
@@ -2062,6 +2091,13 @@ def cmd_deploy_mind_eval(args: argparse.Namespace) -> int:
                   "--idle-ticks", str(args.idle_ticks),
                   "--walk-seeds", str(args.walk_seeds),
                   "--seed", str(args.seed)]
+    try:
+        _mind_cfg(args.mind_set)
+    except ValueError as e:
+        print(f"[deploy-mind-eval] ✗ {e}")
+        return 2
+    for item in args.mind_set or ():
+        eval_args += ["--mind-set", item]
     cfg = MindEvalDeployConfig(
         expert=args.expert, eval_args=eval_args, branch=args.branch,
         label=args.label or "neuroslm-mind-eval",
@@ -3454,6 +3490,11 @@ def _eval_mind(args: argparse.Namespace) -> int:
     from neuroslm.connectors.vast_mind_eval import expert_slug
 
     experts = [e.strip() for e in args.expert.split(",") if e.strip()]
+    try:
+        mind_cfg = _mind_cfg(args.mind_set)
+    except ValueError as e:
+        print(f"[mind-eval] {e}", file=sys.stderr)
+        return 2
     if args.out and len(experts) > 1:
         print("[mind-eval] --out names ONE file; use --out-dir with "
               "several experts", file=sys.stderr)
@@ -3475,7 +3516,8 @@ def _eval_mind(args: argparse.Namespace) -> int:
               f"held-out mean |cos|={spread:.3f} "
               f"(near 1 = collapsed embedding)")
         report = indicators.run_indicator_battery(
-            seams, probes=probes, seed=args.seed, n_items=args.n_items,
+            seams, probes=probes, cfg=mind_cfg, seed=args.seed,
+            n_items=args.n_items,
             n_distractors=args.n_distractors, n_idle_ticks=args.idle_ticks,
             n_walk_seeds=args.walk_seeds, progress=print)
         report["meta"].update(expert=expert, device=args.device,
@@ -5381,6 +5423,11 @@ def _add_mind_eval_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--walk-seeds", dest="walk_seeds", type=int, default=1,
                    help="park_walk: walk this many seeds (seed, seed+1, "
                         "...) — one park and one mind each")
+    p.add_argument("--mind-set", dest="mind_set", action="append",
+                   default=[], metavar="FIELD=VALUE",
+                   help="override a MindConfig field for every probe "
+                        "(repeatable), e.g. ignition_broadcast=false; "
+                        "the report records the config in meta.cfg")
     p.add_argument("--seed", type=int, default=0)
 
 

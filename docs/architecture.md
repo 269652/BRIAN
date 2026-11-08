@@ -4180,6 +4180,10 @@ which modules bind *relative to the others*.
 
 `brian deploy-mind-eval --probes park_walk --idle-ticks 500 --walk-seeds 3`
 
+`--mind-set FIELD=VALUE` (repeatable) overrides a `MindConfig` field
+for every probe, e.g. `ignition_broadcast=false` for an arm. The report
+records the config in `meta.cfg`.
+
 **Hierarchical memory** (`memory/hierarchy.py`, `MindConfig.hierarchical_memory`,
 on by default). Two hierarchies are indexed over the same episodes.
 

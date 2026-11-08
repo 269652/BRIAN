@@ -596,6 +596,40 @@ class TestCli:
         assert a.probes == "episodic_recall,metacognition"
         assert a.n_items == 4 and a.seed == 7 and a.device == "cuda"
 
+    def test_mind_set_overrides_typed_config_fields(self):
+        from neuroslm.cli import _mind_cfg
+        cfg = _mind_cfg(["ignition_broadcast=false", "broadcast_gain=0.2",
+                         "ws_capacity=6", "ignition_sustain=thought"])
+        assert cfg.ignition_broadcast is False
+        assert cfg.broadcast_gain == 0.2 and cfg.ws_capacity == 6
+        assert cfg.ignition_sustain == "thought"
+        assert _mind_cfg([]) == MindConfig()
+
+    def test_mind_set_rejects_unknown_or_malformed(self):
+        from neuroslm.cli import _mind_cfg
+        for bad in (["no_such_field=1"], ["ignition_broadcast"],
+                    ["ignition_broadcast=maybe"]):
+            with pytest.raises(ValueError):
+                _mind_cfg(bad)
+
+    def test_eval_mind_passes_the_overrides_to_the_battery(self, monkeypatch):
+        import neuroslm.cli as cli
+        from neuroslm.cognition import indicators, runtime
+        seen = {}
+        monkeypatch.setattr(runtime, "build_hf_seams",
+                            lambda *a, **k: _seams(_fairground_gen))
+        monkeypatch.setattr(runtime, "embedding_spread", lambda f: 0.0)
+
+        def battery(seams, cfg=None, **kw):
+            seen["cfg"] = cfg
+            raise SystemExit(0)
+        monkeypatch.setattr(indicators, "run_indicator_battery", battery)
+        args = cli._build_parser().parse_args(
+            ["eval", "mind", "--mind-set", "ignition_broadcast=false"])
+        with pytest.raises(SystemExit):
+            args.func(args)
+        assert seen["cfg"].ignition_broadcast is False
+
     def test_deploy_mind_eval_parses(self):
         from neuroslm.cli import _build_parser
         a = _build_parser().parse_args(["deploy-mind-eval"])
@@ -673,6 +707,20 @@ class TestDeployRefusesUnpushedWork:
                                        ["--walk-seeds", "3"])
         args = launched[0].eval_args
         assert args[args.index("--walk-seeds") + 1] == "3"
+
+    def test_mind_overrides_reach_the_box(self, monkeypatch):
+        rc, launched, _ = self._deploy(
+            monkeypatch, 0, ["--mind-set", "ignition_broadcast=false",
+                             "--mind-set", "ws_capacity=6"])
+        args = launched[0].eval_args
+        assert [args[i + 1] for i, a in enumerate(args)
+                if a == "--mind-set"] == ["ignition_broadcast=false",
+                                          "ws_capacity=6"]
+
+    def test_a_bad_override_fails_before_asking(self, monkeypatch):
+        rc, launched, asked = self._deploy(
+            monkeypatch, 0, ["--mind-set", "no_such_field=1"])
+        assert rc != 0 and launched == [] and asked == []
 
     def test_can_be_overridden_explicitly(self, monkeypatch):
         rc, launched, asked = self._deploy(monkeypatch, 7,
