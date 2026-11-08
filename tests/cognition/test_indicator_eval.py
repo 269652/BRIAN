@@ -511,6 +511,27 @@ class TestPerturbationalComplexityProbe:
         with pytest.raises(ValueError):
             self._run(pulses=("tms_to_the_moon",))
 
+    def test_reactivation_pulse_comes_to_mind_without_recall(self):
+        """H69 (g): a stored episode the walk never recalls is inert. The
+        reactivation pulse puts the memory into the workspace, as
+        stimulation perturbs active cortex rather than a dormant trace."""
+        res = self._run(pulses=("null", "reactivation"))
+        for arm in ("full", "no_recall"):
+            ch = res["conditions"][arm]["reactivation"]["runs"][0]["channels"]
+            assert "thought" in ch, arm
+
+    def test_reactivation_enters_the_workspace_at_full_salience(self):
+        import random
+        from neuroslm.cognition.indicators import PULSES, _apply_pulse
+        rt = _seams(_fairground_gen).runtime(cfg=MindConfig(),
+                                             rng=random.Random(0))
+        _apply_pulse(rt, PULSES["reactivation"], _bow)
+        text = PULSES["reactivation"][1]
+        held = [it for it in rt.workspace.items() if it.text == text]
+        assert held and held[0].source == "memory"
+        assert held[0].salience == 1.0
+        assert any(e.get("content") == text for e in rt.memory.all())
+
 
 # ── Battery driver ───────────────────────────────────────────────────
 
@@ -1141,7 +1162,8 @@ class TestParkWalkBaseline:
 
     def test_pci_by_twin_walks_has_a_zero_null(self):
         pci = self._c(gen=self._pure, pci_events=1, pci_ticks=3)["pci"]
-        assert set(pci) == {"null", "da", "gaba", "memory"}
+        assert set(pci) == {"null", "da", "gaba", "memory", "reactivation"}
+        assert "thought" in pci["reactivation"]["runs"][0]["channels"]
         assert pci["null"]["pci"] == 0.0
         assert pci["null"]["fraction_diverged"] == 0.0
         assert pci["da"]["channels_reached"] >= 1

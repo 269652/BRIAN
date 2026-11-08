@@ -935,7 +935,8 @@ def probe_park_walk(seams: MindSeams, n_ticks: int = 120,
                     access_horizon: int = 5, pci_events: int = 2,
                     pci_ticks: int = 6,
                     pci_pulses: Sequence[str] = ("null", "da", "gaba",
-                                                 "memory")) -> dict:
+                                                 "memory", "reactivation")
+                    ) -> dict:
     """The baseline (architecture.md §14.16): one full mind per seed
     walking its park, no comparison arms. Per seed:
 
@@ -1081,10 +1082,15 @@ PULSES: Dict[str, Optional[Tuple[str, object, float]]] = {
     "gaba": ("nt", "GABA", 2.0),
     "memory": ("memory", "A sudden memory of the smell of burnt sugar at "
                          "a fairground.", 0.0),
+    "reactivation": ("reactivation", "A sudden memory of the smell of "
+                                     "burnt sugar at a fairground.", 1.0),
 }
 """Perturbations applied to ONE twin after warm-up. ``null`` applies
 nothing — with deterministic replay its PCI must be exactly 0, which
-validates the twin method itself."""
+validates the twin method itself. ``memory`` only stores the episode,
+so it acts through recall alone (run 59588081: never recalled on a
+walk, PCI 0); ``reactivation`` also puts it into the workspace at the
+given salience — the memory comes to mind."""
 
 
 def _diverged(name: str, a: TickResult, b: TickResult, embed_fn) -> bool:
@@ -1114,11 +1120,14 @@ def _apply_pulse(rt: CognitiveRuntime, pulse, embed_fn) -> None:
     kind, target, size = pulse
     if kind == "nt":
         rt.nt.perturb(target, size)
-    else:
-        rt.memory.add(target, content_vec=list(embed_fn(target)),
-                      nt_state=rt.nt.levels(),
-                      tags=["thought", "kind=inferred", "pci_pulse"],
-                      context={"kind": "inferred", "source": "pci_pulse"})
+        return
+    vec = list(embed_fn(target))
+    rt.memory.add(target, content_vec=vec,
+                  nt_state=rt.nt.levels(),
+                  tags=["thought", "kind=inferred", "pci_pulse"],
+                  context={"kind": "inferred", "source": "pci_pulse"})
+    if kind == "reactivation" and rt.workspace is not None:
+        rt.workspace.offer(target, "memory", vec, size)
 
 
 def _twin_trajectory(seams: MindSeams, cfg: MindConfig, seed: int,
